@@ -9172,6 +9172,16 @@
           "name": {
             "type": "string"
           },
+          "pinned": {
+            "type": "boolean"
+          },
+          "sidebar_pinned": {
+            "type": "boolean"
+          },
+          "sidebar_position": {
+            "format": "int32",
+            "type": "integer"
+          },
           "slug": {
             "type": "string"
           },
@@ -9207,6 +9217,9 @@
           "updated_at",
           "slug",
           "tags",
+          "pinned",
+          "sidebar_pinned",
+          "sidebar_position",
           "track_count",
           "auto_album_slug",
           "auto_artist_slug",
@@ -15753,6 +15766,65 @@
         ],
         "type": "object"
       },
+      "Set-playlist-pinRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Set-playlist-pinRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "scope": {
+            "description": "Which pin set to toggle",
+            "enum": [
+              "page",
+              "sidebar"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "pinned"
+        ],
+        "type": "object"
+      },
+      "Set-playlist-sidebar-orderRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Set-playlist-sidebar-orderRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "ids": {
+            "description": "Playlist IDs in the desired top-to-bottom order (full list)",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "type": "object"
+      },
       "Set-system-settingRequest": {
         "additionalProperties": false,
         "properties": {
@@ -18876,6 +18948,16 @@
           "name": {
             "type": "string"
           },
+          "pinned": {
+            "type": "boolean"
+          },
+          "sidebar_pinned": {
+            "type": "boolean"
+          },
+          "sidebar_position": {
+            "format": "int32",
+            "type": "integer"
+          },
           "slug": {
             "type": "string"
           },
@@ -18905,7 +18987,10 @@
           "created_at",
           "updated_at",
           "slug",
-          "tags"
+          "tags",
+          "pinned",
+          "sidebar_pinned",
+          "sidebar_position"
         ],
         "type": "object"
       },
@@ -28110,6 +28195,45 @@
         ]
       }
     },
+    "/api/me/playlists/sidebar-order": {
+      "put": {
+        "operationId": "set-playlist-sidebar-order",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Set-playlist-sidebar-orderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Persist manual sidebar playlist order",
+        "tags": [
+          "Me"
+        ]
+      }
+    },
     "/api/me/playlists/{id}": {
       "delete": {
         "operationId": "delete-playlist",
@@ -28428,6 +28552,62 @@
           }
         ],
         "summary": "Upload a custom playlist cover",
+        "tags": [
+          "Me"
+        ]
+      }
+    },
+    "/api/me/playlists/{id}/pin": {
+      "put": {
+        "operationId": "set-playlist-pin",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Set-playlist-pinRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Pin/unpin a playlist (page or sidebar scope)",
         "tags": [
           "Me"
         ]
@@ -29483,6 +29663,35 @@
           }
         ],
         "summary": "Toggle server-side shuffle",
+        "tags": [
+          "Queue"
+        ]
+      }
+    },
+    "/api/me/queue/upcoming": {
+      "delete": {
+        "operationId": "queue-clear-upcoming",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Drop everything after the current track",
         "tags": [
           "Queue"
         ]

@@ -33,7 +33,7 @@ func (q *Queries) AddTrackToPlaylist(ctx context.Context, arg AddTrackToPlaylist
 const createUserPlaylist = `-- name: CreateUserPlaylist :one
 INSERT INTO user_playlists (user_id, name, description, cover_path, slug)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, user_id, name, description, cover_path, created_at, updated_at, slug, tags
+RETURNING id, user_id, name, description, cover_path, created_at, updated_at, slug, tags, pinned, sidebar_pinned, sidebar_position
 `
 
 type CreateUserPlaylistParams struct {
@@ -63,6 +63,9 @@ func (q *Queries) CreateUserPlaylist(ctx context.Context, arg CreateUserPlaylist
 		&i.UpdatedAt,
 		&i.Slug,
 		&i.Tags,
+		&i.Pinned,
+		&i.SidebarPinned,
+		&i.SidebarPosition,
 	)
 	return i, err
 }
@@ -82,7 +85,7 @@ func (q *Queries) DeleteUserPlaylist(ctx context.Context, arg DeleteUserPlaylist
 }
 
 const getUserPlaylist = `-- name: GetUserPlaylist :one
-SELECT id, user_id, name, description, cover_path, created_at, updated_at, slug, tags FROM user_playlists WHERE id = $1 AND user_id = $2
+SELECT id, user_id, name, description, cover_path, created_at, updated_at, slug, tags, pinned, sidebar_pinned, sidebar_position FROM user_playlists WHERE id = $1 AND user_id = $2
 `
 
 type GetUserPlaylistParams struct {
@@ -103,12 +106,15 @@ func (q *Queries) GetUserPlaylist(ctx context.Context, arg GetUserPlaylistParams
 		&i.UpdatedAt,
 		&i.Slug,
 		&i.Tags,
+		&i.Pinned,
+		&i.SidebarPinned,
+		&i.SidebarPosition,
 	)
 	return i, err
 }
 
 const getUserPlaylistBySlug = `-- name: GetUserPlaylistBySlug :one
-SELECT id, user_id, name, description, cover_path, created_at, updated_at, slug, tags FROM user_playlists WHERE slug = $1 AND user_id = $2
+SELECT id, user_id, name, description, cover_path, created_at, updated_at, slug, tags, pinned, sidebar_pinned, sidebar_position FROM user_playlists WHERE slug = $1 AND user_id = $2
 `
 
 type GetUserPlaylistBySlugParams struct {
@@ -129,6 +135,9 @@ func (q *Queries) GetUserPlaylistBySlug(ctx context.Context, arg GetUserPlaylist
 		&i.UpdatedAt,
 		&i.Slug,
 		&i.Tags,
+		&i.Pinned,
+		&i.SidebarPinned,
+		&i.SidebarPosition,
 	)
 	return i, err
 }
@@ -263,7 +272,7 @@ func (q *Queries) ListPlaylistTracks(ctx context.Context, playlistID int64) ([]L
 }
 
 const listUserPlaylists = `-- name: ListUserPlaylists :many
-SELECT p.id, p.user_id, p.name, p.description, p.cover_path, p.created_at, p.updated_at, p.slug, p.tags,
+SELECT p.id, p.user_id, p.name, p.description, p.cover_path, p.created_at, p.updated_at, p.slug, p.tags, p.pinned, p.sidebar_pinned, p.sidebar_position,
        (SELECT count(*) FROM user_playlist_tracks WHERE playlist_id = p.id) AS track_count,
        -- First track's addressing pair — the FE builds the canonical
        -- /api album-cover URL from these (image URLs are unconditional:
@@ -300,20 +309,23 @@ ORDER BY p.created_at DESC
 `
 
 type ListUserPlaylistsRow struct {
-	ID             int64              `json:"id"`
-	UserID         int64              `json:"user_id"`
-	Name           string             `json:"name"`
-	Description    string             `json:"description"`
-	CoverPath      string             `json:"cover_path"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	Slug           string             `json:"slug"`
-	Tags           []string           `json:"tags"`
-	TrackCount     int64              `json:"track_count"`
-	AutoAlbumSlug  interface{}        `json:"auto_album_slug"`
-	AutoArtistSlug interface{}        `json:"auto_artist_slug"`
-	HasCover       bool               `json:"has_cover"`
-	SyncServices   interface{}        `json:"sync_services"`
+	ID              int64              `json:"id"`
+	UserID          int64              `json:"user_id"`
+	Name            string             `json:"name"`
+	Description     string             `json:"description"`
+	CoverPath       string             `json:"cover_path"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Slug            string             `json:"slug"`
+	Tags            []string           `json:"tags"`
+	Pinned          bool               `json:"pinned"`
+	SidebarPinned   bool               `json:"sidebar_pinned"`
+	SidebarPosition int32              `json:"sidebar_position"`
+	TrackCount      int64              `json:"track_count"`
+	AutoAlbumSlug   interface{}        `json:"auto_album_slug"`
+	AutoArtistSlug  interface{}        `json:"auto_artist_slug"`
+	HasCover        bool               `json:"has_cover"`
+	SyncServices    interface{}        `json:"sync_services"`
 }
 
 // Used by the sidebar — small payload, includes a synthesized cover (first
@@ -337,6 +349,9 @@ func (q *Queries) ListUserPlaylists(ctx context.Context, userID int64) ([]ListUs
 			&i.UpdatedAt,
 			&i.Slug,
 			&i.Tags,
+			&i.Pinned,
+			&i.SidebarPinned,
+			&i.SidebarPosition,
 			&i.TrackCount,
 			&i.AutoAlbumSlug,
 			&i.AutoArtistSlug,
@@ -380,6 +395,53 @@ type ReorderPlaylistTrackParams struct {
 
 func (q *Queries) ReorderPlaylistTrack(ctx context.Context, arg ReorderPlaylistTrackParams) error {
 	_, err := q.db.Exec(ctx, reorderPlaylistTrack, arg.PlaylistID, arg.TrackID, arg.Position)
+	return err
+}
+
+const setPlaylistPagePin = `-- name: SetPlaylistPagePin :exec
+UPDATE user_playlists SET pinned = $3 WHERE id = $1 AND user_id = $2
+`
+
+type SetPlaylistPagePinParams struct {
+	ID     int64 `json:"id"`
+	UserID int64 `json:"user_id"`
+	Pinned bool  `json:"pinned"`
+}
+
+// Pins deliberately do NOT bump updated_at — pinning isn't a content change
+// and must not reshuffle "recently updated" sorts.
+func (q *Queries) SetPlaylistPagePin(ctx context.Context, arg SetPlaylistPagePinParams) error {
+	_, err := q.db.Exec(ctx, setPlaylistPagePin, arg.ID, arg.UserID, arg.Pinned)
+	return err
+}
+
+const setPlaylistSidebarPin = `-- name: SetPlaylistSidebarPin :exec
+UPDATE user_playlists SET sidebar_pinned = $3 WHERE id = $1 AND user_id = $2
+`
+
+type SetPlaylistSidebarPinParams struct {
+	ID            int64 `json:"id"`
+	UserID        int64 `json:"user_id"`
+	SidebarPinned bool  `json:"sidebar_pinned"`
+}
+
+func (q *Queries) SetPlaylistSidebarPin(ctx context.Context, arg SetPlaylistSidebarPinParams) error {
+	_, err := q.db.Exec(ctx, setPlaylistSidebarPin, arg.ID, arg.UserID, arg.SidebarPinned)
+	return err
+}
+
+const setPlaylistSidebarPosition = `-- name: SetPlaylistSidebarPosition :exec
+UPDATE user_playlists SET sidebar_position = $3 WHERE id = $1 AND user_id = $2
+`
+
+type SetPlaylistSidebarPositionParams struct {
+	ID              int64 `json:"id"`
+	UserID          int64 `json:"user_id"`
+	SidebarPosition int32 `json:"sidebar_position"`
+}
+
+func (q *Queries) SetPlaylistSidebarPosition(ctx context.Context, arg SetPlaylistSidebarPositionParams) error {
+	_, err := q.db.Exec(ctx, setPlaylistSidebarPosition, arg.ID, arg.UserID, arg.SidebarPosition)
 	return err
 }
 

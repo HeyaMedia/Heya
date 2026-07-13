@@ -151,6 +151,37 @@ func (a *App) DeleteUserPlaylist(ctx context.Context, userID, playlistID int64) 
 	return sqlc.New(a.db).DeleteUserPlaylist(ctx, sqlc.DeleteUserPlaylistParams{ID: playlistID, UserID: userID})
 }
 
+// SetPlaylistPin toggles one of the two independent pin scopes: "page"
+// floats the playlist on /music/playlists, "sidebar" adds it to the left
+// sidebar's pinned set. Neither touches updated_at — pinning isn't a content
+// change and must not reshuffle "recently updated" sorts.
+func (a *App) SetPlaylistPin(ctx context.Context, userID, playlistID int64, scope string, pinned bool) error {
+	q := sqlc.New(a.db)
+	switch scope {
+	case "page":
+		return q.SetPlaylistPagePin(ctx, sqlc.SetPlaylistPagePinParams{ID: playlistID, UserID: userID, Pinned: pinned})
+	case "sidebar":
+		return q.SetPlaylistSidebarPin(ctx, sqlc.SetPlaylistSidebarPinParams{ID: playlistID, UserID: userID, SidebarPinned: pinned})
+	default:
+		return fmt.Errorf("unknown pin scope %q (want page or sidebar)", scope)
+	}
+}
+
+// SetSidebarPlaylistOrder persists the manual drag order for the sidebar.
+// The FE always sends the complete list, so every row gets a fresh 1-based
+// position each save.
+func (a *App) SetSidebarPlaylistOrder(ctx context.Context, userID int64, ids []int64) error {
+	q := sqlc.New(a.db)
+	for i, id := range ids {
+		if err := q.SetPlaylistSidebarPosition(ctx, sqlc.SetPlaylistSidebarPositionParams{
+			ID: id, UserID: userID, SidebarPosition: int32(i + 1),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // UpdateUserPlaylist renames / re-describes / re-covers an existing playlist.
 // Renaming regenerates the slug (dev-phase convention: no legacy-URL shims —
 // see CLAUDE.md) so the URL always reflects the current name; an unchanged

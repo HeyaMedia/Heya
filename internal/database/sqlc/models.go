@@ -1199,15 +1199,18 @@ type UserPlaybackPreference struct {
 }
 
 type UserPlaylist struct {
-	ID          int64              `json:"id"`
-	UserID      int64              `json:"user_id"`
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	CoverPath   string             `json:"cover_path"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	Slug        string             `json:"slug"`
-	Tags        []string           `json:"tags"`
+	ID              int64              `json:"id"`
+	UserID          int64              `json:"user_id"`
+	Name            string             `json:"name"`
+	Description     string             `json:"description"`
+	CoverPath       string             `json:"cover_path"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Slug            string             `json:"slug"`
+	Tags            []string           `json:"tags"`
+	Pinned          bool               `json:"pinned"`
+	SidebarPinned   bool               `json:"sidebar_pinned"`
+	SidebarPosition int32              `json:"sidebar_position"`
 }
 
 type UserPlaylistSync struct {

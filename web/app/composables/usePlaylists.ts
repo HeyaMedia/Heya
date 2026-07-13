@@ -13,6 +13,22 @@ export interface SidebarPlaylist {
   name: string
   count: number
   cover_path: string
+  pinned: boolean
+}
+
+export type SidebarPlaylistSort = 'custom' | 'name' | 'updated' | 'created'
+
+// Module-level singleton so every usePlaylists() caller (sidebar, phone nav
+// sheet, playlists page) observes the same sort choice. Client-only pref —
+// SSR renders the default and hydration corrects it before first paint of
+// the sidebar list.
+const SIDEBAR_SORT_KEY = 'heya:sidebar-playlist-sort'
+const sidebarSort = ref<SidebarPlaylistSort>('custom')
+if (import.meta.client) {
+  const stored = localStorage.getItem(SIDEBAR_SORT_KEY)
+  if (stored === 'custom' || stored === 'name' || stored === 'updated' || stored === 'created') {
+    sidebarSort.value = stored
+  }
 }
 
 // Server-owned playlist state lives in Colada. Every caller observes the same
@@ -133,21 +149,74 @@ export function usePlaylists() {
     invalidatePlaylistCaches(id)
   }
 
-  const sidebarRows = computed<SidebarPlaylist[]>(() =>
-    playlists.value.map(p => ({
-      id: p.id,
-      slug: p.slug,
-      name: p.name,
-      count: p.track_count,
-      // Resolved, renderable URL (custom-cover endpoint or first album's
-      // canonical cover) — raw cover_path is a disk path, never usable.
-      cover_path: playlistCoverSrc(p) ?? '',
-    })),
-  )
+  // Toggle one of the two independent pin scopes. Optimistic — a pin is
+  // cheap to re-toggle if the request fails, so no rollback plumbing.
+  async function setPin(id: number, scope: 'page' | 'sidebar', pinned: boolean) {
+    const { $heya } = useNuxtApp()
+    updateList(rows => rows.map(p => (p.id === id
+      ? { ...p, ...(scope === 'page' ? { pinned } : { sidebar_pinned: pinned }) }
+      : p)))
+    await $heya('/api/me/playlists/{id}/pin', {
+      method: 'PUT',
+      path: { id },
+      body: { scope, pinned },
+    })
+  }
+
+  // Persist a manual sidebar drag order. `ids` is the full list, top to
+  // bottom, as rendered (pinned block first) — positions are just 1..n.
+  async function reorderSidebar(ids: number[]) {
+    const { $heya } = useNuxtApp()
+    const pos = new Map(ids.map((id, i) => [id, i + 1]))
+    updateList(rows => rows.map(p => (pos.has(p.id) ? { ...p, sidebar_position: pos.get(p.id)! } : p)))
+    await $heya('/api/me/playlists/sidebar-order', {
+      method: 'PUT',
+      body: { ids },
+    })
+  }
+
+  function setSidebarSort(sort: SidebarPlaylistSort) {
+    sidebarSort.value = sort
+    if (import.meta.client) localStorage.setItem(SIDEBAR_SORT_KEY, sort)
+  }
+
+  const sidebarRows = computed<SidebarPlaylist[]>(() => {
+    const bySort = (a: UserPlaylistRow, b: UserPlaylistRow): number => {
+      switch (sidebarSort.value) {
+        case 'name':
+          return a.name.localeCompare(b.name)
+        case 'updated':
+          return b.updated_at.localeCompare(a.updated_at)
+        case 'created':
+          return b.created_at.localeCompare(a.created_at)
+        default: {
+          // Manual order; never-dragged rows (position 0) sink below
+          // positioned ones, newest-first among themselves.
+          const ap = a.sidebar_position > 0 ? a.sidebar_position : Infinity
+          const bp = b.sidebar_position > 0 ? b.sidebar_position : Infinity
+          return ap !== bp ? ap - bp : b.created_at.localeCompare(a.created_at)
+        }
+      }
+    }
+    return [...playlists.value]
+      .sort((a, b) => Number(b.sidebar_pinned) - Number(a.sidebar_pinned) || bySort(a, b))
+      .map(p => ({
+        id: p.id,
+        slug: p.slug,
+        name: p.name,
+        count: p.track_count,
+        // Resolved, renderable URL (custom-cover endpoint or first album's
+        // canonical cover) — raw cover_path is a disk path, never usable.
+        cover_path: playlistCoverSrc(p) ?? '',
+        pinned: p.sidebar_pinned,
+      }))
+  })
 
   return {
     playlists,
     sidebarRows,
+    sidebarSort: readonly(sidebarSort),
+    setSidebarSort,
     loaded,
     ensureLoaded,
     create,
@@ -157,5 +226,7 @@ export function usePlaylists() {
     removeTrack,
     setCover,
     clearCover,
+    setPin,
+    reorderSidebar,
   }
 }

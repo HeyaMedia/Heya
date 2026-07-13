@@ -281,6 +281,32 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			return nil, nil
 		})
 
+	huma.Register(api, secured(op(http.MethodPut, "/api/me/playlists/{id}/pin", "set-playlist-pin", "Pin/unpin a playlist (page or sidebar scope)", "Me")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			Body struct {
+				Scope  string `json:"scope" enum:"page,sidebar" doc:"Which pin set to toggle"`
+				Pinned bool   `json:"pinned"`
+			}
+		}) (*struct{}, error) {
+			if err := app.SetPlaylistPin(ctx, userFrom(ctx).ID, in.ID, in.Body.Scope, in.Body.Pinned); err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			return nil, nil
+		})
+
+	huma.Register(api, secured(op(http.MethodPut, "/api/me/playlists/sidebar-order", "set-playlist-sidebar-order", "Persist manual sidebar playlist order", "Me")),
+		func(ctx context.Context, in *struct {
+			Body struct {
+				IDs []int64 `json:"ids" doc:"Playlist IDs in the desired top-to-bottom order (full list)"`
+			}
+		}) (*struct{}, error) {
+			if err := app.SetSidebarPlaylistOrder(ctx, userFrom(ctx).ID, in.Body.IDs); err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return nil, nil
+		})
+
 	huma.Register(api, secured(op(http.MethodDelete, "/api/me/playlists/{id}", "delete-playlist", "Delete a playlist", "Me")),
 		func(ctx context.Context, in *IDPath) (*struct{}, error) {
 			if err := app.DeleteUserPlaylist(ctx, userFrom(ctx).ID, in.ID); err != nil {

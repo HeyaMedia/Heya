@@ -129,7 +129,24 @@
     <div class="ms-divider" />
     <div class="ms-section-label ms-section-label-link">
       <NuxtLink to="/music/playlists" class="ms-section-link" title="All playlists">Playlists</NuxtLink>
-      <NuxtLink to="/music/playlists" class="ms-section-all" title="All playlists"><Icon name="chevright" :size="11" /></NuxtLink>
+      <div class="ms-section-actions">
+        <AppMenu align="end" :width="190" trigger-class="ms-sort-btn" trigger-title="Sort playlists">
+          <template #trigger>
+            <Icon name="sort" :size="12" />
+          </template>
+          <DropdownMenuItem
+            v-for="opt in SIDEBAR_SORTS"
+            :key="opt.value"
+            class="surface-item ms-sort-item"
+            :class="{ active: sidebarSort === opt.value }"
+            @select="setSidebarSort(opt.value)"
+          >
+            <span>{{ opt.label }}</span>
+            <Icon v-if="sidebarSort === opt.value" name="check" :size="12" />
+          </DropdownMenuItem>
+        </AppMenu>
+        <NuxtLink to="/music/playlists" class="ms-section-all" title="All playlists"><Icon name="chevright" :size="11" /></NuxtLink>
+      </div>
     </div>
     <ul class="ms-playlists">
       <li>
@@ -143,19 +160,34 @@
           </div>
         </NuxtLink>
       </li>
-      <li v-for="(pl, i) in playlists" :key="pl.id">
+      <li
+        v-for="(pl, i) in playlists"
+        :key="pl.id"
+        class="ms-pl-row"
+        :class="{
+          'reorder-before': reorderOverIndex === i && reorderId !== pl.id,
+          'reorder-after': reorderOverIndex === i + 1 && i === playlists.length - 1,
+          'reorder-source': reorderId === pl.id,
+        }"
+      >
         <NuxtLink
           :to="`/music/playlist/${pl.slug || pl.id}`"
           class="ms-pl-item"
           :class="{ active: section === 'playlist-' + (pl.slug || pl.id), 'drop-target': !isCoarse && dragDrop.dragState.overPlaylistId === pl.id }"
           :aria-current="section === 'playlist-' + (pl.slug || pl.id) ? 'page' : undefined"
-          @dragover="!isCoarse && dragDrop.onPlaylistDragOver($event, pl.id)"
-          @dragleave="!isCoarse && dragDrop.onPlaylistDragLeave()"
-          @drop="!isCoarse && dragDrop.onPlaylistDrop($event, pl.id, pl.name)"
+          :draggable="!isCoarse"
+          @dragstart="onReorderStart($event, pl)"
+          @dragend="onReorderEnd"
+          @dragover="onRowDragOver($event, pl, i)"
+          @dragleave="onRowDragLeave"
+          @drop="onRowDrop($event, pl, i)"
         >
           <Poster :idx="i" :src="pl.cover_path || null" aspect="1/1" class="ms-pl-cover" :width="80" />
           <div class="ms-pl-meta">
-            <div class="ms-pl-name">{{ pl.name }}</div>
+            <div class="ms-pl-name">
+              <span class="ms-pl-name-text">{{ pl.name }}</span>
+              <Icon v-if="pl.pinned" name="pin" :size="10" weight="fill" class="ms-pl-pin" />
+            </div>
             <div class="ms-pl-count">{{ pl.count }} tracks</div>
           </div>
         </NuxtLink>
@@ -168,11 +200,12 @@
 </template>
 
 <script setup lang="ts">
-import { CollapsibleRoot, CollapsibleTrigger, CollapsibleContent } from 'reka-ui'
+import { CollapsibleRoot, CollapsibleTrigger, CollapsibleContent, DropdownMenuItem } from 'reka-ui'
+import type { SidebarPlaylistSort } from '~/composables/usePlaylists'
 
 const props = defineProps<{
   section: string
-  playlists: Array<{ id: number; slug: string; name: string; count: number; cover_path?: string }>
+  playlists: Array<{ id: number; slug: string; name: string; count: number; cover_path?: string; pinned?: boolean }>
 }>()
 
 defineEmits<{ 'create-playlist': [] }>()
@@ -191,6 +224,80 @@ const coverShown = computed(() => coverExpanded.value && !!currentTrack.value)
 // conventions: gate on pointer coarseness, not viewport width).
 const { isCoarse } = useViewport()
 const dragDrop = useMusicDragDrop()
+
+// --- Sidebar sort + drag-to-reorder ---------------------------------------
+// Two drag flavors share the playlist rows: dragging a row REORDERS it,
+// while a drag arriving from a track/album source still DROPS INTO the row.
+// They're told apart by `reorderId`, which only a row's own dragstart sets —
+// external drags never touch it, so the dragDrop path stays intact.
+const SIDEBAR_SORTS: Array<{ value: SidebarPlaylistSort; label: string }> = [
+  { value: 'custom', label: 'Custom order' },
+  { value: 'name', label: 'Name' },
+  { value: 'updated', label: 'Recently updated' },
+  { value: 'created', label: 'Recently created' },
+]
+const playlistsApi = usePlaylists()
+const { sidebarSort, setSidebarSort } = playlistsApi
+
+const reorderId = ref<number | null>(null)
+// Insertion index 0..n over props.playlists — i means "above row i",
+// playlists.length means "below the last row".
+const reorderOverIndex = ref<number | null>(null)
+
+function onReorderStart(e: DragEvent, pl: { id: number; name: string }) {
+  if (isCoarse.value) return
+  reorderId.value = pl.id
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', pl.name)
+  }
+}
+
+function onReorderEnd() {
+  reorderId.value = null
+  reorderOverIndex.value = null
+}
+
+function onRowDragOver(e: DragEvent, pl: { id: number }, index: number) {
+  if (isCoarse.value) return
+  if (reorderId.value == null) {
+    dragDrop.onPlaylistDragOver(e, pl.id)
+    return
+  }
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  reorderOverIndex.value = index + (e.clientY > rect.top + rect.height / 2 ? 1 : 0)
+}
+
+function onRowDragLeave() {
+  if (reorderId.value == null) {
+    dragDrop.onPlaylistDragLeave()
+    return
+  }
+  reorderOverIndex.value = null
+}
+
+async function onRowDrop(e: DragEvent, pl: { id: number; name: string }, index: number) {
+  if (isCoarse.value) return
+  if (reorderId.value == null) {
+    dragDrop.onPlaylistDrop(e, pl.id, pl.name)
+    return
+  }
+  e.preventDefault()
+  const from = props.playlists.findIndex(p => p.id === reorderId.value)
+  let to = reorderOverIndex.value ?? index
+  onReorderEnd()
+  if (from < 0) return
+  const ids = props.playlists.map(p => p.id)
+  const [moved] = ids.splice(from, 1)
+  if (from < to) to -= 1
+  ids.splice(to, 0, moved!)
+  // A drag IS a custom order — flip the sort so the drop lands visibly even
+  // when the list was showing name/updated order.
+  setSidebarSort('custom')
+  await playlistsApi.reorderSidebar(ids)
+}
 
 const librarySections = ['library', 'artists', 'albums', 'songs']
 const myMusicSections = ['my', 'my-artists', 'my-albums', 'my-favorites', 'stats']
@@ -519,9 +626,63 @@ watch(() => props.section, () => {
   border-radius: var(--r-sm);
 }
 
+.ms-section-actions { display: flex; align-items: center; gap: 2px; }
+
+/* Sidebar-pinned marker on a playlist row. */
+.ms-pl-name { display: flex; align-items: center; gap: 4px; }
+.ms-pl-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-pl-pin { color: var(--fg-3); flex-shrink: 0; }
+
+/* Drag-to-reorder insertion line: a gold bar in the 2px row gap at the
+   insertion point. The dragged row itself dims so the ghost reads as
+   "moving", not "copying". */
+.ms-pl-row { position: relative; }
+.ms-pl-row.reorder-before::before,
+.ms-pl-row.reorder-after::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--gold);
+  pointer-events: none;
+}
+.ms-pl-row.reorder-before::before { top: -2px; }
+.ms-pl-row.reorder-after::after { bottom: -2px; }
+.ms-pl-row.reorder-source .ms-pl-item { opacity: 0.4; }
+
 .ms-section-label-link { display: flex; align-items: center; justify-content: space-between; }
 .ms-section-link { color: inherit; text-decoration: none; }
 .ms-section-link:hover { color: var(--fg-0); }
 .ms-section-all { color: var(--fg-4); display: inline-flex; text-decoration: none; }
 .ms-section-all:hover { color: var(--gold); }
+</style>
+
+<style>
+/* Unscoped on purpose (docs/ui.md): .ms-sort-btn lands on AppMenu's own
+   trigger button and .ms-sort-item on portaled menu content — scoped CSS
+   reaches neither. */
+.ms-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  border-radius: 6px;
+  color: var(--fg-3);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.ms-sort-btn:hover,
+.ms-sort-btn[data-state='open'] {
+  color: var(--fg-0);
+  background: rgb(var(--ink) / 0.06);
+}
+.ms-sort-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ms-sort-item.active { color: var(--gold); }
 </style>

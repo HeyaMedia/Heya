@@ -73,6 +73,17 @@ WHERE id = $1 AND user_id = $2;
 -- ownership-gated via GetUserPlaylist / GetUserPlaylistBySlug.
 SELECT cover_path FROM user_playlists WHERE id = $1;
 
+-- name: SetPlaylistPagePin :exec
+-- Pins deliberately do NOT bump updated_at — pinning isn't a content change
+-- and must not reshuffle "recently updated" sorts.
+UPDATE user_playlists SET pinned = $3 WHERE id = $1 AND user_id = $2;
+
+-- name: SetPlaylistSidebarPin :exec
+UPDATE user_playlists SET sidebar_pinned = $3 WHERE id = $1 AND user_id = $2;
+
+-- name: SetPlaylistSidebarPosition :exec
+UPDATE user_playlists SET sidebar_position = $3 WHERE id = $1 AND user_id = $2;
+
 -- name: DeleteUserPlaylist :exec
 DELETE FROM user_playlists WHERE id = $1 AND user_id = $2;
 

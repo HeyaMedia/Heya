@@ -54,6 +54,9 @@
           <div class="pls-cover">
             <NuxtImg v-if="coverFor(p)" :src="coverFor(p)!" class="pls-cover-img" width="360" :alt="p.name" />
             <div v-else class="pls-cover-fallback"><Icon name="list" :size="34" /></div>
+            <span v-if="p.pinned" class="pls-pin" title="Pinned">
+              <Icon name="pin" :size="11" weight="fill" />
+            </span>
             <span v-if="p.sync_services?.length" class="pls-sync" :title="`Synced with ${p.sync_services.join(', ')}`">
               <Icon name="refresh" :size="10" /> synced
             </span>
@@ -93,6 +96,8 @@ interface PlaylistRow {
   auto_artist_slug: string
   has_cover: boolean
   sync_services: string[] | null
+  pinned: boolean
+  sidebar_pinned: boolean
 }
 
 const { $heya } = useNuxtApp()
@@ -134,15 +139,20 @@ const allTags = computed(() => {
 const filtered = computed(() => {
   let out = playlists.value
   if (tagFilter.value) out = out.filter(p => p.tags?.includes(tagFilter.value))
-  return [...out].sort((a, b) => {
+  // Pinned playlists float above the rest regardless of the chosen sort.
+  return [...out].sort((a, b) => Number(b.pinned) - Number(a.pinned) || bySort(a, b))
+})
+
+function bySort(a: PlaylistRow, b: PlaylistRow): number {
+  return ((): number => {
     switch (sort.value) {
       case 'name': return a.name.localeCompare(b.name)
       case 'created': return Date.parse(b.created_at) - Date.parse(a.created_at)
       case 'tracks': return (b.track_count ?? 0) - (a.track_count ?? 0)
       default: return Date.parse(b.updated_at) - Date.parse(a.updated_at)
     }
-  })
-})
+  })()
+}
 
 function coverFor(p: PlaylistRow) {
   return playlistCoverSrc(p)
@@ -164,9 +174,31 @@ async function saveMutation(p: PlaylistRow, patch: Partial<{ name: string; tags:
   sidebarPlaylists.ensureLoaded()
 }
 
+async function togglePin(p: PlaylistRow, scope: 'page' | 'sidebar', pinned: boolean) {
+  try {
+    // setPin also patches the sidebar's cache optimistically; this page's
+    // own query just refetches (tiny payload, instant reorder).
+    await sidebarPlaylists.setPin(p.id, scope, pinned)
+    listQuery.refetch()
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.data?.detail || 'Pin failed' }
+  }
+}
+
 function menuFor(p: PlaylistRow): ContextMenuItem[] {
   const items = actions.forPlaylist({ id: p.id, name: p.name, track_count: p.track_count, slug: p.slug })
   items.push(
+    { label: '', separator: true },
+    {
+      label: p.pinned ? 'Unpin' : 'Pin to top',
+      icon: 'pin',
+      action: () => togglePin(p, 'page', !p.pinned),
+    },
+    {
+      label: p.sidebar_pinned ? 'Unpin from sidebar' : 'Pin to sidebar',
+      icon: 'pin',
+      action: () => togglePin(p, 'sidebar', !p.sidebar_pinned),
+    },
     { label: '', separator: true },
     {
       label: 'Rename…',
@@ -300,6 +332,15 @@ function menuFor(p: PlaylistRow): ContextMenuItem[] {
   display: flex; align-items: center; justify-content: center;
   color: var(--fg-4);
 }
+.pls-pin {
+  position: absolute; top: 8px; left: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(6px);
+  color: var(--gold);
+}
+
 .pls-sync {
   position: absolute; top: 8px; right: 8px;
   display: inline-flex; align-items: center; gap: 4px;
