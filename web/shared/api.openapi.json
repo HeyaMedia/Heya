@@ -32210,14 +32210,14 @@
         "operationId": "ambient-backdrops",
         "parameters": [
           {
-            "description": "Comma-separated media types (movie,tv,music,book). Empty = all four.",
+            "description": "Comma-separated media types (movie,tv,anime,music,book). Empty = all five.",
             "explode": false,
             "in": "query",
             "name": "types",
             "schema": {
-              "description": "Comma-separated media types (movie,tv,music,book). Empty = all four.",
+              "description": "Comma-separated media types (movie,tv,anime,music,book). Empty = all five.",
               "examples": [
-                "movie,tv"
+                "movie,tv,anime"
               ],
               "type": "string"
             }

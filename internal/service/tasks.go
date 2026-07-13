@@ -697,7 +697,7 @@ func (a *App) QuerySegmentsItems(ctx context.Context, status string, limit, offs
 		       count(*) FILTER (WHERE lf.segments_analyzed_at IS NOT NULL)
 		FROM library_files lf
 		JOIN libraries l ON l.id = lf.library_id
-		WHERE l.media_type IN ('movie', 'tv')
+		WHERE l.media_type IN ('movie', 'tv', 'anime')
 		  AND lf.deleted_at IS NULL
 		  AND lf.media_info IS NOT NULL
 		  AND lf.media_item_id IS NOT NULL
@@ -719,7 +719,7 @@ func (a *App) QuerySegmentsItems(ctx context.Context, status string, limit, offs
 		       (SELECT count(*) FROM media_segments ms WHERE ms.library_file_id = lf.id)
 		FROM library_files lf
 		JOIN libraries l ON l.id = lf.library_id
-		WHERE l.media_type IN ('movie', 'tv')
+		WHERE l.media_type IN ('movie', 'tv', 'anime')
 		  AND lf.deleted_at IS NULL
 		  AND lf.media_info IS NOT NULL
 		  AND lf.media_item_id IS NOT NULL
@@ -778,7 +778,7 @@ func (a *App) QuerySegmentsItems(ctx context.Context, status string, limit, offs
 // need detection while missing an intro OR a credits row (any source),
 // movie files while missing a credits row (movies have no intro pass).
 // Requires the `library_files lf` + `libraries l` join aliases.
-const detectionNeededExpr = `(CASE WHEN l.media_type = 'tv'
+const detectionNeededExpr = `(CASE WHEN l.media_type IN ('tv', 'anime')
 	THEN NOT EXISTS (SELECT 1 FROM media_segments ms WHERE ms.library_file_id = lf.id AND ms.segment_type = 'intro')
 	  OR NOT EXISTS (SELECT 1 FROM media_segments ms WHERE ms.library_file_id = lf.id AND ms.segment_type = 'credits')
 	ELSE NOT EXISTS (SELECT 1 FROM media_segments ms WHERE ms.library_file_id = lf.id AND ms.segment_type = 'credits')
@@ -808,7 +808,7 @@ func (a *App) QueryDetectionItems(ctx context.Context, status string, limit, off
 		       count(*) FILTER (WHERE `+detectionCompleteExpr+`)
 		FROM library_files lf
 		JOIN libraries l ON l.id = lf.library_id
-		WHERE l.media_type IN ('movie', 'tv')
+		WHERE l.media_type IN ('movie', 'tv', 'anime')
 		  AND lf.deleted_at IS NULL
 		  AND lf.media_info IS NOT NULL
 		  AND lf.media_item_id IS NOT NULL
@@ -832,7 +832,7 @@ func (a *App) QueryDetectionItems(ctx context.Context, status string, limit, off
 		       (SELECT count(*) FROM media_segments ms WHERE ms.library_file_id = lf.id AND ms.source IN ('chromaprint', 'blackframe'))
 		FROM library_files lf
 		JOIN libraries l ON l.id = lf.library_id
-		WHERE l.media_type IN ('movie', 'tv')
+		WHERE l.media_type IN ('movie', 'tv', 'anime')
 		  AND lf.deleted_at IS NULL
 		  AND lf.media_info IS NOT NULL
 		  AND lf.media_item_id IS NOT NULL

@@ -145,7 +145,7 @@ WHERE (mi.media_type = $1
         SELECT 1 FROM unnest(COALESCE(m.genres, ts.genres)) AS g
         WHERE lower(g) = ANY($10::text[])))
   -- Mirror JFListLibraryItems: exclude episode-less TV series.
-  AND (mi.media_type <> 'tv' OR EXISTS (
+  AND (mi.media_type NOT IN ('tv', 'anime') OR EXISTS (
         SELECT 1 FROM tv_series ts2 JOIN tv_seasons s2 ON s2.series_id = ts2.id
         WHERE ts2.media_item_id = mi.id))
 `
@@ -545,7 +545,7 @@ WHERE (mi.media_type = $1
   -- phantom series (no /Seasons, no /Episodes) that strict clients (Infuse)
   -- error on. Real Jellyfin never has one — a series exists only from real
   -- episode files. Series WITH seasons but empty tv_episodes still pass.
-  AND (mi.media_type <> 'tv' OR EXISTS (SELECT 1 FROM tv_seasons s2 WHERE s2.series_id = ts.id))
+  AND (mi.media_type NOT IN ('tv', 'anime') OR EXISTS (SELECT 1 FROM tv_seasons s2 WHERE s2.series_id = ts.id))
 ORDER BY
   CASE WHEN $11::text = 'random' THEN md5(mi.id::text || $12::text) END ASC,
   CASE WHEN $11 = 'added'    AND $13::bool     THEN mi.created_at END DESC NULLS LAST,

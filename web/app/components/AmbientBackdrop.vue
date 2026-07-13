@@ -90,10 +90,10 @@ const types = computed<string[]>(() => {
   const p = route.path
   if (p.startsWith('/watch')) return []
   if (p.startsWith('/movies') || p.startsWith('/collection')) return ['movie']
-  if (p.startsWith('/tv')) return ['tv']
+  if (p.startsWith('/tv')) return ['tv', 'anime']
   if (p.startsWith('/music')) return ['music']
   if (p.startsWith('/books')) return ['book']
-  return ['movie', 'tv', 'music', 'book']
+  return ['movie', 'tv', 'anime', 'music', 'book']
 })
 const typesKey = computed(() => types.value.join(','))
 

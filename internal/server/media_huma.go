@@ -62,10 +62,10 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 	// /api/media/{id} can swallow it as a slug.
 	huma.Register(api, secured(op(http.MethodGet, "/api/media/ambient-backdrops", "ambient-backdrops", "Random media items with artwork for the ambient background", "Media")),
 		func(ctx context.Context, in *struct {
-			Types string `query:"types" example:"movie,tv" doc:"Comma-separated media types (movie,tv,music,book). Empty = all four."`
+			Types string `query:"types" example:"movie,tv,anime" doc:"Comma-separated media types (movie,tv,anime,music,book). Empty = all five."`
 			Limit int32  `query:"limit" minimum:"1" maximum:"100" default:"30"`
 		}) (*JSONOutput[[]service.AmbientBackdropItem], error) {
-			allowed := map[string]bool{"movie": true, "tv": true, "music": true, "book": true}
+			allowed := map[string]bool{"movie": true, "tv": true, "anime": true, "music": true, "book": true}
 			var types []string
 			for _, t := range strings.Split(in.Types, ",") {
 				if t = strings.TrimSpace(t); allowed[t] {
@@ -73,7 +73,7 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 				}
 			}
 			if len(types) == 0 {
-				types = []string{"movie", "tv", "music", "book"}
+				types = []string{"movie", "tv", "anime", "music", "book"}
 			}
 			items, err := app.SampleAmbientBackdrops(ctx, types, in.Limit)
 			if err != nil {

@@ -36,7 +36,7 @@
             <div class="mf-readonly">{{ formatRating(detail?.movie?.rating) }}</div>
           </div>
         </template>
-        <template v-if="mediaType === 'tv'">
+        <template v-if="mediaType === 'tv' || mediaType === 'anime'">
           <div class="mf-field">
             <label class="mf-label">Status</label>
             <AppSelect
@@ -63,7 +63,7 @@
     </div>
 
     <!-- Networks (TV only) -->
-    <div v-if="mediaType === 'tv'" class="mf-card">
+    <div v-if="mediaType === 'tv' || mediaType === 'anime'" class="mf-card">
       <div class="mf-card-head">Networks</div>
       <div class="mf-chips-wrap">
         <button

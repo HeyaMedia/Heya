@@ -18,7 +18,7 @@ const transcodingCount = computed(() => sessions.value.filter(s => s.playback_ac
 const directCount = computed(() => sessions.value.filter(s => s.playback_action === 'direct_play' || s.playback_action === 'remux').length)
 
 function mediaIcon(type: string): string {
-  return type === 'movie' ? 'film' : type === 'tv' ? 'tv' : type === 'music' ? 'music' : 'book'
+  return type === 'movie' ? 'film' : type === 'tv' || type === 'anime' ? 'tv' : type === 'music' ? 'music' : 'book'
 }
 
 // Transcode badge tone: transcoding is the expensive path (amber); remux and

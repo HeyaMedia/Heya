@@ -18,7 +18,7 @@
             <input id="me-year" v-model="form.year" type="text" class="mf-input" maxlength="4" />
           </div>
           <div class="mf-field">
-            <label class="mf-label" for="me-original-title">Original {{ mediaType === 'tv' ? 'Name' : 'Title' }}</label>
+            <label class="mf-label" for="me-original-title">Original {{ mediaType === 'tv' || mediaType === 'anime' ? 'Name' : 'Title' }}</label>
             <input id="me-original-title" v-model="form.original_title" type="text" class="mf-input" />
           </div>
           <div class="mf-field">

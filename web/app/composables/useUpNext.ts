@@ -28,7 +28,7 @@ export function useUpNext(source: () => UpNextSourceRow[] | undefined | null) {
 
     const series = new Map<number, UpNextSourceRow>()
     for (const row of recent) {
-      if (row.media_type !== 'tv') continue
+      if (row.media_type !== 'tv' && row.media_type !== 'anime') continue
       if (!series.has(row.media_item_id)) series.set(row.media_item_id, row)
     }
 

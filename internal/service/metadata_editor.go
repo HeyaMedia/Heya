@@ -672,7 +672,7 @@ func (a *App) ApplyIdentify(ctx context.Context, mediaItemID int64, providerName
 	switch item.MediaType {
 	case sqlc.MediaTypeMovie:
 		kind = metadata.KindMovie
-	case sqlc.MediaTypeTv:
+	case sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
 		kind = metadata.KindTV
 	default:
 		kind = metadata.MediaKind(item.MediaType)
@@ -892,7 +892,7 @@ func (a *App) SearchProviderArtwork(ctx context.Context, mediaItemID int64, filt
 	switch item.MediaType {
 	case sqlc.MediaTypeMovie:
 		kind = metadata.KindMovie
-	case sqlc.MediaTypeTv:
+	case sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
 		kind = metadata.KindTV
 	case sqlc.MediaTypeMusic:
 		// Music media items are artists; the artist payload's flat image

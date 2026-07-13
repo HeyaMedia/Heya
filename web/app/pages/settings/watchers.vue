@@ -73,7 +73,8 @@ const coverageTone = computed<'good' | 'warn' | 'bad'>(() => {
 function iconForKind(kind: string): string {
   switch (kind) {
     case 'movie': return 'film'
-    case 'tv':    return 'tv'
+    case 'tv':
+    case 'anime': return 'tv'
     case 'music': return 'music'
     case 'book':  return 'book'
     default:      return 'folder'

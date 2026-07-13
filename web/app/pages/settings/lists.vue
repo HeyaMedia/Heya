@@ -76,7 +76,8 @@ async function remove(l: UserList) {
 function mediaTypeIcon(t: string): string {
   switch (t) {
     case 'movie': return 'film'
-    case 'tv': return 'tv'
+    case 'tv':
+    case 'anime': return 'tv'
     case 'music': return 'music'
     case 'book': return 'book'
     default: return 'list'
