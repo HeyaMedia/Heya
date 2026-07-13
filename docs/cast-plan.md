@@ -262,8 +262,9 @@ independent tracks, both provider-side:
   proves it's possible; real work).
 - HomeKit-managed speakers (Home-app access gotcha), password
   receivers (`--password`), artwork over FIFO (`ARTWORK=` URL).
-- Cast video subtitle delivery (external WebVTT first; conversion/burn-in for
-  ASS/PGS) and richer per-receiver codec profiles.
+- Cast video bitmap-subtitle burn-in (PGS/DVD/DVB) and richer per-receiver
+  codec profiles. Text subtitles, including ASS/SSA converted to WebVTT, are
+  delivered as Default Media Receiver text tracks.
 
 ### Provider implementation order
 
@@ -274,7 +275,7 @@ receiver pulls). Keep discovery and transport capabilities explicit so the UI
 can hide unsupported media instead of learning provider names.
 
 1. **Google Cast v2 via the Default Media Receiver — AUDIO HARDWARE-PROVEN;
-   VIDEO BACKEND BUILT, HARDWARE VALIDATION PENDING (2026-07-13).** No paid or registered Google
+   VIDEO HARDWARE-PROVEN (2026-07-13).** No paid or registered Google
    receiver app is required: Heya launches the public Default Media Receiver
    app ID `CC1AD845`. `_googlecast._tcp` discovery, Cast v2 TLS/protobuf
    framing, launch/load/control/status handling, native pause/resume/seek, and
@@ -282,7 +283,10 @@ can hide unsupported media instead of learning provider names.
    Cast module. Audio passed real hardware testing, including the automatically
    selected LAN media origin. Video adds a file-scoped HLS token tree,
    per-session segment routing, direct MP4 or H.264/AAC fallback, remote
-   controls/progress, and local/receiver handoff. Discovery parses the Cast
+   controls/progress, local/receiver handoff, cross-client mobile remotes, and
+   session-owned audio/subtitle/quality selections. External text subtitles
+   are exposed to the receiver as signed WebVTT tracks; bitmap formats remain
+   a future burn-in path. Discovery parses the Cast
    `ca` bitfield (`AUDIO_OUT`/`VIDEO_OUT`), so speaker-only Cast devices never
    appear in the video picker. Codec support is intentionally conservative:
    `ca` describes I/O, not HEVC/AV1/HDR decoder support.

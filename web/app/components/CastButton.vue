@@ -12,7 +12,7 @@
     v-if="visible"
     v-model="menuOpen"
     align="end"
-    :width="304"
+    :width="videoCastSession ? 336 : 304"
     :trigger-class="{ 'btn-icon': true, 'topbar-cast-btn': true, active: cast.engaged }"
     :trigger-title="cast.engaged ? `Casting to ${cast.deviceName}` : 'Cast'"
     trigger-aria-label="Cast to a device"
@@ -22,7 +22,8 @@
       <Icon :name="connecting ? 'loading' : 'cast'" :size="18" :class="{ 'cast-btn-spin': connecting }" />
     </template>
 
-    <div v-if="cast.engaged" class="cast-menu-current">
+    <CastVideoRemote v-if="videoCastSession" compact />
+    <div v-else-if="cast.engaged" class="cast-menu-current">
       <span class="cast-device-icon is-active">
         <Icon name="cast" :size="16" />
       </span>
@@ -42,6 +43,7 @@
         :key="d.id"
         class="surface-item app-context-item cast-device-item"
         :class="{ 'is-active': cast.engagedDeviceId === d.id }"
+        :disabled="!!videoCastSession"
         @select="pick(d.id)"
       >
         <span class="cast-device-icon">
@@ -97,8 +99,10 @@ import type { CastDevice } from '~/composables/useCast'
 
 const cast = useCastStore()
 const { startCastTo, stopCasting } = usePlayerBindings()
+const { toast } = useToast()
 
 const visible = computed(() => cast.devices.length > 0 || cast.engaged)
+const videoCastSession = computed(() => cast.session?.media_kind === 'video' ? cast.session : null)
 const supportsVideo = (d: CastDevice) => d.capabilities?.includes('video') ?? false
 const audioOnlyDevices = computed(() => cast.devices.filter(d => !supportsVideo(d)))
 const videoCapableDevices = computed(() => cast.devices.filter(supportsVideo))
@@ -110,12 +114,39 @@ watch(menuOpen, (open) => {
 
 const connecting = computed(() => cast.connecting || cast.session?.state === 'starting')
 
-function pick(deviceId: string) {
+async function pick(deviceId: string) {
   // Picking the connected device again is the disconnect gesture.
-  if (cast.engagedDeviceId === deviceId) { void stopCasting(); return }
+  if (cast.engagedDeviceId === deviceId) { disconnect(); return }
+  const video = videoCastSession.value
+  if (video?.file_id && video.entity_type && video.entity_id) {
+    const position = cast.livePositionSec()
+    try {
+      await cast.stopSession()
+      cast.engagedDeviceId = deviceId
+      await cast.playVideo({
+        fileId: video.file_id,
+        entityType: video.entity_type,
+        entityId: video.entity_id,
+        title: video.title,
+        audioTrack: video.audio_track,
+        subtitleTrack: video.subtitle_track,
+        quality: video.quality,
+        fallbackVolume: video.volume,
+        startSeconds: position,
+        startPaused: video.state === 'paused',
+      })
+    } catch (error) {
+      cast.engagedDeviceId = null
+      toast.err(error instanceof Error ? error.message : 'Could not move Chromecast playback')
+    }
+    return
+  }
   void startCastTo(deviceId)
 }
-function disconnect() { void stopCasting() }
+function disconnect() {
+  if (videoCastSession.value) void cast.disconnect()
+  else void stopCasting()
+}
 
 function deviceSub(d: CastDevice) {
   if (d.provider === 'client') return d.kind ? `HeyaConnect · ${titleCase(d.kind)}` : 'HeyaConnect'

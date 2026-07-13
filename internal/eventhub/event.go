@@ -61,22 +61,26 @@ type DeviceCommandPayload struct {
 // point-in-time sample: the FE interpolates from (PositionSec, At,
 // State) between events instead of the server ticking every second.
 type CastStatePayload struct {
-	SessionID   string    `json:"session_id"`
-	DeviceID    string    `json:"device_id"`
-	DeviceName  string    `json:"device_name"`
-	UserID      int64     `json:"user_id"`
-	State       string    `json:"state"`
-	MediaKind   string    `json:"media_kind,omitempty"`
-	TrackID     int64     `json:"track_id,omitempty"`
-	FileID      string    `json:"file_id,omitempty"`
-	EntityType  string    `json:"entity_type,omitempty"`
-	EntityID    int64     `json:"entity_id,omitempty"`
-	Title       string    `json:"title,omitempty"`
-	Artist      string    `json:"artist,omitempty"`
-	PositionSec float64   `json:"position_sec"`
-	DurationSec int       `json:"duration_sec,omitempty"`
-	Volume      int       `json:"volume"`
-	At          time.Time `json:"at"`
+	SessionID     string    `json:"session_id"`
+	DeviceID      string    `json:"device_id"`
+	DeviceName    string    `json:"device_name"`
+	UserID        int64     `json:"user_id"`
+	State         string    `json:"state"`
+	MediaKind     string    `json:"media_kind,omitempty"`
+	TrackID       int64     `json:"track_id,omitempty"`
+	FileID        string    `json:"file_id,omitempty"`
+	MediaItemID   int64     `json:"media_item_id,omitempty"`
+	EntityType    string    `json:"entity_type,omitempty"`
+	EntityID      int64     `json:"entity_id,omitempty"`
+	Title         string    `json:"title,omitempty"`
+	Artist        string    `json:"artist,omitempty"`
+	AudioTrack    int       `json:"audio_track,omitempty"`
+	SubtitleTrack *int      `json:"subtitle_track,omitempty"`
+	Quality       string    `json:"quality,omitempty"`
+	PositionSec   float64   `json:"position_sec"`
+	DurationSec   int       `json:"duration_sec,omitempty"`
+	Volume        int       `json:"volume"`
+	At            time.Time `json:"at"`
 }
 
 type Event struct {

@@ -655,6 +655,7 @@ export interface StreamSubtitle {
   is_default: boolean
   is_forced: boolean
   is_hearing_impaired: boolean
+  delivery: 'external' | 'burn-in' | 'unsupported'
 }
 
 export interface EpisodeFileEntry {

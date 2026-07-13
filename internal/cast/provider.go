@@ -35,13 +35,14 @@ type Device struct {
 // Chromecast consume URL. PullPath and PullQuery are internal inputs used by
 // Manager to mint a user-scoped URL after the receiver is selected.
 type TrackInfo struct {
-	TrackID    int64
-	FileID     string
-	EntityType string
-	EntityID   int64
-	Path       string
-	URL        string
-	PullPath   string
+	TrackID     int64
+	FileID      string
+	MediaItemID int64
+	EntityType  string
+	EntityID    int64
+	Path        string
+	URL         string
+	PullPath    string
 	// PullScopePath optionally broadens the signed receiver URL from the
 	// exact PullPath to one resource subtree. Video HLS needs this because a
 	// receiver first opens master.m3u8 and then follows variant/segment URLs.
@@ -56,6 +57,26 @@ type TrackInfo struct {
 	Album         string
 	Duration      int // seconds
 	StartAt       int // seconds
+	StartPaused   bool
+	// Video selections are session state, not initiating-browser state. They
+	// are mirrored through SessionSnapshot so any of the user's clients can
+	// present and change the same remote controls.
+	AudioTrack int
+	Quality    string
+	TextTrack  *TextTrackInfo
+}
+
+// TextTrackInfo describes one out-of-band subtitle selected for a Cast LOAD.
+// PullPath is signed alongside the video's HLS/direct subtree; Manager.Play
+// fills URL with that same short-lived token before the transport starts.
+type TextTrackInfo struct {
+	SelectionIndex int
+	StreamIndex    int
+	TrackID        int
+	Name           string
+	Language       string
+	PullPath       string
+	URL            string
 }
 
 // NativeSeekTransport marks URL-pull transports that keep a receiver session

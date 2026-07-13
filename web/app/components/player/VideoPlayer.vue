@@ -285,6 +285,7 @@ async function pickVideoCastDevice(deviceID: string) {
       entityId: props.entityId || props.mediaItemId || 0,
       title: props.title,
       audioTrack: activeAudioIdx.value,
+      subtitleTrack: activeSubIdx.value >= 0 ? activeSubIdx.value : undefined,
       quality: activeQuality.value,
       fallbackVolume: localState.volume * 100,
       startSeconds: position,
@@ -313,9 +314,11 @@ async function restartVideoCast() {
       entityId: props.entityId || props.mediaItemId || 0,
       title: props.title,
       audioTrack: activeAudioIdx.value,
+      subtitleTrack: activeSubIdx.value >= 0 ? activeSubIdx.value : undefined,
       quality: activeQuality.value,
       fallbackVolume: session.volume,
       startSeconds: position,
+      startPaused: session.state === 'paused',
     })
     videoCastSessionID.value = snap.id
     lastRemotePosition.value = snap.position_sec
@@ -694,9 +697,21 @@ function destroyVTT() {
 function selectSub(idx: number) {
   activeSubIdx.value = idx
   showSubMenu.value = false
+  if (videoCastActive.value) {
+    void restartVideoCast()
+    return
+  }
   awaitVideoReady().then(() => initSubtitles())
 }
-function disableSubs() { activeSubIdx.value = -1; showSubMenu.value = false; destroySubtitles() }
+function disableSubs() {
+  activeSubIdx.value = -1
+  showSubMenu.value = false
+  if (videoCastActive.value) {
+    void restartVideoCast()
+    return
+  }
+  destroySubtitles()
+}
 function selectAudio(idx: number) {
   if (idx === activeAudioIdx.value) { showAudioMenu.value = false; return }
   const currentTime = state.currentTime
@@ -942,6 +957,9 @@ onMounted(() => {
       && p.entity_id === (props.entityId || props.mediaItemId || 0)
     if (!sameSession && !sameEntity) return
     lastRemotePosition.value = p.position_sec
+    if (p.audio_track != null) activeAudioIdx.value = p.audio_track
+    activeSubIdx.value = p.subtitle_track ?? -1
+    if (p.quality) activeQuality.value = p.quality
     if (p.state === 'stopped') {
       if (deliberatelyStoppedCastSessions.delete(p.session_id)) return
       videoCastPending.value = false
@@ -1300,7 +1318,7 @@ onUnmounted(() => {
 
             <!-- Subs -->
             <AppMenu
-              v-if="subtitleTracks.length && !videoCastActive"
+              v-if="subtitleTracks.length"
               v-model="showSubMenu"
               :width="260"
               align="end"
@@ -1326,11 +1344,13 @@ onUnmounted(() => {
                 :key="s.index"
                 class="surface-item vp-item"
                 :class="{ active: i === activeSubIdx }"
+                :disabled="videoCastActive && s.delivery !== 'external'"
                 @select="selectSub(i)"
               >
                 <Icon v-if="i === activeSubIdx" name="check" :size="14" class="vp-item-check" />
                 <span>{{ s.title || s.language?.toUpperCase() || `Track ${s.index}` }}</span>
                 <span v-if="s.codec === 'ass' || s.codec === 'ssa'" class="sub-tag">ASS</span>
+                <span v-else-if="videoCastActive && s.delivery !== 'external'" class="sub-tag">Burn-in</span>
               </DropdownMenuItem>
             </AppMenu>
 

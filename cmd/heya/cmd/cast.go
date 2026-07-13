@@ -31,7 +31,9 @@ var castVideoEntityType string
 var castVideoEntityID int64
 var castVideoTitle string
 var castVideoAudioTrack int
+var castVideoSubtitleTrack int
 var castVideoQuality string
+var castVideoPaused bool
 
 var castCmd = &cobra.Command{
 	Use:   "cast",
@@ -52,10 +54,13 @@ var castVideoCmd = &cobra.Command{
 			"entity_type": castVideoEntityType,
 			"title":       castVideoTitle, "audio_track": castVideoAudioTrack,
 			"quality": castVideoQuality, "volume": castVolumeFlag,
-			"start_seconds": castStartFlag,
+			"start_seconds": castStartFlag, "start_paused": castVideoPaused,
 		}
 		if castVideoEntityID > 0 {
 			body["entity_id"] = castVideoEntityID
+		}
+		if castVideoSubtitleTrack >= 0 {
+			body["subtitle_track"] = castVideoSubtitleTrack
 		}
 		var snap castSessionJSON
 		if err := castAPI(cmd.Context(), http.MethodPost, "/api/cast/sessions", body, &snap); err != nil {
@@ -215,7 +220,9 @@ func init() {
 	castVideoCmd.Flags().Int64Var(&castVideoEntityID, "entity-id", 0, "Movie media-item or episode ID (defaults from the file)")
 	castVideoCmd.Flags().StringVar(&castVideoTitle, "title", "", "Receiver display title")
 	castVideoCmd.Flags().IntVar(&castVideoAudioTrack, "audio", 0, "Zero-based audio stream")
+	castVideoCmd.Flags().IntVar(&castVideoSubtitleTrack, "subtitle", -1, "Zero-based text subtitle stream (-1 disables subtitles)")
 	castVideoCmd.Flags().StringVar(&castVideoQuality, "quality", "auto", "HLS quality profile")
+	castVideoCmd.Flags().BoolVar(&castVideoPaused, "paused", false, "Load the video paused")
 	castCmd.PersistentFlags().StringVar(&castToFlag, "to", "", "Device name (substring) or device ID")
 	castCmd.AddCommand(castDevicesCmd, castPlayCmd, castVideoCmd, castStatusCmd, castSeekCmd, castVolCmd,
 		castControlCmd("pause", "Pause playback"),

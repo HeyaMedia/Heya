@@ -31,6 +31,13 @@ type subtitleTrack struct {
 }
 
 func handleGetSubtitle(app *service.App) http.HandlerFunc {
+	return handleGetSubtitleAs(app, false)
+}
+
+// handleGetSubtitleAs optionally normalizes every external text subtitle to
+// WebVTT. Browsers keep ASS/SSA for AkariSub rendering; Google's Default
+// Media Receiver accepts the same track reliably when Heya exposes WebVTT.
+func handleGetSubtitleAs(app *service.App, forceWebVTT bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		index, err := strconv.Atoi(r.PathValue("index"))
 		if err != nil {
@@ -76,7 +83,7 @@ func handleGetSubtitle(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		isASS := subCodec == "ass" || subCodec == "ssa"
+		isASS := !forceWebVTT && (subCodec == "ass" || subCodec == "ssa")
 		ext := ".vtt"
 		outputCodec := "webvtt"
 		contentType := "text/vtt; charset=utf-8"

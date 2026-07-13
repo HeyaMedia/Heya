@@ -54,29 +54,33 @@ func newSessionID() string {
 
 // snapshot is the API/WS view of a session.
 type SessionSnapshot struct {
-	ID          string       `json:"id"`
-	DeviceID    string       `json:"device_id"`
-	DeviceName  string       `json:"device_name"`
-	UserID      int64        `json:"user_id"`
-	State       SessionState `json:"state"`
-	MediaKind   string       `json:"media_kind,omitempty"`
-	TrackID     int64        `json:"track_id,omitempty"`
-	FileID      string       `json:"file_id,omitempty"`
-	EntityType  string       `json:"entity_type,omitempty"`
-	EntityID    int64        `json:"entity_id,omitempty"`
-	Title       string       `json:"title,omitempty"`
-	Artist      string       `json:"artist,omitempty"`
-	Album       string       `json:"album,omitempty"`
-	DurationSec int          `json:"duration_sec,omitempty"`
-	PositionSec float64      `json:"position_sec"`
-	Volume      int          `json:"volume"`
-	UpdatedAt   time.Time    `json:"updated_at"`
+	ID            string       `json:"id"`
+	DeviceID      string       `json:"device_id"`
+	DeviceName    string       `json:"device_name"`
+	UserID        int64        `json:"user_id"`
+	State         SessionState `json:"state"`
+	MediaKind     string       `json:"media_kind,omitempty"`
+	TrackID       int64        `json:"track_id,omitempty"`
+	FileID        string       `json:"file_id,omitempty"`
+	MediaItemID   int64        `json:"media_item_id,omitempty"`
+	EntityType    string       `json:"entity_type,omitempty"`
+	EntityID      int64        `json:"entity_id,omitempty"`
+	Title         string       `json:"title,omitempty"`
+	Artist        string       `json:"artist,omitempty"`
+	Album         string       `json:"album,omitempty"`
+	AudioTrack    int          `json:"audio_track,omitempty"`
+	SubtitleTrack *int         `json:"subtitle_track,omitempty"`
+	Quality       string       `json:"quality,omitempty"`
+	DurationSec   int          `json:"duration_sec,omitempty"`
+	PositionSec   float64      `json:"position_sec"`
+	Volume        int          `json:"volume"`
+	UpdatedAt     time.Time    `json:"updated_at"`
 }
 
 func (s *Session) Snapshot() SessionSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return SessionSnapshot{
+	snapshot := SessionSnapshot{
 		ID:          s.ID,
 		DeviceID:    s.Device.ID,
 		DeviceName:  s.Device.Name,
@@ -85,16 +89,24 @@ func (s *Session) Snapshot() SessionSnapshot {
 		MediaKind:   s.track.MediaKind,
 		TrackID:     s.track.TrackID,
 		FileID:      s.track.FileID,
+		MediaItemID: s.track.MediaItemID,
 		EntityType:  s.track.EntityType,
 		EntityID:    s.track.EntityID,
 		Title:       s.track.Title,
 		Artist:      s.track.Artist,
 		Album:       s.track.Album,
+		AudioTrack:  s.track.AudioTrack,
+		Quality:     s.track.Quality,
 		DurationSec: s.track.Duration,
 		PositionSec: s.positionLocked().Seconds(),
 		Volume:      s.volume,
 		UpdatedAt:   time.Now(),
 	}
+	if s.track.TextTrack != nil {
+		idx := s.track.TextTrack.SelectionIndex
+		snapshot.SubtitleTrack = &idx
+	}
+	return snapshot
 }
 
 func (s *Session) positionLocked() time.Duration {

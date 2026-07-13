@@ -2447,8 +2447,18 @@
             "maxLength": 24,
             "type": "string"
           },
+          "start_paused": {
+            "description": "Load video paused; used when changing remote track options while paused",
+            "type": "boolean"
+          },
           "start_seconds": {
             "description": "Start position in the media item — lets a client hand off mid-playback",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "subtitle_track": {
+            "description": "Zero-based text-subtitle selection for video; omit for subtitles off",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
@@ -15691,6 +15701,10 @@
           "artist": {
             "type": "string"
           },
+          "audio_track": {
+            "format": "int64",
+            "type": "integer"
+          },
           "device_id": {
             "type": "string"
           },
@@ -15714,6 +15728,10 @@
           "id": {
             "type": "string"
           },
+          "media_item_id": {
+            "format": "int64",
+            "type": "integer"
+          },
           "media_kind": {
             "type": "string"
           },
@@ -15721,8 +15739,15 @@
             "format": "double",
             "type": "number"
           },
+          "quality": {
+            "type": "string"
+          },
           "state": {
             "type": "string"
+          },
+          "subtitle_track": {
+            "format": "int64",
+            "type": "integer"
           },
           "title": {
             "type": "string"
@@ -16809,6 +16834,9 @@
           "codec": {
             "type": "string"
           },
+          "delivery": {
+            "type": "string"
+          },
           "index": {
             "format": "int64",
             "type": "integer"
@@ -16835,7 +16863,8 @@
           "language",
           "is_default",
           "is_forced",
-          "is_hearing_impaired"
+          "is_hearing_impaired",
+          "delivery"
         ],
         "type": "object"
       },
@@ -21990,6 +22019,63 @@
           }
         },
         "summary": "Scoped video HLS segment for a cast receiver",
+        "tags": [
+          "Cast"
+        ]
+      }
+    },
+    "/api/cast/media/video/{file_id}/subtitles/{index}": {
+      "get": {
+        "operationId": "cast-stream-video-subtitle",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "cast_token",
+            "schema": {
+              "maxLength": 2048,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "Binary response — content type set per endpoint"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Scoped WebVTT subtitle for a cast receiver",
         "tags": [
           "Cast"
         ]

@@ -118,6 +118,27 @@ func (m *Manager) mediaURLFor(dev Device, userID int64, track TrackInfo) (string
 	return u.String(), nil
 }
 
+// mediaDependencyURL gives an HLS/text-track dependency the same receiver
+// origin and scoped token as the primary media URL. Other primary query
+// options (sid/audio/quality) are intentionally not copied to subtitles.
+func mediaDependencyURL(primaryURL, dependencyPath string) (string, error) {
+	primary, err := url.Parse(primaryURL)
+	if err != nil || primary.Scheme == "" || primary.Host == "" {
+		return "", fmt.Errorf("cast: invalid primary media URL")
+	}
+	token := primary.Query().Get("cast_token")
+	if token == "" || !strings.HasPrefix(dependencyPath, "/") {
+		return "", fmt.Errorf("cast: invalid media dependency")
+	}
+	primary.Path = dependencyPath
+	primary.RawPath = ""
+	query := url.Values{}
+	query.Set("cast_token", token)
+	primary.RawQuery = query.Encode()
+	primary.Fragment = ""
+	return primary.String(), nil
+}
+
 func (m *Manager) issueMediaToken(userID int64, path string, durationSec int, subtree bool) (string, error) {
 	ttl := time.Duration(durationSec)*time.Second + mediaTokenGrace
 	if ttl < mediaTokenGrace {

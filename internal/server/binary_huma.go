@@ -111,6 +111,8 @@ func registerBinaryRoutes(api huma.API, app *service.App) {
 		wrapStreamAs[castVideoStreamInput](handleCastVideoHLS(app, handleHLSPlaylist(app))))
 	huma.Register(api, binaryOp(http.MethodGet, "/api/cast/media/video/{file_id}/hls/{segment}", "cast-stream-video-hls-segment", "Scoped video HLS segment for a cast receiver", "Cast"),
 		wrapStreamAs[castVideoSegmentInput](handleCastVideoHLS(app, handleHLSSegment(app))))
+	huma.Register(api, binaryOp(http.MethodGet, "/api/cast/media/video/{file_id}/subtitles/{index}", "cast-stream-video-subtitle", "Scoped WebVTT subtitle for a cast receiver", "Cast"),
+		wrapStreamAs[castVideoSubtitleInput](handleCastVideoSubtitle(app)))
 
 	huma.Register(api, securedBinary(http.MethodGet, "/api/music/tracks/{id}/stream", "stream-track", "Best-quality playable audio for a track", "Music"),
 		wrapStreamAs[musicTrackStreamInput](handleStreamTrack(app)))
@@ -266,6 +268,12 @@ type castVideoStreamInput struct {
 type castVideoSegmentInput struct {
 	FileID    string `path:"file_id" maxLength:"64"`
 	Segment   string `path:"segment" maxLength:"128"`
+	CastToken string `query:"cast_token" required:"false" maxLength:"2048"`
+}
+
+type castVideoSubtitleInput struct {
+	FileID    string `path:"file_id" maxLength:"64"`
+	Index     int    `path:"index" minimum:"0"`
 	CastToken string `query:"cast_token" required:"false" maxLength:"2048"`
 }
 

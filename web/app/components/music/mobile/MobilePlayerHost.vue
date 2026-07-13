@@ -6,17 +6,19 @@
   render BottomNav, so both need the bar; /watch and /login use layout:false
   / auth and get neither).
 
-  Renders nothing on desktop/tablet or when no track is loaded. The
+  Renders nothing on desktop/tablet or when no local/remote media is loaded. The
   `.global-miniplayer-dock` element only exists while the bar is visible —
   heya.css keys `.app:has(.global-miniplayer-dock)` off that to pad
   .app-main, so layouts need no has-miniplayer class bookkeeping.
 -->
 <template>
-  <template v-if="isPhone && currentTrack">
+  <template v-if="isPhone && (currentTrack || videoCastSession)">
     <div class="global-miniplayer-dock">
-      <MiniPlayer @expand="npOpen = true" />
+      <CastVideoMiniPlayer v-if="videoCastSession" @expand="npOpen = true" />
+      <MiniPlayer v-else @expand="npOpen = true" />
     </div>
-    <NowPlayingSheet v-model:open="npOpen" />
+    <CastVideoRemoteSheet v-if="videoCastSession" v-model:open="npOpen" />
+    <NowPlayingSheet v-else v-model:open="npOpen" />
   </template>
 </template>
 
@@ -24,6 +26,7 @@
 const { isPhone } = useViewport()
 const { currentTrack, muted, volume, toggleMute, setVolume } = usePlayerBindings()
 const cast = useCastStore()
+const videoCastSession = computed(() => cast.session?.media_kind === 'video' ? cast.session : null)
 
 const npOpen = ref(false)
 

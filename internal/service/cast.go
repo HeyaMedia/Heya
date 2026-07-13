@@ -451,7 +451,7 @@ func (a *App) CastPlayTrack(ctx context.Context, userID int64, deviceID string, 
 // conservative MP4/H.264/AAC source is range-served directly; everything else
 // uses Heya's existing HLS pipeline with a safe H.264/AAC fallback. The
 // receiver URL is scoped to this file's cast-media subtree by Manager.Play.
-func (a *App) CastPlayVideo(ctx context.Context, userID int64, deviceID, fileRef, entityType string, entityID int64, title string, audioTrack int, quality string, volume, startSeconds int) (cast.SessionSnapshot, error) {
+func (a *App) CastPlayVideo(ctx context.Context, userID int64, deviceID, fileRef, entityType string, entityID int64, title string, audioTrack int, subtitleTrack *int, quality string, volume, startSeconds int, startPaused bool) (cast.SessionSnapshot, error) {
 	if a.castMgr == nil {
 		return cast.SessionSnapshot{}, fmt.Errorf("casting unavailable")
 	}
@@ -491,6 +491,29 @@ func (a *App) CastPlayVideo(ctx context.Context, userID int64, deviceID, fileRef
 	if len(file.MediaInfo) > 0 {
 		_ = json.Unmarshal(file.MediaInfo, &mediaInfo)
 	}
+	audioStreams := make([]worker.StreamInfo, 0)
+	subtitleStreams := make([]worker.StreamInfo, 0)
+	for _, stream := range mediaInfo.Streams {
+		switch stream.CodecType {
+		case "audio":
+			audioStreams = append(audioStreams, stream)
+		case "subtitle":
+			subtitleStreams = append(subtitleStreams, stream)
+		}
+	}
+	if audioTrack > 0 && audioTrack >= len(audioStreams) {
+		return cast.SessionSnapshot{}, fmt.Errorf("cast: video audio track %d does not exist", audioTrack)
+	}
+	var selectedSubtitle *worker.StreamInfo
+	if subtitleTrack != nil {
+		if *subtitleTrack < 0 || *subtitleTrack >= len(subtitleStreams) {
+			return cast.SessionSnapshot{}, fmt.Errorf("cast: video subtitle track %d does not exist", *subtitleTrack)
+		}
+		selectedSubtitle = &subtitleStreams[*subtitleTrack]
+		if transcoder.SubtitleDeliveryFor(selectedSubtitle.CodecName) != transcoder.SubDeliveryExternal {
+			return cast.SessionSnapshot{}, fmt.Errorf("cast: subtitle track %d requires burn-in and cannot be sent to the Default Media Receiver", *subtitleTrack)
+		}
+	}
 	if entityID <= 0 && file.MediaItemID.Valid {
 		entityID = file.MediaItemID.Int64
 	}
@@ -507,16 +530,40 @@ func (a *App) CastPlayVideo(ctx context.Context, userID int64, deviceID, fileRef
 	}
 
 	info := cast.TrackInfo{
-		FileID:     file.PublicID.String(),
-		EntityType: entityType,
-		EntityID:   entityID,
-		Path:       file.Path,
-		MediaKind:  "video",
-		Title:      strings.TrimSpace(title),
-		Duration:   int(mediaInfo.Duration),
+		FileID:      file.PublicID.String(),
+		MediaItemID: file.MediaItemID.Int64,
+		EntityType:  entityType,
+		EntityID:    entityID,
+		Path:        file.Path,
+		MediaKind:   "video",
+		Title:       strings.TrimSpace(title),
+		Duration:    int(mediaInfo.Duration),
+		AudioTrack:  audioTrack,
+		Quality:     "auto",
+		StartPaused: startPaused,
 	}
 	root := fmt.Sprintf("/api/cast/media/video/%s", info.FileID)
-	if castVideoCanDirect(mediaInfo, file.Path, audioTrack) {
+	if quality != "" && quality != "auto" {
+		if _, exists := transcoder.GetProfile(quality); exists {
+			info.Quality = quality
+		}
+	}
+	if selectedSubtitle != nil {
+		name := strings.TrimSpace(selectedSubtitle.Tags["title"])
+		if name == "" {
+			name = strings.ToUpper(strings.TrimSpace(selectedSubtitle.Tags["language"]))
+		}
+		info.TextTrack = &cast.TextTrackInfo{
+			SelectionIndex: *subtitleTrack,
+			StreamIndex:    selectedSubtitle.Index,
+			TrackID:        1,
+			Name:           name,
+			Language:       strings.TrimSpace(selectedSubtitle.Tags["language"]),
+			PullPath:       fmt.Sprintf("%s/subtitles/%d", root, selectedSubtitle.Index),
+		}
+		info.PullScopePath = root
+	}
+	if info.Quality == "auto" && castVideoCanDirect(mediaInfo, file.Path, audioTrack) {
 		info.PullPath = root
 		info.ContentType = "video/mp4"
 	} else {
@@ -528,10 +575,8 @@ func (a *App) CastPlayVideo(ctx context.Context, userID int64, deviceID, fileRef
 		if audioTrack > 0 {
 			q.Set("audio", fmt.Sprint(audioTrack))
 		}
-		if quality != "" && quality != "auto" {
-			if _, exists := transcoder.GetProfile(quality); exists {
-				q.Set("quality", quality)
-			}
+		if info.Quality != "auto" {
+			q.Set("quality", info.Quality)
 		}
 		info.PullPath = root + "/hls/master.m3u8"
 		info.PullScopePath = root

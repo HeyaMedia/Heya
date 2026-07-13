@@ -86,6 +86,7 @@ type subStream struct {
 	IsDefault         bool   `json:"is_default"`
 	IsForced          bool   `json:"is_forced"`
 	IsHearingImpaired bool   `json:"is_hearing_impaired"`
+	Delivery          string `json:"delivery"`
 }
 
 func parseClientCaps(r *http.Request) transcoder.ClientCapabilities {
@@ -237,6 +238,7 @@ func buildStreamInfoResponse(info worker.MediaInfo, caps transcoder.ClientCapabi
 				IsDefault:         isDefault,
 				IsForced:          isForced,
 				IsHearingImpaired: isHI,
+				Delivery:          subtitleDeliveryString(transcoder.SubtitleDeliveryFor(s.CodecName)),
 			})
 		}
 	}

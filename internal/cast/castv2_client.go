@@ -245,9 +245,31 @@ func (c *castV2Client) load(ctx context.Context, track TrackInfo) (castV2MediaSt
 			"albumName":    track.Album,
 		},
 	}
-	if err := c.sendMedia(map[string]any{
-		"type": "LOAD", "autoplay": true, "currentTime": float64(track.StartAt), "media": media,
-	}, true); err != nil {
+	load := map[string]any{
+		"type": "LOAD", "autoplay": !track.StartPaused, "currentTime": float64(track.StartAt), "media": media,
+	}
+	if track.TextTrack != nil {
+		text := track.TextTrack
+		language := text.Language
+		if language == "" {
+			language = "und"
+		}
+		name := text.Name
+		if name == "" {
+			name = "Subtitles"
+		}
+		media["tracks"] = []map[string]any{{
+			"trackId":          text.TrackID,
+			"type":             "TEXT",
+			"trackContentId":   text.URL,
+			"trackContentType": "text/vtt",
+			"subtype":          "SUBTITLES",
+			"name":             name,
+			"language":         language,
+		}}
+		load["activeTrackIds"] = []int{text.TrackID}
+	}
+	if err := c.sendMedia(load, true); err != nil {
 		return castV2MediaStatus{}, err
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, castV2ResponseTimeout)

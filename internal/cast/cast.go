@@ -262,6 +262,15 @@ func (m *Manager) Play(deviceID string, userID int64, track TrackInfo, volume in
 			return nil, err
 		}
 		track.URL = mediaURL
+		if track.TextTrack != nil {
+			textURL, err := mediaDependencyURL(mediaURL, track.TextTrack.PullPath)
+			if err != nil {
+				return nil, err
+			}
+			textTrack := *track.TextTrack
+			textTrack.URL = textURL
+			track.TextTrack = &textTrack
+		}
 	}
 
 	endpointKey := receiverSessionKey(dev)
@@ -361,21 +370,25 @@ func (m *Manager) emitSession(s *Session) {
 	}
 	snap := s.Snapshot()
 	m.hub.EmitToUser(snap.UserID, eventhub.EventCastState, eventhub.CastStatePayload{
-		SessionID:   snap.ID,
-		DeviceID:    snap.DeviceID,
-		DeviceName:  snap.DeviceName,
-		UserID:      snap.UserID,
-		State:       string(snap.State),
-		MediaKind:   snap.MediaKind,
-		TrackID:     snap.TrackID,
-		FileID:      snap.FileID,
-		EntityType:  snap.EntityType,
-		EntityID:    snap.EntityID,
-		Title:       snap.Title,
-		Artist:      snap.Artist,
-		PositionSec: snap.PositionSec,
-		DurationSec: snap.DurationSec,
-		Volume:      snap.Volume,
-		At:          time.Now(),
+		SessionID:     snap.ID,
+		DeviceID:      snap.DeviceID,
+		DeviceName:    snap.DeviceName,
+		UserID:        snap.UserID,
+		State:         string(snap.State),
+		MediaKind:     snap.MediaKind,
+		TrackID:       snap.TrackID,
+		FileID:        snap.FileID,
+		MediaItemID:   snap.MediaItemID,
+		EntityType:    snap.EntityType,
+		EntityID:      snap.EntityID,
+		Title:         snap.Title,
+		Artist:        snap.Artist,
+		AudioTrack:    snap.AudioTrack,
+		SubtitleTrack: snap.SubtitleTrack,
+		Quality:       snap.Quality,
+		PositionSec:   snap.PositionSec,
+		DurationSec:   snap.DurationSec,
+		Volume:        snap.Volume,
+		At:            time.Now(),
 	})
 }

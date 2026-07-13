@@ -65,12 +65,15 @@ func TestChromecastTransportAgainstFakeReceiver(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if err := transport.Start(ctx, TrackInfo{
-		URL:         "http://192.168.20.10:8080/api/cast/media/music/42?cast_token=test",
-		ContentType: "audio/flac",
-		MediaKind:   "audio",
+		URL:         "http://192.168.20.10:8080/api/cast/media/video/file-a?cast_token=test",
+		ContentType: "video/mp4",
+		MediaKind:   "video",
 		Title:       "Protocol test",
-		Artist:      "Heya",
 		Duration:    180,
+		TextTrack: &TextTrackInfo{
+			TrackID: 1, Name: "English", Language: "en",
+			URL: "http://192.168.20.10:8080/api/cast/media/video/file-a/subtitles/7?cast_token=test",
+		},
 	}, 23); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -94,6 +97,23 @@ func TestChromecastTransportAgainstFakeReceiver(t *testing.T) {
 		t.Fatalf("stop: %v", err)
 	}
 	receiver.waitFor(t, "LAUNCH", "LOAD", "PAUSE", "PLAY", "SEEK", "SET_VOLUME", "STOP", "PONG")
+	load := receiver.payloadFor(t, "LOAD")
+	active, ok := load["activeTrackIds"].([]any)
+	if !ok || len(active) != 1 || active[0] != float64(1) {
+		t.Fatalf("LOAD activeTrackIds = %#v", load["activeTrackIds"])
+	}
+	media, ok := load["media"].(map[string]any)
+	if !ok {
+		t.Fatalf("LOAD media = %#v", load["media"])
+	}
+	tracks, ok := media["tracks"].([]any)
+	if !ok || len(tracks) != 1 {
+		t.Fatalf("LOAD tracks = %#v", media["tracks"])
+	}
+	text, ok := tracks[0].(map[string]any)
+	if !ok || text["type"] != "TEXT" || text["trackContentType"] != "text/vtt" || text["language"] != "en" {
+		t.Fatalf("LOAD text track = %#v", tracks[0])
+	}
 }
 
 func waitTransportEvent(t *testing.T, events <-chan TransportEvent, want TransportEventKind) {
@@ -124,6 +144,7 @@ type fakeCastV2Receiver struct {
 
 	mu       sync.Mutex
 	commands []string
+	payloads []map[string]any
 	done     chan struct{}
 }
 
@@ -168,6 +189,7 @@ func (r *fakeCastV2Receiver) serve() {
 		kind, _ := payload["type"].(string)
 		r.mu.Lock()
 		r.commands = append(r.commands, kind)
+		r.payloads = append(r.payloads, payload)
 		r.mu.Unlock()
 		switch kind {
 		case "GET_STATUS":
@@ -199,6 +221,19 @@ func (r *fakeCastV2Receiver) serve() {
 			}
 		}
 	}
+}
+
+func (r *fakeCastV2Receiver) payloadFor(t *testing.T, kind string) map[string]any {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, command := range r.commands {
+		if command == kind {
+			return r.payloads[i]
+		}
+	}
+	t.Fatalf("receiver never saw %s", kind)
+	return nil
 }
 
 func (r *fakeCastV2Receiver) sendMediaStatus(conn net.Conn, state, idleReason string) {

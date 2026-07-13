@@ -68,6 +68,7 @@ func TestScopedMediaURLAllowsOnlyOneHLSSubtree(t *testing.T) {
 		track.PullPath,
 		"/api/cast/media/video/file-a/hls/index.m3u8",
 		"/api/cast/media/video/file-a/hls/seg_0001.ts",
+		"/api/cast/media/video/file-a/subtitles/7",
 	} {
 		if userID, err := m.ValidateMediaToken(token, path); err != nil || userID != 7 {
 			t.Fatalf("validate %q = user %d, err %v", path, userID, err)
@@ -81,6 +82,24 @@ func TestScopedMediaURLAllowsOnlyOneHLSSubtree(t *testing.T) {
 		if _, err := m.ValidateMediaToken(token, path); err == nil {
 			t.Fatalf("subtree token was accepted for %q", path)
 		}
+	}
+}
+
+func TestMediaDependencyURLReusesOnlyScopedToken(t *testing.T) {
+	primary := "http://192.168.20.10:8080/api/cast/media/video/file-a/hls/master.m3u8?audio=2&cast_token=signed-token&quality=1080p&sid=cast-1"
+	got, err := mediaDependencyURL(primary, "/api/cast/media/video/file-a/subtitles/7")
+	if err != nil {
+		t.Fatalf("dependency URL: %v", err)
+	}
+	u, err := url.Parse(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Path != "/api/cast/media/video/file-a/subtitles/7" || u.Query().Get("cast_token") != "signed-token" {
+		t.Fatalf("dependency URL = %s", got)
+	}
+	if u.Query().Has("audio") || u.Query().Has("quality") || u.Query().Has("sid") {
+		t.Fatalf("primary playback query leaked into dependency URL: %s", got)
 	}
 }
 

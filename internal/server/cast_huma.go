@@ -76,16 +76,18 @@ func registerCastRoutes(api huma.API, app *service.App) {
 	huma.Register(api, secured(op(http.MethodPost, "/api/cast/sessions", "cast-play", "Start (or retarget) a cast session", "Cast")),
 		func(ctx context.Context, in *struct {
 			Body struct {
-				DeviceID     string `json:"device_id" minLength:"1" doc:"Target device (from /api/cast/devices)"`
-				TrackID      int64  `json:"track_id,omitempty" minimum:"1" doc:"Music track to play; mutually exclusive with file_id"`
-				FileID       string `json:"file_id,omitempty" maxLength:"64" doc:"Video library-file reference; mutually exclusive with track_id"`
-				EntityType   string `json:"entity_type,omitempty" enum:"movie,episode" doc:"Watch-progress entity type for video"`
-				EntityID     int64  `json:"entity_id,omitempty" minimum:"1" doc:"Movie media-item ID or TV episode ID for video progress"`
-				Title        string `json:"title,omitempty" maxLength:"500" doc:"Display title for video playback"`
-				AudioTrack   int    `json:"audio_track,omitempty" minimum:"0" doc:"Zero-based audio-stream selection for video"`
-				Quality      string `json:"quality,omitempty" maxLength:"24" doc:"Optional HLS quality profile for video; auto uses the source-compatible plan"`
-				Volume       int    `json:"volume" minimum:"0" maximum:"100" default:"30" doc:"Initial device volume (ignored when retargeting an existing session)"`
-				StartSeconds int    `json:"start_seconds,omitempty" minimum:"0" doc:"Start position in the media item — lets a client hand off mid-playback"`
+				DeviceID      string `json:"device_id" minLength:"1" doc:"Target device (from /api/cast/devices)"`
+				TrackID       int64  `json:"track_id,omitempty" minimum:"1" doc:"Music track to play; mutually exclusive with file_id"`
+				FileID        string `json:"file_id,omitempty" maxLength:"64" doc:"Video library-file reference; mutually exclusive with track_id"`
+				EntityType    string `json:"entity_type,omitempty" enum:"movie,episode" doc:"Watch-progress entity type for video"`
+				EntityID      int64  `json:"entity_id,omitempty" minimum:"1" doc:"Movie media-item ID or TV episode ID for video progress"`
+				Title         string `json:"title,omitempty" maxLength:"500" doc:"Display title for video playback"`
+				AudioTrack    int    `json:"audio_track,omitempty" minimum:"0" doc:"Zero-based audio-stream selection for video"`
+				SubtitleTrack *int   `json:"subtitle_track,omitempty" minimum:"0" doc:"Zero-based text-subtitle selection for video; omit for subtitles off"`
+				Quality       string `json:"quality,omitempty" maxLength:"24" doc:"Optional HLS quality profile for video; auto uses the source-compatible plan"`
+				Volume        int    `json:"volume" minimum:"0" maximum:"100" default:"30" doc:"Initial device volume (ignored when retargeting an existing session)"`
+				StartSeconds  int    `json:"start_seconds,omitempty" minimum:"0" doc:"Start position in the media item — lets a client hand off mid-playback"`
+				StartPaused   bool   `json:"start_paused,omitempty" doc:"Load video paused; used when changing remote track options while paused"`
 			}
 		}) (*JSONOutput[cast.SessionSnapshot], error) {
 			var snap cast.SessionSnapshot
@@ -94,7 +96,7 @@ func registerCastRoutes(api huma.API, app *service.App) {
 			case in.Body.TrackID > 0 && in.Body.FileID == "":
 				snap, err = app.CastPlayTrack(ctx, userFrom(ctx).ID, in.Body.DeviceID, in.Body.TrackID, in.Body.Volume, in.Body.StartSeconds)
 			case in.Body.FileID != "" && in.Body.TrackID == 0:
-				snap, err = app.CastPlayVideo(ctx, userFrom(ctx).ID, in.Body.DeviceID, in.Body.FileID, in.Body.EntityType, in.Body.EntityID, in.Body.Title, in.Body.AudioTrack, in.Body.Quality, in.Body.Volume, in.Body.StartSeconds)
+				snap, err = app.CastPlayVideo(ctx, userFrom(ctx).ID, in.Body.DeviceID, in.Body.FileID, in.Body.EntityType, in.Body.EntityID, in.Body.Title, in.Body.AudioTrack, in.Body.SubtitleTrack, in.Body.Quality, in.Body.Volume, in.Body.StartSeconds, in.Body.StartPaused)
 			default:
 				return nil, huma.Error422UnprocessableEntity("provide exactly one of track_id or file_id")
 			}

@@ -288,14 +288,18 @@ func TestVideoSessionSnapshotAndProgressSink(t *testing.T) {
 		state:  StatePlaying,
 		track: TrackInfo{
 			FileID: "file-public-id", MediaKind: "video",
-			EntityType: "episode", EntityID: 77,
-			Title: "Episode", Duration: 120,
+			MediaItemID: 44, EntityType: "episode", EntityID: 77,
+			Title: "Episode", Duration: 120, AudioTrack: 1, Quality: "1080p",
+			TextTrack: &TextTrackInfo{SelectionIndex: 2, StreamIndex: 7},
 		},
 		resumedAt: time.Now().Add(-3 * time.Second),
 	}
 	snap := s.Snapshot()
 	if snap.MediaKind != "video" || snap.FileID != "file-public-id" || snap.EntityType != "episode" || snap.EntityID != 77 {
 		t.Fatalf("video snapshot = %#v", snap)
+	}
+	if snap.MediaItemID != 44 || snap.AudioTrack != 1 || snap.SubtitleTrack == nil || *snap.SubtitleTrack != 2 || snap.Quality != "1080p" {
+		t.Fatalf("video control state = %#v", snap)
 	}
 	s.recordPlayback(false)
 	if gotItem.EntityID != 77 || gotPosition < 2 || gotPosition > 4 || gotCompleted {

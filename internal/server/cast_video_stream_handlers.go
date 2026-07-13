@@ -52,3 +52,17 @@ func handleCastVideoHLS(app *service.App, normal http.HandlerFunc) http.HandlerF
 		normal(w, r)
 	}
 }
+
+func handleCastVideoSubtitle(app *service.App) http.HandlerFunc {
+	normal := handleGetSubtitleAs(app, true)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !validateCastVideoRequest(w, r, app) {
+			return
+		}
+		q := r.URL.Query()
+		q.Del("cast_token")
+		r.URL.RawQuery = q.Encode()
+		w.Header().Set("Cache-Control", "private, no-store")
+		normal(w, r)
+	}
+}

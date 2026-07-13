@@ -1,4 +1,5 @@
 import { acceptHMRUpdate, defineStore } from 'pinia'
+import type { StreamInfoResponse } from '~~/shared/types'
 
 // Server-side casting (docs/cast-plan.md Phase 2). The SERVER is the player:
 // it pushes or exposes scoped media to the receiver and owns the session; this store is the
@@ -39,11 +40,15 @@ export interface CastSession {
   media_kind?: 'audio' | 'video'
   track_id?: number
   file_id?: string
+  media_item_id?: number
   entity_type?: 'movie' | 'episode'
   entity_id?: number
   title?: string
   artist?: string
   album?: string
+  audio_track?: number
+  subtitle_track?: number
+  quality?: string
   duration_sec?: number
   position_sec: number
   volume: number
@@ -60,10 +65,14 @@ export interface CastStateEvent {
   media_kind?: 'audio' | 'video'
   track_id?: number
   file_id?: string
+  media_item_id?: number
   entity_type?: 'movie' | 'episode'
   entity_id?: number
   title?: string
   artist?: string
+  audio_track?: number
+  subtitle_track?: number
+  quality?: string
   position_sec: number
   duration_sec?: number
   volume: number
@@ -73,6 +82,7 @@ export interface CastStateEvent {
 const VOLUME_DEBOUNCE_MS = 200
 
 export const useCastStore = defineStore('cast', () => {
+  const { token } = useAuth()
   const devices = ref<CastDevice[]>([])
   const devicesLoaded = ref(false)
   const session = ref<CastSession | null>(null)
@@ -80,6 +90,11 @@ export const useCastStore = defineStore('cast', () => {
   // True while the play POST is in flight so the UI can show a connecting
   // state before the first WS event lands.
   const connecting = ref(false)
+  const videoStreamInfo = shallowRef<StreamInfoResponse | null>(null)
+  const videoStreamInfoFileID = ref('')
+  const videoStreamInfoLoading = ref(false)
+  const videoStreamInfoError = ref('')
+  let videoInfoRequest = 0
 
   const engaged = computed(() => engagedDeviceId.value !== null)
   const deviceName = computed(() => {
@@ -106,6 +121,39 @@ export const useCastStore = defineStore('cast', () => {
     const dur = session.value.duration_sec ?? 0
     if (dur > 0 && pos > dur) pos = dur
     return pos
+  }
+
+  function resetVideoStreamInfo(fileID = '') {
+    if (videoStreamInfoFileID.value === fileID && videoStreamInfo.value) return
+    videoInfoRequest++
+    videoStreamInfoFileID.value = fileID
+    videoStreamInfo.value = null
+    videoStreamInfoLoading.value = false
+    videoStreamInfoError.value = ''
+  }
+
+  async function loadVideoStreamInfo(fileID = session.value?.file_id ?? '') {
+    if (!fileID) return null
+    if (videoStreamInfoFileID.value === fileID && videoStreamInfo.value) return videoStreamInfo.value
+    if (videoStreamInfoFileID.value === fileID && videoStreamInfoLoading.value) return null
+    resetVideoStreamInfo(fileID)
+    const request = ++videoInfoRequest
+    videoStreamInfoLoading.value = true
+    try {
+      const info = await $fetch<StreamInfoResponse>(`/api/stream/${encodeURIComponent(fileID)}/info`, {
+        headers: token.value ? { Authorization: `Bearer ${token.value}` } : {},
+      })
+      if (request !== videoInfoRequest) return null
+      videoStreamInfo.value = info
+      return info
+    } catch (error) {
+      if (request === videoInfoRequest) {
+        videoStreamInfoError.value = error instanceof Error ? error.message : 'Could not load video controls'
+      }
+      return null
+    } finally {
+      if (request === videoInfoRequest) videoStreamInfoLoading.value = false
+    }
   }
 
   // Advance ownership: only the tab that started the current cast play
@@ -167,6 +215,7 @@ export const useCastStore = defineStore('cast', () => {
         engagedDeviceId.value = s.device_id
         lastDeviceVolume.value = s.volume
         samplePosition(s.position_sec)
+        if (s.media_kind === 'video' && s.file_id) resetVideoStreamInfo(s.file_id)
       } else if (engagedDeviceId.value && !connecting.value) {
         session.value = null
       }
@@ -215,9 +264,11 @@ export const useCastStore = defineStore('cast', () => {
     entityId: number
     title?: string
     audioTrack?: number
+    subtitleTrack?: number
     quality?: string
     fallbackVolume: number
     startSeconds?: number
+    startPaused?: boolean
   }) {
     const deviceId = engagedDeviceId.value
     if (!deviceId) throw new Error('no cast device engaged')
@@ -235,8 +286,10 @@ export const useCastStore = defineStore('cast', () => {
         quality: input.quality ?? 'auto',
         volume: lastDeviceVolume.value ?? Math.min(Math.max(Math.round(input.fallbackVolume), 0), 30),
         start_seconds: Math.max(0, Math.floor(input.startSeconds ?? 0)),
+        start_paused: input.startPaused ?? false,
       }
       if (input.entityId > 0) body.entity_id = input.entityId
+      if (input.subtitleTrack != null && input.subtitleTrack >= 0) body.subtitle_track = Math.floor(input.subtitleTrack)
       const snap = await ($heya as any)('/api/cast/sessions', {
         method: 'POST',
         body,
@@ -250,6 +303,28 @@ export const useCastStore = defineStore('cast', () => {
     } finally {
       connecting.value = false
     }
+  }
+
+  // Reconfigure the active server-owned video session from any of the user's
+  // clients. The receiver is reloaded at its live position because Google's
+  // Default Media Receiver cannot switch embedded audio tracks in place.
+  async function updateVideo(input: { audioTrack?: number, subtitleTrack?: number | null, quality?: string }) {
+    const s = session.value
+    if (!s || s.media_kind !== 'video' || !s.file_id || !s.entity_type || !s.entity_id) {
+      throw new Error('no Chromecast video session is active')
+    }
+    return await playVideo({
+      fileId: s.file_id,
+      entityType: s.entity_type,
+      entityId: s.entity_id,
+      title: s.title,
+      audioTrack: input.audioTrack ?? s.audio_track ?? 0,
+      subtitleTrack: input.subtitleTrack === undefined ? s.subtitle_track : (input.subtitleTrack ?? undefined),
+      quality: input.quality ?? s.quality ?? 'auto',
+      fallbackVolume: s.volume,
+      startSeconds: livePositionSec(),
+      startPaused: s.state === 'paused',
+    })
   }
 
   async function postControl(id: string, verb: 'pause' | 'resume' | 'stop'): Promise<CastSession> {
@@ -382,10 +457,14 @@ export const useCastStore = defineStore('cast', () => {
       media_kind: p.media_kind,
       track_id: p.track_id,
       file_id: p.file_id,
+      media_item_id: p.media_item_id,
       entity_type: p.entity_type,
       entity_id: p.entity_id,
       title: p.title,
       artist: p.artist,
+      audio_track: p.audio_track,
+      subtitle_track: p.subtitle_track,
+      quality: p.quality,
       album: prev?.track_id === p.track_id ? prev?.album : undefined,
       duration_sec: p.duration_sec,
       position_sec: p.position_sec,
@@ -393,14 +472,19 @@ export const useCastStore = defineStore('cast', () => {
     }
     lastDeviceVolume.value = p.volume
     samplePosition(p.position_sec)
+    if (p.media_kind === 'video' && p.file_id && videoStreamInfoFileID.value !== p.file_id) {
+      resetVideoStreamInfo(p.file_id)
+    }
     return null
   }
 
   return {
     devices, devicesLoaded, session, engagedDeviceId, connecting, lastDeviceVolume,
+    videoStreamInfo, videoStreamInfoLoading, videoStreamInfoError,
     engaged, deviceName, isClientDevice,
     refreshDevices, adoptExisting,
-    playTrack, playVideo, pause, resume, seekTo, setVolume, stopSession, disconnect,
+    playTrack, playVideo, updateVideo, pause, resume, seekTo, setVolume, stopSession, disconnect,
+    loadVideoStreamInfo,
     applyEvent, livePositionSec,
   }
 })
