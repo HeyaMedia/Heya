@@ -54,6 +54,14 @@ func registerQueueRoutes(api huma.API, app *service.App) {
 			return &struct{}{}, nil
 		})
 
+	huma.Register(api, secured(op(http.MethodDelete, "/api/me/queue/upcoming", "queue-clear-upcoming", "Drop everything after the current track", "Queue")),
+		func(ctx context.Context, _ *struct{}) (*struct{}, error) {
+			if err := app.ClearUpcoming(ctx, userFrom(ctx).ID); err != nil {
+				return nil, humaServiceError(err)
+			}
+			return &struct{}{}, nil
+		})
+
 	type addedBody struct {
 		Added int64 `json:"added"`
 	}

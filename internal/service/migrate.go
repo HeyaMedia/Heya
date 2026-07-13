@@ -25,7 +25,12 @@ func AutoMigrate(databaseURL string) error {
 
 	current, _ := goose.GetDBVersion(db)
 
-	if err := goose.Up(db, "."); err != nil {
+	// AllowMissing: concurrent dev sessions race migration numbers (a
+	// renumbered file can land below an already-recorded version). Apply
+	// the stragglers out of order instead of refusing to boot — every
+	// migration here is written to be independently applicable, and the
+	// pre-alpha consolidation pass squashes the numbering anyway.
+	if err := goose.Up(db, ".", goose.WithAllowMissing()); err != nil {
 		return err
 	}
 

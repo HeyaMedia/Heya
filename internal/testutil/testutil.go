@@ -44,7 +44,9 @@ func SetupDB(t *testing.T) *pgxpool.Pool {
 	goose.SetBaseFS(migrations.FS)
 	goose.SetDialect("postgres")
 	goose.SetLogger(goose.NopLogger())
-	if err := goose.Up(db, "."); err != nil {
+	// AllowMissing mirrors service.AutoMigrate: concurrent sessions race
+	// migration numbers; tests must not refuse the shared dev DB over it.
+	if err := goose.Up(db, ".", goose.WithAllowMissing()); err != nil {
 		db.Close()
 		t.Fatalf("running migrations: %v", err)
 	}

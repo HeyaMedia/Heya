@@ -1,0 +1,307 @@
+import { acceptHMRUpdate, defineStore } from 'pinia'
+
+// Windowed mirror of the server-owned play queue (docs/queue-plan.md
+// Phase B). The server materializes and owns the queue; this store holds
+// a contiguous window around the pointer plus the transport meta, applies
+// mutations optimistically, and reconciles from the per-user
+// `queue.changed` WS events (plugins/queue-live.client.ts). usePlayer
+// keeps its public shape and delegates queue semantics here — components
+// never talk to this store directly.
+
+export interface QueueItem {
+  item_id: number
+  ord: number
+  track_id: number
+  title: string
+  duration: number
+  disc_number: number
+  track_number: number
+  album_id: number
+  album_title: string
+  album_slug: string
+  artist_id: number
+  artist_name: string
+  artist_slug: string
+}
+
+export interface QueueViewPayload {
+  version: number
+  current_item_id?: number
+  current_index: number
+  total: number
+  position_seconds: number
+  playing: boolean
+  repeat_mode: string
+  shuffled: boolean
+  active_output?: string
+  items: QueueItem[]
+  window_start_index: number
+}
+
+// Shape of the queue.changed WS payload (eventhub.QueueChangedPayload).
+export interface QueueChangedEvent {
+  version: number
+  kind: 'replaced' | 'items' | 'pointer' | 'modes' | 'transport' | 'output'
+  current_item_id?: number
+  track_id?: number
+  position_sec: number
+  playing: boolean
+  repeat_mode: string
+  shuffled: boolean
+  active_output?: string
+}
+
+export interface QueueSourceInput {
+  kind: 'album' | 'artist' | 'playlist' | 'genre' | 'library' | 'tracks'
+  id?: number
+  genre?: string
+  track_ids?: number[]
+}
+
+// Per-TAB output identity (sessionStorage is per-tab): the queue has one
+// active renderer at a time; everyone else mirrors.
+const OUTPUT_KEY = 'heya_queue_output'
+function tabOutputID(): string {
+  if (import.meta.server) return 'local:ssr'
+  try {
+    let id = sessionStorage.getItem(OUTPUT_KEY)
+    if (!id) {
+      id = 'local:' + crypto.randomUUID().slice(0, 13)
+      sessionStorage.setItem(OUTPUT_KEY, id)
+    }
+    return id
+  } catch {
+    return 'local:' + Math.random().toString(36).slice(2, 10)
+  }
+}
+
+export const useQueueStore = defineStore('playQueue', () => {
+  const version = ref(0)
+  const items = ref<QueueItem[]>([])
+  const windowStart = ref(0) // absolute index of items[0]
+  const total = ref(0)
+  const currentItemID = ref(0)
+  const currentIndex = ref(-1) // absolute
+  const positionSeconds = ref(0) // server-coarse (heartbeats)
+  const playing = ref(false) // server transport state
+  const repeatMode = ref<'off' | 'all' | 'one'>('off')
+  const shuffled = ref(false)
+  const activeOutput = ref('')
+  const loaded = ref(false)
+
+  const outputID = tabOutputID()
+  // '' = unclaimed; treat as "ours to take".
+  const isActiveOutput = computed(() => activeOutput.value === '' || activeOutput.value === outputID)
+
+  // Index of the current item WITHIN the window (-1 when outside it) —
+  // what usePlayer's played/upcoming slices key on.
+  const currentWindowIndex = computed(() => {
+    const id = currentItemID.value
+    if (!id) return -1
+    return items.value.findIndex((i) => i.item_id === id)
+  })
+
+  function applyView(v: QueueViewPayload) {
+    version.value = v.version
+    items.value = v.items ?? []
+    windowStart.value = v.window_start_index
+    total.value = v.total
+    currentItemID.value = v.current_item_id ?? 0
+    currentIndex.value = v.current_index
+    positionSeconds.value = v.position_seconds
+    playing.value = v.playing
+    repeatMode.value = (v.repeat_mode as typeof repeatMode.value) || 'off'
+    shuffled.value = v.shuffled
+    activeOutput.value = v.active_output ?? ''
+    loaded.value = true
+  }
+
+  async function refetch(aroundOrd?: number) {
+    const { $heya } = useNuxtApp()
+    const view = await $heya('/api/me/queue', {
+      query: aroundOrd ? { around: aroundOrd } : {},
+    }) as QueueViewPayload
+    applyView(view)
+    return view
+  }
+
+  async function replace(source: QueueSourceInput, startTrackID: number, shuffle: boolean, output?: string) {
+    const { $heya } = useNuxtApp()
+    const view = await $heya('/api/me/queue', {
+      method: 'POST',
+      body: {
+        source,
+        start_track_id: startTrackID,
+        shuffle,
+        output: output ?? outputID,
+      },
+    }) as QueueViewPayload
+    applyView(view)
+    return view
+  }
+
+  async function enqueue(trackIDs: number[], at: 'end' | 'next') {
+    const { $heya } = useNuxtApp()
+    const res = await $heya('/api/me/queue/items', {
+      method: 'POST',
+      body: { track_ids: trackIDs, at },
+    }) as { added: number }
+    await refetch()
+    return res.added
+  }
+
+  async function removeItem(itemID: number) {
+    // Optimistic: drop from the window; WS/refetch reconciles.
+    const idx = items.value.findIndex((i) => i.item_id === itemID)
+    if (idx >= 0) {
+      items.value = items.value.toSpliced(idx, 1)
+      total.value = Math.max(0, total.value - 1)
+    }
+    const { $heya } = useNuxtApp()
+    try {
+      await $heya('/api/me/queue/items/{id}', { method: 'DELETE', path: { id: itemID } })
+    } catch {
+      await refetch()
+    }
+  }
+
+  async function moveItem(itemID: number, afterItemID: number) {
+    // Optimistic local reorder.
+    const from = items.value.findIndex((i) => i.item_id === itemID)
+    if (from >= 0) {
+      const next = items.value.toSpliced(from, 1)
+      const anchor = afterItemID === 0
+        ? next.findIndex((i) => i.item_id === currentItemID.value)
+        : next.findIndex((i) => i.item_id === afterItemID)
+      next.splice(anchor + 1, 0, items.value[from]!)
+      items.value = next
+    }
+    const { $heya } = useNuxtApp()
+    try {
+      await $heya('/api/me/queue/items/{id}/move', {
+        method: 'POST',
+        path: { id: itemID },
+        body: { after_item_id: afterItemID },
+      })
+    } catch {
+      await refetch()
+    }
+  }
+
+  async function jump(itemID: number) {
+    const { $heya } = useNuxtApp()
+    const view = await $heya('/api/me/queue/jump', {
+      method: 'POST',
+      body: { item_id: itemID },
+    }) as QueueViewPayload
+    applyView(view)
+    return view
+  }
+
+  async function advance(fromItemID: number, reason: 'ended' | 'skip' | 'prev') {
+    const { $heya } = useNuxtApp()
+    const view = await $heya('/api/me/queue/advance', {
+      method: 'POST',
+      body: { from_item_id: fromItemID, reason },
+    }) as QueueViewPayload
+    applyView(view)
+    return view
+  }
+
+  async function setShuffle(on: boolean) {
+    shuffled.value = on // optimistic; the items event refetches the order
+    const { $heya } = useNuxtApp()
+    await $heya('/api/me/queue/shuffle', { method: 'POST', body: { on } })
+  }
+
+  async function setRepeat(mode: 'off' | 'all' | 'one') {
+    repeatMode.value = mode
+    const { $heya } = useNuxtApp()
+    await $heya('/api/me/queue/repeat', { method: 'POST', body: { mode } })
+  }
+
+  async function clearUpcoming() {
+    const idx = currentWindowIndex.value
+    if (idx >= 0) {
+      items.value = items.value.slice(0, idx + 1)
+      total.value = windowStart.value + idx + 1
+    }
+    const { $heya } = useNuxtApp()
+    try {
+      await $heya('/api/me/queue/upcoming', { method: 'DELETE' })
+    } catch {
+      await refetch()
+    }
+  }
+
+  async function clearAll() {
+    items.value = []
+    total.value = 0
+    currentItemID.value = 0
+    currentIndex.value = -1
+    playing.value = false
+    const { $heya } = useNuxtApp()
+    try {
+      await $heya('/api/me/queue', { method: 'DELETE' })
+    } catch { /* already gone */ }
+  }
+
+  async function claim() {
+    activeOutput.value = outputID // optimistic
+    const { $heya } = useNuxtApp()
+    await $heya('/api/me/queue/claim', { method: 'POST', body: { output: outputID } })
+  }
+
+  // Fire-and-forget renderer heartbeat. A 409 means another output took
+  // over while we were playing — the caller's WS mirror handles the stop.
+  function heartbeat(posSeconds: number, isPlaying: boolean) {
+    const { $heya } = useNuxtApp()
+    void $heya('/api/me/queue/heartbeat', {
+      method: 'POST',
+      body: { output: outputID, position_seconds: Math.max(0, posSeconds), playing: isPlaying },
+    }).catch(() => { /* not the active output (or offline) — mirror handles it */ })
+  }
+
+  // WS entry point. Returns 'refetch' when the caller should await a
+  // window refetch (structural change or version gap), null otherwise.
+  function applyEvent(p: QueueChangedEvent): 'refetch' | null {
+    if (p.kind === 'transport') {
+      // No version bump on heartbeats by design.
+      positionSeconds.value = p.position_sec
+      playing.value = p.playing
+      return null
+    }
+    const gap = p.version > version.value + 1
+    if (p.version <= version.value) return null // stale/echo
+    version.value = p.version
+    repeatMode.value = (p.repeat_mode as typeof repeatMode.value) || repeatMode.value
+    shuffled.value = p.shuffled
+    activeOutput.value = p.active_output ?? ''
+    positionSeconds.value = p.position_sec
+    playing.value = p.playing
+
+    if (p.kind === 'pointer' || p.kind === 'modes' || p.kind === 'output') {
+      const newCurrent = p.current_item_id ?? 0
+      const inWindow = items.value.some((i) => i.item_id === newCurrent)
+      currentItemID.value = newCurrent
+      if (gap || (newCurrent !== 0 && !inWindow)) return 'refetch'
+      // Keep the absolute index in step for in-window pointer moves.
+      const wIdx = currentWindowIndex.value
+      if (wIdx >= 0) currentIndex.value = windowStart.value + wIdx
+      return null
+    }
+    // replaced | items — structural, window is stale.
+    return 'refetch'
+  }
+
+  return {
+    version, items, windowStart, total, currentItemID, currentIndex,
+    positionSeconds, playing, repeatMode, shuffled, activeOutput, loaded,
+    outputID, isActiveOutput, currentWindowIndex,
+    refetch, replace, enqueue, removeItem, moveItem, jump, advance,
+    setShuffle, setRepeat, clearUpcoming, clearAll, claim, heartbeat,
+    applyEvent, applyView,
+  }
+})
+
+if (import.meta.hot) import.meta.hot.accept(acceptHMRUpdate(useQueueStore, import.meta.hot))

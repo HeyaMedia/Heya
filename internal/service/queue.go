@@ -681,6 +681,36 @@ func (a *App) ClaimQueueOutput(ctx context.Context, userID int64, output string)
 	return nil
 }
 
+// ClearUpcoming drops everything after the current item (the sidebar's
+// "Clear" on the Up Next header); history and the playing track stay.
+func (a *App) ClearUpcoming(ctx context.Context, userID int64) error {
+	var out sqlc.PlayQueue
+	err := a.withTx(ctx, func(q *sqlc.Queries) error {
+		pq, err := q.GetPlayQueueByUser(ctx, userID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		n, err := q.DeleteUpcomingQueueItems(ctx, sqlc.DeleteUpcomingQueueItemsParams{
+			QueueID: pq.ID, Ord: anchorOrDefault(ctx, q, pq),
+		})
+		if err != nil || n == 0 {
+			return err
+		}
+		out, err = q.BumpQueueVersion(ctx, pq.ID)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	if out.ID != 0 {
+		a.emitQueue(userID, out, "items", 0)
+	}
+	return nil
+}
+
 // ClearQueue empties the queue (pointer included).
 func (a *App) ClearQueue(ctx context.Context, userID int64) error {
 	var out sqlc.PlayQueue

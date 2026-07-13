@@ -70,6 +70,9 @@ RETURNING *;
 -- name: DeleteAllQueueItems :exec
 DELETE FROM play_queue_items WHERE queue_id = $1;
 
+-- name: DeleteUpcomingQueueItems :execrows
+DELETE FROM play_queue_items WHERE queue_id = $1 AND ord > $2;
+
 -- name: DeleteQueueItem :execrows
 DELETE FROM play_queue_items WHERE id = $1 AND queue_id = $2;
 

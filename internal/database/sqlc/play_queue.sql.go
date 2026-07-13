@@ -107,6 +107,23 @@ func (q *Queries) DeleteQueueItemsThrough(ctx context.Context, arg DeleteQueueIt
 	return result.RowsAffected(), nil
 }
 
+const deleteUpcomingQueueItems = `-- name: DeleteUpcomingQueueItems :execrows
+DELETE FROM play_queue_items WHERE queue_id = $1 AND ord > $2
+`
+
+type DeleteUpcomingQueueItemsParams struct {
+	QueueID int64 `json:"queue_id"`
+	Ord     int64 `json:"ord"`
+}
+
+func (q *Queries) DeleteUpcomingQueueItems(ctx context.Context, arg DeleteUpcomingQueueItemsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteUpcomingQueueItems, arg.QueueID, arg.Ord)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const ensurePlayQueue = `-- name: EnsurePlayQueue :one
 
 INSERT INTO play_queues (user_id)

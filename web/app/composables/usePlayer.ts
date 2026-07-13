@@ -1,4 +1,5 @@
 import { useAudioEngine } from '~/composables/useAudioEngine'
+import type { QueueItem } from '~/composables/useQueue'
 import { resumeContext } from '~/engine/context'
 import { shouldSuppressCrossfade } from '~/engine/crossfade/albumAware'
 import { SmartCrossfade } from '~/engine/crossfade/smartCrossfade'
@@ -171,10 +172,6 @@ export const usePlayerStore = defineStore('player', () => {
   const duration = ref(0)
   const volume = ref(80)
   const muted = ref(false)
-  const shuffled = ref(false)
-  const repeatMode = ref<'off' | 'all' | 'one'>('off')
-  const queue = ref<Track[]>([])
-  const originalOrder = ref<Track[]>([])
   const queueOpen = ref(false)
   const sideTab = ref<'queue' | 'lyrics'>('queue')
   const engineWired = ref(false)
@@ -183,9 +180,106 @@ export const usePlayerStore = defineStore('player', () => {
   const sleepDeadline = ref<number | null>(null)
   const sleepNowTick = ref(0)
 
+  // --- Server-owned queue facade (docs/queue-plan.md Phase B) --------------
+  // The queue lives server-side (useQueue windowed mirror); `queue` here is
+  // a compatibility computed so the 40+ existing call sites that do
+  // `queue.value = tracks; play(track)` keep working — the setter stages a
+  // server replace that the following play() call finalizes with the right
+  // start track. Radio streams / podcast episodes aren't music-track rows,
+  // so any list containing them flips to a LOCAL queue (the pre-Phase-B
+  // array behavior) — the server never hears about those.
+  const qs = useQueueStore()
+  const localMode = ref(false)
+  const localQueue = ref<Track[]>([])
+  const originalOrder = ref<Track[]>([]) // local-mode shuffle restore
+  const localShuffled = ref(false)
+  const localRepeat = ref<'off' | 'all' | 'one'>('off')
+
+  function itemToTrack(i: QueueItem): Track {
+    return {
+      id: i.track_id,
+      title: i.title,
+      artist: i.artist_name,
+      album: i.album_title,
+      duration: i.duration,
+      album_id: i.album_id,
+      artist_id: i.artist_id,
+      artist_slug: i.artist_slug,
+      album_slug: i.album_slug,
+      poster: useAlbumCoverUrl(i.artist_slug, i.album_slug) ?? undefined,
+    }
+  }
+  const serverQueueTracks = computed(() => qs.items.map(itemToTrack))
+
+  // Staged replace: coalesces `queue.value = tracks` + the play(track)
+  // that always follows into one POST with the right start track. If no
+  // play() lands (rare), the timer flushes with the head as the start.
+  let stagedTracks: Track[] | null = null
+  let stagedTimer: ReturnType<typeof setTimeout> | null = null
+  function flushStagedReplace(startTrackID: number) {
+    if (stagedTimer) { clearTimeout(stagedTimer); stagedTimer = null }
+    const tracks = stagedTracks
+    stagedTracks = null
+    if (!tracks?.length) return
+    void qs.replace(
+      { kind: 'tracks', track_ids: tracks.map((t) => t.id) },
+      startTrackID, false, queueOutputID(),
+    ).catch(() => { /* queue view refetches via WS; playback already started */ })
+  }
+  // The output the server should attribute playback to: the cast device
+  // while casting, this tab otherwise (Phase C moves cast fully onto this).
+  function queueOutputID(): string {
+    const cast = useCastStore()
+    return cast.engaged && cast.engagedDeviceId ? `cast:${cast.engagedDeviceId}` : qs.outputID
+  }
+
+  const queue = computed<Track[]>({
+    get: () => (localMode.value ? localQueue.value : serverQueueTracks.value),
+    set: (tracks) => {
+      if (!tracks || tracks.length === 0) {
+        // Deliberately does NOT clear the server queue: it's the user's
+        // persistent queue now, and empty assignments happen incidentally
+        // (teardown paths, resets). Only the explicit hold-to-stop gesture
+        // (stop()) and the panel's Clear deleted server state.
+        localMode.value = false
+        localQueue.value = []
+        originalOrder.value = []
+        return
+      }
+      if (tracks.some((t) => t.isStream || t.id <= 0)) {
+        localMode.value = true
+        localQueue.value = tracks
+        return
+      }
+      localMode.value = false
+      stagedTracks = tracks
+      if (stagedTimer) clearTimeout(stagedTimer)
+      stagedTimer = setTimeout(() => flushStagedReplace(tracks[0]?.id ?? 0), 50)
+    },
+  })
+
+  const shuffled = computed<boolean>({
+    get: () => (localMode.value ? localShuffled.value : qs.shuffled),
+    set: (v) => {
+      if (localMode.value) localShuffled.value = v
+      else void qs.setShuffle(v)
+    },
+  })
+  const repeatMode = computed<'off' | 'all' | 'one'>({
+    get: () => (localMode.value ? localRepeat.value : qs.repeatMode),
+    set: (v) => {
+      if (localMode.value) localRepeat.value = v
+      else void qs.setRepeat(v)
+    },
+  })
+
+  // Index of the current track within the exposed `queue` array. Server
+  // mode uses the pointer (duplicate tracks in a queue stay unambiguous);
+  // local mode keeps the old find-by-id.
   const currentIndex = computed(() => {
+    if (!localMode.value) return qs.currentWindowIndex
     const track = currentTrack.value
-    return track ? queue.value.findIndex(item => item.id === track.id) : -1
+    return track ? localQueue.value.findIndex((item) => item.id === track.id) : -1
   })
   const playedTracks = computed(() => currentIndex.value > 0 ? queue.value.slice(0, currentIndex.value) : [])
   const upcomingTracks = computed(() => currentIndex.value >= 0 ? queue.value.slice(currentIndex.value + 1) : [])
@@ -249,6 +343,9 @@ export const usePlayerStore = defineStore('player', () => {
       // reorder — debounced so a rapid string of reorders coalesces into one
       // sync() instead of refetching on every intermediate drop position.
       watch(upcomingTracks, (list) => schedulePrefetchSync(list, currentTrack.value))
+      // Server queue mutations (any tab, any client) re-arm the pending
+      // deck — a reorder or reshuffle changes what plays next.
+      watch(() => qs.version, () => prepareTransition())
     }
     // Seed the engine's volume OUTSIDE the wiring guard so it's idempotent: a
     // hot reload of useAudioEngine resets its module singleton (back to a 1.0
@@ -586,8 +683,9 @@ export const usePlayerStore = defineStore('player', () => {
   // Promote `next` to the current track after a deck swap and arm the hop
   // after it. The active deck already carries `next`'s normalization (set on
   // the pending deck before the swap), so no re-leveling here.
-  function advanceCurrentTo(next: Track) {
+  function advanceCurrentTo(next: Track, reason: 'ended' | 'skip' = 'ended') {
     alog('player', `now playing "${next.title}" #${next.id} (advanced via deck swap)`)
+    reportAdvance(reason)
     currentTrack.value = next
     position.value = 0
     scrobbledTrackId.value = null
@@ -599,15 +697,49 @@ export const usePlayerStore = defineStore('player', () => {
     prepareTransition()
   }
 
-  async function play(track?: Track) {
+  // Tell the server the renderer crossed a track boundary so its pointer
+  // follows. Fire-and-forget: playback already advanced locally; the
+  // from_item_id guard makes a racing double-report a no-op, and the
+  // response/WS event reconciles the mirror.
+  function reportAdvance(reason: 'ended' | 'skip' | 'prev') {
+    if (localMode.value || !import.meta.client) return
+    const from = qs.currentItemID
+    if (!from) return
+    void qs.advance(from, reason).catch(() => { /* WS view reconciles */ })
+  }
+
+  // syncQueuePointer keeps the server pointer in step with a direct
+  // play(track): a staged context replace flushes with this start track;
+  // an in-queue track becomes a jump; anything else becomes a one-track
+  // queue. jumpTo() passes skipQueueSync — it already jumped precisely.
+  function syncQueuePointer(track: Track) {
+    if (!import.meta.client || localMode.value || track.isStream || track.id <= 0) return
+    if (stagedTracks) {
+      flushStagedReplace(track.id)
+      return
+    }
+    const item = qs.items.find((i) => i.track_id === track.id)
+    if (item) {
+      if (item.item_id !== qs.currentItemID) void qs.jump(item.item_id).catch(() => {})
+    } else {
+      void qs.replace({ kind: 'tracks', track_ids: [track.id] }, track.id, false, queueOutputID())
+        .catch(() => { /* view reconciles via WS */ })
+    }
+  }
+
+  async function play(track?: Track, opts?: { skipQueueSync?: boolean }) {
     // Remote output: the queue/track state stays client-side (Phase 2),
     // but the audio path is an API call — never touch the local engine.
     if (import.meta.client && useCastStore().engaged) {
+      if (track && !opts?.skipQueueSync) syncQueuePointer(track)
       await playViaCast(track)
       return
     }
     const e = ensureEngine()
     if (track) {
+      if (!opts?.skipQueueSync) syncQueuePointer(track)
+      // Rendering locally makes this tab the active output.
+      if (import.meta.client && !localMode.value && !qs.isActiveOutput) void qs.claim()
       // Never play a track whose file was removed from disk.
       if (track.available === false) return
       // Manual play invalidates any armed transition / preloaded pending deck.
@@ -652,6 +784,13 @@ export const usePlayerStore = defineStore('player', () => {
     }
     // No track passed — resume current
     if (!currentTrack.value) return
+    // Mirror tab pressing play = "play here": claim the output and pick
+    // up from the server's position via the same cold-load handoff the
+    // cast-disconnect path uses.
+    if (import.meta.client && !localMode.value && !qs.isActiveOutput) {
+      localHandoff = { trackId: currentTrack.value.id, position: qs.positionSeconds }
+      void qs.claim()
+    }
     // Coming back from a cast session: the deck holds nothing (or a stale
     // buffer from before the handoff) — cold-load and jump to where the
     // receiver left off.
@@ -782,22 +921,24 @@ export const usePlayerStore = defineStore('player', () => {
     persistVolumePrefs(volume.value, muted.value)
   }
 
-  // --- Shuffle (reorders the queue in place) -------------------------------
-  // The played + currently-playing tracks stay fixed; only the upcoming slice
-  // is shuffled / restored.
+  // --- Shuffle --------------------------------------------------------------
+  // Server mode: one POST — the server reshuffles the upcoming slice (or
+  // restores the source's natural order) over the FULL queue, which is the
+  // whole point (client shuffle only ever saw the loaded window). Local
+  // mode (radio/podcasts) keeps the in-place array shuffle.
   function upcomingStart() {
     return currentIndex.value >= 0 ? currentIndex.value + 1 : 0
   }
   function shuffleUpcoming() {
     const start = upcomingStart()
-    if (start >= queue.value.length) return
-    const head = queue.value.slice(0, start)
-    const upcoming = queue.value.slice(start)
+    if (start >= localQueue.value.length) return
+    const head = localQueue.value.slice(0, start)
+    const upcoming = localQueue.value.slice(start)
     for (let i = upcoming.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1))
       ;[upcoming[i], upcoming[j]] = [upcoming[j]!, upcoming[i]!]
     }
-    queue.value = [...head, ...upcoming]
+    localQueue.value = [...head, ...upcoming]
   }
   // Restore the pre-shuffle ordering, reconciled against the *current* queue so
   // edits made while shuffled survive: tracks removed during shuffle stay gone,
@@ -806,21 +947,25 @@ export const usePlayerStore = defineStore('player', () => {
   function restoreOriginalOrder() {
     if (!originalOrder.value.length) return
     const start = upcomingStart()
-    const head = queue.value.slice(0, start)
-    const upcomingNow = queue.value.slice(start)
+    const head = localQueue.value.slice(0, start)
+    const upcomingNow = localQueue.value.slice(start)
     const upcomingIds = new Set(upcomingNow.map((t) => t.id))
     // Original ordering, but only for tracks still upcoming in the live queue.
     const restored = originalOrder.value.filter((t) => upcomingIds.has(t.id))
     const restoredIds = new Set(restored.map((t) => t.id))
     // Tracks queued while shuffled weren't in the snapshot — keep them.
     const added = upcomingNow.filter((t) => !restoredIds.has(t.id))
-    queue.value = [...head, ...restored, ...added]
+    localQueue.value = [...head, ...restored, ...added]
     originalOrder.value = []
   }
   function toggleShuffle() {
-    shuffled.value = !shuffled.value
-    if (shuffled.value) {
-      originalOrder.value = [...queue.value]
+    if (!localMode.value) {
+      void qs.setShuffle(!qs.shuffled)
+      return // the items event re-arms the transition via the version watcher
+    }
+    localShuffled.value = !localShuffled.value
+    if (localShuffled.value) {
+      originalOrder.value = [...localQueue.value]
       shuffleUpcoming()
     } else {
       restoreOriginalOrder()
@@ -863,7 +1008,7 @@ export const usePlayerStore = defineStore('player', () => {
       try {
         alog('player', `skip → "${next.title}" (instant, preloaded ✓)`)
         await e.transition('gapless')
-        advanceCurrentTo(next)
+        advanceCurrentTo(next, 'skip')
         transitioning = false
         return
       } catch (err) {
@@ -980,9 +1125,17 @@ export const usePlayerStore = defineStore('player', () => {
   // three sections plus drag / remove. `currentIndex` is the index of the
   // playing track in `queue`; -1 when nothing is playing. We derive it from
   // `currentTrack.id` rather than storing both — single source of truth.
-  // jumpTo plays the queue item at absolute index, treating the queue as
-  // the authoritative ordering. Used by the right-sidebar rows.
+  // jumpTo plays the queue item at absolute window index. Server mode
+  // jumps by ITEM id (a queue can hold the same track twice; index-based
+  // find-by-track-id would hit the wrong copy).
   async function jumpTo(index: number) {
+    if (!localMode.value) {
+      const item = qs.items[index]
+      if (!item) return
+      void qs.jump(item.item_id).catch(() => {})
+      await play(itemToTrack(item), { skipQueueSync: true })
+      return
+    }
     const t = queue.value[index]
     if (!t) return
     await play(t)
@@ -994,7 +1147,12 @@ export const usePlayerStore = defineStore('player', () => {
   function removeFromQueue(index: number) {
     if (index <= currentIndex.value) return
     if (index >= queue.value.length) return
-    queue.value.splice(index, 1)
+    if (!localMode.value) {
+      const item = qs.items[index]
+      if (item) void qs.removeItem(item.item_id)
+    } else {
+      localQueue.value.splice(index, 1)
+    }
     prepareTransition()
   }
 
@@ -1003,10 +1161,20 @@ export const usePlayerStore = defineStore('player', () => {
     if (from <= currentIndex.value || to <= currentIndex.value) return
     if (from >= queue.value.length || to >= queue.value.length) return
     if (from === to) return
-    const next = queue.value.slice()
-    const [item] = next.splice(from, 1)
-    if (item) next.splice(to, 0, item)
-    queue.value = next
+    if (!localMode.value) {
+      const item = qs.items[from]
+      if (!item) return
+      // The predecessor at the target slot once `from` is extracted; the
+      // current item as predecessor means "head of upcoming" (0 works too).
+      const without = qs.items.toSpliced(from, 1)
+      const pred = without[to - 1]
+      void qs.moveItem(item.item_id, pred ? pred.item_id : 0)
+    } else {
+      const next = localQueue.value.slice()
+      const [item] = next.splice(from, 1)
+      if (item) next.splice(to, 0, item)
+      localQueue.value = next
+    }
     prepareTransition()
   }
 
@@ -1022,10 +1190,16 @@ export const usePlayerStore = defineStore('player', () => {
       await play(list[0]!)
       return
     }
+    if (!localMode.value) {
+      // Server-side dedupe against the FULL upcoming slice (the local
+      // window only sees part of a big queue).
+      void qs.enqueue(list.map((t) => t.id), 'end').then(() => prepareTransition())
+      return
+    }
     const upcomingIds = new Set(upcomingTracks.value.map((t) => t.id))
     const fresh = list.filter((t) => !upcomingIds.has(t.id))
     if (!fresh.length) return
-    queue.value = [...queue.value, ...fresh]
+    localQueue.value = [...localQueue.value, ...fresh]
     prepareTransition()
   }
 
@@ -1040,27 +1214,35 @@ export const usePlayerStore = defineStore('player', () => {
       await play(list[0]!)
       return
     }
+    if (!localMode.value) {
+      void qs.enqueue(list.map((t) => t.id), 'next').then(() => prepareTransition())
+      return
+    }
     const upcomingIds = new Set(upcomingTracks.value.map((t) => t.id))
     const fresh = list.filter((t) => !upcomingIds.has(t.id))
     if (!fresh.length) return
     const idx = currentIndex.value
     const insertAt = idx < 0 ? 0 : idx + 1
-    const next = queue.value.slice()
+    const next = localQueue.value.slice()
     next.splice(insertAt, 0, ...fresh)
-    queue.value = next
+    localQueue.value = next
     prepareTransition()
   }
 
   // clearUpcoming empties everything after the current track. Used by the
   // sidebar's "Clear" button on the Up Next header.
   function clearUpcoming() {
+    if (!localMode.value) {
+      void qs.clearUpcoming().then(() => prepareTransition())
+      return
+    }
     const idx = currentIndex.value
     if (idx < 0) {
-      queue.value = []
+      localQueue.value = []
       originalOrder.value = []
       return
     }
-    queue.value = queue.value.slice(0, idx + 1)
+    localQueue.value = localQueue.value.slice(0, idx + 1)
     originalOrder.value = []
     prepareTransition()
   }
@@ -1071,6 +1253,7 @@ export const usePlayerStore = defineStore('player', () => {
   // someone else's cast must not kill it by clearing its own local queue.
   function stop() {
     if (import.meta.client && useCastStore().engaged) void useCastStore().stopSession()
+    if (import.meta.client && !localMode.value) void qs.clearAll() // explicit gesture — labeled "stop & clear queue"
     localHandoff = null
     if (engineWired.value) ensureEngine().stop()
     playing.value = false
@@ -1170,7 +1353,7 @@ export const usePlayerStore = defineStore('player', () => {
 
   return {
     playing, currentTrack, position, duration, volume, muted,
-    shuffled, repeatMode, queue, originalOrder, queueOpen, sideTab,
+    shuffled, repeatMode, queue, originalOrder, queueOpen, sideTab, localMode,
     engineWired, scrobbledTrackId, sleepAtTrackEnd, sleepDeadline, sleepNowTick,
     currentIndex, playedTracks, upcomingTracks, upcomingCount,
     nextUp, progress, hasPrevious, hasNext,

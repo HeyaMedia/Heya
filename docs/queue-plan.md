@@ -118,12 +118,34 @@ move-around-pointer, claim/heartbeat rejection, history pruning at
 exactly 200), plus a live smoke against the dev server: shuffled album
 materialization, skip, stale-double-fire no-op, clear.
 
-## Phase B — the FE swap (the big lift)
+## Phase B — the FE swap (the big lift) ✅ CORE SHIPPED 2026-07-13
 
-Replace `usePlayer`'s `queue`/`originalOrder` arrays with a windowed
-server mirror. This is the riskiest chunk — the array is load-bearing for
-QueuePanel/QueuePane, drag-reorder, played/upcoming computeds, prefetch,
-and transition arming.
+Landed as a **compatibility facade** instead of a 40-file sweep:
+`usePlayer.queue` became a writable computed over the `useQueue` windowed
+mirror — the setter stages a `tracks`-source replace that the play(track)
+call following every `queue.value = tracks` finalizes with the right
+start track. All existing play-context call sites work unchanged and are
+server-backed immediately; upgrading contexts to semantic sources
+(album/genre — task for the >window cases) is incremental follow-up.
+Field notes:
+
+- **Radio streams and podcast episodes aren't music-track rows** — any
+  list containing them flips the facade to a LOCAL queue (the old array
+  behavior, kept for exactly this). Podcasts use negative synthetic ids.
+- **Nothing incidental may clear the server queue.** An empty
+  `queue.value = []` assignment only resets local state; deletion happens
+  on the labeled hold-to-stop gesture and the panel's Clear. (First
+  version cleared server-side and something in page teardown nuked the
+  queue on reload.)
+- Advance/skip report `from_item_id` fire-and-forget after the local
+  engine transition — gapless stays renderer-local, the server pointer
+  follows, double-fires no-op.
+- Verified live: album play → server materialization via an untouched
+  call site → tab claims output → heartbeats → hard reload → full
+  restore (queue window, current track, position) → queue panel renders
+  played/up-next from the window.
+
+Original scope notes below.
 
 - New `useQueue` store: window + meta + version, optimistic mutations with
   rollback, WS reconcile, window paging as the user scrolls the panel
