@@ -96,14 +96,27 @@ payload; anything structural (`replaced`, `items`) triggers a window
 refetch. CLI mutations reach the serve process's hub via the existing
 LISTEN/NOTIFY relay — CLI goes over HTTP anyway (same rule as cast).
 
-## Phase A — queue service + API
+## Phase A — queue service + API ✅ SHIPPED 2026-07-13
 
-`internal/service/queue.go` (+ sqlc queries, migration): materialization
-from sources, window reads, sparse-key mutations, advance/jump/heartbeat,
-version bumps + `PublishToUser` emits. Unit tests over the mutation
-semantics (advance idempotency, reorder around the pointer, reshuffle
-preserving played head, history pruning). No FE yet — verifiable via
-`heya api` + a `heya queue` CLI subcommand (CLI-first).
+Built as planned (migration 00025, `queries/play_queue.sql`,
+`internal/service/queue.go`, `/api/me/queue` routes, per-user
+`queue.changed` events) with two field notes:
+
+- **Playability is two-headed**: most of an existing library links files
+  via the legacy `tracks.library_file_id`, not `track_files` rows — the
+  materializers accept either (the narrow predicate silently emptied
+  every source against prod data).
+- **The CLI is `heya player`** (`show/play/add/next/skip/shuffle/
+  repeat/clear`) — `heya queue` was already taken by the River job queue.
+- `src_ord` (rank in the source's natural order, captured at
+  materialization) is what makes shuffle-off restore the original order
+  without re-querying the source.
+
+Verified: 7 integration tests over a real DB (advance idempotency +
+repeat modes, shuffle/unshuffle restore, play-next gap math + dedupe,
+move-around-pointer, claim/heartbeat rejection, history pruning at
+exactly 200), plus a live smoke against the dev server: shuffled album
+materialization, skip, stale-double-fire no-op, clear.
 
 ## Phase B — the FE swap (the big lift)
 

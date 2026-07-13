@@ -99,6 +99,7 @@ func BuildAPI(mux *http.ServeMux, app *service.App, cfg *config.Config, opts ...
 	registerRadioRoutes(api, app)
 	registerPodcastRoutes(api, app)
 	registerCastRoutes(api, app)
+	registerQueueRoutes(api, app)
 	registerStreamRoutes(api, app)
 	registerBinaryRoutes(api, app)
 	registerDocsRoutes(api)

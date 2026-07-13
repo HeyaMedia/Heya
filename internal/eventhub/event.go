@@ -30,6 +30,11 @@ const (
 	// change). Global, not per-user: cast targets are household devices
 	// and every client mirrors the same session state.
 	EventCastState EventType = "cast.state"
+	// Play-queue change — fired per-user (EmitToUser) on every queue
+	// mutation so all of a user's clients mirror the same server-owned
+	// queue (docs/queue-plan.md). Thin payload: structural kinds tell
+	// clients to refetch their window; a version gap means the same.
+	EventQueueChanged EventType = "queue.changed"
 )
 
 // RadioICYPayload is the per-user event body for EventRadioICY. UserID
@@ -211,4 +216,21 @@ type StatsPayload struct {
 	TotalFiles   int            `json:"total_files"`
 	QueuePending int            `json:"queue_pending"`
 	QueueRunning int            `json:"queue_running"`
+}
+
+// QueueChangedPayload is the per-user body for EventQueueChanged.
+// Kind ∈ replaced | items | pointer | modes | transport | output:
+// 'replaced' and 'items' are structural (clients refetch their window);
+// the rest apply directly from this payload. Version does NOT bump for
+// 'transport' (heartbeat) events.
+type QueueChangedPayload struct {
+	Version       int64   `json:"version"`
+	Kind          string  `json:"kind"`
+	CurrentItemID int64   `json:"current_item_id,omitempty"`
+	TrackID       int64   `json:"track_id,omitempty"`
+	PositionSec   float64 `json:"position_sec"`
+	Playing       bool    `json:"playing"`
+	RepeatMode    string  `json:"repeat_mode"`
+	Shuffled      bool    `json:"shuffled"`
+	ActiveOutput  string  `json:"active_output,omitempty"`
 }
