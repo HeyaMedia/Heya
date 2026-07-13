@@ -507,6 +507,53 @@ CROSS JOIN (SELECT count(*) FROM demoted) demoted_count
 CROSS JOIN (SELECT count(*) FROM selected) selected_count
 CROSS JOIN (SELECT count(*) FROM resolved) resolved_count;
 
+-- name: BulkApproveSingleScannerCandidates :many
+WITH eligible AS (
+    SELECT lmi.id AS identity_id, min(mmc.id) AS candidate_id, min(mmc.provider_id) AS provider_id
+    FROM local_media_identities lmi
+    JOIN metadata_match_candidates mmc ON mmc.identity_id = lmi.id
+    WHERE lmi.library_id = sqlc.arg(library_id)
+      AND (
+        lmi.review_status IN ('needs_review', 'review', 'suspicious')
+        OR EXISTS (
+          SELECT 1 FROM scan_findings sf
+          WHERE sf.identity_id = lmi.id AND sf.resolved_at IS NULL
+        )
+    )
+    GROUP BY lmi.id
+    HAVING count(*) = 1
+       AND min(mmc.score) >= sqlc.arg(min_confidence)
+),
+updated_identities AS (
+    UPDATE local_media_identities lmi
+    SET review_status = 'accepted',
+        metadata_provider_id = eligible.provider_id,
+        updated_at = now()
+    FROM eligible
+    WHERE lmi.id = eligible.identity_id
+    RETURNING lmi.id
+),
+selected AS (
+    UPDATE metadata_match_candidates mmc
+    SET status = 'selected', rejection_reason = '', updated_at = now()
+    FROM eligible
+    WHERE mmc.id = eligible.candidate_id
+      AND mmc.identity_id = eligible.identity_id
+    RETURNING mmc.identity_id
+),
+resolved AS (
+    UPDATE scan_findings sf
+    SET resolved_at = now()
+    FROM eligible
+    WHERE sf.identity_id = eligible.identity_id
+      AND sf.resolved_at IS NULL
+    RETURNING sf.identity_id
+)
+SELECT id FROM updated_identities
+CROSS JOIN (SELECT count(*) FROM selected) selected_count
+CROSS JOIN (SELECT count(*) FROM resolved) resolved_count
+ORDER BY id;
+
 -- name: RejectScannerIdentity :one
 WITH updated_identity AS (
     UPDATE local_media_identities lmi

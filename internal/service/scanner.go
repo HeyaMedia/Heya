@@ -145,6 +145,10 @@ type ScannerCandidateDetailView struct {
 	Subjects         []string          `json:"subjects,omitempty"`
 }
 
+type ScannerBulkApproveResult struct {
+	Approved int `json:"approved"`
+}
+
 func (a *App) GetLibraryScannerView(ctx context.Context, libraryID int64, includeCandidates bool) (ScannerView, error) {
 	q := sqlc.New(a.db)
 	view := ScannerView{
@@ -244,6 +248,24 @@ func (a *App) ApproveScannerCandidate(ctx context.Context, libraryID, identityID
 		log.Warn().Err(err).Int64("library_id", libraryID).Int64("identity_id", identityID).Msg("scanner review approval: enqueue apply failed")
 	}
 	return view, nil
+}
+
+func (a *App) BulkApproveSingleScannerCandidates(ctx context.Context, libraryID int64, minConfidence float64) (ScannerBulkApproveResult, error) {
+	q := sqlc.New(a.db)
+	ids, err := q.BulkApproveSingleScannerCandidates(ctx, sqlc.BulkApproveSingleScannerCandidatesParams{
+		LibraryID:     libraryID,
+		MinConfidence: scannerPgNumericFromFloat64(minConfidence),
+	})
+	if err != nil {
+		return ScannerBulkApproveResult{}, err
+	}
+	if len(ids) > 0 && a.river != nil {
+		args := worker.ProcessLibraryScanArgs{LibraryID: libraryID, Force: true}
+		if err := worker.EnqueueProcessLibraryScan(ctx, a.river, a.db, args, worker.PriorityMatch, ""); err != nil {
+			log.Warn().Err(err).Int64("library_id", libraryID).Int("approved", len(ids)).Msg("scanner bulk approval: enqueue apply failed")
+		}
+	}
+	return ScannerBulkApproveResult{Approved: len(ids)}, nil
 }
 
 func scannerCandidateDetailView(candidate sqlc.ListScannerCandidatesByLibraryRow, detail *metadata.MediaDetail) ScannerCandidateDetailView {

@@ -137,6 +137,29 @@ func TestScannerReviewViewBucketsAndActions(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "needs_review", resetView.ReviewStatus)
 	require.Equal(t, "needs_review", resetView.Bucket)
+
+	// Bulk approval must count every candidate, not only candidates above the
+	// threshold: the two-candidate review identity is deliberately ineligible.
+	bulk, err := app.BulkApproveSingleScannerCandidates(ctx, lib.ID, 0.9)
+	require.NoError(t, err)
+	require.Zero(t, bulk.Approved)
+
+	single := createScannerIdentity(t, ctx, q, lib, run.ID, "title_year:single|2005", "Single Movie", "2005", "needs_review", 0)
+	_, err = q.UpsertMetadataMatchCandidate(ctx, sqlc.UpsertMetadataMatchCandidateParams{
+		IdentityID: single.ID, ScanRunID: pgInt8ForTest(run.ID), ProviderName: "heya",
+		ProviderID: "heya:movie:tmdb:2005", ProviderKind: "tmdb", Title: "Single Movie", Year: "2005",
+		Score: pgNumericForTest(t, "0.950"), Rank: 1, Status: "selected", RejectionReason: "",
+		ExternalIds: []byte(`{"tmdb":"2005"}`), RawData: []byte(`{}`),
+	})
+	require.NoError(t, err)
+
+	bulk, err = app.BulkApproveSingleScannerCandidates(ctx, lib.ID, 0.95)
+	require.NoError(t, err)
+	require.Equal(t, 1, bulk.Approved)
+	bulkApproved, err := getScannerIdentityView(ctx, q, lib.ID, single.ID)
+	require.NoError(t, err)
+	require.Equal(t, "accepted", bulkApproved.ReviewStatus)
+	require.Equal(t, "heya:movie:tmdb:2005", bulkApproved.SelectedProviderID)
 }
 
 func TestScannerReviewScopePaths(t *testing.T) {

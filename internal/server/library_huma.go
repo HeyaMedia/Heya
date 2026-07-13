@@ -247,6 +247,20 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(identity), nil
 		})
 
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/libraries/{id}/scanner/bulk-approve-single", "library-scanner-bulk-approve-single", "Approve single scanner candidates above a confidence threshold", "Libraries")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			Body struct {
+				MinConfidence float64 `json:"min_confidence" minimum:"0" maximum:"1"`
+			}
+		}) (*JSONOutput[service.ScannerBulkApproveResult], error) {
+			result, err := app.BulkApproveSingleScannerCandidates(ctx, in.ID, in.Body.MinConfidence)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(result), nil
+		})
+
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/scanner/identities/{identity_id}/candidates/{candidate_id}/detail", "library-scanner-candidate-detail", "Fetch scanner match candidate detail", "Libraries")),
 		func(ctx context.Context, in *struct {
 			IDPath

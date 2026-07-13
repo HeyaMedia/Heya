@@ -317,6 +317,15 @@ async function refresh(opts: { silent?: boolean } = {}) {
 const busyId = ref<number | null>(null)
 const actionNote = ref('')
 const actionError = ref('')
+const bulkOpen = ref(false)
+const bulkConfidence = ref(0.95)
+const bulkBusy = ref(false)
+
+const bulkEligibleCount = computed(() => identities.value.filter(identity =>
+  identity.bucket === 'needs_review' &&
+  identity.candidate_count === 1 &&
+  (identity.selected_score ?? -1) >= bulkConfidence.value,
+).length)
 
 async function runAction(identity: ScanIdentity, action: string, body: Record<string, any> | undefined, describe: string) {
   busyId.value = identity.id
@@ -343,6 +352,28 @@ async function runAction(identity: ScanIdentity, action: string, body: Record<st
 function approveCandidate(identity: ScanIdentity, candidate: ScanCandidate) {
   runAction(identity, 'approve-candidate', { candidate_id: candidate.id },
     `Approved “${candidate.title}” for ${identity.title || identity.identity_key} — awaiting apply.`)
+}
+
+async function bulkApproveSingleCandidates() {
+  if (!bulkEligibleCount.value || bulkBusy.value) return
+  bulkBusy.value = true
+  actionNote.value = ''
+  actionError.value = ''
+  try {
+    const heya = $heya as any
+    const result = await heya('/api/libraries/{id}/scanner/bulk-approve-single', {
+      method: 'POST',
+      path: { id: props.library.id },
+      body: { min_confidence: bulkConfidence.value },
+    }) as { approved: number }
+    await refresh({ silent: true })
+    actionNote.value = `Approved ${result.approved} single-candidate match${result.approved === 1 ? '' : 'es'} at ${score(bulkConfidence.value)} confidence or higher — apply queued.`
+    bulkOpen.value = false
+  } catch (e: any) {
+    actionError.value = e?.data?.error || e?.message || 'Bulk approval failed.'
+  } finally {
+    bulkBusy.value = false
+  }
 }
 function rejectIdentity(identity: ScanIdentity) {
   runAction(identity, 'reject', { reason: 'manual_rejected' }, `Rejected ${identity.title || identity.identity_key}.`)
@@ -560,6 +591,25 @@ function runFiles(run: ScanRun): number {
           <Icon name="search" :size="13" />
           <input v-model="search" placeholder="Filter by title or key…" />
         </div>
+        <div class="bulk-accept">
+          <button class="sv2-btn ghost" :class="{ active: bulkOpen }" @click="bulkOpen = !bulkOpen">
+            <Icon name="check" :size="12" /> Accept confident singles
+            <span class="chip-count">{{ bulkEligibleCount }}</span>
+          </button>
+          <div v-if="bulkOpen" class="bulk-popover">
+            <div class="bulk-title">Accept one-candidate matches</div>
+            <p>Only needs-review identities with exactly one candidate at or above this confidence are changed.</p>
+            <label>
+              <span>Minimum confidence</span>
+              <b class="mono">{{ score(bulkConfidence) }}</b>
+            </label>
+            <input v-model.number="bulkConfidence" type="range" min="0" max="1" step="0.01">
+            <button class="mini-btn accept" :disabled="bulkBusy || bulkEligibleCount === 0" @click="bulkApproveSingleCandidates">
+              <Icon :name="bulkBusy ? 'spinner' : 'check'" :size="11" />
+              {{ bulkBusy ? 'Applying…' : `Apply all ${bulkEligibleCount}` }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <section class="identity-panel">
@@ -569,9 +619,22 @@ function runFiles(run: ScanRun): number {
         <div v-else-if="filteredIdentities.length === 0" class="panel-empty">
           No identities match this filter.
         </div>
-        <table v-else class="idt">
-          <tbody>
-            <template v-for="identity in filteredIdentities" :key="identity.id">
+        <DynamicScroller
+          v-else
+          class="identity-scroller"
+          :items="filteredIdentities"
+          :min-item-size="61"
+          key-field="id"
+          page-mode
+        >
+          <template #default="{ item: identity, active }">
+            <DynamicScrollerItem
+              :item="identity"
+              :active="active"
+              :size-dependencies="[expanded.has(identity.id), detailOpen.size, candidateDetailLoading]"
+            >
+              <table class="idt">
+                <tbody>
               <tr class="idt-row" :class="{ open: expanded.has(identity.id) }" @click="toggleExpand(identity.id)">
                 <td class="idt-chev">
                   <button
@@ -774,9 +837,11 @@ function runFiles(run: ScanRun): number {
                   </div>
                 </td>
               </tr>
-            </template>
-          </tbody>
-        </table>
+                </tbody>
+              </table>
+            </DynamicScrollerItem>
+          </template>
+        </DynamicScroller>
       </section>
 
       <!-- Only findings NOT tied to an identity live here — per-identity issues
@@ -899,6 +964,18 @@ function runFiles(run: ScanRun): number {
   gap: 12px;
   flex-wrap: wrap;
 }
+.bulk-accept { position: relative; margin-left: auto; }
+.bulk-popover {
+  position: absolute; z-index: 20; top: calc(100% + 7px); right: 0;
+  width: min(320px, calc(100vw - 32px)); padding: 13px;
+  border: 1px solid var(--border-strong); border-radius: var(--r-md);
+  background: var(--bg-1); box-shadow: 0 12px 36px rgb(0 0 0 / 0.28);
+}
+.bulk-title { color: var(--fg-0); font-size: 12.5px; font-weight: 650; }
+.bulk-popover p { margin: 5px 0 12px; color: var(--fg-3); font-size: 11.5px; line-height: 1.4; }
+.bulk-popover label { display: flex; justify-content: space-between; color: var(--fg-2); font-size: 11.5px; }
+.bulk-popover input[type="range"] { width: 100%; margin: 8px 0 12px; accent-color: var(--gold); }
+.bulk-popover .mini-btn { width: 100%; justify-content: center; }
 .filter-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .filter-chip {
   display: inline-flex; align-items: center; gap: 6px;
@@ -963,6 +1040,8 @@ function runFiles(run: ScanRun): number {
    column soaks up slack, so every other column hugs its content and the
    columns line up across all rows (status, local, match, flags). */
 .idt { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.identity-scroller :deep(.vue-recycle-scroller__item-wrapper) { overflow: visible; }
+.identity-scroller :deep(.vue-recycle-scroller__item-view:not(:first-child)) .idt { border-top: 1px solid var(--border); }
 .idt-row { cursor: pointer; }
 .idt-row > td {
   padding: 9px 10px;
