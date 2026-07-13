@@ -838,6 +838,7 @@ type PlayQueue struct {
 	Source          []byte             `json:"source"`
 	ActiveOutput    string             `json:"active_output"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	DeviceID        string             `json:"device_id"`
 }
 
 type PlayQueueItem struct {

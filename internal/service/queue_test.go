@@ -82,7 +82,7 @@ func TestQueueReplaceWindowAndStartTrack(t *testing.T) {
 	f := setupQueueFixture(t, pool, userID, "replace", 12)
 	ctx := context.Background()
 
-	view, err := app.ReplaceQueue(ctx, userID, QueueSource{Kind: "album", ID: f.albumID}, 0, false, "local:test")
+	view, err := app.ReplaceQueue(ctx, userID, "test", QueueSource{Kind: "album", ID: f.albumID}, 0, false, "local:test")
 	require.NoError(t, err)
 	require.EqualValues(t, 12, view.Total)
 	require.True(t, view.Playing)
@@ -96,12 +96,12 @@ func TestQueueReplaceWindowAndStartTrack(t *testing.T) {
 	require.Equal(t, view.CurrentItemID, view.Items[0].ItemID)
 
 	// Start mid-album without shuffle: pointer lands on the track, order intact.
-	view, err = app.ReplaceQueue(ctx, userID, QueueSource{Kind: "album", ID: f.albumID}, f.trackIDs[4], false, "local:test")
+	view, err = app.ReplaceQueue(ctx, userID, "test", QueueSource{Kind: "album", ID: f.albumID}, f.trackIDs[4], false, "local:test")
 	require.NoError(t, err)
 	require.EqualValues(t, 4, view.CurrentIndex)
 
 	// Shuffled start: the chosen track leads.
-	view, err = app.ReplaceQueue(ctx, userID, QueueSource{Kind: "album", ID: f.albumID}, f.trackIDs[7], true, "local:test")
+	view, err = app.ReplaceQueue(ctx, userID, "test", QueueSource{Kind: "album", ID: f.albumID}, f.trackIDs[7], true, "local:test")
 	require.NoError(t, err)
 	require.EqualValues(t, 0, view.CurrentIndex)
 	require.Equal(t, f.trackIDs[7], view.Items[0].TrackID)
@@ -115,49 +115,49 @@ func TestQueueAdvanceIdempotentAndRepeat(t *testing.T) {
 	f := setupQueueFixture(t, pool, userID, "advance", 3)
 	ctx := context.Background()
 
-	view, err := app.ReplaceQueue(ctx, userID, QueueSource{Kind: "album", ID: f.albumID}, 0, false, "local:test")
+	view, err := app.ReplaceQueue(ctx, userID, "test", QueueSource{Kind: "album", ID: f.albumID}, 0, false, "local:test")
 	require.NoError(t, err)
 	first := view.CurrentItemID
 
 	// Normal advance.
-	view, err = app.AdvanceQueue(ctx, userID, first, "ended")
+	view, err = app.AdvanceQueue(ctx, userID, "test", first, "ended")
 	require.NoError(t, err)
 	second := view.CurrentItemID
 	require.NotEqual(t, first, second)
 	require.EqualValues(t, 1, view.CurrentIndex)
 
 	// Stale double-fire: advancing "from" the already-passed item is a no-op.
-	view, err = app.AdvanceQueue(ctx, userID, first, "ended")
+	view, err = app.AdvanceQueue(ctx, userID, "test", first, "ended")
 	require.NoError(t, err)
 	require.Equal(t, second, view.CurrentItemID)
 
 	// prev returns to the first track.
-	view, err = app.AdvanceQueue(ctx, userID, second, "prev")
+	view, err = app.AdvanceQueue(ctx, userID, "test", second, "prev")
 	require.NoError(t, err)
 	require.Equal(t, first, view.CurrentItemID)
 
 	// repeat one: ended stays put.
-	require.NoError(t, app.SetQueueRepeat(ctx, userID, "one"))
-	view, err = app.AdvanceQueue(ctx, userID, first, "ended")
+	require.NoError(t, app.SetQueueRepeat(ctx, userID, "test", "one"))
+	view, err = app.AdvanceQueue(ctx, userID, "test", first, "ended")
 	require.NoError(t, err)
 	require.Equal(t, first, view.CurrentItemID)
 	require.True(t, view.Playing)
 
 	// repeat off, run to the end: pointer stays on the last, playing stops.
-	require.NoError(t, app.SetQueueRepeat(ctx, userID, "off"))
-	view, err = app.AdvanceQueue(ctx, userID, first, "skip")
+	require.NoError(t, app.SetQueueRepeat(ctx, userID, "test", "off"))
+	view, err = app.AdvanceQueue(ctx, userID, "test", first, "skip")
 	require.NoError(t, err)
-	view, err = app.AdvanceQueue(ctx, userID, view.CurrentItemID, "skip")
+	view, err = app.AdvanceQueue(ctx, userID, "test", view.CurrentItemID, "skip")
 	require.NoError(t, err)
 	last := view.CurrentItemID
-	view, err = app.AdvanceQueue(ctx, userID, last, "ended")
+	view, err = app.AdvanceQueue(ctx, userID, "test", last, "ended")
 	require.NoError(t, err)
 	require.Equal(t, last, view.CurrentItemID)
 	require.False(t, view.Playing)
 
 	// repeat all: wraps to the head.
-	require.NoError(t, app.SetQueueRepeat(ctx, userID, "all"))
-	view, err = app.AdvanceQueue(ctx, userID, last, "ended")
+	require.NoError(t, app.SetQueueRepeat(ctx, userID, "test", "all"))
+	view, err = app.AdvanceQueue(ctx, userID, "test", last, "ended")
 	require.NoError(t, err)
 	require.Equal(t, first, view.CurrentItemID)
 	require.True(t, view.Playing)
@@ -170,18 +170,18 @@ func TestQueueShuffleRestoresNaturalOrder(t *testing.T) {
 	f := setupQueueFixture(t, pool, userID, "shuffle", 30)
 	ctx := context.Background()
 
-	view, err := app.ReplaceQueue(ctx, userID, QueueSource{Kind: "album", ID: f.albumID}, 0, false, "local:test")
+	view, err := app.ReplaceQueue(ctx, userID, "test", QueueSource{Kind: "album", ID: f.albumID}, 0, false, "local:test")
 	require.NoError(t, err)
 	// Advance twice so there's a played head that must not move.
-	view, err = app.AdvanceQueue(ctx, userID, view.CurrentItemID, "skip")
+	view, err = app.AdvanceQueue(ctx, userID, "test", view.CurrentItemID, "skip")
 	require.NoError(t, err)
-	view, err = app.AdvanceQueue(ctx, userID, view.CurrentItemID, "skip")
+	view, err = app.AdvanceQueue(ctx, userID, "test", view.CurrentItemID, "skip")
 	require.NoError(t, err)
 	current := view.CurrentItemID
 	require.Equal(t, f.trackIDs[2], view.Items[2].TrackID)
 
-	require.NoError(t, app.SetQueueShuffle(ctx, userID, true))
-	view, err = app.GetQueue(ctx, userID, nil, 100)
+	require.NoError(t, app.SetQueueShuffle(ctx, userID, "test", true))
+	view, err = app.GetQueue(ctx, userID, "test", nil, 100)
 	require.NoError(t, err)
 	require.True(t, view.Shuffled)
 	require.Equal(t, current, view.CurrentItemID)
@@ -190,8 +190,8 @@ func TestQueueShuffleRestoresNaturalOrder(t *testing.T) {
 	require.Equal(t, f.trackIDs[0], view.Items[0].TrackID)
 	require.Equal(t, f.trackIDs[1], view.Items[1].TrackID)
 
-	require.NoError(t, app.SetQueueShuffle(ctx, userID, false))
-	view, err = app.GetQueue(ctx, userID, nil, 100)
+	require.NoError(t, app.SetQueueShuffle(ctx, userID, "test", false))
+	view, err = app.GetQueue(ctx, userID, "test", nil, 100)
 	require.NoError(t, err)
 	require.False(t, view.Shuffled)
 	// Full natural order restored via src_ord.
@@ -208,20 +208,20 @@ func TestQueueEnqueueDedupeAndPlayNext(t *testing.T) {
 	extra := setupQueueFixture(t, pool, userID, "enqueue-extra", 4)
 	ctx := context.Background()
 
-	_, err := app.ReplaceQueue(ctx, userID, QueueSource{Kind: "album", ID: f.albumID}, 0, false, "local:test")
+	_, err := app.ReplaceQueue(ctx, userID, "test", QueueSource{Kind: "album", ID: f.albumID}, 0, false, "local:test")
 	require.NoError(t, err)
 
 	// Duplicate of an upcoming track is dropped; fresh ones land at the end.
-	added, err := app.EnqueueTracks(ctx, userID, []int64{f.trackIDs[3], extra.trackIDs[0], extra.trackIDs[1]}, "end")
+	added, err := app.EnqueueTracks(ctx, userID, "test", []int64{f.trackIDs[3], extra.trackIDs[0], extra.trackIDs[1]}, "end")
 	require.NoError(t, err)
 	require.EqualValues(t, 2, added)
 
 	// Play-next slots directly after the current item.
-	added, err = app.EnqueueTracks(ctx, userID, []int64{extra.trackIDs[2]}, "next")
+	added, err = app.EnqueueTracks(ctx, userID, "test", []int64{extra.trackIDs[2]}, "next")
 	require.NoError(t, err)
 	require.EqualValues(t, 1, added)
 
-	view, err := app.GetQueue(ctx, userID, nil, 100)
+	view, err := app.GetQueue(ctx, userID, "test", nil, 100)
 	require.NoError(t, err)
 	require.EqualValues(t, 8, view.Total)
 	require.Equal(t, extra.trackIDs[2], view.Items[1].TrackID, "play-next must follow the current track")
@@ -236,21 +236,21 @@ func TestQueueMoveItem(t *testing.T) {
 	f := setupQueueFixture(t, pool, userID, "move", 6)
 	ctx := context.Background()
 
-	view, err := app.ReplaceQueue(ctx, userID, QueueSource{Kind: "album", ID: f.albumID}, 0, false, "local:test")
+	view, err := app.ReplaceQueue(ctx, userID, "test", QueueSource{Kind: "album", ID: f.albumID}, 0, false, "local:test")
 	require.NoError(t, err)
 
 	// Move the last item to the head of the upcoming slice (after current).
 	lastItem := view.Items[5].ItemID
-	require.NoError(t, app.MoveQueueItem(ctx, userID, lastItem, 0))
-	view, err = app.GetQueue(ctx, userID, nil, 100)
+	require.NoError(t, app.MoveQueueItem(ctx, userID, "test", lastItem, 0))
+	view, err = app.GetQueue(ctx, userID, "test", nil, 100)
 	require.NoError(t, err)
 	require.Equal(t, lastItem, view.Items[1].ItemID)
 
 	// Move it after a specific item. It currently sits BEFORE that anchor
 	// (index 1 vs 3), so extracting it shifts the anchor left one slot —
 	// the moved item lands at the anchor's original index.
-	require.NoError(t, app.MoveQueueItem(ctx, userID, lastItem, view.Items[3].ItemID))
-	view, err = app.GetQueue(ctx, userID, nil, 100)
+	require.NoError(t, app.MoveQueueItem(ctx, userID, "test", lastItem, view.Items[3].ItemID))
+	view, err = app.GetQueue(ctx, userID, "test", nil, 100)
 	require.NoError(t, err)
 	require.Equal(t, lastItem, view.Items[3].ItemID)
 }
@@ -262,22 +262,22 @@ func TestQueueClaimAndHeartbeat(t *testing.T) {
 	f := setupQueueFixture(t, pool, userID, "claim", 2)
 	ctx := context.Background()
 
-	_, err := app.ReplaceQueue(ctx, userID, QueueSource{Kind: "album", ID: f.albumID}, 0, false, "local:tab-a")
+	_, err := app.ReplaceQueue(ctx, userID, "test", QueueSource{Kind: "album", ID: f.albumID}, 0, false, "local:tab-a")
 	require.NoError(t, err)
 
 	// The active output heartbeats fine.
-	require.NoError(t, app.QueueHeartbeat(ctx, userID, "local:tab-a", 42, true))
-	view, err := app.GetQueue(ctx, userID, nil, 10)
+	require.NoError(t, app.QueueHeartbeat(ctx, userID, "test", "local:tab-a", 42, true))
+	view, err := app.GetQueue(ctx, userID, "test", nil, 10)
 	require.NoError(t, err)
 	require.InDelta(t, 42, view.PositionSeconds, 0.01)
 
 	// A non-active output is rejected.
-	err = app.QueueHeartbeat(ctx, userID, "local:tab-b", 50, true)
+	err = app.QueueHeartbeat(ctx, userID, "test", "local:tab-b", 50, true)
 	require.True(t, errors.Is(err, ErrQueueNotActiveOutput))
 
 	// Until it claims.
-	require.NoError(t, app.ClaimQueueOutput(ctx, userID, "local:tab-b"))
-	require.NoError(t, app.QueueHeartbeat(ctx, userID, "local:tab-b", 50, true))
+	require.NoError(t, app.ClaimQueueOutput(ctx, userID, "test", "local:tab-b"))
+	require.NoError(t, app.QueueHeartbeat(ctx, userID, "test", "local:tab-b", 50, true))
 }
 
 func TestQueueHistoryPruning(t *testing.T) {
@@ -287,23 +287,43 @@ func TestQueueHistoryPruning(t *testing.T) {
 	f := setupQueueFixture(t, pool, userID, "prune", queueHistoryKeep+20)
 	ctx := context.Background()
 
-	view, err := app.ReplaceQueue(ctx, userID, QueueSource{Kind: "album", ID: f.albumID}, 0, false, "local:test")
+	view, err := app.ReplaceQueue(ctx, userID, "test", QueueSource{Kind: "album", ID: f.albumID}, 0, false, "local:test")
 	require.NoError(t, err)
 	require.EqualValues(t, queueHistoryKeep+20, view.Total)
 
 	// Jump deep into the queue (no pruning on jump)...
-	viewDeep, err := app.GetQueue(ctx, userID, ptrInt64(int64((queueHistoryKeep+10)*queueOrdGap)), 10)
+	viewDeep, err := app.GetQueue(ctx, userID, "test", ptrInt64(int64((queueHistoryKeep+10)*queueOrdGap)), 10)
 	require.NoError(t, err)
 	require.NotEmpty(t, viewDeep.Items)
 	deep := viewDeep.Items[0].ItemID
-	_, err = app.JumpToQueueItem(ctx, userID, deep)
+	_, err = app.JumpToQueueItem(ctx, userID, "test", deep)
 	require.NoError(t, err)
 
 	// ...then one advance prunes history down to the keep window.
-	view, err = app.AdvanceQueue(ctx, userID, deep, "ended")
+	view, err = app.AdvanceQueue(ctx, userID, "test", deep, "ended")
 	require.NoError(t, err)
 	require.Less(t, view.Total, int64(queueHistoryKeep+20))
 	require.EqualValues(t, queueHistoryKeep, view.CurrentIndex, "exactly queueHistoryKeep played items remain")
+}
+
+func TestQueuesAreIsolatedPerDevice(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	app := &App{db: pool}
+	userID := testutil.TestUserID(t, pool)
+	f := setupQueueFixture(t, pool, userID, "devices", 3)
+	ctx := context.Background()
+	_, err := app.ReplaceQueue(ctx, userID, "client:desktop", QueueSource{Kind: "tracks", TrackIDs: []int64{f.trackIDs[0]}}, 0, false, "client:desktop")
+	require.NoError(t, err)
+	_, err = app.ReplaceQueue(ctx, userID, "client:phone", QueueSource{Kind: "tracks", TrackIDs: []int64{f.trackIDs[1], f.trackIDs[2]}}, 0, false, "client:phone")
+	require.NoError(t, err)
+	desktop, err := app.GetQueue(ctx, userID, "client:desktop", nil, 10)
+	require.NoError(t, err)
+	phone, err := app.GetQueue(ctx, userID, "client:phone", nil, 10)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), desktop.Total)
+	require.Equal(t, int64(2), phone.Total)
+	require.Equal(t, f.trackIDs[0], desktop.Items[0].TrackID)
+	require.Equal(t, f.trackIDs[1], phone.Items[0].TrackID)
 }
 
 func ptrInt64(v int64) *int64 { return &v }

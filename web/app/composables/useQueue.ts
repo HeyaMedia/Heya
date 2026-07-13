@@ -40,6 +40,7 @@ export interface QueueViewPayload {
 
 // Shape of the queue.changed WS payload (eventhub.QueueChangedPayload).
 export interface QueueChangedEvent {
+  device_id: string
   version: number
   kind: 'replaced' | 'items' | 'pointer' | 'modes' | 'transport' | 'output'
   current_item_id?: number
@@ -60,19 +61,8 @@ export interface QueueSourceInput {
 
 // Per-TAB output identity (sessionStorage is per-tab): the queue has one
 // active renderer at a time; everyone else mirrors.
-const OUTPUT_KEY = 'heya_queue_output'
 function tabOutputID(): string {
-  if (import.meta.server) return 'local:ssr'
-  try {
-    let id = sessionStorage.getItem(OUTPUT_KEY)
-    if (!id) {
-      id = 'local:' + crypto.randomUUID().slice(0, 13)
-      sessionStorage.setItem(OUTPUT_KEY, id)
-    }
-    return id
-  } catch {
-    return 'local:' + Math.random().toString(36).slice(2, 10)
-  }
+  return clientDeviceID()
 }
 
 export const useQueueStore = defineStore('playQueue', () => {
@@ -90,6 +80,19 @@ export const useQueueStore = defineStore('playQueue', () => {
   const loaded = ref(false)
 
   const outputID = tabOutputID()
+  const targetDeviceID = ref(outputID)
+  async function queueAPI(path: any, options: any = {}) {
+    const { $heya } = useNuxtApp()
+    return await ($heya as any)(path, {
+      ...options,
+      query: { ...(options.query ?? {}), device_id: targetDeviceID.value },
+    })
+  }
+  async function selectTarget(deviceID?: string | null) {
+    targetDeviceID.value = deviceID || outputID
+    loaded.value = false
+    await refetch()
+  }
   // '' = unclaimed; treat as "ours to take".
   const isActiveOutput = computed(() => activeOutput.value === '' || activeOutput.value === outputID)
 
@@ -117,8 +120,7 @@ export const useQueueStore = defineStore('playQueue', () => {
   }
 
   async function refetch(aroundOrd?: number) {
-    const { $heya } = useNuxtApp()
-    const view = await $heya('/api/me/queue', {
+    const view = await queueAPI('/api/me/queue', {
       query: aroundOrd ? { around: aroundOrd } : {},
     }) as QueueViewPayload
     applyView(view)
@@ -126,8 +128,7 @@ export const useQueueStore = defineStore('playQueue', () => {
   }
 
   async function replace(source: QueueSourceInput, startTrackID: number, shuffle: boolean, output?: string) {
-    const { $heya } = useNuxtApp()
-    const view = await $heya('/api/me/queue', {
+    const view = await queueAPI('/api/me/queue', {
       method: 'POST',
       body: {
         source,
@@ -141,8 +142,7 @@ export const useQueueStore = defineStore('playQueue', () => {
   }
 
   async function enqueue(trackIDs: number[], at: 'end' | 'next') {
-    const { $heya } = useNuxtApp()
-    const res = await $heya('/api/me/queue/items', {
+    const res = await queueAPI('/api/me/queue/items', {
       method: 'POST',
       body: { track_ids: trackIDs, at },
     }) as { added: number }
@@ -157,9 +157,8 @@ export const useQueueStore = defineStore('playQueue', () => {
       items.value = items.value.toSpliced(idx, 1)
       total.value = Math.max(0, total.value - 1)
     }
-    const { $heya } = useNuxtApp()
     try {
-      await $heya('/api/me/queue/items/{id}', { method: 'DELETE', path: { id: itemID } })
+      await queueAPI('/api/me/queue/items/{id}', { method: 'DELETE', path: { id: itemID } })
     } catch {
       await refetch()
     }
@@ -176,9 +175,8 @@ export const useQueueStore = defineStore('playQueue', () => {
       next.splice(anchor + 1, 0, items.value[from]!)
       items.value = next
     }
-    const { $heya } = useNuxtApp()
     try {
-      await $heya('/api/me/queue/items/{id}/move', {
+      await queueAPI('/api/me/queue/items/{id}/move', {
         method: 'POST',
         path: { id: itemID },
         body: { after_item_id: afterItemID },
@@ -189,8 +187,7 @@ export const useQueueStore = defineStore('playQueue', () => {
   }
 
   async function jump(itemID: number) {
-    const { $heya } = useNuxtApp()
-    const view = await $heya('/api/me/queue/jump', {
+    const view = await queueAPI('/api/me/queue/jump', {
       method: 'POST',
       body: { item_id: itemID },
     }) as QueueViewPayload
@@ -199,8 +196,7 @@ export const useQueueStore = defineStore('playQueue', () => {
   }
 
   async function advance(fromItemID: number, reason: 'ended' | 'skip' | 'prev') {
-    const { $heya } = useNuxtApp()
-    const view = await $heya('/api/me/queue/advance', {
+    const view = await queueAPI('/api/me/queue/advance', {
       method: 'POST',
       body: { from_item_id: fromItemID, reason },
     }) as QueueViewPayload
@@ -210,14 +206,12 @@ export const useQueueStore = defineStore('playQueue', () => {
 
   async function setShuffle(on: boolean) {
     shuffled.value = on // optimistic; the items event refetches the order
-    const { $heya } = useNuxtApp()
-    await $heya('/api/me/queue/shuffle', { method: 'POST', body: { on } })
+    await queueAPI('/api/me/queue/shuffle', { method: 'POST', body: { on } })
   }
 
   async function setRepeat(mode: 'off' | 'all' | 'one') {
     repeatMode.value = mode
-    const { $heya } = useNuxtApp()
-    await $heya('/api/me/queue/repeat', { method: 'POST', body: { mode } })
+    await queueAPI('/api/me/queue/repeat', { method: 'POST', body: { mode } })
   }
 
   async function clearUpcoming() {
@@ -226,9 +220,8 @@ export const useQueueStore = defineStore('playQueue', () => {
       items.value = items.value.slice(0, idx + 1)
       total.value = windowStart.value + idx + 1
     }
-    const { $heya } = useNuxtApp()
     try {
-      await $heya('/api/me/queue/upcoming', { method: 'DELETE' })
+      await queueAPI('/api/me/queue/upcoming', { method: 'DELETE' })
     } catch {
       await refetch()
     }
@@ -240,23 +233,20 @@ export const useQueueStore = defineStore('playQueue', () => {
     currentItemID.value = 0
     currentIndex.value = -1
     playing.value = false
-    const { $heya } = useNuxtApp()
     try {
-      await $heya('/api/me/queue', { method: 'DELETE' })
+      await queueAPI('/api/me/queue', { method: 'DELETE' })
     } catch { /* already gone */ }
   }
 
   async function claim() {
     activeOutput.value = outputID // optimistic
-    const { $heya } = useNuxtApp()
-    await $heya('/api/me/queue/claim', { method: 'POST', body: { output: outputID } })
+    await queueAPI('/api/me/queue/claim', { method: 'POST', body: { output: outputID } })
   }
 
   // Fire-and-forget renderer heartbeat. A 409 means another output took
   // over while we were playing — the caller's WS mirror handles the stop.
   function heartbeat(posSeconds: number, isPlaying: boolean) {
-    const { $heya } = useNuxtApp()
-    void $heya('/api/me/queue/heartbeat', {
+    void queueAPI('/api/me/queue/heartbeat', {
       method: 'POST',
       body: { output: outputID, position_seconds: Math.max(0, posSeconds), playing: isPlaying },
     }).catch(() => { /* not the active output (or offline) — mirror handles it */ })
@@ -265,6 +255,7 @@ export const useQueueStore = defineStore('playQueue', () => {
   // WS entry point. Returns 'refetch' when the caller should await a
   // window refetch (structural change or version gap), null otherwise.
   function applyEvent(p: QueueChangedEvent): 'refetch' | null {
+    if (p.device_id !== targetDeviceID.value) return null
     if (p.kind === 'transport') {
       // No version bump on heartbeats by design.
       positionSeconds.value = p.position_sec
@@ -297,10 +288,10 @@ export const useQueueStore = defineStore('playQueue', () => {
   return {
     version, items, windowStart, total, currentItemID, currentIndex,
     positionSeconds, playing, repeatMode, shuffled, activeOutput, loaded,
-    outputID, isActiveOutput, currentWindowIndex,
+    outputID, targetDeviceID, isActiveOutput, currentWindowIndex,
     refetch, replace, enqueue, removeItem, moveItem, jump, advance,
     setShuffle, setRepeat, clearUpcoming, clearAll, claim, heartbeat,
-    applyEvent, applyView,
+    applyEvent, applyView, selectTarget,
   }
 })
 

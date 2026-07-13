@@ -1021,6 +1021,10 @@ export const usePlayerStore = defineStore('player', () => {
   async function nextTrack() {
     const next = forwardNext()
     if (!next) { playing.value = false; return }
+    if (import.meta.client && useCastStore().isClientDevice) {
+      await play(next)
+      return
+    }
     if (playing.value && !transitioning && prefetchedTrackId === next.id && !next.isStream) {
       const e = ensureEngine()
       transitioning = true
@@ -1294,6 +1298,18 @@ export const usePlayerStore = defineStore('player', () => {
   // Engage a device and hand the current playback off to it mid-track.
   async function startCastTo(deviceId: string) {
     const cast = useCastStore()
+    if (deviceId.startsWith('client:')) {
+      cast.engagedDeviceId = deviceId
+      await qs.selectTarget(deviceId)
+      const idx = qs.currentWindowIndex
+      const remote = idx >= 0 ? queue.value[idx] : undefined
+      currentTrack.value = remote ?? null
+      position.value = qs.positionSeconds
+      playing.value = qs.playing
+      if (remote?.duration) duration.value = remote.duration
+      if (engineWired.value) ensureEngine().pause()
+      return
+    }
     const track = currentTrack.value
     const pos = position.value
     const wasPlaying = playing.value
@@ -1328,6 +1344,7 @@ export const usePlayerStore = defineStore('player', () => {
     const track = currentTrack.value
     const pos = cast.session ? cast.livePositionSec() : position.value
     await cast.disconnect()
+    await qs.selectTarget()
     playing.value = false
     position.value = pos
     lastTickTime = pos

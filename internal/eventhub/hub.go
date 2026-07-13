@@ -12,11 +12,57 @@ type Hub struct {
 	// Jellyfin bridge) that receives every broadcast but no user-targeted
 	// event. Authenticated WebSocket connections register with their real
 	// user id via SubscribeUser so PublishToUser can reach only them.
-	subs map[chan Event]int64
+	subs    map[chan Event]int64
+	devices map[int64]map[string]ClientDevice
+}
+
+type ClientDevice struct {
+	ID           string         `json:"id"`
+	Name         string         `json:"name"`
+	Kind         string         `json:"kind"`
+	Capabilities []string       `json:"capabilities"`
+	State        map[string]any `json:"state,omitempty"`
+	LastSeen     time.Time      `json:"last_seen"`
 }
 
 func New() *Hub {
-	return &Hub{subs: make(map[chan Event]int64)}
+	return &Hub{subs: make(map[chan Event]int64), devices: make(map[int64]map[string]ClientDevice)}
+}
+
+func (h *Hub) UpsertDevice(userID int64, device ClientDevice) {
+	if userID == 0 || device.ID == "" {
+		return
+	}
+	device.LastSeen = time.Now()
+	h.mu.Lock()
+	if h.devices[userID] == nil {
+		h.devices[userID] = make(map[string]ClientDevice)
+	}
+	h.devices[userID][device.ID] = device
+	h.mu.Unlock()
+}
+
+func (h *Hub) RemoveDevice(userID int64, deviceID string) {
+	h.mu.Lock()
+	if devices := h.devices[userID]; devices != nil {
+		delete(devices, deviceID)
+	}
+	h.mu.Unlock()
+}
+
+func (h *Hub) ClientDevices(userID int64) []ClientDevice {
+	cutoff := time.Now().Add(-35 * time.Second)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var out []ClientDevice
+	for id, d := range h.devices[userID] {
+		if d.LastSeen.Before(cutoff) {
+			delete(h.devices[userID], id)
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
 }
 
 func (h *Hub) Publish(event Event) {

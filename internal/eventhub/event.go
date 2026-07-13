@@ -35,6 +35,9 @@ const (
 	// queue (docs/queue-plan.md). Thin payload: structural kinds tell
 	// clients to refetch their window; a version gap means the same.
 	EventQueueChanged EventType = "queue.changed"
+	// Browser/device remote-control command. Published to the user's sockets;
+	// clients discard commands whose TargetDeviceID is not their stable id.
+	EventDeviceCommand EventType = "device.command"
 )
 
 // RadioICYPayload is the per-user event body for EventRadioICY. UserID
@@ -45,6 +48,13 @@ type RadioICYPayload struct {
 	Artist    string `json:"artist"`
 	Title     string `json:"title"`
 	StreamURL string `json:"stream_url"`
+}
+
+type DeviceCommandPayload struct {
+	TargetDeviceID string         `json:"target_device_id"`
+	CommandID      string         `json:"command_id"`
+	Action         string         `json:"action"`
+	Args           map[string]any `json:"args,omitempty"`
 }
 
 // CastStatePayload is the body for EventCastState. Position is a
@@ -224,6 +234,7 @@ type StatsPayload struct {
 // the rest apply directly from this payload. Version does NOT bump for
 // 'transport' (heartbeat) events.
 type QueueChangedPayload struct {
+	DeviceID      string  `json:"device_id"`
 	Version       int64   `json:"version"`
 	Kind          string  `json:"kind"`
 	CurrentItemID int64   `json:"current_item_id,omitempty"`

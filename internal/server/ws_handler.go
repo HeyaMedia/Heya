@@ -17,8 +17,11 @@ var upgrader = websocket.Upgrader{
 }
 
 type wsClientMessage struct {
-	Type   string   `json:"type"`
-	Events []string `json:"events"`
+	Type     string                 `json:"type"`
+	Events   []string               `json:"events"`
+	Device   *eventhub.ClientDevice `json:"device,omitempty"`
+	DeviceID string                 `json:"device_id,omitempty"`
+	State    map[string]any         `json:"state,omitempty"`
 }
 
 func handleWebSocket(hub *eventhub.Hub, sessionLookup auth.SessionLookup) http.HandlerFunc {
@@ -50,6 +53,8 @@ func handleWebSocket(hub *eventhub.Hub, sessionLookup auth.SessionLookup) http.H
 		ctx := r.Context()
 		rawEvents := r.URL.Query().Get("events") == "raw"
 		clientSubscriptions := r.URL.Query().Get("subscriptions") == "1"
+		var registeredDeviceID atomic.Value
+		registeredDeviceID.Store("")
 		var wantsLogs atomic.Bool
 		// Old frontend bundles never send subscription controls. Keep their
 		// behavior intact across a backend restart; only negotiated clients opt
@@ -89,7 +94,26 @@ func handleWebSocket(hub *eventhub.Hub, sessionLookup auth.SessionLookup) http.H
 					continue
 				}
 				var message wsClientMessage
-				if json.Unmarshal(data, &message) != nil || message.Type != "subscribe" {
+				if json.Unmarshal(data, &message) != nil {
+					continue
+				}
+				if message.Type == "device.hello" && message.Device != nil {
+					registeredDeviceID.Store(message.Device.ID)
+					hub.UpsertDevice(resolved.User.ID, *message.Device)
+					continue
+				}
+				if message.Type == "device.heartbeat" && message.DeviceID == registeredDeviceID.Load().(string) && message.DeviceID != "" {
+					devices := hub.ClientDevices(resolved.User.ID)
+					for _, d := range devices {
+						if d.ID == message.DeviceID {
+							d.State = message.State
+							hub.UpsertDevice(resolved.User.ID, d)
+							break
+						}
+					}
+					continue
+				}
+				if message.Type != "subscribe" {
 					continue
 				}
 				wantsLogEvents := false

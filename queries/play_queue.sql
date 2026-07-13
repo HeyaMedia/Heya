@@ -1,4 +1,4 @@
--- Server-owned play queue (docs/queue-plan.md). One queue per user,
+-- Server-owned play queue. One queue per user/device,
 -- fully materialized; clients read windows around the pointer. Every
 -- structural mutation bumps play_queues.version inside the service tx.
 --
@@ -7,13 +7,13 @@
 -- unique constraint never sees a transient collision mid-UPDATE.
 
 -- name: EnsurePlayQueue :one
-INSERT INTO play_queues (user_id)
-VALUES ($1)
-ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
+INSERT INTO play_queues (user_id, device_id)
+VALUES (sqlc.arg(user_id), sqlc.arg(device_id))
+ON CONFLICT (user_id, device_id) DO UPDATE SET user_id = EXCLUDED.user_id
 RETURNING *;
 
--- name: GetPlayQueueByUser :one
-SELECT * FROM play_queues WHERE user_id = $1;
+-- name: GetPlayQueueByUserDevice :one
+SELECT * FROM play_queues WHERE user_id = sqlc.arg(user_id) AND device_id = sqlc.arg(device_id);
 
 -- name: SetQueuePointer :one
 UPDATE play_queues

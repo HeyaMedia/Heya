@@ -339,6 +339,12 @@ export function useEventBus() {
     }
   }
 
+  function send(message: Record<string, unknown>): boolean {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false
+    ws.send(JSON.stringify(message))
+    return true
+  }
+
   return {
     connected: readonly(connected),
     activeScans: readonly(activeScans),
@@ -352,6 +358,7 @@ export function useEventBus() {
     connect,
     disconnect,
     on,
+    send,
   }
 }
 

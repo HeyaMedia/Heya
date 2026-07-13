@@ -95,12 +95,12 @@ func queueItemView(id, ord, trackID int64, title string, duration, disc, track i
 // `aroundOrd` (nil = around the current pointer). A user with no queue
 // yet gets an empty view (version 0) rather than a 404 — the FE treats
 // "no queue" and "empty queue" identically.
-func (a *App) GetQueue(ctx context.Context, userID int64, aroundOrd *int64, limit int) (QueueView, error) {
+func (a *App) GetQueue(ctx context.Context, userID int64, deviceID string, aroundOrd *int64, limit int) (QueueView, error) {
 	if limit <= 0 || limit > 500 {
 		limit = queueWindowDefault
 	}
 	q := sqlc.New(a.db)
-	pq, err := q.GetPlayQueueByUser(ctx, userID)
+	pq, err := q.GetPlayQueueByUserDevice(ctx, sqlc.GetPlayQueueByUserDeviceParams{UserID: userID, DeviceID: deviceID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return QueueView{CurrentIndex: -1, RepeatMode: "off", Items: []QueueItemView{}}, nil
 	}
@@ -234,10 +234,10 @@ func (a *App) materializeSource(ctx context.Context, q *sqlc.Queries, queueID, u
 // ReplaceQueue materializes a fresh queue from the source and points it
 // at startTrackID (or the head). With shuffle on, the chosen start track
 // is moved to the front — "play this, then surprise me".
-func (a *App) ReplaceQueue(ctx context.Context, userID int64, src QueueSource, startTrackID int64, shuffle bool, output string) (QueueView, error) {
+func (a *App) ReplaceQueue(ctx context.Context, userID int64, deviceID string, src QueueSource, startTrackID int64, shuffle bool, output string) (QueueView, error) {
 	var out sqlc.PlayQueue
 	err := a.withTx(ctx, func(q *sqlc.Queries) error {
-		pq, err := q.EnsurePlayQueue(ctx, userID)
+		pq, err := q.EnsurePlayQueue(ctx, sqlc.EnsurePlayQueueParams{UserID: userID, DeviceID: deviceID})
 		if err != nil {
 			return err
 		}
@@ -295,20 +295,20 @@ func (a *App) ReplaceQueue(ctx context.Context, userID int64, src QueueSource, s
 		return QueueView{}, err
 	}
 	a.emitQueue(userID, out, "replaced", 0)
-	return a.GetQueue(ctx, userID, nil, queueWindowDefault)
+	return a.GetQueue(ctx, userID, deviceID, nil, queueWindowDefault)
 }
 
 // EnqueueTracks appends (at="end") or inserts after the current item
 // (at="next"), de-duplicating against the upcoming slice. Returns how
 // many actually landed.
-func (a *App) EnqueueTracks(ctx context.Context, userID int64, trackIDs []int64, at string) (int64, error) {
+func (a *App) EnqueueTracks(ctx context.Context, userID int64, deviceID string, trackIDs []int64, at string) (int64, error) {
 	if len(trackIDs) == 0 {
 		return 0, nil
 	}
 	var added int64
 	var out sqlc.PlayQueue
 	err := a.withTx(ctx, func(q *sqlc.Queries) error {
-		pq, err := q.EnsurePlayQueue(ctx, userID)
+		pq, err := q.EnsurePlayQueue(ctx, sqlc.EnsurePlayQueueParams{UserID: userID, DeviceID: deviceID})
 		if err != nil {
 			return err
 		}
@@ -391,10 +391,10 @@ func (a *App) EnqueueTracks(ctx context.Context, userID int64, trackIDs []int64,
 }
 
 // RemoveQueueItem drops one non-current item.
-func (a *App) RemoveQueueItem(ctx context.Context, userID, itemID int64) error {
+func (a *App) RemoveQueueItem(ctx context.Context, userID int64, deviceID string, itemID int64) error {
 	var out sqlc.PlayQueue
 	err := a.withTx(ctx, func(q *sqlc.Queries) error {
-		pq, err := q.GetPlayQueueByUser(ctx, userID)
+		pq, err := q.GetPlayQueueByUserDevice(ctx, sqlc.GetPlayQueueByUserDeviceParams{UserID: userID, DeviceID: deviceID})
 		if err != nil {
 			return fmt.Errorf("no queue")
 		}
@@ -420,10 +420,10 @@ func (a *App) RemoveQueueItem(ctx context.Context, userID, itemID int64) error {
 
 // MoveQueueItem places itemID directly after afterItemID (0 = directly
 // after the current item, i.e. head of the upcoming slice).
-func (a *App) MoveQueueItem(ctx context.Context, userID, itemID, afterItemID int64) error {
+func (a *App) MoveQueueItem(ctx context.Context, userID int64, deviceID string, itemID, afterItemID int64) error {
 	var out sqlc.PlayQueue
 	err := a.withTx(ctx, func(q *sqlc.Queries) error {
-		pq, err := q.GetPlayQueueByUser(ctx, userID)
+		pq, err := q.GetPlayQueueByUserDevice(ctx, sqlc.GetPlayQueueByUserDeviceParams{UserID: userID, DeviceID: deviceID})
 		if err != nil {
 			return fmt.Errorf("no queue")
 		}
@@ -494,10 +494,10 @@ func (a *App) MoveQueueItem(ctx context.Context, userID, itemID, afterItemID int
 }
 
 // JumpToQueueItem moves the pointer to an arbitrary item (sidebar click).
-func (a *App) JumpToQueueItem(ctx context.Context, userID, itemID int64) (QueueView, error) {
+func (a *App) JumpToQueueItem(ctx context.Context, userID int64, deviceID string, itemID int64) (QueueView, error) {
 	var out sqlc.PlayQueue
 	err := a.withTx(ctx, func(q *sqlc.Queries) error {
-		pq, err := q.GetPlayQueueByUser(ctx, userID)
+		pq, err := q.GetPlayQueueByUserDevice(ctx, sqlc.GetPlayQueueByUserDeviceParams{UserID: userID, DeviceID: deviceID})
 		if err != nil {
 			return fmt.Errorf("no queue")
 		}
@@ -515,17 +515,17 @@ func (a *App) JumpToQueueItem(ctx context.Context, userID, itemID int64) (QueueV
 		return QueueView{}, err
 	}
 	a.emitQueue(userID, out, "pointer", 0)
-	return a.GetQueue(ctx, userID, nil, queueWindowDefault)
+	return a.GetQueue(ctx, userID, deviceID, nil, queueWindowDefault)
 }
 
 // AdvanceQueue moves the pointer per queue order. Idempotent: the caller
 // names the item it finished (fromItemID); a stale double-fire (already
 // advanced) is a silent no-op. reason ∈ ended | skip | prev.
-func (a *App) AdvanceQueue(ctx context.Context, userID, fromItemID int64, reason string) (QueueView, error) {
+func (a *App) AdvanceQueue(ctx context.Context, userID int64, deviceID string, fromItemID int64, reason string) (QueueView, error) {
 	var out sqlc.PlayQueue
 	var moved, pruned bool
 	err := a.withTx(ctx, func(q *sqlc.Queries) error {
-		pq, err := q.GetPlayQueueByUser(ctx, userID)
+		pq, err := q.GetPlayQueueByUserDevice(ctx, sqlc.GetPlayQueueByUserDeviceParams{UserID: userID, DeviceID: deviceID})
 		if err != nil {
 			return fmt.Errorf("no queue")
 		}
@@ -599,16 +599,16 @@ func (a *App) AdvanceQueue(ctx context.Context, userID, fromItemID int64, reason
 		}
 		a.emitQueue(userID, out, kind, 0)
 	}
-	return a.GetQueue(ctx, userID, nil, queueWindowDefault)
+	return a.GetQueue(ctx, userID, deviceID, nil, queueWindowDefault)
 }
 
 // SetQueueShuffle reorders the upcoming slice server-side: on = fresh
 // random order, off = the source's natural order (src_ord). Played
 // history and the current track never move.
-func (a *App) SetQueueShuffle(ctx context.Context, userID int64, on bool) error {
+func (a *App) SetQueueShuffle(ctx context.Context, userID int64, deviceID string, on bool) error {
 	var out sqlc.PlayQueue
 	err := a.withTx(ctx, func(q *sqlc.Queries) error {
-		pq, err := q.GetPlayQueueByUser(ctx, userID)
+		pq, err := q.GetPlayQueueByUserDevice(ctx, sqlc.GetPlayQueueByUserDeviceParams{UserID: userID, DeviceID: deviceID})
 		if err != nil {
 			return fmt.Errorf("no queue")
 		}
@@ -626,12 +626,12 @@ func (a *App) SetQueueShuffle(ctx context.Context, userID int64, on bool) error 
 }
 
 // SetQueueRepeat sets the repeat mode.
-func (a *App) SetQueueRepeat(ctx context.Context, userID int64, mode string) error {
+func (a *App) SetQueueRepeat(ctx context.Context, userID int64, deviceID, mode string) error {
 	if mode != "off" && mode != "all" && mode != "one" {
 		return fmt.Errorf("invalid repeat mode %q", mode)
 	}
 	q := sqlc.New(a.db)
-	pq, err := q.GetPlayQueueByUser(ctx, userID)
+	pq, err := q.GetPlayQueueByUserDevice(ctx, sqlc.GetPlayQueueByUserDeviceParams{UserID: userID, DeviceID: deviceID})
 	if err != nil {
 		return fmt.Errorf("no queue")
 	}
@@ -646,9 +646,9 @@ func (a *App) SetQueueRepeat(ctx context.Context, userID int64, mode string) err
 // QueueHeartbeat records the renderer's coarse position (~15s cadence
 // while playing). Only the active output may report; anything else gets
 // ErrQueueNotActiveOutput and should stop rendering.
-func (a *App) QueueHeartbeat(ctx context.Context, userID int64, output string, positionSec float64, playing bool) error {
+func (a *App) QueueHeartbeat(ctx context.Context, userID int64, deviceID, output string, positionSec float64, playing bool) error {
 	q := sqlc.New(a.db)
-	pq, err := q.GetPlayQueueByUser(ctx, userID)
+	pq, err := q.GetPlayQueueByUserDevice(ctx, sqlc.GetPlayQueueByUserDeviceParams{UserID: userID, DeviceID: deviceID})
 	if err != nil {
 		return fmt.Errorf("no queue")
 	}
@@ -667,9 +667,9 @@ func (a *App) QueueHeartbeat(ctx context.Context, userID int64, output string, p
 
 // ClaimQueueOutput makes `output` the one renderer. Every other client
 // sees the event and drops to mirror mode.
-func (a *App) ClaimQueueOutput(ctx context.Context, userID int64, output string) error {
+func (a *App) ClaimQueueOutput(ctx context.Context, userID int64, deviceID, output string) error {
 	q := sqlc.New(a.db)
-	pq, err := q.EnsurePlayQueue(ctx, userID)
+	pq, err := q.EnsurePlayQueue(ctx, sqlc.EnsurePlayQueueParams{UserID: userID, DeviceID: deviceID})
 	if err != nil {
 		return err
 	}
@@ -683,10 +683,10 @@ func (a *App) ClaimQueueOutput(ctx context.Context, userID int64, output string)
 
 // ClearUpcoming drops everything after the current item (the sidebar's
 // "Clear" on the Up Next header); history and the playing track stay.
-func (a *App) ClearUpcoming(ctx context.Context, userID int64) error {
+func (a *App) ClearUpcoming(ctx context.Context, userID int64, deviceID string) error {
 	var out sqlc.PlayQueue
 	err := a.withTx(ctx, func(q *sqlc.Queries) error {
-		pq, err := q.GetPlayQueueByUser(ctx, userID)
+		pq, err := q.GetPlayQueueByUserDevice(ctx, sqlc.GetPlayQueueByUserDeviceParams{UserID: userID, DeviceID: deviceID})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -712,10 +712,10 @@ func (a *App) ClearUpcoming(ctx context.Context, userID int64) error {
 }
 
 // ClearQueue empties the queue (pointer included).
-func (a *App) ClearQueue(ctx context.Context, userID int64) error {
+func (a *App) ClearQueue(ctx context.Context, userID int64, deviceID string) error {
 	var out sqlc.PlayQueue
 	err := a.withTx(ctx, func(q *sqlc.Queries) error {
-		pq, err := q.GetPlayQueueByUser(ctx, userID)
+		pq, err := q.GetPlayQueueByUserDevice(ctx, sqlc.GetPlayQueueByUserDeviceParams{UserID: userID, DeviceID: deviceID})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -745,6 +745,7 @@ func (a *App) emitQueue(userID int64, pq sqlc.PlayQueue, kind string, trackID in
 		return
 	}
 	payload := eventhub.QueueChangedPayload{
+		DeviceID:     pq.DeviceID,
 		Version:      pq.Version,
 		Kind:         kind,
 		PositionSec:  float64(pq.PositionSeconds),

@@ -15,7 +15,7 @@ const bumpQueueVersion = `-- name: BumpQueueVersion :one
 UPDATE play_queues
 SET version = version + 1, updated_at = now()
 WHERE id = $1
-RETURNING id, user_id, version, current_item_id, position_seconds, playing, repeat_mode, shuffled, source, active_output, updated_at
+RETURNING id, user_id, version, current_item_id, position_seconds, playing, repeat_mode, shuffled, source, active_output, updated_at, device_id
 `
 
 func (q *Queries) BumpQueueVersion(ctx context.Context, id int64) (PlayQueue, error) {
@@ -33,6 +33,7 @@ func (q *Queries) BumpQueueVersion(ctx context.Context, id int64) (PlayQueue, er
 		&i.Source,
 		&i.ActiveOutput,
 		&i.UpdatedAt,
+		&i.DeviceID,
 	)
 	return i, err
 }
@@ -126,21 +127,26 @@ func (q *Queries) DeleteUpcomingQueueItems(ctx context.Context, arg DeleteUpcomi
 
 const ensurePlayQueue = `-- name: EnsurePlayQueue :one
 
-INSERT INTO play_queues (user_id)
-VALUES ($1)
-ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
-RETURNING id, user_id, version, current_item_id, position_seconds, playing, repeat_mode, shuffled, source, active_output, updated_at
+INSERT INTO play_queues (user_id, device_id)
+VALUES ($1, $2)
+ON CONFLICT (user_id, device_id) DO UPDATE SET user_id = EXCLUDED.user_id
+RETURNING id, user_id, version, current_item_id, position_seconds, playing, repeat_mode, shuffled, source, active_output, updated_at, device_id
 `
 
-// Server-owned play queue (docs/queue-plan.md). One queue per user,
+type EnsurePlayQueueParams struct {
+	UserID   int64  `json:"user_id"`
+	DeviceID string `json:"device_id"`
+}
+
+// Server-owned play queue. One queue per user/device,
 // fully materialized; clients read windows around the pointer. Every
 // structural mutation bumps play_queues.version inside the service tx.
 //
 // Ordering keys are sparse (gap 1024). Rewrites (renumber, reshuffle,
 // unshuffle) land in a fresh range ABOVE max(ord) so the (queue_id, ord)
 // unique constraint never sees a transient collision mid-UPDATE.
-func (q *Queries) EnsurePlayQueue(ctx context.Context, userID int64) (PlayQueue, error) {
-	row := q.db.QueryRow(ctx, ensurePlayQueue, userID)
+func (q *Queries) EnsurePlayQueue(ctx context.Context, arg EnsurePlayQueueParams) (PlayQueue, error) {
+	row := q.db.QueryRow(ctx, ensurePlayQueue, arg.UserID, arg.DeviceID)
 	var i PlayQueue
 	err := row.Scan(
 		&i.ID,
@@ -154,6 +160,7 @@ func (q *Queries) EnsurePlayQueue(ctx context.Context, userID int64) (PlayQueue,
 		&i.Source,
 		&i.ActiveOutput,
 		&i.UpdatedAt,
+		&i.DeviceID,
 	)
 	return i, err
 }
@@ -197,12 +204,17 @@ func (q *Queries) FirstQueueItem(ctx context.Context, queueID int64) (PlayQueueI
 	return i, err
 }
 
-const getPlayQueueByUser = `-- name: GetPlayQueueByUser :one
-SELECT id, user_id, version, current_item_id, position_seconds, playing, repeat_mode, shuffled, source, active_output, updated_at FROM play_queues WHERE user_id = $1
+const getPlayQueueByUserDevice = `-- name: GetPlayQueueByUserDevice :one
+SELECT id, user_id, version, current_item_id, position_seconds, playing, repeat_mode, shuffled, source, active_output, updated_at, device_id FROM play_queues WHERE user_id = $1 AND device_id = $2
 `
 
-func (q *Queries) GetPlayQueueByUser(ctx context.Context, userID int64) (PlayQueue, error) {
-	row := q.db.QueryRow(ctx, getPlayQueueByUser, userID)
+type GetPlayQueueByUserDeviceParams struct {
+	UserID   int64  `json:"user_id"`
+	DeviceID string `json:"device_id"`
+}
+
+func (q *Queries) GetPlayQueueByUserDevice(ctx context.Context, arg GetPlayQueueByUserDeviceParams) (PlayQueue, error) {
+	row := q.db.QueryRow(ctx, getPlayQueueByUserDevice, arg.UserID, arg.DeviceID)
 	var i PlayQueue
 	err := row.Scan(
 		&i.ID,
@@ -216,6 +228,7 @@ func (q *Queries) GetPlayQueueByUser(ctx context.Context, userID int64) (PlayQue
 		&i.Source,
 		&i.ActiveOutput,
 		&i.UpdatedAt,
+		&i.DeviceID,
 	)
 	return i, err
 }
@@ -849,7 +862,7 @@ SET repeat_mode = $1,
     shuffled    = $2,
     version = version + 1, updated_at = now()
 WHERE id = $3
-RETURNING id, user_id, version, current_item_id, position_seconds, playing, repeat_mode, shuffled, source, active_output, updated_at
+RETURNING id, user_id, version, current_item_id, position_seconds, playing, repeat_mode, shuffled, source, active_output, updated_at, device_id
 `
 
 type SetQueueModesParams struct {
@@ -873,6 +886,7 @@ func (q *Queries) SetQueueModes(ctx context.Context, arg SetQueueModesParams) (P
 		&i.Source,
 		&i.ActiveOutput,
 		&i.UpdatedAt,
+		&i.DeviceID,
 	)
 	return i, err
 }
@@ -882,7 +896,7 @@ UPDATE play_queues
 SET active_output = $1,
     version = version + 1, updated_at = now()
 WHERE id = $2
-RETURNING id, user_id, version, current_item_id, position_seconds, playing, repeat_mode, shuffled, source, active_output, updated_at
+RETURNING id, user_id, version, current_item_id, position_seconds, playing, repeat_mode, shuffled, source, active_output, updated_at, device_id
 `
 
 type SetQueueOutputParams struct {
@@ -905,6 +919,7 @@ func (q *Queries) SetQueueOutput(ctx context.Context, arg SetQueueOutputParams) 
 		&i.Source,
 		&i.ActiveOutput,
 		&i.UpdatedAt,
+		&i.DeviceID,
 	)
 	return i, err
 }
@@ -916,7 +931,7 @@ SET current_item_id  = $1,
     playing          = $3,
     version = version + 1, updated_at = now()
 WHERE id = $4
-RETURNING id, user_id, version, current_item_id, position_seconds, playing, repeat_mode, shuffled, source, active_output, updated_at
+RETURNING id, user_id, version, current_item_id, position_seconds, playing, repeat_mode, shuffled, source, active_output, updated_at, device_id
 `
 
 type SetQueuePointerParams struct {
@@ -946,6 +961,7 @@ func (q *Queries) SetQueuePointer(ctx context.Context, arg SetQueuePointerParams
 		&i.Source,
 		&i.ActiveOutput,
 		&i.UpdatedAt,
+		&i.DeviceID,
 	)
 	return i, err
 }
@@ -959,7 +975,7 @@ SET source           = $1,
     playing          = $4,
     version = version + 1, updated_at = now()
 WHERE id = $5
-RETURNING id, user_id, version, current_item_id, position_seconds, playing, repeat_mode, shuffled, source, active_output, updated_at
+RETURNING id, user_id, version, current_item_id, position_seconds, playing, repeat_mode, shuffled, source, active_output, updated_at, device_id
 `
 
 type SetQueueReplacedParams struct {
@@ -992,6 +1008,7 @@ func (q *Queries) SetQueueReplaced(ctx context.Context, arg SetQueueReplacedPara
 		&i.Source,
 		&i.ActiveOutput,
 		&i.UpdatedAt,
+		&i.DeviceID,
 	)
 	return i, err
 }
@@ -1002,7 +1019,7 @@ SET position_seconds = $1,
     playing          = $2,
     updated_at = now()
 WHERE id = $3
-RETURNING id, user_id, version, current_item_id, position_seconds, playing, repeat_mode, shuffled, source, active_output, updated_at
+RETURNING id, user_id, version, current_item_id, position_seconds, playing, repeat_mode, shuffled, source, active_output, updated_at, device_id
 `
 
 type SetQueueTransportParams struct {
@@ -1028,6 +1045,7 @@ func (q *Queries) SetQueueTransport(ctx context.Context, arg SetQueueTransportPa
 		&i.Source,
 		&i.ActiveOutput,
 		&i.UpdatedAt,
+		&i.DeviceID,
 	)
 	return i, err
 }

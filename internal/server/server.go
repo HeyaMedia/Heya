@@ -100,6 +100,9 @@ func BuildAPI(mux *http.ServeMux, app *service.App, cfg *config.Config, opts ...
 	registerPodcastRoutes(api, app)
 	registerCastRoutes(api, app)
 	registerQueueRoutes(api, app)
+	if o.hub != nil {
+		registerClientDeviceRoutes(api, o.hub)
+	}
 	registerStreamRoutes(api, app)
 	registerBinaryRoutes(api, app)
 	registerDocsRoutes(api)

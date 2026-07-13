@@ -29121,6 +29121,16 @@
     "/api/me/queue": {
       "delete": {
         "operationId": "queue-clear",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "device_id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "No Content"
@@ -29149,6 +29159,14 @@
       "get": {
         "operationId": "queue-get",
         "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "device_id",
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "description": "Window anchor ord; 0 anchors on the current item",
             "explode": false,
@@ -29213,6 +29231,16 @@
       },
       "post": {
         "operationId": "queue-replace",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "device_id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -29266,6 +29294,16 @@
     "/api/me/queue/advance": {
       "post": {
         "operationId": "queue-advance",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "device_id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -29319,6 +29357,16 @@
     "/api/me/queue/claim": {
       "post": {
         "operationId": "queue-claim",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "device_id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -29358,6 +29406,16 @@
     "/api/me/queue/heartbeat": {
       "post": {
         "operationId": "queue-heartbeat",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "device_id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -29397,6 +29455,16 @@
     "/api/me/queue/items": {
       "post": {
         "operationId": "queue-enqueue",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "device_id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -29452,6 +29520,14 @@
         "operationId": "queue-remove-item",
         "parameters": [
           {
+            "explode": false,
+            "in": "query",
+            "name": "device_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
             "name": "id",
             "required": true,
@@ -29491,6 +29567,14 @@
       "post": {
         "operationId": "queue-move-item",
         "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "device_id",
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "id",
@@ -29540,6 +29624,16 @@
     "/api/me/queue/jump": {
       "post": {
         "operationId": "queue-jump",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "device_id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -29593,6 +29687,16 @@
     "/api/me/queue/repeat": {
       "post": {
         "operationId": "queue-repeat",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "device_id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -29632,6 +29736,16 @@
     "/api/me/queue/shuffle": {
       "post": {
         "operationId": "queue-shuffle",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "device_id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -29671,6 +29785,16 @@
     "/api/me/queue/upcoming": {
       "delete": {
         "operationId": "queue-clear-upcoming",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "device_id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "No Content"

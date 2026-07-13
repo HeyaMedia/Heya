@@ -25,6 +25,7 @@ export interface CastDevice {
   addr?: string
   port?: number
   last_seen?: string
+  kind?: string
 }
 
 export interface CastSession {
@@ -115,9 +116,21 @@ export const useCastStore = defineStore('cast', () => {
     const { $heya } = useNuxtApp()
     try {
       const res = await $heya('/api/cast/devices') as { items?: CastDevice[] | null }
-      devices.value = res.items ?? []
+      const clients = await ($heya as any)('/api/me/devices') as { items?: Array<{ id: string, name: string, kind: string, last_seen: string }> }
+      devices.value = [
+        ...(clients.items ?? []).filter(d => d.id !== clientDeviceID()).map(d => ({ ...d, provider: 'client' })),
+        ...(res.items ?? []),
+      ]
     } catch { /* casting disabled or unreachable — keep the last list */ }
     devicesLoaded.value = true
+  }
+
+  const isClientDevice = computed(() => engagedDeviceId.value?.startsWith('client:') ?? false)
+  async function clientCommand(action: string, args?: Record<string, unknown>) {
+    const id = engagedDeviceId.value
+    if (!id) return
+    const { $heya } = useNuxtApp()
+    await ($heya as any)('/api/me/devices/{id}/command', { method: 'POST', path: { id }, body: { action, args } })
   }
 
   // Adopt a session that already exists server-side. Called at boot (page
@@ -151,6 +164,10 @@ export const useCastStore = defineStore('cast', () => {
   async function playTrack(trackId: number, fallbackVolume: number, startSeconds = 0) {
     const deviceId = engagedDeviceId.value
     if (!deviceId) throw new Error('no cast device engaged')
+    if (deviceId.startsWith('client:')) {
+      await clientCommand('play', { track_id: trackId, position_seconds: startSeconds })
+      return
+    }
     const { $heya } = useNuxtApp()
     connecting.value = true
     lastRequestedTrackId = trackId
@@ -182,6 +199,7 @@ export const useCastStore = defineStore('cast', () => {
   }
 
   async function pause() {
+    if (isClientDevice.value) { await clientCommand('pause'); return }
     const s = session.value
     if (!s) return
     // Optimistic: the receiver goes silent near-instantly (transport
@@ -194,6 +212,7 @@ export const useCastStore = defineStore('cast', () => {
   }
 
   async function resume() {
+    if (isClientDevice.value) { await clientCommand('resume'); return }
     const s = session.value
     if (!s) return
     // Resume respawns the sender at the frozen position (~2-3s of
@@ -205,6 +224,7 @@ export const useCastStore = defineStore('cast', () => {
   }
 
   async function seekTo(seconds: number) {
+    if (isClientDevice.value) { await clientCommand('seek', { seconds }); return }
     const s = session.value
     if (!s) return
     samplePosition(seconds)
@@ -221,6 +241,7 @@ export const useCastStore = defineStore('cast', () => {
   // Volume drags fire per pixel — debounce the POST, apply optimistically.
   let volumeTimer: ReturnType<typeof setTimeout> | null = null
   function setVolume(level: number) {
+    if (isClientDevice.value) { void clientCommand('volume', { level }); return }
     const s = session.value
     if (!s) return
     const clamped = Math.max(0, Math.min(100, Math.round(level)))
@@ -245,6 +266,7 @@ export const useCastStore = defineStore('cast', () => {
   // event reads as deliberate, not as a natural end to advance past.
   async function stopSession() {
     ownsPlayback = false
+    if (isClientDevice.value) { await clientCommand('stop'); return }
     const s = session.value
     session.value = null
     if (!s) return
@@ -308,7 +330,7 @@ export const useCastStore = defineStore('cast', () => {
 
   return {
     devices, devicesLoaded, session, engagedDeviceId, connecting, lastDeviceVolume,
-    engaged, deviceName,
+    engaged, deviceName, isClientDevice,
     refreshDevices, adoptExisting,
     playTrack, pause, resume, seekTo, setVolume, stopSession, disconnect,
     applyEvent, livePositionSec,

@@ -23,11 +23,11 @@ one.
 
 | Decision | Choice | Why |
 | --- | --- | --- |
-| Queue scope | **One queue per user** (`play_queues.user_id UNIQUE`) | The "reconnect anywhere and see it" story only has a clean answer with a single queue; household = per-user is enough isolation |
+| Queue scope | **One queue per user/device** (`UNIQUE(user_id, device_id)`) | Each renderer keeps its own context. Selecting another Heya client binds the controller to that device's queue without copying or merging queues. |
 | Player model | **One active output per user** (Spotify Connect semantics) | Two tabs advancing one pointer is chaos. A second tab becomes a mirror/remote; its play button = "play here" (transfer) |
 | Queue storage | **Materialize fully**, windowed reads | 10k rows is nothing for PG (`INSERT … SELECT … ORDER BY random()`); stable order makes repeat/reorder/up-next well-defined. No sampling/virtual queue in v1 |
 | Client view | **Window around the pointer** (current ± ~50, paged) | Clients never hold the full queue; fixes the 10k-array problem outright |
-| Live sync | **WS, per-user scoped** (`hub.PublishToUser`) | Plumbing already exists; cast events are household-global, queue events are personal |
+| Live sync | **WS, per-user scoped and device-tagged** (`hub.PublishToUser`) | Every client receives its own user's events and applies only the selected target device's queue events. |
 | Event shape | Thin `queue.changed` + `version` counter; refetch window on version gap | Live Interactivity pattern — lean invalidate+refetch, no CRDT ambitions |
 | Cutover | **Full swap, no dual path** | Client-queue and server-queue side by side is permanent complexity. Local playback consumes the server queue too |
 | Sequencing | **Queue swap first, cast binds after** | Prove the model with the daily-driver (local playback) before rewiring cast advance |
@@ -90,7 +90,7 @@ CREATE TABLE play_queue_items (
 | `POST   /api/me/queue/claim` | `{output: 'local:<client_id>' \| 'cast:<device_id>'}` — become the active output; everyone else drops to mirror |
 | `DELETE /api/me/queue` | Clear |
 
-WS: one per-user event, `queue.changed {version, kind: 'replaced'|'items'|'pointer'|'transport'|'output', current_item_id, position_seconds, playing, active_output}`.
+WS: one per-user event, `queue.changed {device_id, version, kind: 'replaced'|'items'|'pointer'|'transport'|'output', current_item_id, position_seconds, playing, active_output}`.
 Common cases (pointer move, transport flip) apply straight from the
 payload; anything structural (`replaced`, `items`) triggers a window
 refetch. CLI mutations reach the serve process's hub via the existing

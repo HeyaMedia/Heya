@@ -31,7 +31,7 @@
         class="surface-item app-context-item cast-device-item"
         @select="pick(d.id)"
       >
-        <Icon name="speakerhigh" :size="15" class="surface-item-icon" />
+        <Icon :name="d.provider === 'client' ? 'television-simple' : 'speakerhigh'" :size="15" class="surface-item-icon" />
         <span class="cast-device-text">
           <span class="cast-device-name">{{ d.name }}</span>
           <span v-if="deviceSub(d)" class="cast-device-sub">{{ deviceSub(d) }}</span>
@@ -77,6 +77,7 @@ function pick(deviceId: string) {
 function disconnect() { void stopCasting() }
 
 function deviceSub(d: CastDevice) {
+  if (d.provider === 'client') return d.kind ? `Heya ${d.kind}` : 'Heya client'
   return [d.manufacturer, d.model].filter(Boolean).join(' ')
 }
 </script>
@@ -132,7 +133,4 @@ function deviceSub(d: CastDevice) {
   to { transform: rotate(360deg); }
 }
 
-@media (max-width: 720px) {
-  .topbar-cast-btn { display: none; }
-}
 </style>
