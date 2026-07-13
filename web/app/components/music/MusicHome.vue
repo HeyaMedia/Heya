@@ -571,7 +571,7 @@ function formatLapsed(a: LapsedArtist) {
   return 'a while ago — back to'
 }
 
-const { play, queue } = usePlayerBindings()
+const { play, queue, playTracks } = usePlayerBindings()
 const actions = useMusicActions()
 const playlistMenu = usePlaylistMenu()
 const { isCoarse } = useViewport()
@@ -605,8 +605,7 @@ function mixTrackToTrack(t: MixTrack): Track {
 async function playMix(mix: Mix) {
   if (!mix.tracks.length) return
   const tracks = mix.tracks.map(mixTrackToTrack)
-  queue.value = tracks
-  await play(tracks[0]!)
+  await playTracks(tracks)
 }
 
 async function playAlbumByArtistSlug(artistSlug: string, albumSlug: string, artistName: string, albumTitle: string, albumId: number) {
@@ -631,8 +630,7 @@ async function playAlbumByArtistSlug(artistSlug: string, albumSlug: string, arti
         true_peak_db: primary?.true_peak_db != null ? parseFloat(primary.true_peak_db) : null,
       }
     })
-    queue.value = tracks
-    await play(tracks[0]!)
+    await playTracks(tracks)
   } catch {
     // Swallow — the NuxtLink wrapper still routes to the detail page on
     // outer click; we lose the play-from-mosaic gesture only.
@@ -683,8 +681,7 @@ async function playArtist(slug: string, artistName: string) {
       source: 'artist',
     }))
     if (!tracks.length) return
-    queue.value = tracks
-    await play(tracks[0]!)
+    await playTracks(tracks)
   } catch {
     // outer NuxtLink still navigates — that's the fallback
   }
@@ -711,8 +708,7 @@ async function playPlaylist(id: number, name: string) {
       source: 'playlist',
     }))
     if (!tracks.length) return
-    queue.value = tracks
-    await play(tracks[0]!)
+    await playTracks(tracks)
   } catch {
     // outer NuxtLink to /music/playlist/:id still navigates
   }

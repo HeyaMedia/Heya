@@ -75,7 +75,7 @@ function episodeHash(feedURL: string, guid: string): number {
 // usePodcastActions — subscription state + episode playback. The
 // subscribed-set is cached app-wide so the toggle is instant across pages.
 export function usePodcastActions() {
-  const { play, queue } = usePlayerBindings()
+  const { playLocal } = usePlayerBindings()
   const subscribedSet = useState<Set<string>>('podcast_subs', () => new Set())
   const subscribedLoaded = useState('podcast_subs_loaded', () => false)
 
@@ -116,8 +116,7 @@ export function usePodcastActions() {
   // so a single-item queue is cleaner and avoids surprise autoplay.
   async function playEpisode(podcast: PodcastDetail, episode: PodcastEpisode) {
     const track = episodeToTrack(podcast, episode)
-    queue.value = [track]
-    await play(track)
+    await playLocal([track], track)
   }
 
   return { ensureSubscriptionsLoaded, isSubscribed, subscribe, unsubscribe, playEpisode, subscribedSet }

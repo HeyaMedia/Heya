@@ -173,7 +173,7 @@ const router = useRouter()
 // creates that only know the id). Everything downstream keys on String(ref).
 const playlistRef = computed(() => String(route.params.slug ?? ''))
 
-const { play, queue, currentTrack, playing, formatTime } = usePlayerBindings()
+const { play, queue, currentTrack, playing, formatTime, playTracks, playContext } = usePlayerBindings()
 const playlists = usePlaylists()
 const queryClient = useQueryCache()
 const { $heya } = useNuxtApp()
@@ -412,15 +412,14 @@ async function playAll(shuffle: boolean) {
   let list = tracks.value.filter(isPlayable).map(toPlayable)
   if (shuffle) list = [...list].sort(() => Math.random() - 0.5)
   if (!list.length) return
-  queue.value = list
-  await play(list[0])
+  await playTracks(list)
 }
 
 async function playFrom(idx: number) {
   const target = tracks.value[idx]
   if (!target || !isPlayable(target)) return
-  queue.value = tracks.value.filter(isPlayable).map(toPlayable)
-  await play(toPlayable(target))
+  // Semantic source: the server owns the playlist order + availability.
+  await playContext({ kind: 'playlist', id: playlistId.value }, { startTrackId: target.track_id })
 }
 
 async function removeRow(trackId: number) {

@@ -1,5 +1,5 @@
 import { useAudioEngine } from '~/composables/useAudioEngine'
-import type { QueueItem } from '~/composables/useQueue'
+import type { QueueItem, QueueSourceInput } from '~/composables/useQueue'
 import { resumeContext } from '~/engine/context'
 import { shouldSuppressCrossfade } from '~/engine/crossfade/albumAware'
 import { SmartCrossfade } from '~/engine/crossfade/smartCrossfade'
@@ -211,21 +211,6 @@ export const usePlayerStore = defineStore('player', () => {
   }
   const serverQueueTracks = computed(() => qs.items.map(itemToTrack))
 
-  // Staged replace: coalesces `queue.value = tracks` + the play(track)
-  // that always follows into one POST with the right start track. If no
-  // play() lands (rare), the timer flushes with the head as the start.
-  let stagedTracks: Track[] | null = null
-  let stagedTimer: ReturnType<typeof setTimeout> | null = null
-  function flushStagedReplace(startTrackID: number) {
-    if (stagedTimer) { clearTimeout(stagedTimer); stagedTimer = null }
-    const tracks = stagedTracks
-    stagedTracks = null
-    if (!tracks?.length) return
-    void qs.replace(
-      { kind: 'tracks', track_ids: tracks.map((t) => t.id) },
-      startTrackID, false, queueOutputID(),
-    ).catch(() => { /* queue view refetches via WS; playback already started */ })
-  }
   // The output the server should attribute playback to: the cast device
   // while casting, this tab otherwise (Phase C moves cast fully onto this).
   function queueOutputID(): string {
@@ -233,30 +218,11 @@ export const usePlayerStore = defineStore('player', () => {
     return cast.engaged && cast.engagedDeviceId ? `cast:${cast.engagedDeviceId}` : qs.outputID
   }
 
-  const queue = computed<Track[]>({
-    get: () => (localMode.value ? localQueue.value : serverQueueTracks.value),
-    set: (tracks) => {
-      if (!tracks || tracks.length === 0) {
-        // Deliberately does NOT clear the server queue: it's the user's
-        // persistent queue now, and empty assignments happen incidentally
-        // (teardown paths, resets). Only the explicit hold-to-stop gesture
-        // (stop()) and the panel's Clear deleted server state.
-        localMode.value = false
-        localQueue.value = []
-        originalOrder.value = []
-        return
-      }
-      if (tracks.some((t) => t.isStream || t.id <= 0)) {
-        localMode.value = true
-        localQueue.value = tracks
-        return
-      }
-      localMode.value = false
-      stagedTracks = tracks
-      if (stagedTimer) clearTimeout(stagedTimer)
-      stagedTimer = setTimeout(() => flushStagedReplace(tracks[0]?.id ?? 0), 50)
-    },
-  })
+  // Read-only: the queue is server state (or the local stream list). It
+  // changes through playContext/playTracks/playLocal and the queue ops —
+  // never by assignment.
+  const queue = computed<Track[]>(() =>
+    localMode.value ? localQueue.value : serverQueueTracks.value)
 
   const shuffled = computed<boolean>({
     get: () => (localMode.value ? localShuffled.value : qs.shuffled),
@@ -708,16 +674,69 @@ export const usePlayerStore = defineStore('player', () => {
     void qs.advance(from, reason).catch(() => { /* WS view reconciles */ })
   }
 
-  // syncQueuePointer keeps the server pointer in step with a direct
-  // play(track): a staged context replace flushes with this start track;
-  // an in-queue track becomes a jump; anything else becomes a one-track
-  // queue. jumpTo() passes skipQueueSync — it already jumped precisely.
-  function syncQueuePointer(track: Track) {
-    if (!import.meta.client || localMode.value || track.isStream || track.id <= 0) return
-    if (stagedTracks) {
-      flushStagedReplace(track.id)
+  // --- Context playback: THE way to start playing something ---------------
+  // The server materializes the full source (an artist's whole
+  // discography, a 10k-track genre) — clients only ever see the window,
+  // which is exactly what makes server-side shuffle truly random.
+  async function playContext(source: QueueSourceInput, opts?: {
+    startTrackId?: number
+    // Play THIS exact object (its stream_url/loudness overrides intact —
+    // the quality picker's play-this-file path) instead of rebuilding the
+    // track from the window row. Implies startTrackId.
+    startTrack?: Track
+    shuffle?: boolean
+  }) {
+    if (!import.meta.client) return
+    localMode.value = false
+    originalOrder.value = []
+    let view
+    try {
+      view = await qs.replace(source, opts?.startTrack?.id ?? opts?.startTrackId ?? 0, !!opts?.shuffle, queueOutputID())
+    } catch {
+      useToast().toast.err('Nothing playable in this selection')
       return
     }
+    if (opts?.startTrack) {
+      await play(opts.startTrack, { skipQueueSync: true })
+      return
+    }
+    const current = view.items.find((i) => i.item_id === (view.current_item_id ?? 0)) ?? view.items[0]
+    if (!current) return
+    await play(itemToTrack(current), { skipQueueSync: true })
+  }
+
+  // Explicit track lists (mixes, top-tracks, multi-selects). Lists that
+  // contain non-library entries (radio streams, podcast episodes) can't
+  // live server-side and drop to the local queue.
+  async function playTracks(tracks: Track[], start?: Track, opts?: { shuffle?: boolean }) {
+    const list = tracks.filter((t) => t.available !== false)
+    if (!list.length) return
+    if (list.some((t) => t.isStream || t.id <= 0)) {
+      await playLocal(list, start)
+      return
+    }
+    await playContext(
+      { kind: 'tracks', track_ids: list.map((t) => t.id) },
+      { startTrack: start, shuffle: opts?.shuffle },
+    )
+  }
+
+  // Local-only playback for things that aren't music-track rows: internet
+  // radio streams and podcast episodes. The server queue is left alone.
+  async function playLocal(tracks: Track[], start?: Track) {
+    localMode.value = true
+    localQueue.value = tracks
+    originalOrder.value = []
+    const first = start ?? tracks[0]
+    if (first) await play(first, { skipQueueSync: true })
+  }
+
+  // syncQueuePointer keeps the server pointer in step with a direct
+  // play(track): an in-queue track becomes a jump; anything else becomes
+  // a one-track queue. jumpTo()/playContext() pass skipQueueSync — they
+  // already positioned the pointer precisely.
+  function syncQueuePointer(track: Track) {
+    if (!import.meta.client || localMode.value || track.isStream || track.id <= 0) return
     const item = qs.items.find((i) => i.track_id === track.id)
     if (item) {
       if (item.item_id !== qs.currentItemID) void qs.jump(item.item_id).catch(() => {})
@@ -1186,8 +1205,7 @@ export const usePlayerStore = defineStore('player', () => {
     const list = (Array.isArray(tracks) ? tracks : [tracks]).filter((t) => t.available !== false)
     if (!list.length) return
     if (!queue.value.length) {
-      queue.value = list
-      await play(list[0]!)
+      await playTracks(list)
       return
     }
     if (!localMode.value) {
@@ -1210,8 +1228,7 @@ export const usePlayerStore = defineStore('player', () => {
     const list = (Array.isArray(tracks) ? tracks : [tracks]).filter((t) => t.available !== false)
     if (!list.length) return
     if (!queue.value.length) {
-      queue.value = list
-      await play(list[0]!)
+      await playTracks(list)
       return
     }
     if (!localMode.value) {
@@ -1258,7 +1275,8 @@ export const usePlayerStore = defineStore('player', () => {
     if (engineWired.value) ensureEngine().stop()
     playing.value = false
     currentTrack.value = null
-    queue.value = []
+    localMode.value = false
+    localQueue.value = []
     originalOrder.value = []
     position.value = 0
     duration.value = 0
@@ -1358,6 +1376,7 @@ export const usePlayerStore = defineStore('player', () => {
     currentIndex, playedTracks, upcomingTracks, upcomingCount,
     nextUp, progress, hasPrevious, hasNext,
     play, pause, togglePlay, seek, setVolume, toggleMute, stop,
+    playContext, playTracks, playLocal,
     toggleShuffle, cycleRepeat, nextTrack, prevTrack,
     toggleLoved, toggleQueue, toggleLyrics, formatTime,
     jumpTo, removeFromQueue, moveInQueue, clearUpcoming,
@@ -1376,6 +1395,9 @@ export function usePlayerBindings() {
   return {
     ...storeToRefs(store),
     play: store.play,
+    playContext: store.playContext,
+    playTracks: store.playTracks,
+    playLocal: store.playLocal,
     pause: store.pause,
     togglePlay: store.togglePlay,
     seek: store.seek,

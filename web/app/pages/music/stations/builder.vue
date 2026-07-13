@@ -242,7 +242,7 @@ import { refDebounced } from '@vueuse/core'
 
 definePageMeta({ layout: 'default' })
 
-const { play, queue } = usePlayerBindings()
+const { play, queue, playTracks } = usePlayerBindings()
 const { $heya } = useNuxtApp()
 const playlistsApi = usePlaylists()
 
@@ -537,14 +537,12 @@ function trackRowToTrack(t: RichTrackRow): Track {
 async function playAll() {
   if (!builtTracks.value.length) return
   const built = builtTracks.value.map(trackRowToTrack)
-  queue.value = built
-  await play(built[0]!)
+  await playTracks(built)
 }
 
 async function playFrom(i: number) {
   const built = builtTracks.value.map(trackRowToTrack)
-  queue.value = built
-  await play(built[i]!)
+  await playTracks(built, built[i])
 }
 
 async function onSaveAsPlaylist() {

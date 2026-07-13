@@ -461,7 +461,7 @@ import { mediaDetailQuery } from '~/queries/media'
 const props = defineProps<{ mediaId: number; slug: string }>()
 
 const route = useRoute()
-const { play, queue, currentTrack, playing, formatTime } = usePlayerBindings()
+const { playContext, playTracks, addToQueue, currentTrack, playing, formatTime } = usePlayerBindings()
 const radio = useRadio()
 
 // Now-playing markers. A Popular Tracks row lights up when the playing track
@@ -871,22 +871,16 @@ function trackFromAlbum(album: AlbumView, t: TrackView): Track {
 }
 
 async function playAlbum(album: AlbumView, shuffle: boolean) {
-  let tracks = album.tracks.filter(isTrackPlayable).map((t) => trackFromAlbum(album, t))
-  if (shuffle) tracks = [...tracks].sort(() => Math.random() - 0.5)
-  if (!tracks.length) return
-  queue.value = tracks
-  await play(tracks[0])
+  // Semantic source: server materializes (and truly shuffles) the album.
+  await playContext({ kind: 'album', id: album.id }, { shuffle })
 }
 
 async function playAll(shuffle: boolean) {
-  let tracks: Track[] = []
-  for (const al of albums.value) {
-    for (const t of al.tracks) if (isTrackPlayable(t)) tracks.push(trackFromAlbum(al, t))
-  }
-  if (shuffle) tracks = [...tracks].sort(() => Math.random() - 0.5)
-  if (!tracks.length) return
-  queue.value = tracks
-  await play(tracks[0])
+  // Semantic source: the FULL discography server-side — not just the
+  // albums this page happened to load — with true random shuffle.
+  const artistID = artist.value?.id
+  if (!artistID) return
+  await playContext({ kind: 'artist', id: artistID }, { shuffle })
 }
 
 function addAllToQueue() {
@@ -894,7 +888,7 @@ function addAllToQueue() {
   for (const al of albums.value) {
     for (const t of al.tracks) if (isTrackPlayable(t)) tracks.push(trackFromAlbum(al, t))
   }
-  queue.value = [...queue.value, ...tracks]
+  void addToQueue(tracks)
 }
 
 function topTrackToTrack(t: ArtistTopTrackRow): Track {
@@ -955,16 +949,13 @@ function onTtRowTap(t: ArtistTopTrackRow) {
 async function playTopTrack(t: ArtistTopTrackRow) {
   if (!isTopTrackPlayable(t)) return
   const built = topTrackToTrack(t)
-  queue.value = [built]
-  await play(built)
+  await playTracks([built])
 }
 
 async function playTopAll(shuffle: boolean) {
-  let owned = topTracks.value.filter(isTopTrackPlayable).map(topTrackToTrack)
+  const owned = topTracks.value.filter(isTopTrackPlayable).map(topTrackToTrack)
   if (!owned.length) return
-  if (shuffle) owned = [...owned].sort(() => Math.random() - 0.5)
-  queue.value = owned
-  await play(owned[0]!)
+  await playTracks(owned, undefined, { shuffle })
 }
 
 if (import.meta.client) {

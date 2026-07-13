@@ -77,7 +77,7 @@ const kind = computed(() => route.params.kind as MusicBrowseKind)
 const bucketKey = computed(() => route.params.key as string)
 
 const { $heya } = useNuxtApp()
-const { play, queue, currentTrack, playing, formatTime } = usePlayerBindings()
+const { play, queue, currentTrack, playing, formatTime, playTracks } = usePlayerBindings()
 const actions = useMusicActions()
 
 const PAGE = 100
@@ -207,15 +207,13 @@ async function playAll(shuffle: boolean) {
   let list = loadedItems().map(({ item }) => rowToTrack(item))
   if (shuffle) list = [...list].sort(() => Math.random() - 0.5)
   if (!list.length) return
-  queue.value = list
-  await play(list[0])
+  await playTracks(list)
 }
 
 async function playFrom(idx: number) {
   const target = itemAt(idx)
   if (!target) return
-  queue.value = loadedItems().map(({ item }) => rowToTrack(item))
-  await play(rowToTrack(target))
+  await playTracks(loadedItems().map(({ item }) => rowToTrack(item)), rowToTrack(target))
 }
 
 </script>

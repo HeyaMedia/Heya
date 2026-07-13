@@ -91,7 +91,7 @@ const route = useRoute()
 const slug = computed(() => String(route.params.slug ?? ''))
 
 const { $heya } = useNuxtApp()
-const { play, currentTrack, queue } = usePlayerBindings()
+const { play, currentTrack, queue, playTracks } = usePlayerBindings()
 const actions = useMusicActions()
 
 // Shares the cache key with MusicHome's mixes-for-you query — opening
@@ -125,15 +125,13 @@ async function playAll(shuffle: boolean) {
   if (shuffle) {
     tracks = [...tracks].sort(() => Math.random() - 0.5)
   }
-  queue.value = tracks
-  await play(tracks[0]!)
+  await playTracks(tracks)
 }
 
 async function playFrom(index: number) {
   if (!mix.value?.tracks.length) return
   const tracks = mix.value.tracks.map(mixTrackToTrack)
-  queue.value = tracks
-  await play(tracks[index]!)
+  await playTracks(tracks, tracks[index])
 }
 
 // TrackList migration (W2c) — the header row stays hand-rolled above (see

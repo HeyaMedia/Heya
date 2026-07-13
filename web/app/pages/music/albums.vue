@@ -55,7 +55,7 @@ import { musicAlbumDetailQuery } from '~/queries/music'
 definePageMeta({ layout: 'default' })
 
 const { $heya } = useNuxtApp()
-const { play, queue } = usePlayerBindings()
+const { play, queue, playTracks } = usePlayerBindings()
 const actions = useMusicActions()
 const albumRatings = useRatings('album')
 const albumRatingValues = albumRatings.ratings
@@ -95,8 +95,7 @@ async function playAlbum(al: MusicAlbumRow) {
       poster: useAlbumCoverUrl(al.artist_slug, al.slug) ?? undefined,
       source: 'album',
     }))
-    queue.value = built
-    await play(built[0]!)
+    await playTracks(built)
   } catch {
     // fall through — outer link still navigates
   }

@@ -15,7 +15,7 @@ const route = useRoute()
 const artistSlug = computed(() => route.params.slug as string)
 const albumSlug = computed(() => route.params.album as string)
 
-const { play, queue, currentTrack, playing, formatTime } = usePlayerBindings()
+const { play, queue, currentTrack, playing, formatTime, playTracks, addToQueue } = usePlayerBindings()
 
 const albumRatings = useRatings('album')
 async function onRateAlbum(id: number, v: number) {
@@ -174,14 +174,12 @@ async function playAll(shuffle: boolean) {
   let pl = playableTracks.value.map(trackToPlayable)
   if (shuffle) pl = [...pl].sort(() => Math.random() - 0.5)
   if (!pl.length) return
-  queue.value = pl
-  await play(pl[0])
+  await playTracks(pl)
 }
 
 async function playFrom(track: TrackView) {
   if (!isPlayable(track)) return
-  queue.value = playableTracks.value.map(trackToPlayable)
-  await play(trackToPlayable(track))
+  await playTracks(playableTracks.value.map(trackToPlayable), trackToPlayable(track))
 }
 
 async function playFromFile(track: TrackView, file: TrackFile) {
@@ -192,12 +190,13 @@ async function playFromFile(track: TrackView, file: TrackFile) {
   playable.track_file_id = file.id
   playable.integrated_lufs = file.integrated_lufs != null ? parseFloat(file.integrated_lufs) : null
   playable.true_peak_db = file.true_peak_db != null ? parseFloat(file.true_peak_db) : null
-  queue.value = tracks.value.map((t) => (t.id === track.id ? playable : trackToPlayable(t)))
-  await play(playable)
+  // startTrack passes the object through verbatim so the explicit file
+  // URL survives (the server queue only knows track ids).
+  await playTracks(tracks.value.filter(isPlayable).map(trackToPlayable), playable)
 }
 
 function queueAll() {
-  queue.value = [...queue.value, ...playableTracks.value.map(trackToPlayable)]
+  void addToQueue(playableTracks.value.map(trackToPlayable))
 }
 
 const radio = useRadio()

@@ -68,7 +68,7 @@ interface RatedTrackRow {
   available?: boolean
 }
 
-const { play, queue, currentTrack, playing, formatTime } = usePlayerBindings()
+const { play, queue, currentTrack, playing, formatTime, playTracks } = usePlayerBindings()
 const { $heya } = useNuxtApp()
 const trackRatings = useTrackRatings()
 const ratings = trackRatings.ratings
@@ -157,8 +157,7 @@ async function playFrom(i: number) {
     .filter((r) => r.available !== false)
     .map(toPlayable)
   if (!built.length) return
-  queue.value = built
-  await play(built.find((b) => b.id === clicked.track_id) ?? built[0]!)
+  await playTracks(built, built.find((b) => b.id === clicked.track_id))
 }
 </script>
 

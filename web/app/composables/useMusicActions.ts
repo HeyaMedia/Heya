@@ -55,7 +55,7 @@ export interface ArtistEntity {
 }
 
 export function useMusicActions() {
-  const { play, queue, addToQueue, playNext } = usePlayerBindings()
+  const { playContext, playTracks, addToQueue, playNext } = usePlayerBindings()
   const { $heya } = useNuxtApp()
   const playlists = usePlaylists()
   const radio = useRadio()
@@ -144,7 +144,7 @@ export function useMusicActions() {
         {
           label: 'Play Now',
           icon: 'play',
-          action: async () => { queue.value = [playable]; await play(playable) },
+          action: async () => { await playTracks([playable]) },
         },
         {
           label: 'Play Next',
@@ -235,12 +235,9 @@ export function useMusicActions() {
         {
           label: 'Play',
           icon: 'play',
-          action: async () => {
-            const ts = await fetchAlbumTracks(album)
-            if (!ts.length) return
-            queue.value = ts
-            await play(ts[0]!)
-          },
+          // Semantic source: the server materializes the album directly —
+          // no tracklist fetch, and availability filtering happens there.
+          action: async () => { await playContext({ kind: 'album', id: album.id }) },
         },
         {
           label: 'Play Next',
@@ -315,8 +312,7 @@ export function useMusicActions() {
               available: t.available,
             }))
             if (!ts.length) return
-            queue.value = ts
-            await play(ts[0]!)
+            await playTracks(ts)
           } catch { /* no-op */ }
         },
       },
@@ -353,11 +349,7 @@ export function useMusicActions() {
       {
         label: 'Play Mix',
         icon: 'play',
-        action: async () => {
-          if (!playables.length) return
-          queue.value = playables
-          await play(playables[0]!)
-        },
+        action: async () => { await playTracks(playables) },
       },
       {
         label: 'Play Next',
@@ -399,29 +391,9 @@ export function useMusicActions() {
       {
         label: 'Play',
         icon: 'play',
-        action: async () => {
-          try {
-            // The playlist-detail endpoint returns ListPlaylistTracksRow, whose
-            // JSON keys are track_id/track_title (not id/title). Build from the
-            // correct fields and drop tracks whose file was removed from disk.
-            const r = await $heya('/api/me/playlists/{id}', { path: { id: String(p.id) } }) as unknown as { tracks?: Array<{ track_id: number; track_title: string; artist_name?: string; album_title?: string; duration: number; album_id?: number; artist_id?: number; artist_slug?: string; album_slug?: string; available?: boolean }> }
-            const list = (r.tracks ?? []).filter((t) => t.available !== false)
-            if (!list.length) return
-            const ts: Track[] = list.map((t) => ({
-              id: t.track_id, title: t.track_title,
-              artist: t.artist_name ?? '', album: t.album_title ?? '',
-              duration: t.duration,
-              stream_url: `/api/music/tracks/${t.track_id}/stream`,
-              album_id: t.album_id, artist_id: t.artist_id,
-              artist_slug: t.artist_slug, album_slug: t.album_slug,
-              poster: t.artist_slug && t.album_slug ? (useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? undefined) : undefined,
-              source: 'playlist',
-              available: t.available,
-            }))
-            queue.value = ts
-            await play(ts[0]!)
-          } catch { /* swallow */ }
-        },
+        // Semantic source — the server pulls the playlist's live tracks
+        // itself (ownership-checked, availability-filtered).
+        action: async () => { await playContext({ kind: 'playlist', id: p.id }) },
         disabled: (p.track_count ?? 1) === 0,
       },
       { label: '', separator: true },

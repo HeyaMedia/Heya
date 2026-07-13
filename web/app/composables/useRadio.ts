@@ -59,7 +59,7 @@ function rowToTrack(row: RadioTrackRow): Track {
 }
 
 export function useRadio() {
-  const { play, queue } = usePlayerBindings()
+  const { playTracks, playLocal } = usePlayerBindings()
   const starting = useState('radio_starting', () => false)
 
   async function startRadio(seed: RadioSeed, seedTrack?: Track) {
@@ -72,8 +72,7 @@ export function useRadio() {
       if (seedTrack) tracks.push({ ...seedTrack, source: 'radio' })
       tracks.push(...radioTracks)
       if (!tracks.length) return
-      queue.value = tracks
-      await play(tracks[0])
+      await playTracks(tracks, tracks[0])
     } catch (e) { console.warn('startRadio failed:', e) }
     finally { starting.value = false }
   }
@@ -91,8 +90,7 @@ export function useRadio() {
       if (seedTrack) tracks.push({ ...seedTrack, source: 'mix' })
       tracks.push(...mixTracks)
       if (!tracks.length) return
-      queue.value = tracks
-      await play(tracks[0])
+      await playTracks(tracks, tracks[0])
     } catch (e) { console.warn('startDJMix failed:', e) }
     finally { starting.value = false }
   }
@@ -162,7 +160,7 @@ function hashStationUUID(uuid: string): number {
 // doesn't re-implement them. The store ref is reactive — favorites change
 // across pages without a refetch.
 export function useRadioActions() {
-  const { play, queue } = usePlayerBindings()
+  const { playTracks, playLocal } = usePlayerBindings()
   const favoriteUUIDs = useState<Set<string>>('radio_favorite_uuids', () => new Set())
   const favoritesLoaded = useState('radio_favorites_loaded', () => false)
   const loadingStationUUID = useState<string | null>('radio_loading_uuid', () => null)
@@ -212,8 +210,7 @@ body: station as any /* eslint-disable-line @typescript-eslint/no-explicit-any *
     loadingStationUUID.value = station.stationuuid
     try {
       const track = stationToTrack(station)
-      queue.value = [track]
-      await play(track)
+      await playLocal([track], track)
       // Fire-and-forget recents + upstream click
       try {
         const { $heya } = useNuxtApp()

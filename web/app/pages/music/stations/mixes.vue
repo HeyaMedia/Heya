@@ -95,7 +95,7 @@ import { musicMixesQuery, type MusicMix as Mix, type MusicMixTrack as MixTrack }
 
 definePageMeta({ layout: 'default' })
 
-const { play, queue } = usePlayerBindings()
+const { play, queue, playTracks } = usePlayerBindings()
 const actions = useMusicActions()
 
 function mixTrackToEntity(t: MixTrack) {
@@ -162,14 +162,7 @@ async function playMix(mix: Mix, opts: { shuffle?: boolean; startIdx?: number } 
     poster: useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? undefined,
     source: 'mix',
   }))
-  if (opts.shuffle) {
-    for (let i = built.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1))
-      ;[built[i], built[j]] = [built[j]!, built[i]!]
-    }
-  }
-  queue.value = built
-  await play(built[opts.startIdx ?? 0]!)
+  await playTracks(built, built[opts.startIdx ?? 0], { shuffle: opts.shuffle })
 }
 </script>
 

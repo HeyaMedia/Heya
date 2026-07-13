@@ -91,7 +91,7 @@ import { musicMixesQuery, type MusicMix as Mix, type MusicMixTrack as MixTrack }
 
 definePageMeta({ layout: 'default' })
 
-const { play, queue } = usePlayerBindings()
+const { play, queue, playTracks } = usePlayerBindings()
 const actions = useMusicActions()
 
 function mixTrackToEntity(t: MixTrack) {
@@ -166,8 +166,7 @@ function mixTrackToTrack(t: MixTrack): Track {
 async function playMix(mix: Mix) {
   if (!mix.tracks.length) return
   const built = mix.tracks.map(mixTrackToTrack)
-  queue.value = built
-  await play(built[0]!)
+  await playTracks(built)
 }
 </script>
 

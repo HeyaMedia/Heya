@@ -50,7 +50,7 @@ const columns: TrackListColumn[] = [
   { key: 'duration', kind: 'duration', headerIcon: 'clock' },
 ]
 
-const { play, queue, currentTrack } = usePlayerBindings()
+const { play, queue, currentTrack, playTracks } = usePlayerBindings()
 const { $heya } = useNuxtApp()
 const trackRatings = useTrackRatings()
 const ratings = trackRatings.ratings
@@ -168,8 +168,7 @@ async function playFrom(startIdx: number) {
       available: t.available,
     }))
   if (!built.length) return
-  queue.value = built
-  await play(built.find((b) => b.id === clicked.track_id) ?? built[0]!)
+  await playTracks(built, built.find((b) => b.id === clicked.track_id))
 }
 </script>
 

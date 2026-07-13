@@ -158,7 +158,7 @@ import { lovedAlbumsQuery, lovedArtistsQuery, musicAlbumDetailQuery, userPlaylis
 
 definePageMeta({ layout: 'default' })
 
-const { play, queue } = usePlayerBindings()
+const { play, queue, playTracks } = usePlayerBindings()
 const { $heya } = useNuxtApp()
 // Right-click on desktop, long-press on touch — the card shelves' only
 // play/queue path on coarse pointers (hover-play is hidden there).
@@ -244,8 +244,7 @@ async function playLovedAlbum(al: LovedAlbumRow) {
       poster: useAlbumCoverUrl(al.artist_slug, al.slug) ?? undefined,
       source: 'my-music',
     }))
-    queue.value = built
-    await play(built[0]!)
+    await playTracks(built)
   } catch {
     // fall through — outer link still navigates
   }
@@ -266,8 +265,7 @@ async function playLovedTracks(startIdx: number) {
     poster: useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? undefined,
     source: 'loved',
   }))
-  queue.value = built
-  await play(built[startIdx]!)
+  await playTracks(built, built[startIdx])
 }
 </script>
 

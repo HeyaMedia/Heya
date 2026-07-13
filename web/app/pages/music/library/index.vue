@@ -118,7 +118,7 @@ import { musicAlbumDetailQuery } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
 
-const { play, queue } = usePlayerBindings()
+const { play, queue, playTracks } = usePlayerBindings()
 const { $heya } = useNuxtApp()
 // Right-click on desktop, long-press on touch — the card shelves' only
 // play/queue path on coarse pointers (hover-play is hidden there).
@@ -200,8 +200,7 @@ async function playAlbum(al: RecentAlbumRow, _i: number) {
       poster: useAlbumCoverUrl(al.artist_slug, al.slug) ?? undefined,
       source: 'library',
     }))
-    queue.value = built
-    await play(built[0]!)
+    await playTracks(built)
   } catch {
     // outer link still navigates to album page
   }

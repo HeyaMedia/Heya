@@ -31,7 +31,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ reroll: [] }>()
 
-const { play, queue } = usePlayerBindings()
+const { play, queue, playTracks } = usePlayerBindings()
 const playlistsApi = usePlaylists()
 const saveError = ref<string | null>(null)
 
@@ -55,14 +55,12 @@ function trackToPlayable(t: StationTrack): Track {
 async function playAll() {
   if (!props.tracks.length) return
   const built = props.tracks.map(trackToPlayable)
-  queue.value = built
-  await play(built[0]!)
+  await playTracks(built)
 }
 
 async function playFrom(i: number) {
   const built = props.tracks.map(trackToPlayable)
-  queue.value = built
-  await play(built[i]!)
+  await playTracks(built, built[i])
 }
 
 async function onSaveAsPlaylist() {
