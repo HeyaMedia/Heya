@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/karbowiak/heya/internal/cast"
@@ -11,27 +12,43 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// system_settings key for server-side casting. Same live-toggle
+// system_settings keys for server-side casting. Same live-toggle
 // semantics as Jellyfin/Subsonic: UI-editable unless env-locked.
-const castKeyEnabled = "cast.enabled"
+const (
+	castKeyEnabled = "cast.enabled"
+	castKeyDevices = "cast.devices"
+)
 
-func (a *App) SaveCastSettings(ctx context.Context, enabled bool) error {
+func (a *App) SaveCastSettings(ctx context.Context, enabled bool, devices string) error {
 	cur := a.config.Cast
 	if err := errIfEnvLockedChanged(castKeyEnabled, cur.Enabled, enabled); err != nil {
+		return err
+	}
+	if err := errIfEnvLockedChanged(castKeyDevices, cur.Devices, devices); err != nil {
 		return err
 	}
 	if err := persistFieldSetting(a, ctx, castKeyEnabled, cur.Enabled, enabled); err != nil {
 		return err
 	}
+	if err := persistFieldSetting(a, ctx, castKeyDevices, cur.Devices, devices); err != nil {
+		return err
+	}
 	if a.config.Cast.Enabled.Source != config.SourceEnv {
 		a.config.Cast.Enabled = config.Field[bool]{Value: enabled, Source: config.SourceDB}
 	}
+	if a.config.Cast.Devices.Source != config.SourceEnv {
+		a.config.Cast.Devices = config.Field[string]{Value: devices, Source: config.SourceDB}
+	}
 	// Flips take effect immediately: enable starts discovery, disable
 	// tears down every active session (receivers see a clean TEARDOWN).
-	if enabled {
-		a.StartCast(ctx)
-	} else if a.castMgr != nil {
+	// A device-list change while running restarts the manager so the
+	// resolve loop picks it up — active sessions stop (rare admin action).
+	devicesChanged := cur.Devices.Value != a.config.Cast.Devices.Value
+	if a.castMgr != nil && (!a.CastEnabled() || devicesChanged) {
 		a.castMgr.Stop()
+	}
+	if a.CastEnabled() {
+		a.StartCast(ctx)
 	}
 	return nil
 }
@@ -43,6 +60,7 @@ func (a *App) LoadCastFromDB(ctx context.Context) {
 		return
 	}
 	overlayFieldFromDB(a, ctx, &a.config.Cast.Enabled, castKeyEnabled, nil)
+	overlayFieldFromDB(a, ctx, &a.config.Cast.Devices, castKeyDevices, nil)
 }
 
 func (a *App) CastEnabled() bool { return a.config.Cast.Enabled.Value }
@@ -76,6 +94,86 @@ func splitCastDevices(raw string) []string {
 // Cast exposes the manager for handlers/CLI. Nil when the App was built
 // without a data dir (spec-dump / humatest fixtures).
 func (a *App) Cast() *cast.Manager { return a.castMgr }
+
+// CastConfigView is the Settings payload: values + provenance so the UI
+// can grey out env-locked fields.
+type CastConfigView struct {
+	Enabled       bool   `json:"enabled"`
+	EnabledSource string `json:"enabled_source"`
+	Devices       string `json:"devices"`
+	DevicesSource string `json:"devices_source"`
+}
+
+func (a *App) CastConfig() CastConfigView {
+	return CastConfigView{
+		Enabled:       a.config.Cast.Enabled.Value,
+		EnabledSource: string(a.config.Cast.Enabled.Source),
+		Devices:       a.config.Cast.Devices.Value,
+		DevicesSource: string(a.config.Cast.Devices.Source),
+	}
+}
+
+// CastInterface is one of the server's own network legs — the debug page
+// renders these against discovered devices so a subnet mismatch (the #1
+// "no devices" cause: containers, VLANs) is visible at a glance.
+type CastInterface struct {
+	Name string `json:"name"`
+	Addr string `json:"addr"`
+}
+
+type CastNetworkStatus struct {
+	Enabled    bool                      `json:"enabled"`
+	Running    bool                      `json:"running"`
+	Interfaces []CastInterface           `json:"interfaces"`
+	Devices    []cast.Device             `json:"devices"`
+	Static     []cast.StaticTargetStatus `json:"static"`
+	Sessions   []cast.SessionSnapshot    `json:"sessions"`
+}
+
+// CastStatus assembles the Settings → Casting diagnostics view.
+func (a *App) CastStatus() CastNetworkStatus {
+	st := CastNetworkStatus{
+		Enabled:    a.CastEnabled(),
+		Interfaces: castLocalInterfaces(),
+		Devices:    []cast.Device{},
+		Static:     []cast.StaticTargetStatus{},
+		Sessions:   []cast.SessionSnapshot{},
+	}
+	if a.castMgr != nil {
+		st.Running = a.castMgr.Running()
+		st.Devices = a.castMgr.Devices()
+		st.Static = a.castMgr.StaticStatuses()
+		st.Sessions = a.castMgr.Sessions()
+	}
+	return st
+}
+
+// castLocalInterfaces lists the server's up, non-loopback IPv4 legs.
+// mDNS discovery can only hear receivers sharing an L2 with one of these.
+func castLocalInterfaces() []CastInterface {
+	out := []CastInterface{}
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return out
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipn, ok := addr.(*net.IPNet)
+			if !ok || ipn.IP.To4() == nil {
+				continue
+			}
+			out = append(out, CastInterface{Name: iface.Name, Addr: ipn.String()})
+		}
+	}
+	return out
+}
 
 // CastPlayTrack resolves a track to its primary file and starts (or
 // retargets) a session on the device. The primary (highest

@@ -2472,6 +2472,120 @@
         ],
         "type": "object"
       },
+      "CastConfigView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/CastConfigView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "devices": {
+            "type": "string"
+          },
+          "devices_source": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "enabled_source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "enabled_source",
+          "devices",
+          "devices_source"
+        ],
+        "type": "object"
+      },
+      "CastInterface": {
+        "additionalProperties": false,
+        "properties": {
+          "addr": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "addr"
+        ],
+        "type": "object"
+      },
+      "CastNetworkStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/CastNetworkStatus.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "devices": {
+            "items": {
+              "$ref": "#/components/schemas/Device"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "interfaces": {
+            "items": {
+              "$ref": "#/components/schemas/CastInterface"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/SessionSnapshot"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "static": {
+            "items": {
+              "$ref": "#/components/schemas/StaticTargetStatus"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "enabled",
+          "running",
+          "interfaces",
+          "devices",
+          "static",
+          "sessions"
+        ],
+        "type": "object"
+      },
       "Category": {
         "additionalProperties": false,
         "properties": {
@@ -15054,6 +15168,32 @@
         ],
         "type": "object"
       },
+      "Set-cast-configRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Set-cast-configRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "devices": {
+            "description": "Comma-separated receiver addresses resolved by unicast mDNS (same-subnet only)",
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "devices"
+        ],
+        "type": "object"
+      },
       "Set-playback-preferenceRequest": {
         "additionalProperties": false,
         "properties": {
@@ -15434,6 +15574,36 @@
         },
         "required": [
           "source"
+        ],
+        "type": "object"
+      },
+      "StaticTargetStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "addr": {
+            "type": "string"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "addr",
+          "ok",
+          "checked_at"
         ],
         "type": "object"
       },
@@ -20729,6 +20899,100 @@
         ]
       }
     },
+    "/api/cast/config": {
+      "get": {
+        "operationId": "cast-config",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CastConfigView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Casting config",
+        "tags": [
+          "Cast"
+        ]
+      },
+      "put": {
+        "operationId": "set-cast-config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Set-cast-configRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CastConfigView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Apply casting config",
+        "tags": [
+          "Cast"
+        ]
+      }
+    },
     "/api/cast/devices": {
       "get": {
         "operationId": "cast-devices",
@@ -21199,6 +21463,49 @@
           }
         ],
         "summary": "Set cast session volume",
+        "tags": [
+          "Cast"
+        ]
+      }
+    },
+    "/api/cast/status": {
+      "get": {
+        "operationId": "cast-status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CastNetworkStatus"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Casting network diagnostics",
         "tags": [
           "Cast"
         ]

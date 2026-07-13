@@ -37,8 +37,9 @@ type Manager struct {
 
 	// staticAddrs are receiver addresses resolved by unicast mDNS instead
 	// of multicast browse — deployments where multicast can't reach us
-	// (containers, cross-VLAN receivers). Set before Start.
-	staticAddrs []string
+	// (containers, multicast-filtered networks). Set before Start.
+	staticAddrs  []string
+	staticStatus map[string]StaticTargetStatus
 
 	mu        sync.RWMutex
 	providers map[string]Provider
@@ -72,7 +73,40 @@ func (m *Manager) SetPlaybackSink(fn PlaybackSink) { m.playbackSink = fn }
 func (m *Manager) SetStaticDevices(addrs []string) {
 	m.mu.Lock()
 	m.staticAddrs = addrs
+	m.staticStatus = map[string]StaticTargetStatus{}
 	m.mu.Unlock()
+}
+
+func (m *Manager) setStaticStatus(s StaticTargetStatus) {
+	m.mu.Lock()
+	if m.staticStatus == nil {
+		m.staticStatus = map[string]StaticTargetStatus{}
+	}
+	m.staticStatus[s.Addr] = s
+	m.mu.Unlock()
+}
+
+// StaticStatuses reports the last resolve outcome per configured address,
+// in config order (untried targets appear with a zero CheckedAt).
+func (m *Manager) StaticStatuses() []StaticTargetStatus {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]StaticTargetStatus, 0, len(m.staticAddrs))
+	for _, addr := range m.staticAddrs {
+		if s, ok := m.staticStatus[addr]; ok {
+			out = append(out, s)
+		} else {
+			out = append(out, StaticTargetStatus{Addr: addr})
+		}
+	}
+	return out
+}
+
+// Running reports whether discovery is live (started and not stopped).
+func (m *Manager) Running() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.started
 }
 
 // Start extracts helper binaries, registers providers, and launches the

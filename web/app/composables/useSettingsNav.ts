@@ -99,8 +99,9 @@ const ALL_GROUPS: SettingsNavGroup[] = [
           { to: '/settings/all-sessions', label: 'All sessions' },
         ],
       },
+      { to: '/settings/cast', label: 'Casting', icon: 'cast' },
       {
-        to: '/settings/jellyfin', label: 'Client APIs', icon: 'cast',
+        to: '/settings/jellyfin', label: 'Client APIs', icon: 'link',
         tabs: [
           { to: '/settings/jellyfin', label: 'Jellyfin' },
           { to: '/settings/subsonic', label: 'Subsonic' },

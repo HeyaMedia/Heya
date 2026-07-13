@@ -10,6 +10,8 @@ export type AdminListeners = components['schemas']['AdminListenersBody']
 export type WatcherStatus = components['schemas']['WatcherStatusBody']
 export type JellyfinConfig = components['schemas']['JellyfinConfigBody']
 export type SubsonicConfig = components['schemas']['SubsonicConfigBody']
+export type CastConfig = components['schemas']['CastConfigView']
+export type CastStatus = components['schemas']['CastNetworkStatus']
 export type SubsonicCredential = components['schemas']['SubsonicCredentialBody']
 export type Library = components['schemas']['LibraryView']
 export type LibrarySettings = components['schemas']['LibrarySettings']
@@ -186,6 +188,27 @@ export const jellyfinConfigQuery = defineQueryOptions(() => ({
     return await $heya('/api/jellyfin/config') as JellyfinConfig
   },
   staleTime: 1000 * 30,
+  meta: privateSettings,
+}))
+
+export const castConfigQuery = defineQueryOptions(() => ({
+  key: ['admin', 'cast', 'config'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/cast/config') as CastConfig
+  },
+  staleTime: 1000 * 30,
+  meta: privateSettings,
+}))
+
+export const castStatusQuery = defineQueryOptions(() => ({
+  key: ['admin', 'cast', 'status'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/cast/status') as CastStatus
+  },
+  // Diagnostics page — keep it fresh while open.
+  staleTime: 1000 * 10,
   meta: privateSettings,
 }))
 

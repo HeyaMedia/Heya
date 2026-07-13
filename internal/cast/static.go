@@ -33,21 +33,42 @@ const (
 	mdnsPort              = "5353"
 )
 
+// StaticTargetStatus is the per-address outcome of the last unicast
+// resolve pass — the Settings → Casting debug page renders these so "why
+// is my receiver missing" answers itself.
+type StaticTargetStatus struct {
+	Addr      string    `json:"addr"`
+	OK        bool      `json:"ok"`
+	Error     string    `json:"error,omitempty"`
+	DeviceID  string    `json:"device_id,omitempty"`
+	Name      string    `json:"name,omitempty"`
+	CheckedAt time.Time `json:"checked_at"`
+}
+
 // resolveStaticLoop periodically unicast-resolves the configured addresses
-// and feeds the shared device cache. Failures are logged once per address
-// per pass and retried on the next tick — a powered-off receiver is normal.
+// and feeds the shared device cache. Failures are recorded per address and
+// retried on the next tick — a powered-off receiver is normal. Note the
+// hard physics: receivers enforce RFC 6762's source-address check, so
+// unicast queries only get answers from the SAME subnet — a cross-VLAN
+// target will sit here erroring until the server gets a leg on that L2.
 func (m *Manager) resolveStaticLoop(ctx context.Context, addrs []string) {
 	for {
 		for _, addr := range addrs {
 			dev, err := resolveStaticAirplay(ctx, addr)
+			status := StaticTargetStatus{Addr: addr, CheckedAt: time.Now()}
 			if err != nil {
 				if ctx.Err() != nil {
 					return
 				}
+				status.Error = err.Error()
 				log.Debug().Err(err).Str("addr", addr).Msg("cast: static device did not resolve")
-				continue
+			} else {
+				status.OK = true
+				status.DeviceID = dev.ID
+				status.Name = dev.Name
+				m.upsertDevice(dev)
 			}
-			m.upsertDevice(dev)
+			m.setStaticStatus(status)
 		}
 		select {
 		case <-ctx.Done():

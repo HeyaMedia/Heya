@@ -22,6 +22,31 @@ func registerCastRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(devicesBody{Items: app.Cast().Devices()}), nil
 		})
 
+	// Settings surface: values + provenance (env-locked fields grey out in
+	// the UI) and the network diagnostics behind Settings → Casting.
+	huma.Register(api, secured(op(http.MethodGet, "/api/cast/config", "cast-config", "Casting config", "Cast")),
+		func(_ context.Context, _ *struct{}) (*JSONOutput[service.CastConfigView], error) {
+			return noStoreJSON(app.CastConfig()), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodPut, "/api/cast/config", "set-cast-config", "Apply casting config", "Cast")),
+		func(ctx context.Context, in *struct {
+			Body struct {
+				Enabled bool   `json:"enabled"`
+				Devices string `json:"devices" doc:"Comma-separated receiver addresses resolved by unicast mDNS (same-subnet only)"`
+			}
+		}) (*JSONOutput[service.CastConfigView], error) {
+			if err := app.SaveCastSettings(ctx, in.Body.Enabled, in.Body.Devices); err != nil {
+				return nil, humaServiceError(err)
+			}
+			return noStoreJSON(app.CastConfig()), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/cast/status", "cast-status", "Casting network diagnostics", "Cast")),
+		func(_ context.Context, _ *struct{}) (*JSONOutput[service.CastNetworkStatus], error) {
+			return noStoreJSON(app.CastStatus()), nil
+		})
+
 	type sessionsBody struct {
 		Items []cast.SessionSnapshot `json:"items"`
 	}
