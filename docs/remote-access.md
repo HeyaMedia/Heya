@@ -96,10 +96,19 @@ signals presence; empty on save keeps the stored one).
 `POST /v1/check {port, challenge}` — probes the **request's source IP only**
 (anti-SSRF), TLS with verification skipped, `GET /api/connectivity/probe`
 expecting the challenge back. Distinct error codes (`timeout`,
-`connection_refused`, `tls_handshake`, `challenge_mismatch`) map to distinct
-UI messages. `GET /v1/ip` returns the caller's IP for display + CGNAT
-detection. The media-server side serves the challenge only while a check it
-initiated is in flight.
+`connection_refused`, `tls_handshake`, `challenge_mismatch`, `same_network`)
+map to distinct UI messages. `GET /v1/ip` returns the caller's IP for
+display + CGNAT detection. The media-server side serves the challenge only
+while a check it initiated is in flight.
+
+**Hairpin caveat:** when the check service egresses behind the *same
+router* as the target server (e.g. heya.media hosted on the same LAN), its
+probe of the WAN IP is a hairpin connection and fails on routers without
+NAT loopback even though the port is genuinely open (verified 2026-07-15:
+external vantage points connected fine while the co-located prober got
+RST). The service should compare the target IP against its own public
+egress IP and return `same_network` instead of a false negative; Heya maps
+that to the `unverified` phase.
 
 ## Lifecycle notes
 

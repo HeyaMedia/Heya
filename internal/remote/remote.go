@@ -463,6 +463,12 @@ func (m *Manager) runCheck(ctx context.Context) {
 		case res.Unavailable:
 			s.Phase = PhaseUnverified
 			s.Detail = "the connectivity check service could not be reached — port mapping looks OK locally but reachability is unproven"
+		case res.Error != nil && res.Error.Code == "same_network":
+			// The check service egresses behind the same router as this
+			// server (hairpin probe) — it cannot see us from outside, so
+			// the verdict is inconclusive rather than negative.
+			s.Phase = PhaseUnverified
+			s.Detail = "the check service is on the same network as this server and can't probe from outside — result inconclusive"
 		case res.Reachable && res.Verified:
 			s.Phase = PhaseReachable
 			s.Detail = ""
