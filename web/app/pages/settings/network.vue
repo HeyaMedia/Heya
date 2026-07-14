@@ -131,6 +131,7 @@ const domainDraft = ref('')
 const subdomainDraft = ref('')
 const tokenDraft = ref('')
 const emailDraft = ref('')
+const portDraft = ref('')
 
 const providerOptions = [
   { value: 'none', label: 'None — bare IP, self-signed certificate' },
@@ -202,6 +203,23 @@ function seedRemoteDrafts() {
   subdomainDraft.value = c.subdomain ?? ''
   emailDraft.value = c.acme_email ?? ''
   tokenDraft.value = ''
+  portDraft.value = c.port ? String(c.port) : ''
+}
+
+async function savePort() {
+  const n = Number.parseInt(portDraft.value, 10)
+  if (!Number.isFinite(n) || n === remoteCfg.value?.port) return
+  if (n < 1024 || n > 65535) {
+    flash.value = { kind: 'err', text: 'Port must be between 1024 and 65535.' }
+    return
+  }
+  remoteSaving.value = true
+  try {
+    await saveRemote({ port: n })
+    flash.value = { kind: 'ok', text: `Port ${n} saved — remapping and re-checking.` }
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.data?.detail ?? e?.message ?? 'Port save failed.' }
+  } finally { remoteSaving.value = false }
 }
 
 async function onRemoteToggle(on: boolean) {
@@ -350,6 +368,14 @@ watch(cfg, (next) => {
             <div class="url-hint">Valid TLS on your own network, no port forwarding involved.</div>
           </a>
         </div>
+
+        <SettingsField label="External port"
+          description="The router port mapped to Heya — part of every remote URL, so changing it breaks existing bookmarks. Auto-generated on first enable."
+          :lockedBy="isLocked('remote.port') ? lockTooltip('remote.port') : undefined"
+          v-slot="{ fieldId }">
+          <input :id="fieldId" v-model="portDraft" type="number" min="1024" max="65535" class="sv2-input mono port-input"
+            :disabled="remoteSaving || isLocked('remote.port')" @blur="savePort" @keyup.enter="savePort" />
+        </SettingsField>
 
         <div class="raw-bar" style="margin-top: 12px">
           <button class="sv2-btn ghost" :disabled="checking" @click="onRecheck">
@@ -698,6 +724,7 @@ watch(cfg, (next) => {
   transition: border-color 0.12s;
 }
 .sv2-input:focus { border-color: var(--gold); }
+.port-input { min-width: 120px; width: 120px; }
 .sv2-input:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .hint { font-size: 12px; color: var(--fg-3); line-height: 1.5; margin: 0 0 10px; }
