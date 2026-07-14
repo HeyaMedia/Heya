@@ -20,6 +20,8 @@ const (
 	mediaTokenGrace  = time.Hour
 )
 
+var strictRawURLEncoding = base64.RawURLEncoding.Strict()
+
 type mediaTokenClaims struct {
 	Version int    `json:"v"`
 	UserID  int64  `json:"u"`
@@ -179,11 +181,15 @@ func (m *Manager) ValidateMediaToken(token, expectedPath string) (int64, error) 
 	if !ok || payloadPart == "" || sigPart == "" {
 		return 0, fmt.Errorf("invalid cast media token")
 	}
-	payload, err := base64.RawURLEncoding.DecodeString(payloadPart)
+	// Strict decoding rejects alternate textual encodings that differ only in
+	// unused trailing bits. They decode to the same signed bytes, but accepting
+	// multiple URL tokens for one signature makes tokens unnecessarily
+	// malleable and can defeat string-keyed logging/caching assumptions.
+	payload, err := strictRawURLEncoding.DecodeString(payloadPart)
 	if err != nil {
 		return 0, fmt.Errorf("invalid cast media token")
 	}
-	sig, err := base64.RawURLEncoding.DecodeString(sigPart)
+	sig, err := strictRawURLEncoding.DecodeString(sigPart)
 	if err != nil || !hmac.Equal(sig, m.signMediaToken(payload)) {
 		return 0, fmt.Errorf("invalid cast media token")
 	}

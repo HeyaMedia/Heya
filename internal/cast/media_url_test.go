@@ -1,6 +1,8 @@
 package cast
 
 import (
+	"bytes"
+	"encoding/base64"
 	"net/url"
 	"strings"
 	"testing"
@@ -40,9 +42,39 @@ func TestScopedMediaURL(t *testing.T) {
 	if _, err := m.ValidateMediaToken(token, "/api/cast/media/music/43"); err == nil {
 		t.Fatal("token was accepted for another media path")
 	}
-	tampered := token[:len(token)-1] + map[bool]string{true: "a", false: "b"}[strings.HasSuffix(token, "b")]
+	payloadPart, sigPart, ok := strings.Cut(token, ".")
+	if !ok || sigPart == "" {
+		t.Fatalf("invalid test token %q", token)
+	}
+	replacement := byte('A')
+	if sigPart[0] == replacement {
+		replacement = 'B'
+	}
+	tampered := payloadPart + "." + string(replacement) + sigPart[1:]
 	if _, err := m.ValidateMediaToken(tampered, track.PullPath); err == nil {
 		t.Fatal("tampered token was accepted")
+	}
+
+	// A 32-byte SHA-256 signature ends with four data bits and two unused
+	// Base64 bits. Flip only an unused bit to create a different string that
+	// permissive decoding maps to the exact same signature bytes. Tokens must
+	// still reject that noncanonical alias.
+	const base64URLAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	lastIndex := strings.IndexByte(base64URLAlphabet, sigPart[len(sigPart)-1])
+	if lastIndex < 0 || lastIndex%4 != 0 || lastIndex+1 >= len(base64URLAlphabet) {
+		t.Fatalf("unexpected canonical signature ending %q", sigPart[len(sigPart)-1])
+	}
+	noncanonicalSig := sigPart[:len(sigPart)-1] + string(base64URLAlphabet[lastIndex+1])
+	canonicalBytes, err := base64.RawURLEncoding.DecodeString(sigPart)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noncanonicalBytes, err := base64.RawURLEncoding.DecodeString(noncanonicalSig)
+	if err != nil || !bytes.Equal(canonicalBytes, noncanonicalBytes) {
+		t.Fatalf("test setup did not preserve signature bytes: %v", err)
+	}
+	if _, err := m.ValidateMediaToken(payloadPart+"."+noncanonicalSig, track.PullPath); err == nil {
+		t.Fatal("noncanonical token encoding was accepted")
 	}
 }
 
