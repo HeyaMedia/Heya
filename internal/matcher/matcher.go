@@ -51,6 +51,7 @@ type Matcher struct {
 	heya  *heyametadata.HeyaProvider
 	opts  MatchOptions
 	probe ProbeFunc
+	inTx  bool
 }
 
 func New(db *pgxpool.Pool, opts MatchOptions, heya *heyametadata.HeyaProvider, probe ProbeFunc) *Matcher {
@@ -71,6 +72,7 @@ func New(db *pgxpool.Pool, opts MatchOptions, heya *heyametadata.HeyaProvider, p
 func (m *Matcher) WithTx(tx pgx.Tx) *Matcher {
 	c := *m
 	c.q = m.q.WithTx(tx)
+	c.inTx = true
 	return &c
 }
 

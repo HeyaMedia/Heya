@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -261,72 +262,230 @@ func (r *richErrs) stopIfDone(ctx context.Context) bool {
 	return false
 }
 
-func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *metadata.MediaDetail) error {
-	var re richErrs
+// richFailure records a fan-out error. A matcher scoped to an explicit
+// PostgreSQL transaction must stop immediately: any statement error aborts the
+// transaction, so continuing only hides the useful error behind a cascade of
+// SQLSTATE 25P02 failures. Pool-backed fan-out retains the existing best-effort
+// behaviour and continues writing independent components.
+func (m *Matcher) richFailure(re *richErrs, err error) bool {
+	re.add(err)
+	return m.inTx
+}
 
+type richPersonCredit struct {
+	isCast      bool
+	canonicalID string
+	externalIDs map[string]string
+	name        string
+	character   string
+	job         string
+	department  string
+	order       int
+	gender      int
+	profilePath string
+	profiles    []metadata.ProfileImage
+	popularity  float64
+	source      string
+}
+
+type resolvedPersonCredit struct {
+	credit richPersonCredit
+	person sqlc.Person
+}
+
+type richPersonProfile struct {
+	image     metadata.ProfileImage
+	sortOrder int
+}
+
+type richPersonWrite struct {
+	person       sqlc.Person
+	canonicalIDs map[string]struct{}
+	profiles     map[string]richPersonProfile
+}
+
+func collectRichPersonCredits(d *metadata.MediaDetail) []richPersonCredit {
+	credits := make([]richPersonCredit, 0, len(d.Cast)+len(d.Crew))
 	seenCast := map[string]bool{}
 	for _, c := range d.Cast {
-		if re.stopIfDone(ctx) {
-			return re.result()
-		}
 		dedup := c.Name + "|" + c.Character
 		if seenCast[dedup] {
 			continue
 		}
 		seenCast[dedup] = true
-
-		person := m.findOrCreatePerson(ctx, c.Name, c.ExternalIDs, c.Gender, c.ProfilePath, c.Popularity, c.Profiles)
-		if person.ID == 0 {
-			re.misses++
-			continue
-		}
-		if err := m.bindCanonical(ctx, "person", person.ID, c.CanonicalID, "person", 1, 0); err != nil {
-			re.add(fmt.Errorf("bind cast person %q: %w", c.Name, err))
-		}
-		if err := m.q.CreateMediaCast(ctx, sqlc.CreateMediaCastParams{
-			MediaItemID:  mediaItemID,
-			PersonID:     person.ID,
-			Character:    c.Character,
-			DisplayOrder: int32(c.Order),
-			Gender:       int32(c.Gender),
-			Source:       c.Source,
-		}); err != nil {
-			re.add(fmt.Errorf("cast %q: %w", c.Name, err))
-			if ctx.Err() != nil {
-				return re.result()
-			}
-		}
+		credits = append(credits, richPersonCredit{
+			isCast: true, canonicalID: c.CanonicalID, externalIDs: c.ExternalIDs,
+			name: c.Name, character: c.Character, order: c.Order, gender: c.Gender,
+			profilePath: c.ProfilePath, profiles: c.Profiles, popularity: c.Popularity,
+			source: c.Source,
+		})
 	}
 
 	seenCrew := map[string]bool{}
 	for _, c := range d.Crew {
-		if re.stopIfDone(ctx) {
-			return re.result()
-		}
 		dedup := c.Name + "|" + c.Job
 		if seenCrew[dedup] {
 			continue
 		}
 		seenCrew[dedup] = true
+		credits = append(credits, richPersonCredit{
+			canonicalID: c.CanonicalID, externalIDs: c.ExternalIDs, name: c.Name,
+			job: c.Job, department: c.Department, gender: c.Gender,
+			profilePath: c.ProfilePath, profiles: c.Profiles, source: c.Source,
+		})
+	}
 
-		person := m.findOrCreatePerson(ctx, c.Name, c.ExternalIDs, c.Gender, c.ProfilePath, 0, c.Profiles)
+	// Cast and crew are deliberately one ordering domain. A person can be cast
+	// in one title and crew in another; ordering the two lists separately still
+	// permits opposite row-lock orders between concurrent applies.
+	sort.SliceStable(credits, func(i, j int) bool {
+		return richPersonCreditKey(credits[i]) < richPersonCreditKey(credits[j])
+	})
+	return credits
+}
+
+func richPersonCreditKey(c richPersonCredit) string {
+	identity := strings.ToLower(strings.TrimSpace(c.canonicalID))
+	if identity == "" {
+		parts := make([]string, 0, len(c.externalIDs))
+		for _, key := range sortedNonEmptyExternalIDKeys(c.externalIDs) {
+			parts = append(parts, strings.ToLower(key)+"="+strings.ToLower(c.externalIDs[key]))
+		}
+		identity = strings.Join(parts, "|")
+	}
+	if identity == "" {
+		identity = strings.ToLower(strings.TrimSpace(c.name))
+	}
+	role := "crew|" + c.department + "|" + c.job
+	if c.isCast {
+		role = "cast|" + c.character
+	}
+	return identity + "|" + role + "|" + c.name
+}
+
+func sortedNonEmptyExternalIDKeys(ids map[string]string) []string {
+	keys := make([]string, 0, len(ids))
+	for key, value := range ids {
+		if value != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *metadata.MediaDetail) error {
+	var re richErrs
+	credits := collectRichPersonCredits(d)
+	resolved := make([]resolvedPersonCredit, 0, len(credits))
+	for _, credit := range credits {
+		if re.stopIfDone(ctx) {
+			return re.result()
+		}
+		person, err := m.findOrCreatePerson(ctx, credit.name, credit.externalIDs, credit.gender, credit.profilePath, credit.popularity)
+		if err != nil {
+			if m.richFailure(&re, fmt.Errorf("resolve person %q: %w", credit.name, err)) {
+				return re.result()
+			}
+			continue
+		}
 		if person.ID == 0 {
 			re.misses++
 			continue
 		}
-		if err := m.bindCanonical(ctx, "person", person.ID, c.CanonicalID, "person", 1, 0); err != nil {
-			re.add(fmt.Errorf("bind crew person %q: %w", c.Name, err))
+		resolved = append(resolved, resolvedPersonCredit{credit: credit, person: person})
+	}
+
+	// Resolve first, then acquire every shared person/profile/binding row in
+	// ascending local person ID order. Local IDs are the actual PostgreSQL lock
+	// keys, making this robust even when two payloads describe the same person
+	// with different roles or identifier subsets.
+	sortResolvedPersonCredits(resolved)
+	writes := make([]*richPersonWrite, 0, len(resolved))
+	for _, item := range resolved {
+		var write *richPersonWrite
+		if len(writes) == 0 || writes[len(writes)-1].person.ID != item.person.ID {
+			write = &richPersonWrite{
+				person: item.person, canonicalIDs: map[string]struct{}{},
+				profiles: map[string]richPersonProfile{},
+			}
+			writes = append(writes, write)
+		} else {
+			write = writes[len(writes)-1]
+		}
+		if item.credit.canonicalID != "" {
+			write.canonicalIDs[item.credit.canonicalID] = struct{}{}
+		}
+		for index, profile := range item.credit.profiles {
+			if profile.URL == "" {
+				continue
+			}
+			if existing, ok := write.profiles[profile.URL]; !ok || index < existing.sortOrder {
+				write.profiles[profile.URL] = richPersonProfile{image: profile, sortOrder: index}
+			}
+		}
+	}
+
+	for _, write := range writes {
+		profileURLs := make([]string, 0, len(write.profiles))
+		for url := range write.profiles {
+			profileURLs = append(profileURLs, url)
+		}
+		sort.Strings(profileURLs)
+		for _, url := range profileURLs {
+			profile := write.profiles[url]
+			if err := m.q.CreatePersonProfile(ctx, sqlc.CreatePersonProfileParams{
+				PersonID: write.person.ID, Url: profile.image.URL, Source: profile.image.Source,
+				Aspect: fallbackAspect(profile.image.Aspect), Width: int32(profile.image.Width),
+				Height: int32(profile.image.Height), Score: numericFromFloat(profile.image.Score),
+				SortOrder: int32(profile.sortOrder),
+			}); err != nil {
+				if m.richFailure(&re, fmt.Errorf("profile for person %q: %w", write.person.Name, err)) {
+					return re.result()
+				}
+			}
+		}
+
+		canonicalIDs := make([]string, 0, len(write.canonicalIDs))
+		for id := range write.canonicalIDs {
+			canonicalIDs = append(canonicalIDs, id)
+		}
+		sort.Strings(canonicalIDs)
+		for _, canonicalID := range canonicalIDs {
+			if err := m.bindCanonical(ctx, "person", write.person.ID, canonicalID, "person", 1, 0); err != nil {
+				if m.richFailure(&re, fmt.Errorf("bind person %q: %w", write.person.Name, err)) {
+					return re.result()
+				}
+			}
+		}
+	}
+
+	for _, item := range resolved {
+		credit, person := item.credit, item.person
+		if credit.isCast {
+			if err := m.q.CreateMediaCast(ctx, sqlc.CreateMediaCastParams{
+				MediaItemID:  mediaItemID,
+				PersonID:     person.ID,
+				Character:    credit.character,
+				DisplayOrder: int32(credit.order),
+				Gender:       int32(credit.gender),
+				Source:       credit.source,
+			}); err != nil {
+				if m.richFailure(&re, fmt.Errorf("cast %q: %w", credit.name, err)) {
+					return re.result()
+				}
+			}
+			continue
 		}
 		if err := m.q.CreateMediaCrew(ctx, sqlc.CreateMediaCrewParams{
 			MediaItemID: mediaItemID,
 			PersonID:    person.ID,
-			Job:         c.Job,
-			Department:  c.Department,
-			Gender:      int32(c.Gender),
-			Source:      c.Source,
+			Job:         credit.job,
+			Department:  credit.department,
+			Gender:      int32(credit.gender),
+			Source:      credit.source,
 		}); err != nil {
-			re.add(fmt.Errorf("crew %q: %w", c.Name, err))
-			if ctx.Err() != nil {
+			if m.richFailure(&re, fmt.Errorf("crew %q: %w", credit.name, err)) {
 				return re.result()
 			}
 		}
@@ -542,52 +701,41 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 	return re.result()
 }
 
-func (m *Matcher) findOrCreatePerson(ctx context.Context, name string, externalIDs map[string]string, gender int, profilePath string, popularity float64, profiles []metadata.ProfileImage) sqlc.Person {
-	var person sqlc.Person
-	for k, v := range externalIDs {
-		if v == "" {
+func (m *Matcher) findOrCreatePerson(ctx context.Context, name string, externalIDs map[string]string, gender int, profilePath string, popularity float64) (sqlc.Person, error) {
+	for _, key := range sortedNonEmptyExternalIDKeys(externalIDs) {
+		probe := mustJSON(map[string]string{key: externalIDs[key]})
+		existing, err := m.q.FindPersonByExternalID(ctx, probe)
+		switch {
+		case err == nil:
+			return existing, nil
+		case errors.Is(err, pgx.ErrNoRows):
 			continue
-		}
-		probe := mustJSON(map[string]string{k: v})
-		if existing, err := m.q.FindPersonByExternalID(ctx, probe); err == nil {
-			person = existing
-			break
+		default:
+			return sqlc.Person{}, err
 		}
 	}
 
-	if person.ID == 0 {
-		created, err := m.q.CreatePerson(ctx, sqlc.CreatePersonParams{
-			ExternalIds: mustJSON(externalIDs),
-			Name:        name,
-			AlsoKnownAs: []string{},
-			Gender:      int32(gender),
-			ProfilePath: profilePath,
-			Popularity:  numericFromFloat(popularity),
-		})
-		if err != nil {
-			log.Debug().Err(err).Str("name", name).Msg("failed to create person")
-			return sqlc.Person{}
-		}
-		person = created
+	created, err := m.q.CreatePerson(ctx, sqlc.CreatePersonParams{
+		ExternalIds: mustJSON(externalIDs),
+		Name:        name,
+		AlsoKnownAs: []string{},
+		Gender:      int32(gender),
+		ProfilePath: profilePath,
+		Popularity:  numericFromFloat(popularity),
+	})
+	if err != nil {
+		return sqlc.Person{}, err
 	}
+	return created, nil
+}
 
-	for i, p := range profiles {
-		if p.URL == "" {
-			continue
+func sortResolvedPersonCredits(resolved []resolvedPersonCredit) {
+	sort.SliceStable(resolved, func(i, j int) bool {
+		if resolved[i].person.ID != resolved[j].person.ID {
+			return resolved[i].person.ID < resolved[j].person.ID
 		}
-		m.q.CreatePersonProfile(ctx, sqlc.CreatePersonProfileParams{
-			PersonID:  person.ID,
-			Url:       p.URL,
-			Source:    p.Source,
-			Aspect:    fallbackAspect(p.Aspect),
-			Width:     int32(p.Width),
-			Height:    int32(p.Height),
-			Score:     numericFromFloat(p.Score),
-			SortOrder: int32(i),
-		})
-	}
-
-	return person
+		return richPersonCreditKey(resolved[i].credit) < richPersonCreditKey(resolved[j].credit)
+	})
 }
 
 func fallbackAspect(a string) string {
