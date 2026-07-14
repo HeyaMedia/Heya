@@ -170,7 +170,7 @@ func ApplyTVMaterialization(ctx context.Context, lib sqlc.Library, result Result
 		}
 		applied.TVSeriesID = series.ID
 
-		episodeLinks, err := loadTVEpisodeLinkIndex(ctx, q, item.ID)
+		episodeLinks, err := loadTVEpisodeLinkIndex(ctx, q, item.ID, detail)
 		if err != nil {
 			applied.Action = "failed"
 			applied.Error = err.Error()
@@ -190,6 +190,13 @@ func ApplyTVMaterialization(ctx context.Context, lib sqlc.Library, result Result
 		applied.FilesAttached = fileCounts.attached
 		applied.FilesAlreadyAttached = fileCounts.alreadyAttached
 		applied.FilesReassigned = fileCounts.reassigned
+		if err := pruneStaleCanonicalTVStructure(ctx, q, series.ID, detail); err != nil {
+			applied.Action = "failed"
+			applied.Error = err.Error()
+			results = append(results, applied)
+			emitTVApplyResult(applied, domain, emit)
+			return results, fmt.Errorf("prune stale TV structure %s: %w", preview.Key, err)
+		}
 
 		localMatch := combinedTVMatchForPreview(preview, matches)
 		if useLocalData {
@@ -431,6 +438,9 @@ func applyTVFiles(ctx context.Context, q *sqlc.Queries, libraryID, mediaItemID i
 		if err := replaceTVLibraryFileLinks(ctx, q, fileID, mediaItemID, plan, episodeLinks); err != nil {
 			return counts, err
 		}
+		if err := storeTVFileCanonicalEpisodes(ctx, q, fileID, tvEpisodeLinkTargetsForPlan(plan, episodeLinks)); err != nil {
+			return counts, err
+		}
 	}
 	return counts, nil
 }
@@ -441,8 +451,8 @@ type tvEpisodeNumberKey struct {
 }
 
 type tvEpisodeLinkIndex struct {
-	byNumber   map[tvEpisodeNumberKey]int64
-	byAbsolute map[int32]int64
+	byNumber   map[tvEpisodeNumberKey]tvEpisodeLinkTarget
+	byAbsolute map[int32]tvEpisodeLinkTarget
 }
 
 type tvEpisodeLinkTarget struct {
@@ -452,22 +462,94 @@ type tvEpisodeLinkTarget struct {
 	absoluteNumber int32
 }
 
-func loadTVEpisodeLinkIndex(ctx context.Context, q *sqlc.Queries, mediaItemID int64) (tvEpisodeLinkIndex, error) {
+func loadTVEpisodeLinkIndex(ctx context.Context, q *sqlc.Queries, mediaItemID int64, detail *metadata.MediaDetail) (tvEpisodeLinkIndex, error) {
 	rows, err := q.ListTVEpisodeLinkTargetsByMediaItem(ctx, mediaItemID)
 	if err != nil {
 		return tvEpisodeLinkIndex{}, err
 	}
 	index := tvEpisodeLinkIndex{
-		byNumber:   map[tvEpisodeNumberKey]int64{},
-		byAbsolute: map[int32]int64{},
+		byNumber:   map[tvEpisodeNumberKey]tvEpisodeLinkTarget{},
+		byAbsolute: map[int32]tvEpisodeLinkTarget{},
 	}
+	canonicalNumbers := tvCanonicalEpisodeNumbers(detail)
 	for _, row := range rows {
-		index.byNumber[tvEpisodeNumberKey{season: row.SeasonNumber, episode: row.EpisodeNumber}] = row.EpisodeID
+		key := tvEpisodeNumberKey{season: row.SeasonNumber, episode: row.EpisodeNumber}
+		if len(canonicalNumbers) > 0 && !canonicalNumbers[key] {
+			continue
+		}
+		target := tvEpisodeLinkTarget{
+			episodeID:      row.EpisodeID,
+			seasonNumber:   row.SeasonNumber,
+			episodeNumber:  row.EpisodeNumber,
+			absoluteNumber: row.AbsoluteNumber,
+		}
+		index.byNumber[key] = target
 		if row.AbsoluteNumber > 0 {
-			index.byAbsolute[row.AbsoluteNumber] = row.EpisodeID
+			index.byAbsolute[row.AbsoluteNumber] = target
 		}
 	}
+	addTVEpisodeLinkAliases(&index, detail)
 	return index, nil
+}
+
+func tvCanonicalEpisodeNumbers(detail *metadata.MediaDetail) map[tvEpisodeNumberKey]bool {
+	numbers := map[tvEpisodeNumberKey]bool{}
+	if detail == nil {
+		return numbers
+	}
+	for _, season := range detail.Seasons {
+		for _, episode := range season.Episodes {
+			if episode.Number <= 0 || season.Number < 0 {
+				continue
+			}
+			numbers[tvEpisodeNumberKey{season: int32(season.Number), episode: int32(episode.Number)}] = true
+		}
+	}
+	return numbers
+}
+
+func addTVEpisodeLinkAliases(index *tvEpisodeLinkIndex, detail *metadata.MediaDetail) {
+	if index == nil || detail == nil {
+		return
+	}
+	for _, season := range detail.Seasons {
+		for _, episode := range season.Episodes {
+			canonicalKey := tvEpisodeNumberKey{season: int32(season.Number), episode: int32(episode.Number)}
+			target, ok := index.byNumber[canonicalKey]
+			if !ok {
+				continue
+			}
+			if target.absoluteNumber == 0 && episode.AbsoluteNumber > 0 {
+				target.absoluteNumber = int32(episode.AbsoluteNumber)
+				index.byNumber[canonicalKey] = target
+			}
+			if target.absoluteNumber > 0 {
+				if _, exists := index.byAbsolute[target.absoluteNumber]; !exists {
+					index.byAbsolute[target.absoluteNumber] = target
+				}
+			}
+			for _, number := range episode.Numbers {
+				episodeNumber, valid := integralTVEpisodeNumber(number.Number)
+				if !valid {
+					continue
+				}
+				if strings.EqualFold(number.Scheme, "absolute") {
+					absolute := int32(episodeNumber)
+					if _, exists := index.byAbsolute[absolute]; !exists {
+						index.byAbsolute[absolute] = target
+					}
+					continue
+				}
+				if number.Season < 0 {
+					continue
+				}
+				aliasKey := tvEpisodeNumberKey{season: int32(number.Season), episode: int32(episodeNumber)}
+				if _, exists := index.byNumber[aliasKey]; !exists {
+					index.byNumber[aliasKey] = target
+				}
+			}
+		}
+	}
 }
 
 func replaceTVLibraryFileLinks(ctx context.Context, q *sqlc.Queries, libraryFileID, mediaItemID int64, plan TVPlan, episodeLinks tvEpisodeLinkIndex) error {
@@ -506,28 +588,144 @@ func tvEpisodeLinkTargetsForPlan(plan TVPlan, episodeLinks tvEpisodeLinkIndex) [
 		if pairedAbsolute {
 			absoluteNumber = int32(plan.AbsoluteEpisodes[idx])
 		}
-		episodeID := episodeLinks.byNumber[tvEpisodeNumberKey{season: seasonNumber, episode: episodeNumber}]
-		if episodeID == 0 && absoluteNumber > 0 {
-			episodeID = episodeLinks.byAbsolute[absoluteNumber]
+		target, found := episodeLinks.byNumber[tvEpisodeNumberKey{season: seasonNumber, episode: episodeNumber}]
+		if !found && absoluteNumber > 0 {
+			target, found = episodeLinks.byAbsolute[absoluteNumber]
 		}
-		targets = append(targets, tvEpisodeLinkTarget{
-			episodeID:      episodeID,
-			seasonNumber:   seasonNumber,
-			episodeNumber:  episodeNumber,
-			absoluteNumber: absoluteNumber,
-		})
+		if found {
+			if target.absoluteNumber == 0 && absoluteNumber > 0 {
+				target.absoluteNumber = absoluteNumber
+			}
+			targets = append(targets, target)
+			continue
+		}
+		targets = append(targets, tvEpisodeLinkTarget{seasonNumber: seasonNumber, episodeNumber: episodeNumber, absoluteNumber: absoluteNumber})
 	}
 	if len(targets) > 0 {
 		return targets
 	}
 	for _, absolute := range plan.AbsoluteEpisodes {
 		absoluteNumber := int32(absolute)
-		targets = append(targets, tvEpisodeLinkTarget{
-			episodeID:      episodeLinks.byAbsolute[absoluteNumber],
-			absoluteNumber: absoluteNumber,
-		})
+		if target, ok := episodeLinks.byAbsolute[absoluteNumber]; ok {
+			targets = append(targets, target)
+			continue
+		}
+		targets = append(targets, tvEpisodeLinkTarget{absoluteNumber: absoluteNumber})
 	}
 	return targets
+}
+
+func storeTVFileCanonicalEpisodes(ctx context.Context, q *sqlc.Queries, fileID int64, targets []tvEpisodeLinkTarget) error {
+	seasons, episodes := tvCanonicalEpisodeArrays(targets)
+	if len(episodes) == 0 {
+		return nil
+	}
+	return q.SetLibraryFileResolvedEpisodes(ctx, sqlc.SetLibraryFileResolvedEpisodesParams{
+		ID:       fileID,
+		Seasons:  mustJSONBytes(seasons),
+		Episodes: mustJSONBytes(episodes),
+	})
+}
+
+func pruneStaleCanonicalTVStructure(ctx context.Context, q *sqlc.Queries, seriesID int64, detail *metadata.MediaDetail) error {
+	episodeRows, err := q.ListCanonicalTVEpisodeRowsBySeries(ctx, seriesID)
+	if err != nil {
+		return err
+	}
+	if stale := staleCanonicalTVEpisodeIDs(detail, episodeRows); len(stale) > 0 {
+		if _, err := q.DeleteCanonicalTVEpisodesByIDs(ctx, stale); err != nil {
+			return err
+		}
+	}
+	seasonRows, err := q.ListCanonicalTVSeasonRowsBySeries(ctx, seriesID)
+	if err != nil {
+		return err
+	}
+	if stale := staleCanonicalTVSeasonIDs(detail, seasonRows); len(stale) > 0 {
+		if _, err := q.DeleteEmptyCanonicalTVSeasonsByIDs(ctx, stale); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func staleCanonicalTVEpisodeIDs(detail *metadata.MediaDetail, rows []sqlc.ListCanonicalTVEpisodeRowsBySeriesRow) []int64 {
+	expected := map[string]tvEpisodeNumberKey{}
+	count := 0
+	if detail != nil {
+		for _, season := range detail.Seasons {
+			for _, episode := range season.Episodes {
+				count++
+				canonicalID := strings.TrimSpace(episode.CanonicalID)
+				if canonicalID == "" {
+					return nil
+				}
+				expected[canonicalID] = tvEpisodeNumberKey{season: int32(season.Number), episode: int32(episode.Number)}
+			}
+		}
+	}
+	if count == 0 || len(expected) != count {
+		return nil
+	}
+	var stale []int64
+	for _, row := range rows {
+		want, current := expected[row.EntityID.String()]
+		got := tvEpisodeNumberKey{season: row.SeasonNumber, episode: row.EpisodeNumber}
+		if !current || want != got {
+			stale = append(stale, row.ID)
+		}
+	}
+	return stale
+}
+
+func staleCanonicalTVSeasonIDs(detail *metadata.MediaDetail, rows []sqlc.ListCanonicalTVSeasonRowsBySeriesRow) []int64 {
+	expected := map[string]int32{}
+	count := 0
+	if detail != nil {
+		for _, season := range detail.Seasons {
+			count++
+			canonicalID := strings.TrimSpace(season.CanonicalID)
+			if canonicalID == "" {
+				return nil
+			}
+			expected[canonicalID] = int32(season.Number)
+		}
+	}
+	if count == 0 || len(expected) != count {
+		return nil
+	}
+	var stale []int64
+	for _, row := range rows {
+		want, current := expected[row.EntityID.String()]
+		if !current || want != row.SeasonNumber {
+			stale = append(stale, row.ID)
+		}
+	}
+	return stale
+}
+
+func tvCanonicalEpisodeArrays(targets []tvEpisodeLinkTarget) ([]int, []int) {
+	seasonSeen := map[int]bool{}
+	pairSeen := map[tvEpisodeNumberKey]bool{}
+	var seasons, episodes []int
+	for _, target := range targets {
+		if target.episodeID == 0 || target.episodeNumber <= 0 || target.seasonNumber < 0 {
+			continue
+		}
+		key := tvEpisodeNumberKey{season: target.seasonNumber, episode: target.episodeNumber}
+		if pairSeen[key] {
+			continue
+		}
+		pairSeen[key] = true
+		season := int(target.seasonNumber)
+		if !seasonSeen[season] {
+			seasonSeen[season] = true
+			seasons = append(seasons, season)
+		}
+		episodes = append(episodes, int(target.episodeNumber))
+	}
+	sort.Ints(seasons)
+	return seasons, episodes
 }
 
 func createTVLibraryFileLink(ctx context.Context, q *sqlc.Queries, libraryFileID, mediaItemID, episodeID int64, seasonNumber, episodeNumber, absoluteNumber int32, title string) error {

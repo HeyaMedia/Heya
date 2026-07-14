@@ -229,6 +229,68 @@ func TestFetchTVMetadataPreviewsMapsPlannedEpisodes(t *testing.T) {
 	}
 }
 
+func TestFetchTVMetadataPreviewsAcceptsFlattened86Aliases(t *testing.T) {
+	detail := eightySixMetadataDetail()
+	provider := &fakeMovieDetailProvider{details: map[string]*metadata.MediaDetail{
+		"heya:anime:86": detail,
+	}}
+	episodes := make([]TVEpisodeRef, 0, 23)
+	files := make([]string, 0, 23)
+	for episode := 1; episode <= 23; episode++ {
+		episodes = append(episodes, TVEpisodeRef{Season: 1, Episode: episode})
+		files = append(files, fmt.Sprintf("86 Eighty Six (2021)/Season 01/86 Eighty Six (2021) - S01E%02d.mkv", episode))
+	}
+
+	previews, err := FetchTVMetadataPreviews(context.Background(), []TVSearchMatch{{
+		Accepted: true, Key: "tvdb:371898", ProviderID: "heya:anime:86", Title: "86 Eighty Six", Year: "2021",
+	}}, []TVMatch{{
+		Key: "tvdb:371898", Title: "86 Eighty Six", Year: "2021", Episodes: episodes, Files: files,
+	}}, provider, &captureEmitter{})
+	if err != nil {
+		t.Fatalf("fetch 86 preview: %v", err)
+	}
+	if len(previews) != 1 {
+		t.Fatalf("previews: got %d, want 1", len(previews))
+	}
+	preview := previews[0]
+	if preview.Seasons != 2 || preview.RemoteEpisodes != 23 {
+		t.Fatalf("canonical structure: seasons=%d episodes=%d", preview.Seasons, preview.RemoteEpisodes)
+	}
+	if preview.PlannedEpisodes != 23 || preview.MappedEpisodes != 23 || len(preview.MissingEpisodes) != 0 {
+		t.Fatalf("flattened alias coverage: mapped=%d/%d missing=%#v", preview.MappedEpisodes, preview.PlannedEpisodes, preview.MissingEpisodes)
+	}
+}
+
+func eightySixMetadataDetail() *metadata.MediaDetail {
+	detail := &metadata.MediaDetail{
+		Title: "86 Eighty Six",
+		Year:  "2021",
+		Seasons: []metadata.SeasonDetail{
+			{CanonicalID: "10000000-0000-4000-8000-000000000001", Number: 1, Title: "Season 1"},
+			{CanonicalID: "10000000-0000-4000-8000-000000000002", Number: 2, Title: "Season 2"},
+		},
+	}
+	for absolute := 1; absolute <= 23; absolute++ {
+		canonicalSeason, canonicalEpisode := 1, absolute
+		if absolute > 11 {
+			canonicalSeason = 2
+			canonicalEpisode = absolute - 11
+		}
+		episode := metadata.EpisodeDetail{
+			CanonicalID:    fmt.Sprintf("20000000-0000-4000-8000-%012d", absolute),
+			Number:         canonicalEpisode,
+			AbsoluteNumber: absolute,
+			Numbers: []metadata.EpisodeNumber{
+				{Scheme: "aired", Season: canonicalSeason, Number: float64(canonicalEpisode), Provider: "thexem"},
+				{Scheme: "aired", Season: 1, Number: float64(absolute), Provider: "tvdb"},
+				{Scheme: "absolute", Number: float64(absolute), Provider: "thexem"},
+			},
+		}
+		detail.Seasons[canonicalSeason-1].Episodes = append(detail.Seasons[canonicalSeason-1].Episodes, episode)
+	}
+	return detail
+}
+
 func TestFetchMusicMetadataPreviewsMapsArtistDiscography(t *testing.T) {
 	provider := &fakeMusicDetailProvider{details: map[string]*metadata.MediaDetail{
 		"heya:artist:mbid:ado-mbid": {

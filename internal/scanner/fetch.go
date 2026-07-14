@@ -1679,16 +1679,23 @@ func tvRemoteEpisodeIndex(detail *metadata.MediaDetail) (map[int]map[int]bool, m
 	for _, season := range detail.Seasons {
 		for _, episode := range season.Episodes {
 			if episode.Number > 0 {
-				if seasonEpisodes[season.Number] == nil {
-					seasonEpisodes[season.Number] = map[int]bool{}
-				}
-				if !seasonEpisodes[season.Number][episode.Number] {
-					seasonEpisodes[season.Number][episode.Number] = true
+				if addTVRemoteEpisodeNumber(seasonEpisodes, season.Number, episode.Number) {
 					count++
 				}
 			}
 			if episode.AbsoluteNumber > 0 {
 				absoluteEpisodes[episode.AbsoluteNumber] = true
+			}
+			for _, number := range episode.Numbers {
+				episodeNumber, ok := integralTVEpisodeNumber(number.Number)
+				if !ok {
+					continue
+				}
+				if strings.EqualFold(number.Scheme, "absolute") {
+					absoluteEpisodes[episodeNumber] = true
+					continue
+				}
+				addTVRemoteEpisodeNumber(seasonEpisodes, number.Season, episodeNumber)
 			}
 		}
 	}
@@ -1696,6 +1703,25 @@ func tvRemoteEpisodeIndex(detail *metadata.MediaDetail) (map[int]map[int]bool, m
 		count = detail.NumberOfEpisodes
 	}
 	return seasonEpisodes, absoluteEpisodes, count
+}
+
+func addTVRemoteEpisodeNumber(seasonEpisodes map[int]map[int]bool, season, episode int) bool {
+	if episode <= 0 || season < 0 {
+		return false
+	}
+	if seasonEpisodes[season] == nil {
+		seasonEpisodes[season] = map[int]bool{}
+	}
+	if seasonEpisodes[season][episode] {
+		return false
+	}
+	seasonEpisodes[season][episode] = true
+	return true
+}
+
+func integralTVEpisodeNumber(value float64) (int, bool) {
+	number := int(value)
+	return number, number > 0 && float64(number) == value
 }
 
 func tvRemoteHasEpisode(ref TVEpisodeRef, seasonEpisodes map[int]map[int]bool, absoluteEpisodes map[int]bool) bool {

@@ -432,6 +432,7 @@ type SeasonDetail struct {
 type EpisodeDetail struct {
 	CanonicalID    string            `json:"canonical_id,omitempty"`
 	Number         int               `json:"number"`
+	Numbers        []EpisodeNumber   `json:"numbers,omitempty"`
 	Title          string            `json:"title"`
 	Titles         []TitleEntry      `json:"titles,omitempty"`
 	Overview       string            `json:"overview"`
@@ -447,6 +448,18 @@ type EpisodeDetail struct {
 	TmdbID         int               `json:"tmdb_id,omitempty"`
 	TvdbID         int               `json:"tvdb_id,omitempty"`
 	Source         string            `json:"source,omitempty"`
+}
+
+// EpisodeNumber is one numbering alias supplied by the canonical metadata
+// provider. A single episode may simultaneously be canonical S02E01, upstream
+// aired S01E12, and absolute episode 12. Keeping the complete alias set lets
+// scanners resolve the local filename without changing the canonical season
+// layout used by the library UI.
+type EpisodeNumber struct {
+	Scheme   string  `json:"scheme"`
+	Season   int     `json:"season,omitempty"`
+	Number   float64 `json:"number"`
+	Provider string  `json:"provider,omitempty"`
 }
 
 type TrackDetail struct {

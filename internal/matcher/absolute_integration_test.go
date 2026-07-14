@@ -73,6 +73,10 @@ func TestReconcileAbsoluteEpisodesIntegration(t *testing.T) {
 	}
 	fMain := mkFile("/data/Anime/Yamato {anidb-2662}/Yamato - 24 - Real Episode.mkv")
 	fSpecial := mkFile("/data/Anime/Yamato {anidb-2662}/Yamato - 99 - Only A Special.mkv")
+	var fEmpty int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO library_files (library_id, path, parse_result, status, media_item_id) VALUES ($1,$2,'{}','matched',$3) RETURNING id`,
+		libraryID, "/data/Anime/Yamato/Yamato.S01E12.mkv", itemID).Scan(&fEmpty))
 
 	resolved := func(fileID int64) ([]int, []int) {
 		var raw []byte
@@ -81,6 +85,12 @@ func TestReconcileAbsoluteEpisodesIntegration(t *testing.T) {
 		require.NoError(t, json.Unmarshal(raw, &pr))
 		return pr.Parsed.Release.Seasons, pr.Parsed.Release.Episodes
 	}
+	require.NoError(t, q.SetLibraryFileResolvedEpisodes(ctx, sqlc.SetLibraryFileResolvedEpisodesParams{
+		ID: fEmpty, Seasons: []byte(`[2]`), Episodes: []byte(`[1]`),
+	}))
+	sEmpty, eEmpty := resolved(fEmpty)
+	require.Equal(t, []int{2}, sEmpty, "empty parse result gains the canonical season container")
+	require.Equal(t, []int{1}, eEmpty, "empty parse result gains the canonical episode container")
 
 	n, err := ReconcileAbsoluteEpisodes(ctx, q, itemID)
 	require.NoError(t, err)

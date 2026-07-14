@@ -8,6 +8,7 @@ package sqlc
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -187,6 +188,50 @@ func (q *Queries) CreateTVSeries(ctx context.Context, arg CreateTVSeriesParams) 
 	return i, err
 }
 
+const deleteCanonicalTVEpisodesByIDs = `-- name: DeleteCanonicalTVEpisodesByIDs :execrows
+WITH deleted_bindings AS (
+    DELETE FROM metadata_entity_bindings
+    WHERE local_kind = 'tv_episode'
+      AND local_id = ANY($1::bigint[])
+    RETURNING local_id
+)
+DELETE FROM tv_episodes
+WHERE id = ANY($1::bigint[])
+`
+
+func (q *Queries) DeleteCanonicalTVEpisodesByIDs(ctx context.Context, episodeIds []int64) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteCanonicalTVEpisodesByIDs, episodeIds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteEmptyCanonicalTVSeasonsByIDs = `-- name: DeleteEmptyCanonicalTVSeasonsByIDs :execrows
+WITH empty_seasons AS MATERIALIZED (
+    SELECT s.id
+    FROM tv_seasons s
+    WHERE s.id = ANY($1::bigint[])
+      AND NOT EXISTS (SELECT 1 FROM tv_episodes e WHERE e.season_id = s.id)
+), deleted_bindings AS (
+    DELETE FROM metadata_entity_bindings b
+    USING empty_seasons stale
+    WHERE b.local_kind = 'tv_season' AND b.local_id = stale.id
+    RETURNING b.local_id
+)
+DELETE FROM tv_seasons s
+USING empty_seasons stale
+WHERE s.id = stale.id
+`
+
+func (q *Queries) DeleteEmptyCanonicalTVSeasonsByIDs(ctx context.Context, seasonIds []int64) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteEmptyCanonicalTVSeasonsByIDs, seasonIds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getTVEpisode = `-- name: GetTVEpisode :one
 SELECT id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source FROM tv_episodes WHERE season_id = $1 AND episode_number = $2
 `
@@ -345,6 +390,86 @@ func (q *Queries) GetTVSeriesByMediaItemID(ctx context.Context, mediaItemID int6
 		&i.OriginCountry,
 	)
 	return i, err
+}
+
+const listCanonicalTVEpisodeRowsBySeries = `-- name: ListCanonicalTVEpisodeRowsBySeries :many
+SELECT e.id, s.season_number, e.episode_number, b.entity_id
+FROM tv_episodes e
+JOIN tv_seasons s ON s.id = e.season_id
+JOIN metadata_entity_bindings b
+  ON b.local_kind = 'tv_episode' AND b.local_id = e.id
+WHERE s.series_id = $1
+ORDER BY s.season_number, e.episode_number
+`
+
+type ListCanonicalTVEpisodeRowsBySeriesRow struct {
+	ID            int64     `json:"id"`
+	SeasonNumber  int32     `json:"season_number"`
+	EpisodeNumber int32     `json:"episode_number"`
+	EntityID      uuid.UUID `json:"entity_id"`
+}
+
+// Canonically bound rows are compared with the current HeyaMetadata projection
+// after files have been relinked. Rows absent from (or moved within) the current
+// projection are old provider layouts and can then be removed safely.
+func (q *Queries) ListCanonicalTVEpisodeRowsBySeries(ctx context.Context, seriesID int64) ([]ListCanonicalTVEpisodeRowsBySeriesRow, error) {
+	rows, err := q.db.Query(ctx, listCanonicalTVEpisodeRowsBySeries, seriesID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCanonicalTVEpisodeRowsBySeriesRow{}
+	for rows.Next() {
+		var i ListCanonicalTVEpisodeRowsBySeriesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SeasonNumber,
+			&i.EpisodeNumber,
+			&i.EntityID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCanonicalTVSeasonRowsBySeries = `-- name: ListCanonicalTVSeasonRowsBySeries :many
+SELECT s.id, s.season_number, b.entity_id
+FROM tv_seasons s
+JOIN metadata_entity_bindings b
+  ON b.local_kind = 'tv_season' AND b.local_id = s.id
+WHERE s.series_id = $1
+ORDER BY s.season_number
+`
+
+type ListCanonicalTVSeasonRowsBySeriesRow struct {
+	ID           int64     `json:"id"`
+	SeasonNumber int32     `json:"season_number"`
+	EntityID     uuid.UUID `json:"entity_id"`
+}
+
+func (q *Queries) ListCanonicalTVSeasonRowsBySeries(ctx context.Context, seriesID int64) ([]ListCanonicalTVSeasonRowsBySeriesRow, error) {
+	rows, err := q.db.Query(ctx, listCanonicalTVSeasonRowsBySeries, seriesID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCanonicalTVSeasonRowsBySeriesRow{}
+	for rows.Next() {
+		var i ListCanonicalTVSeasonRowsBySeriesRow
+		if err := rows.Scan(&i.ID, &i.SeasonNumber, &i.EntityID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listEpisodeAbsoluteMap = `-- name: ListEpisodeAbsoluteMap :many

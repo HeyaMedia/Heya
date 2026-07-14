@@ -31,23 +31,23 @@ func TestAnimeFixtureProducesLocalPlans(t *testing.T) {
 		t.Fatalf("match anime: %v", err)
 	}
 
-	if got := countInventoryFiles(inv); got != 168 {
-		t.Fatalf("classified inventory files: got %d, want 168", got)
+	if got := countInventoryFiles(inv); got != 178 {
+		t.Fatalf("classified inventory files: got %d, want 178", got)
 	}
 	if got := len(inventoryFilesByClass(inv, ClassExtraMedia)); got != 4 {
 		t.Fatalf("local extras: got %d, want 4", got)
 	}
-	if got := len(plans); got != 94 {
-		t.Fatalf("anime plans: got %d, want 94", got)
+	if got := len(plans); got != 104 {
+		t.Fatalf("anime plans: got %d, want 104", got)
 	}
 	if got := len(matches); got != 12 {
 		t.Fatalf("anime matches: got %d, want 12", got)
 	}
-	if got := countTVPlannedEpisodes(plans); got != 95 {
-		t.Fatalf("planned episodes: got %d, want 95", got)
+	if got := countTVPlannedEpisodes(plans); got != 104 {
+		t.Fatalf("planned episodes: got %d, want 104", got)
 	}
-	if got := len(multiEpisodeTVPlans(plans)); got != 1 {
-		t.Fatalf("multi-episode plans: got %d, want 1", got)
+	if got := len(multiEpisodeTVPlans(plans)); got != 0 {
+		t.Fatalf("multi-episode plans: got %d, want 0", got)
 	}
 	if got := countEvents(emit.events, "anime.file.unplanned"); got != 3 {
 		t.Fatalf("unplanned anime files: got %d, want 3", got)
@@ -60,7 +60,8 @@ func TestAnimeFixtureProducesLocalPlans(t *testing.T) {
 	for _, match := range matches {
 		byKey[match.Key] = match
 	}
-	assertTVMatch(t, byKey, "tvdb:371898", "86 Eighty Six", "2021", "tvdb", 13, 12)
+	assertTVMatch(t, byKey, "tvdb:371898", "86 Eighty Six", "2021", "tvdb", 23, 23)
+	assertFlattened86Episodes(t, byKey["tvdb:371898"])
 	assertTVMatch(t, byKey, "tmdb:1429", "Attack on Titan", "2013", "tmdb", 10, 10)
 	assertTVMatch(t, byKey, "tmdb:209867", "Frieren: Beyond Journey's End", "2023", "tmdb", 10, 10)
 	assertTVMatch(t, byKey, "tvdb:389597", "Solo Leveling", "2024", "tvdb", 8, 8)
@@ -78,11 +79,9 @@ func TestAnimeFixtureProducesLocalPlans(t *testing.T) {
 	WriteReport(&report, sqlc.Library{ID: 4, Name: "Anime", MediaType: sqlc.MediaTypeAnime}, Result{Inventory: inv, TVPlans: plans, TVMatches: matches}, emit.events)
 	for _, want := range []string{
 		"Anime scan report: Anime (id=4)",
-		"Anime episode plans:   94",
+		"Anime episode plans:   104",
 		"Local anime identities: 12",
-		"Planned episodes:      95",
-		"Multi-episode files",
-		"86 Eighty Six (2021) S01E12,E13",
+		"Planned episodes:      104",
 		"Local extras:          4",
 		"Attack on Titan (2013)/NCOPs/Attack on Titan Creditless Opening 01.mkv type=opening",
 		"Attack on Titan (2013)/NCEDs/Attack on Titan Creditless Ending 01.mkv type=ending",
@@ -177,8 +176,8 @@ func TestRunLibrarySupportsAnimeReport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run anime library: %v", err)
 	}
-	if len(result.TVPlans) != 94 {
-		t.Fatalf("runner anime plans: got %d, want 94", len(result.TVPlans))
+	if len(result.TVPlans) != 104 {
+		t.Fatalf("runner anime plans: got %d, want 104", len(result.TVPlans))
 	}
 	if len(result.TVMatches) != 12 {
 		t.Fatalf("runner anime matches: got %d, want 12", len(result.TVMatches))
@@ -186,11 +185,24 @@ func TestRunLibrarySupportsAnimeReport(t *testing.T) {
 	report := out.String()
 	for _, want := range []string{
 		"Anime scan report: Anime (id=4)",
-		"Anime episode plans:   94",
+		"Anime episode plans:   104",
 		"Local extras:          4",
 	} {
 		if !strings.Contains(report, want) {
 			t.Fatalf("runner report missing %q:\n%s", want, report)
+		}
+	}
+}
+
+func assertFlattened86Episodes(t *testing.T, match TVMatch) {
+	t.Helper()
+	if len(match.Episodes) != 23 {
+		t.Fatalf("86 flattened episodes: got %d, want 23", len(match.Episodes))
+	}
+	for idx, ref := range match.Episodes {
+		want := idx + 1
+		if ref.Season != 1 || ref.Episode != want {
+			t.Fatalf("86 flattened episode %d: got %#v, want S01E%02d", idx, ref, want)
 		}
 	}
 }

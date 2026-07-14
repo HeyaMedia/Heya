@@ -279,13 +279,16 @@ func TestKindSpecificCanonicalMapping(t *testing.T) {
       "data":{"classification":{"status":"ended","language":"ja"},"episode_count":1,"season_count":1,
       "seasons":[{"id":"`+testSeasonID+`","number":0,"name":"Specials","episode_count":1,"episode_ids":["`+testEpisodeID+`"]}],
       "episodes":[{"id":"`+testEpisodeID+`","season_id":"`+testSeasonID+`","titles":[{"value":"OVA","language":"en","type":"display"}],
-	      "numbers":[{"scheme":"aired","season":0,"number":1,"provider":"anidb"},{"scheme":"absolute","number":13}],"is_special":true,"episode_type":"ova","runtime_minutes":24}]}}`)
+	      "numbers":[{"scheme":"aired","season":0,"number":1,"provider":"anidb"},{"scheme":"absolute","number":13},{"scheme":"aired","season":1,"number":12,"provider":"tvdb"}],"is_special":true,"episode_type":"ova","runtime_minutes":24}]}}`)
 	if len(episodic.Seasons) != 1 || episodic.Seasons[0].CanonicalID != testSeasonID || len(episodic.Seasons[0].Episodes) != 1 {
 		t.Fatalf("episodic structure mapping: %#v", episodic.Seasons)
 	}
 	episode := episodic.Seasons[0].Episodes[0]
 	if episode.CanonicalID != testEpisodeID || episode.Number != 1 || episode.AbsoluteNumber != 13 || !episode.IsSpecial || episode.EpisodeType != 3 {
 		t.Fatalf("episode mapping: %#v", episode)
+	}
+	if len(episode.Numbers) != 3 || episode.Numbers[2].Provider != "tvdb" || episode.Numbers[2].Season != 1 || episode.Numbers[2].Number != 12 {
+		t.Fatalf("episode numbering aliases: %#v", episode.Numbers)
 	}
 
 	book := mustMapDocument(t, provider, `{
@@ -305,6 +308,40 @@ func TestKindSpecificCanonicalMapping(t *testing.T) {
 	      "recording":{"provider":"musicbrainz","provider_id":"recording-mbid","isrcs":["JPXXX0000001"]}}]}]}}`)
 	if len(release.Tracks) != 1 || release.Tracks[0].CanonicalID != testRecordID || release.Tracks[0].Duration != 123 || release.Tracks[0].ISRC != "JPXXX0000001" || !release.Tracks[0].LyricsAvailable {
 		t.Fatalf("release recording mapping: %#v", release.Tracks)
+	}
+}
+
+func TestAnimeEpisodeKeepsCanonicalTheXEMSeasonAndFlattenedAliases(t *testing.T) {
+	client, err := NewClient("http://metadata.test", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := NewHeyaProvider(client)
+	seasonTwoID := "44444444-4444-4444-8444-444444444445"
+	detail := mustMapDocument(t, provider, `{
+      "schema_version":1,"projection_version":5,"id":"`+testMovieID+`","kind":"anime","external_ids":[],
+      "display":{"title":"86 Eighty Six","year":2021},
+      "data":{"classification":{"status":"ended","language":"ja"},"episode_count":23,"season_count":2,
+      "seasons":[
+        {"id":"`+testSeasonID+`","number":1,"name":"Season 1","episode_count":11,"episode_ids":[]},
+        {"id":"`+seasonTwoID+`","number":2,"name":"Season 2","episode_count":12,"episode_ids":["`+testEpisodeID+`"]}
+      ],
+      "episodes":[{"id":"`+testEpisodeID+`","season_id":"`+seasonTwoID+`","titles":[{"value":"Welcome","language":"en","type":"display"}],
+      "numbers":[
+        {"scheme":"aired","season":1,"number":12,"provider":"tvdb"},
+        {"scheme":"aired","season":2,"number":1,"provider":"thexem"},
+        {"scheme":"absolute","number":12,"provider":"thexem"}
+      ],"runtime_minutes":24}]}}`)
+
+	if len(detail.Seasons) != 2 || len(detail.Seasons[1].Episodes) != 1 {
+		t.Fatalf("canonical seasons: %#v", detail.Seasons)
+	}
+	episode := detail.Seasons[1].Episodes[0]
+	if episode.Number != 1 || episode.AbsoluteNumber != 12 || episode.Source != "thexem" {
+		t.Fatalf("canonical TheXEM numbering: %#v", episode)
+	}
+	if len(episode.Numbers) != 3 || episode.Numbers[0].Season != 1 || episode.Numbers[0].Number != 12 || episode.Numbers[0].Provider != "tvdb" {
+		t.Fatalf("flattened numbering aliases: %#v", episode.Numbers)
 	}
 }
 

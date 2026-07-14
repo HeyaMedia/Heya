@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
 )
@@ -181,12 +182,12 @@ func TestPlanTVMaterializationCreatesUniqueTargetsAndBlocksRejected(t *testing.T
 
 func TestTVEpisodeLinkTargetsPreservesAbsoluteNumbers(t *testing.T) {
 	index := tvEpisodeLinkIndex{
-		byNumber: map[tvEpisodeNumberKey]int64{
-			{season: 1, episode: 2}: 2002,
+		byNumber: map[tvEpisodeNumberKey]tvEpisodeLinkTarget{
+			{season: 1, episode: 2}: {episodeID: 2002, seasonNumber: 1, episodeNumber: 2, absoluteNumber: 2},
 		},
-		byAbsolute: map[int32]int64{
-			2:  9002,
-			24: 9024,
+		byAbsolute: map[int32]tvEpisodeLinkTarget{
+			2:  {episodeID: 2002, seasonNumber: 1, episodeNumber: 2, absoluteNumber: 2},
+			24: {episodeID: 9024, seasonNumber: 2, episodeNumber: 13, absoluteNumber: 24},
 		},
 	}
 
@@ -210,7 +211,7 @@ func TestTVEpisodeLinkTargetsPreservesAbsoluteNumbers(t *testing.T) {
 	if len(fallback) != 1 {
 		t.Fatalf("fallback targets: got %d, want 1", len(fallback))
 	}
-	if fallback[0].episodeID != 9024 || fallback[0].seasonNumber != 1 || fallback[0].episodeNumber != 24 || fallback[0].absoluteNumber != 24 {
+	if fallback[0].episodeID != 9024 || fallback[0].seasonNumber != 2 || fallback[0].episodeNumber != 13 || fallback[0].absoluteNumber != 24 {
 		t.Fatalf("fallback target: %#v", fallback[0])
 	}
 
@@ -220,7 +221,73 @@ func TestTVEpisodeLinkTargetsPreservesAbsoluteNumbers(t *testing.T) {
 	if len(absoluteOnly) != 1 {
 		t.Fatalf("absolute targets: got %d, want 1", len(absoluteOnly))
 	}
-	if absoluteOnly[0].episodeID != 9024 || absoluteOnly[0].seasonNumber != 0 || absoluteOnly[0].episodeNumber != 0 || absoluteOnly[0].absoluteNumber != 24 {
+	if absoluteOnly[0].episodeID != 9024 || absoluteOnly[0].seasonNumber != 2 || absoluteOnly[0].episodeNumber != 13 || absoluteOnly[0].absoluteNumber != 24 {
 		t.Fatalf("absolute target: %#v", absoluteOnly[0])
+	}
+}
+
+func TestTVEpisodeLinkTargetsMapFlattened86AliasToCanonicalSeason(t *testing.T) {
+	index := tvEpisodeLinkIndex{
+		byNumber:   map[tvEpisodeNumberKey]tvEpisodeLinkTarget{},
+		byAbsolute: map[int32]tvEpisodeLinkTarget{},
+	}
+	for season := 1; season <= 2; season++ {
+		for episode := 1; episode <= map[int]int{1: 11, 2: 12}[season]; episode++ {
+			absolute := episode
+			if season == 2 {
+				absolute += 11
+			}
+			target := tvEpisodeLinkTarget{
+				episodeID:      int64(absolute),
+				seasonNumber:   int32(season),
+				episodeNumber:  int32(episode),
+				absoluteNumber: int32(absolute),
+			}
+			index.byNumber[tvEpisodeNumberKey{season: int32(season), episode: int32(episode)}] = target
+			index.byAbsolute[int32(absolute)] = target
+		}
+	}
+	addTVEpisodeLinkAliases(&index, eightySixMetadataDetail())
+
+	targets := tvEpisodeLinkTargetsForPlan(TVPlan{Season: 1, Episodes: []int{12, 23}}, index)
+	if len(targets) != 2 {
+		t.Fatalf("targets: got %d, want 2", len(targets))
+	}
+	if targets[0].episodeID != 12 || targets[0].seasonNumber != 2 || targets[0].episodeNumber != 1 || targets[0].absoluteNumber != 12 {
+		t.Fatalf("S01E12 target: %#v", targets[0])
+	}
+	if targets[1].episodeID != 23 || targets[1].seasonNumber != 2 || targets[1].episodeNumber != 12 || targets[1].absoluteNumber != 23 {
+		t.Fatalf("S01E23 target: %#v", targets[1])
+	}
+	seasons, episodes := tvCanonicalEpisodeArrays(targets)
+	if len(seasons) != 1 || seasons[0] != 2 || len(episodes) != 2 || episodes[0] != 1 || episodes[1] != 12 {
+		t.Fatalf("canonical parse arrays: seasons=%#v episodes=%#v", seasons, episodes)
+	}
+}
+
+func TestStaleCanonicalTVRowsDetectOld86Layout(t *testing.T) {
+	detail := eightySixMetadataDetail()
+	currentS2E1 := uuid.MustParse(detail.Seasons[1].Episodes[0].CanonicalID)
+	staleEpisode := uuid.MustParse("30000000-0000-4000-8000-000000000012")
+	episodeRows := []sqlc.ListCanonicalTVEpisodeRowsBySeriesRow{
+		{ID: 11, SeasonNumber: 1, EpisodeNumber: 11, EntityID: uuid.MustParse(detail.Seasons[0].Episodes[10].CanonicalID)},
+		{ID: 12, SeasonNumber: 1, EpisodeNumber: 12, EntityID: staleEpisode},
+		{ID: 13, SeasonNumber: 1, EpisodeNumber: 12, EntityID: currentS2E1},
+		{ID: 14, SeasonNumber: 2, EpisodeNumber: 1, EntityID: currentS2E1},
+	}
+	staleEpisodes := staleCanonicalTVEpisodeIDs(detail, episodeRows)
+	if len(staleEpisodes) != 2 || staleEpisodes[0] != 12 || staleEpisodes[1] != 13 {
+		t.Fatalf("stale episode rows: %#v", staleEpisodes)
+	}
+
+	seasonRows := []sqlc.ListCanonicalTVSeasonRowsBySeriesRow{
+		{ID: 21, SeasonNumber: 1, EntityID: uuid.MustParse(detail.Seasons[0].CanonicalID)},
+		{ID: 22, SeasonNumber: 1, EntityID: uuid.MustParse(detail.Seasons[1].CanonicalID)},
+		{ID: 23, SeasonNumber: 2, EntityID: uuid.MustParse(detail.Seasons[1].CanonicalID)},
+		{ID: 24, SeasonNumber: 3, EntityID: uuid.MustParse("30000000-0000-4000-8000-000000000003")},
+	}
+	staleSeasons := staleCanonicalTVSeasonIDs(detail, seasonRows)
+	if len(staleSeasons) != 2 || staleSeasons[0] != 22 || staleSeasons[1] != 24 {
+		t.Fatalf("stale season rows: %#v", staleSeasons)
 	}
 }

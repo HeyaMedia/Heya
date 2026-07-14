@@ -1025,9 +1025,14 @@ func (q *Queries) RestoreLibraryFile(ctx context.Context, id int64) error {
 
 const setLibraryFileResolvedEpisodes = `-- name: SetLibraryFileResolvedEpisodes :exec
 UPDATE library_files
-SET parse_result = jsonb_set(
-        jsonb_set(parse_result, '{parsed,release,seasons}', $1::jsonb, true),
-        '{parsed,release,episodes}', $2::jsonb, true),
+SET parse_result = COALESCE(parse_result, '{}'::jsonb) || jsonb_build_object(
+        'parsed', COALESCE(NULLIF(parse_result->'parsed', 'null'::jsonb), '{}'::jsonb) || jsonb_build_object(
+            'release', COALESCE(NULLIF(parse_result->'parsed'->'release', 'null'::jsonb), '{}'::jsonb) || jsonb_build_object(
+                'seasons', $1::jsonb,
+                'episodes', $2::jsonb
+            )
+        )
+    ),
     updated_at = now()
 WHERE id = $3::bigint
 `
@@ -1038,12 +1043,11 @@ type SetLibraryFileResolvedEpisodesParams struct {
 	ID       int64  `json:"id"`
 }
 
-// Writes catalog-resolved season/episode arrays into an absolute-numbered anime
-// file's parse_result, in place, without disturbing status/media_item_id/
-// media_info. This is what makes an absolute file ("Series - 24 - Title", parsed
-// with only absoluteEpisodes) look like a normal SxxExx file to every downstream
-// file<->episode join. Idempotent: the reconcile step recomputes from the
-// unchanged absoluteEpisodes each run. See matcher.ReconcileAbsoluteEpisodes.
+// Writes catalog-resolved season/episode arrays into an anime file's
+// parse_result, in place, without disturbing status/media_item_id/media_info.
+// This supports both absolute files ("Series - 24 - Title") and flattened aired
+// aliases (local S01E12 -> canonical TheXEM S02E01), making either layout look
+// canonical to every downstream file<->episode join.
 func (q *Queries) SetLibraryFileResolvedEpisodes(ctx context.Context, arg SetLibraryFileResolvedEpisodesParams) error {
 	_, err := q.db.Exec(ctx, setLibraryFileResolvedEpisodes, arg.Seasons, arg.Episodes, arg.ID)
 	return err

@@ -51,16 +51,20 @@ WHERE status = 'matched'
   AND jsonb_array_length(COALESCE(NULLIF(parse_result->'parsed'->'release'->'seasons', 'null'::jsonb), '[]'::jsonb)) = 0;
 
 -- name: SetLibraryFileResolvedEpisodes :exec
--- Writes catalog-resolved season/episode arrays into an absolute-numbered anime
--- file's parse_result, in place, without disturbing status/media_item_id/
--- media_info. This is what makes an absolute file ("Series - 24 - Title", parsed
--- with only absoluteEpisodes) look like a normal SxxExx file to every downstream
--- file<->episode join. Idempotent: the reconcile step recomputes from the
--- unchanged absoluteEpisodes each run. See matcher.ReconcileAbsoluteEpisodes.
+-- Writes catalog-resolved season/episode arrays into an anime file's
+-- parse_result, in place, without disturbing status/media_item_id/media_info.
+-- This supports both absolute files ("Series - 24 - Title") and flattened aired
+-- aliases (local S01E12 -> canonical TheXEM S02E01), making either layout look
+-- canonical to every downstream file<->episode join.
 UPDATE library_files
-SET parse_result = jsonb_set(
-        jsonb_set(parse_result, '{parsed,release,seasons}', sqlc.arg(seasons)::jsonb, true),
-        '{parsed,release,episodes}', sqlc.arg(episodes)::jsonb, true),
+SET parse_result = COALESCE(parse_result, '{}'::jsonb) || jsonb_build_object(
+        'parsed', COALESCE(NULLIF(parse_result->'parsed', 'null'::jsonb), '{}'::jsonb) || jsonb_build_object(
+            'release', COALESCE(NULLIF(parse_result->'parsed'->'release', 'null'::jsonb), '{}'::jsonb) || jsonb_build_object(
+                'seasons', sqlc.arg(seasons)::jsonb,
+                'episodes', sqlc.arg(episodes)::jsonb
+            )
+        )
+    ),
     updated_at = now()
 WHERE id = sqlc.arg(id)::bigint;
 

@@ -80,6 +80,52 @@ JOIN tv_seasons s ON s.id = e.season_id
 WHERE s.series_id = $1
 ORDER BY s.season_number ASC, e.episode_number ASC;
 
+-- name: ListCanonicalTVEpisodeRowsBySeries :many
+-- Canonically bound rows are compared with the current HeyaMetadata projection
+-- after files have been relinked. Rows absent from (or moved within) the current
+-- projection are old provider layouts and can then be removed safely.
+SELECT e.id, s.season_number, e.episode_number, b.entity_id
+FROM tv_episodes e
+JOIN tv_seasons s ON s.id = e.season_id
+JOIN metadata_entity_bindings b
+  ON b.local_kind = 'tv_episode' AND b.local_id = e.id
+WHERE s.series_id = $1
+ORDER BY s.season_number, e.episode_number;
+
+-- name: DeleteCanonicalTVEpisodesByIDs :execrows
+WITH deleted_bindings AS (
+    DELETE FROM metadata_entity_bindings
+    WHERE local_kind = 'tv_episode'
+      AND local_id = ANY(sqlc.arg(episode_ids)::bigint[])
+    RETURNING local_id
+)
+DELETE FROM tv_episodes
+WHERE id = ANY(sqlc.arg(episode_ids)::bigint[]);
+
+-- name: ListCanonicalTVSeasonRowsBySeries :many
+SELECT s.id, s.season_number, b.entity_id
+FROM tv_seasons s
+JOIN metadata_entity_bindings b
+  ON b.local_kind = 'tv_season' AND b.local_id = s.id
+WHERE s.series_id = $1
+ORDER BY s.season_number;
+
+-- name: DeleteEmptyCanonicalTVSeasonsByIDs :execrows
+WITH empty_seasons AS MATERIALIZED (
+    SELECT s.id
+    FROM tv_seasons s
+    WHERE s.id = ANY(sqlc.arg(season_ids)::bigint[])
+      AND NOT EXISTS (SELECT 1 FROM tv_episodes e WHERE e.season_id = s.id)
+), deleted_bindings AS (
+    DELETE FROM metadata_entity_bindings b
+    USING empty_seasons stale
+    WHERE b.local_kind = 'tv_season' AND b.local_id = stale.id
+    RETURNING b.local_id
+)
+DELETE FROM tv_seasons s
+USING empty_seasons stale
+WHERE s.id = stale.id;
+
 -- name: ListEpisodeAbsoluteMap :many
 -- Absolute-number -> (season, episode) resolution for one series. Powers the
 -- read-time remap of absolute-numbered anime files: their parse_result carries

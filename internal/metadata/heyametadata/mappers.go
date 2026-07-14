@@ -251,7 +251,14 @@ func (p *HeyaProvider) mapEpisodic(document episodicDocument) *metadata.MediaDet
 func (p *HeyaProvider) mapEpisode(episode episodicEpisode, fallbackSeason int, kind string) metadata.EpisodeDetail {
 	number, absolute, provider := 0, 0, ""
 	bestPriority := 999
+	numbers := make([]metadata.EpisodeNumber, 0, len(episode.Numbers))
 	for _, value := range episode.Numbers {
+		numbers = append(numbers, metadata.EpisodeNumber{
+			Scheme:   value.Scheme,
+			Season:   value.Season,
+			Number:   value.Number,
+			Provider: value.Provider,
+		})
 		if value.Scheme == "absolute" {
 			absolute = int(value.Number)
 			continue
@@ -277,7 +284,7 @@ func (p *HeyaProvider) mapEpisode(episode episodicEpisode, fallbackSeason int, k
 		provider = firstNonEmpty(episode.Numbers[0].Provider, episode.Numbers[0].Scheme)
 	}
 	ratingValue, votes := preferredRating(episode.Ratings)
-	result := metadata.EpisodeDetail{CanonicalID: episode.ID, Number: number, Title: firstNonEmpty(firstLocalized(episode.Titles), "Episode "+strconv.Itoa(number)), Titles: mapLocalizedTitles(episode.Titles), Overview: firstNonEmpty(firstLocalized(episode.Overviews), episode.Summary), RuntimeMinutes: episode.RuntimeMinutes, AirDate: episode.AirDate, Rating: ratingValue, VoteCount: votes, AbsoluteNumber: absolute, IsSpecial: episode.IsSpecial, EpisodeType: episodeTypeNumber(episode.EpisodeType), StillURL: p.imageByClass(episode.Images, "still"), Source: provider}
+	result := metadata.EpisodeDetail{CanonicalID: episode.ID, Number: number, Numbers: numbers, Title: firstNonEmpty(firstLocalized(episode.Titles), "Episode "+strconv.Itoa(number)), Titles: mapLocalizedTitles(episode.Titles), Overview: firstNonEmpty(firstLocalized(episode.Overviews), episode.Summary), RuntimeMinutes: episode.RuntimeMinutes, AirDate: episode.AirDate, Rating: ratingValue, VoteCount: votes, AbsoluteNumber: absolute, IsSpecial: episode.IsSpecial, EpisodeType: episodeTypeNumber(episode.EpisodeType), StillURL: p.imageByClass(episode.Images, "still"), Source: provider}
 	_, result.Overviews = localizedOverview(episode.Overviews)
 	for _, id := range episode.ExternalIDs {
 		value, _ := strconv.Atoi(id.Value)
