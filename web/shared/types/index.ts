@@ -2,9 +2,8 @@
 // API responses where the local shape diverges from the spec (pgtype objects
 // flattened to strings, etc.).
 //
-// For API response types that match the spec, prefer importing from
-// `#open-fetch-schemas/heya` (`components['schemas']['Foo']`) instead of
-// re-declaring the shape here. See `pages/settings/server.vue` for an example.
+// For API response types that match the spec, prefer importing the generated
+// named type from `~~/shared/api/types.gen` instead of re-declaring it here.
 
 export interface User {
   id: number

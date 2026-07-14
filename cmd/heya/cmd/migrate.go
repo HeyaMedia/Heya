@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	heyadb "github.com/karbowiak/heya/internal/database"
 	"github.com/karbowiak/heya/migrations"
 	"github.com/pressly/goose/v3"
 	"github.com/rs/zerolog/log"
@@ -37,7 +38,16 @@ var migrateUpCmd = &cobra.Command{
 			return fmt.Errorf("running migrations: %w", err)
 		}
 
-		log.Info().Msg("migrations applied successfully")
+		pool, err := heyadb.ConnectWithOptions(cmd.Context(), cfg.DatabaseURL.Value, heyadb.Options{MaxConns: 1})
+		if err != nil {
+			return fmt.Errorf("connecting for River migrations: %w", err)
+		}
+		defer pool.Close()
+		if err := heyadb.MigrateRiver(cmd.Context(), pool); err != nil {
+			return err
+		}
+
+		log.Info().Msg("application and River migrations applied successfully")
 		return nil
 	},
 }

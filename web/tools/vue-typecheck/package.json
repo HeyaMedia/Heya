@@ -1,0 +1,11 @@
+{
+  "name": "@heya/vue-typecheck",
+  "private": true,
+  "scripts": {
+    "check": "vue-tsc --noEmit -p ../../tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vue-tsc": "3.3.7"
+  }
+}

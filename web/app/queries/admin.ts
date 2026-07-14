@@ -1,16 +1,29 @@
 import { defineQueryOptions } from '@pinia/colada'
-import type { components } from '#open-fetch-schemas/heya'
+export type {
+  AdminDbBody as AdminDatabase,
+  AdminLogLevelBody as AdminLogLevel,
+  AdminSystemBody as AdminSystem,
+  DashboardStats,
+  HealthBody as Health,
+  JobSummaryRow,
+  MetadataQueueStatus,
+  ReadyBody as Ready,
+  TaskResponse,
+  TranscodeStatusBody as TranscodeStatus,
+} from '~~/shared/api/types.gen'
 
-export type Health = components['schemas']['HealthBody']
-export type Ready = components['schemas']['ReadyBody']
-export type AdminSystem = components['schemas']['AdminSystemBody']
-export type AdminLogLevel = components['schemas']['AdminLogLevelBody']
-export type AdminDatabase = components['schemas']['AdminDBBody']
-export type DashboardStats = components['schemas']['DashboardStats']
-export type MetadataQueueStatus = components['schemas']['MetadataQueueStatus']
-export type JobSummaryRow = components['schemas']['JobSummaryRow']
-export type TranscodeStatus = components['schemas']['TranscodeStatusBody']
-export type TaskResponse = components['schemas']['TaskResponse']
+import type {
+  AdminDbBody as AdminDatabase,
+  AdminLogLevelBody as AdminLogLevel,
+  AdminSystemBody as AdminSystem,
+  DashboardStats,
+  HealthBody as Health,
+  JobSummaryRow,
+  MetadataQueueStatus,
+  ReadyBody as Ready,
+  TaskResponse,
+  TranscodeStatusBody as TranscodeStatus,
+} from '~~/shared/api/types.gen'
 
 const privateRuntime = {
   prefetch: 'none',

@@ -242,7 +242,7 @@ There is no shared track-row component; 8 pages hand-roll fixed
   deps without approval (AppSheet uses the already-installed reka Drawer),
   follow docs/ui.md gotchas (scoped CSS vs portals, backdrop-filter
   poisoning, App* reuse, unconditional image URLs).
-- Every package: `cd web && bunx vue-tsc --noEmit` must pass (0 errors). No
+- Every package: `cd web && bun run typecheck` must pass (0 errors). No
   commits from agents — the orchestrator reviews, runs the visual gate, and
   commits per package.
 - Visual gate (orchestrator, per package): Eye at `390x844 dpr3 touch`

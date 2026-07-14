@@ -11,8 +11,8 @@
 //
 // The `fetchUser()` call is intentionally tolerant: a transient error
 // (backend restarting, network hiccup) leaves the token in place rather
-// than booting the user. Only the openFetch `onResponseError:heya` hook
-// (plugins/heyaApi.client.ts) escalates a real 401 to a logout.
+// than booting the user. Only the `$heya` response interceptor in
+// plugins/heyaApi.client.ts escalates a real 401 to a logout.
 export default defineNuxtPlugin({
   name: 'heya:auth',
   async setup() {

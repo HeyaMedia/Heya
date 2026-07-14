@@ -114,11 +114,12 @@ migrate-down:
 # `*_huma.go` handler. CI also runs this and fails on drift, so a forgotten
 # regen turns into a red build, not a silent skew.
 #
-# The typed TS client (paths, components, $heya/useHeya) is generated from
-# this spec at Nuxt build time by `nuxt-open-fetch` — no separate FE codegen
-# step needed.
+# The committed TypeScript contract is regenerated alongside the JSON spec.
+# Runtime requests use the Nuxt-native `$heya` plugin; Pinia Colada owns query
+# caching/state independently of the transport.
 gen-api-client:
 	go run ./cmd/heya openapi-spec --format json -o web/shared/api.openapi.json
+	cd web && bun run generate:api
 
 # Regenerate the committed HeyaMetadata V2 client from a checked-out sibling
 # contract. Both the spec snapshot and generated client are committed so normal

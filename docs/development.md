@@ -118,7 +118,7 @@ Nuxt, which returns the SPA HTML shell with HTTP 200. If you see
 make db-up                 # postgres only
 make db-reset              # drops + recreates db, seeds an admin user
 make reset                 # full wipe — includes data/* (images, transcodes)
-./bin/heya migrate up      # apply pending migrations
+./bin/heya migrate up      # apply pending application + River migrations
 ./bin/heya migrate down    # roll back one
 ./bin/heya migrate status  # show applied/pending
 ./bin/heya db:wipe         # wipe media tables but keep users
@@ -200,7 +200,7 @@ go test ./internal/parser/ # one package
 ## Type-checking the frontend
 
 ```bash
-cd web && bunx vue-tsc --noEmit
+cd web && bun run typecheck
 ```
 
 Run this before declaring frontend work done. The codebase is held at 0 errors
@@ -238,7 +238,7 @@ The hook runs (in parallel) on every `git commit`:
 
 | Check                         | Runs when                              | What it gates                                           |
 | ----------------------------- | -------------------------------------- | ------------------------------------------------------- |
-| `bunx vue-tsc --noEmit`       | `.vue` / `.ts` / `.d.ts` under `web/`  | Frontend type errors stay at 0                          |
+| `bun run typecheck`           | `.vue` / `.ts` / `.d.ts` under `web/`  | TypeScript 7 and Vue SFC type errors stay at 0          |
 | `gofmt -l` (staged files)     | any `.go` changed                      | Blocks unformatted Go                                   |
 | `golangci-lint --new-from-rev=HEAD` | any `.go` changed                | Blocks **new** lint issues (errcheck, gosec, staticcheck, …). Pre-existing baseline isn't enforced. |
 | `go build ./cmd/heya`         | any `.go` changed                      | Proves the binary still compiles                        |
@@ -265,9 +265,9 @@ every PR:
 
 | Job          | What it does                                                                                                              |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| **frontend** | `bun install --frozen-lockfile` (catches stale `bun.lock`) → `bunx vue-tsc --noEmit` → `bun audit` (npm CVE scan)         |
+| **frontend** | `bun install --frozen-lockfile` (catches stale `bun.lock`) → `bun run typecheck` → `bun audit` (npm CVE scan)             |
 | **go-static**| `gofmt -l` → `golangci-lint --new-from-rev=origin/main` (PR-diff lint) → `go build ./...` → `sqlc generate` + drift check |
-| **go-test**  | Spins up Postgres 17 service container → applies migrations via goose → `go test -race -count=1 ./...`                    |
+| **go-test**  | Spins up Postgres 17 service container → applies application + River migrations → `go test -race -count=1 ./...`       |
 | **security** | `govulncheck ./...` against the Go vuln DB → `osv-scanner` across the whole repo (covers npm + Go via OSV.dev)            |
 
 CI is the tier that can't be bypassed with `--no-verify`. Configure GitHub

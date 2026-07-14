@@ -1,10 +1,9 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
-import type { components } from '#open-fetch-schemas/heya'
+import type { LibraryView as Library } from '~~/shared/api/types.gen'
 import { librariesQuery } from '~/queries/catalog'
 import { watcherStatusQuery } from '~/queries/settings'
-type Library = components['schemas']['LibraryView']
 
 const watcherData = useQuery(watcherStatusQuery())
 const librariesData = useQuery(librariesQuery())

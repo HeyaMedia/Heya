@@ -1,21 +1,62 @@
-// Wires the nuxt-open-fetch `heya` client into our auth flow:
-// - injects `Authorization: Bearer <token>` from useAuth() on every request
-// - logs the user out on 401 (mirrors the old apiFetch / useApiClient behaviour)
-//
-// `.client.ts` because the bearer token lives in localStorage and the whole app
-// is SPA mode (`ssr: false`), so there's no server-side context that needs this.
-export default defineNuxtPlugin((nuxtApp) => {
-  nuxtApp.hook('openFetch:onRequest:heya', (ctx) => {
-    const { token } = useAuth()
-    ctx.options.headers.set('X-Heya-Client-Version', nuxtApp.$config.public.heyaVersion)
-    if (token.value) {
-      ctx.options.headers.set('Authorization', `Bearer ${token.value}`)
-    }
-  })
+import type { FetchOptions } from 'ofetch'
 
-  nuxtApp.hook('openFetch:onResponseError:heya', (ctx) => {
-    if (ctx.response.status === 401) {
-      useAuth().logout()
+type HeyaPathValue = string | number | boolean
+
+export type HeyaRequestOptions = FetchOptions & {
+  /** Values substituted into `{name}` placeholders before the request. */
+  path?: Record<string, HeyaPathValue>
+}
+
+export type HeyaClient = <T = any>(
+  url: `/api/${string}`,
+  options?: HeyaRequestOptions,
+) => Promise<T>
+
+export function resolveHeyaPath(url: string, values: Record<string, HeyaPathValue> = {}): string {
+  return url.replace(/\{([^}]+)\}/g, (_placeholder, name: string) => {
+    const value = values[name]
+    if (value === undefined) {
+      throw new Error(`Missing path parameter: ${name}`)
     }
+    return encodeURIComponent(String(value))
   })
+}
+
+// Nuxt-native API transport. Pinia Colada remains responsible for query keys,
+// caching and persistence; this plugin only owns HTTP concerns shared by every
+// query/mutation: path expansion, client version, bearer auth, and 401 logout.
+// `.client.ts` is intentional because auth state lives in localStorage and the
+// application is an SPA (`ssr: false`).
+export default defineNuxtPlugin({
+  name: 'heya:api',
+  setup(nuxtApp) {
+    const apiFetch = $fetch.create({
+      onRequest({ options }) {
+        const { token } = useAuth()
+        const headers = new Headers(options.headers)
+        headers.set('X-Heya-Client-Version', nuxtApp.$config.public.heyaVersion)
+        if (token.value) {
+          headers.set('Authorization', `Bearer ${token.value}`)
+        }
+        options.headers = headers
+      },
+      onResponseError({ response }) {
+        if (response.status === 401) {
+          useAuth().logout()
+        }
+      },
+    })
+
+    const heya: HeyaClient = (url, options = {}) => {
+      const { path, ...fetchOptions } = options
+      // ofetch's public options allow arbitrary HTTP verbs, while Nitro's
+      // generated $fetch overload narrows them per route. `$heya` deliberately
+      // accepts the public transport type because it serves every API route.
+      return apiFetch(resolveHeyaPath(url, path), fetchOptions as any)
+    }
+
+    return {
+      provide: { heya },
+    }
+  },
 })

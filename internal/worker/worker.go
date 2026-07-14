@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/communitysegments"
+	"github.com/karbowiak/heya/internal/database"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/matcher"
@@ -18,7 +19,6 @@ import (
 	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
-	"github.com/riverqueue/river/rivermigrate"
 	"github.com/rs/zerolog/log"
 )
 
@@ -87,11 +87,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	if cfg.Passive {
 		log.Warn().Msg("passive mode: skipping river migrations + stale unique_states cleanup")
 	} else {
-		migrator, err := rivermigrate.New(riverpgxv5.New(cfg.DB), nil)
-		if err != nil {
-			return nil, fmt.Errorf("river migrator: %w", err)
-		}
-		if _, err := migrator.Migrate(ctx, rivermigrate.DirectionUp, nil); err != nil {
+		if err := database.MigrateRiver(ctx, cfg.DB); err != nil {
 			return nil, fmt.Errorf("river migrate: %w", err)
 		}
 		log.Info().Msg("river migrations applied")

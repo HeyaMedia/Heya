@@ -1,25 +1,47 @@
 import { defineQueryOptions } from '@pinia/colada'
-import type { components } from '#open-fetch-schemas/heya'
+export type {
+  AdminListenersBody as AdminListeners,
+  AdminSessionView as AdminSession,
+  AdminStorageBody as AdminStorage,
+  AdminUserView as AdminUser,
+  ApiTokenView as ApiToken,
+  AuthSessionView as AuthSession,
+  CastConfigView as CastConfig,
+  CastNetworkStatus as CastStatus,
+  Entry as LogEntry,
+  JellyfinConfigBody as JellyfinConfig,
+  JobKindSummaryRow as JobKindSummary,
+  JobListResult,
+  LibrarySettings,
+  LibraryView as Library,
+  SubsonicConfigBody as SubsonicConfig,
+  SubsonicCredentialBody as SubsonicCredential,
+  UserListView,
+  UserSettings,
+  WatcherStatusBody as WatcherStatus,
+} from '~~/shared/api/types.gen'
 
-export type AuthSession = components['schemas']['AuthSessionView']
-export type ApiToken = components['schemas']['ApiTokenView']
-export type AdminSession = components['schemas']['AdminSessionView']
-export type AdminUser = components['schemas']['AdminUserView']
-export type AdminStorage = components['schemas']['AdminStorageBody']
-export type AdminListeners = components['schemas']['AdminListenersBody']
-export type WatcherStatus = components['schemas']['WatcherStatusBody']
-export type JellyfinConfig = components['schemas']['JellyfinConfigBody']
-export type SubsonicConfig = components['schemas']['SubsonicConfigBody']
-export type CastConfig = components['schemas']['CastConfigView']
-export type CastStatus = components['schemas']['CastNetworkStatus']
-export type SubsonicCredential = components['schemas']['SubsonicCredentialBody']
-export type Library = components['schemas']['LibraryView']
-export type LibrarySettings = components['schemas']['LibrarySettings']
-export type UserSettings = components['schemas']['UserSettings']
-export type UserListView = components['schemas']['UserListView']
-export type LogEntry = components['schemas']['Entry']
-export type JobListResult = components['schemas']['JobListResult']
-export type JobKindSummary = components['schemas']['JobKindSummaryRow']
+import type {
+  AdminListenersBody as AdminListeners,
+  AdminSessionView as AdminSession,
+  AdminStorageBody as AdminStorage,
+  AdminUserView as AdminUser,
+  ApiTokenView as ApiToken,
+  AuthSessionView as AuthSession,
+  CastConfigView as CastConfig,
+  CastNetworkStatus as CastStatus,
+  Entry as LogEntry,
+  JellyfinConfigBody as JellyfinConfig,
+  JobKindSummaryRow as JobKindSummary,
+  JobListResult,
+  LibrarySettings,
+  LibraryView as Library,
+  SubsonicConfigBody as SubsonicConfig,
+  SubsonicCredentialBody as SubsonicCredential,
+  UserListView,
+  UserSettings,
+  WatcherStatusBody as WatcherStatus,
+} from '~~/shared/api/types.gen'
 export type MusicServiceImportState = { status?: string, imported?: number, matched?: number, unmatched?: number, scanned?: number, error?: string }
 export type MusicService = {
   service: 'listenbrainz' | 'lastfm'

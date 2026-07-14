@@ -42,24 +42,7 @@
 </template>
 
 <script setup lang="ts">
-export interface UpNextItem {
-  id: number
-  title: string
-  slug: string
-  season_number: number
-  episode_number: number
-  episode_label: string
-  play_file_id: number
-  play_file_public_id?: string
-  // Episode primary key — let the watch route surface "S01E03 · Episode
-  // title" in the activity panel via entity_type=episode + entity_id.
-  episode_id?: number
-  // Episode runtime — the hero "Tonight" planner sums these for its
-  // session-length estimate.
-  runtime_minutes?: number
-  public_id?: string
-  media_item_public_id?: string
-}
+import type { UpNextItem } from '~/types/home'
 
 defineProps<{ items: UpNextItem[] }>()
 defineEmits<{ play: [item: UpNextItem] }>()

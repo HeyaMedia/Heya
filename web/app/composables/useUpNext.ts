@@ -1,4 +1,4 @@
-import type { UpNextItem } from '~/components/home/UpNextRow.vue'
+import type { UpNextItem } from '~/types/home'
 
 // A recently-watched row, reduced to what Up Next needs. Both the deduped
 // (/api/me/watch/recent) and episode-level (/api/me/watch/recent-episodes)

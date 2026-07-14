@@ -52,7 +52,7 @@
 <script setup lang="ts">
 import type { MediaItem, Movie } from '~~/shared/types'
 import type { HeroItem, HeroPlayInfo } from '~/components/home/HeroA.vue'
-import type { UpNextItem } from '~/components/home/UpNextRow.vue'
+import type { UpNextItem } from '~/types/home'
 import type { RecentTVEntry } from '~/components/home/HeroNewIn.vue'
 
 export type HeroMode = 'featured' | 'tonight' | 'new' | 'music'

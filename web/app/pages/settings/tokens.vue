@@ -1,10 +1,9 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'settings' })
 
-import type { components } from '#open-fetch-schemas/heya'
+import type { CreateApiTokenResult as CreateResult } from '~~/shared/api/types.gen'
 import { myApiTokensQuery } from '~/queries/settings'
 import type { ApiToken } from '~/queries/settings'
-type CreateResult = components['schemas']['CreateApiTokenResult']
 
 const { $heya } = useNuxtApp()
 const { confirm } = useConfirm()

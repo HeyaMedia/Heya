@@ -18,7 +18,7 @@ jobs:
   # Frontend: type-check the Nuxt SPA and audit npm-side deps.
   # ────────────────────────────────────────────────────────────────
   frontend:
-    name: Frontend (vue-tsc + audit)
+    name: Frontend (TypeScript + Vue + audit)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -32,7 +32,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ hashFiles('web/bun.lock') }}
+          key: bun-${{ runner.os }}-${{ hashFiles('web/bun.lock', 'web/tools/*/bun.lock') }}
           restore-keys: |
             bun-${{ runner.os }}-
 
@@ -50,10 +50,9 @@ jobs:
         run: bun install --frozen-lockfile
 
       # Go is set up here (not just in go-static) so this job can regenerate
-      # the OpenAPI spec and verify it matches what's committed. Mirrors the
-      # sqlc-drift check: if a Huma handler changed and the spec wasn't
-      # regenerated, the build fails here. nuxt-open-fetch consumes the spec
-      # at Nuxt build time, so this single artifact is enough.
+      # the OpenAPI spec and committed TypeScript contract. Mirrors the
+      # sqlc-drift check: if a Huma handler changed and the generated artifacts
+      # weren't refreshed, the build fails here.
       - name: Setup Go (for openapi-spec CLI)
         uses: actions/setup-go@v6
         with:
@@ -65,16 +64,16 @@ jobs:
 
       - name: Verify API spec is up to date
         run: |
-          if ! git diff --quiet web/shared/api.openapi.json; then
-            echo "::error::OpenAPI spec is out of date."
+          if ! git diff --quiet -- web/shared/api.openapi.json web/shared/api/; then
+            echo "::error::OpenAPI spec or generated TypeScript contract is out of date."
             echo "Run 'make gen-api-client' locally and commit the result."
-            git diff --stat web/shared/api.openapi.json
+            git diff --stat -- web/shared/api.openapi.json web/shared/api/
             exit 1
           fi
 
-      - name: Type-check (vue-tsc)
+      - name: Type-check (TypeScript 7 + Vue SFCs)
         working-directory: web
-        run: bunx vue-tsc --noEmit
+        run: bun run typecheck
 
       # Advisory only: surfaces known CVEs (mostly transitive build-time deps
       # like vite/esbuild/tar that never ship to users) without blocking the
@@ -165,6 +164,7 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgres://heya:heya@localhost:5440/heya?sslmode=disable
+      HEYA_DATABASE_URL: postgres://heya:heya@localhost:5440/heya?sslmode=disable
     steps:
       - uses: actions/checkout@v7
 
@@ -183,18 +183,11 @@ jobs:
             go-test-${{ runner.os }}-
             go-build-${{ runner.os }}-
 
-      - name: Cache goose binary
-        uses: actions/cache@v6
-        with:
-          path: ~/go/bin/goose
-          key: goose-${{ runner.os }}-v3
-
-      - name: Apply migrations
-        run: |
-          if [ ! -x "$HOME/go/bin/goose" ]; then
-            go install github.com/pressly/goose/v3/cmd/goose@latest
-          fi
-          $HOME/go/bin/goose -dir migrations postgres "$DATABASE_URL" up
+      # Exercise the production migration boundary: Heya owns both its Goose
+      # schema and River's queue schema. Applying only the former leaves clean
+      # databases without river_job and makes queue integration tests invalid.
+      - name: Apply application and River migrations
+        run: go run ./cmd/heya migrate up
 
       - name: Run tests with race detector
         run: go test -race -count=1 ./...
@@ -225,7 +218,7 @@ jobs:
           if [ ! -x "$HOME/go/bin/govulncheck" ]; then
             go install golang.org/x/vuln/cmd/govulncheck@latest
           fi
-          $HOME/go/bin/govulncheck ./...
+          "$HOME/go/bin/govulncheck" ./...
 
       # Advisory only: known CVEs across npm + Go deps (incl. ones with no
       # upstream fix yet, e.g. disintegration/imaging). Reported as a warning

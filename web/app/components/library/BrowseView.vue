@@ -75,7 +75,7 @@
 
 <script setup lang="ts">
 import type { MediaItem } from '~~/shared/types'
-import type { ContinueWatchingItem } from '~/components/home/ContinueWatchingRow.vue'
+import type { ContinueWatchingItem } from '~/types/home'
 import { useInfiniteQuery, useQuery, useQueryCache } from '@pinia/colada'
 import { movieUserStateQuery, seriesUserStateQuery, userListsQuery as userListsOptions } from '~/queries/catalog'
 import { continueWatchingQuery } from '~/queries/activity'

@@ -1,5 +1,5 @@
 import { defineQueryOptions } from '@pinia/colada'
-import type { ContinueWatchingItem } from '~/components/home/ContinueWatchingRow.vue'
+import type { ContinueWatchingItem } from '~/types/home'
 
 export interface ActivityItem {
   type: string

@@ -79,7 +79,7 @@ the rationale.
 
 | Command                | What it does                              |
 | ---------------------- | ----------------------------------------- |
-| `heya migrate up`      | Apply pending migrations (goose)          |
+| `heya migrate up`      | Apply pending application + River migrations |
 | `heya migrate down`    | Roll back one migration                   |
 | `heya migrate status`  | Show applied vs pending                   |
 | `heya migrate reset`   | Roll back all migrations                  |

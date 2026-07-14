@@ -8,10 +8,10 @@
 pre-commit:
   parallel: true
   jobs:
-    - name: vue-tsc
+    - name: frontend-typecheck
       glob: 'web/**/*.{vue,ts,tsx,d.ts}'
       root: web/
-      run: bunx vue-tsc --noEmit
+      run: bun run typecheck
 
     # Refuse commits that introduce `trustedDependencies` in package.json.
     # That field is the only way for a package to escape bun's default
@@ -67,17 +67,17 @@ pre-commit:
 
     # If any Huma handler changes, regenerate the OpenAPI spec and block
     # the commit on drift. Catches "I added a new endpoint but forgot to
-    # run make gen-api-client" before it ships. nuxt-open-fetch consumes
-    # this spec at Nuxt build time, so refreshing the JSON is enough.
+    # run make gen-api-client" before it ships. Both the spec and generated
+    # TypeScript contract are committed review artifacts.
     - name: openapi-drift
       glob:
         - 'internal/server/*_huma.go'
         - 'internal/server/huma.go'
       run: |
         make gen-api-client >/dev/null
-        if ! git diff --quiet web/shared/api.openapi.json; then
-          echo "openapi: regenerated spec differs from committed output." >&2
-          echo "Stage web/shared/api.openapi.json or revert the handler change." >&2
-          git diff --stat web/shared/api.openapi.json >&2
+        if ! git diff --quiet -- web/shared/api.openapi.json web/shared/api/; then
+          echo "openapi: regenerated spec/types differ from committed output." >&2
+          echo "Stage web/shared/api.openapi.json and web/shared/api/ or revert the handler change." >&2
+          git diff --stat -- web/shared/api.openapi.json web/shared/api/ >&2
           exit 1
         fi

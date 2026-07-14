@@ -148,7 +148,7 @@
 
 <script setup lang="ts">
 import type { ContextMenuItem, MediaItem, MediaDetail, Movie } from '~~/shared/types'
-import type { ContinueWatchingItem } from '~/components/home/ContinueWatchingRow.vue'
+import type { ContinueWatchingItem } from '~/types/home'
 import type { HeroPlayInfo } from '~/components/home/HeroA.vue'
 import { useInfiniteQuery, useQuery, useQueryCache } from '@pinia/colada'
 import { meSettingsQuery, type UserSettingsBlob } from '~/queries/user'

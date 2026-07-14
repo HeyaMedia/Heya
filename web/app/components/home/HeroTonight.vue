@@ -58,7 +58,7 @@
 // "Tonight" — the up-next queue as a planner: what's waiting, how long it
 // runs, one click to start. Same data the Up Next rail uses, framed as a
 // session instead of a list.
-import type { UpNextItem } from '~/components/home/UpNextRow.vue'
+import type { UpNextItem } from '~/types/home'
 
 const props = defineProps<{ items: UpNextItem[] }>()
 defineEmits<{ play: [item: UpNextItem] }>()

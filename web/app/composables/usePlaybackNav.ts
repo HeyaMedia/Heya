@@ -1,5 +1,4 @@
-import type { ContinueWatchingItem } from '~/components/home/ContinueWatchingRow.vue'
-import type { UpNextItem } from '~/components/home/UpNextRow.vue'
+import type { ContinueWatchingItem, UpNextItem } from '~/types/home'
 
 // Navigation into the video player, shared by the Home page and the Movies/TV
 // Recommended landings so the /watch URL shape + entity tagging live in one

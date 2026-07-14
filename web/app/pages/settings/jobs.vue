@@ -2,10 +2,9 @@
 import { timeAgo as timeAgoBase } from '~/composables/useFormat'
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
-import type { components } from '#open-fetch-schemas/heya'
+import type { JobRow } from '~~/shared/api/types.gen'
 import { jobSummaryQuery } from '~/queries/admin'
 import { adminJobKindsQuery, adminJobsQuery } from '~/queries/settings'
-type JobRow = components['schemas']['JobRow']
 type WorkerSetting = {
   kind: string
   label: string

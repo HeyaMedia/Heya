@@ -37,27 +37,7 @@
 </template>
 
 <script setup lang="ts">
-export interface ContinueWatchingItem {
-  id: number
-  entity_type: string
-  entity_id: number
-  progress_seconds: number
-  total_seconds: number
-  media_item_id: number
-  media_item_public_id?: string
-  title: string
-  poster_path: string
-  slug: string
-  media_type: string
-  episode_number?: number
-  episode_title?: string
-  season_number?: number
-  // file_id is enriched by the backend so the FE can navigate to /watch
-  // without a second lookup. 0 when the file can't be resolved (deleted /
-  // mismatched parse) — the FE should hide or disable the tile in that case.
-  file_id: number
-  file_public_id?: string
-}
+import type { ContinueWatchingItem } from '~/types/home'
 
 defineProps<{ items: ContinueWatchingItem[] }>()
 defineEmits<{ play: [item: ContinueWatchingItem] }>()

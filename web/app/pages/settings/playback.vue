@@ -1,11 +1,9 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'settings' })
 
-import type { components } from '#open-fetch-schemas/heya'
+import type { LibraryView, UserSettings } from '~~/shared/api/types.gen'
 import { librariesQuery } from '~/queries/catalog'
 import { userPlaybackSettingsQuery } from '~/queries/settings'
-type UserSettings = components['schemas']['UserSettings']
-type LibraryView  = components['schemas']['LibraryView']
 
 const { $heya } = useNuxtApp()
 

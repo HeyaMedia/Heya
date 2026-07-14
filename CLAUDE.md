@@ -97,10 +97,10 @@ them without a discussion.
   routes are `/movies/{slug}`, `/tv/{slug}`, etc. Albums are addressed by
   `(artist_slug, album_slug)`. Tracks have no slug → stay ID-addressed.
 - **Frontend types track the API.** When a Go response shape changes,
-  `make gen-api-client` regenerates `web/shared/api.openapi.json`. TS types
-  derive from that spec at Nuxt build/prepare time (`nuxt-open-fetch`) — there
-  is no separate codegen artifact. The lefthook `openapi-drift` check blocks
-  the commit if you forgot.
+  `make gen-api-client` regenerates `web/shared/api.openapi.json` and the
+  committed named types in `web/shared/api/`. The Nuxt-native `$heya`
+  transport stays separate from Pinia Colada's query/cache layer. The
+  lefthook `openapi-drift` check blocks the commit if you forgot.
 - **HeyaMetadata V2** is the canonical metadata source. Its generated contract
   lives in `clients/heyametadata`; the adapter is
   `internal/metadata/heyametadata`. Provider reconciliation stays there.
@@ -146,7 +146,7 @@ And one positive rule:
 Type-check and compile-check are cheap and catch a lot. The visual layer needs
 actual eyes.
 
-- **Frontend**: `cd web && bunx vue-tsc --noEmit` before declaring done. The
+- **Frontend**: `cd web && bun run typecheck` before declaring done. The
   codebase is held at 0 errors; regressions show up clearly.
 - **Go**: `go build ./...` after non-trivial changes (lefthook will catch it on
   commit, but find out earlier). Run the targeted test package if you touched
