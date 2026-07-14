@@ -52,20 +52,24 @@ make dev-web               # bun run dev on :3000
 - Nuxt/Vite on `:3000` — HMR.
 
 The front door is a **separate Go process on purpose**. Go has no in-process
-hot reload, so the backend must restart on every code save (air's job). But
-tsnet must own a *stable* listener that doesn't flap on saves — so Tailscale
-lives in the `dev-proxy` process, which never restarts on a code/Vue edit.
-Because the front door stays put across air rebuilds and Nuxt restarts, the
-browser's HMR socket and any in-flight WS connection never see the backend
-churn. The previous "Go fronts Nuxt" / "Nuxt fronts Go" setups both had the
-front-door process restart on every rebuild, which is what caused the
-ECONNRESET cascade; that's now solved because the front door never restarts on
-a code save. Editing proxy/tailscale code → press `r` on the `proxy` pane in
-mprocs (or it rebuilds via `make dev-front`).
+hot reload, so the backend must restart on every code save (air's job) — but
+the browser-facing port must not flap with it. Because the front door stays
+put across air rebuilds and Nuxt restarts, the browser's HMR socket and any
+in-flight WS connection never see the backend churn. The previous "Go fronts
+Nuxt" / "Nuxt fronts Go" setups both had the front-door process restart on
+every rebuild, which is what caused the ECONNRESET cascade. The dev-proxy
+does exactly one thing — proxy — and holds no business logic. Editing proxy
+code → press `r` on the `proxy` pane in mprocs (or `make dev-front`).
 
-Tailscale works in dev too — the DB-backed Settings toggle drives the tsnet
-node that lives in the `dev-proxy` process. See
-[tailscale.md](./tailscale.md#development).
+**Tailscale and remote access are production-only.** Under `--dev-backend`
+neither manager is constructed; the API reports them unavailable and the
+Settings UI says so. To exercise them locally, run a real production-mode
+server against the local docker DB on a scratch port:
+
+```bash
+HEYA_DATABASE_URL="postgres://heya:heya@localhost:5440/heya?sslmode=disable" \
+HEYA_PORT=18080 HEYA_DATA_DIR=/tmp/heya-nettest ./bin/heya serve
+```
 
 Don't run `go build -o ./bin/heya ./cmd/heya` by hand during dev — `air` rebuilds on save. `go build ./...` is fine as a compile-check.
 

@@ -13,6 +13,12 @@ const {
   fetchRaw, subscribeToEvents,
 } = useTailscale()
 
+const {
+  available: remoteAvailable, cfg: remoteCfg, status: remoteStatus, message: remoteMessage,
+  refresh: refreshRemote, saveConfig: saveRemote, recheck: recheckRemote,
+  subscribeToEvents: subscribeRemote,
+} = useRemoteAccess()
+
 const listenersData = useQuery(adminListenersQuery())
 const listeners = computed(() => listenersData.data.value ?? null)
 const loadingListeners = computed(() => listenersData.isLoading.value)
@@ -27,6 +33,7 @@ const { flash } = useFlash()
 const { toast } = useToast()
 
 let unsubscribe: (() => void) | null = null
+let unsubscribeRemote: (() => void) | null = null
 
 async function loadListeners() {
   try { await listenersData.refetch() } catch {}
@@ -113,6 +120,130 @@ async function copyRaw() {
 
 const stateDirHint = computed(() => cfg.value?.state_dir || 'data/tailscale/')
 
+// ---- Remote access (UPnP + ACME + reachability) ----
+
+const remoteSaving = ref(false)
+const checking = ref(false)
+// 'none' sentinel: AppSelect treats '' as no-value (reka), so the "no
+// provider" row needs a real string; mapped back to '' on save.
+const providerDraft = ref('none')
+const domainDraft = ref('')
+const subdomainDraft = ref('')
+const tokenDraft = ref('')
+const emailDraft = ref('')
+
+const providerOptions = [
+  { value: 'none', label: 'None — bare IP, self-signed certificate' },
+  { value: 'desec', label: 'deSEC (dedyn.io)', meta: 'free · LAN + WAN hostnames' },
+  { value: 'duckdns', label: 'DuckDNS', meta: 'free · WAN hostname only' },
+  { value: 'cloudflare', label: 'Cloudflare', meta: 'your own domain' },
+]
+
+const domainPlaceholder = computed(() => {
+  switch (providerDraft.value) {
+    case 'desec': return 'myname.dedyn.io'
+    case 'duckdns': return 'myname.duckdns.org'
+    case 'cloudflare': return 'example.com'
+    default: return ''
+  }
+})
+
+const remoteBadge = computed((): { state: 'ok' | 'warn' | 'error' | 'idle', label: string } => {
+  switch (remoteStatus.value?.phase) {
+    case 'reachable':   return { state: 'ok', label: 'Reachable' }
+    case 'starting':    return { state: 'warn', label: 'Starting…' }
+    case 'mapping':     return { state: 'warn', label: 'Mapping port…' }
+    case 'probing':     return { state: 'warn', label: 'Checking…' }
+    case 'unverified':  return { state: 'warn', label: 'Unverified' }
+    case 'unreachable': return { state: 'error', label: 'Unreachable' }
+    case 'error':       return { state: 'error', label: 'Error' }
+    default:            return { state: 'idle', label: 'Off' }
+  }
+})
+
+const certBadge = computed((): { state: 'ok' | 'warn' | 'idle', label: string } => {
+  const c = remoteStatus.value?.cert
+  if (!c) return { state: 'idle', label: 'no certificate' }
+  if (c.issuing) return { state: 'warn', label: 'issuing…' }
+  if (c.mode === 'acme') return { state: 'ok', label: 'Let’s Encrypt' }
+  return { state: 'warn', label: 'self-signed' }
+})
+
+const remoteRows = computed(() => {
+  const s = remoteStatus.value
+  if (!s) return []
+  const check = s.last_check
+  return [
+    { key: 'Port', value: s.port ? String(s.port) : '', mono: true, copy: true },
+    { key: 'LAN IP', value: s.lan_ip ?? '', mono: true },
+    { key: 'Router WAN IP', value: s.router_external_ip ?? '', mono: true },
+    { key: 'Public IP (observed)', value: s.observed_ip ?? '', mono: true, copy: true },
+    { key: 'UPnP', value: s.upnp?.available ? (s.upnp.error || 'mapped') : (s.upnp?.error || 'unavailable') },
+    { key: 'Last check', value: s.last_check_at ? `${s.last_check_at}${check?.latency_ms ? ` · ${check.latency_ms}ms` : ''}` : 'never' },
+  ]
+})
+
+const dnsDirty = computed(() => {
+  const c = remoteCfg.value
+  if (!c) return false
+  const provider = providerDraft.value === 'none' ? '' : providerDraft.value
+  return provider !== (c.dns_provider ?? '')
+    || domainDraft.value !== (c.domain ?? '')
+    || subdomainDraft.value !== (c.subdomain ?? '')
+    || emailDraft.value !== (c.acme_email ?? '')
+    || tokenDraft.value !== ''
+})
+
+function seedRemoteDrafts() {
+  const c = remoteCfg.value
+  if (!c) return
+  providerDraft.value = c.dns_provider || 'none'
+  domainDraft.value = c.domain ?? ''
+  subdomainDraft.value = c.subdomain ?? ''
+  emailDraft.value = c.acme_email ?? ''
+  tokenDraft.value = ''
+}
+
+async function onRemoteToggle(on: boolean) {
+  remoteSaving.value = true
+  try {
+    await saveRemote({ enabled: on })
+    flash.value = { kind: 'ok', text: on ? 'Remote access enabling — watch the status above.' : 'Remote access disabled.' }
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.data?.detail ?? e?.message ?? 'Toggle failed.' }
+  } finally { remoteSaving.value = false }
+}
+
+async function saveDNS() {
+  remoteSaving.value = true
+  try {
+    await saveRemote({
+      dns_provider: providerDraft.value === 'none' ? '' : providerDraft.value,
+      domain: domainDraft.value.trim(),
+      subdomain: subdomainDraft.value.trim(),
+      acme_email: emailDraft.value.trim(),
+      ...(tokenDraft.value ? { dns_token: tokenDraft.value } : {}),
+    })
+    tokenDraft.value = ''
+    flash.value = { kind: 'ok', text: 'DNS settings saved — re-applying remote access.' }
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.data?.detail ?? e?.message ?? 'Save failed.' }
+  } finally { remoteSaving.value = false }
+}
+
+async function onRecheck() {
+  checking.value = true
+  try {
+    await recheckRemote()
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.data?.detail ?? e?.message ?? 'Check failed.' }
+  } finally { checking.value = false }
+}
+
+watch(remoteCfg, () => {
+  if (!remoteSaving.value) seedRemoteDrafts()
+})
+
 function listenerIcon(kind: string): string {
   switch (kind) {
     case 'lan':       return 'network'
@@ -122,11 +253,13 @@ function listenerIcon(kind: string): string {
 }
 
 onMounted(async () => {
-  await Promise.all([refreshTS(), loadListeners(), ensureSources()])
+  await Promise.all([refreshTS(), refreshRemote(), loadListeners(), ensureSources()])
   hostnameDraft.value = cfg.value?.hostname ?? 'heya'
+  seedRemoteDrafts()
   unsubscribe = subscribeToEvents()
+  unsubscribeRemote = subscribeRemote()
 })
-onBeforeUnmount(() => { unsubscribe?.() })
+onBeforeUnmount(() => { unsubscribe?.(); unsubscribeRemote?.() })
 
 watch(cfg, (next) => {
   if (next && hostnameDraft.value !== next.hostname && !saving.value) {
@@ -167,6 +300,136 @@ watch(cfg, (next) => {
           </div>
         </div>
       </div>
+    </SettingsSection>
+
+    <SettingsSection title="Remote access" icon="globe"
+      :description="remoteCfg?.enabled ? 'Direct access from the internet — UPnP port mapping, verified from outside by heya.media.' : 'Off — map a router port via UPnP and reach Heya directly, no VPN required.'"
+      :lockedBy="isLocked('remote.enabled') ? lockTooltip('remote.enabled') : undefined">
+      <template #actions>
+        <StatusBadge v-if="remoteAvailable && remoteCfg?.enabled" :state="remoteBadge.state">{{ remoteBadge.label }}</StatusBadge>
+        <AppSwitch
+          :model-value="remoteCfg?.enabled ?? false"
+          size="md"
+          aria-label="Enable remote access"
+          :disabled="remoteSaving || !remoteAvailable || isLocked('remote.enabled')"
+          @update:model-value="onRemoteToggle"
+        />
+      </template>
+
+      <p v-if="!remoteAvailable" class="hint">{{ remoteMessage || 'Remote access is unavailable in this run mode.' }}</p>
+
+      <template v-else-if="remoteCfg?.enabled && remoteStatus">
+        <div v-if="remoteStatus.cgnat" class="cgnat-banner">
+          <Icon name="warning" :size="14" />
+          <div>
+            <strong>Carrier-grade NAT detected.</strong> Your ISP shares one public IP across customers —
+            port forwarding cannot work on this connection. Use <NuxtLink to="/settings/network">Tailscale</NuxtLink> below for remote access instead.
+          </div>
+        </div>
+        <div v-else-if="remoteStatus.detail" class="remote-detail" :class="remoteBadge.state">{{ remoteStatus.detail }}</div>
+
+        <KVTable :rows="remoteRows" />
+
+        <div v-if="remoteStatus.remote_url || remoteStatus.lan_url" class="urls">
+          <a v-if="remoteStatus.remote_url" :href="remoteStatus.remote_url" target="_blank" rel="noopener" class="url-card">
+            <div class="url-head">
+              <span class="url-label">Remote · internet</span>
+              <StatusBadge :state="remoteStatus.phase === 'reachable' ? 'ok' : 'warn'">
+                {{ remoteStatus.phase === 'reachable' ? 'verified' : remoteStatus.phase }}
+              </StatusBadge>
+            </div>
+            <div class="url-val mono">{{ remoteStatus.remote_url }}</div>
+            <div class="url-hint">Reachable from anywhere — auth still applies.</div>
+          </a>
+          <a v-if="remoteStatus.lan_url" :href="remoteStatus.lan_url" target="_blank" rel="noopener" class="url-card">
+            <div class="url-head">
+              <span class="url-label">LAN · HTTPS</span>
+              <StatusBadge state="ok">local</StatusBadge>
+            </div>
+            <div class="url-val mono">{{ remoteStatus.lan_url }}</div>
+            <div class="url-hint">Valid TLS on your own network, no port forwarding involved.</div>
+          </a>
+        </div>
+
+        <div class="raw-bar" style="margin-top: 12px">
+          <button class="sv2-btn ghost" :disabled="checking" @click="onRecheck">
+            <Icon :name="checking ? 'spinner' : 'refresh'" :size="12" />
+            {{ checking ? 'Checking…' : 'Check now' }}
+          </button>
+        </div>
+      </template>
+    </SettingsSection>
+
+    <SettingsSection v-if="remoteAvailable && remoteCfg?.enabled" title="Hostnames & certificate" icon="shield"
+      description="Point a DNS provider at this server to get stable hostnames and a real browser-trusted certificate (Let’s Encrypt, DNS-01 — no port 80/443 needed)."
+      :lockedBy="isLocked('remote.dns_provider') ? lockTooltip('remote.dns_provider') : undefined">
+      <template #actions>
+        <StatusBadge :state="certBadge.state">{{ certBadge.label }}</StatusBadge>
+      </template>
+
+      <SettingsField label="DNS provider"
+        description="deSEC and DuckDNS are free (create an account, paste the token). Cloudflare manages a domain you own."
+        v-slot="{ fieldId }">
+        <AppSelect :id="fieldId" v-model="providerDraft" :options="providerOptions"
+          :disabled="remoteSaving || isLocked('remote.dns_provider')" />
+      </SettingsField>
+
+      <template v-if="providerDraft !== 'none'">
+        <SettingsField label="Domain"
+          :description="providerDraft === 'cloudflare' ? 'The zone as it appears in your Cloudflare dashboard.' : 'The domain you registered at the provider.'"
+          :lockedBy="isLocked('remote.domain') ? lockTooltip('remote.domain') : undefined"
+          v-slot="{ fieldId }">
+          <input :id="fieldId" v-model="domainDraft" class="sv2-input mono" :placeholder="domainPlaceholder"
+            :disabled="remoteSaving || isLocked('remote.domain')" />
+        </SettingsField>
+
+        <SettingsField v-if="providerDraft !== 'duckdns'" label="Subdomain (optional)"
+          description="Nest Heya under a label — e.g. “heya” gives wan.heya.your-domain."
+          :lockedBy="isLocked('remote.subdomain') ? lockTooltip('remote.subdomain') : undefined"
+          v-slot="{ fieldId }">
+          <input :id="fieldId" v-model="subdomainDraft" class="sv2-input mono" placeholder="heya"
+            :disabled="remoteSaving || isLocked('remote.subdomain')" />
+        </SettingsField>
+
+        <SettingsField label="API token"
+          :description="providerDraft === 'cloudflare' ? 'A scoped API token with Zone.DNS:Edit — never your global API key.' : 'The token from your provider dashboard. Stored server-side, never shown again.'"
+          :lockedBy="isLocked('remote.dns_token') ? lockTooltip('remote.dns_token') : undefined"
+          v-slot="{ fieldId }">
+          <input :id="fieldId" v-model="tokenDraft" type="password" class="sv2-input mono" autocomplete="off"
+            :placeholder="remoteCfg?.token_set ? '•••••• saved — paste to replace' : 'paste token'"
+            :disabled="remoteSaving || isLocked('remote.dns_token')" />
+        </SettingsField>
+
+        <SettingsField label="ACME email (optional)"
+          description="Let’s Encrypt expiry notices go here. Leave empty to skip."
+          v-slot="{ fieldId }">
+          <input :id="fieldId" v-model="emailDraft" type="email" class="sv2-input" placeholder="you@example.com"
+            :disabled="remoteSaving" />
+        </SettingsField>
+      </template>
+
+      <div class="raw-bar" style="margin-top: 4px">
+        <button class="sv2-btn" :disabled="!dnsDirty || remoteSaving" @click="saveDNS">
+          {{ remoteSaving ? 'Saving…' : 'Save & apply' }}
+        </button>
+      </div>
+
+      <template v-if="remoteStatus?.cert && remoteStatus.cert.mode !== 'none'">
+        <KVTable :rows="[
+          { key: 'Certificate', value: certBadge.label },
+          { key: 'Covers', value: remoteStatus.cert.sans?.join(', ') ?? '', mono: true },
+          { key: 'Expires', value: remoteStatus.cert.expiry ?? '' },
+          { key: 'Error', value: remoteStatus.cert.error ?? '' },
+          { key: 'DNS error', value: remoteStatus.dns?.error ?? '' },
+        ]" />
+      </template>
+
+      <p v-if="providerDraft === 'duckdns'" class="hint" style="margin-top: 10px">
+        DuckDNS holds a single address per domain, so only the remote (WAN) hostname exists — there's no LAN hostname tier.
+      </p>
+      <p v-if="providerDraft === 'cloudflare'" class="hint" style="margin-top: 10px">
+        Records are created DNS-only (grey cloud). Cloudflare's proxy can't forward Heya's high port, and streaming video through it is a fast way to get flagged — leave it off.
+      </p>
     </SettingsSection>
 
     <SettingsSection title="Tailscale" icon="cloud"
@@ -440,6 +703,38 @@ watch(cfg, (next) => {
 .hint { font-size: 12px; color: var(--fg-3); line-height: 1.5; margin: 0 0 10px; }
 .hint code { font-family: var(--font-mono); color: var(--fg-1); }
 .hint-warn { font-size: 11px; color: var(--gold); margin-left: 8px; }
+
+.cgnat-banner {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  font-size: 12.5px; line-height: 1.5;
+  color: var(--fg-1);
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent);
+  border-radius: var(--r-md);
+}
+.cgnat-banner :first-child { color: var(--bad); flex-shrink: 0; margin-top: 2px; }
+.cgnat-banner strong { color: var(--bad); }
+
+.remote-detail {
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  font-size: 12.5px; line-height: 1.5;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--fg-2);
+}
+.remote-detail.error {
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
+  border-color: color-mix(in srgb, var(--bad) 30%, transparent);
+  color: var(--fg-1);
+}
+.remote-detail.warn {
+  background: var(--gold-soft);
+  border-color: color-mix(in srgb, var(--gold) 25%, transparent);
+}
 
 .raw-bar { display: flex; gap: 6px; margin-bottom: 10px; }
 .raw-json, .raw-err {

@@ -16,6 +16,7 @@ import (
 	"github.com/karbowiak/heya/internal/database"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/logbuf"
+	"github.com/karbowiak/heya/internal/remote"
 	"github.com/karbowiak/heya/internal/scheduler"
 	"github.com/karbowiak/heya/internal/server"
 	"github.com/karbowiak/heya/internal/service"
@@ -117,38 +118,53 @@ var serveCmd = &cobra.Command{
 			server.WithBaseContext(appCtx),
 		)
 
-		// Wire the Tailscale manager. In prod it's an in-process tsnet node
-		// serving the same handler as the LAN listener, so toggling it on at
-		// runtime serves the same routes. With --dev-backend the node instead
-		// lives in the stable `heya dev-proxy` front-door (so it survives air
-		// rebuilds) and we drive it over a localhost control socket — the
-		// DB-backed enable/disable flow through the handlers is identical.
-		tsLogger := log.With().Str("subsystem", "tailscale").Logger()
-		onTSStatus := func(st tsnetwrap.Status) {
-			app.EventHub().Emit(eventhub.EventTailscale, st)
-		}
-		var tsManager tsnetwrap.Manager
+		// Wire the network subsystems: Tailscale (in-process tsnet node) and
+		// remote access (UPnP + ACME + reachability). Both serve the same
+		// handler as the LAN listener and both are PRODUCTION-ONLY — under
+		// --dev-backend the managers stay nil and the API reports them as
+		// unavailable. The dev-proxy is a dumb reverse proxy on purpose.
 		if devBackend {
-			tsManager = tsnetwrap.NewRemoteClient(devTSControlSocket(), tsLogger, onTSStatus)
-			tsLogger.Info().Str("socket", devTSControlSocket()).Msg("dev-backend: driving tailscale via dev-proxy control socket")
+			log.Info().Msg("dev-backend: tailscale + remote access are production-only, skipping")
 		} else {
-			tsManager = tsnetwrap.New(srv.Handler, tsLogger, onTSStatus)
-		}
-		app.SetTailscale(tsManager)
+			tsLogger := log.With().Str("subsystem", "tailscale").Logger()
+			tsManager := tsnetwrap.New(srv.Handler, tsLogger, func(st tsnetwrap.Status) {
+				app.EventHub().Emit(eventhub.EventTailscale, st)
+			})
+			app.SetTailscale(tsManager)
 
-		if cfg.Tailscale.Enabled.Value {
-			go func() {
-				if err := tsManager.Enable(appCtx, tsnetwrap.Config{
-					Enabled:  true,
-					Hostname: cfg.Tailscale.Hostname.Value,
-					AuthKey:  cfg.Tailscale.AuthKey.Value,
-					StateDir: cfg.Tailscale.StateDir.Value,
-					HTTPS:    cfg.Tailscale.HTTPS.Value,
-					Funnel:   cfg.Tailscale.Funnel.Value,
-				}); err != nil {
-					tsLogger.Warn().Err(err).Msg("tailscale enable failed; LAN listener continues")
-				}
-			}()
+			if cfg.Tailscale.Enabled.Value {
+				go func() {
+					if err := tsManager.Enable(appCtx, tsnetwrap.Config{
+						Enabled:  true,
+						Hostname: cfg.Tailscale.Hostname.Value,
+						AuthKey:  cfg.Tailscale.AuthKey.Value,
+						StateDir: cfg.Tailscale.StateDir.Value,
+						HTTPS:    cfg.Tailscale.HTTPS.Value,
+						Funnel:   cfg.Tailscale.Funnel.Value,
+					}); err != nil {
+						tsLogger.Warn().Err(err).Msg("tailscale enable failed; LAN listener continues")
+					}
+				}()
+			}
+
+			remoteLogger := log.With().Str("subsystem", "remote").Logger()
+			remoteMgr := remote.NewManager(srv.Handler, remoteLogger, func(st remote.RemoteStatus) {
+				app.EventHub().Emit(eventhub.EventRemote, st)
+			})
+			app.SetRemote(remoteMgr)
+
+			if cfg.Remote.Enabled.Value {
+				go func() {
+					rc, err := app.RemoteRuntimeConfig(appCtx)
+					if err != nil {
+						remoteLogger.Warn().Err(err).Msg("remote access boot config failed")
+						return
+					}
+					if err := remoteMgr.Enable(appCtx, rc); err != nil {
+						remoteLogger.Warn().Err(err).Msg("remote access enable failed; LAN listener continues")
+					}
+				}()
+			}
 		}
 
 		// Bring the HTTP listener up FIRST — before the (potentially slow,
@@ -262,11 +278,11 @@ var serveCmd = &cobra.Command{
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 		defer cancel()
 
-		// Three independent shutdowns in parallel. The 6s budget covers
-		// the slowest one (tsnet); workers + http server finish in well
-		// under a second.
+		// Four independent shutdowns in parallel. The 6s budget covers
+		// the slowest one (tsnet); workers + http server + remote listener
+		// finish in well under a second.
 		var wg sync.WaitGroup
-		wg.Add(3)
+		wg.Add(4)
 		go func() {
 			defer wg.Done()
 			// Workers were never started in passive mode; River's Stop on a
@@ -281,6 +297,18 @@ var serveCmd = &cobra.Command{
 			defer wg.Done()
 			if err := srv.Shutdown(shutdownCtx); err != nil {
 				log.Warn().Err(err).Msg("http shutdown error")
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			// Close only tears down the TLS listener + loops; the UPnP
+			// mapping is left in place on purpose — a restart (air, deploy)
+			// must not drop remote users' ability to reconnect. Only an
+			// explicit user Disable unmaps.
+			if rm := app.Remote(); rm != nil {
+				if err := rm.Close(); err != nil {
+					log.Warn().Err(err).Msg("remote access shutdown error")
+				}
 			}
 		}()
 		go func() {
@@ -319,17 +347,6 @@ var serveCmd = &cobra.Command{
 func init() {
 	serveCmd.Flags().Bool("dev-backend", false,
 		"Dev mode: serve the API on this port only and drive Tailscale via the `heya dev-proxy` control socket instead of an in-process node (used by `make dev`)")
-}
-
-// devTSControlSocket is the localhost unix socket the `heya dev-proxy`
-// front-door listens on for tailscale control and the --dev-backend server
-// dials. Both processes run from the repo root, so the default relative path
-// lines up; override with HEYA_DEV_TS_CONTROL if needed.
-func devTSControlSocket() string {
-	if v := os.Getenv("HEYA_DEV_TS_CONTROL"); v != "" {
-		return v
-	}
-	return "tmp/heya-dev-ts.sock"
 }
 
 // waitWithDeadline returns when wg.Wait() completes or when the deadline

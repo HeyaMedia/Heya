@@ -15,6 +15,7 @@ For deeper context, see `docs/`:
 | [docs/music-api.md](docs/music-api.md)       | `/api/music/*` route map and shape conventions    |
 | [docs/eye.md](docs/eye.md)                   | Heya Eye — headless-Chrome UI debugger            |
 | [docs/jellyfin.md](docs/jellyfin.md)         | Jellyfin-compatible API — arch, coverage, testing |
+| [docs/remote-access.md](docs/remote-access.md) | Direct remote access — UPnP, ACME DNS-01 certs, heya.media reachability probe |
 | [docs/subsonic.md](docs/subsonic.md)         | Subsonic/OpenSubsonic-compatible API — auth story, coverage, client setup |
 | [docs/cli.md](docs/cli.md)                   | Full CLI reference                                |
 | [docs/tailscale.md](docs/tailscale.md)       | tsnet integration                                 |
@@ -45,10 +46,10 @@ For deeper context, see `docs/`:
 3. Nuxt/Vite dev server on `:3000` (HMR).
 
 The front door is its own Go process *on purpose*: the backend restarts on
-every code save (air's job), but tsnet must own a stable listener that doesn't
-flap — so Tailscale lives in `dev-proxy`, which never restarts on a code/Vue
-edit. The browser's HMR socket and any in-flight WS connection survive air
-rebuilds. `make dev` reclaims ports `:8080`/`:3050`/`:3000` from any orphaned
+every code save (air's job), but the browser-facing port must not flap with
+it — the HMR socket and any in-flight WS connection survive air rebuilds.
+The dev-proxy does exactly one thing (proxy); Tailscale and remote access
+are **production-only** subsystems that don't exist under `--dev-backend`. `make dev` reclaims ports `:8080`/`:3050`/`:3000` from any orphaned
 run, then launches mprocs; quitting mprocs (`q` / Ctrl+C) tears all three down,
 and pressing `r` on a pane restarts just that process. `make dev-front` /
 `make dev-go` / `make dev-web` split them into separate terminals. You open
@@ -166,11 +167,11 @@ the LAN listener. HTTPS uses Tailscale-issued certs from MagicDNS. Funnel is
 off by default. State lives in `data/tailscale/`. Full integration in
 [docs/tailscale.md](docs/tailscale.md).
 
-In dev the tsnet node lives in the stable `heya dev-proxy` process (not the
-air-restarted backend); the backend drives it over a localhost control socket.
-The DB-backed Settings toggle works in dev — give the dev node a distinct
-identity (`HEYA_TAILSCALE_HOSTNAME=heya-dev`,
-`HEYA_TAILSCALE_STATE_DIR=./data/tailscale-dev` in `.env.local`). See
+Tailscale (like remote access) is production-only — no tsnet node exists
+under `--dev-backend`. To exercise it locally, run a prod-mode `heya serve`
+against the local docker DB on a scratch port with a distinct identity
+(`HEYA_TAILSCALE_HOSTNAME=heya-dev`,
+`HEYA_TAILSCALE_STATE_DIR=./data/tailscale-dev`). See
 [docs/tailscale.md](docs/tailscale.md#development).
 
 ## Helpful CLI subset
@@ -186,6 +187,7 @@ identity (`HEYA_TAILSCALE_HOSTNAME=heya-dev`,
 | `heya library scan <id>`                   | Trigger a library scan                               |
 | `heya media refresh <id\|slug>`            | Re-fetch metadata for a media item                   |
 | `heya queue status` / `heya job list`      | Inspect background work                              |
+| `heya remote status` / `check`             | Remote access (UPnP + certs + reachability) — see [docs/remote-access.md](docs/remote-access.md) |
 | `heya analyze status` / `heya analyze reset` | Sonic-analysis pipeline                            |
 | `heya ai status` / `heya ai chat "…"`      | AI subsystem — local llama-server or external provider |
 | `heya migrate up` / `db:wipe`              | DB migration / wipe                                  |

@@ -2693,6 +2693,37 @@
         ],
         "type": "object"
       },
+      "CertStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "expiry": {
+            "type": "string"
+          },
+          "issuing": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "sans": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "mode",
+          "issuing"
+        ],
+        "type": "object"
+      },
       "Change-passwordRequest": {
         "additionalProperties": false,
         "properties": {
@@ -2721,6 +2752,50 @@
         "required": [
           "current_password",
           "new_password"
+        ],
+        "type": "object"
+      },
+      "CheckError": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
+      "CheckResult": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/CheckError"
+          },
+          "latency_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "observed_ip": {
+            "type": "string"
+          },
+          "reachable": {
+            "type": "boolean"
+          },
+          "unavailable": {
+            "type": "boolean"
+          },
+          "verified": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "reachable",
+          "verified"
         ],
         "type": "object"
       },
@@ -3257,6 +3332,36 @@
           "name",
           "media_type",
           "paths"
+        ],
+        "type": "object"
+      },
+      "DNSStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "lan_host": {
+            "type": "string"
+          },
+          "last_sync_at": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "wan_host": {
+            "type": "string"
+          },
+          "zone": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "configured"
         ],
         "type": "object"
       },
@@ -13269,6 +13374,27 @@
         ],
         "type": "object"
       },
+      "ProbeBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ProbeBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "challenge": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "challenge"
+        ],
+        "type": "object"
+      },
       "Provider": {
         "additionalProperties": false,
         "properties": {
@@ -14553,6 +14679,181 @@
           "username",
           "email",
           "password"
+        ],
+        "type": "object"
+      },
+      "RemoteConfigPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/RemoteConfigPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "acme_email": {
+            "type": "string"
+          },
+          "dns_provider": {
+            "description": "DNS provider for hostnames + certificates",
+            "enum": [
+              "",
+              "desec",
+              "duckdns",
+              "cloudflare"
+            ],
+            "type": "string"
+          },
+          "dns_token": {
+            "description": "Provider API token (write-only; empty keeps existing)",
+            "type": "string"
+          },
+          "domain": {
+            "description": "Zone managed at the provider (myname.dedyn.io, example.com)",
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "port": {
+            "description": "External+listener port; 0 = keep current / auto-generate",
+            "format": "int64",
+            "type": "integer"
+          },
+          "subdomain": {
+            "description": "Optional label under the domain (heya → wan.heya.example.com)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "RemoteConfigView": {
+        "additionalProperties": false,
+        "properties": {
+          "acme_email": {
+            "type": "string"
+          },
+          "dns_provider": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "port": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "subdomain": {
+            "type": "string"
+          },
+          "token_set": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "port",
+          "token_set"
+        ],
+        "type": "object"
+      },
+      "RemoteStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "cert": {
+            "$ref": "#/components/schemas/CertStatus"
+          },
+          "cgnat": {
+            "type": "boolean"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "dns": {
+            "$ref": "#/components/schemas/DNSStatus"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "lan_ip": {
+            "type": "string"
+          },
+          "lan_url": {
+            "type": "string"
+          },
+          "last_check": {
+            "$ref": "#/components/schemas/CheckResult"
+          },
+          "last_check_at": {
+            "type": "string"
+          },
+          "observed_ip": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "port": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "remote_url": {
+            "type": "string"
+          },
+          "router_external_ip": {
+            "type": "string"
+          },
+          "upnp": {
+            "$ref": "#/components/schemas/UPnPStatus"
+          }
+        },
+        "required": [
+          "enabled",
+          "phase",
+          "cgnat",
+          "upnp",
+          "dns",
+          "cert"
+        ],
+        "type": "object"
+      },
+      "RemoteStatusBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/RemoteStatusBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "config": {
+            "$ref": "#/components/schemas/RemoteConfigView"
+          },
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RemoteStatus"
+          }
+        },
+        "required": [
+          "available",
+          "config"
         ],
         "type": "object"
       },
@@ -18517,6 +18818,27 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "UPnPStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "gateway": {
+            "type": "string"
+          },
+          "mapped_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "available"
+        ],
         "type": "object"
       },
       "UnmatchedFile": {
@@ -22998,6 +23320,44 @@
         "summary": "Per-field config provenance",
         "tags": [
           "Admin"
+        ]
+      }
+    },
+    "/api/connectivity/probe": {
+      "get": {
+        "operationId": "connectivity-probe",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProbeBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Reachability check challenge echo",
+        "tags": [
+          "Remote"
         ]
       }
     },
@@ -38921,6 +39281,145 @@
         "summary": "Aggregated recommendation feed",
         "tags": [
           "Discover"
+        ]
+      }
+    },
+    "/api/remote/check": {
+      "post": {
+        "operationId": "remote-check",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoteStatusBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Re-run the reachability check",
+        "tags": [
+          "Remote"
+        ]
+      }
+    },
+    "/api/remote/config": {
+      "put": {
+        "operationId": "set-remote-config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoteConfigPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Apply remote access config",
+        "tags": [
+          "Remote"
+        ]
+      }
+    },
+    "/api/remote/status": {
+      "get": {
+        "operationId": "remote-status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoteStatusBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Remote access status",
+        "tags": [
+          "Remote"
         ]
       }
     },

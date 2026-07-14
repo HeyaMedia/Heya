@@ -9,36 +9,31 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
-
-	tsnetwrap "github.com/karbowiak/heya/internal/tailscale"
 
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
 
-// dev-proxy is the stable dev front door. It owns the user-facing LAN port
-// (:8080) and — when the --dev-backend server tells it to — the tailnet node,
-// reverse-proxying everything to the two hot-reloading downstreams:
+// dev-proxy is the stable dev front door. It does exactly one thing: own the
+// user-facing port (:8080) and reverse-proxy to the two hot-reloading
+// downstreams:
 //
 //	/api/*       ──► HEYA_DEV_BACKEND (default :3050, run by air)
 //	/jellyfin/*  ──► HEYA_DEV_BACKEND
 //	/subsonic/*  ──► HEYA_DEV_BACKEND
 //	/*           ──► HEYA_DEV_PROXY   (default :3000, Nuxt/Vite)
 //
-// Because this process never holds business logic, it doesn't restart when you
-// edit Go or Vue — so the tailnet node and any in-flight WS/HMR socket survive
-// air rebuilds. tsnet here is the exact production code path (tsnetwrap), just
-// fronting a proxy handler instead of the embedded app. The backend drives
-// enable/disable over the control socket (see serve --dev-backend).
+// Because this process never holds business logic, it doesn't restart when
+// you edit Go or Vue — in-flight WS/HMR sockets survive air rebuilds.
+// Tailscale and remote access are production-only subsystems (`heya serve`
+// without --dev-backend) and deliberately have no dev-proxy presence.
 var devProxyCmd = &cobra.Command{
 	Use:   "dev-proxy",
-	Short: "Dev front door: reverse-proxy Nuxt + the API and own the tailnet node",
+	Short: "Dev front door: reverse-proxy Nuxt + the API on one stable port",
 	Long: "Stable dev front door used by `make dev`. Reverse-proxies /api/* and /jellyfin/* to the air-run backend " +
-		"and every other path to the Nuxt dev server, while owning the LAN listener and the Tailscale " +
-		"node so neither flaps when air rebuilds the backend.",
+		"and every other path to the Nuxt dev server, so the browser-facing port never flaps during rebuilds.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
@@ -70,32 +65,6 @@ var devProxyCmd = &cobra.Command{
 		mux.Handle("/subsonic/", apiProxy)
 		mux.Handle("/", webProxy)
 
-		// tsnet via the production wrapper, fronting the proxy handler. We
-		// only construct the node here; the backend opens/closes its listeners
-		// over the control socket so the DB-backed toggle stays authoritative.
-		tsLogger := log.With().Str("subsystem", "tailscale").Logger()
-		tsServer := tsnetwrap.New(mux, tsLogger, func(st tsnetwrap.Status) {
-			tsLogger.Debug().Str("backend_state", st.BackendState).Bool("running", st.Running).Msg("tailscale status")
-		})
-
-		// Control socket for serve --dev-backend to drive enable/disable.
-		socketPath := devTSControlSocket()
-		if err := os.MkdirAll(filepath.Dir(socketPath), 0o750); err != nil {
-			return err
-		}
-		_ = os.Remove(socketPath) // clear a stale socket from a crashed run
-		ctlLn, err := net.Listen("unix", socketPath)
-		if err != nil {
-			return err
-		}
-		ctlSrv := &http.Server{Handler: tsnetwrap.ControlHandler(tsServer), ReadHeaderTimeout: 5 * time.Second}
-		go func() {
-			if err := ctlSrv.Serve(ctlLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				tsLogger.Warn().Err(err).Msg("tailscale control server stopped")
-			}
-		}()
-
-		// LAN front door.
 		ln, err := reuseAddrListen(cfg.Addr())
 		if err != nil {
 			return err
@@ -106,7 +75,6 @@ var devProxyCmd = &cobra.Command{
 				Str("addr", cfg.Addr()).
 				Str("api", backendURL.String()).
 				Str("nuxt", nuxtURL.String()).
-				Str("ts_control", socketPath).
 				Msg("dev-proxy front door up")
 			if err := lanSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
 				log.Fatal().Err(err).Msg("dev-proxy server error")
@@ -116,19 +84,9 @@ var devProxyCmd = &cobra.Command{
 		<-sigCtx.Done()
 		log.Info().Msg("dev-proxy shutting down")
 
-		// Hard backstop — tsnet teardown can hang; mirror serve.go's 8s cap.
-		go func() {
-			<-time.After(8 * time.Second)
-			log.Warn().Msg("dev-proxy shutdown took >8s, forcing exit")
-			os.Exit(1)
-		}()
-
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 		defer cancel()
 		_ = lanSrv.Shutdown(shutdownCtx)
-		_ = ctlSrv.Shutdown(shutdownCtx)
-		_ = tsServer.Close() // flush state dir cleanly so the next start isn't slow
-		_ = os.Remove(socketPath)
 
 		log.Info().Msg("dev-proxy clean shutdown complete")
 		return nil

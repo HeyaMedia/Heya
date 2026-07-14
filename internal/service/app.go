@@ -25,6 +25,7 @@ import (
 	"github.com/karbowiak/heya/internal/podcastindex"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/radiobrowser"
+	"github.com/karbowiak/heya/internal/remote"
 	"github.com/karbowiak/heya/internal/scheduler"
 	"github.com/karbowiak/heya/internal/sessions"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
@@ -52,6 +53,7 @@ type App struct {
 	hub            *eventhub.Hub
 	scheduler      *scheduler.Trigger
 	tailscale      tailscale.Manager
+	remote         *remote.Manager
 	textSearcher   *sonicanalysis.TextSearcher
 	modelFetcher   *sonicanalysis.ModelFetcher
 	analyzer       *sonicanalysis.Analyzer
@@ -389,6 +391,9 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	// wants it sets HEYA_TAILSCALE_ENABLED with a distinct HEYA_TAILSCALE_HOSTNAME.
 	if !cfg.PassiveMode.Value {
 		app.LoadTailscaleFromDB(ctx)
+		// Same reasoning as tailscale: a borrowed prod DB's remote.enabled
+		// must not map ports / issue certs from a dev checkout.
+		app.LoadRemoteFromDB(ctx)
 	}
 	app.LoadTranscoderFromDB(ctx)
 

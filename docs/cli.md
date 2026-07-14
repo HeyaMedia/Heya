@@ -112,6 +112,9 @@ it to grey out env-locked fields.
 | -------------------------------- | ------------------------------------------------------ |
 | `heya tailscale status [--json]` | Show current node state                                |
 | `heya tailscale logout`          | Wipe local identity (re-onboard on next start)         |
+| `heya remote status [--json]`    | Remote-access state machine (phase, port, IPs, cert)   |
+| `heya remote check`              | Re-assert the port mapping + re-run the outside-in check |
+| `heya remote enable` / `disable` | Toggle remote access (disable unmaps the router port)  |
 
 Run while `heya serve` is **not** running — both would race for the
 state dir. See [tailscale.md](./tailscale.md) for the full integration.

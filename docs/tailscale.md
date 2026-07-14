@@ -65,20 +65,19 @@ tsnet stores the node identity (machine key, cert cache, etc.) under `data/tails
 
 ## Development
 
-Tailscale works in `make dev` the same DB-backed way it does in prod — only the *plumbing* differs.
+Tailscale is **production-only**: under `--dev-backend` (what `make dev` runs) no tsnet node is constructed, the API reports the manager unavailable, and the Settings toggle is inert. The dev-proxy is a dumb reverse proxy with no tailnet presence.
 
-In dev the stack is split across three processes (see [development.md](./development.md#daily-dev)): the air-restarted backend on `:3050` and the stable `heya dev-proxy` front door on `:8080`. The backend restarts on every code save, so it can't own the tsnet node — a flapping listener would drop the tailnet connection on each rebuild. Instead the node lives in the long-lived `dev-proxy` process, and the backend drives it remotely over a localhost unix control socket (default `tmp/heya-dev-ts.sock`, override with `HEYA_DEV_TS_CONTROL`).
-
-The backend stays the brain. Settings → Tailscale writes `system_settings` (DB), the config layer merges env > DB > default, and the backend calls `Server.Enable` over the control socket to drive the node. `Server.Enable` is idempotent, so the backend re-asserts the desired state on every air restart and the node stays up. Status and login-URL events flow back over the WebSocket to the UI exactly as in prod, so the DB-backed toggle works live.
-
-Give the dev node a **distinct identity** so it never clobbers a real prod node — in `.env.local`:
+To exercise Tailscale locally, run a real production-mode server against the local docker DB on a scratch port, with a **distinct identity** so it never clobbers a real prod node:
 
 ```bash
-HEYA_TAILSCALE_HOSTNAME=heya-dev
-HEYA_TAILSCALE_STATE_DIR=./data/tailscale-dev
+HEYA_DATABASE_URL="postgres://heya:heya@localhost:5440/heya?sslmode=disable" \
+HEYA_PORT=18080 \
+HEYA_TAILSCALE_HOSTNAME=heya-dev \
+HEYA_TAILSCALE_STATE_DIR=./data/tailscale-dev \
+./bin/heya serve
 ```
 
-Then either set `HEYA_TAILSCALE_ENABLED=true` to bring it up at boot (the UI shows it env-locked), or leave it unset and toggle it from Settings (DB-backed). Prod is unaffected — `heya serve` (no flag) runs tsnet in-process as described above.
+Then toggle it from Settings (DB-backed) or set `HEYA_TAILSCALE_ENABLED=true` to bring it up at boot (the UI shows it env-locked).
 
 ## CLI
 

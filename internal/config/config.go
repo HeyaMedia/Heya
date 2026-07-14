@@ -56,6 +56,7 @@ type Config struct {
 	TranscodeCacheDir   Field[string]
 	TranscodeCacheMaxGB Field[int]
 	Tailscale           TailscaleConfig
+	Remote              RemoteConfig
 	Jellyfin            JellyfinConfig
 	Subsonic            SubsonicConfig
 	Cast                CastConfig
@@ -130,6 +131,31 @@ type TailscaleConfig struct {
 	Funnel   Field[bool]
 }
 
+// RemoteConfig holds the direct remote-access knobs (UPnP port mapping +
+// per-server TLS via ACME DNS-01 + outside-in reachability checks against
+// heya.media). Enabled/Port/ACMEEmail and the DNS provider trio are
+// UI-editable (DB-backed, env locks); CheckURL, CertDir and ACMECA are
+// boot-time only. Port==0 means "generate a random high port once and
+// persist it" — the chosen port is sticky because it ends up in every
+// bookmark and client config.
+type RemoteConfig struct {
+	Enabled   Field[bool]
+	Port      Field[int]
+	CheckURL  Field[string]
+	CertDir   Field[string]
+	ACMECA    Field[string]
+	ACMEEmail Field[string]
+	// DNSProvider ∈ "" | "desec" | "duckdns" | "cloudflare". Domain is the
+	// zone managed at that provider (myname.dedyn.io, myname.duckdns.org,
+	// example.com); Subdomain optionally nests Heya under it (heya →
+	// wan.heya.example.com). DNSToken is the provider API token — never
+	// exposed via the API, only written.
+	DNSProvider Field[string]
+	DNSToken    Field[string] `json:"-"`
+	Domain      Field[string]
+	Subdomain   Field[string]
+}
+
 // Load reads .env / .env.local (without overriding real env), then resolves
 // every Field from the environment. Defaults are applied for any var that
 // wasn't set. There is no yaml layer — Heya is env-only.
@@ -181,6 +207,18 @@ func Load() *Config {
 			StateDir: envString("HEYA_TAILSCALE_STATE_DIR", dataDir.Value+"/tailscale"),
 			HTTPS:    envBool("HEYA_TAILSCALE_HTTPS", false),
 			Funnel:   envBool("HEYA_TAILSCALE_FUNNEL", false),
+		},
+		Remote: RemoteConfig{
+			Enabled:     envBool("HEYA_REMOTE_ENABLED", false),
+			Port:        envInt("HEYA_REMOTE_PORT", 0),
+			CheckURL:    envString("HEYA_REMOTE_CHECK_URL", "https://heya.media"),
+			CertDir:     envString("HEYA_REMOTE_CERT_DIR", dataDir.Value+"/remote"),
+			ACMECA:      envString("HEYA_REMOTE_ACME_CA", ""),
+			ACMEEmail:   envString("HEYA_REMOTE_ACME_EMAIL", ""),
+			DNSProvider: envString("HEYA_REMOTE_DNS_PROVIDER", ""),
+			DNSToken:    envString("HEYA_REMOTE_DNS_TOKEN", ""),
+			Domain:      envString("HEYA_REMOTE_DOMAIN", ""),
+			Subdomain:   envString("HEYA_REMOTE_SUBDOMAIN", ""),
 		},
 	}
 }
@@ -352,6 +390,16 @@ var sourceFields = []sourceField{
 	{"tailscale.state_dir", func(c *Config) SourceEntry { return c.Tailscale.StateDir.Entry() }},
 	{"tailscale.https", func(c *Config) SourceEntry { return c.Tailscale.HTTPS.Entry() }},
 	{"tailscale.funnel", func(c *Config) SourceEntry { return c.Tailscale.Funnel.Entry() }},
+	{"remote.enabled", func(c *Config) SourceEntry { return c.Remote.Enabled.Entry() }},
+	{"remote.port", func(c *Config) SourceEntry { return c.Remote.Port.Entry() }},
+	{"remote.check_url", func(c *Config) SourceEntry { return c.Remote.CheckURL.Entry() }},
+	{"remote.cert_dir", func(c *Config) SourceEntry { return c.Remote.CertDir.Entry() }},
+	{"remote.acme_ca", func(c *Config) SourceEntry { return c.Remote.ACMECA.Entry() }},
+	{"remote.acme_email", func(c *Config) SourceEntry { return c.Remote.ACMEEmail.Entry() }},
+	{"remote.dns_provider", func(c *Config) SourceEntry { return c.Remote.DNSProvider.Entry() }},
+	{"remote.dns_token", func(c *Config) SourceEntry { return c.Remote.DNSToken.Entry() }},
+	{"remote.domain", func(c *Config) SourceEntry { return c.Remote.Domain.Entry() }},
+	{"remote.subdomain", func(c *Config) SourceEntry { return c.Remote.Subdomain.Entry() }},
 }
 
 // Sources returns the flat key→provenance map for the infra layer. The

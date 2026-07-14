@@ -20,6 +20,10 @@ const (
 	EventScannerEvent   EventType = "scan.event"
 	EventTaskProgress   EventType = "task.progress"
 	EventTailscale      EventType = "tailscale.status"
+	// Remote-access (UPnP + ACME + reachability) state — fired by
+	// internal/remote on every phase/DNS/cert transition. Broadcast:
+	// remote access is server-global state, admin UI only.
+	EventRemote EventType = "remote.status"
 	// Radio ICY metadata — fired by the radio stream proxy each time an
 	// upstream station sends a fresh `StreamTitle=...` block. FE consumers
 	// (Playbar / QueueRow) overlay these on the "Now Playing" card while a

@@ -845,6 +845,14 @@ export type Category = {
     name: string;
 };
 
+export type CertStatus = {
+    error?: string;
+    expiry?: string;
+    issuing: boolean;
+    mode: string;
+    sans?: Array<string> | null;
+};
+
 export type ChangePasswordRequest = {
     /**
      * A URL to the JSON Schema for this object.
@@ -858,6 +866,20 @@ export type ChangePasswordRequest = {
      * New password — minimum 8 chars
      */
     new_password: string;
+};
+
+export type CheckError = {
+    code: string;
+    detail?: string;
+};
+
+export type CheckResult = {
+    error?: CheckError;
+    latency_ms?: number;
+    observed_ip?: string;
+    reachable: boolean;
+    unavailable?: boolean;
+    verified: boolean;
 };
 
 export type ClearedBody = {
@@ -1006,6 +1028,16 @@ export type CreateLibraryInputBody = {
      */
     paths: Array<string> | null;
     settings?: LibrarySettings;
+};
+
+export type DnsStatus = {
+    configured: boolean;
+    error?: string;
+    lan_host?: string;
+    last_sync_at?: string;
+    provider?: string;
+    wan_host?: string;
+    zone?: string;
 };
 
 export type DashboardStats = {
@@ -3705,6 +3737,14 @@ export type PodcastsBody = {
     items: Array<Podcast> | null;
 };
 
+export type ProbeBody = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    challenge: string;
+};
+
 export type Provider = {
     base_url: string;
     id: string;
@@ -4134,6 +4174,74 @@ export type RegisterInputBody = {
      * Username
      */
     username: string;
+};
+
+export type RemoteConfigPayload = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    acme_email?: string;
+    /**
+     * DNS provider for hostnames + certificates
+     */
+    dns_provider?: '' | 'desec' | 'duckdns' | 'cloudflare';
+    /**
+     * Provider API token (write-only; empty keeps existing)
+     */
+    dns_token?: string;
+    /**
+     * Zone managed at the provider (myname.dedyn.io, example.com)
+     */
+    domain?: string;
+    enabled: boolean;
+    /**
+     * External+listener port; 0 = keep current / auto-generate
+     */
+    port?: number;
+    /**
+     * Optional label under the domain (heya → wan.heya.example.com)
+     */
+    subdomain?: string;
+};
+
+export type RemoteConfigView = {
+    acme_email?: string;
+    dns_provider?: string;
+    domain?: string;
+    enabled: boolean;
+    port: number;
+    subdomain?: string;
+    token_set: boolean;
+};
+
+export type RemoteStatus = {
+    cert: CertStatus;
+    cgnat: boolean;
+    detail?: string;
+    dns: DnsStatus;
+    enabled: boolean;
+    lan_ip?: string;
+    lan_url?: string;
+    last_check?: CheckResult;
+    last_check_at?: string;
+    observed_ip?: string;
+    phase: string;
+    port?: number;
+    remote_url?: string;
+    router_external_ip?: string;
+    upnp: UPnPStatus;
+};
+
+export type RemoteStatusBody = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    available: boolean;
+    config: RemoteConfigView;
+    message?: string;
+    status?: RemoteStatus;
 };
 
 export type ReorderListRequest = {
@@ -5267,6 +5375,13 @@ export type TvSeason = {
 
 export type UiSettings = {
     pinned_hero_mode?: string;
+};
+
+export type UPnPStatus = {
+    available: boolean;
+    error?: string;
+    gateway?: string;
+    mapped_at?: string;
 };
 
 export type UnmatchedFile = {
@@ -6873,6 +6988,10 @@ export type PodcastsBodyWritable = {
     items: Array<Podcast> | null;
 };
 
+export type ProbeBodyWritable = {
+    challenge: string;
+};
+
 export type QueueAdvanceRequestWritable = {
     /**
      * The item this renderer just finished/skipped — makes double-fires no-ops
@@ -7048,6 +7167,38 @@ export type RegisterInputBodyWritable = {
      * Username
      */
     username: string;
+};
+
+export type RemoteConfigPayloadWritable = {
+    acme_email?: string;
+    /**
+     * DNS provider for hostnames + certificates
+     */
+    dns_provider?: '' | 'desec' | 'duckdns' | 'cloudflare';
+    /**
+     * Provider API token (write-only; empty keeps existing)
+     */
+    dns_token?: string;
+    /**
+     * Zone managed at the provider (myname.dedyn.io, example.com)
+     */
+    domain?: string;
+    enabled: boolean;
+    /**
+     * External+listener port; 0 = keep current / auto-generate
+     */
+    port?: number;
+    /**
+     * Optional label under the domain (heya → wan.heya.example.com)
+     */
+    subdomain?: string;
+};
+
+export type RemoteStatusBodyWritable = {
+    available: boolean;
+    config: RemoteConfigView;
+    message?: string;
+    status?: RemoteStatus;
 };
 
 export type ReorderListRequestWritable = {
@@ -9506,6 +9657,31 @@ export type GetConfigSourcesResponses = {
 };
 
 export type GetConfigSourcesResponse = GetConfigSourcesResponses[keyof GetConfigSourcesResponses];
+
+export type ConnectivityProbeData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/connectivity/probe';
+};
+
+export type ConnectivityProbeErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ConnectivityProbeError = ConnectivityProbeErrors[keyof ConnectivityProbeErrors];
+
+export type ConnectivityProbeResponses = {
+    /**
+     * OK
+     */
+    200: ProbeBody;
+};
+
+export type ConnectivityProbeResponse = ConnectivityProbeResponses[keyof ConnectivityProbeResponses];
 
 export type ApiDocsData = {
     body?: never;
@@ -17010,6 +17186,81 @@ export type ListRecommendationsResponses = {
 };
 
 export type ListRecommendationsResponse = ListRecommendationsResponses[keyof ListRecommendationsResponses];
+
+export type RemoteCheckData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/remote/check';
+};
+
+export type RemoteCheckErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type RemoteCheckError = RemoteCheckErrors[keyof RemoteCheckErrors];
+
+export type RemoteCheckResponses = {
+    /**
+     * OK
+     */
+    200: RemoteStatusBody;
+};
+
+export type RemoteCheckResponse = RemoteCheckResponses[keyof RemoteCheckResponses];
+
+export type SetRemoteConfigData = {
+    body: RemoteConfigPayloadWritable;
+    path?: never;
+    query?: never;
+    url: '/api/remote/config';
+};
+
+export type SetRemoteConfigErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type SetRemoteConfigError = SetRemoteConfigErrors[keyof SetRemoteConfigErrors];
+
+export type SetRemoteConfigResponses = {
+    /**
+     * OK
+     */
+    200: StatusBody;
+};
+
+export type SetRemoteConfigResponse = SetRemoteConfigResponses[keyof SetRemoteConfigResponses];
+
+export type RemoteStatusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/remote/status';
+};
+
+export type RemoteStatusErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type RemoteStatusError = RemoteStatusErrors[keyof RemoteStatusErrors];
+
+export type RemoteStatusResponses = {
+    /**
+     * OK
+     */
+    200: RemoteStatusBody;
+};
+
+export type RemoteStatusResponse = RemoteStatusResponses[keyof RemoteStatusResponses];
 
 export type ListSchedulesData = {
     body?: never;
