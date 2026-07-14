@@ -75,18 +75,20 @@
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.5);
   --shadow-3: 0 24px 64px rgba(0, 0, 0, 0.65);
-  /* card/poster lift — --shade channel so it warms/softens per theme.
-     Offset to the bottom-right (top-left key light) for a directional feel;
-     the hover variant deepens along the same axis so the shadow follows
-     the tile's translateY lift instead of jumping to a centered look. */
+  /* card/poster lift — Heya 2.0 directional 3-layer system. A top-left key
+     light throws the drop to the bottom-right (offset +x ≈ half of +y), over
+     an --ink hairline ring; the --shade drops warm/soften per theme. The
+     hover variant deepens along the same axis AND adds a --tone-rgb kiss so
+     the shadow follows the tile's translateY lift and picks up the page tone.
+     (Definitions live below, after --chrome.) */
   /* Opaque chrome tone — the top navbar's color, and the exact target the
      library sidebar and FilterBar tops fade from, so the whole top frame
      matches in every theme (bg-0/bg-1 flip per theme, so one definition
      covers dark, OLED, and light). Nothing scrolls behind the navbar, so
      it gains nothing from being glass. */
   --chrome: color-mix(in srgb, var(--bg-0) 62%, var(--bg-1));
-  --shadow-card: 3px 4px 7px rgb(var(--shade) / 0.32), 12px 16px 32px rgb(var(--shade) / 0.26);
-  --shadow-card-hover: 4px 6px 10px rgb(var(--shade) / 0.36), 14px 20px 36px rgb(var(--shade) / 0.32);
+  --shadow-card: 0 0 0 1px rgb(var(--ink) / 0.11), 7px 12px 24px -10px rgb(var(--shade) / 0.75), 18px 34px 68px -16px rgb(var(--shade) / 0.95);
+  --shadow-card-hover: 0 0 0 1px rgb(var(--ink) / 0.18), 10px 18px 32px -10px rgb(var(--shade) / 0.8), 24px 48px 92px -18px rgb(var(--shade) / 0.95), 0 0 34px rgb(var(--tone-rgb) / 0.14);
   /* small floating elements — buttons, chips, tags, badges */
   --shadow-el: 1px 2px 3px rgb(var(--shade) / 0.22), 4px 7px 16px rgb(var(--shade) / 0.16);
 
@@ -115,6 +117,24 @@
   /* type */
   --font-sans: 'Inter', 'Inter Tight', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  /* display face (Heya 2.0 headings) — Archivo's variable width + weight axes
+     drive the condensed 800-weight titles; falls back to the sans stack. */
+  --font-display: 'Archivo Variable', var(--font-sans);
+
+  /* ── Heya 2.0 vocabulary ──────────────────────────────────────────
+     Tone-follow + ledger primitives ported from the detail-page redesign.
+     --tone/--tone-rgb default to the active accent but are RUNTIME-OVERRIDDEN
+     per page (exactly the --pb-accent precedent): the page root receives an
+     inline `{ '--tone': t.main, '--tone-rgb': 'R G B' }` sampled from the
+     artwork via sampleImageTone() (useImageTone.ts). --tone-rgb is the
+     space-separated triple twin of --tone, for rgb(var(--tone-rgb) / α).
+     --hair/--hair-strong are the ledger/section hairlines (distinct from the
+     older --border/--border-strong, which stay put for legacy chrome). */
+  --tone:     var(--accent);
+  --tone-rgb: var(--accent-rgb);
+  --hair:        rgb(var(--ink) / 0.10);
+  --hair-strong: rgb(var(--ink) / 0.18);
+  --pad-fluid: clamp(24px, 4.5vw, 72px);
 }
 
 /* ── Accent presets ─────────────────────────────────────────────────
@@ -123,54 +143,63 @@
    fills (btn-primary etc). Gold doubles as the no-attribute default. */
 :root, :root[data-accent="gold"] {
   --accent:        #e6b94a;
+  --accent-rgb:    230 185 74;
   --accent-bright: #f3cb66;
   --accent-deep:   #b88e2a;
   --accent-ink:    #1a1408;
 }
 :root[data-accent="ember"] {
   --accent:        #e8834a;
+  --accent-rgb:    232 131 74;
   --accent-bright: #f49d6b;
   --accent-deep:   #bd5e28;
   --accent-ink:    #1a0e06;
 }
 :root[data-accent="crimson"] {
   --accent:        #d9565c;
+  --accent-rgb:    217 86 92;
   --accent-bright: #e87b80;
   --accent-deep:   #ab3238;
   --accent-ink:    #1a0708;
 }
 :root[data-accent="rose"] {
   --accent:        #de6f9f;
+  --accent-rgb:    222 111 159;
   --accent-bright: #ec92b8;
   --accent-deep:   #b04574;
   --accent-ink:    #1a0811;
 }
 :root[data-accent="iris"] {
   --accent:        #9b82e8;
+  --accent-rgb:    155 130 232;
   --accent-bright: #b6a2f2;
   --accent-deep:   #6f56bd;
   --accent-ink:    #0e081a;
 }
 :root[data-accent="ocean"] {
   --accent:        #5b9ce6;
+  --accent-rgb:    91 156 230;
   --accent-bright: #82b6f0;
   --accent-deep:   #3670b5;
   --accent-ink:    #06101a;
 }
 :root[data-accent="teal"] {
   --accent:        #45c2b0;
+  --accent-rgb:    69 194 176;
   --accent-bright: #6cd6c6;
   --accent-deep:   #26937f;
   --accent-ink:    #061a16;
 }
 :root[data-accent="moss"] {
   --accent:        #93c159;
+  --accent-rgb:    147 193 89;
   --accent-bright: #aed67c;
   --accent-deep:   #6a9634;
   --accent-ink:    #0e1a06;
 }
 :root[data-accent="silver"] {
   --accent:        #b9bec8;
+  --accent-rgb:    185 190 200;
   --accent-bright: #d5d9e0;
   --accent-deep:   #878e9b;
   --accent-ink:    #12141a;

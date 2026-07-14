@@ -222,6 +222,11 @@ export default defineNuxtConfig({
     "@fontsource/jetbrains-mono/latin-500.css",
     "@fontsource/jetbrains-mono/latin-600.css",
     "@fontsource/jetbrains-mono/latin-700.css",
+    "@fontsource/jetbrains-mono/latin-800.css",
+    // Display face (Heya 2.0). `standard.css` carries BOTH the weight and
+    // width axes (font-stretch 62%–125%); the default `index.css` is
+    // weight-only, so it would ignore `font-variation-settings: "wdth" …`.
+    "@fontsource-variable/archivo/standard.css",
     "~/assets/css/heya.css",
     "~/assets/css/main.css",
     "~/assets/css/surface.css",

@@ -32,6 +32,7 @@ export default {
       fontFamily: {
         sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
         mono: ['JetBrains Mono', 'IBM Plex Mono', 'ui-monospace', 'monospace'],
+        display: ['Archivo Variable', 'Inter', 'system-ui', 'sans-serif'],
       },
       borderRadius: {
         xs: '4px',

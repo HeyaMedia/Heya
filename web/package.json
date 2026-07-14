@@ -13,6 +13,7 @@
     "postinstall": "nuxi prepare"
   },
   "dependencies": {
+    "@fontsource-variable/archivo": "^5.2.8",
     "@fontsource/inter": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@nuxt/image": "^2.0.0",
