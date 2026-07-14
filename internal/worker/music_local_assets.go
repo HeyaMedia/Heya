@@ -319,6 +319,12 @@ func writeAsset(ctx context.Context, q *sqlc.Queries, mediaItemID int64, assetTy
 	if existingLocal[key] {
 		return
 	}
+	if assetType == sqlc.AssetTypeBackdrop && label == "" && sortOrder == 0 {
+		if err := ShiftMediaAssetSortOrders(ctx, q, mediaItemID, sqlc.AssetTypeBackdrop); err != nil {
+			log.Warn().Err(err).Int64("item_id", mediaItemID).Msg("make room for local music backdrop failed")
+			return
+		}
+	}
 	if _, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 		MediaItemID: mediaItemID,
 		AssetType:   assetType,

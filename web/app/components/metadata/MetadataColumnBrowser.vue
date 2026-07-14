@@ -99,6 +99,7 @@ const emit = defineEmits<{
 
 const libraries = ref<Library[]>([])
 const loadingLibs = ref(true)
+const { toast } = useToast()
 const search = ref('')
 
 const expandedLibs = ref(new Set<number>())
@@ -151,7 +152,10 @@ async function toggleLib(id: number) {
       const items = await $heya('/api/libraries/{id}/media', { path: { id }, query: { limit: 2000 } }) as MediaItem[]
       libMedia.value[id] = items
       libCounts.value[id] = items.length
-    } catch { libMedia.value[id] = [] }
+    } catch (error) {
+      libMedia.value[id] = []
+      toast.err(apiErrorMessage(error, 'Could not load library media'), { duration: 7000 })
+    }
     libLoading.value[id] = false
   }
 }
@@ -170,7 +174,10 @@ async function toggleItem(item: MediaItem) {
       const { $heya } = useNuxtApp()
       const detail = await $heya('/api/media/{id}', { path: { id: String(item.id) } }) as MediaDetail
       itemSeasons.value[item.id] = (detail as any).seasons || []
-    } catch { itemSeasons.value[item.id] = [] }
+    } catch (error) {
+      itemSeasons.value[item.id] = []
+      toast.err(apiErrorMessage(error, 'Could not load seasons'), { duration: 7000 })
+    }
   }
 }
 
@@ -207,7 +214,9 @@ onMounted(async () => {
   try {
     const { $heya } = useNuxtApp()
     libraries.value = await $heya('/api/libraries') as Library[]
-  } catch { /* empty */ }
+  } catch (error) {
+    toast.err(apiErrorMessage(error, 'Could not load libraries'), { duration: 7000 })
+  }
   loadingLibs.value = false
 })
 </script>

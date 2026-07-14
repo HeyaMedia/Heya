@@ -38,6 +38,12 @@ function isLibraryLang(code: string) {
   return lib === c || lib.startsWith(c) || c.startsWith(lib)
 }
 
+function sourceLabel(source: string) {
+  const normalized = source.toLowerCase()
+  if (normalized === 'local' || normalized === 'user') return 'Local'
+  return 'Heya'
+}
+
 const titlesByLang = computed(() => {
   const groups: Record<string, typeof props.titles> = {}
   for (const t of (props.titles || [])) {
@@ -104,7 +110,7 @@ const hasOverviews = computed(() => overviewsByLang.value.length > 0)
             <div v-if="t.title_type || t.source || t.country" class="loc-meta">
               <span v-if="t.title_type">{{ t.title_type }}</span>
               <span v-if="t.country">{{ t.country }}</span>
-              <span v-if="t.source" class="loc-source">{{ t.source }}</span>
+              <span v-if="t.source" class="loc-source">{{ sourceLabel(t.source) }}</span>
             </div>
           </div>
         </div>
@@ -130,7 +136,7 @@ const hasOverviews = computed(() => overviewsByLang.value.length > 0)
           </div>
           <p v-for="(o, i) in g.items" :key="o.id ?? i" class="loc-overview-text">
             {{ o.overview }}
-            <span v-if="o.source" class="loc-source loc-source-inline">{{ o.source }}</span>
+            <span v-if="o.source" class="loc-source loc-source-inline">{{ sourceLabel(o.source) }}</span>
           </p>
         </div>
       </div>

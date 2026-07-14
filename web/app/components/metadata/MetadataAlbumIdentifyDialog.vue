@@ -12,7 +12,7 @@
       </button>
     </div>
     <div class="mid-results scroll">
-      <div v-if="searching" class="mid-empty">Searching HeyaMetadata albums...</div>
+      <div v-if="searching" class="mid-empty">Searching Heya albums...</div>
       <div v-else-if="searched && !results.length" class="mid-empty">No results found</div>
       <div
         v-for="r in results"
@@ -29,12 +29,14 @@
             <span v-if="r.year" class="mid-result-year">{{ r.year }}</span>
           </div>
           <div class="mid-result-provider">
-            <span class="mid-badge">{{ r.provider_name }}</span>
-            <span class="mid-provider-id">{{ r.provider_id }}</span>
+            <span class="mid-badge">Heya</span>
+            <span class="mid-provider-id">{{ resultIdentity(r) }}</span>
           </div>
           <div v-if="r.description" class="mid-desc">{{ r.description }}</div>
         </div>
-        <button class="btn btn-secondary mid-apply-btn" @click="apply(r)">Apply</button>
+        <button class="btn btn-secondary mid-apply-btn" :disabled="applyingId === r.provider_id" @click="apply(r)">
+          {{ applyingId === r.provider_id ? 'Applying...' : 'Apply' }}
+        </button>
       </div>
     </div>
   </AppDialog>
@@ -53,6 +55,8 @@ const query = ref('')
 const searching = ref(false)
 const searched = ref(false)
 const results = ref<ProviderSearchResult[]>([])
+const applyingId = ref('')
+const { toast } = useToast()
 
 const { $heya } = useNuxtApp()
 
@@ -75,19 +79,23 @@ async function search() {
       query: { q: query.value },
     }) as { results: ProviderSearchResult[] }
     results.value = res.results || []
-  } catch { results.value = [] }
+  } catch (error) {
+    results.value = []
+    toast.err(apiErrorMessage(error, 'Heya album search failed'), { duration: 7000 })
+  }
   searching.value = false
 }
 
 async function apply(r: ProviderSearchResult) {
   if (!props.album) return
   const ok = await useConfirm().confirm({
-    title: `Pin album to "${r.title}"?`,
-    message: 'The album is pinned to this MusicBrainz release group and the artist re-fetches — title, year, label and cover adopt from the new record.',
-    confirmLabel: 'Pin & refresh',
+    title: `Use "${r.title}"?`,
+    message: 'This changes the album’s canonical Heya identity and queues an artist metadata refresh.',
+    confirmLabel: 'Use & refresh',
     destructive: true,
   })
   if (!ok) return
+  applyingId.value = r.provider_id
   try {
     await $heya('/api/music/albums/{id}/identify', {
       method: 'POST',
@@ -95,7 +103,17 @@ async function apply(r: ProviderSearchResult) {
       body: { provider_name: r.provider_name, provider_id: r.provider_id } as any,
     })
     emit('applied')
-  } catch { /* empty */ }
+  } catch (error) {
+    toast.err(apiErrorMessage(error, 'Could not apply the selected Heya album'), { duration: 7000 })
+  } finally {
+    applyingId.value = ''
+  }
+}
+
+function resultIdentity(result: ProviderSearchResult): string {
+  const value = (result as any).heya_slug || result.provider_id || ''
+  const uuid = value.match(/[0-9a-f]{8}-[0-9a-f-]{27,}/i)?.[0]
+  return uuid || 'Canonical result'
 }
 </script>
 

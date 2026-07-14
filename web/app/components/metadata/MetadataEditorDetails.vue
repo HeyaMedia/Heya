@@ -84,19 +84,18 @@
       </div>
     </div>
 
-    <!-- External IDs -->
+    <!-- Canonical identity -->
     <div class="mf-card">
-      <div class="mf-card-head">External IDs</div>
-      <div class="mf-ids">
-        <div v-for="key in ['tmdb', 'imdb', 'tvdb']" :key="key" class="mf-id-row">
-          <label class="mf-id-label" :for="`me-ext-id-${key}`">{{ key.toUpperCase() }}</label>
-          <input :id="`me-ext-id-${key}`" v-model="form.external_ids[key]" type="text" class="mf-input mf-id-input" :placeholder="`${key} ID`" />
-        </div>
+      <div class="mf-card-head">Heya Identity</div>
+      <div class="mf-identity">
+        <span class="mf-identity-kind">{{ detail?.metadata_binding?.entity_kind || mediaType }}</span>
+        <code>{{ detail?.metadata_binding?.entity_id || 'Not linked to Heya yet' }}</code>
       </div>
+      <p class="mf-hint">Use Identify to change the canonical record. Source-specific IDs are managed by Heya and remain transparent here.</p>
     </div>
 
     <!-- Read-only metadata -->
-    <div v-if="detail?.production_companies?.length || detail?.keywords?.length || detail?.certifications?.length || detail?.external_ratings?.length" class="mf-card">
+    <div v-if="detail?.production_companies?.length || detail?.keywords?.length || detail?.certifications?.length" class="mf-card">
       <div class="mf-card-head">Additional Info</div>
       <div class="mf-sections">
         <div v-if="detail?.production_companies?.length" class="mf-section">
@@ -122,15 +121,6 @@
           </div>
         </div>
 
-        <div v-if="detail?.external_ratings?.length" class="mf-section">
-          <div class="mf-section-label">External Ratings</div>
-          <div class="mf-ratings">
-            <div v-for="r in detail.external_ratings" :key="r.source" class="mf-rating">
-              <span class="mf-rating-src">{{ r.source }}</span>
-              <span class="mf-rating-val">{{ r.value }}</span>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   </div>
@@ -310,30 +300,32 @@ function formatRating(r: any): string {
   outline: none;
 }
 
-/* ── External IDs ── */
-.mf-ids {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.mf-id-row {
+/* ── Canonical identity ── */
+.mf-identity {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  min-width: 0;
 }
-
-.mf-id-label {
-  width: 50px;
+.mf-identity code {
+  color: var(--fg-1);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.mf-identity-kind {
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--gold-soft);
+  color: var(--gold-bright);
   font-size: 10px;
   font-weight: 700;
-  color: var(--fg-3);
-  font-family: var(--font-mono);
-  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
-
-.mf-id-input {
-  flex: 1;
+.mf-hint {
+  margin: 12px 0 0;
+  color: var(--fg-3);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 /* ── Read-only sections ── */

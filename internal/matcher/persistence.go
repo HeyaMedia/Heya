@@ -854,7 +854,9 @@ func (m *Matcher) createTVSeries(ctx context.Context, mediaItemID int64, d *meta
 		return err
 	}
 
-	m.linkNetworks(ctx, series.ID, d.Networks)
+	if !m.lockedFields(ctx, mediaItemID)["networks"] {
+		m.linkNetworks(ctx, series.ID, d.Networks)
+	}
 	m.linkCreators(ctx, series.ID, d.CreatedBy)
 
 	for _, sd := range d.Seasons {
@@ -1163,11 +1165,12 @@ func (m *Matcher) createBook(ctx context.Context, mediaItemID int64, d *metadata
 			return err
 		}
 	case gerr == nil:
+		locked := m.lockedFields(ctx, mediaItemID)
 		filePathToStore, formatToStore := filePath, ext
 		if filePath == "" {
 			filePathToStore, formatToStore = existing.FilePath, existing.Format
 		}
-		if _, err := m.q.UpdateBook(ctx, sqlc.UpdateBookParams{
+		p := sqlc.UpdateBookParams{
 			ID:            existing.ID,
 			AuthorID:      authorID,
 			Isbn:          d.ISBN,
@@ -1182,7 +1185,41 @@ func (m *Matcher) createBook(ctx context.Context, mediaItemID int64, d *metadata
 			SeriesNumber:  int32(d.SeriesNum),
 			Format:        formatToStore,
 			Description:   d.Description,
-		}); err != nil {
+		}
+		if locked["author"] {
+			p.AuthorID = existing.AuthorID
+		}
+		if locked["isbn"] {
+			p.Isbn = existing.Isbn
+		}
+		if locked["page_count"] {
+			p.PageCount = existing.PageCount
+		}
+		if locked["publisher"] {
+			p.Publisher = existing.Publisher
+		}
+		if locked["publish_date"] {
+			p.PublishDate = existing.PublishDate
+		}
+		if locked["subjects"] {
+			p.Subjects = existing.Subjects
+		}
+		if locked["language"] {
+			p.Language = existing.Language
+		}
+		if locked["series_name"] {
+			p.SeriesName = existing.SeriesName
+		}
+		if locked["series_number"] {
+			p.SeriesNumber = existing.SeriesNumber
+		}
+		if locked["format"] {
+			p.Format = existing.Format
+		}
+		if locked["description"] {
+			p.Description = existing.Description
+		}
+		if _, err := m.q.UpdateBook(ctx, p); err != nil {
 			return err
 		}
 	default:

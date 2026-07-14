@@ -606,6 +606,55 @@ func (q *Queries) UpdateTVEpisode(ctx context.Context, arg UpdateTVEpisodeParams
 	return i, err
 }
 
+const updateTVSeason = `-- name: UpdateTVSeason :one
+UPDATE tv_seasons
+SET title = $2, overview = $3, poster_path = $4, air_date = $5,
+    end_date = $6, status = $7, aired_episodes = $8, external_ids = $9
+WHERE id = $1
+RETURNING id, series_id, season_number, title, overview, poster_path, air_date, end_date, status, aired_episodes, external_ids
+`
+
+type UpdateTVSeasonParams struct {
+	ID            int64       `json:"id"`
+	Title         string      `json:"title"`
+	Overview      string      `json:"overview"`
+	PosterPath    string      `json:"poster_path"`
+	AirDate       pgtype.Date `json:"air_date"`
+	EndDate       pgtype.Date `json:"end_date"`
+	Status        string      `json:"status"`
+	AiredEpisodes int32       `json:"aired_episodes"`
+	ExternalIds   []byte      `json:"external_ids"`
+}
+
+func (q *Queries) UpdateTVSeason(ctx context.Context, arg UpdateTVSeasonParams) (TvSeason, error) {
+	row := q.db.QueryRow(ctx, updateTVSeason,
+		arg.ID,
+		arg.Title,
+		arg.Overview,
+		arg.PosterPath,
+		arg.AirDate,
+		arg.EndDate,
+		arg.Status,
+		arg.AiredEpisodes,
+		arg.ExternalIds,
+	)
+	var i TvSeason
+	err := row.Scan(
+		&i.ID,
+		&i.SeriesID,
+		&i.SeasonNumber,
+		&i.Title,
+		&i.Overview,
+		&i.PosterPath,
+		&i.AirDate,
+		&i.EndDate,
+		&i.Status,
+		&i.AiredEpisodes,
+		&i.ExternalIds,
+	)
+	return i, err
+}
+
 const updateTVSeries = `-- name: UpdateTVSeries :one
 UPDATE tv_series
 SET status = $2, genres = $3,

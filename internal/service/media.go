@@ -309,6 +309,9 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 	}
 
 	result := map[string]any{"media_item": item, "available": hasFiles, "files": mediaFiles}
+	if binding, err := q.GetMediaItemMetadataBinding(ctx, item.ID); err == nil {
+		result["metadata_binding"] = binding
+	}
 
 	// TV episode files are consumed twice (available-seasons derivation in
 	// the switch below + the episode_files map at the end) — fetch once, the
@@ -332,6 +335,9 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 		series, seriesErr := q.GetTVSeriesByMediaItemID(ctx, item.ID)
 		if seriesErr == nil {
 			result["tv_series"] = series
+			if networks, err := q.ListNetworksForSeries(ctx, series.ID); err == nil {
+				result["networks"] = networks
+			}
 			seasons, _ := q.ListTVSeasonsBySeries(ctx, series.ID)
 
 			availableSeasons := map[int]bool{}
@@ -916,7 +922,15 @@ func (a *App) maybeQueueImageSidecarWrite(ctx context.Context, q *sqlc.Queries, 
 func pickMediaAsset(assets []sqlc.MediaAsset, imageType string, sortOrder int, label string) *sqlc.MediaAsset {
 	if label != "" {
 		for i := range assets {
-			if assets[i].Label == label {
+			if string(assets[i].AssetType) == imageType && assets[i].Label == label &&
+				(sortOrder < 0 || int(assets[i].SortOrder) == sortOrder) {
+				return &assets[i]
+			}
+		}
+		// Season/episode callers historically omitted sort. Preserve that
+		// convenience after trying the exact collection position first.
+		for i := range assets {
+			if string(assets[i].AssetType) == imageType && assets[i].Label == label {
 				return &assets[i]
 			}
 		}
@@ -934,6 +948,16 @@ func pickMediaAsset(assets []sqlc.MediaAsset, imageType string, sortOrder int, l
 	for i := range assets {
 		if string(assets[i].AssetType) == imageType && assets[i].Label == "" {
 			return &assets[i]
+		}
+	}
+	// Backdrops are an ordered collection. Language/"extra" labels are
+	// provenance, not separate scopes like season posters, so the first row is
+	// still a valid bare hero image after an explicit promotion.
+	if imageType == "backdrop" {
+		for i := range assets {
+			if string(assets[i].AssetType) == imageType {
+				return &assets[i]
+			}
 		}
 	}
 	return nil
@@ -1163,6 +1187,7 @@ type TrackView struct {
 type AlbumView struct {
 	sqlc.Album
 	Tracks []TrackView `json:"tracks"`
+	HeyaID string      `json:"heya_id,omitempty"`
 }
 
 // buildAlbumViews loads albums for an artist with each album's tracks and
@@ -1171,6 +1196,18 @@ func buildAlbumViews(ctx context.Context, q *sqlc.Queries, artistID int64) []Alb
 	albums, err := q.ListAlbumsByArtist(ctx, artistID)
 	if err != nil {
 		return nil
+	}
+	albumIDs := make([]int64, 0, len(albums))
+	for _, album := range albums {
+		albumIDs = append(albumIDs, album.ID)
+	}
+	heyaIDs := make(map[int64]string, len(albumIDs))
+	if bindings, err := q.ListMetadataBindingsByLocalIDs(ctx, sqlc.ListMetadataBindingsByLocalIDsParams{
+		LocalKind: "album", Column2: albumIDs,
+	}); err == nil {
+		for _, binding := range bindings {
+			heyaIDs[binding.LocalID] = binding.EntityID.String()
+		}
 	}
 
 	// Three whole-artist queries instead of one per album plus one per track
@@ -1199,7 +1236,7 @@ func buildAlbumViews(ctx context.Context, q *sqlc.Queries, artistID int64) []Alb
 		if tv == nil {
 			tv = []TrackView{} // keep `tracks: []` (not null) for trackless albums
 		}
-		views = append(views, AlbumView{Album: album, Tracks: tv})
+		views = append(views, AlbumView{Album: album, Tracks: tv, HeyaID: heyaIDs[album.ID]})
 	}
 	return views
 }

@@ -93,14 +93,33 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 
 	var assetErr error
 	if SingleAssetTypes[job.Args.AssetType] && job.Args.Label == "" {
-		_, assetErr = q.UpsertPrimaryMediaAsset(ctx, sqlc.UpsertPrimaryMediaAssetParams{
-			MediaItemID: job.Args.MediaItemID,
-			AssetType:   sqlc.AssetType(job.Args.AssetType),
-			Source:      "remote",
-			LocalPath:   localPath,
-			RemoteUrl:   job.Args.URL,
-		})
+		if job.Args.ReplacePrimary {
+			_, assetErr = q.ReplacePrimaryMediaAsset(ctx, sqlc.ReplacePrimaryMediaAssetParams{
+				MediaItemID: job.Args.MediaItemID,
+				AssetType:   sqlc.AssetType(job.Args.AssetType),
+				Source:      "remote",
+				LocalPath:   localPath,
+				RemoteUrl:   job.Args.URL,
+			})
+		} else {
+			_, assetErr = q.UpsertPrimaryMediaAsset(ctx, sqlc.UpsertPrimaryMediaAssetParams{
+				MediaItemID: job.Args.MediaItemID,
+				AssetType:   sqlc.AssetType(job.Args.AssetType),
+				Source:      "remote",
+				LocalPath:   localPath,
+				RemoteUrl:   job.Args.URL,
+			})
+		}
 	} else {
+		sortOrder := job.Args.SortOrder
+		if job.Args.Label != "" {
+			_ = q.DeleteMediaAssetsByTypeLabel(ctx, sqlc.DeleteMediaAssetsByTypeLabelParams{
+				MediaItemID: job.Args.MediaItemID,
+				AssetType:   sqlc.AssetType(job.Args.AssetType),
+				Label:       job.Args.Label,
+			})
+			sortOrder = 0
+		}
 		_, assetErr = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 			MediaItemID: job.Args.MediaItemID,
 			AssetType:   sqlc.AssetType(job.Args.AssetType),
@@ -108,7 +127,7 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 			LocalPath:   localPath,
 			RemoteUrl:   job.Args.URL,
 			Label:       job.Args.Label,
-			SortOrder:   int32(job.Args.SortOrder),
+			SortOrder:   int32(sortOrder),
 		})
 	}
 	if assetErr != nil {

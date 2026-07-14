@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -11,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
@@ -22,33 +25,55 @@ import (
 
 // UpdateMediaMetadataReq holds the fields that can be patched on a media item.
 type UpdateMediaMetadataReq struct {
-	Title            *string           `json:"title"`
-	SortTitle        *string           `json:"sort_title"`
-	Year             *string           `json:"year"`
-	Description      *string           `json:"description"`
-	ExternalIDs      map[string]string `json:"external_ids"`
-	Tagline          *string           `json:"tagline"`
-	Genres           []string          `json:"genres"`
-	ReleaseDate      *string           `json:"release_date"`
-	OriginalTitle    *string           `json:"original_title"`
-	OriginalLanguage *string           `json:"original_language"`
-	RuntimeMinutes   *int32            `json:"runtime_minutes"`
-	Status           *string           `json:"status"`
-	FirstAirDate     *string           `json:"first_air_date"`
-	LastAirDate      *string           `json:"last_air_date"`
-	OriginalName     *string           `json:"original_name"`
+	Title            *string           `json:"title,omitempty"`
+	SortTitle        *string           `json:"sort_title,omitempty"`
+	Year             *string           `json:"year,omitempty"`
+	Description      *string           `json:"description,omitempty"`
+	ExternalIDs      map[string]string `json:"external_ids,omitempty"`
+	Tagline          *string           `json:"tagline,omitempty"`
+	Genres           []string          `json:"genres,omitempty"`
+	ReleaseDate      *string           `json:"release_date,omitempty"`
+	OriginalTitle    *string           `json:"original_title,omitempty"`
+	OriginalLanguage *string           `json:"original_language,omitempty"`
+	RuntimeMinutes   *int32            `json:"runtime_minutes,omitempty"`
+	Status           *string           `json:"status,omitempty"`
+	FirstAirDate     *string           `json:"first_air_date,omitempty"`
+	LastAirDate      *string           `json:"last_air_date,omitempty"`
+	OriginalName     *string           `json:"original_name,omitempty"`
 	// Music-only (artist row). Title doubles as the artist name.
-	SortName       *string `json:"sort_name"`
-	Disambiguation *string `json:"disambiguation"`
-	Biography      *string `json:"biography"`
+	SortName       *string `json:"sort_name,omitempty"`
+	Disambiguation *string `json:"disambiguation,omitempty"`
+	Biography      *string `json:"biography,omitempty"`
+	// Book-only. Provider identifiers are deliberately not editable: the
+	// canonical Heya binding remains the identity, while these are local
+	// presentation/catalog fields.
+	AuthorName   *string  `json:"author_name,omitempty"`
+	ISBN         *string  `json:"isbn,omitempty"`
+	PageCount    *int32   `json:"page_count,omitempty"`
+	Publisher    *string  `json:"publisher,omitempty"`
+	PublishDate  *string  `json:"publish_date,omitempty"`
+	Subjects     []string `json:"subjects,omitempty"`
+	Language     *string  `json:"language,omitempty"`
+	SeriesName   *string  `json:"series_name,omitempty"`
+	SeriesNumber *int32   `json:"series_number,omitempty"`
+	Format       *string  `json:"format,omitempty"`
+	// TV-only relation names.
+	Networks []string `json:"networks,omitempty"`
+}
+
+// UpdateSeasonReq holds the editable fields for a TV season.
+type UpdateSeasonReq struct {
+	Title    *string `json:"title,omitempty"`
+	Overview *string `json:"overview,omitempty"`
+	AirDate  *string `json:"air_date,omitempty"`
 }
 
 // UpdateEpisodeReq holds the fields that can be patched on an episode.
 type UpdateEpisodeReq struct {
-	Title          *string `json:"title"`
-	Overview       *string `json:"overview"`
-	RuntimeMinutes *int32  `json:"runtime_minutes"`
-	AirDate        *string `json:"air_date"`
+	Title          *string `json:"title,omitempty"`
+	Overview       *string `json:"overview,omitempty"`
+	RuntimeMinutes *int32  `json:"runtime_minutes,omitempty"`
+	AirDate        *string `json:"air_date,omitempty"`
 }
 
 // updateMediaItemParamsFrom spells every UpdateMediaItem field from the
@@ -240,6 +265,93 @@ func (a *App) UpdateMediaMetadata(ctx context.Context, mediaItemID int64, req Up
 				}); err != nil {
 					return fmt.Errorf("updating tv metadata: %w", err)
 				}
+				if req.Networks != nil {
+					if err := q.DeleteNetworksForSeries(ctx, series.ID); err != nil {
+						return fmt.Errorf("clearing tv networks: %w", err)
+					}
+					for i, name := range req.Networks {
+						name = strings.TrimSpace(name)
+						if name == "" {
+							continue
+						}
+						network, err := q.UpsertNetworkByExternalIDs(ctx, sqlc.UpsertNetworkByExternalIDsParams{
+							Name: name, ExternalIds: []byte("{}"), LogoPath: "", Country: "",
+						})
+						if err != nil {
+							return fmt.Errorf("upserting tv network %q: %w", name, err)
+						}
+						if err := q.AttachNetworkToSeries(ctx, sqlc.AttachNetworkToSeriesParams{
+							SeriesID: series.ID, NetworkID: network.ID, SortOrder: int32(i),
+						}); err != nil {
+							return fmt.Errorf("attaching tv network %q: %w", name, err)
+						}
+					}
+				}
+			}
+		case sqlc.MediaTypeBook:
+			book, bErr := q.GetBookByMediaItemID(ctx, mediaItemID)
+			if bErr == nil {
+				authorID := book.AuthorID
+				if req.AuthorName != nil {
+					name := strings.TrimSpace(*req.AuthorName)
+					authorID = pgtype.Int8{}
+					if name != "" {
+						author, err := q.GetAuthorByName(ctx, name)
+						if errors.Is(err, pgx.ErrNoRows) {
+							author, err = q.CreateAuthor(ctx, sqlc.CreateAuthorParams{Name: name})
+						}
+						if err != nil {
+							return fmt.Errorf("updating book author %q: %w", name, err)
+						}
+						authorID = pgtype.Int8{Int64: author.ID, Valid: true}
+					}
+				}
+
+				isbn, pageCount := book.Isbn, book.PageCount
+				publisher, publishDate := book.Publisher, book.PublishDate
+				subjects, language := book.Subjects, book.Language
+				seriesName, seriesNumber := book.SeriesName, book.SeriesNumber
+				format, description := book.Format, book.Description
+				if req.ISBN != nil {
+					isbn = *req.ISBN
+				}
+				if req.PageCount != nil {
+					pageCount = *req.PageCount
+				}
+				if req.Publisher != nil {
+					publisher = *req.Publisher
+				}
+				if req.PublishDate != nil {
+					publishDate = pgDateFromStr(*req.PublishDate)
+				}
+				if req.Subjects != nil {
+					subjects = req.Subjects
+				}
+				if req.Language != nil {
+					language = *req.Language
+				}
+				if req.SeriesName != nil {
+					seriesName = *req.SeriesName
+				}
+				if req.SeriesNumber != nil {
+					seriesNumber = *req.SeriesNumber
+				}
+				if req.Format != nil {
+					format = *req.Format
+				}
+				if req.Description != nil {
+					description = *req.Description
+				}
+
+				if _, err := q.UpdateBook(ctx, sqlc.UpdateBookParams{
+					ID: book.ID, AuthorID: authorID, Isbn: isbn,
+					OpenlibraryID: book.OpenlibraryID, PageCount: pageCount,
+					Publisher: publisher, PublishDate: publishDate, FilePath: book.FilePath,
+					Subjects: subjects, Language: language, SeriesName: seriesName,
+					SeriesNumber: seriesNumber, Format: format, Description: description,
+				}); err != nil {
+					return fmt.Errorf("updating book metadata: %w", err)
+				}
 			}
 		case sqlc.MediaTypeMusic:
 			artist, aErr := q.GetArtistByMediaItemID(ctx, mediaItemID)
@@ -328,6 +440,39 @@ func (a *App) UpdateMediaMetadata(ctx context.Context, mediaItemID int64, req Up
 		if req.Biography != nil {
 			edited = append(edited, "biography")
 		}
+		if req.AuthorName != nil {
+			edited = append(edited, "author")
+		}
+		if req.ISBN != nil {
+			edited = append(edited, "isbn")
+		}
+		if req.PageCount != nil {
+			edited = append(edited, "page_count")
+		}
+		if req.Publisher != nil {
+			edited = append(edited, "publisher")
+		}
+		if req.PublishDate != nil {
+			edited = append(edited, "publish_date")
+		}
+		if req.Subjects != nil {
+			edited = append(edited, "subjects")
+		}
+		if req.Language != nil {
+			edited = append(edited, "language")
+		}
+		if req.SeriesName != nil {
+			edited = append(edited, "series_name")
+		}
+		if req.SeriesNumber != nil {
+			edited = append(edited, "series_number")
+		}
+		if req.Format != nil {
+			edited = append(edited, "format")
+		}
+		if req.Networks != nil {
+			edited = append(edited, "networks")
+		}
 		if len(edited) > 0 {
 			if err := q.SetMediaItemFieldProvenance(ctx, sqlc.SetMediaItemFieldProvenanceParams{
 				ID:              mediaItemID,
@@ -366,6 +511,40 @@ func stampUserProvenance(existing []byte, fields ...string) []byte {
 		return []byte("{}")
 	}
 	return b
+}
+
+// UpdateSeason patches a TV season record without disturbing catalog fields
+// that are not exposed by the editor.
+func (a *App) UpdateSeason(ctx context.Context, seasonID int64, req UpdateSeasonReq) (sqlc.TvSeason, error) {
+	q := sqlc.New(a.db)
+	season, err := q.GetTVSeasonByID(ctx, seasonID)
+	if err != nil {
+		return sqlc.TvSeason{}, fmt.Errorf("season not found: %w", err)
+	}
+	title, overview, airDate := season.Title, season.Overview, season.AirDate
+	if req.Title != nil {
+		title = *req.Title
+	}
+	if req.Overview != nil {
+		overview = *req.Overview
+	}
+	if req.AirDate != nil {
+		airDate = pgDateFromStr(*req.AirDate)
+	}
+	updated, err := q.UpdateTVSeason(ctx, sqlc.UpdateTVSeasonParams{
+		ID: season.ID, Title: title, Overview: overview, PosterPath: season.PosterPath,
+		AirDate: airDate, EndDate: season.EndDate, Status: season.Status,
+		AiredEpisodes: season.AiredEpisodes, ExternalIds: season.ExternalIds,
+	})
+	if err != nil {
+		return sqlc.TvSeason{}, fmt.Errorf("updating season: %w", err)
+	}
+	if series, sErr := q.GetTVSeriesByID(ctx, season.SeriesID); sErr == nil {
+		if item, iErr := q.GetMediaItemByID(ctx, series.MediaItemID); iErr == nil {
+			a.emitMediaUpdated(item.ID, item.LibraryID, item.Title, string(item.MediaType))
+		}
+	}
+	return updated, nil
 }
 
 // UpdateEpisode patches a TV episode record.
@@ -704,6 +883,15 @@ func (a *App) ApplyIdentify(ctx context.Context, mediaItemID int64, providerName
 	if _, err := txq.UpdateMediaItem(ctx, p); err != nil {
 		return fmt.Errorf("re-identify: update media item: %w", err)
 	}
+	// Choosing a different canonical record is an explicit request to adopt
+	// that record. Lift prior per-field manual locks before the matcher writes
+	// its projection; otherwise Identify would appear to work while silently
+	// retaining stale fields from the old identity.
+	if err := txq.SetMediaItemFieldProvenance(ctx, sqlc.SetMediaItemFieldProvenanceParams{
+		ID: mediaItemID, FieldProvenance: []byte("{}"),
+	}); err != nil {
+		return fmt.Errorf("re-identify: clear field provenance: %w", err)
+	}
 
 	for _, del := range []struct {
 		name string
@@ -744,52 +932,77 @@ func (a *App) ApplyIdentify(ctx context.Context, mediaItemID int64, providerName
 	return nil
 }
 
-// applyIdentifyMusic re-points a music artist at a different upstream record.
-// Unlike the movie/TV path it does NOT rebuild rows inline: it stamps the
-// chosen MusicBrainz id on the artist row and enqueues a forced enrich, which
-// re-fetches by that MBID and reuses the refresh pipeline's merge machinery
-// (findCanonicalSibling folds this row into an existing local artist when the
-// new identity is already present — the safe path for chimera repairs, where
-// writing media_items.external_ids here would trip idx_media_items_mbid_unique
-// instead). Name / bio / albums / top-tracks all adopt on that refresh.
+// applyIdentifyMusic re-points a music artist at a canonical Heya artist and
+// lets the normal refresh pipeline adopt the full projection. MusicBrainz (or
+// any other catalog ID) is optional compatibility evidence; Apple/Deezer-only
+// Heya roots are equally valid identities.
 func (a *App) applyIdentifyMusic(ctx context.Context, item sqlc.MediaItemCard, detail *metadata.MediaDetail) error {
-	newMBID := detail.ExternalIDs["mbid"]
-	if newMBID == "" {
-		return fmt.Errorf("selected match has no MusicBrainz id yet — heya.media could not resolve it; try again once the upstream record is enriched")
+	if detail.CanonicalKind != "artist" {
+		return fmt.Errorf("artist identify expected canonical artist, got %q", detail.CanonicalKind)
 	}
-
-	q := sqlc.New(a.db)
-	artist, err := q.GetArtistByMediaItemID(ctx, item.ID)
+	canonicalID, err := uuid.Parse(detail.CanonicalID)
 	if err != nil {
-		return fmt.Errorf("artist for media item %d not found: %w", item.ID, err)
+		return fmt.Errorf("artist identify returned invalid canonical UUID %q: %w", detail.CanonicalID, err)
+	}
+	schemaVersion := detail.SchemaVersion
+	if schemaVersion <= 0 {
+		schemaVersion = 1
 	}
 
-	if _, err := q.UpdateArtist(ctx, sqlc.UpdateArtistParams{
-		ID:             artist.ID,
-		MusicbrainzID:  newMBID,
-		Name:           artist.Name,
-		SortName:       artist.SortName,
-		Disambiguation: artist.Disambiguation,
-		Biography:      artist.Biography,
-	}); err != nil {
-		return fmt.Errorf("stamp artist mbid: %w", err)
-	}
+	err = a.withTx(ctx, func(q *sqlc.Queries) error {
+		artist, err := q.GetArtistByMediaItemID(ctx, item.ID)
+		if err != nil {
+			return fmt.Errorf("artist for media item %d not found: %w", item.ID, err)
+		}
+		newMBID := artist.MusicbrainzID
+		if evidence := detail.ExternalIDs["mbid"]; evidence != "" {
+			newMBID = evidence
+		}
+		if _, err := q.UpdateArtist(ctx, sqlc.UpdateArtistParams{
+			ID: artist.ID, MusicbrainzID: newMBID, Name: artist.Name,
+			SortName: artist.SortName, Disambiguation: artist.Disambiguation,
+			Biography: artist.Biography,
+		}); err != nil {
+			return fmt.Errorf("store artist identity evidence: %w", err)
+		}
+		for _, binding := range []struct {
+			kind string
+			id   int64
+		}{{"media_item", item.ID}, {"artist", artist.ID}} {
+			if _, err := q.UpsertMetadataEntityBinding(ctx, sqlc.UpsertMetadataEntityBindingParams{
+				LocalKind: binding.kind, LocalID: binding.id, EntityID: canonicalID,
+				EntityKind: "artist", SchemaVersion: int32(schemaVersion),
+				ProjectionVersion: detail.ProjectionVersion,
+			}); err != nil {
+				return fmt.Errorf("bind %s to canonical artist: %w", binding.kind, err)
+			}
+		}
+		if err := q.PromoteCanonicalMetadataProviderID(ctx, sqlc.PromoteCanonicalMetadataProviderIDParams{
+			MediaItemID:        pgtype.Int8{Int64: item.ID, Valid: true},
+			MetadataProviderID: heyametadata.EncodeEntityProviderID(detail.CanonicalID),
+		}); err != nil {
+			return fmt.Errorf("promote canonical artist identity: %w", err)
+		}
 
-	// An explicit re-identify means the user wants the new record's identity —
-	// lift any user-edit locks on the identity fields so the refresh adopts it.
-	fp := map[string]string{}
-	if len(item.FieldProvenance) > 0 {
-		_ = json.Unmarshal(item.FieldProvenance, &fp)
-	}
-	for _, f := range []string{"title", "sort_name", "disambiguation", "biography"} {
-		delete(fp, f)
-	}
-	blob, _ := json.Marshal(fp)
-	if err := q.SetMediaItemFieldProvenance(ctx, sqlc.SetMediaItemFieldProvenanceParams{
-		ID:              item.ID,
-		FieldProvenance: blob,
-	}); err != nil {
-		return fmt.Errorf("clear identity provenance: %w", err)
+		// An explicit re-identify means the user wants the new record's identity:
+		// lift manual locks so the queued refresh can adopt its presentation.
+		fp := map[string]string{}
+		if len(item.FieldProvenance) > 0 {
+			_ = json.Unmarshal(item.FieldProvenance, &fp)
+		}
+		for _, f := range []string{"title", "sort_name", "disambiguation", "biography"} {
+			delete(fp, f)
+		}
+		blob, _ := json.Marshal(fp)
+		if err := q.SetMediaItemFieldProvenance(ctx, sqlc.SetMediaItemFieldProvenanceParams{
+			ID: item.ID, FieldProvenance: blob,
+		}); err != nil {
+			return fmt.Errorf("clear identity provenance: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	return worker.EnqueueEnrichForce(ctx, a.river, item.ID, item.MediaType, worker.EnrichSourceForced)
@@ -806,29 +1019,45 @@ func (a *App) DeleteMediaAsset(ctx context.Context, mediaItemID, assetID int64) 
 	if asset.MediaItemID != mediaItemID {
 		return fmt.Errorf("asset does not belong to this media item")
 	}
+	assetsOfType, err := q.ListMediaAssetsByType(ctx, sqlc.ListMediaAssetsByTypeParams{
+		MediaItemID: mediaItemID, AssetType: asset.AssetType,
+	})
+	if err != nil {
+		return fmt.Errorf("list %s assets: %w", asset.AssetType, err)
+	}
+	wasFirst := len(assetsOfType) > 0 && assetsOfType[0].ID == asset.ID
 
-	if asset.LocalPath != "" {
-		fullPath := filepath.Join(a.config.DataDir.Value, "images", asset.LocalPath)
-		os.Remove(fullPath)
+	if cachedPath, ok := a.cachedMediaAssetPath(asset.LocalPath); ok {
+		if err := os.Remove(cachedPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("delete cached image: %w", err)
+		}
 	}
 
-	q.DeleteMediaAsset(ctx, assetID)
+	if err := q.DeleteMediaAsset(ctx, assetID); err != nil {
+		return fmt.Errorf("delete media asset: %w", err)
+	}
 
-	if asset.SortOrder == 0 {
+	if wasFirst {
 		assetType := string(asset.AssetType)
 		if assetType == "poster" || assetType == "backdrop" {
 			remaining, _ := q.ListMediaAssetsByType(ctx, sqlc.ListMediaAssetsByTypeParams{
 				MediaItemID: mediaItemID,
 				AssetType:   asset.AssetType,
 			})
-			newPath := ""
-			if len(remaining) > 0 {
-				newPath = remaining[0].LocalPath
+			if assetType == "backdrop" && len(remaining) > 0 {
+				// Backdrops are ordered. Closing the gap also makes the next row
+				// the actual primary for hero/rail consumers.
+				return a.SetPrimaryAsset(ctx, mediaItemID, remaining[0].ID)
 			}
+			newPath := ""
 			if assetType == "poster" {
-				q.UpdateMediaItemPosterPath(ctx, sqlc.UpdateMediaItemPosterPathParams{ID: mediaItemID, PosterPath: newPath})
+				if err := q.UpdateMediaItemPosterPath(ctx, sqlc.UpdateMediaItemPosterPathParams{ID: mediaItemID, PosterPath: newPath}); err != nil {
+					return fmt.Errorf("clear poster path: %w", err)
+				}
 			} else {
-				q.UpdateMediaItemBackdropPath(ctx, sqlc.UpdateMediaItemBackdropPathParams{ID: mediaItemID, BackdropPath: newPath})
+				if err := q.UpdateMediaItemBackdropPath(ctx, sqlc.UpdateMediaItemBackdropPathParams{ID: mediaItemID, BackdropPath: newPath}); err != nil {
+					return fmt.Errorf("clear backdrop path: %w", err)
+				}
 			}
 		}
 	}
@@ -838,6 +1067,32 @@ func (a *App) DeleteMediaAsset(ctx context.Context, mediaItemID, assetID int64) 
 	}
 
 	return nil
+}
+
+// cachedMediaAssetPath returns a local file only when it lives under Heya's
+// managed image cache. Scanner-owned sidecars can point into the user's media
+// library and deleting an editor row must never delete those source files.
+func (a *App) cachedMediaAssetPath(localPath string) (string, bool) {
+	if localPath == "" || a.config == nil {
+		return "", false
+	}
+	base, err := filepath.Abs(filepath.Join(a.config.DataDir.Value, "images"))
+	if err != nil {
+		return "", false
+	}
+	candidate := localPath
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(base, candidate)
+	}
+	candidate, err = filepath.Abs(candidate)
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(base, candidate)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return candidate, true
 }
 
 // SetPrimaryAsset promotes a media asset to the primary position for its type.
@@ -851,18 +1106,65 @@ func (a *App) SetPrimaryAsset(ctx context.Context, mediaItemID, assetID int64) e
 	if asset.MediaItemID != mediaItemID {
 		return fmt.Errorf("asset does not belong to this media item")
 	}
-
-	q.ShiftAssetSortOrders(ctx, sqlc.ShiftAssetSortOrdersParams{
-		MediaItemID: mediaItemID,
-		Column2:     asset.AssetType,
-	})
-	q.SetAssetSortOrder(ctx, sqlc.SetAssetSortOrderParams{ID: assetID, SortOrder: 0})
-
 	assetType := string(asset.AssetType)
-	if assetType == "poster" {
-		q.UpdateMediaItemPosterPath(ctx, sqlc.UpdateMediaItemPosterPathParams{ID: mediaItemID, PosterPath: asset.LocalPath})
-	} else if assetType == "backdrop" {
-		q.UpdateMediaItemBackdropPath(ctx, sqlc.UpdateMediaItemBackdropPathParams{ID: mediaItemID, BackdropPath: asset.LocalPath})
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin promote %s asset: %w", assetType, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	txq := q.WithTx(tx)
+
+	if worker.SingleAssetTypes[assetType] {
+		primary, err := txq.ReplacePrimaryMediaAsset(ctx, sqlc.ReplacePrimaryMediaAssetParams{
+			MediaItemID: mediaItemID, AssetType: asset.AssetType, Source: asset.Source,
+			LocalPath: asset.LocalPath, RemoteUrl: asset.RemoteUrl, Language: asset.Language,
+			Width: asset.Width, Height: asset.Height, FileSize: asset.FileSize,
+		})
+		if err != nil {
+			return fmt.Errorf("replace primary %s: %w", assetType, err)
+		}
+		if primary.ID != asset.ID {
+			if err := txq.DeleteMediaAsset(ctx, asset.ID); err != nil {
+				return fmt.Errorf("remove replaced %s asset: %w", assetType, err)
+			}
+		}
+		if assetType == "poster" {
+			path := primary.LocalPath
+			if path == "" {
+				path = primary.RemoteUrl
+			}
+			if err := txq.UpdateMediaItemPosterPath(ctx, sqlc.UpdateMediaItemPosterPathParams{ID: mediaItemID, PosterPath: path}); err != nil {
+				return fmt.Errorf("update poster path: %w", err)
+			}
+		}
+	} else {
+		if err := txq.StageOrderedMediaAssets(ctx, sqlc.StageOrderedMediaAssetsParams{
+			MediaItemID: mediaItemID, Column2: asset.AssetType,
+		}); err != nil {
+			return fmt.Errorf("stage %s assets: %w", assetType, err)
+		}
+		if err := txq.PromoteOrderedMediaAsset(ctx, sqlc.PromoteOrderedMediaAssetParams{
+			MediaItemID: mediaItemID, Column2: asset.AssetType, ID: assetID,
+		}); err != nil {
+			return fmt.Errorf("reorder %s assets: %w", assetType, err)
+		}
+		path := asset.LocalPath
+		if path == "" {
+			path = asset.RemoteUrl
+		}
+		switch assetType {
+		case "poster":
+			if err := txq.UpdateMediaItemPosterPath(ctx, sqlc.UpdateMediaItemPosterPathParams{ID: mediaItemID, PosterPath: path}); err != nil {
+				return fmt.Errorf("update poster path: %w", err)
+			}
+		case "backdrop":
+			if err := txq.UpdateMediaItemBackdropPath(ctx, sqlc.UpdateMediaItemBackdropPathParams{ID: mediaItemID, BackdropPath: path}); err != nil {
+				return fmt.Errorf("update backdrop path: %w", err)
+			}
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit promoted %s asset: %w", assetType, err)
 	}
 
 	if item, iErr := q.GetMediaItemByID(ctx, mediaItemID); iErr == nil {
@@ -902,6 +1204,8 @@ func (a *App) SearchProviderArtwork(ctx context.Context, mediaItemID int64, filt
 		// Music media items are artists; the artist payload's flat image
 		// pool comes back typed as posters.
 		kind = metadata.KindMusic
+	case sqlc.MediaTypeBook:
+		kind = metadata.KindBook
 	default:
 		return []metadata.ArtworkResult{}, nil
 	}
@@ -915,9 +1219,21 @@ func (a *App) SearchProviderArtwork(ctx context.Context, mediaItemID int64, filt
 		return nil, nil
 	}
 
-	results, err := a.heya.FetchArtwork(ctx, kind, externalIDs, fetchOpts)
+	var results []metadata.ArtworkResult
+	var fetchErr error
+	if binding, bindErr := q.GetMediaItemMetadataBinding(ctx, mediaItemID); bindErr == nil {
+		if detail, err := a.heya.GetDetail(ctx, heyametadata.EncodeEntityProviderID(binding.EntityID.String()), fetchOpts); err == nil {
+			results = detail.Artwork
+		} else {
+			fetchErr = err
+		}
+	}
+	if results == nil {
+		results, fetchErr = a.heya.FetchArtwork(ctx, kind, externalIDs, fetchOpts)
+	}
+	err = fetchErr
 	if err != nil {
-		return nil, nil
+		return nil, fmt.Errorf("fetch Heya artwork: %w", err)
 	}
 
 	if filterType == "" {
@@ -933,7 +1249,7 @@ func (a *App) SearchProviderArtwork(ctx context.Context, mediaItemID int64, filt
 }
 
 // DownloadAsset queues a background job to download an image asset from a URL.
-func (a *App) DownloadAsset(ctx context.Context, mediaItemID int64, url, assetType string) error {
+func (a *App) DownloadAsset(ctx context.Context, mediaItemID int64, url, assetType, label string) error {
 	q := sqlc.New(a.db)
 
 	item, err := q.GetMediaItemByID(ctx, mediaItemID)
@@ -942,7 +1258,7 @@ func (a *App) DownloadAsset(ctx context.Context, mediaItemID int64, url, assetTy
 	}
 
 	sortOrder := 0
-	if !worker.SingleAssetTypes[assetType] {
+	if !worker.SingleAssetTypes[assetType] || label != "" {
 		assetCount, _ := q.CountMediaAssetsByType(ctx, mediaItemID)
 		sortOrder = 10
 		for _, c := range assetCount {
@@ -956,14 +1272,24 @@ func (a *App) DownloadAsset(ctx context.Context, mediaItemID int64, url, assetTy
 	if txErr != nil {
 		return fmt.Errorf("begin tx: %w", txErr)
 	}
-	_, _ = a.river.InsertTx(ctx, tx, worker.DownloadImageArgs{
-		MediaItemID: mediaItemID,
-		URL:         url,
-		AssetType:   assetType,
-		MediaType:   string(item.MediaType),
-		SortOrder:   sortOrder,
-	}, nil)
-	_ = tx.Commit(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
+	if a.river == nil {
+		return fmt.Errorf("image queue is not available")
+	}
+	if _, err := a.river.InsertTx(ctx, tx, worker.DownloadImageArgs{
+		MediaItemID:    mediaItemID,
+		URL:            url,
+		AssetType:      assetType,
+		MediaType:      string(item.MediaType),
+		Label:          label,
+		SortOrder:      sortOrder,
+		ReplacePrimary: worker.SingleAssetTypes[assetType] && label == "",
+	}, nil); err != nil {
+		return fmt.Errorf("enqueue image download: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit image download: %w", err)
+	}
 
 	// No emit here: this only enqueues a DownloadImageArgs job. The asset isn't
 	// stored yet, so a media.updated now would trigger a stale refetch. The
@@ -980,8 +1306,22 @@ type UploadMediaAssetResult struct {
 }
 
 // UploadMediaAsset saves an uploaded file to disk and creates a media asset record.
-func (a *App) UploadMediaAsset(ctx context.Context, mediaItemID int64, file io.Reader, filename, assetType string) (UploadMediaAssetResult, error) {
+func (a *App) UploadMediaAsset(ctx context.Context, mediaItemID int64, file io.Reader, filename, assetType, label string) (UploadMediaAssetResult, error) {
 	q := sqlc.New(a.db)
+	validImageType := false
+	for _, candidate := range []sqlc.AssetType{
+		sqlc.AssetTypePoster, sqlc.AssetTypeBackdrop, sqlc.AssetTypeLogo,
+		sqlc.AssetTypeArt, sqlc.AssetTypeBanner, sqlc.AssetTypeThumb,
+		sqlc.AssetTypeDisc, sqlc.AssetTypeClearart, sqlc.AssetTypeStill,
+	} {
+		if sqlc.AssetType(assetType) == candidate {
+			validImageType = true
+			break
+		}
+	}
+	if !validImageType {
+		return UploadMediaAssetResult{}, fmt.Errorf("unsupported image type %q", assetType)
+	}
 
 	item, err := q.GetMediaItemByID(ctx, mediaItemID)
 	if err != nil {
@@ -989,45 +1329,93 @@ func (a *App) UploadMediaAsset(ctx context.Context, mediaItemID int64, file io.R
 	}
 
 	dirName := fmt.Sprintf("%d", mediaItemID)
-	if item.Slug != "" {
+	if item.Slug != "" && item.Slug != "." && item.Slug != ".." && !strings.ContainsAny(item.Slug, `/\\`) {
 		dirName = item.Slug
 	}
 
-	ext := filepath.Ext(filename)
+	ext := filepath.Ext(filepath.Base(filename))
 	if ext == "" {
 		ext = ".jpg"
 	}
 	destFilename := fmt.Sprintf("custom_%s%s", assetType, ext)
+	if label != "" {
+		destFilename = fmt.Sprintf("custom_%s_%s%s", assetType, strings.NewReplacer("/", "-", "\\", "-").Replace(label), ext)
+	}
 
-	dirPath := filepath.Join(a.config.DataDir.Value, "images", string(item.MediaType), dirName)
-	os.MkdirAll(dirPath, 0755)
+	cacheRoot, err := filepath.Abs(filepath.Join(a.config.DataDir.Value, "images"))
+	if err != nil {
+		return UploadMediaAssetResult{}, fmt.Errorf("resolve image cache: %w", err)
+	}
+	dirPath := filepath.Join(cacheRoot, string(item.MediaType), dirName)
+	if err := os.MkdirAll(dirPath, 0750); err != nil {
+		return UploadMediaAssetResult{}, fmt.Errorf("create image cache directory: %w", err)
+	}
 
-	dst, err := os.Create(filepath.Join(dirPath, destFilename))
+	localPath := filepath.Join(dirPath, destFilename)
+	// localPath is constructed from the absolute managed cache root, a closed
+	// asset-type enum, a path-separator-free slug, and a basename extension.
+	// #nosec G304 -- the components above cannot escape cacheRoot.
+	dst, err := os.Create(localPath)
 	if err != nil {
 		return UploadMediaAssetResult{}, fmt.Errorf("failed to save file: %w", err)
 	}
-	defer dst.Close()
 
 	size, err := io.Copy(dst, file)
+	if closeErr := dst.Close(); err == nil {
+		err = closeErr
+	}
 	if err != nil {
 		return UploadMediaAssetResult{}, fmt.Errorf("failed to write file: %w", err)
 	}
 
-	localPath := filepath.Join(string(item.MediaType), dirName, destFilename)
+	var asset sqlc.MediaAsset
+	err = a.withTx(ctx, func(txq *sqlc.Queries) error {
+		if worker.SingleAssetTypes[assetType] && label == "" {
+			var replaceErr error
+			asset, replaceErr = txq.ReplacePrimaryMediaAsset(ctx, sqlc.ReplacePrimaryMediaAssetParams{
+				MediaItemID: mediaItemID, AssetType: sqlc.AssetType(assetType), Source: "custom",
+				LocalPath: localPath, FileSize: size,
+			})
+			return replaceErr
+		}
 
-	asset, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
-		MediaItemID: mediaItemID,
-		AssetType:   sqlc.AssetType(assetType),
-		Source:      "custom",
-		LocalPath:   localPath,
-		RemoteUrl:   "",
-		Label:       "custom",
-		SortOrder:   100,
-		FileSize:    size,
+		sortOrder := int32(0)
+		if label != "" {
+			if deleteErr := txq.DeleteMediaAssetsByTypeLabel(ctx, sqlc.DeleteMediaAssetsByTypeLabelParams{
+				MediaItemID: mediaItemID, AssetType: sqlc.AssetType(assetType), Label: label,
+			}); deleteErr != nil {
+				return deleteErr
+			}
+		}
+		rows, listErr := txq.ListMediaAssetsByType(ctx, sqlc.ListMediaAssetsByTypeParams{
+			MediaItemID: mediaItemID, AssetType: sqlc.AssetType(assetType),
+		})
+		if listErr != nil {
+			return listErr
+		}
+		if len(rows) > 0 {
+			if label == "" {
+				if shiftErr := worker.ShiftMediaAssetSortOrders(ctx, txq, mediaItemID, sqlc.AssetType(assetType)); shiftErr != nil {
+					return shiftErr
+				}
+			} else {
+				sortOrder = rows[len(rows)-1].SortOrder + 1
+			}
+		}
+		var createErr error
+		asset, createErr = txq.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+			MediaItemID: mediaItemID, AssetType: sqlc.AssetType(assetType), Source: "custom",
+			LocalPath: localPath, Label: label, SortOrder: sortOrder, FileSize: size,
+		})
+		return createErr
 	})
 	if err != nil {
-		// Asset creation failed but the file was saved.
-		return UploadMediaAssetResult{Path: localPath}, nil
+		return UploadMediaAssetResult{Path: localPath}, fmt.Errorf("record uploaded image: %w", err)
+	}
+	if assetType == "poster" && label == "" {
+		_ = q.UpdateMediaItemPosterPath(ctx, sqlc.UpdateMediaItemPosterPathParams{ID: mediaItemID, PosterPath: localPath})
+	} else if assetType == "backdrop" && label == "" && asset.SortOrder == 0 {
+		_ = q.UpdateMediaItemBackdropPath(ctx, sqlc.UpdateMediaItemBackdropPathParams{ID: mediaItemID, BackdropPath: localPath})
 	}
 
 	a.emitMediaUpdated(item.ID, item.LibraryID, item.Title, string(item.MediaType))

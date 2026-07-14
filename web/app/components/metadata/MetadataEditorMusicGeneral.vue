@@ -21,16 +21,16 @@
       </div>
 
       <div class="mf-card">
-        <div class="mf-card-head">Provider</div>
+        <div class="mf-card-head">Heya Identity</div>
         <div class="mf-grid">
           <div class="mf-field mf-full">
-            <label class="mf-label" for="me-artist-mbid">MusicBrainz ID</label>
-            <input id="me-artist-mbid" :value="detail.artist?.musicbrainz_id || ''" type="text" class="mf-input mf-input-readonly" readonly placeholder="none — use Identify to pin one" />
+            <label class="mf-label" for="me-artist-heya-id">Heya ID</label>
+            <input id="me-artist-heya-id" :value="detail.metadata_binding?.entity_id || ''" type="text" class="mf-input mf-input-readonly" readonly placeholder="Not linked to Heya yet" />
           </div>
         </div>
         <p class="mf-hint">
-          Set via the Identify button above — the artist re-fetches from that record,
-          and albums, top tracks and images follow along.
+          Identify selects the canonical Heya artist. Albums, top tracks and images
+          then refresh from Heya without exposing individual catalog identities.
         </p>
       </div>
     </div>

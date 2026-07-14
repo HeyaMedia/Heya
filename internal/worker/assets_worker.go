@@ -318,6 +318,13 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 					FileSize:    size,
 				})
 			} else {
+				if at == sqlc.AssetTypeBackdrop {
+					err = ShiftMediaAssetSortOrders(ctx, q, mediaItemID, sqlc.AssetTypeBackdrop)
+					if err != nil {
+						log.Warn().Err(err).Int64("media_item_id", mediaItemID).Msg("make room for local backdrop failed")
+						continue
+					}
+				}
 				_, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 					MediaItemID: mediaItemID,
 					AssetType:   at,
@@ -341,6 +348,12 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 			}
 			destPath := filepath.Join(cacheDir, name)
 			copyFromFS(fsys, name, destPath, false)
+			if order == 0 {
+				if err := ShiftMediaAssetSortOrders(ctx, q, mediaItemID, sqlc.AssetTypeBackdrop); err != nil {
+					log.Warn().Err(err).Int64("media_item_id", mediaItemID).Msg("make room for numbered local backdrop failed")
+					continue
+				}
+			}
 
 			if _, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: mediaItemID,

@@ -59,9 +59,9 @@
           </TabsTrigger>
         </TabsList>
         <div class="me-nav-spacer" />
-        <button class="me-save-btn" :disabled="!dirty" @click="save">
-          <Icon name="check" :size="16" />
-          Save Changes
+        <button class="me-save-btn" :disabled="!dirty || saving" @click="save">
+          <Icon :name="saving ? 'loading' : 'check'" :size="16" />
+          {{ saving ? 'Saving...' : 'Save Changes' }}
         </button>
       </TabsRoot>
 
@@ -79,15 +79,24 @@
             @refresh="fetchDetail"
           />
           <MetadataEditorGeneral
-            v-if="activeTab === 'general' && !isMusic"
+            v-if="activeTab === 'general' && !isMusic && !isBook"
             v-model:form="form"
             :media-type="detail.media_item.media_type"
             :detail="detail"
           />
+          <MetadataEditorBookGeneral
+            v-if="activeTab === 'general' && isBook"
+            v-model:form="form"
+          />
           <MetadataEditorDetails
-            v-if="activeTab === 'details'"
+            v-if="activeTab === 'details' && !isBook"
             v-model:form="form"
             :media-type="detail.media_item.media_type"
+            :detail="detail"
+          />
+          <MetadataEditorBookDetails
+            v-if="activeTab === 'details' && isBook"
+            v-model:form="form"
             :detail="detail"
           />
           <MetadataLocalizations
@@ -142,6 +151,7 @@
             :media-public-id="mediaPublicId"
             :detail="filteredDetailForImages"
             context="season"
+            :asset-label="imageContextLabel"
             @refresh="fetchDetail"
           />
         </template>
@@ -166,6 +176,7 @@
             :media-public-id="mediaPublicId"
             :detail="filteredDetailForImages"
             context="episode"
+            :asset-label="imageContextLabel"
             @refresh="fetchDetail"
           />
           <MetadataEditorMediaInfo
@@ -200,13 +211,16 @@ const props = defineProps<{
 const emit = defineEmits<{ close: [] }>()
 
 const queryClient = useQueryCache()
+const { toast } = useToast()
 
 const detail = ref<any>(null)
 const library = ref<any>(null)
 const loading = ref(false)
 const refreshing = ref(false)
+const saving = ref(false)
 const showIdentify = ref(false)
 const activeTab = ref('general')
+const refetchTimers: Array<ReturnType<typeof setTimeout>> = []
 
 const mode = computed<'media' | 'season' | 'episode'>(() => {
   if (props.episodeId) return 'episode'
@@ -234,10 +248,19 @@ const musicTabs = [
   { key: 'images', label: 'Images', icon: 'grid' },
 ]
 
+const bookTabs = [
+  { key: 'general', label: 'General', icon: 'pencil' },
+  { key: 'details', label: 'Details', icon: 'info' },
+  { key: 'images', label: 'Images', icon: 'grid' },
+  { key: 'mediainfo', label: 'Media Info', icon: 'film' },
+]
+
 const isMusic = computed(() => detail.value?.media_item?.media_type === 'music')
+const isBook = computed(() => detail.value?.media_item?.media_type === 'book')
 
 const visibleTabs = computed(() => {
   if (mode.value === 'media' && isMusic.value) return musicTabs
+  if (mode.value === 'media' && isBook.value) return bookTabs
   return allTabs.filter(t => t.modes.includes(mode.value))
 })
 
@@ -358,6 +381,15 @@ const filteredDetailForImages = computed(() => {
   return { ...detail.value, assets: filtered }
 })
 
+const imageContextLabel = computed(() => {
+  if (mode.value === 'season' && activeSeason.value) return `season-${activeSeason.value.season_number}`
+  if (mode.value === 'episode' && activeEpisode.value) {
+    const ep = activeEpisode.value
+    return `s${String(ep.season.season_number).padStart(2, '0')}e${String(ep.episode.episode_number).padStart(2, '0')}`
+  }
+  return ''
+})
+
 const form = ref<Record<string, any>>({})
 const initialForm = ref<string>('')
 
@@ -372,6 +404,25 @@ function buildMediaForm(d: any) {
       sort_name: artist?.sort_name || '',
       disambiguation: artist?.disambiguation || '',
       biography: artist?.biography || '',
+    }
+  }
+  if (mi.media_type === 'book') {
+    const book = d.book || {}
+    return {
+      title: mi.title || '',
+      sort_title: mi.sort_title || '',
+      year: mi.year || '',
+      description: book.description || mi.description || '',
+      author_name: d.author?.name || '',
+      isbn: book.isbn || '',
+      page_count: book.page_count || 0,
+      publisher: book.publisher || '',
+      publish_date: formatPgDate(book.publish_date),
+      subjects: [...(book.subjects || [])],
+      language: book.language || '',
+      series_name: book.series_name || '',
+      series_number: book.series_number || 0,
+      format: book.format || '',
     }
   }
   const movie = d.movie
@@ -390,9 +441,8 @@ function buildMediaForm(d: any) {
     status: tv?.status || '',
     first_air_date: tv?.first_air_date ? formatPgDate(tv.first_air_date) : '',
     last_air_date: tv?.last_air_date ? formatPgDate(tv.last_air_date) : '',
-    networks: [...(tv?.networks || [])],
+    networks: [...(d.networks || [])].map((network: any) => typeof network === 'string' ? network : network.name).filter(Boolean),
     original_name: tv?.original_name || '',
-    external_ids: mergeExternalIDs(mi.external_ids, movie, tv),
   }
 }
 
@@ -425,30 +475,6 @@ function rebuildForm() {
   initialForm.value = JSON.stringify(form.value)
 }
 
-function mergeExternalIDs(raw: any, movie: any, tv: any): Record<string, string> {
-  const ids = parseExternalIDs(raw)
-  if (movie) {
-    if (movie.tmdb_id && !ids.tmdb) ids.tmdb = String(movie.tmdb_id)
-    if (movie.imdb_id && !ids.imdb) ids.imdb = movie.imdb_id
-  }
-  if (tv) {
-    if (tv.tmdb_id && !ids.tmdb) ids.tmdb = String(tv.tmdb_id)
-    if (tv.imdb_id && !ids.imdb) ids.imdb = tv.imdb_id
-  }
-  if (!ids.tmdb) ids.tmdb = ''
-  if (!ids.imdb) ids.imdb = ''
-  if (!ids.tvdb) ids.tvdb = ''
-  return ids
-}
-
-function parseExternalIDs(raw: any): Record<string, string> {
-  if (!raw) return {}
-  if (typeof raw === 'string') {
-    try { return JSON.parse(raw) } catch { return {} }
-  }
-  return { ...raw }
-}
-
 function formatPgDate(d: any): string {
   if (!d) return ''
   if (typeof d === 'string') return d.substring(0, 10)
@@ -471,71 +497,92 @@ async function fetchDetail() {
         })
       } catch { library.value = null }
     }
-  } catch { detail.value = null }
+  } catch (error) {
+    detail.value = null
+    toast.err(apiErrorMessage(error, 'Could not load metadata editor data'))
+  }
   loading.value = false
 }
 
 async function save() {
-  if (!props.mediaId || !dirty.value) return
+  if (!props.mediaId || !dirty.value || saving.value) return
   const { $heya } = useNuxtApp()
-
-  if (mode.value === 'episode' && props.episodeId) {
-    try {
+  saving.value = true
+  try {
+    if (mode.value === 'episode' && props.episodeId) {
       await $heya('/api/media/{id}/episode/{episode_id}', {
         method: 'PUT',
         path: { id: props.mediaId, episode_id: props.episodeId },
         body: form.value as any,
       })
-      await fetchDetail()
-    } catch { /* empty */ }
-    return
-  }
-
-  if (mode.value === 'media' && isMusic.value) {
-    const body: UpdateMediaMetadataRequest = {
-      title: form.value.title,
-      sort_name: form.value.sort_name,
-      disambiguation: form.value.disambiguation,
-      biography: form.value.biography,
-    }
-    try {
+    } else if (mode.value === 'season' && props.seasonId) {
+      await $heya('/api/media/{id}/season/{season_id}', {
+        method: 'PUT',
+        path: { id: props.mediaId, season_id: props.seasonId },
+        body: form.value as any,
+      })
+    } else if (mode.value === 'media' && isMusic.value) {
+      const body: UpdateMediaMetadataRequest = {
+        title: form.value.title,
+        sort_name: form.value.sort_name,
+        disambiguation: form.value.disambiguation,
+        biography: form.value.biography,
+      }
       await $heya('/api/media/{id}/metadata', {
         method: 'PUT',
         path: { id: props.mediaId },
         body: body as any,
       })
-      await fetchDetail()
-    } catch { /* empty */ }
-    return
-  }
-
-  if (mode.value === 'media') {
-    const body: UpdateMediaMetadataRequest = {
-      title: form.value.title,
-      sort_title: form.value.sort_title,
-      year: form.value.year,
-      description: form.value.description,
-      external_ids: form.value.external_ids,
-      tagline: form.value.tagline,
-      genres: form.value.genres,
-      release_date: form.value.release_date,
-      original_title: form.value.original_title,
-      original_language: form.value.original_language,
-      runtime_minutes: form.value.runtime_minutes,
-      status: form.value.status,
-      first_air_date: form.value.first_air_date,
-      last_air_date: form.value.last_air_date,
-      networks: form.value.networks,
-      original_name: form.value.original_name,
-    }
-    try {
+    } else if (mode.value === 'media' && isBook.value) {
       await $heya('/api/media/{id}/metadata', {
         method: 'PUT',
         path: { id: props.mediaId },
-        body: body as any,
+        body: {
+          title: form.value.title,
+          sort_title: form.value.sort_title,
+          year: form.value.year,
+          description: form.value.description,
+          author_name: form.value.author_name,
+          isbn: form.value.isbn,
+          page_count: form.value.page_count,
+          publisher: form.value.publisher,
+          publish_date: form.value.publish_date,
+          subjects: form.value.subjects,
+          language: form.value.language,
+          series_name: form.value.series_name,
+          series_number: form.value.series_number,
+          format: form.value.format,
+        } as any,
       })
-      await fetchDetail()
-    } catch { /* empty */ }
+    } else if (mode.value === 'media') {
+      const body: UpdateMediaMetadataRequest = {
+        title: form.value.title,
+        sort_title: form.value.sort_title,
+        year: form.value.year,
+        description: form.value.description,
+        tagline: form.value.tagline,
+        genres: form.value.genres,
+        release_date: form.value.release_date,
+        original_title: form.value.original_title,
+        original_language: form.value.original_language,
+        runtime_minutes: form.value.runtime_minutes,
+        status: form.value.status,
+        first_air_date: form.value.first_air_date,
+        last_air_date: form.value.last_air_date,
+        networks: form.value.networks,
+        original_name: form.value.original_name,
+      }
+      await $heya('/api/media/{id}/metadata', {
+        method: 'PUT', path: { id: props.mediaId }, body: body as any,
+      })
+    }
+    await fetchDetail()
+    queryClient.invalidateQueries({ key: ['media', 'detail'] })
+    toast.ok('Metadata saved')
+  } catch (error) {
+    toast.err(apiErrorMessage(error, 'Could not save metadata'), { duration: 7000 })
+  } finally {
+    saving.value = false
   }
 }
 
@@ -545,24 +592,40 @@ async function refreshMetadata() {
   try {
     const { $heya } = useNuxtApp()
     await $heya('/api/media/{id}/refresh', { method: 'POST', path: { id: props.mediaId } })
-    await new Promise(r => setTimeout(r, 2000))
-    await fetchDetail()
-  } catch { /* empty */ }
-  refreshing.value = false
+    toast.info('Metadata refresh queued; this panel will update as Heya finishes it')
+    scheduleMetadataRefetches([3000, 12000, 30000, 60000])
+  } catch (error) {
+    toast.err(apiErrorMessage(error, 'Could not queue metadata refresh'), { duration: 7000 })
+  } finally {
+    refreshing.value = false
+  }
 }
 
 function onIdentified() {
   showIdentify.value = false
-  fetchDetail()
+  scheduleMetadataRefetches([0, 3000, 12000, 30000, 60000])
   // Prefix match: catches the slug-keyed ['media','detail',slug] query that
   // the originating page (movie/tv/artist detail) reads from, regardless of
   // whether it's cached under the slug or the numeric id — so that page
   // reflects the new identity immediately instead of waiting out its
   // staleTime or needing a manual reload.
   queryClient.invalidateQueries({ key: ['media', 'detail'] })
+  toast.info('Heya identity applied; metadata refresh is running')
+}
+
+function scheduleMetadataRefetches(delays: number[]) {
+  clearMetadataRefetches()
+  for (const delay of delays) {
+    refetchTimers.push(setTimeout(() => fetchDetail(), delay))
+  }
+}
+
+function clearMetadataRefetches() {
+  while (refetchTimers.length) clearTimeout(refetchTimers.pop())
 }
 
 watch(() => props.mediaId, () => {
+  clearMetadataRefetches()
   showIdentify.value = false
   activeTab.value = 'general'
   if (props.mediaId) fetchDetail()
@@ -573,6 +636,8 @@ watch([() => props.seasonId, () => props.episodeId], () => {
   activeTab.value = 'general'
   rebuildForm()
 })
+
+onBeforeUnmount(clearMetadataRefetches)
 </script>
 
 <style scoped>

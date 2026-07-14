@@ -116,6 +116,22 @@ func (q *Queries) DeleteMediaAssetsByItem(ctx context.Context, mediaItemID int64
 	return err
 }
 
+const deleteMediaAssetsByTypeLabel = `-- name: DeleteMediaAssetsByTypeLabel :exec
+DELETE FROM media_assets
+WHERE media_item_id = $1 AND asset_type = $2 AND label = $3
+`
+
+type DeleteMediaAssetsByTypeLabelParams struct {
+	MediaItemID int64     `json:"media_item_id"`
+	AssetType   AssetType `json:"asset_type"`
+	Label       string    `json:"label"`
+}
+
+func (q *Queries) DeleteMediaAssetsByTypeLabel(ctx context.Context, arg DeleteMediaAssetsByTypeLabelParams) error {
+	_, err := q.db.Exec(ctx, deleteMediaAssetsByTypeLabel, arg.MediaItemID, arg.AssetType, arg.Label)
+	return err
+}
+
 const getMediaAssetByID = `-- name: GetMediaAssetByID :one
 SELECT id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at FROM media_assets WHERE id = $1
 `
@@ -235,6 +251,99 @@ func (q *Queries) ListMediaAssetsByType(ctx context.Context, arg ListMediaAssets
 	return items, nil
 }
 
+const promoteOrderedMediaAsset = `-- name: PromoteOrderedMediaAsset :exec
+WITH ranked AS (
+    SELECT media_assets.id,
+           row_number() OVER (
+               ORDER BY CASE WHEN media_assets.id = $3 THEN 0 ELSE 1 END,
+                        media_assets.sort_order, media_assets.id
+           ) - 1 AS wanted_order
+    FROM media_assets
+    WHERE media_assets.media_item_id = $1
+      AND media_assets.asset_type = $2::asset_type
+)
+UPDATE media_assets AS asset
+SET sort_order = ranked.wanted_order
+FROM ranked
+WHERE asset.id = ranked.id
+`
+
+type PromoteOrderedMediaAssetParams struct {
+	MediaItemID int64     `json:"media_item_id"`
+	Column2     AssetType `json:"column_2"`
+	ID          int64     `json:"id"`
+}
+
+func (q *Queries) PromoteOrderedMediaAsset(ctx context.Context, arg PromoteOrderedMediaAssetParams) error {
+	_, err := q.db.Exec(ctx, promoteOrderedMediaAsset, arg.MediaItemID, arg.Column2, arg.ID)
+	return err
+}
+
+const replacePrimaryMediaAsset = `-- name: ReplacePrimaryMediaAsset :one
+INSERT INTO media_assets (media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size)
+VALUES ($1, $2, $3, $4, $5, $6, '', 0, $7, $8, $9)
+ON CONFLICT (media_item_id, asset_type)
+    WHERE label = '' AND asset_type IN ('poster', 'logo', 'art', 'banner', 'thumb', 'disc', 'clearart')
+DO UPDATE SET
+    source = EXCLUDED.source,
+    local_path = EXCLUDED.local_path,
+    remote_url = EXCLUDED.remote_url,
+    language = EXCLUDED.language,
+    sort_order = 0,
+    width = EXCLUDED.width,
+    height = EXCLUDED.height,
+    file_size = EXCLUDED.file_size
+RETURNING id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at
+`
+
+type ReplacePrimaryMediaAssetParams struct {
+	MediaItemID int64     `json:"media_item_id"`
+	AssetType   AssetType `json:"asset_type"`
+	Source      string    `json:"source"`
+	LocalPath   string    `json:"local_path"`
+	RemoteUrl   string    `json:"remote_url"`
+	Language    string    `json:"language"`
+	Width       int32     `json:"width"`
+	Height      int32     `json:"height"`
+	FileSize    int64     `json:"file_size"`
+}
+
+// An explicit metadata-editor choice is authoritative. Unlike the scanner's
+// local-first upsert above, this always replaces the singular visual slot.
+func (q *Queries) ReplacePrimaryMediaAsset(ctx context.Context, arg ReplacePrimaryMediaAssetParams) (MediaAsset, error) {
+	row := q.db.QueryRow(ctx, replacePrimaryMediaAsset,
+		arg.MediaItemID,
+		arg.AssetType,
+		arg.Source,
+		arg.LocalPath,
+		arg.RemoteUrl,
+		arg.Language,
+		arg.Width,
+		arg.Height,
+		arg.FileSize,
+	)
+	var i MediaAsset
+	err := row.Scan(
+		&i.ID,
+		&i.MediaItemID,
+		&i.AssetType,
+		&i.Source,
+		&i.LocalPath,
+		&i.RemoteUrl,
+		&i.Language,
+		&i.Label,
+		&i.SortOrder,
+		&i.Width,
+		&i.Height,
+		&i.FileSize,
+		&i.Score,
+		&i.Likes,
+		&i.Aspect,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const setAssetSortOrder = `-- name: SetAssetSortOrder :exec
 UPDATE media_assets SET sort_order = $2 WHERE id = $1
 `
@@ -249,18 +358,31 @@ func (q *Queries) SetAssetSortOrder(ctx context.Context, arg SetAssetSortOrderPa
 	return err
 }
 
-const shiftAssetSortOrders = `-- name: ShiftAssetSortOrders :exec
-UPDATE media_assets SET sort_order = sort_order + 1
-WHERE media_item_id = $1 AND asset_type = $2::asset_type AND sort_order >= 0
+const stageOrderedMediaAssets = `-- name: StageOrderedMediaAssets :exec
+WITH ranked AS (
+    SELECT media_assets.id,
+           row_number() OVER (ORDER BY media_assets.sort_order, media_assets.id) - 1 AS old_order
+    FROM media_assets
+    WHERE media_assets.media_item_id = $1
+      AND media_assets.asset_type = $2::asset_type
+)
+UPDATE media_assets AS asset
+SET sort_order = (-1000000000 + ranked.old_order)::integer
+FROM ranked
+WHERE asset.id = ranked.id
 `
 
-type ShiftAssetSortOrdersParams struct {
+type StageOrderedMediaAssetsParams struct {
 	MediaItemID int64     `json:"media_item_id"`
 	Column2     AssetType `json:"column_2"`
 }
 
-func (q *Queries) ShiftAssetSortOrders(ctx context.Context, arg ShiftAssetSortOrdersParams) error {
-	_, err := q.db.Exec(ctx, shiftAssetSortOrders, arg.MediaItemID, arg.Column2)
+// Move the collection into a collision-free negative range before assigning
+// its final 0..N order. This is necessary because older remote rows may all
+// have an empty local_path, which makes in-place swaps trip the legacy unique
+// index on (media_item_id, asset_type, sort_order, local_path).
+func (q *Queries) StageOrderedMediaAssets(ctx context.Context, arg StageOrderedMediaAssetsParams) error {
+	_, err := q.db.Exec(ctx, stageOrderedMediaAssets, arg.MediaItemID, arg.Column2)
 	return err
 }
 

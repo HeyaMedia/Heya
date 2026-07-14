@@ -37,6 +37,12 @@ FROM metadata_entity_bindings
 WHERE entity_id = $1
 ORDER BY local_kind, local_id;
 
+-- name: ListMetadataBindingsByLocalIDs :many
+SELECT *
+FROM metadata_entity_bindings
+WHERE local_kind = $1 AND local_id = ANY($2::bigint[])
+ORDER BY local_id;
+
 -- name: UpsertMetadataWorkflow :one
 INSERT INTO metadata_resolution_workflows (
   request_key, identity_id, kind, query, hints, selected_resolution, state

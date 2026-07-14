@@ -22,7 +22,9 @@ func TestPickMediaAsset(t *testing.T) {
 	assets := []sqlc.MediaAsset{
 		asset("backdrop", "", 0, "", "http://cdn/bd0.webp"),
 		asset("backdrop", "en", 11, "", "http://cdn/bd11.webp"),
+		asset("backdrop", "en", 12, "", "http://cdn/bd12.webp"),
 		asset("poster", "", 0, "", "http://cdn/p0.webp"),
+		asset("poster", "en", 11, "", "http://cdn/poster-en.webp"),
 		asset("poster", "season-1", 1001, "", "http://cdn/s1.webp"),
 	}
 
@@ -38,6 +40,13 @@ func TestPickMediaAsset(t *testing.T) {
 	// Sort-exact request picks the carousel backdrop.
 	if got := pickMediaAsset(assets, "backdrop", 11, ""); got == nil || got.RemoteUrl != "http://cdn/bd11.webp" {
 		t.Fatalf("backdrop sort 11: want bd11, got %+v", got)
+	}
+	// A label used by several assets must still respect both type and sort.
+	if got := pickMediaAsset(assets, "backdrop", 12, "en"); got == nil || got.RemoteUrl != "http://cdn/bd12.webp" {
+		t.Fatalf("English backdrop sort 12: want bd12, got %+v", got)
+	}
+	if got := pickMediaAsset(assets, "poster", 11, "en"); got == nil || got.RemoteUrl != "http://cdn/poster-en.webp" {
+		t.Fatalf("English poster sort 11: want poster-en, got %+v", got)
 	}
 	// Bare backdrop picks the primary.
 	if got := pickMediaAsset(assets, "backdrop", -1, ""); got == nil || got.RemoteUrl != "http://cdn/bd0.webp" {

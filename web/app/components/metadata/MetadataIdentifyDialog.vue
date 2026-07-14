@@ -6,14 +6,14 @@
     @update:model-value="(v) => v ? null : $emit('close')"
   >
     <div class="mid-search-bar">
-      <input v-model="query" type="text" class="mid-input" :placeholder="isURL ? 'Paste a Heya / TMDB / IMDb URL...' : 'Search title or paste a URL...'" @keydown.enter="search" />
+      <input v-model="query" type="text" class="mid-input" :placeholder="isURL ? 'Paste a Heya ID or URL...' : 'Search Heya by title...'" @keydown.enter="search" />
       <input v-if="!isURL" v-model="year" type="text" class="mid-input mid-year" placeholder="Year" maxlength="4" @keydown.enter="search" />
       <button class="btn btn-primary" :disabled="searching || !query.trim()" @click="search">
         {{ searching ? (isURL ? 'Looking up...' : 'Searching...') : (isURL ? 'Look up' : 'Search') }}
       </button>
     </div>
     <div class="mid-results scroll">
-      <div v-if="searching" class="mid-empty">Searching providers...</div>
+      <div v-if="searching" class="mid-empty">Searching Heya...</div>
       <div v-else-if="searched && !results.length" class="mid-empty">No results found</div>
       <div
         v-for="r in results"
@@ -28,12 +28,14 @@
             <span v-if="r.year" class="mid-result-year">{{ r.year }}</span>
           </div>
           <div class="mid-result-provider">
-            <span class="mid-badge">{{ r.provider_name }}</span>
-            <span class="mid-provider-id">{{ r.provider_id }}</span>
+            <span class="mid-badge">Heya</span>
+            <span class="mid-provider-id">{{ resultIdentity(r) }}</span>
           </div>
           <div v-if="r.description" class="mid-desc">{{ r.description }}</div>
         </div>
-        <button class="btn btn-secondary mid-apply-btn" @click="apply(r)">Apply</button>
+        <button class="btn btn-secondary mid-apply-btn" :disabled="applyingId === r.provider_id" @click="apply(r)">
+          {{ applyingId === r.provider_id ? 'Applying...' : 'Apply' }}
+        </button>
       </div>
     </div>
   </AppDialog>
@@ -50,6 +52,8 @@ const year = ref(props.detail?.media_item?.year || '')
 const searching = ref(false)
 const searched = ref(false)
 const results = ref<ProviderSearchResult[]>([])
+const applyingId = ref('')
+const { toast } = useToast()
 
 const isURL = computed(() => {
   const q = query.value.trim()
@@ -78,18 +82,22 @@ async function search() {
       query: q,
     }) as { results: ProviderSearchResult[] }
     results.value = res.results || []
-  } catch { results.value = [] }
+  } catch (error) {
+    results.value = []
+    toast.err(apiErrorMessage(error, 'Heya search failed'), { duration: 7000 })
+  }
   searching.value = false
 }
 
 async function apply(r: ProviderSearchResult) {
   const ok = await useConfirm().confirm({
     title: `Replace metadata with "${r.title}"?`,
-    message: `Pulled from ${r.provider_name}. This will overwrite the current metadata.`,
+    message: 'This changes the canonical Heya identity and refreshes the metadata attached to it.',
     confirmLabel: 'Replace',
     destructive: true,
   })
   if (!ok) return
+  applyingId.value = r.provider_id
   try {
     const { $heya } = useNuxtApp()
     await $heya('/api/media/{id}/identify', {
@@ -98,7 +106,17 @@ async function apply(r: ProviderSearchResult) {
       body: { provider_name: r.provider_name, provider_id: r.provider_id } as any,
     })
     emit('applied')
-  } catch { /* empty */ }
+  } catch (error) {
+    toast.err(apiErrorMessage(error, 'Could not apply the selected Heya identity'), { duration: 7000 })
+  } finally {
+    applyingId.value = ''
+  }
+}
+
+function resultIdentity(result: ProviderSearchResult): string {
+  const value = (result as any).heya_slug || result.provider_id || ''
+  const uuid = value.match(/[0-9a-f]{8}-[0-9a-f-]{27,}/i)?.[0]
+  return uuid || 'Canonical result'
 }
 </script>
 

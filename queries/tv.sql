@@ -37,6 +37,13 @@ SELECT * FROM tv_seasons WHERE series_id = $1 AND season_number = $2;
 -- name: GetTVSeasonByID :one
 SELECT * FROM tv_seasons WHERE id = $1;
 
+-- name: UpdateTVSeason :one
+UPDATE tv_seasons
+SET title = $2, overview = $3, poster_path = $4, air_date = $5,
+    end_date = $6, status = $7, aired_episodes = $8, external_ids = $9
+WHERE id = $1
+RETURNING *;
+
 -- name: GetTVSeriesByID :one
 SELECT * FROM tv_series WHERE id = $1;
 

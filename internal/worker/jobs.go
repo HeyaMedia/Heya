@@ -61,6 +61,9 @@ type DownloadImageArgs struct {
 	MediaType   string `json:"media_type"`
 	Label       string `json:"label"`
 	SortOrder   int    `json:"sort_order"`
+	// ReplacePrimary is only set by an explicit metadata-editor choice. Scanner
+	// and refresh jobs keep the normal local-first precedence rules.
+	ReplacePrimary bool `json:"replace_primary,omitempty"`
 }
 
 func (DownloadImageArgs) Kind() string { return "download_image" }

@@ -55,6 +55,19 @@ func registerMetadataEditorRoutes(api huma.API, app *service.App) {
 			return &JSONOutput[sqlc.TvEpisode]{Body: updated}, nil
 		})
 
+	huma.Register(api, adminSecured(op(http.MethodPut, "/api/media/{id}/season/{season_id}", "update-season", "Edit a TV season", "Metadata Editor")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			SeasonID int64 `path:"season_id" minimum:"1"`
+			Body     service.UpdateSeasonReq
+		}) (*JSONOutput[sqlc.TvSeason], error) {
+			updated, err := app.UpdateSeason(ctx, in.SeasonID, in.Body)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return &JSONOutput[sqlc.TvSeason]{Body: updated}, nil
+		})
+
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/media/{id}/identify", "identify-search", "Provider search for re-identification", "Metadata Editor")),
 		func(ctx context.Context, in *struct {
 			IDPath
@@ -108,7 +121,7 @@ func registerMetadataEditorRoutes(api huma.API, app *service.App) {
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/media/{id}/assets/search", "search-provider-artwork", "Search upstream provider artwork", "Metadata Editor")),
 		func(ctx context.Context, in *struct {
 			IDPath
-			Type     string `query:"type" enum:",poster,backdrop,logo,clearart,banner,thumb,still" doc:"Filter by asset type (empty = all)"`
+			Type     string `query:"type" enum:",poster,backdrop,logo,art,clearart,banner,thumb,disc,still" doc:"Filter by asset type (empty = all)"`
 			Provider string `query:"provider" maxLength:"32" doc:"Filter by provider name"`
 		}) (*JSONOutput[artworkBody], error) {
 			results, err := app.SearchProviderArtwork(ctx, in.ID, in.Type, in.Provider)
@@ -123,10 +136,11 @@ func registerMetadataEditorRoutes(api huma.API, app *service.App) {
 			IDPath
 			Body struct {
 				URL       string `json:"url" minLength:"1" maxLength:"2048" format:"uri"`
-				AssetType string `json:"asset_type" enum:"poster,backdrop,logo,clearart,banner,thumb,still"`
+				AssetType string `json:"asset_type" enum:"poster,backdrop,logo,art,clearart,banner,thumb,disc,still"`
+				Label     string `json:"label,omitempty" maxLength:"128"`
 			}
 		}) (*StatusOutput, error) {
-			if err := app.DownloadAsset(ctx, in.ID, in.Body.URL, in.Body.AssetType); err != nil {
+			if err := app.DownloadAsset(ctx, in.ID, in.Body.URL, in.Body.AssetType, in.Body.Label); err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
 			return statusOK("queued"), nil
@@ -164,8 +178,12 @@ func registerMetadataEditorRoutes(api huma.API, app *service.App) {
 			if vs := in.RawBody.Form.Value["asset_type"]; len(vs) > 0 && vs[0] != "" {
 				assetType = vs[0]
 			}
+			label := ""
+			if vs := in.RawBody.Form.Value["label"]; len(vs) > 0 {
+				label = vs[0]
+			}
 
-			result, err := app.UploadMediaAsset(ctx, in.ID, data.File, data.File.Filename, assetType)
+			result, err := app.UploadMediaAsset(ctx, in.ID, data.File, data.File.Filename, assetType, label)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
@@ -185,6 +203,7 @@ type uploadAssetForm struct {
 	// asset_type is declared here only so it shows up in the OpenAPI schema;
 	// the actual value is read from RawBody.Form.Value["asset_type"].
 	AssetType string `form:"asset_type" doc:"poster|backdrop|logo|… (defaults to poster)"`
+	Label     string `form:"label" doc:"Optional season/episode asset label"`
 }
 
 type identifyBody struct {

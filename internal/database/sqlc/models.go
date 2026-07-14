@@ -194,6 +194,7 @@ type Album struct {
 	Playcount          int64              `json:"playcount"`
 	ExternalIds        []byte             `json:"external_ids"`
 	ArtistCredits      []byte             `json:"artist_credits"`
+	FieldProvenance    []byte             `json:"field_provenance"`
 }
 
 type AlbumCentroid struct {

@@ -31,6 +31,24 @@ WHERE media_assets.source <> 'local'
    )
 RETURNING *;
 
+-- name: ReplacePrimaryMediaAsset :one
+-- An explicit metadata-editor choice is authoritative. Unlike the scanner's
+-- local-first upsert above, this always replaces the singular visual slot.
+INSERT INTO media_assets (media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size)
+VALUES ($1, $2, $3, $4, $5, $6, '', 0, $7, $8, $9)
+ON CONFLICT (media_item_id, asset_type)
+    WHERE label = '' AND asset_type IN ('poster', 'logo', 'art', 'banner', 'thumb', 'disc', 'clearart')
+DO UPDATE SET
+    source = EXCLUDED.source,
+    local_path = EXCLUDED.local_path,
+    remote_url = EXCLUDED.remote_url,
+    language = EXCLUDED.language,
+    sort_order = 0,
+    width = EXCLUDED.width,
+    height = EXCLUDED.height,
+    file_size = EXCLUDED.file_size
+RETURNING *;
+
 -- name: ListMediaAssets :many
 SELECT * FROM media_assets
 WHERE media_item_id = $1
@@ -61,9 +79,42 @@ WHERE id = $1;
 -- name: DeleteMediaAsset :exec
 DELETE FROM media_assets WHERE id = $1;
 
+-- name: DeleteMediaAssetsByTypeLabel :exec
+DELETE FROM media_assets
+WHERE media_item_id = $1 AND asset_type = $2 AND label = $3;
+
 -- name: SetAssetSortOrder :exec
 UPDATE media_assets SET sort_order = $2 WHERE id = $1;
 
--- name: ShiftAssetSortOrders :exec
-UPDATE media_assets SET sort_order = sort_order + 1
-WHERE media_item_id = $1 AND asset_type = $2::asset_type AND sort_order >= 0;
+-- name: StageOrderedMediaAssets :exec
+-- Move the collection into a collision-free negative range before assigning
+-- its final 0..N order. This is necessary because older remote rows may all
+-- have an empty local_path, which makes in-place swaps trip the legacy unique
+-- index on (media_item_id, asset_type, sort_order, local_path).
+WITH ranked AS (
+    SELECT media_assets.id,
+           row_number() OVER (ORDER BY media_assets.sort_order, media_assets.id) - 1 AS old_order
+    FROM media_assets
+    WHERE media_assets.media_item_id = $1
+      AND media_assets.asset_type = $2::asset_type
+)
+UPDATE media_assets AS asset
+SET sort_order = (-1000000000 + ranked.old_order)::integer
+FROM ranked
+WHERE asset.id = ranked.id;
+
+-- name: PromoteOrderedMediaAsset :exec
+WITH ranked AS (
+    SELECT media_assets.id,
+           row_number() OVER (
+               ORDER BY CASE WHEN media_assets.id = $3 THEN 0 ELSE 1 END,
+                        media_assets.sort_order, media_assets.id
+           ) - 1 AS wanted_order
+    FROM media_assets
+    WHERE media_assets.media_item_id = $1
+      AND media_assets.asset_type = $2::asset_type
+)
+UPDATE media_assets AS asset
+SET sort_order = ranked.wanted_order
+FROM ranked
+WHERE asset.id = ranked.id;

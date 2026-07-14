@@ -10,12 +10,13 @@
         </button>
       </div>
       <div class="mei-grid">
-        <div v-for="asset in group.assets" :key="asset.id" class="mei-card" :class="{ 'mei-card-wide': wideTypes.has(asset.asset_type) }">
+        <div v-if="!group.assets.length" class="mei-empty-slot">No image selected</div>
+        <div v-for="(asset, assetIndex) in group.assets" :key="asset.id" class="mei-card" :class="{ 'mei-card-wide': wideTypes.has(asset.asset_type) }">
           <div class="mei-img-wrap" :style="{ aspectRatio: wideTypes.has(asset.asset_type) ? '16/9' : '2/3' }">
             <NuxtImg :src="imageUrl(asset)" class="mei-img" :width="240" :quality="80" densities="1x 2x" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
-            <div v-if="asset.sort_order === 0" class="mei-primary-badge">Primary</div>
+            <div v-if="assetIndex === 0" class="mei-primary-badge">Primary</div>
             <div class="mei-overlay">
-              <button v-if="asset.sort_order !== 0" class="mei-btn" title="Set as primary" @click="setPrimary(asset)">
+              <button v-if="assetIndex !== 0" class="mei-btn" title="Set as primary" @click="setPrimary(asset)">
                 <Icon name="star" :size="14" />
               </button>
               <button class="mei-btn mei-btn-danger" title="Delete" @click="deleteAsset(asset)">
@@ -25,13 +26,16 @@
           </div>
           <div class="mei-meta">
             <span v-if="asset.language" class="mei-tag">{{ asset.language }}</span>
-            <span class="mei-tag mei-tag-src">{{ asset.source }}</span>
+            <span class="mei-tag mei-tag-src">{{ assetSourceLabel(asset) }}</span>
           </div>
         </div>
       </div>
     </div>
 
     <div class="mei-upload-row">
+      <select v-model="uploadType" class="mei-upload-select" aria-label="Custom image type">
+        <option v-for="type in allowedTypes" :key="type" :value="type">{{ singularTypeLabel(type) }}</option>
+      </select>
       <label class="btn btn-ghost-sm">
         <Icon name="plus" :size="14" />
         Upload Custom
@@ -47,23 +51,9 @@
       content-class="mei-find-dialog"
       @update:model-value="(v) => v ? null : findModalType = null"
     >
-      <div v-if="!findLoading && availableProviders.length > 1" class="mei-provider-bar">
-        <button
-          class="mei-provider-pill"
-          :class="{ active: findProviderFilter === 'all' }"
-          @click="findProviderFilter = 'all'"
-        >All</button>
-        <button
-          v-for="prov in availableProviders"
-          :key="prov"
-          class="mei-provider-pill"
-          :class="{ active: findProviderFilter === prov }"
-          @click="findProviderFilter = prov"
-        >{{ prov }}</button>
-      </div>
       <div v-if="findLoading" class="mei-modal-empty">
         <Icon name="loading" :size="18" />
-        Searching providers...
+        Searching Heya...
       </div>
       <div v-else-if="!findGrouped.length" class="mei-modal-empty">No images found</div>
       <div v-for="lang in findGrouped" :key="lang.code" class="mei-lang-group">
@@ -83,7 +73,7 @@
           >
             <div class="mei-find-img-wrap" :style="{ aspectRatio: wideTypes.has(findModalType!) ? '16/9' : '2/3' }">
               <NuxtImg :src="art.url" :alt="`Poster option ${i + 1}`" class="mei-find-img" />
-              <div v-if="art.source" class="mei-find-source">{{ art.source }}</div>
+              <div class="mei-find-source">Heya</div>
               <div class="mei-find-dl"><Icon name="plus" :size="16" /></div>
             </div>
           </button>
@@ -101,6 +91,7 @@ const props = defineProps<{
   mediaPublicId?: string | null
   detail: any
   context?: 'media' | 'season' | 'episode'
+  assetLabel?: string
 }>()
 
 const emit = defineEmits<{ refresh: [] }>()
@@ -108,9 +99,10 @@ const emit = defineEmits<{ refresh: [] }>()
 const findModalType = ref<string | null>(null)
 const findLoading = ref(false)
 const findResults = ref<ArtworkSearchResult[]>([])
-const findProviderFilter = ref<string>('all')
+const uploadType = ref('poster')
+const { toast } = useToast()
 
-const wideTypes = new Set(['backdrop', 'banner'])
+const wideTypes = new Set(['backdrop', 'banner', 'still'])
 
 const assets = computed(() => props.detail?.assets || [])
 const mediaImageKey = computed(() => useMediaImageKey({ id: props.mediaId, public_id: props.mediaPublicId }))
@@ -126,6 +118,7 @@ const baseTypeLabels: Record<string, string> = {
   poster: 'Posters', backdrop: 'Backdrops', logo: 'Logos',
   art: 'Art', banner: 'Banners', thumb: 'Thumbnails', disc: 'Disc Art',
   clearart: 'Clear Art',
+  still: 'Episode Image',
 }
 
 const langLabels: Record<string, string> = {
@@ -140,6 +133,14 @@ const langLabels: Record<string, string> = {
 
 const nonImageTypes = new Set(['subtitle', 'lyrics', 'nfo'])
 
+const allowedTypes = computed(() => {
+  if (props.context === 'season') return ['poster']
+  if (props.context === 'episode') return ['still']
+  const mediaType = props.detail?.media_item?.media_type
+  if (mediaType === 'book') return ['poster', 'backdrop']
+  return ['poster', 'backdrop', 'logo', 'clearart', 'banner', 'thumb', 'disc']
+})
+
 const groups = computed(() => {
   const map = new Map<string, any[]>()
   for (const a of assets.value) {
@@ -148,25 +149,16 @@ const groups = computed(() => {
     if (!map.has(t)) map.set(t, [])
     map.get(t)!.push(a)
   }
-  return Array.from(map.entries())
-    .map(([type, items]) => ({ type, label: typeLabels.value[type] || type, assets: items }))
-    .filter(g => g.assets.length > 0)
-})
-
-const availableProviders = computed(() => {
-  const providers = new Set<string>()
-  for (const art of findResults.value) {
-    if (art.source) providers.add(art.source)
-  }
-  return Array.from(providers)
+  return allowedTypes.value.map(type => ({
+    type,
+    label: typeLabels.value[type] || type,
+    assets: map.get(type) || [],
+  }))
 })
 
 const findGrouped = computed(() => {
-  const filtered = findProviderFilter.value === 'all'
-    ? findResults.value
-    : findResults.value.filter(a => a.source === findProviderFilter.value)
   const map = new Map<string, ArtworkSearchResult[]>()
-  for (const art of filtered) {
+  for (const art of findResults.value) {
     const lang = art.language || ''
     if (!map.has(lang)) map.set(lang, [])
     map.get(lang)!.push(art)
@@ -187,17 +179,28 @@ const findGrouped = computed(() => {
 })
 
 function imageUrl(asset: any) {
-  if (asset.local_path && !asset.local_path.startsWith('http')) {
-    return `/api/media/${mediaImageKey.value}/image/${asset.asset_type}?sort=${asset.sort_order}`
-  }
-  return asset.remote_url || asset.local_path
+  const key = mediaImageKey.value
+  if (!key) return ''
+  const params = new URLSearchParams({ sort: String(asset.sort_order) })
+  if (asset.label) params.set('label', asset.label)
+  return `/api/media/${key}/image/${asset.asset_type}?${params}`
+}
+
+function assetSourceLabel(asset: any) {
+  if (asset.source === 'local') return 'Local'
+  if (asset.source === 'custom') return 'Custom'
+  return 'Heya'
+}
+
+function singularTypeLabel(type: string) {
+  const label = typeLabels.value[type] || type
+  return label.endsWith('s') ? label.slice(0, -1) : label
 }
 
 async function openFindModal(type: string) {
   findModalType.value = type
   findLoading.value = true
   findResults.value = []
-  findProviderFilter.value = 'all'
   try {
     const { $heya } = useNuxtApp()
     const res = await $heya('/api/media/{id}/assets/search', {
@@ -205,7 +208,10 @@ async function openFindModal(type: string) {
       query: { type: type as any },
     }) as { results: ArtworkSearchResult[] }
     findResults.value = res.results || []
-  } catch { findResults.value = [] }
+  } catch (error) {
+    findResults.value = []
+    toast.err(apiErrorMessage(error, 'Could not search Heya artwork'), { duration: 7000 })
+  }
   findLoading.value = false
 }
 
@@ -217,7 +223,10 @@ async function setPrimary(asset: any) {
       path: { id: props.mediaId, asset_id: asset.id },
     })
     emit('refresh')
-  } catch { /* empty */ }
+    toast.ok('Primary image updated')
+  } catch (error) {
+    toast.err(apiErrorMessage(error, 'Could not set the primary image'), { duration: 7000 })
+  }
 }
 
 async function deleteAsset(asset: any) {
@@ -234,7 +243,10 @@ async function deleteAsset(asset: any) {
       path: { id: props.mediaId, asset_id: asset.id },
     })
     emit('refresh')
-  } catch { /* empty */ }
+    toast.ok('Image deleted')
+  } catch (error) {
+    toast.err(apiErrorMessage(error, 'Could not delete the image'), { duration: 7000 })
+  }
 }
 
 async function downloadArt(art: ArtworkSearchResult) {
@@ -243,10 +255,17 @@ async function downloadArt(art: ArtworkSearchResult) {
     await $heya('/api/media/{id}/assets/download', {
       method: 'POST',
       path: { id: props.mediaId },
-      body: { url: art.url, asset_type: art.asset_type || findModalType.value } as any,
+      body: { url: art.url, asset_type: art.asset_type || findModalType.value, label: props.assetLabel || '' } as any,
     })
-    emit('refresh')
-  } catch { /* empty */ }
+    findModalType.value = null
+    toast.info('Image download queued')
+    setTimeout(() => emit('refresh'), 1500)
+    setTimeout(() => emit('refresh'), 5000)
+    setTimeout(() => emit('refresh'), 15000)
+    setTimeout(() => emit('refresh'), 30000)
+  } catch (error) {
+    toast.err(apiErrorMessage(error, 'Could not queue the image download'), { duration: 7000 })
+  }
 }
 
 async function uploadFile(e: Event) {
@@ -256,7 +275,8 @@ async function uploadFile(e: Event) {
 
   const form = new FormData()
   form.append('file', file)
-  form.append('asset_type', 'poster')
+  form.append('asset_type', uploadType.value)
+  if (props.assetLabel) form.append('label', props.assetLabel)
 
   // Multipart upload — stays on raw $fetch. $heya / openapi-fetch insist on
   // JSON bodies, and the spec doesn't model the multipart shape anyway.
@@ -268,9 +288,16 @@ async function uploadFile(e: Event) {
       headers: token.value ? { Authorization: `Bearer ${token.value}` } : {},
     })
     emit('refresh')
-  } catch { /* empty */ }
+    toast.ok('Custom image uploaded')
+  } catch (error) {
+    toast.err(apiErrorMessage(error, 'Could not upload the custom image'), { duration: 7000 })
+  }
   input.value = ''
 }
+
+watch(allowedTypes, (types) => {
+  if (!types.includes(uploadType.value)) uploadType.value = types[0] || 'poster'
+}, { immediate: true })
 </script>
 
 <style scoped>
@@ -335,6 +362,18 @@ async function uploadFile(e: Event) {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+.mei-empty-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 150px;
+  min-height: 76px;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-sm);
+  color: var(--fg-3);
+  font-size: 12px;
 }
 
 .mei-card {
@@ -427,6 +466,15 @@ async function uploadFile(e: Event) {
 .mei-upload-row {
   display: flex;
   gap: 8px;
+}
+.mei-upload-select {
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-3);
+  color: var(--fg-1);
+  padding: 0 10px;
+  font-size: 12px;
 }
 
 /* AppDialog supplies overlay/panel/header chrome — the rules below

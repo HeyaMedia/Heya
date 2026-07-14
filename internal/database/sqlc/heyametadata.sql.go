@@ -247,6 +247,47 @@ func (q *Queries) ListMetadataBindingsByEntity(ctx context.Context, entityID uui
 	return items, nil
 }
 
+const listMetadataBindingsByLocalIDs = `-- name: ListMetadataBindingsByLocalIDs :many
+SELECT local_kind, local_id, entity_id, entity_kind, schema_version, projection_version, bound_at, updated_at
+FROM metadata_entity_bindings
+WHERE local_kind = $1 AND local_id = ANY($2::bigint[])
+ORDER BY local_id
+`
+
+type ListMetadataBindingsByLocalIDsParams struct {
+	LocalKind string  `json:"local_kind"`
+	Column2   []int64 `json:"column_2"`
+}
+
+func (q *Queries) ListMetadataBindingsByLocalIDs(ctx context.Context, arg ListMetadataBindingsByLocalIDsParams) ([]MetadataEntityBinding, error) {
+	rows, err := q.db.Query(ctx, listMetadataBindingsByLocalIDs, arg.LocalKind, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MetadataEntityBinding{}
+	for rows.Next() {
+		var i MetadataEntityBinding
+		if err := rows.Scan(
+			&i.LocalKind,
+			&i.LocalID,
+			&i.EntityID,
+			&i.EntityKind,
+			&i.SchemaVersion,
+			&i.ProjectionVersion,
+			&i.BoundAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markMetadataWorkflowDiscovery = `-- name: MarkMetadataWorkflowDiscovery :one
 UPDATE metadata_resolution_workflows
 SET discovery_id = $2,

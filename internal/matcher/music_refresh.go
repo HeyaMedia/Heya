@@ -50,7 +50,25 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 		return res, fmt.Errorf("get artist %d: %w", artistID, err)
 	}
 
-	detail := m.enrichArtistFromHeyaMedia(ctx, artist.MusicbrainzID, artist.Name, artist.Disambiguation)
+	// Canonical Heya binding is the durable identity. Provider IDs are optional
+	// evidence and cannot be required here: Apple/Deezer-rooted artists may have
+	// no MusicBrainz ID at all.
+	var detail *metadata.MediaDetail
+	if m.heya != nil {
+		if binding, bindErr := m.q.GetMetadataEntityBinding(ctx, sqlc.GetMetadataEntityBindingParams{
+			LocalKind: "media_item", LocalID: artist.MediaItemID,
+		}); bindErr == nil && binding.EntityKind == "artist" {
+			if canonical, _, fetchErr := m.heya.FetchByKindID(ctx, "artist", binding.EntityID.String()); fetchErr == nil {
+				detail = canonical
+				log.Debug().Int64("artist_id", artistID).Str("entity_id", binding.EntityID.String()).Msg("refreshing artist via canonical Heya binding")
+			} else {
+				log.Debug().Err(fetchErr).Int64("artist_id", artistID).Str("entity_id", binding.EntityID.String()).Msg("canonical artist fetch failed; falling back to discovery evidence")
+			}
+		}
+	}
+	if detail == nil {
+		detail = m.enrichArtistFromHeyaMedia(ctx, artist.MusicbrainzID, artist.Name, artist.Disambiguation)
+	}
 	if detail == nil {
 		// Negative cache: mark so the scan task's staleness gate skips it.
 		if markErr := m.q.MarkArtistDiscographyEnriched(ctx, artistID); markErr != nil {
@@ -336,6 +354,13 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 				Str("title", embedded.Title).
 				Str("year", newYear).
 				Msg("album enrichment would duplicate a sibling tuple; keeping local title+year")
+		}
+		albumProvenance := ParseFieldProvenance(dbAlbum.FieldProvenance)
+		if albumProvenance.UserLocked("title") {
+			newTitle = dbAlbum.Title
+		}
+		if albumProvenance.UserLocked("year") {
+			newYear = dbAlbum.Year
 		}
 
 		changed := albumMBID != dbAlbum.MusicbrainzID ||

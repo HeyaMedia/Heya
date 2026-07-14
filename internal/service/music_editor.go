@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -13,14 +14,14 @@ import (
 // Slug and cover are deliberately absent: slugs are stable user-facing URLs,
 // and covers go through the artwork pipeline.
 type UpdateAlbumReq struct {
-	Title       *string  `json:"title"`
-	Year        *string  `json:"year"`
-	AlbumType   *string  `json:"album_type"`
-	Label       *string  `json:"label"`
-	Country     *string  `json:"country"`
-	Barcode     *string  `json:"barcode"`
-	Genres      []string `json:"genres"`
-	ReleaseDate *string  `json:"release_date"`
+	Title       *string  `json:"title,omitempty"`
+	Year        *string  `json:"year,omitempty"`
+	AlbumType   *string  `json:"album_type,omitempty"`
+	Label       *string  `json:"label,omitempty"`
+	Country     *string  `json:"country,omitempty"`
+	Barcode     *string  `json:"barcode,omitempty"`
+	Genres      []string `json:"genres,omitempty"`
+	ReleaseDate *string  `json:"release_date,omitempty"`
 }
 
 // UpdateAlbumMetadata patches an album row. Full-row write underneath, so
@@ -78,6 +79,27 @@ func (a *App) UpdateAlbumMetadata(ctx context.Context, albumID int64, req Update
 	updated, err := q.UpdateAlbum(ctx, p)
 	if err != nil {
 		return sqlc.Album{}, fmt.Errorf("updating album: %w", err)
+	}
+	provenance := map[string]string{}
+	_ = json.Unmarshal(album.FieldProvenance, &provenance)
+	if provenance == nil {
+		provenance = map[string]string{}
+	}
+	for field, changed := range map[string]bool{
+		"title": req.Title != nil, "year": req.Year != nil,
+		"album_type": req.AlbumType != nil, "label": req.Label != nil,
+		"country": req.Country != nil, "barcode": req.Barcode != nil,
+		"genres": req.Genres != nil, "release_date": req.ReleaseDate != nil,
+	} {
+		if changed {
+			provenance[field] = "user"
+		}
+	}
+	if blob, marshalErr := json.Marshal(provenance); marshalErr == nil {
+		if err := q.SetAlbumFieldProvenance(ctx, sqlc.SetAlbumFieldProvenanceParams{ID: album.ID, FieldProvenance: blob}); err != nil {
+			return sqlc.Album{}, fmt.Errorf("stamping album field provenance: %w", err)
+		}
+		updated.FieldProvenance = blob
 	}
 	return updated, nil
 }
@@ -165,6 +187,11 @@ func (a *App) ApplyAlbumIdentify(ctx context.Context, albumID int64, providerNam
 		SchemaVersion: int32(detail.SchemaVersion), ProjectionVersion: detail.ProjectionVersion,
 	}); err != nil {
 		return fmt.Errorf("bind album to canonical metadata: %w", err)
+	}
+	if err := q.SetAlbumFieldProvenance(ctx, sqlc.SetAlbumFieldProvenanceParams{
+		ID: album.ID, FieldProvenance: []byte("{}"),
+	}); err != nil {
+		return fmt.Errorf("clear album field provenance: %w", err)
 	}
 
 	item, err := q.GetMediaItemByID(ctx, artist.MediaItemID)

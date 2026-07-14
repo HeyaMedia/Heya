@@ -137,6 +137,7 @@ const searching = ref(false)
 const searched = ref(false)
 const searchResults = ref<any[]>([])
 const downloading = ref<string | null>(null)
+const { toast } = useToast()
 
 const externalSubs = computed(() => {
   return (props.detail?.assets || []).filter((a: any) => a.asset_type === 'subtitle')
@@ -191,8 +192,9 @@ async function doSearch() {
     if (searchLangs.value) query.languages = searchLangs.value
     const res = await $heya('/api/opensubtitles/search', { query }) as { data: any[] }
     searchResults.value = res.data || []
-  } catch {
+  } catch (error) {
     searchResults.value = []
+    toast.err(apiErrorMessage(error, 'Subtitle search failed'), { duration: 7000 })
   }
   searching.value = false
 }
@@ -212,7 +214,10 @@ async function downloadSubtitle(r: any) {
       } as any,
     })
     emit('refresh')
-  } catch { /* empty */ }
+    toast.ok('Subtitle downloaded')
+  } catch (error) {
+    toast.err(apiErrorMessage(error, 'Subtitle download failed'), { duration: 7000 })
+  }
   downloading.value = null
 }
 
@@ -230,7 +235,10 @@ async function deleteSubtitle(s: any) {
       path: { id: props.mediaId, asset_id: s.id },
     })
     emit('refresh')
-  } catch { /* empty */ }
+    toast.ok('Subtitle deleted')
+  } catch (error) {
+    toast.err(apiErrorMessage(error, 'Could not delete the subtitle'), { duration: 7000 })
+  }
 }
 
 watch(() => props.mediaId, () => {

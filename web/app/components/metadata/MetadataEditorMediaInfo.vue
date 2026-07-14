@@ -126,6 +126,7 @@ interface FileInfo {
 
 const files = ref<FileInfo[]>([])
 const loading = ref(false)
+const { toast } = useToast()
 
 function videoStreams(f: FileInfo) { return (f.streams || []).filter(s => s.codec_type === 'video') }
 function audioStreams(f: FileInfo) { return (f.streams || []).filter(s => s.codec_type === 'audio') }
@@ -167,8 +168,9 @@ async function fetchFiles() {
     } else {
       files.value = all
     }
-  } catch {
+  } catch (error) {
     files.value = []
+    toast.err(apiErrorMessage(error, 'Could not load media information'), { duration: 7000 })
   }
   loading.value = false
 }

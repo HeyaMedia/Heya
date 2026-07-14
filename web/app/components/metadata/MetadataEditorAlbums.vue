@@ -18,11 +18,11 @@
           </div>
           <div class="mea-sub">
             <span v-if="al.label" class="mea-label-text">{{ al.label }}</span>
-            <span v-if="al.musicbrainz_id" class="mea-mbid" :title="al.musicbrainz_id">
-              <Icon name="check" :size="11" /> MusicBrainz
+            <span v-if="al.heya_id" class="mea-heya" :title="al.heya_id">
+              <Icon name="check" :size="11" /> Heya
             </span>
-            <span v-else class="mea-mbid mea-mbid-missing">
-              <Icon name="warning" :size="11" /> unmatched
+            <span v-else class="mea-heya mea-heya-missing">
+              <Icon name="warning" :size="11" /> Not linked to Heya
             </span>
           </div>
         </div>
@@ -30,7 +30,7 @@
           <button class="btn btn-ghost-sm" title="Edit album fields" @click="editAlbum = al">
             <Icon name="pencil" :size="13" /> Edit
           </button>
-          <button class="btn btn-ghost-sm" title="Pin to a different MusicBrainz release group" @click="identifyAlbum = al">
+          <button class="btn btn-ghost-sm" title="Choose a different Heya release" @click="identifyAlbum = al">
             <Icon name="search" :size="13" /> Identify
           </button>
         </div>
@@ -188,14 +188,14 @@ function onIdentified() {
   text-overflow: ellipsis;
 }
 
-.mea-mbid {
+.mea-heya {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   color: rgb(110, 190, 130);
   flex-shrink: 0;
 }
-.mea-mbid-missing {
+.mea-heya-missing {
   color: rgb(220, 170, 90);
 }
 

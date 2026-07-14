@@ -83,15 +83,18 @@ UPDATE artists
 -- Same pattern: only overwrite when the new value is non-empty.
 UPDATE albums
    SET musicbrainz_id = CASE WHEN $2::text  != '' THEN $2 ELSE musicbrainz_id END,
-       title          = CASE WHEN $3::text  != '' THEN $3 ELSE title          END,
-       year           = CASE WHEN $4::text  != '' THEN $4 ELSE year           END,
-       album_type     = CASE WHEN $5::text  != '' THEN $5 ELSE album_type     END,
-       label          = CASE WHEN $6::text  != '' THEN $6 ELSE label          END,
-       country        = CASE WHEN $7::text  != '' THEN $7 ELSE country        END,
-       barcode        = CASE WHEN $8::text  != '' THEN $8 ELSE barcode        END,
-       release_date   = COALESCE($9::date, release_date),
+       title          = CASE WHEN $3::text  != '' AND COALESCE(field_provenance->>'title', '') <> 'user' THEN $3 ELSE title END,
+       year           = CASE WHEN $4::text  != '' AND COALESCE(field_provenance->>'year', '') <> 'user' THEN $4 ELSE year END,
+       album_type     = CASE WHEN $5::text  != '' AND COALESCE(field_provenance->>'album_type', '') <> 'user' THEN $5 ELSE album_type END,
+       label          = CASE WHEN $6::text  != '' AND COALESCE(field_provenance->>'label', '') <> 'user' THEN $6 ELSE label END,
+       country        = CASE WHEN $7::text  != '' AND COALESCE(field_provenance->>'country', '') <> 'user' THEN $7 ELSE country END,
+       barcode        = CASE WHEN $8::text  != '' AND COALESCE(field_provenance->>'barcode', '') <> 'user' THEN $8 ELSE barcode END,
+       release_date   = CASE WHEN $9::date IS NOT NULL AND COALESCE(field_provenance->>'release_date', '') <> 'user' THEN $9 ELSE release_date END,
        cover_path     = CASE WHEN $10::text != '' THEN $10 ELSE cover_path    END
  WHERE id = $1;
+
+-- name: SetAlbumFieldProvenance :exec
+UPDATE albums SET field_provenance = $2 WHERE id = $1;
 
 -- name: UpdateTrackFromEnrichment :exec
 -- Overwrites track title and duration with enriched data (heya.media wins

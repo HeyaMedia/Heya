@@ -470,6 +470,7 @@ export type Album = {
     duration_seconds: number;
     explicit: boolean;
     external_ids: string;
+    field_provenance: string;
     genres: Array<string> | null;
     id: number;
     integrated_lufs: Numeric;
@@ -1226,7 +1227,8 @@ export type DownloadAssetRequest = {
      * A URL to the JSON Schema for this object.
      */
     readonly $schema?: string;
-    asset_type: 'poster' | 'backdrop' | 'logo' | 'clearart' | 'banner' | 'thumb' | 'still';
+    asset_type: 'poster' | 'backdrop' | 'logo' | 'art' | 'clearart' | 'banner' | 'thumb' | 'disc' | 'still';
+    label?: string;
     url: string;
 };
 
@@ -1998,6 +2000,7 @@ export type ListAlbumsByArtistIdForShelfRow = {
     duration_seconds: number;
     explicit: boolean;
     external_ids: string;
+    field_provenance: string;
     genres: Array<string> | null;
     id: number;
     integrated_lufs: Numeric;
@@ -2040,6 +2043,7 @@ export type ListAlbumsByArtistSlugRow = {
     duration_seconds: number;
     explicit: boolean;
     external_ids: string;
+    field_provenance: string;
     genres: Array<string> | null;
     id: number;
     integrated_lufs: Numeric;
@@ -2162,6 +2166,7 @@ export type ListMusicAlbumsRow = {
     duration_seconds: number;
     explicit: boolean;
     external_ids: string;
+    field_provenance: string;
     genres: Array<string> | null;
     id: number;
     integrated_lufs: Numeric;
@@ -2257,6 +2262,7 @@ export type ListOnThisDayAlbumsRow = {
     duration_seconds: number;
     explicit: boolean;
     external_ids: string;
+    field_provenance: string;
     genres: Array<string> | null;
     id: number;
     integrated_lufs: Numeric;
@@ -2354,6 +2360,7 @@ export type ListRecentlyAddedAlbumsRow = {
     duration_seconds: number;
     explicit: boolean;
     external_ids: string;
+    field_provenance: string;
     genres: Array<string> | null;
     id: number;
     integrated_lufs: Numeric;
@@ -2519,6 +2526,7 @@ export type ListUserLovedAlbumsRow = {
     duration_seconds: number;
     explicit: boolean;
     external_ids: string;
+    field_provenance: string;
     genres: Array<string> | null;
     id: number;
     integrated_lufs: Numeric;
@@ -2635,6 +2643,7 @@ export type ListUserRatedAlbumsRow = {
     duration_seconds: number;
     explicit: boolean;
     external_ids: string;
+    field_provenance: string;
     genres: Array<string> | null;
     id: number;
     integrated_lufs: Numeric;
@@ -5236,6 +5245,24 @@ export type TvEpisode = {
     title: string;
 };
 
+export type TvSeason = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    air_date: Date;
+    aired_episodes: number;
+    end_date: Date;
+    external_ids: string;
+    id: number;
+    overview: string;
+    poster_path: string;
+    season_number: number;
+    series_id: number;
+    status: string;
+    title: string;
+};
+
 export type UiSettings = {
     pinned_hero_mode?: string;
 };
@@ -5312,14 +5339,14 @@ export type UpdateAlbumReq = {
      * A URL to the JSON Schema for this object.
      */
     readonly $schema?: string;
-    album_type: string | null;
-    barcode: string | null;
-    country: string | null;
-    genres: Array<string> | null;
-    label: string | null;
-    release_date: string | null;
-    title: string | null;
-    year: string | null;
+    album_type?: string;
+    barcode?: string;
+    country?: string;
+    genres?: Array<string> | null;
+    label?: string;
+    release_date?: string;
+    title?: string;
+    year?: string;
 };
 
 export type UpdateEpisodeReq = {
@@ -5327,10 +5354,10 @@ export type UpdateEpisodeReq = {
      * A URL to the JSON Schema for this object.
      */
     readonly $schema?: string;
-    air_date: string | null;
-    overview: string | null;
-    runtime_minutes: number | null;
-    title: string | null;
+    air_date?: string;
+    overview?: string;
+    runtime_minutes?: number;
+    title?: string;
 };
 
 export type UpdateMediaMetadataReq = {
@@ -5338,26 +5365,47 @@ export type UpdateMediaMetadataReq = {
      * A URL to the JSON Schema for this object.
      */
     readonly $schema?: string;
-    biography: string | null;
-    description: string | null;
-    disambiguation: string | null;
-    external_ids: {
+    author_name?: string;
+    biography?: string;
+    description?: string;
+    disambiguation?: string;
+    external_ids?: {
         [key: string]: string;
     };
-    first_air_date: string | null;
-    genres: Array<string> | null;
-    last_air_date: string | null;
-    original_language: string | null;
-    original_name: string | null;
-    original_title: string | null;
-    release_date: string | null;
-    runtime_minutes: number | null;
-    sort_name: string | null;
-    sort_title: string | null;
-    status: string | null;
-    tagline: string | null;
-    title: string | null;
-    year: string | null;
+    first_air_date?: string;
+    format?: string;
+    genres?: Array<string> | null;
+    isbn?: string;
+    language?: string;
+    last_air_date?: string;
+    networks?: Array<string> | null;
+    original_language?: string;
+    original_name?: string;
+    original_title?: string;
+    page_count?: number;
+    publish_date?: string;
+    publisher?: string;
+    release_date?: string;
+    runtime_minutes?: number;
+    series_name?: string;
+    series_number?: number;
+    sort_name?: string;
+    sort_title?: string;
+    status?: string;
+    subjects?: Array<string> | null;
+    tagline?: string;
+    title?: string;
+    year?: string;
+};
+
+export type UpdateSeasonReq = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    air_date?: string;
+    overview?: string;
+    title?: string;
 };
 
 export type UploadAssetResultBody = {
@@ -5850,6 +5898,7 @@ export type AlbumWritable = {
     duration_seconds: number;
     explicit: boolean;
     external_ids: string;
+    field_provenance: string;
     genres: Array<string> | null;
     id: number;
     integrated_lufs: Numeric;
@@ -6130,7 +6179,8 @@ export type DoctorReportWritable = {
 };
 
 export type DownloadAssetRequestWritable = {
-    asset_type: 'poster' | 'backdrop' | 'logo' | 'clearart' | 'banner' | 'thumb' | 'still';
+    asset_type: 'poster' | 'backdrop' | 'logo' | 'art' | 'clearart' | 'banner' | 'thumb' | 'disc' | 'still';
+    label?: string;
     url: string;
 };
 
@@ -7448,6 +7498,20 @@ export type TvEpisodeWritable = {
     title: string;
 };
 
+export type TvSeasonWritable = {
+    air_date: Date;
+    aired_episodes: number;
+    end_date: Date;
+    external_ids: string;
+    id: number;
+    overview: string;
+    poster_path: string;
+    season_number: number;
+    series_id: number;
+    status: string;
+    title: string;
+};
+
 export type UpNextResultWritable = {
     episode_id?: number;
     episode_number?: number;
@@ -7491,44 +7555,61 @@ export type UpdateUserListRequestWritable = {
 };
 
 export type UpdateAlbumReqWritable = {
-    album_type: string | null;
-    barcode: string | null;
-    country: string | null;
-    genres: Array<string> | null;
-    label: string | null;
-    release_date: string | null;
-    title: string | null;
-    year: string | null;
+    album_type?: string;
+    barcode?: string;
+    country?: string;
+    genres?: Array<string> | null;
+    label?: string;
+    release_date?: string;
+    title?: string;
+    year?: string;
 };
 
 export type UpdateEpisodeReqWritable = {
-    air_date: string | null;
-    overview: string | null;
-    runtime_minutes: number | null;
-    title: string | null;
+    air_date?: string;
+    overview?: string;
+    runtime_minutes?: number;
+    title?: string;
 };
 
 export type UpdateMediaMetadataReqWritable = {
-    biography: string | null;
-    description: string | null;
-    disambiguation: string | null;
-    external_ids: {
+    author_name?: string;
+    biography?: string;
+    description?: string;
+    disambiguation?: string;
+    external_ids?: {
         [key: string]: string;
     };
-    first_air_date: string | null;
-    genres: Array<string> | null;
-    last_air_date: string | null;
-    original_language: string | null;
-    original_name: string | null;
-    original_title: string | null;
-    release_date: string | null;
-    runtime_minutes: number | null;
-    sort_name: string | null;
-    sort_title: string | null;
-    status: string | null;
-    tagline: string | null;
-    title: string | null;
-    year: string | null;
+    first_air_date?: string;
+    format?: string;
+    genres?: Array<string> | null;
+    isbn?: string;
+    language?: string;
+    last_air_date?: string;
+    networks?: Array<string> | null;
+    original_language?: string;
+    original_name?: string;
+    original_title?: string;
+    page_count?: number;
+    publish_date?: string;
+    publisher?: string;
+    release_date?: string;
+    runtime_minutes?: number;
+    series_name?: string;
+    series_number?: number;
+    sort_name?: string;
+    sort_title?: string;
+    status?: string;
+    subjects?: Array<string> | null;
+    tagline?: string;
+    title?: string;
+    year?: string;
+};
+
+export type UpdateSeasonReqWritable = {
+    air_date?: string;
+    overview?: string;
+    title?: string;
 };
 
 export type UploadAssetResultBodyWritable = {
@@ -14447,7 +14528,7 @@ export type SearchProviderArtworkData = {
         /**
          * Filter by asset type (empty = all)
          */
-        type?: '' | 'poster' | 'backdrop' | 'logo' | 'clearart' | 'banner' | 'thumb' | 'still';
+        type?: '' | 'poster' | 'backdrop' | 'logo' | 'art' | 'clearart' | 'banner' | 'thumb' | 'disc' | 'still';
         /**
          * Filter by provider name
          */
@@ -14481,6 +14562,10 @@ export type UploadMediaAssetData = {
          */
         asset_type: string;
         file: Blob | File;
+        /**
+         * Optional season/episode asset label
+         */
+        label: string;
     };
     path: {
         /**
@@ -14819,6 +14904,37 @@ export type RefreshMediaResponses = {
 };
 
 export type RefreshMediaResponse = RefreshMediaResponses[keyof RefreshMediaResponses];
+
+export type UpdateSeasonData = {
+    body: UpdateSeasonReqWritable;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+        season_id: number;
+    };
+    query?: never;
+    url: '/api/media/{id}/season/{season_id}';
+};
+
+export type UpdateSeasonErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type UpdateSeasonError = UpdateSeasonErrors[keyof UpdateSeasonErrors];
+
+export type UpdateSeasonResponses = {
+    /**
+     * OK
+     */
+    200: TvSeason;
+};
+
+export type UpdateSeasonResponse = UpdateSeasonResponses[keyof UpdateSeasonResponses];
 
 export type GetUpNextData = {
     body?: never;

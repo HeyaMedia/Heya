@@ -1497,6 +1497,10 @@
             "contentEncoding": "base64",
             "type": "string"
           },
+          "field_provenance": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "genres": {
             "items": {
               "type": "string"
@@ -1642,7 +1646,8 @@
           "listeners",
           "playcount",
           "external_ids",
-          "artist_credits"
+          "artist_credits",
+          "field_provenance"
         ],
         "type": "object"
       },
@@ -3956,11 +3961,17 @@
               "poster",
               "backdrop",
               "logo",
+              "art",
               "clearart",
               "banner",
               "thumb",
+              "disc",
               "still"
             ],
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 128,
             "type": "string"
           },
           "url": {
@@ -6575,6 +6586,10 @@
             "contentEncoding": "base64",
             "type": "string"
           },
+          "field_provenance": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "genres": {
             "items": {
               "type": "string"
@@ -6725,6 +6740,7 @@
           "playcount",
           "external_ids",
           "artist_credits",
+          "field_provenance",
           "artist_name",
           "artist_slug",
           "track_count"
@@ -6777,6 +6793,10 @@
             "contentEncoding": "base64",
             "type": "string"
           },
+          "field_provenance": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "genres": {
             "items": {
               "type": "string"
@@ -6927,6 +6947,7 @@
           "playcount",
           "external_ids",
           "artist_credits",
+          "field_provenance",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -7294,6 +7315,10 @@
             "contentEncoding": "base64",
             "type": "string"
           },
+          "field_provenance": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "genres": {
             "items": {
               "type": "string"
@@ -7444,6 +7469,7 @@
           "playcount",
           "external_ids",
           "artist_credits",
+          "field_provenance",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -7731,6 +7757,10 @@
             "contentEncoding": "base64",
             "type": "string"
           },
+          "field_provenance": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "genres": {
             "items": {
               "type": "string"
@@ -7885,6 +7915,7 @@
           "playcount",
           "external_ids",
           "artist_credits",
+          "field_provenance",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -8145,6 +8176,10 @@
             "contentEncoding": "base64",
             "type": "string"
           },
+          "field_provenance": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "genres": {
             "items": {
               "type": "string"
@@ -8295,6 +8330,7 @@
           "playcount",
           "external_ids",
           "artist_credits",
+          "field_provenance",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -8855,6 +8891,10 @@
             "contentEncoding": "base64",
             "type": "string"
           },
+          "field_provenance": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "genres": {
             "items": {
               "type": "string"
@@ -9008,6 +9048,7 @@
           "playcount",
           "external_ids",
           "artist_credits",
+          "field_provenance",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -9375,6 +9416,10 @@
             "contentEncoding": "base64",
             "type": "string"
           },
+          "field_provenance": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "genres": {
             "items": {
               "type": "string"
@@ -9528,6 +9573,7 @@
           "playcount",
           "external_ids",
           "artist_credits",
+          "field_provenance",
           "artist_name",
           "artist_slug",
           "rating_2",
@@ -18390,6 +18436,72 @@
         ],
         "type": "object"
       },
+      "TvSeason": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/TvSeason.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "air_date": {
+            "$ref": "#/components/schemas/Date"
+          },
+          "aired_episodes": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "end_date": {
+            "$ref": "#/components/schemas/Date"
+          },
+          "external_ids": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "overview": {
+            "type": "string"
+          },
+          "poster_path": {
+            "type": "string"
+          },
+          "season_number": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "series_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "series_id",
+          "season_number",
+          "title",
+          "overview",
+          "poster_path",
+          "air_date",
+          "end_date",
+          "status",
+          "aired_episodes",
+          "external_ids"
+        ],
+        "type": "object"
+      },
       "UISettings": {
         "additionalProperties": false,
         "properties": {
@@ -18641,22 +18753,13 @@
             "type": "string"
           },
           "album_type": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "barcode": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "country": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "genres": {
             "items": {
@@ -18668,40 +18771,18 @@
             ]
           },
           "label": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "release_date": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "title": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "year": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           }
         },
-        "required": [
-          "title",
-          "year",
-          "album_type",
-          "label",
-          "country",
-          "barcode",
-          "genres",
-          "release_date"
-        ],
         "type": "object"
       },
       "UpdateEpisodeReq": {
@@ -18717,37 +18798,19 @@
             "type": "string"
           },
           "air_date": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "overview": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "runtime_minutes": {
             "format": "int32",
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer"
           },
           "title": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           }
         },
-        "required": [
-          "title",
-          "overview",
-          "runtime_minutes",
-          "air_date"
-        ],
         "type": "object"
       },
       "UpdateMediaMetadataReq": {
@@ -18762,23 +18825,17 @@
             "readOnly": true,
             "type": "string"
           },
+          "author_name": {
+            "type": "string"
+          },
           "biography": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "description": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "disambiguation": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "external_ids": {
             "additionalProperties": {
@@ -18787,10 +18844,10 @@
             "type": "object"
           },
           "first_air_date": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
           },
           "genres": {
             "items": {
@@ -18801,100 +18858,109 @@
               "null"
             ]
           },
+          "isbn": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
           "last_air_date": {
+            "type": "string"
+          },
+          "networks": {
+            "items": {
+              "type": "string"
+            },
             "type": [
-              "string",
+              "array",
               "null"
             ]
           },
           "original_language": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "original_name": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "original_title": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
+          },
+          "page_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "publish_date": {
+            "type": "string"
+          },
+          "publisher": {
+            "type": "string"
           },
           "release_date": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "runtime_minutes": {
             "format": "int32",
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer"
+          },
+          "series_name": {
+            "type": "string"
+          },
+          "series_number": {
+            "format": "int32",
+            "type": "integer"
           },
           "sort_name": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "sort_title": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "status": {
+            "type": "string"
+          },
+          "subjects": {
+            "items": {
+              "type": "string"
+            },
             "type": [
-              "string",
+              "array",
               "null"
             ]
           },
           "tagline": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "title": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "year": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           }
         },
-        "required": [
-          "title",
-          "sort_title",
-          "year",
-          "description",
-          "external_ids",
-          "tagline",
-          "genres",
-          "release_date",
-          "original_title",
-          "original_language",
-          "runtime_minutes",
-          "status",
-          "first_air_date",
-          "last_air_date",
-          "original_name",
-          "sort_name",
-          "disambiguation",
-          "biography"
-        ],
+        "type": "object"
+      },
+      "UpdateSeasonReq": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/UpdateSeasonReq.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "air_date": {
+            "type": "string"
+          },
+          "overview": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "UploadAssetResultBody": {
@@ -33371,9 +33437,11 @@
                 "poster",
                 "backdrop",
                 "logo",
+                "art",
                 "clearart",
                 "banner",
                 "thumb",
+                "disc",
                 "still"
               ],
               "type": "string"
@@ -33460,6 +33528,9 @@
                 },
                 "file": {
                   "contentType": "image/*"
+                },
+                "label": {
+                  "contentType": "text/plain"
                 }
               },
               "schema": {
@@ -33473,11 +33544,16 @@
                     "contentMediaType": "application/octet-stream",
                     "format": "binary",
                     "type": "string"
+                  },
+                  "label": {
+                    "description": "Optional season/episode asset label",
+                    "type": "string"
                   }
                 },
                 "required": [
                   "file",
-                  "asset_type"
+                  "asset_type",
+                  "label"
                 ],
                 "type": "object"
               }
@@ -34160,6 +34236,86 @@
         "summary": "Force a metadata refresh for one item",
         "tags": [
           "Media"
+        ]
+      }
+    },
+    "/api/media/{id}/season/{season_id}": {
+      "put": {
+        "operationId": "update-season",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "season_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSeasonReq"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TvSeason"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Edit a TV season",
+        "tags": [
+          "Metadata Editor"
         ]
       }
     },

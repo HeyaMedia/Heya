@@ -42,7 +42,7 @@
       </div>
     </div>
     <template #footer="{ close }">
-      <button class="btn btn-ghost-sm mae-identify-btn" title="Pin to a different MusicBrainz release group" @click="$emit('identify')">
+      <button class="btn btn-ghost-sm mae-identify-btn" title="Choose a different Heya release" @click="$emit('identify')">
         <Icon name="search" :size="13" /> Re-identify
       </button>
       <button class="btn btn-ghost-sm" @click="close()">Cancel</button>
@@ -67,6 +67,7 @@ const genresText = ref('')
 const saving = ref(false)
 
 const { $heya } = useNuxtApp()
+const { toast } = useToast()
 
 watch(() => props.show, (v) => {
   if (v && props.album) {
@@ -103,7 +104,10 @@ async function save() {
       } as any,
     })
     emit('saved')
-  } catch { /* empty */ }
+    toast.ok('Album metadata saved')
+  } catch (error) {
+    toast.err(apiErrorMessage(error, 'Could not save album metadata'), { duration: 7000 })
+  }
   saving.value = false
 }
 </script>
