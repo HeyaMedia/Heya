@@ -3,8 +3,10 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
@@ -104,14 +106,27 @@ func (w *FetchArtworkWorker) Work(ctx context.Context, job *river.Job[FetchArtwo
 		// On-demand images: record the secondary artwork as a pending remote
 		// asset row (keeps the carousel + alternate-art picker populated) instead
 		// of downloading it now. The serve path fetches bytes on first view.
-		if _, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
-			MediaItemID: job.Args.MediaItemID,
-			AssetType:   sqlc.AssetType(art.AssetType),
-			Source:      "remote",
-			RemoteUrl:   art.URL,
-			Label:       art.Language,
-			SortOrder:   int32(sortOrder),
-		}); err != nil {
+		var err error
+		if SingleAssetTypes[art.AssetType] {
+			_, err = q.UpsertPrimaryMediaAsset(ctx, sqlc.UpsertPrimaryMediaAssetParams{
+				MediaItemID: job.Args.MediaItemID,
+				AssetType:   sqlc.AssetType(art.AssetType),
+				Source:      "remote",
+				RemoteUrl:   art.URL,
+				Language:    art.Language,
+			})
+		} else {
+			_, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+				MediaItemID: job.Args.MediaItemID,
+				AssetType:   sqlc.AssetType(art.AssetType),
+				Source:      "remote",
+				RemoteUrl:   art.URL,
+				Language:    art.Language,
+				Label:       art.Language,
+				SortOrder:   int32(sortOrder),
+			})
+		}
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			log.Debug().Err(err).Int64("media_item_id", job.Args.MediaItemID).Str("asset_type", art.AssetType).Msg("pending artwork row insert skipped")
 		}
 		sortOrder++

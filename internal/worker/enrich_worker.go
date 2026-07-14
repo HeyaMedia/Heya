@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -471,18 +472,31 @@ func writeSecondaryArtwork(ctx context.Context, q *sqlc.Queries, itemID int64, d
 			continue
 		}
 		count[art.AssetType]++
-		label := art.Language
-		if label == "" {
-			label = "extra"
+		var err error
+		if SingleAssetTypes[art.AssetType] {
+			_, err = q.UpsertPrimaryMediaAsset(ctx, sqlc.UpsertPrimaryMediaAssetParams{
+				MediaItemID: itemID,
+				AssetType:   sqlc.AssetType(art.AssetType),
+				Source:      "remote",
+				RemoteUrl:   art.URL,
+				Language:    art.Language,
+			})
+		} else {
+			label := art.Language
+			if label == "" {
+				label = "extra"
+			}
+			_, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+				MediaItemID: itemID,
+				AssetType:   sqlc.AssetType(art.AssetType),
+				Source:      "remote",
+				RemoteUrl:   art.URL,
+				Language:    art.Language,
+				Label:       label,
+				SortOrder:   int32(sortOrder),
+			})
 		}
-		if _, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
-			MediaItemID: itemID,
-			AssetType:   sqlc.AssetType(art.AssetType),
-			Source:      "remote",
-			RemoteUrl:   art.URL,
-			Label:       label,
-			SortOrder:   int32(sortOrder),
-		}); err != nil {
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			log.Debug().Err(err).Int64("item_id", itemID).Str("asset_type", art.AssetType).Msg("pending artwork row insert skipped")
 		}
 		sortOrder++

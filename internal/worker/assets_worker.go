@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -230,14 +231,25 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 			continue
 		}
 
-		if _, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
-			MediaItemID: mediaItemID,
-			AssetType:   sqlc.AssetType(img.AssetType),
-			Source:      "remote",
-			RemoteUrl:   img.URL,
-			Label:       img.Label,
-			SortOrder:   int32(img.SortOrder),
-		}); err != nil {
+		var err error
+		if SingleAssetTypes[img.AssetType] && img.Label == "" {
+			_, err = q.UpsertPrimaryMediaAsset(ctx, sqlc.UpsertPrimaryMediaAssetParams{
+				MediaItemID: mediaItemID,
+				AssetType:   sqlc.AssetType(img.AssetType),
+				Source:      "remote",
+				RemoteUrl:   img.URL,
+			})
+		} else {
+			_, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+				MediaItemID: mediaItemID,
+				AssetType:   sqlc.AssetType(img.AssetType),
+				Source:      "remote",
+				RemoteUrl:   img.URL,
+				Label:       img.Label,
+				SortOrder:   int32(img.SortOrder),
+			})
+		}
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			log.Debug().Err(err).Int64("media_item_id", mediaItemID).Str("asset_type", img.AssetType).Msg("pending image row insert skipped")
 		}
 	}
@@ -260,7 +272,9 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 	existing, _ := q.ListMediaAssets(ctx, mediaItemID)
 	seen := map[string]bool{}
 	for _, a := range existing {
-		if a.Label == "" && SingleAssetTypes[string(a.AssetType)] {
+		// A remote row does not fill a local-data slot. If the sidecar exists,
+		// the upsert below must be allowed to replace it.
+		if a.Label == "" && a.Source == "local" && SingleAssetTypes[string(a.AssetType)] {
 			seen[string(a.AssetType)] = true
 		}
 	}
@@ -294,13 +308,25 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 			if info != nil {
 				size = info.Size()
 			}
-			if _, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
-				MediaItemID: mediaItemID,
-				AssetType:   at,
-				Source:      "local",
-				LocalPath:   destPath,
-				FileSize:    size,
-			}); err == nil {
+			var err error
+			if SingleAssetTypes[string(at)] {
+				_, err = q.UpsertPrimaryMediaAsset(ctx, sqlc.UpsertPrimaryMediaAssetParams{
+					MediaItemID: mediaItemID,
+					AssetType:   at,
+					Source:      "local",
+					LocalPath:   destPath,
+					FileSize:    size,
+				})
+			} else {
+				_, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+					MediaItemID: mediaItemID,
+					AssetType:   at,
+					Source:      "local",
+					LocalPath:   destPath,
+					FileSize:    size,
+				})
+			}
+			if err == nil {
 				created++
 			}
 			continue
@@ -373,7 +399,7 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssetsFS(ctx context.Context, q *
 	existing, _ := q.ListMediaAssets(ctx, mediaItemID)
 	hasThumb := false
 	for _, a := range existing {
-		if a.AssetType == sqlc.AssetTypeThumb && a.Label == "" {
+		if a.AssetType == sqlc.AssetTypeThumb && a.Label == "" && a.Source == "local" {
 			hasThumb = true
 		}
 	}
@@ -424,7 +450,7 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssetsFS(ctx context.Context, q *
 				continue
 			}
 			hasThumb = true
-			if _, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+			if _, err := q.UpsertPrimaryMediaAsset(ctx, sqlc.UpsertPrimaryMediaAssetParams{
 				MediaItemID: mediaItemID,
 				AssetType:   sqlc.AssetTypeThumb,
 				Source:      "local",

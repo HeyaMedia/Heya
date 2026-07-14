@@ -536,9 +536,14 @@ func applyMovieRemoteAssets(ctx context.Context, q *sqlc.Queries, mediaItemID in
 			continue
 		}
 		count[art.AssetType]++
-		label := art.Language
-		if label == "" {
-			label = "extra"
+		label := ""
+		assetSortOrder := int32(0)
+		if !isSinglePrimaryAsset(assetType) {
+			label = art.Language
+			if label == "" {
+				label = "extra"
+			}
+			assetSortOrder = sortOrder
 		}
 		ok, err := createMovieAsset(ctx, q, sqlc.CreateMediaAssetParams{
 			MediaItemID: mediaItemID,
@@ -547,7 +552,7 @@ func applyMovieRemoteAssets(ctx context.Context, q *sqlc.Queries, mediaItemID in
 			RemoteUrl:   art.URL,
 			Language:    art.Language,
 			Label:       label,
-			SortOrder:   sortOrder,
+			SortOrder:   assetSortOrder,
 			Width:       int32(art.Width),
 			Height:      int32(art.Height),
 		})
@@ -563,7 +568,22 @@ func applyMovieRemoteAssets(ctx context.Context, q *sqlc.Queries, mediaItemID in
 }
 
 func createMovieAsset(ctx context.Context, q *sqlc.Queries, params sqlc.CreateMediaAssetParams) (bool, error) {
-	_, err := q.CreateMediaAsset(ctx, params)
+	var err error
+	if params.Label == "" && isSinglePrimaryAsset(params.AssetType) {
+		_, err = q.UpsertPrimaryMediaAsset(ctx, sqlc.UpsertPrimaryMediaAssetParams{
+			MediaItemID: params.MediaItemID,
+			AssetType:   params.AssetType,
+			Source:      params.Source,
+			LocalPath:   params.LocalPath,
+			RemoteUrl:   params.RemoteUrl,
+			Language:    params.Language,
+			Width:       params.Width,
+			Height:      params.Height,
+			FileSize:    params.FileSize,
+		})
+	} else {
+		_, err = q.CreateMediaAsset(ctx, params)
+	}
 	if err == nil {
 		return true, nil
 	}
@@ -571,6 +591,21 @@ func createMovieAsset(ctx context.Context, q *sqlc.Queries, params sqlc.CreateMe
 		return false, nil
 	}
 	return false, err
+}
+
+func isSinglePrimaryAsset(assetType sqlc.AssetType) bool {
+	switch assetType {
+	case sqlc.AssetTypePoster,
+		sqlc.AssetTypeLogo,
+		sqlc.AssetTypeArt,
+		sqlc.AssetTypeBanner,
+		sqlc.AssetTypeThumb,
+		sqlc.AssetTypeDisc,
+		sqlc.AssetTypeClearart:
+		return true
+	default:
+		return false
+	}
 }
 
 func markMovieApplyEnriched(ctx context.Context, q *sqlc.Queries, mediaItemID int64) error {

@@ -91,33 +91,33 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 		return nil
 	}
 
+	var assetErr error
 	if SingleAssetTypes[job.Args.AssetType] && job.Args.Label == "" {
-		existing, _ := q.ListMediaAssetsByType(ctx, sqlc.ListMediaAssetsByTypeParams{
+		_, assetErr = q.UpsertPrimaryMediaAsset(ctx, sqlc.UpsertPrimaryMediaAssetParams{
 			MediaItemID: job.Args.MediaItemID,
 			AssetType:   sqlc.AssetType(job.Args.AssetType),
+			Source:      "remote",
+			LocalPath:   localPath,
+			RemoteUrl:   job.Args.URL,
 		})
-		for _, old := range existing {
-			if old.Label == "" {
-				q.DeleteMediaAsset(ctx, old.ID)
-			}
+	} else {
+		_, assetErr = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+			MediaItemID: job.Args.MediaItemID,
+			AssetType:   sqlc.AssetType(job.Args.AssetType),
+			Source:      "remote",
+			LocalPath:   localPath,
+			RemoteUrl:   job.Args.URL,
+			Label:       job.Args.Label,
+			SortOrder:   int32(job.Args.SortOrder),
+		})
+	}
+	if assetErr != nil {
+		if !errors.Is(assetErr, pgx.ErrNoRows) {
+			log.Debug().Err(assetErr).Str("path", localPath).Msg("failed to create media asset")
 		}
 	}
 
-	asset, assetErr := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
-		MediaItemID: job.Args.MediaItemID,
-		AssetType:   sqlc.AssetType(job.Args.AssetType),
-		Source:      "remote",
-		LocalPath:   localPath,
-		RemoteUrl:   job.Args.URL,
-		Label:       job.Args.Label,
-		SortOrder:   int32(job.Args.SortOrder),
-	})
-	if assetErr != nil {
-		log.Debug().Err(assetErr).Str("path", localPath).Msg("failed to create media asset")
-	}
-	_ = asset
-
-	if job.Args.AssetType == "poster" && job.Args.SortOrder == 0 {
+	if assetErr == nil && job.Args.AssetType == "poster" && job.Args.SortOrder == 0 {
 		item, err := q.GetMediaItemByID(ctx, job.Args.MediaItemID)
 		if err == nil {
 			updateArtworkPathColumns(ctx, q, item, localPath, item.BackdropPath)
