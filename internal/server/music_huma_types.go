@@ -143,12 +143,8 @@ func defaultPositive(v, def int32) int32 {
 	return v
 }
 
-// readTrackLyrics adapts the existing primaryLyricsPath + readLyricsFile path
-// used by the legacy handler. The lyrics parser lives in lyrics_handlers.go.
+// readTrackLyrics keeps the Huma handler coupled only to the service-level
+// local-first/canonical fallback. The parser lives in lyrics_handlers.go.
 func readTrackLyrics(ctx context.Context, app *service.App, trackID int64) ([]byte, error) {
-	path, err := primaryLyricsPathCtx(ctx, app, trackID)
-	if err != nil {
-		return nil, err
-	}
-	return readLyricsFile(path)
+	return app.TrackLyrics(ctx, trackID)
 }

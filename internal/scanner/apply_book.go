@@ -130,6 +130,9 @@ func ApplyBookMaterialization(ctx context.Context, lib sqlc.Library, result Resu
 		if applied.Action != "repair" && mediaAction == "create_media_item" {
 			applied.Action = "create"
 		}
+		if err := bindCanonicalMetadata(ctx, q, "media_item", item.ID, detail); err != nil {
+			return results, fmt.Errorf("bind book %s to canonical metadata: %w", preview.Key, err)
+		}
 
 		bookRow, rowAction, err := applyBookRow(ctx, q, item.ID, detail, preview)
 		if err != nil {
@@ -312,6 +315,11 @@ func applyBookRow(ctx context.Context, q *sqlc.Queries, mediaItemID int64, detai
 	authorID, err := applyBookAuthor(ctx, q, detail)
 	if err != nil {
 		return sqlc.Book{}, "", err
+	}
+	if authorID.Valid {
+		if err := bindCanonicalChild(ctx, q, "author", authorID.Int64, detail.AuthorCanonicalID, "author"); err != nil {
+			return sqlc.Book{}, "", err
+		}
 	}
 	filePath := firstBookFilePath(preview)
 	bookFormat := bookDatabaseFormat(preview)

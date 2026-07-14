@@ -383,6 +383,28 @@ func TestFetchArtifactCoverageRequiresDetailForApply(t *testing.T) {
 	require.True(t, fetchMetadataCoversAcceptedSearch(result, sqlc.Library{MediaType: sqlc.MediaTypeMovie}))
 }
 
+func TestFetchArtifactCoverageAcceptsCandidateToCanonicalPromotion(t *testing.T) {
+	const key = "artist:gorillaz"
+	const canonicalID = "655bcfd0-b04d-45d6-9ed6-0b571fdc8be6"
+	result := Result{
+		MusicSearch: []MusicSearchMatch{{
+			Key: key, Accepted: true,
+			ProviderID: "heyametadata:v2:entity:" + canonicalID,
+		}},
+		MusicMetadata: []MusicFetchPreview{{
+			Key:        key,
+			ProviderID: "heyametadata:v2:candidate:artist:289f6483-ffeb-4325-97fb-b1840314d0f4",
+			Detail: &metadata.MediaDetail{
+				CanonicalID: canonicalID, CanonicalKind: "artist", ArtistName: "Gorillaz",
+			},
+		}},
+	}
+
+	require.True(t, fetchMetadataCoversAcceptedSearch(result, sqlc.Library{MediaType: sqlc.MediaTypeMusic}))
+	result.MusicMetadata[0].Detail.CanonicalID = "10000000-0000-4000-8000-000000000001"
+	require.False(t, fetchMetadataCoversAcceptedSearch(result, sqlc.Library{MediaType: sqlc.MediaTypeMusic}))
+}
+
 func TestLoadedSearchArtifactCanFetchWithoutSearchProvider(t *testing.T) {
 	fetcher := &fakeMovieDetailProvider{details: map[string]*metadata.MediaDetail{
 		"heya:movie:tmdb:438631": {

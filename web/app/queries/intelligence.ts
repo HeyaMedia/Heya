@@ -158,6 +158,7 @@ export const aiCatalogQuery = defineQueryOptions(() => ({
 }))
 
 export type ImageArtifactStatus = { role: string, name: string, size: number, present: boolean, shared: boolean }
+export type ImageComputeDevice = { name: string, description: string }
 export type ImageModel = {
   id: string
   label: string
@@ -178,10 +179,12 @@ export type ImageGenerationStatus = {
   download_state: string
   progress?: AIDownloadProgress
   download_error?: string
+  devices: ImageComputeDevice[]
+  device_error?: string
   artifacts: ImageArtifactStatus[]
   download_bytes: number
 }
-export type ImageGenerateRequest = { prompt: string, negative_prompt?: string, width?: number, height?: number, steps?: number, cfg?: number, seed?: number, model_id?: string, backend?: string }
+export type ImageGenerateRequest = { prompt: string, negative_prompt?: string, width?: number, height?: number, steps?: number, cfg?: number, seed?: number, model_id?: string, backend?: string, device?: string }
 export type ImageGenerateResult = { url: string, model: string, seed: number, duration_ms: number }
 
 export const imageGenerationStatusQuery = defineQueryOptions(() => ({

@@ -65,7 +65,7 @@ func configValues(c *config.Config) map[string]string {
 		"infra.log_level":         c.LogLevel.Value,
 		"infra.log_format":        c.LogFormat.Value,
 		"infra.data_dir":          c.DataDir.Value,
-		"infra.heya_media_url":    c.HeyaMediaURL.Value,
+		"infra.heya_metadata_url": c.HeyaMetadataURL.Value,
 		"transcoder.hwaccel":      c.HWAccel.Value,
 		"transcoder.cache_dir":    c.TranscodeCacheDir.Value,
 		"transcoder.cache_max_gb": strconv.Itoa(c.TranscodeCacheMaxGB.Value),

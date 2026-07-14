@@ -332,6 +332,10 @@ func (f *fakeBackend) ListTrackFiles(_ context.Context, _ int64) ([]sqlc.TrackFi
 	return []sqlc.TrackFile{}, nil
 }
 
+func (f *fakeBackend) TrackLyrics(_ context.Context, _ int64) ([]byte, error) {
+	return nil, service.ErrTrackLyricsUnavailable
+}
+
 func (f *fakeBackend) ListUsers(_ context.Context) ([]sqlc.User, error) {
 	return []sqlc.User{f.user}, nil
 }

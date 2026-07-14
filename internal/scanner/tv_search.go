@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/karbowiak/heya/internal/metadata"
@@ -37,15 +38,18 @@ type TVSearchQuery struct {
 }
 
 type TVSearchCandidate struct {
-	ProviderID  string            `json:"provider_id"`
-	Provider    string            `json:"provider"`
-	Title       string            `json:"title"`
-	Year        string            `json:"year,omitempty"`
-	Description string            `json:"description,omitempty"`
-	PosterURL   string            `json:"poster_url,omitempty"`
-	HeyaSlug    string            `json:"heya_slug,omitempty"`
-	Confidence  float64           `json:"confidence"`
-	ExternalIDs map[string]string `json:"external_ids,omitempty"`
+	ProviderID     string                    `json:"provider_id"`
+	Provider       string                    `json:"provider"`
+	Title          string                    `json:"title"`
+	Year           string                    `json:"year,omitempty"`
+	Description    string                    `json:"description,omitempty"`
+	PosterURL      string                    `json:"poster_url,omitempty"`
+	HeyaSlug       string                    `json:"heya_slug,omitempty"`
+	Confidence     float64                   `json:"confidence"`
+	Recommendation string                    `json:"recommendation,omitempty"`
+	Evidence       []metadata.SearchEvidence `json:"evidence,omitempty"`
+	RequiresReview bool                      `json:"requires_review,omitempty"`
+	ExternalIDs    map[string]string         `json:"external_ids,omitempty"`
 }
 
 func SearchTVMatches(ctx context.Context, matches []TVMatch, provider TVSearchProvider, emit Emitter, threshold float64, decisionsOpt ...SearchDecisions) ([]TVSearchMatch, error) {
@@ -71,7 +75,18 @@ func searchTVLikeMatches(ctx context.Context, matches []TVMatch, provider TVSear
 			return results, err
 		}
 
-		query := metadata.SearchQuery{Title: match.Title, Year: match.Year}
+		canonicalKind := "tv_show"
+		if domain == "anime" {
+			canonicalKind = "anime"
+		}
+		query := metadata.SearchQuery{
+			CanonicalKind: canonicalKind,
+			Title:         match.Title,
+			Year:          match.Year,
+			Identifiers:   cloneTVExternalIDs(match.ExternalIDs),
+			Aliases:       append([]string(nil), match.Aliases...),
+			Episodes:      tvDiscoveryEpisodeHints(match.Episodes, domain),
+		}
 		search := TVSearchMatch{
 			Key:   match.Key,
 			Query: TVSearchQuery{Title: query.Title, Year: query.Year, Aliases: match.Aliases},
@@ -93,13 +108,11 @@ func searchTVLikeMatches(ctx context.Context, matches []TVMatch, provider TVSear
 			}
 		}
 
-		if direct, ok := directTVSearchMatch(match, domain, emit); ok {
-			results = append(results, direct)
-			continue
-		}
-
 		candidates, err := provider.Search(ctx, metadata.KindTV, query)
 		if err != nil {
+			if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
+				return results, err
+			}
 			search.Reason = "search_error"
 			emit.Emit(Event{
 				Event:    "match.search_failed",
@@ -136,15 +149,18 @@ func searchTVLikeMatches(ctx context.Context, matches []TVMatch, provider TVSear
 
 		for _, candidate := range scored {
 			search.Candidates = append(search.Candidates, TVSearchCandidate{
-				ProviderID:  candidate.ProviderID,
-				Provider:    candidate.ProviderName,
-				Title:       candidate.Title,
-				Year:        candidate.Year,
-				Description: candidate.Description,
-				PosterURL:   candidate.PosterURL,
-				HeyaSlug:    candidate.HeyaSlug,
-				Confidence:  candidate.Confidence,
-				ExternalIDs: candidate.ExternalIDs,
+				ProviderID:     candidate.ProviderID,
+				Provider:       candidate.ProviderName,
+				Title:          candidate.Title,
+				Year:           candidate.Year,
+				Description:    candidate.Description,
+				PosterURL:      candidate.PosterURL,
+				HeyaSlug:       candidate.HeyaSlug,
+				Confidence:     candidate.Confidence,
+				Recommendation: candidate.Recommendation,
+				Evidence:       candidate.Evidence,
+				RequiresReview: candidate.RequiresReview,
+				ExternalIDs:    candidate.ExternalIDs,
 			})
 			emit.Emit(Event{
 				Event: "match.candidate",
@@ -169,7 +185,10 @@ func searchTVLikeMatches(ctx context.Context, matches []TVMatch, provider TVSear
 
 		top := scored[0]
 		clearGap := movieSearchClearGap(scored, match.Title)
-		if top.Confidence >= threshold && clearGap {
+		if domain == "anime" && !top.RequiresReview && heyaEvidenceClearsTVAmbiguity(match.Year, top.Year, top.Evidence) {
+			clearGap = true
+		}
+		if !top.RequiresReview && top.Confidence >= threshold && clearGap {
 			search.Accepted = true
 			search.ProviderID = top.ProviderID
 			search.Provider = top.ProviderName
@@ -218,70 +237,25 @@ func searchTVLikeMatches(ctx context.Context, matches []TVMatch, provider TVSear
 	return results, nil
 }
 
-func directTVSearchMatch(match TVMatch, domain string, emit Emitter) (TVSearchMatch, bool) {
-	provider := tvDirectIDProvider(match.KeyType)
-	if provider == "" {
-		return TVSearchMatch{}, false
-	}
-	value := strings.TrimSpace(match.ExternalIDs[provider])
-	if value == "" {
-		prefix := provider + ":"
-		if strings.HasPrefix(match.Key, prefix) {
-			value = strings.TrimSpace(strings.TrimPrefix(match.Key, prefix))
+func tvDiscoveryEpisodeHints(refs []TVEpisodeRef, domain string) []metadata.EpisodeHint {
+	seen := make(map[[2]int]struct{}, len(refs))
+	hints := make([]metadata.EpisodeHint, 0, len(refs))
+	for _, ref := range refs {
+		season, number := ref.Season, ref.Episode
+		if domain == "anime" && ref.Absolute > 0 {
+			season, number = 0, ref.Absolute
 		}
+		if number <= 0 {
+			continue
+		}
+		key := [2]int{season, number}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		hints = append(hints, metadata.EpisodeHint{Season: season, Number: number})
 	}
-	if value == "" {
-		return TVSearchMatch{}, false
-	}
-
-	providerID := "heya:tv:" + provider + ":" + value
-	candidate := TVSearchCandidate{
-		ProviderID:  providerID,
-		Provider:    "heya",
-		Title:       match.Title,
-		Year:        match.Year,
-		Confidence:  1,
-		ExternalIDs: cloneTVExternalIDs(match.ExternalIDs),
-	}
-	if candidate.ExternalIDs == nil {
-		candidate.ExternalIDs = map[string]string{}
-	}
-	candidate.ExternalIDs[provider] = value
-
-	search := TVSearchMatch{
-		Key:         match.Key,
-		Query:       TVSearchQuery{Title: match.Title, Year: match.Year, Aliases: match.Aliases},
-		Accepted:    true,
-		ProviderID:  providerID,
-		Provider:    "heya",
-		Title:       match.Title,
-		Year:        match.Year,
-		Confidence:  1,
-		Candidates:  []TVSearchCandidate{candidate},
-		ExternalIDs: candidate.ExternalIDs,
-	}
-	emit.Emit(Event{
-		Event: "match.direct_selected",
-		Kind:  domain,
-		Data: map[string]any{
-			"key":          match.Key,
-			"provider_id":  providerID,
-			"title":        match.Title,
-			"year":         match.Year,
-			"confidence":   search.Confidence,
-			"external_ids": candidate.ExternalIDs,
-		},
-	})
-	return search, true
-}
-
-func tvDirectIDProvider(keyType string) string {
-	switch keyType {
-	case "tmdb", "tvdb", "imdb", "anidb", "mal":
-		return keyType
-	default:
-		return ""
-	}
+	return hints
 }
 
 func cloneTVExternalIDs(ids map[string]string) map[string]string {
@@ -388,6 +362,44 @@ func tvSearchPrimaryTitleExact(match TVMatch, title string) bool {
 	}
 	for _, queryTitle := range tvSearchQueryTitles(match) {
 		if normalizeSearchTitle(queryTitle) == title {
+			return true
+		}
+	}
+	return false
+}
+
+func heyaEvidenceClearsTVAmbiguity(queryYear, candidateYear string, evidence []metadata.SearchEvidence) bool {
+	if !searchEvidenceIsExact(evidence, "title") {
+		return false
+	}
+	if queryYear != "" && queryYear == candidateYear && searchEvidenceIsExact(evidence, "year") {
+		return true
+	}
+	return searchEvidenceHasCompleteEpisodes(evidence)
+}
+
+func searchEvidenceIsExact(evidence []metadata.SearchEvidence, field string) bool {
+	for _, item := range evidence {
+		if strings.EqualFold(item.Field, field) &&
+			(strings.EqualFold(item.Outcome, "exact") || strings.EqualFold(item.Outcome, "exact_alias")) {
+			return true
+		}
+	}
+	return false
+}
+
+func searchEvidenceHasCompleteEpisodes(evidence []metadata.SearchEvidence) bool {
+	for _, item := range evidence {
+		if !strings.EqualFold(item.Field, "episodes") {
+			continue
+		}
+		matchedText, totalText, ok := strings.Cut(strings.TrimSpace(item.Outcome), "_of_")
+		if !ok {
+			continue
+		}
+		matched, matchedErr := strconv.Atoi(matchedText)
+		total, totalErr := strconv.Atoi(totalText)
+		if matchedErr == nil && totalErr == nil && total > 0 && matched == total {
 			return true
 		}
 	}

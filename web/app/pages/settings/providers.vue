@@ -114,13 +114,13 @@ const UPSTREAM_SOURCES = [
       description="See where metadata comes from and configure credentials for services that require a direct account."
     />
 
-    <SettingsSection title="Heya Media aggregator" icon="database"
-      description="The upstream metadata router. All movie / TV / music / book metadata reaches Heya through it — there are no direct outbound clients in this binary."
-      lockedBy="HEYA_MEDIA_*">
+    <SettingsSection title="HeyaMetadata V2" icon="database"
+      description="The canonical metadata service. It owns provider reconciliation, durable discovery/resolution, freshness, and canonical identities. Community skip segments are fetched directly by Heya."
+      lockedBy="HEYA_METADATA_*">
       <KVTable :rows="[
-        { key: 'Base URL',  value: 'https://heya.media', mono: true, copy: true },
-        { key: 'Client',    value: 'internal/metadata/heyamedia', mono: true },
-        { key: 'Authentication', value: 'API key (env-managed)' },
+        { key: 'Base URL',  value: 'HEYA_METADATA_URL (default http://localhost:3030)', mono: true },
+        { key: 'Client',    value: 'internal/metadata/heyametadata', mono: true },
+        { key: 'Authentication', value: 'HEYA_METADATA_API_KEY (optional, env-managed)' },
       ]" />
       <div class="upstream-row">
         <div v-for="s in UPSTREAM_SOURCES" :key="s.name" class="upstream-chip">

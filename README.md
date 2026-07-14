@@ -1,10 +1,10 @@
 # Heya
 
 Self-hosted media server for films, TV, music, and books — a single Go binary
-with the Nuxt SPA embedded, Postgres as the only datastore. Metadata comes
-from [HeyaMedia/metadata-server](https://github.com/HeyaMedia/metadata-server)
-(TMDB, TVDB, AniDB, MusicBrainz, OpenLibrary behind one aggregator), so Heya
-stays focused on libraries, playback, and the UI.
+with the Nuxt SPA embedded, Postgres as the only datastore. Canonical metadata
+comes from HeyaMetadata V2 (TMDB, TVDB, AniDB, MusicBrainz, and OpenLibrary
+reconciled behind one UUID-based contract), so Heya stays focused on libraries,
+playback, and the UI. Community skip segments are fetched directly by Heya.
 
 - **Libraries** — local + SMB mounts, filesystem watch + periodic re-scan, NFO-aware matching
 - **Playback** — HLS transcoding with per-client capability negotiation, ASS subtitles, trickplay
@@ -21,13 +21,15 @@ mkdir -p "$HOME/heya-data"
 docker run -d --name heya -p 8080:8080 \
   -v "$HOME/heya-data:/data" \
   -v "/path/to/your/media:/media:ro" \
+  -e HEYA_METADATA_URL='https://your-heyametadata.example' \
   -e HEYA_ADMIN_USERNAME=admin \
   -e HEYA_ADMIN_PASSWORD=admin \
   ghcr.io/heyamedia/heya:latest-aio
 ```
 
 Replace `/path/to/your/media` with the absolute path to your films, shows,
-music, or books, then add `/media` as a library in Heya. `$HOME/heya-data`
+music, or books, and set `HEYA_METADATA_URL` to a reachable HeyaMetadata V2
+deployment, then add `/media` as a library in Heya. `$HOME/heya-data`
 holds PostgreSQL and all other Heya state, making it straightforward to inspect
 and back up. A Docker named volume also works, but a normal host path is
 recommended. Or use the regular image against your own Postgres:
@@ -35,6 +37,7 @@ recommended. Or use the regular image against your own Postgres:
 ```bash
 docker run -p 8080:8080 -v $PWD/data:/data \
   -e HEYA_DATABASE_URL='postgres://heya:heya@db:5432/heya?sslmode=disable' \
+  -e HEYA_METADATA_URL='https://your-heyametadata.example' \
   ghcr.io/heyamedia/heya:latest
 ```
 

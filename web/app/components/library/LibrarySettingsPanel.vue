@@ -68,7 +68,7 @@
         <div class="toggle-row" @click="toggleBool('fetch_ratings')">
           <div class="toggle-info">
             <span class="toggle-name">Fetch external ratings</span>
-            <span class="toggle-desc">Pull IMDb, TMDB, and other ratings from heya.media</span>
+            <span class="toggle-desc">Pull provider ratings through HeyaMetadata V2</span>
           </div>
           <AppSwitch
             :model-value="local.fetch_ratings"
@@ -146,7 +146,7 @@
       </div>
       <p class="sp-footnote">
         <Icon name="refresh" :size="11" />
-        Metadata is fetched from heya.media and auto-refreshes on its own —
+        Metadata is fetched from HeyaMetadata V2 and refreshed through its change feed —
         every 14 days while a title is still active, every 180 days once it has
         ended.
       </p>

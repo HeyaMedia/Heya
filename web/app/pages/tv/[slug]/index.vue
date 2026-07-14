@@ -19,7 +19,7 @@
         </div>
 
         <div class="hero-info">
-          <!-- Provenance rail: IMDb/TMDB/TVDB/heya.media links. -->
+          <!-- Provenance rail: IMDb/TMDB/TVDB provider links. -->
           <DetailLinksRow :media-item="detail.media_item" />
 
           <div class="detail-badges">
@@ -228,7 +228,7 @@
       </AppDialog>
 
       <!-- Recommendations: library titles by default; the appearance toggle
-           adds the rest as heya.media links (new tab, fetch-on-demand). -->
+           adds external provider links for titles not in this library. -->
       <div v-if="visibleRecs.length" class="detail-section">
         <div class="section-row-head">
           <h2 class="section-title-lg">More Like This</h2>
@@ -248,7 +248,7 @@
                 :src="recPosterUrl(r)"
                 aspect="2/3"
                 :title="r.title ?? 'Untitled'"
-                :badge-tl="r.local_media_item_id ? '' : 'heya.media ↗'"
+                :badge-tl="r.local_media_item_id ? '' : 'provider ↗'"
                 :badge-tr="r.vote_average ? `★ ${formatVote(r.vote_average)}` : ''"
               />
             </NuxtLink>
@@ -262,7 +262,7 @@
                 :src="recPosterUrl(r)"
                 aspect="2/3"
                 :title="r.title ?? 'Untitled'"
-                :badge-tl="r.local_media_item_id ? '' : 'heya.media ↗'"
+                :badge-tl="r.local_media_item_id ? '' : 'provider ↗'"
                 :badge-tr="r.vote_average ? `★ ${formatVote(r.vote_average)}` : ''"
               />
             </NuxtLink>
@@ -395,20 +395,20 @@ const listStyle = computed(() =>
     : undefined)
 
 // "More Like This": library titles only by default; the appearance toggle
-// adds the rest as heya.media links (fetch-on-demand upstream pages).
+// adds the rest as links to their strongest public metadata provider.
 // Externals without a usable provider id are dropped rather than rendered —
 // a card whose link resolves nowhere would open a junk tab.
 const visibleRecs = computed(() => {
   const recs = detail.value?.recommendations ?? []
   if (!prefs.value.showUnavailableRecs) return recs.filter(r => r.local_media_item_id)
-  return recs.filter(r => r.local_media_item_id || heyaMediaExternalUrl(r.media_type, r.external_ids))
+  return recs.filter(r => r.local_media_item_id || externalProviderUrl(r.media_type, r.external_ids))
 })
 
 function recTo(r: MediaRecommendation): string {
   if (r.local_media_item_id) {
     return mediaUrl({ id: r.local_media_item_id, public_id: r.local_public_id ?? undefined, title: r.title ?? '', slug: r.local_slug ?? undefined, media_type: r.media_type })
   }
-  return heyaMediaExternalUrl(r.media_type, r.external_ids)
+  return externalProviderUrl(r.media_type, r.external_ids)
 }
 
 // Lightbox openers
@@ -875,7 +875,7 @@ watch(detail, async (d) => {
 
 /* Recs */
 .rec-card { width: 140px; flex-shrink: 0; text-decoration: none; color: inherit; display: block; }
-/* External (not in library): dimmed but clickable — opens on heya.media. */
+/* External (not in library): dimmed but clickable — opens its public provider. */
 .rec-card.rec-external { opacity: 0.65; transition: opacity 0.15s; }
 .rec-card.rec-external:hover { opacity: 1; }
 .rec-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 18px; }

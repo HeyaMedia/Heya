@@ -15,6 +15,7 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/metadata"
+	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/karbowiak/heya/internal/worker"
 	"github.com/rs/zerolog/log"
 )
@@ -503,12 +504,15 @@ func (a *App) resolveIdentifyURL(ctx context.Context, providerName, providerID s
 		return metadata.SearchResult{}, err
 	}
 	return metadata.SearchResult{
-		ProviderID:   providerID,
-		ProviderName: providerName,
+		ProviderID:   heyametadata.EncodeEntityProviderID(detail.CanonicalID),
+		ProviderName: "heya",
 		Title:        detail.Title,
 		Year:         detail.Year,
 		Description:  detail.Description,
 		PosterURL:    detail.PosterURL,
+		HeyaSlug:     detail.CanonicalID,
+		ExternalIDs:  detail.ExternalIDs,
+		Enriched:     true,
 		Confidence:   1.0,
 	}, nil
 }

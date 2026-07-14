@@ -12,7 +12,7 @@
       </button>
     </div>
     <div class="mid-results scroll">
-      <div v-if="searching" class="mid-empty">Searching heya.media albums...</div>
+      <div v-if="searching" class="mid-empty">Searching HeyaMetadata albums...</div>
       <div v-else-if="searched && !results.length" class="mid-empty">No results found</div>
       <div
         v-for="r in results"

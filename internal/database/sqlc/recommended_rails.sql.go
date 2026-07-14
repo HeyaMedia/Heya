@@ -14,7 +14,7 @@ import (
 const listLocalRecommendations = `-- name: ListLocalRecommendations :many
 
 WITH agg AS (
-  SELECT mr.external_ids, count(*)::int AS source_count, max(mr.vote_average) AS vote
+  SELECT mr.external_ids, count(*)::int AS source_count, max(mr.provider_score) AS score
   FROM media_recommendations mr
   WHERE (
       mr.media_type = $5::text
@@ -46,7 +46,7 @@ WHERE (
     SELECT 1 FROM user_watch_progress wp
     WHERE wp.user_id = $2 AND wp.entity_type = 'movie' AND wp.entity_id = mi.id AND wp.completed = true
   )
-ORDER BY agg.source_count DESC, agg.vote DESC NULLS LAST
+ORDER BY agg.source_count DESC, agg.score DESC NULLS LAST
 LIMIT $4 OFFSET $3
 `
 
@@ -68,8 +68,8 @@ type ListLocalRecommendationsRow struct {
 	SourceCount int32  `json:"source_count"`
 }
 
-// ── Shared: local TMDB recommendations ──────────────────────────────────
-// Library-wide TMDB "recommended" entries that resolve to an owned item of the
+// ── Shared: local canonical recommendations ──────────────────────────────
+// Library-wide provider recommendations that resolve to an owned item of the
 // given media_type, most-recommended first. Movies the user has finished are
 // dropped; TV keeps its series (episode-keyed progress can't mark a series
 // done here, which is fine for a discovery rail).

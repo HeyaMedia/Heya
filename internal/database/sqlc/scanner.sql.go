@@ -979,6 +979,61 @@ func (q *Queries) IgnoreScannerIdentity(ctx context.Context, arg IgnoreScannerId
 	return i, err
 }
 
+const listFailedScannerEntitiesByLibrary = `-- name: ListFailedScannerEntitiesByLibrary :many
+SELECT id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at FROM scanner_entities
+WHERE library_id = $1
+  AND error_message <> ''
+  AND status IN ('metadata_error', 'apply_error', 'error', 'failed')
+ORDER BY updated_at DESC, id DESC
+`
+
+// Pipeline failures happen after a search run has already been persisted, so
+// scan_runs alone cannot describe the final outcome. Keep this query scoped to
+// terminal error states; transient matched/fetching rows and review decisions
+// are represented elsewhere in the scanner view.
+func (q *Queries) ListFailedScannerEntitiesByLibrary(ctx context.Context, libraryID int64) ([]ScannerEntity, error) {
+	rows, err := q.db.Query(ctx, listFailedScannerEntitiesByLibrary, libraryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ScannerEntity{}
+	for rows.Next() {
+		var i ScannerEntity
+		if err := rows.Scan(
+			&i.ID,
+			&i.LibraryID,
+			&i.MediaType,
+			&i.ScopeKey,
+			&i.ScopePaths,
+			&i.IdentityKey,
+			&i.Title,
+			&i.Year,
+			&i.ProviderID,
+			&i.Status,
+			&i.SearchScanRunID,
+			&i.FetchScanRunID,
+			&i.SearchArtifactID,
+			&i.MetadataArtifactID,
+			&i.ApplyArtifactID,
+			&i.ErrorMessage,
+			&i.Data,
+			&i.DiscoveredAt,
+			&i.SearchedAt,
+			&i.FetchedAt,
+			&i.AppliedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLibraryFileLinksByFile = `-- name: ListLibraryFileLinksByFile :many
 SELECT id, library_file_id, media_item_id, movie_id, tv_episode_id, relation_type, season_number, episode_number, absolute_number, part_index, title, source, confidence, created_at, updated_at, identity_id, scan_run_id, extra_type, thumbnail_path, metadata FROM library_file_links
 WHERE library_file_id = $1
@@ -1989,6 +2044,64 @@ func (q *Queries) ResetScannerIdentityReview(ctx context.Context, arg ResetScann
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const resolveMatchingOpenUnscopedScanFinding = `-- name: ResolveMatchingOpenUnscopedScanFinding :exec
+UPDATE scan_findings
+SET resolved_at = now()
+WHERE library_id = $1
+  AND media_type = $2
+  AND identity_id IS NULL
+  AND resolved_at IS NULL
+  AND code = $3
+  AND rel_path = $4
+  AND message = $5
+`
+
+type ResolveMatchingOpenUnscopedScanFindingParams struct {
+	LibraryID int64     `json:"library_id"`
+	MediaType MediaType `json:"media_type"`
+	Code      string    `json:"code"`
+	RelPath   string    `json:"rel_path"`
+	Message   string    `json:"message"`
+}
+
+func (q *Queries) ResolveMatchingOpenUnscopedScanFinding(ctx context.Context, arg ResolveMatchingOpenUnscopedScanFindingParams) error {
+	_, err := q.db.Exec(ctx, resolveMatchingOpenUnscopedScanFinding,
+		arg.LibraryID,
+		arg.MediaType,
+		arg.Code,
+		arg.RelPath,
+		arg.Message,
+	)
+	return err
+}
+
+const resolveOpenScanFindingsByIdentities = `-- name: ResolveOpenScanFindingsByIdentities :exec
+UPDATE scan_findings
+SET resolved_at = now()
+WHERE library_id = $1
+  AND media_type = $2
+  AND resolved_at IS NULL
+  AND code = ANY($3::text[])
+  AND identity_id = ANY($4::bigint[])
+`
+
+type ResolveOpenScanFindingsByIdentitiesParams struct {
+	LibraryID   int64     `json:"library_id"`
+	MediaType   MediaType `json:"media_type"`
+	Codes       []string  `json:"codes"`
+	IdentityIds []int64   `json:"identity_ids"`
+}
+
+func (q *Queries) ResolveOpenScanFindingsByIdentities(ctx context.Context, arg ResolveOpenScanFindingsByIdentitiesParams) error {
+	_, err := q.db.Exec(ctx, resolveOpenScanFindingsByIdentities,
+		arg.LibraryID,
+		arg.MediaType,
+		arg.Codes,
+		arg.IdentityIds,
+	)
+	return err
 }
 
 const resolveOpenScanFindingsByLibrary = `-- name: ResolveOpenScanFindingsByLibrary :exec

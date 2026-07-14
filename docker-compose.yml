@@ -35,6 +35,9 @@ services:
       - "8080:8080"
     environment:
       HEYA_DATABASE_URL: postgres://heya:heya@postgres:5432/heya?sslmode=disable
+      # Run HeyaMetadata separately. This default reaches a host-side dev
+      # instance on :3030; override HEYA_METADATA_URL for another deployment.
+      HEYA_METADATA_URL: ${HEYA_METADATA_URL:-http://host.docker.internal:3030}
       # First-boot admin bootstrap (ignored once an admin user exists):
       # HEYA_ADMIN_USERNAME: admin
       # HEYA_ADMIN_EMAIL: admin@example.com
@@ -46,6 +49,9 @@ services:
       # HEYA_LIBRARY_0_TYPE: movie
       # Intel/AMD hardware transcode (pair with the devices block below):
       # HEYA_HWACCEL: vaapi
+    extra_hosts:
+      # Makes host.docker.internal work on Linux as well as Docker Desktop.
+      - "host.docker.internal:host-gateway"
     volumes:
       # Tailscale state, transcode cache, sonic models — keep this persistent.
       - ./data/heya:/data

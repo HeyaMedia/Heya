@@ -204,7 +204,7 @@ func TestFindAndParseRealFixture(t *testing.T) {
 	assert.Equal(t, "Attack on Titan", parsed.Title)
 	assert.Equal(t, "1429", parsed.TMDBID)
 	assert.Equal(t, "tt2560140", parsed.IMDBID)
-	assert.Equal(t, "10944", parsed.AniDBID)
+	assert.Equal(t, "9541", parsed.AniDBID)
 	assert.Equal(t, "2013", parsed.Year)
 	assert.Equal(t, "tvshow", parsed.Kind)
 }

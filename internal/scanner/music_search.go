@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -15,6 +16,15 @@ import (
 const musicArtistAutoMatchThreshold = 0.85
 const musicArtistSearchTimeout = 3 * time.Minute
 const musicArtistSearchConcurrency = 4
+const musicArtistDiscoveryReleaseHintLimit = 3
+
+// Literal artist identity is always searched first. These separators are used
+// only for the second-chance primary-credit lookup after that literal lookup
+// fails, so a fixed-name group such as "Above & Beyond" is never split while
+// its canonical identity is available. Keep this aligned with HeyaMetadata's
+// retained-credit parser; the deliberately compact production regression
+// corpus covers every form seen in the real music library.
+var musicCollaborationSeparatorRE = regexp.MustCompile(`(?i)(?:\s+(?:&|and|with|w/|feat\.?|featuring|ft\.?|f/|x|×|vs\.?|versus|presents|meets|/)\s+|\s+f\.\s*|\s*;\s+|\s+:\s+)`)
 
 type MusicSearchProvider interface {
 	Search(context.Context, metadata.MediaKind, metadata.SearchQuery) ([]metadata.SearchResult, error)
@@ -36,19 +46,23 @@ type MusicSearchMatch struct {
 }
 
 type MusicSearchQuery struct {
-	Artist  string   `json:"artist"`
-	Aliases []string `json:"aliases,omitempty"`
+	Artist   string                 `json:"artist"`
+	Aliases  []string               `json:"aliases,omitempty"`
+	Releases []metadata.ReleaseHint `json:"releases,omitempty"`
 }
 
 type MusicSearchCandidate struct {
-	ProviderID  string            `json:"provider_id"`
-	Provider    string            `json:"provider"`
-	Artist      string            `json:"artist"`
-	Description string            `json:"description,omitempty"`
-	PosterURL   string            `json:"poster_url,omitempty"`
-	HeyaSlug    string            `json:"heya_slug,omitempty"`
-	Confidence  float64           `json:"confidence"`
-	ExternalIDs map[string]string `json:"external_ids,omitempty"`
+	ProviderID     string                    `json:"provider_id"`
+	Provider       string                    `json:"provider"`
+	Artist         string                    `json:"artist"`
+	Description    string                    `json:"description,omitempty"`
+	PosterURL      string                    `json:"poster_url,omitempty"`
+	HeyaSlug       string                    `json:"heya_slug,omitempty"`
+	Confidence     float64                   `json:"confidence"`
+	Recommendation string                    `json:"recommendation,omitempty"`
+	Evidence       []metadata.SearchEvidence `json:"evidence,omitempty"`
+	RequiresReview bool                      `json:"requires_review,omitempty"`
+	ExternalIDs    map[string]string         `json:"external_ids,omitempty"`
 }
 
 func SearchMusicArtists(ctx context.Context, artists []MusicArtistPlan, provider MusicSearchProvider, emit Emitter, threshold float64, decisionsOpt ...SearchDecisions) ([]MusicSearchMatch, error) {
@@ -89,7 +103,12 @@ func SearchMusicArtists(ctx context.Context, artists []MusicArtistPlan, provider
 				setErr(err)
 				return
 			}
-			results[i] = searchOneMusicArtist(ctx, artist, provider, emit, threshold, decisions)
+			result, err := searchOneMusicArtist(ctx, artist, provider, emit, threshold, decisions)
+			if err != nil {
+				setErr(err)
+				return
+			}
+			results[i] = result
 		}(i, artist)
 	}
 	wg.Wait()
@@ -107,11 +126,12 @@ func SearchMusicArtists(ctx context.Context, artists []MusicArtistPlan, provider
 	return results, nil
 }
 
-func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider MusicSearchProvider, emit Emitter, threshold float64, decisions SearchDecisions) MusicSearchMatch {
-	query := metadata.SearchQuery{Title: artist.Artist}
+func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider MusicSearchProvider, emit Emitter, threshold float64, decisions SearchDecisions) (MusicSearchMatch, error) {
+	releases := musicDiscoveryReleaseHints(artist.Albums)
+	query := metadata.SearchQuery{Title: artist.Artist, Identifiers: cloneStringMap(artist.ExternalIDs), Releases: releases}
 	search := MusicSearchMatch{
 		Key:   artist.Key,
-		Query: MusicSearchQuery{Artist: artist.Artist},
+		Query: MusicSearchQuery{Artist: artist.Artist, Releases: releases},
 	}
 	emit.Emit(Event{
 		Event: "match.search",
@@ -124,18 +144,17 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 
 	if decision, ok := decisions[artist.Key]; ok {
 		if applied, handled := applyMusicSearchDecision(artist, search, decision, emit); handled {
-			return applied
+			return applied, nil
 		}
-	}
-
-	if direct, ok := directMusicSearchMatch(artist, emit); ok {
-		return direct
 	}
 
 	searchCtx, cancel := context.WithTimeout(ctx, musicArtistSearchTimeout)
 	candidates, err := provider.Search(searchCtx, metadata.KindMusic, query)
 	cancel()
 	if err != nil {
+		if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
+			return search, err
+		}
 		search.Reason = "search_error"
 		search.Error = err.Error()
 		emit.Emit(Event{
@@ -149,48 +168,59 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 				"artist": artist.Artist,
 			},
 		})
-		return search
+		return search, nil
 	}
 
-	scored := make([]metadata.SearchResult, len(candidates))
-	copy(scored, candidates)
-	for i := range scored {
-		scored[i].Confidence = scoreMusicSearchCandidate(artist, scored[i])
-	}
-	sort.Slice(scored, func(i, j int) bool {
-		if scored[i].Confidence == scored[j].Confidence {
-			iExact := musicSearchArtistExact(artist, scored[i].Title)
-			jExact := musicSearchArtistExact(artist, scored[j].Title)
-			if iExact != jExact {
-				return iExact
+	selectionArtist := artist
+	scored := scoreMusicSearchResults(artist, candidates)
+	if !musicSearchCanAutoAccept(scored, artist.Artist, threshold) {
+		if primary := musicPrimaryCollaborationArtist(artist.Artist); primary != "" {
+			fallbackArtist := artist
+			fallbackArtist.Artist = primary
+			fallbackArtist.ExternalIDs = nil
+			fallbackQuery := metadata.SearchQuery{Title: primary, Releases: releases}
+			fallbackCtx, fallbackCancel := context.WithTimeout(ctx, musicArtistSearchTimeout)
+			fallbackCandidates, fallbackErr := provider.Search(fallbackCtx, metadata.KindMusic, fallbackQuery)
+			fallbackCancel()
+			if fallbackErr != nil {
+				if _, deferred := metadata.DeferredWorkRetryAfter(fallbackErr); deferred {
+					return search, fallbackErr
+				}
+				emit.Emit(Event{
+					Event: "match.collaboration_fallback_failed", Severity: SeverityInfo, Kind: "music",
+					Message: fallbackErr.Error(),
+					Data:    map[string]any{"key": artist.Key, "artist": artist.Artist, "primary_artist": primary},
+				})
+			} else {
+				selectionArtist = fallbackArtist
+				search.Query.Aliases = []string{artist.Artist}
+				scored = mergeScoredMusicSearchResults(scored, scoreMusicSearchResults(fallbackArtist, fallbackCandidates))
+				sortMusicSearchCandidates(scored, selectionArtist)
+				emit.Emit(Event{
+					Event: "match.collaboration_fallback", Kind: "music",
+					Data: map[string]any{
+						"key": artist.Key, "artist": artist.Artist, "primary_artist": primary,
+						"candidates": len(fallbackCandidates),
+					},
+				})
 			}
-			iCase := strings.TrimSpace(scored[i].Title) == strings.TrimSpace(artist.Artist)
-			jCase := strings.TrimSpace(scored[j].Title) == strings.TrimSpace(artist.Artist)
-			if iCase != jCase {
-				return iCase
-			}
-			if iCount, jCount := len(scored[i].ExternalIDs), len(scored[j].ExternalIDs); iCount != jCount {
-				return iCount > jCount
-			}
-			if rankI, rankJ := musicSearchProviderRank(scored[i]), musicSearchProviderRank(scored[j]); rankI != rankJ {
-				return rankI < rankJ
-			}
-			return scored[i].Title < scored[j].Title
 		}
-		return scored[i].Confidence > scored[j].Confidence
-	})
+	}
 
 	for _, candidate := range scored {
 		providerID := musicPreferredProviderID(candidate)
 		search.Candidates = append(search.Candidates, MusicSearchCandidate{
-			ProviderID:  providerID,
-			Provider:    candidate.ProviderName,
-			Artist:      candidate.Title,
-			Description: candidate.Description,
-			PosterURL:   candidate.PosterURL,
-			HeyaSlug:    candidate.HeyaSlug,
-			Confidence:  candidate.Confidence,
-			ExternalIDs: candidate.ExternalIDs,
+			ProviderID:     providerID,
+			Provider:       candidate.ProviderName,
+			Artist:         candidate.Title,
+			Description:    candidate.Description,
+			PosterURL:      candidate.PosterURL,
+			HeyaSlug:       candidate.HeyaSlug,
+			Confidence:     candidate.Confidence,
+			Recommendation: candidate.Recommendation,
+			Evidence:       candidate.Evidence,
+			RequiresReview: candidate.RequiresReview,
+			ExternalIDs:    candidate.ExternalIDs,
 		})
 		emit.Emit(Event{
 			Event: "match.candidate",
@@ -208,12 +238,12 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 	if len(scored) == 0 {
 		search.Reason = "no_candidates"
 		emit.Emit(Event{Event: "match.unresolved", Kind: "music", Reason: search.Reason, Data: map[string]any{"key": artist.Key, "artist": artist.Artist}})
-		return search
+		return search, nil
 	}
 
 	top := scored[0]
-	clearGap := musicSearchClearGap(scored, artist.Artist)
-	if top.Confidence >= threshold && clearGap {
+	clearGap := musicSearchClearGap(scored, selectionArtist.Artist)
+	if !top.RequiresReview && top.Confidence >= threshold && clearGap {
 		providerID := musicPreferredProviderID(top)
 		search.Accepted = true
 		search.ProviderID = providerID
@@ -247,55 +277,167 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 			},
 		})
 	}
-	return search
+	return search, nil
 }
 
-func directMusicSearchMatch(artist MusicArtistPlan, emit Emitter) (MusicSearchMatch, bool) {
-	provider, value := musicDirectArtistID(artist.ExternalIDs)
-	if provider == "" || value == "" {
-		return MusicSearchMatch{}, false
+func scoreMusicSearchResults(artist MusicArtistPlan, candidates []metadata.SearchResult) []metadata.SearchResult {
+	scored := append([]metadata.SearchResult(nil), candidates...)
+	for i := range scored {
+		scored[i].Confidence = scoreMusicSearchCandidate(artist, scored[i])
 	}
-	providerID := "heya:artist:" + provider + ":" + value
-	externalIDs := cloneStringMap(artist.ExternalIDs)
-	candidate := MusicSearchCandidate{
-		ProviderID:  providerID,
-		Provider:    "heya",
-		Artist:      artist.Artist,
-		Confidence:  1,
-		ExternalIDs: externalIDs,
-	}
-	search := MusicSearchMatch{
-		Key:         artist.Key,
-		Query:       MusicSearchQuery{Artist: artist.Artist},
-		Accepted:    true,
-		ProviderID:  providerID,
-		Provider:    "heya",
-		Artist:      artist.Artist,
-		Confidence:  1,
-		Candidates:  []MusicSearchCandidate{candidate},
-		ExternalIDs: externalIDs,
-	}
-	emit.Emit(Event{
-		Event: "match.direct_selected",
-		Kind:  "music",
-		Data: map[string]any{
-			"key":          artist.Key,
-			"provider_id":  providerID,
-			"artist":       artist.Artist,
-			"confidence":   search.Confidence,
-			"external_ids": externalIDs,
-		},
+	sortMusicSearchCandidates(scored, artist)
+	return scored
+}
+
+func sortMusicSearchCandidates(scored []metadata.SearchResult, artist MusicArtistPlan) {
+	sort.Slice(scored, func(i, j int) bool {
+		// Query-only canonical hits are deliberately review-only when artist
+		// discovery has structured release evidence. Never let their exact-name
+		// score tie place them ahead of the provider-approved discovery result.
+		if scored[i].RequiresReview != scored[j].RequiresReview {
+			return !scored[i].RequiresReview
+		}
+		if scored[i].Confidence == scored[j].Confidence {
+			iExact := musicSearchArtistExact(artist, scored[i].Title)
+			jExact := musicSearchArtistExact(artist, scored[j].Title)
+			if iExact != jExact {
+				return iExact
+			}
+			iCase := strings.TrimSpace(scored[i].Title) == strings.TrimSpace(artist.Artist)
+			jCase := strings.TrimSpace(scored[j].Title) == strings.TrimSpace(artist.Artist)
+			if iCase != jCase {
+				return iCase
+			}
+			return scored[i].Title < scored[j].Title
+		}
+		return scored[i].Confidence > scored[j].Confidence
 	})
-	return search, true
 }
 
-func musicDirectArtistID(ids map[string]string) (provider, value string) {
-	for _, provider := range []string{"mbid", "apple", "discogs", "deezer"} {
-		if ids[provider] != "" {
-			return provider, ids[provider]
+func musicSearchCanAutoAccept(scored []metadata.SearchResult, queryArtist string, threshold float64) bool {
+	if len(scored) == 0 {
+		return false
+	}
+	top := scored[0]
+	return !top.RequiresReview && top.Confidence >= threshold && musicSearchClearGap(scored, queryArtist)
+}
+
+func musicPrimaryCollaborationArtist(value string) string {
+	parts := musicCollaborationSeparatorRE.Split(strings.TrimSpace(value), 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	primary := strings.TrimSpace(parts[0])
+	if primary == "" || strings.TrimSpace(parts[1]) == "" || normalizeMusicKeyPart(primary) == normalizeMusicKeyPart(value) {
+		return ""
+	}
+	return primary
+}
+
+func mergeScoredMusicSearchResults(groups ...[]metadata.SearchResult) []metadata.SearchResult {
+	indices := map[string]int{}
+	var merged []metadata.SearchResult
+	for _, group := range groups {
+		for _, candidate := range group {
+			if index, ok := indices[candidate.ProviderID]; ok {
+				current := merged[index]
+				if (current.RequiresReview && !candidate.RequiresReview) ||
+					(current.RequiresReview == candidate.RequiresReview && candidate.Confidence > current.Confidence) {
+					merged[index] = candidate
+				}
+				continue
+			}
+			indices[candidate.ProviderID] = len(merged)
+			merged = append(merged, candidate)
 		}
 	}
-	return "", ""
+	return merged
+}
+
+func musicDiscoveryReleaseHints(albums []MusicAlbumPlan) []metadata.ReleaseHint {
+	if len(albums) == 0 {
+		return nil
+	}
+	candidates := append([]MusicAlbumPlan(nil), albums...)
+	sort.SliceStable(candidates, func(i, j int) bool {
+		iPriority := musicDiscoveryReleasePriority(candidates[i].ReleaseKind)
+		jPriority := musicDiscoveryReleasePriority(candidates[j].ReleaseKind)
+		if iPriority != jPriority {
+			return iPriority > jPriority
+		}
+		if len(candidates[i].Tracks) != len(candidates[j].Tracks) {
+			return len(candidates[i].Tracks) > len(candidates[j].Tracks)
+		}
+		if candidates[i].Year != candidates[j].Year {
+			return candidates[i].Year < candidates[j].Year
+		}
+		return candidates[i].Album < candidates[j].Album
+	})
+
+	seen := make(map[string]struct{}, musicArtistDiscoveryReleaseHintLimit)
+	hints := make([]metadata.ReleaseHint, 0, musicArtistDiscoveryReleaseHintLimit)
+	for _, album := range candidates {
+		title := strings.TrimSpace(album.Album)
+		key := normalizeMusicKeyPart(title)
+		if key == "" {
+			continue
+		}
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		hints = append(hints, metadata.ReleaseHint{
+			Title:       title,
+			Year:        album.Year,
+			Type:        album.ReleaseKind,
+			Identifiers: musicReleaseHintIdentifiers(album.ExternalIDs),
+		})
+		if len(hints) == musicArtistDiscoveryReleaseHintLimit {
+			break
+		}
+	}
+	return hints
+}
+
+// musicReleaseHintIdentifiers keeps exact release/catalog identifiers while
+// excluding artist-level evidence that happens to be carried by the album
+// plan. HeyaMetadata owns provider routing and namespace normalization; Heya
+// merely preserves the structured evidence it already parsed from tags/NFOs.
+func musicReleaseHintIdentifiers(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	allowed := map[string]struct{}{
+		"apple_album": {}, "apple_music_album": {}, "itunes_album": {},
+		"deezer_album": {}, "discogs_release": {}, "discogs_master": {},
+		"musicbrainz_album": {}, "musicbrainz_release_group": {},
+		"spotify_album": {}, "audiodb_album": {},
+	}
+	result := make(map[string]string)
+	for key, value := range values {
+		if _, ok := allowed[key]; ok && strings.TrimSpace(value) != "" {
+			result[key] = strings.TrimSpace(value)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func musicDiscoveryReleasePriority(releaseType string) int {
+	switch normalizeMusicReleaseKind(releaseType) {
+	case "album":
+		return 4
+	case "ep":
+		return 3
+	case "single":
+		return 2
+	case "compilation":
+		return 1
+	default:
+		return 0
+	}
 }
 
 func applyMusicSearchDecision(artist MusicArtistPlan, search MusicSearchMatch, decision SearchDecision, emit Emitter) (MusicSearchMatch, bool) {
@@ -450,6 +592,11 @@ func musicSearchClearGap(results []metadata.SearchResult, queryArtist string) bo
 	top := results[0]
 	secondDifferent := -1
 	for i := 1; i < len(results); i++ {
+		if !top.RequiresReview && results[i].RequiresReview {
+			// Provider-approved discovery evidence outranks query-only canonical
+			// suggestions which the provider explicitly marked for review.
+			continue
+		}
 		if normalizeMusicKeyPart(results[i].Title) != normalizeMusicKeyPart(top.Title) {
 			secondDifferent = i
 			break
@@ -465,64 +612,8 @@ func musicSearchArtistExact(artist MusicArtistPlan, candidate string) bool {
 	return normalizeMusicKeyPart(artist.Artist) == normalizeMusicKeyPart(candidate)
 }
 
-func musicSearchProviderRank(result metadata.SearchResult) int {
-	if len(result.ExternalIDs) > 0 {
-		return musicExternalIDsProviderRank(result.ExternalIDs)
-	}
-	provider := musicSearchProviderFromID(result.ProviderID)
-	if provider == "" {
-		return 99
-	}
-	return musicProviderRank(provider)
-}
-
-func musicExternalIDsProviderRank(ids map[string]string) int {
-	for _, provider := range []string{"mbid", "musicbrainz", "apple", "deezer", "discogs"} {
-		if ids[provider] != "" {
-			return musicProviderRank(provider)
-		}
-	}
-	return 99
-}
-
 func musicPreferredProviderID(result metadata.SearchResult) string {
-	if value := firstNonEmpty(result.ExternalIDs["mbid"], result.ExternalIDs["musicbrainz"]); value != "" {
-		return "heya:artist:mbid:" + value
-	}
-	if value := result.ExternalIDs["apple"]; value != "" {
-		return "heya:artist:apple:" + value
-	}
-	if value := result.ExternalIDs["deezer"]; value != "" {
-		return "heya:artist:deezer:" + value
-	}
-	if value := result.ExternalIDs["discogs"]; value != "" {
-		return "heya:artist:discogs:" + value
-	}
 	return result.ProviderID
-}
-
-func musicSearchProviderFromID(providerID string) string {
-	rest := strings.TrimPrefix(providerID, "heya:")
-	parts := strings.SplitN(rest, ":", 3)
-	if len(parts) != 3 {
-		return ""
-	}
-	return parts[1]
-}
-
-func musicProviderRank(provider string) int {
-	switch provider {
-	case "mbid", "musicbrainz":
-		return 0
-	case "apple":
-		return 1
-	case "deezer":
-		return 2
-	case "discogs":
-		return 3
-	default:
-		return 99
-	}
 }
 
 func cloneStringMap(values map[string]string) map[string]string {

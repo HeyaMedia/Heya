@@ -432,7 +432,7 @@ func init() {
 	libraryScanCmd.Flags().Bool("jsonl", false, "Emit one JSON event per line")
 	libraryScanCmd.Flags().Bool("materialize", false, "Preview media item, domain row, and file writes without applying them")
 	libraryScanCmd.Flags().Bool("report", false, "Emit a compact review report instead of the event stream")
-	libraryScanCmd.Flags().Bool("search", false, "Search heya.media for candidate matches without fetching metadata")
+	libraryScanCmd.Flags().Bool("search", false, "Search HeyaMetadata for candidate matches without fetching metadata")
 
 	libraryRemoveCmd.Flags().Int64("id", 0, "Library ID to remove")
 
@@ -465,7 +465,7 @@ func addSettingsFlags(cmd *cobra.Command) {
 	cmd.Flags().String("country", "", "Preferred country/region (e.g. US)")
 	cmd.Flags().Bool("watch", false, "Enable filesystem watching")
 	cmd.Flags().Bool("auto-collections", false, "Automatically add to collections (movies)")
-	cmd.Flags().Bool("fetch-ratings", true, "Fetch external ratings (IMDb, TMDB, etc.) from heya.media")
+	cmd.Flags().Bool("fetch-ratings", true, "Fetch external ratings through HeyaMetadata V2")
 	cmd.Flags().Bool("save-nfo", false, "Write NFO files to media directory")
 	cmd.Flags().Bool("save-images", false, "Write images to media directory")
 }

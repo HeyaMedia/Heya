@@ -53,6 +53,21 @@ func TestScannerReviewViewBucketsAndActions(t *testing.T) {
 	review := createScannerIdentity(t, ctx, q, lib, run.ID, "title_year:review|2002", "Review Movie", "2002", "needs_review", 0)
 	rejected := createScannerIdentity(t, ctx, q, lib, run.ID, "title_year:rejected|2003", "Rejected Movie", "2003", "rejected", 0)
 	unmatched := createScannerIdentity(t, ctx, q, lib, run.ID, "title_year:unmatched|2004", "Unmatched Movie", "2004", "accepted", 0)
+	pipelineFailure, err := q.UpsertScannerEntity(ctx, sqlc.UpsertScannerEntityParams{
+		LibraryID:       lib.ID,
+		MediaType:       lib.MediaType,
+		ScopeKey:        "scope:broken",
+		ScopePaths:      []string{"/tmp/Broken Movie"},
+		IdentityKey:     "title_year:broken|2005",
+		Title:           "Broken Movie",
+		Year:            "2005",
+		ProviderID:      "heya:broken",
+		Status:          "apply_error",
+		SearchScanRunID: pgInt8ForTest(run.ID),
+		ErrorMessage:    "insert album: duplicate key",
+		Data:            []byte(`{}`),
+	})
+	require.NoError(t, err)
 
 	candidate, err := q.UpsertMetadataMatchCandidate(ctx, sqlc.UpsertMetadataMatchCandidateParams{
 		IdentityID:      review.ID,
@@ -115,6 +130,24 @@ func TestScannerReviewViewBucketsAndActions(t *testing.T) {
 	}, scannerBucketsByID(view.Identities))
 	require.Len(t, view.Candidates, 2)
 	require.Len(t, view.OpenFindings, 1)
+	require.Equal(t, []ScannerPipelineFailureView{{
+		ID:           pipelineFailure.ID,
+		IdentityKey:  pipelineFailure.IdentityKey,
+		Title:        pipelineFailure.Title,
+		Status:       pipelineFailure.Status,
+		Stage:        "metadata apply",
+		ErrorMessage: pipelineFailure.ErrorMessage,
+		UpdatedAt:    timePtr(pipelineFailure.UpdatedAt),
+	}}, view.PipelineFailures)
+	require.NotNil(t, view.LatestRun)
+	require.Equal(t, 1, view.LatestRun.PipelineFailureCount)
+	require.Equal(t, pipelineFailure.ErrorMessage, view.LatestRun.PipelineErrorMessage)
+
+	runs, err := app.ListLibraryScannerRuns(ctx, lib.ID, 10, 0)
+	require.NoError(t, err)
+	require.NotEmpty(t, runs)
+	require.Equal(t, 1, runs[0].PipelineFailureCount)
+	require.Equal(t, pipelineFailure.ErrorMessage, runs[0].PipelineErrorMessage)
 
 	approved, err := app.ApproveScannerCandidate(ctx, lib.ID, review.ID, candidate.ID)
 	require.NoError(t, err)

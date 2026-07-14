@@ -26,6 +26,8 @@ const (
 type PersonFetchArgs struct {
 	PersonID int64  `json:"person_id"`
 	TmdbID   int32  `json:"tmdb_id"`
+	EntityID string `json:"entity_id,omitempty"`
+	Force    bool   `json:"force,omitempty"`
 	Language string `json:"language,omitempty"`
 }
 
@@ -35,6 +37,17 @@ func (PersonFetchArgs) InsertOpts() river.InsertOpts {
 		Queue:       "person_fetch",
 		MaxAttempts: 3,
 		Priority:    PriorityScan,
+		UniqueOpts:  uniqueWhileActive(),
+	}
+}
+
+type SyncMetadataChangesArgs struct{}
+
+func (SyncMetadataChangesArgs) Kind() string { return "sync_metadata_changes" }
+func (SyncMetadataChangesArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "sync_metadata_changes",
+		MaxAttempts: 10,
 		UniqueOpts:  uniqueWhileActive(),
 	}
 }
@@ -341,9 +354,9 @@ func (ScanTrackFingerprintArgs) InsertOpts() river.InsertOpts {
 }
 
 // ScanMediaSegmentsFileArgs fetches community skip segments (intro /
-// recap / credits markers) for one movie/episode file from heya.media
-// and stores the duration-gated winners in media_segments. Pure network
-// work — no local decode.
+// recap / credits markers) directly from community providers and stores the
+// duration-gated winners in media_segments. Pure network work — no local
+// decode and no HeyaMetadata dependency.
 type ScanMediaSegmentsFileArgs struct {
 	LibraryFileID   int64  `json:"library_file_id" river:"unique"`
 	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`

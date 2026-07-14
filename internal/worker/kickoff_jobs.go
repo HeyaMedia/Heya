@@ -220,9 +220,9 @@ func (ApplyRichMetadataArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
-// KickoffRefreshStaleArgs replaces scheduler.RefreshStaleItemsTask.
-// Finds every media_item past its automatic refresh window (see
-// refreshWindowDays) and enqueues an enrich_media_item job per item.
+// KickoffRefreshStaleArgs remains decodable only to drain jobs queued by a
+// pre-V2 binary. The worker is a no-op; HeyaMetadata freshness and the V2
+// change cursor own automatic refresh after migration 00031.
 type KickoffRefreshStaleArgs struct {
 	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 }

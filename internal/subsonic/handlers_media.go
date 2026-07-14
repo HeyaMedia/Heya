@@ -333,24 +333,10 @@ func (s *Server) handleGetAvatar(w http.ResponseWriter, r *http.Request) {
 
 var lrcTimestamp = regexp.MustCompile(`^\[(\d+):(\d{2})(?:[.:](\d{1,3}))?\](.*)$`)
 
-// lyricsFor loads and parses the track's sidecar lyrics file into lines.
+// lyricsFor loads and parses local or canonical recording lyrics into lines.
 // synced=true when LRC timestamps were found (start in milliseconds).
 func (s *Server) lyricsFor(r *http.Request, trackID int64) ([]LyricLine, bool, bool) {
-	files, err := s.app.ListTrackFiles(r.Context(), trackID)
-	if err != nil {
-		return nil, false, false
-	}
-	path := ""
-	for _, tf := range files {
-		if tf.LyricsPath != "" {
-			path = tf.LyricsPath
-			break
-		}
-	}
-	if path == "" {
-		return nil, false, false
-	}
-	data, err := os.ReadFile(path) //nolint:gosec // G304: path comes from track_files rows, not request input
+	data, err := s.app.TrackLyrics(r.Context(), trackID)
 	if err != nil {
 		return nil, false, false
 	}

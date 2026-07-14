@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
-	"strings"
 
+	"github.com/google/uuid"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/worker"
 )
@@ -108,22 +108,24 @@ func (a *App) AlbumIdentifySearch(ctx context.Context, albumID int64, query stri
 	return IdentifySearchResult{Results: results}, nil
 }
 
-// ApplyAlbumIdentify re-points one album at a chosen upstream release group.
-// Stamps the MusicBrainz id on the album row and enqueues a forced enrich for
-// the parent artist: the refresh pipeline matches embedded upstream albums
-// MBID-first (findEmbeddedAlbum), so the album's canonical title / year /
-// label / cover adopt from the newly pinned record.
+// ApplyAlbumIdentify re-points one album at a chosen canonical Heya release
+// group. External IDs are copied only as compatibility evidence; the durable
+// identity is the canonical UUID binding.
 func (a *App) ApplyAlbumIdentify(ctx context.Context, albumID int64, providerName, providerID string) error {
 	if providerName != "heya" {
 		return fmt.Errorf("unknown provider: %s", providerName)
 	}
-	// providerID shape: heya:album:mbid:<uuid> (from SearchAlbums results).
-	rest := strings.TrimPrefix(providerID, "heya:")
-	parts := strings.SplitN(rest, ":", 3)
-	if len(parts) != 3 || parts[0] != "album" || parts[1] != "mbid" || parts[2] == "" {
-		return fmt.Errorf("album identify needs a MusicBrainz-backed match (got %q)", providerID)
+	detail, err := a.heya.GetDetail(ctx, providerID, nil)
+	if err != nil {
+		return fmt.Errorf("resolve canonical album match: %w", err)
 	}
-	newMBID := parts[2]
+	if detail.CanonicalKind != "release_group" {
+		return fmt.Errorf("album identify expected release_group, got %q", detail.CanonicalKind)
+	}
+	canonicalID, err := uuid.Parse(detail.CanonicalID)
+	if err != nil {
+		return fmt.Errorf("album identify returned invalid canonical UUID %q: %w", detail.CanonicalID, err)
+	}
 
 	q := sqlc.New(a.db)
 	album, err := q.GetAlbumByID(ctx, albumID)
@@ -133,6 +135,10 @@ func (a *App) ApplyAlbumIdentify(ctx context.Context, albumID int64, providerNam
 	artist, err := q.GetArtistByID(ctx, album.ArtistID)
 	if err != nil {
 		return fmt.Errorf("artist not found: %w", err)
+	}
+	newMBID := album.MusicbrainzID
+	if external := detail.ExternalIDs["mbid"]; external != "" {
+		newMBID = external
 	}
 
 	if _, err := q.UpdateAlbum(ctx, sqlc.UpdateAlbumParams{
@@ -152,7 +158,13 @@ func (a *App) ApplyAlbumIdentify(ctx context.Context, albumID int64, providerNam
 		TotalDiscs:    album.TotalDiscs,
 		Tags:          album.Tags,
 	}); err != nil {
-		return fmt.Errorf("stamp album mbid: %w", err)
+		return fmt.Errorf("store album external identity evidence: %w", err)
+	}
+	if _, err := q.UpsertMetadataEntityBinding(ctx, sqlc.UpsertMetadataEntityBindingParams{
+		LocalKind: "album", LocalID: album.ID, EntityID: canonicalID, EntityKind: "release_group",
+		SchemaVersion: int32(detail.SchemaVersion), ProjectionVersion: detail.ProjectionVersion,
+	}); err != nil {
+		return fmt.Errorf("bind album to canonical metadata: %w", err)
 	}
 
 	item, err := q.GetMediaItemByID(ctx, artist.MediaItemID)

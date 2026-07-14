@@ -13,7 +13,7 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/metadata"
-	"github.com/karbowiak/heya/internal/metadata/heyamedia"
+	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/karbowiak/heya/internal/parser"
 	"github.com/rs/zerolog/log"
 )
@@ -48,12 +48,12 @@ type ProbeFunc func(ctx context.Context, path string) (*mediaprobe.MediaInfo, er
 type Matcher struct {
 	db    *pgxpool.Pool
 	q     *sqlc.Queries
-	heya  *heyamedia.HeyaProvider
+	heya  *heyametadata.HeyaProvider
 	opts  MatchOptions
 	probe ProbeFunc
 }
 
-func New(db *pgxpool.Pool, opts MatchOptions, heya *heyamedia.HeyaProvider, probe ProbeFunc) *Matcher {
+func New(db *pgxpool.Pool, opts MatchOptions, heya *heyametadata.HeyaProvider, probe ProbeFunc) *Matcher {
 	return &Matcher{
 		db:    db,
 		q:     sqlc.New(db),
@@ -127,14 +127,28 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 
 	kind := MediaTypeToKind(mediaType)
 
-	if nfoIDs != nil && (nfoIDs.TMDBID != "" || nfoIDs.IMDBID != "" || nfoIDs.MBID != "" || nfoIDs.AniDBID != "" || nfoIDs.MALID != "") {
-		if info, matched := m.tryNFOLookup(ctx, file, kind, libraryID, nfoIDs); matched {
+	if nfoIDs != nil && (nfoIDs.TMDBID != "" || nfoIDs.IMDBID != "" || nfoIDs.TVDBID != "" || nfoIDs.MBID != "" || nfoIDs.AniDBID != "" || nfoIDs.MALID != "") {
+		if info, matched := m.tryLinkExistingByNFO(ctx, file, libraryID, nfoIDs); matched {
 			return info, nil
 		}
-		log.Debug().Int64("file_id", file.ID).Msg("NFO lookup failed, falling back to title search")
 	}
 
 	query := buildSearchQuery(parsed, kind)
+	if nfoIDs != nil {
+		query.Identifiers = nfoIdentifierEvidence(nfoIDs)
+		if query.Title == "" {
+			query.Title = nfoIDs.Title
+		}
+		if query.Year == "" {
+			query.Year = nfoIDs.Year
+		}
+	}
+	switch mediaType {
+	case sqlc.MediaTypeAnime:
+		query.CanonicalKind = "anime"
+	case sqlc.MediaTypeTv:
+		query.CanonicalKind = "tv_show"
+	}
 
 	if fetchOpts := m.fetchOptsForLibrary(ctx, libraryID); fetchOpts != nil {
 		query.Language = fetchOpts.Language
@@ -166,7 +180,7 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 		// and mask a fetchable remote match behind a low-quality local stub.
 		if searchErr == nil {
 			// No remote signal at all — fold into an existing matched item of the
-			// same identity if one exists (heya.media-outage recovery).
+			// same identity if one exists (metadata-service outage recovery).
 			if info, ok := m.materializeLocal(ctx, file, parsed, nfoIDs, kind, mediaType, libraryID, true); ok {
 				return info, nil
 			}
@@ -193,7 +207,7 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 	clearGap := hasClearGap(allResults, query.Title)
 
 	threshold := autoMatchThresholdFor(top, m.opts.AutoMatchThreshold)
-	if top.Confidence >= threshold && clearGap {
+	if !top.RequiresReview && top.Confidence >= threshold && clearGap {
 		log.Info().
 			Str("query", query.Title).
 			Str("matched", top.Title).
@@ -398,11 +412,11 @@ func hasClearGap(results []metadata.SearchResult, queryTitle string) bool {
 }
 
 // scoreBestTitle scores the query against the result's primary Title plus
-// every entry in AltTitles and returns the best match. HeyaMedia's
+// every entry in AltTitles and returns the best match. HeyaMetadata's
 // alt_titles[] carries all known locale variants, romanizations, and
 // aliases for a hit — running ScoreConfidence over the union lets a
 // filename like "Shingeki no Kyojin" score against the Japanese form
-// even when HeyaMedia's primary "name" is "Attack on Titan".
+// even when HeyaMetadata's primary "name" is "Attack on Titan".
 //
 // Year disambiguation transfers naturally: ScoreConfidence's year bonus
 // only uses the result's year (same for every alt-title comparison), so
@@ -678,10 +692,8 @@ func mergeFilenameIDs(ids *metadata.NFOIDs, rel *parser.SceneReleaseParse) *meta
 	if ids.MALID == "" {
 		ids.MALID = rel.MalID
 	}
-	// Carry the filename's title/year too: the new-item strong-ID path
-	// (tryNFOLookup → stubDetailFromNFO) needs a title to write the stub —
-	// without it, a filename-ID-only item would bail to a fuzzy title search
-	// instead of an authoritative direct-ID match.
+	// Carry the filename's title/year too so exact identifier discovery also
+	// receives useful corroborating hints.
 	if ids.Title == "" {
 		ids.Title = rel.Title
 	}
@@ -691,88 +703,23 @@ func mergeFilenameIDs(ids *metadata.NFOIDs, rel *parser.SceneReleaseParse) *meta
 	return ids
 }
 
-func (m *Matcher) tryNFOLookup(ctx context.Context, file sqlc.LibraryFile, kind metadata.MediaKind, libraryID int64, ids *metadata.NFOIDs) (MatchInfo, bool) {
-	if info, linked := m.tryLinkExistingByNFO(ctx, file, libraryID, ids); linked {
-		return info, true
+func nfoIdentifierEvidence(ids *metadata.NFOIDs) map[string]string {
+	if ids == nil {
+		return nil
 	}
-
-	// New item path. Skip heya.LookupByNFO (which fetches full detail
-	// inline) and write a stub straight from the NFO. The enrich worker
-	// will resolve the rest via the external IDs we just stored.
-	providerID := pickProviderIDFromNFO(kind, ids)
-	if providerID == "" {
-		log.Debug().Int64("file_id", file.ID).Msg("NFO had no usable IDs for stub match")
-		return MatchInfo{}, false
-	}
-
-	stub := stubDetailFromNFO(*ids)
-	if stub.Title == "" {
-		// Without a title we can't render the row meaningfully — fall
-		// back to the title-search path.
-		log.Debug().Int64("file_id", file.ID).Msg("NFO missing title, falling back to search")
-		return MatchInfo{}, false
-	}
-
-	mediaItemID, isNew, err := m.createOrLinkMediaItem(ctx, stub, kind, libraryID, file.Path)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to create media item from NFO stub")
-		return MatchInfo{}, false
-	}
-
-	log.Info().
-		Str("provider_id", providerID).
-		Str("title", stub.Title).
-		Int64("file_id", file.ID).
-		Msg("matched via NFO stub")
-
-	info := MatchInfo{
-		ProviderName: m.heya.Name(),
-		ProviderID:   providerID,
-		IsNew:        isNew,
-	}
-
-	m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
-		ID:          file.ID,
-		Status:      sqlc.FileStatusMatched,
-		MediaItemID: pgInt8(mediaItemID),
-	})
-	return info, true
-}
-
-// pickProviderIDFromNFO selects the best provider ID from an NFO sidecar
-// for the enrich step's heya.media GetDetail call. Preference order mirrors
-// what heyamedia.LookupByNFO would try.
-func pickProviderIDFromNFO(kind metadata.MediaKind, ids *metadata.NFOIDs) string {
-	switch kind {
-	case metadata.KindTV:
-		if ids.TVDBID != "" {
-			return "tvdb:" + ids.TVDBID
-		}
-		if ids.TMDBID != "" {
-			return "tmdb:" + ids.TMDBID
-		}
-		if ids.IMDBID != "" {
-			return "imdb:" + ids.IMDBID
-		}
-		if ids.AniDBID != "" {
-			return "anidb:" + ids.AniDBID
-		}
-		if ids.MALID != "" {
-			return "mal:" + ids.MALID
-		}
-	case metadata.KindMovie:
-		if ids.TMDBID != "" {
-			return "tmdb:" + ids.TMDBID
-		}
-		if ids.IMDBID != "" {
-			return "imdb:" + ids.IMDBID
-		}
-	case metadata.KindMusic:
-		if ids.MBID != "" {
-			return "mbid:" + ids.MBID
+	result := make(map[string]string)
+	for key, value := range map[string]string{
+		"tmdb": ids.TMDBID, "imdb": ids.IMDBID, "tvdb": ids.TVDBID,
+		"musicbrainz": ids.MBID, "anidb": ids.AniDBID, "myanimelist": ids.MALID,
+	} {
+		if value != "" {
+			result[key] = value
 		}
 	}
-	return ""
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 func (m *Matcher) tryLinkExistingByNFO(ctx context.Context, file sqlc.LibraryFile, libraryID int64, ids *metadata.NFOIDs) (MatchInfo, bool) {

@@ -34,8 +34,8 @@ func TestMusicFixtureProducesLocalPlans(t *testing.T) {
 		t.Fatalf("analyze music: %v", err)
 	}
 
-	if got := countInventoryFiles(inv); got != 189 {
-		t.Fatalf("classified inventory files: got %d, want 189", got)
+	if got := countInventoryFiles(inv); got != 190 {
+		t.Fatalf("classified inventory files: got %d, want 190", got)
 	}
 	if got := len(inventoryFilesByClass(inv, ClassArtwork)); got != 47 {
 		t.Fatalf("local artwork: got %d, want 47", got)
@@ -65,7 +65,11 @@ func TestMusicFixtureProducesLocalPlans(t *testing.T) {
 	assertMusicAlbum(t, byAlbum, "Aphex Twin", "Selected Ambient Works 85-92", "1992", "", 3)
 	assertMusicAlbum(t, byAlbum, "Nujabes", "Metaphorical Music", "2003", "", 2)
 	assertMusicAlbum(t, byAlbum, "Lady Gaga & Bradley Cooper", "A Star Is Born", "2018", "", 2)
-	assertMusicAlbum(t, byAlbum, "Yoshiko And Alee", "Freaks Out", "2022", "single", 1)
+	assertMusicAlbum(t, byAlbum, "Yoshiko", "Freaks Out", "2022", "single", 1)
+	yoshiko := byAlbum[musicAlbumKey("Yoshiko", "Freaks Out", "2022")]
+	if yoshiko.ExternalIDs["itunes_album"] != "1630125755" || yoshiko.ExternalIDs["itunes_artist"] != "591024034" {
+		t.Fatalf("Yoshiko durable IDs: %#v", yoshiko.ExternalIDs)
+	}
 	assertMusicAlbum(t, byAlbum, "Daft Punk", "Discovery", "2001", "album", 6)
 	assertMusicAlbum(t, byAlbum, "ano", "ちゅ、多様性。", "2022", "single", 2)
 	assertMusicAlbumAlias(t, byAlbum, "ano", "ちゅ、多様性。", "2022", "Chu,Tayousei.")
@@ -151,16 +155,22 @@ func TestSearchMusicArtistsSelectsAndRejects(t *testing.T) {
 	emit := &captureEmitter{}
 	provider := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{
 		"Ado": {
-			{ProviderID: "heya:artist:mbid:wrong-ado", ProviderName: "heya", Title: "ADO", Confidence: 0.95, ExternalIDs: map[string]string{"mbid": "wrong-ado"}},
-			{ProviderID: "heya:artist:discogs:4017157", ProviderName: "heya", Title: "ADO (9)", Confidence: 0.95, ExternalIDs: map[string]string{"discogs": "4017157"}},
-			{ProviderID: "heya:artist:apple:123", ProviderName: "heya", Title: "Ado", Confidence: 0.95, ExternalIDs: map[string]string{"apple": "123", "mbid": "ado-mbid", "deezer": "456", "discogs": "789"}},
-			{ProviderID: "heya:artist:mbid:ado-other", ProviderName: "heya", Title: "ADO Project", Confidence: 0.95},
-			{ProviderID: "heya:artist:mbid:ado-kojo", ProviderName: "heya", Title: "Ado Kojo", Confidence: 0.95, AltTitles: []string{"Ado"}},
+			{ProviderID: "heyametadata:v2:entity:10000000-0000-4000-8000-000000000001", ProviderName: "heya", Title: "ADO", Confidence: 0.95, ExternalIDs: map[string]string{"mbid": "wrong-ado"}},
+			{ProviderID: "heyametadata:v2:entity:10000000-0000-4000-8000-000000000002", ProviderName: "heya", Title: "ADO (9)", Confidence: 0.95, ExternalIDs: map[string]string{"discogs": "4017157"}},
+			{ProviderID: "heyametadata:v2:entity:10000000-0000-4000-8000-000000000003", ProviderName: "heya", Title: "Ado", Confidence: 0.95, ExternalIDs: map[string]string{"apple": "123", "mbid": "ado-mbid", "deezer": "456", "discogs": "789"}},
+			{ProviderID: "heyametadata:v2:entity:10000000-0000-4000-8000-000000000004", ProviderName: "heya", Title: "ADO Project", Confidence: 0.95},
+			{ProviderID: "heyametadata:v2:entity:10000000-0000-4000-8000-000000000005", ProviderName: "heya", Title: "Ado Kojo", Confidence: 0.95, AltTitles: []string{"Ado"}},
 		},
+		"ano":             {{ProviderID: "heyametadata:v2:entity:20000000-0000-4000-8000-000000000001", ProviderName: "heya", Title: "ano", Confidence: 1, ExternalIDs: map[string]string{"mbid": "ebb4513e-4aab-4ac9-a949-14e77bb7b836"}}},
 		"Heya Test Tones": nil,
 	}}
 	artists := []MusicArtistPlan{
-		{Key: "artist:ado", Artist: "Ado"},
+		{Key: "artist:ado", Artist: "Ado", Albums: []MusicAlbumPlan{
+			{Album: "Single First", Year: "2020", ReleaseKind: "single", Tracks: []MusicTrackPlan{{}}},
+			{Album: "Album Short", Year: "2022", ReleaseKind: "album", Tracks: []MusicTrackPlan{{}}},
+			{Album: "Album Long", Year: "2023", ReleaseKind: "album", Tracks: []MusicTrackPlan{{}, {}}},
+			{Album: "EP", Year: "2021", ReleaseKind: "ep", Tracks: []MusicTrackPlan{{}}},
+		}},
 		{Key: "artist:ano", Artist: "ano", ExternalIDs: map[string]string{"mbid": "ebb4513e-4aab-4ac9-a949-14e77bb7b836"}},
 		{Key: "artist:heya test tones", Artist: "Heya Test Tones"},
 	}
@@ -176,7 +186,7 @@ func TestSearchMusicArtistsSelectsAndRejects(t *testing.T) {
 	for _, item := range search {
 		byKey[item.Key] = item
 	}
-	if !byKey["artist:ado"].Accepted || byKey["artist:ado"].ProviderID != "heya:artist:mbid:ado-mbid" {
+	if !byKey["artist:ado"].Accepted || byKey["artist:ado"].ProviderID != "heyametadata:v2:entity:10000000-0000-4000-8000-000000000003" {
 		t.Fatalf("Ado search: %#v", byKey["artist:ado"])
 	}
 	if score := musicNameSimilarity("Ado", "ADO (9)"); score >= musicArtistAutoMatchThreshold {
@@ -188,14 +198,18 @@ func TestSearchMusicArtistsSelectsAndRejects(t *testing.T) {
 	if score := scoreMusicSearchCandidate(MusicArtistPlan{Artist: "Ado"}, metadata.SearchResult{Title: "Ado Kojo", AltTitles: []string{"Ado"}}); score >= musicArtistAutoMatchThreshold {
 		t.Fatalf("short artist alias scored too high: %.2f", score)
 	}
-	if !byKey["artist:ano"].Accepted || byKey["artist:ano"].ProviderID != "heya:artist:mbid:ebb4513e-4aab-4ac9-a949-14e77bb7b836" {
-		t.Fatalf("ano direct search: %#v", byKey["artist:ano"])
+	if !byKey["artist:ano"].Accepted || byKey["artist:ano"].ProviderID != "heyametadata:v2:entity:20000000-0000-4000-8000-000000000001" {
+		t.Fatalf("ano identifier discovery: %#v", byKey["artist:ano"])
 	}
 	if byKey["artist:heya test tones"].Accepted || byKey["artist:heya test tones"].Reason != "no_candidates" {
 		t.Fatalf("test tones search: %#v", byKey["artist:heya test tones"])
 	}
-	if provider.calls["ano"] != 0 {
-		t.Fatalf("direct MBID artist should not call search provider: calls=%#v", provider.calls)
+	if provider.calls["ano"] != 1 || provider.queries["ano"].Identifiers["mbid"] != "ebb4513e-4aab-4ac9-a949-14e77bb7b836" {
+		t.Fatalf("MBID evidence was not sent through unified discovery: calls=%#v query=%#v", provider.calls, provider.queries["ano"])
+	}
+	adoReleases := provider.queries["Ado"].Releases
+	if len(adoReleases) != musicArtistDiscoveryReleaseHintLimit || adoReleases[0].Title != "Album Long" || adoReleases[1].Title != "Album Short" || adoReleases[2].Title != "EP" {
+		t.Fatalf("bounded release evidence = %#v", adoReleases)
 	}
 
 	var report bytes.Buffer
@@ -213,6 +227,108 @@ func TestSearchMusicArtistsSelectsAndRejects(t *testing.T) {
 		if !strings.Contains(report.String(), want) {
 			t.Fatalf("music search report missing %q:\n%s", want, report.String())
 		}
+	}
+}
+
+func TestSearchMusicArtistsPrefersApprovedDiscoveryOverReviewOnlyCanonicalHits(t *testing.T) {
+	const selected = "heyametadata:v2:candidate:artist:10000000-0000-4000-8000-000000000001"
+	provider := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{
+		"Daft Punk": {
+			{ProviderID: "heyametadata:v2:entity:20000000-0000-4000-8000-000000000001", ProviderName: "heya", Title: "Daft Punk", RequiresReview: true},
+			{ProviderID: "heyametadata:v2:entity:20000000-0000-4000-8000-000000000002", ProviderName: "heya", Title: "Daft Punk", RequiresReview: true},
+			{ProviderID: selected, ProviderName: "heya", Title: "Daft Punk", Recommendation: "strong_match", Evidence: []metadata.SearchEvidence{{Field: "releases", Outcome: "3_of_3"}}, RequiresReview: false},
+		},
+	}}
+	artists := []MusicArtistPlan{{
+		Key: "artist:daft punk", Artist: "Daft Punk",
+		Albums: []MusicAlbumPlan{{Album: "Homework", Year: "1997", ReleaseKind: "album"}},
+	}}
+
+	results, err := SearchMusicArtists(context.Background(), artists, provider, &captureEmitter{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || !results[0].Accepted || results[0].ProviderID != selected {
+		t.Fatalf("approved discovery did not outrank review-only suggestions: %#v", results)
+	}
+	if len(results[0].Candidates) != 3 || results[0].Candidates[0].ProviderID != selected {
+		t.Fatalf("candidate order = %#v", results[0].Candidates)
+	}
+}
+
+func TestSearchMusicArtistsAcceptsApprovedLocalizedAliasOverReviewOnlyNameHit(t *testing.T) {
+	const selected = "heyametadata:v2:candidate:artist:10000000-0000-4000-8000-000000000001"
+	provider := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{
+		"The Seatbelts": {
+			{ProviderID: selected, ProviderName: "heya", Title: "シートベルツ", AltTitles: []string{"The Seatbelts"}, Recommendation: "strong_match", Evidence: []metadata.SearchEvidence{{Field: "releases", Outcome: "1_of_1"}}, RequiresReview: false},
+			{ProviderID: "heyametadata:v2:entity:20000000-0000-4000-8000-000000000001", ProviderName: "heya", Title: "The Seatbelts", RequiresReview: true},
+		},
+	}}
+	artists := []MusicArtistPlan{{
+		Key: "artist:the seatbelts", Artist: "The Seatbelts",
+		Albums: []MusicAlbumPlan{{Album: "Cowboy Bebop OST 1", Year: "1998"}},
+	}}
+
+	results, err := SearchMusicArtists(context.Background(), artists, provider, &captureEmitter{}, musicArtistAutoMatchThreshold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || !results[0].Accepted || results[0].ProviderID != selected || results[0].Confidence != 1 {
+		t.Fatalf("localized approved alias was not accepted: %#v", results)
+	}
+	if musicSearchSelectionLooksSuspicious(results[0]) {
+		t.Fatalf("localized approved alias was re-opened for review: %#v", results[0])
+	}
+}
+
+func TestSearchMusicArtistsFallsBackToPrimaryCollaborationCredit(t *testing.T) {
+	const ladyGaga = "heyametadata:v2:candidate:artist:30000000-0000-4000-8000-000000000001"
+	const simonAndGarfunkel = "heyametadata:v2:entity:30000000-0000-4000-8000-000000000002"
+	provider := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{
+		"Lady Gaga & Bradley Cooper": nil,
+		"Lady Gaga": {{
+			ProviderID: ladyGaga, ProviderName: "heya", Title: "Lady Gaga",
+			Recommendation: "strong_match", Evidence: []metadata.SearchEvidence{{Field: "releases", Outcome: "1_of_1"}},
+		}},
+		"Yoshiko And Alee": nil,
+		"Yoshiko": {{
+			ProviderID:   "heyametadata:v2:candidate:artist:30000000-0000-4000-8000-000000000003",
+			ProviderName: "heya", Title: "Yoshiko", Recommendation: "ambiguous", RequiresReview: true,
+			Evidence: []metadata.SearchEvidence{{Field: "releases", Outcome: "0_of_1"}},
+		}},
+		"Simon & Garfunkel": {{
+			ProviderID: simonAndGarfunkel, ProviderName: "heya", Title: "Simon & Garfunkel",
+			Recommendation: "strong_match", Evidence: []metadata.SearchEvidence{{Field: "releases", Outcome: "1_of_1"}},
+		}},
+	}}
+	artists := []MusicArtistPlan{
+		{Key: "artist:lady gaga bradley cooper", Artist: "Lady Gaga & Bradley Cooper", Albums: []MusicAlbumPlan{{Album: "A Star Is Born", Year: "2018"}}},
+		{Key: "artist:yoshiko and alee", Artist: "Yoshiko And Alee", Albums: []MusicAlbumPlan{{Album: "Freaks Out", Year: "2022", ReleaseKind: "single"}}},
+		{Key: "artist:simon garfunkel", Artist: "Simon & Garfunkel", Albums: []MusicAlbumPlan{{Album: "Bridge over Troubled Water", Year: "1970"}}},
+	}
+
+	results, err := SearchMusicArtists(context.Background(), artists, provider, &captureEmitter{}, musicArtistAutoMatchThreshold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byKey := map[string]MusicSearchMatch{}
+	for _, result := range results {
+		byKey[result.Key] = result
+	}
+	if result := byKey["artist:lady gaga bradley cooper"]; !result.Accepted || result.ProviderID != ladyGaga || result.Artist != "Lady Gaga" || result.Confidence != 1 {
+		t.Fatalf("primary collaboration fallback = %#v", result)
+	}
+	if result := byKey["artist:yoshiko and alee"]; result.Accepted || result.Reason != "ambiguous_or_low_confidence" {
+		t.Fatalf("ambiguous primary collaboration was accepted = %#v", result)
+	}
+	if result := byKey["artist:simon garfunkel"]; !result.Accepted || result.ProviderID != simonAndGarfunkel {
+		t.Fatalf("literal collaboration identity = %#v", result)
+	}
+	if provider.calls["Lady Gaga"] != 1 || provider.queries["Lady Gaga"].Releases[0].Title != "A Star Is Born" {
+		t.Fatalf("Lady Gaga fallback evidence = calls=%#v query=%#v", provider.calls, provider.queries["Lady Gaga"])
+	}
+	if provider.calls["Simon"] != 0 {
+		t.Fatalf("resolved literal band was split: calls=%#v", provider.calls)
 	}
 }
 
@@ -398,6 +514,7 @@ type fakeMusicSearchProvider struct {
 	mu      sync.Mutex
 	results map[string][]metadata.SearchResult
 	calls   map[string]int
+	queries map[string]metadata.SearchQuery
 }
 
 func (f *fakeMusicSearchProvider) Search(_ context.Context, kind metadata.MediaKind, query metadata.SearchQuery) ([]metadata.SearchResult, error) {
@@ -409,6 +526,10 @@ func (f *fakeMusicSearchProvider) Search(_ context.Context, kind metadata.MediaK
 	if f.calls == nil {
 		f.calls = map[string]int{}
 	}
+	if f.queries == nil {
+		f.queries = map[string]metadata.SearchQuery{}
+	}
 	f.calls[query.Title]++
+	f.queries[query.Title] = query
 	return f.results[query.Title], nil
 }

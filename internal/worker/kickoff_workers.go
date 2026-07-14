@@ -21,7 +21,7 @@ import (
 	"github.com/karbowiak/heya/internal/mediafile"
 	"github.com/karbowiak/heya/internal/mediatype"
 	"github.com/karbowiak/heya/internal/metadata"
-	"github.com/karbowiak/heya/internal/metadata/heyamedia"
+	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
@@ -45,14 +45,38 @@ const (
 	scannerFetchTimeout   = 30 * time.Minute
 	scannerApplyTimeout   = 10 * time.Minute
 	scannerRichTimeout    = 5 * time.Minute
+	metadataDeferredRetry = 30 * time.Second
 )
 
 func scannerWorkerError(err error) error {
+	if retryAfter, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
+		return river.JobSnooze(retryAfter)
+	}
 	var tooLarge *scanner.ArtifactTooLargeError
 	if errors.As(err, &tooLarge) {
 		return river.JobCancel(err)
 	}
 	return err
+}
+
+func logScannerPipelineFailure(worker string, jobID int64, lib sqlc.Library, scannerEntityID int64, scopes []string, err error) {
+	if err == nil {
+		return
+	}
+	event := log.Error().
+		Err(err).
+		Str("worker", worker).
+		Int64("job_id", jobID).
+		Int64("library_id", lib.ID).
+		Str("library", lib.Name).
+		Str("media_type", string(lib.MediaType))
+	if scannerEntityID > 0 {
+		event = event.Int64("scanner_entity_id", scannerEntityID)
+	}
+	if label := libraryScanProgressLabel(lib, scopes); label != "" {
+		event = event.Str("scan_scope", label)
+	}
+	event.Msg("scanner pipeline failed")
 }
 
 type jobSourceMetadata struct {
@@ -154,7 +178,7 @@ func libraryScopeDisplayName(lib sqlc.Library, scope string) string {
 type KickoffLibraryScanWorker struct {
 	river.WorkerDefaults[KickoffLibraryScanArgs]
 	DB       *pgxpool.Pool
-	Heya     *heyamedia.HeyaProvider
+	Heya     *heyametadata.HeyaProvider
 	Hub      EventPublisher
 	Watcher  WatcherPauser
 	Progress *TaskProgressBroadcaster
@@ -211,7 +235,7 @@ func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[Kick
 		}
 
 		if scanErr != nil {
-			log.Error().Err(scanErr).Int64("library_id", lib.ID).Msg("kickoff_library_scan: scan error")
+			logScannerPipelineFailure("kickoff_library_scan", job.ID, lib, 0, nil, scanErr)
 			failed++
 			// A cancelled scan leaves the discovered set incomplete, so don't
 			// act on partial results. On a partial-root failure (e.g. one
@@ -287,7 +311,7 @@ type libraryScanOutcome struct {
 type ProcessLibraryScanWorker struct {
 	river.WorkerDefaults[ProcessLibraryScanArgs]
 	DB       *pgxpool.Pool
-	Heya     *heyamedia.HeyaProvider
+	Heya     *heyametadata.HeyaProvider
 	Hub      EventPublisher
 	Watcher  WatcherPauser
 	Progress *TaskProgressBroadcaster
@@ -352,10 +376,15 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 	})
 
 	scanCtx, cancel := context.WithTimeout(ctx, scannerProcessTimeout)
+	scanCtx = metadata.WithDeferredRemoteWork(scanCtx, metadataDeferredRetry)
 	defer cancel()
 	outcome, result, searchScanRunID, err := w.scanLibrarySearch(scanCtx, lib, job.Args.ScopePaths)
 	if err != nil {
-		log.Error().Err(err).Int64("library_id", lib.ID).Msg("process_scan: scan error")
+		if retryAfter, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
+			log.Info().Dur("retry_after", retryAfter).Int64("library_id", lib.ID).Msg("process_scan: metadata work deferred")
+		} else {
+			logScannerPipelineFailure("process_scan", job.ID, lib, 0, job.Args.ScopePaths, err)
+		}
 		return scannerWorkerError(err)
 	}
 
@@ -402,6 +431,17 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 		Int("parked", parked).
 		Int("enqueued_fetch", enqueued).
 		Msg("process_scan: library done")
+	// An unresolved/needs-review search has no fetch or apply worker to emit
+	// the terminal lifecycle event. Without this, the UI keeps the scanner's
+	// final persistence checkpoint around as if the library were still active.
+	if enqueued == 0 {
+		emit(w.Hub, eventhub.EventScanCompleted, eventhub.ScanPayload{
+			LibraryID:   lib.ID,
+			LibraryName: lib.Name,
+			Discovered:  outcome.Discovered,
+			New:         outcome.New,
+		})
+	}
 	return nil
 }
 
@@ -412,7 +452,7 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 type FetchLibraryMetadataWorker struct {
 	river.WorkerDefaults[FetchLibraryMetadataArgs]
 	DB       *pgxpool.Pool
-	Heya     *heyamedia.HeyaProvider
+	Heya     *heyametadata.HeyaProvider
 	Hub      EventPublisher
 	Watcher  WatcherPauser
 	Progress *TaskProgressBroadcaster
@@ -443,11 +483,18 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 	}
 
 	scanCtx, cancel := context.WithTimeout(ctx, scannerFetchTimeout)
+	scanCtx = metadata.WithDeferredRemoteWork(scanCtx, metadataDeferredRetry)
 	defer cancel()
 	result, fetchScanRunID, metadataArtifactID, err := w.scanLibraryFetch(scanCtx, lib, job.Args.ScopePaths, job.Args.ScannerEntityID, job.Args.SearchArtifactID)
 	if err != nil {
-		scanner.MarkScannerEntityFailed(ctx, w.DB, job.Args.ScannerEntityID, "metadata_error", err)
-		log.Error().Err(err).Int64("library_id", lib.ID).Msg("fetch_metadata: scan error")
+		if retryAfter, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
+			log.Info().Dur("retry_after", retryAfter).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("fetch_metadata: metadata work deferred")
+		} else {
+			if markErr := scanner.MarkScannerEntityFailed(ctx, w.DB, job.Args.ScannerEntityID, "metadata_error", err); markErr != nil {
+				log.Error().Err(markErr).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("fetch_metadata: failure state persistence failed")
+			}
+			logScannerPipelineFailure("fetch_metadata", job.ID, lib, job.Args.ScannerEntityID, job.Args.ScopePaths, err)
+		}
 		return scannerWorkerError(err)
 	}
 	if result.New == 0 {
@@ -456,6 +503,14 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 			Int64("scanner_entity_id", job.Args.ScannerEntityID).
 			Int64("metadata_artifact_id", metadataArtifactID).
 			Msg("fetch_metadata: no usable metadata fetched; apply not enqueued")
+		// This is another terminal branch: no apply worker will follow to clear
+		// live scan activity for the library.
+		emit(w.Hub, eventhub.EventScanCompleted, eventhub.ScanPayload{
+			LibraryID:   lib.ID,
+			LibraryName: lib.Name,
+			Discovered:  result.Discovered,
+			New:         result.New,
+		})
 		return nil
 	}
 
@@ -490,7 +545,7 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 type ApplyLibraryScanWorker struct {
 	river.WorkerDefaults[ApplyLibraryScanArgs]
 	DB           *pgxpool.Pool
-	Heya         *heyamedia.HeyaProvider
+	Heya         *heyametadata.HeyaProvider
 	Hub          EventPublisher
 	Watcher      WatcherPauser
 	SonicEnabled SonicEnabledFn
@@ -533,8 +588,10 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 	defer cancel()
 	outcome, result, err := w.scanLibraryApply(scanCtx, lib, job.Args.ScopePaths, job.Args.ScannerEntityID, job.Args.MetadataArtifactID)
 	if err != nil {
-		scanner.MarkScannerEntityFailed(ctx, w.DB, job.Args.ScannerEntityID, "apply_error", err)
-		log.Error().Err(err).Int64("library_id", lib.ID).Msg("apply_metadata: scan error")
+		if markErr := scanner.MarkScannerEntityFailed(ctx, w.DB, job.Args.ScannerEntityID, "apply_error", err); markErr != nil {
+			log.Error().Err(markErr).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("apply_metadata: failure state persistence failed")
+		}
+		logScannerPipelineFailure("apply_metadata", job.ID, lib, job.Args.ScannerEntityID, job.Args.ScopePaths, err)
 		return scannerWorkerError(err)
 	}
 	// Identities the apply deliberately refused (skipped/blocked, e.g.
@@ -1972,25 +2029,25 @@ func trackNeedsSonicAnalysis(ctx context.Context, q *sqlc.Queries, trackID int64
 	return len(ids) > 0 && ids[0] == trackID
 }
 
-func scannerSearchOptions(db *pgxpool.Pool, heya *heyamedia.HeyaProvider) scanner.Options {
+func scannerSearchOptions(db *pgxpool.Pool, heya *heyametadata.HeyaProvider) scanner.Options {
 	opts := scannerBaseOptions(db, heya)
 	opts.RemoteSearch = true
 	return opts
 }
 
-func scannerFetchOptions(db *pgxpool.Pool, heya *heyamedia.HeyaProvider) scanner.Options {
+func scannerFetchOptions(db *pgxpool.Pool, heya *heyametadata.HeyaProvider) scanner.Options {
 	opts := scannerBaseOptions(db, heya)
 	opts.FetchPreview = true
 	return scanner.NormalizeOptions(opts)
 }
 
-func scannerApplyOptions(db *pgxpool.Pool, heya *heyamedia.HeyaProvider) scanner.Options {
+func scannerApplyOptions(db *pgxpool.Pool, heya *heyametadata.HeyaProvider) scanner.Options {
 	opts := scannerBaseOptions(db, heya)
 	opts.Apply = true
 	return scanner.NormalizeOptions(opts)
 }
 
-func scannerBaseOptions(db *pgxpool.Pool, heya *heyamedia.HeyaProvider) scanner.Options {
+func scannerBaseOptions(db *pgxpool.Pool, heya *heyametadata.HeyaProvider) scanner.Options {
 	return scanner.Options{
 		ApplyDB:           db,
 		BookFetcher:       heya,
@@ -2174,112 +2231,13 @@ type KickoffRefreshStaleWorker struct {
 }
 
 func (w *KickoffRefreshStaleWorker) Work(ctx context.Context, job *river.Job[KickoffRefreshStaleArgs]) error {
-	startedAt := time.Now()
-	taskID := job.Args.ScheduledTaskID
-	source := scheduledJobSource(job.Metadata)
+	// Kept registered only so a job queued by an older binary can drain after
+	// cutover. HeyaMetadata owns stale-while-revalidate, while
+	// sync_metadata_changes owns durable local invalidation and binding backfill.
 	q := sqlc.New(w.DB)
-	rc := river.ClientFromContext[pgx.Tx](ctx)
-
-	rows, err := w.DB.Query(ctx, `
-		SELECT mi.id, mi.media_type, mi.title, mi.status, mi.metadata_refreshed_at, mi.enrichment_status
-		FROM media_item_cards mi
-		WHERE mi.media_type = 'music'
-		   OR EXISTS (SELECT 1 FROM media_item_external_ids ei WHERE ei.media_item_id = mi.id)
-		ORDER BY mi.metadata_refreshed_at ASC NULLS FIRST
-	`)
-	if err != nil {
-		finishKickoff(ctx, q, taskID, startedAt, 0, 0, err)
-		return err
-	}
-	defer rows.Close()
-
-	now := time.Now()
-	type stale struct {
-		ID        int64
-		MediaType sqlc.MediaType
-		Title     string
-		Force     bool
-	}
-	var items []stale
-	for rows.Next() {
-		var id int64
-		var mt, title, mediaStatus, enrichStatus string
-		var refreshedAt *time.Time
-		if err := rows.Scan(&id, &mt, &title, &mediaStatus, &refreshedAt, &enrichStatus); err != nil {
-			continue
-		}
-		// A previously FAILED enrichment is stranded — River doesn't retry it
-		// (markFailed returns nil) and rescans skip the unchanged file. Re-drive
-		// it every sweep so a transient provider blip self-heals. Non-forced is
-		// enough (the item isn't 'complete', so the enrich idempotency gate lets
-		// it run).
-		if enrichStatus == "failed" {
-			items = append(items, stale{ID: id, MediaType: sqlc.MediaType(mt), Title: title})
-			continue
-		}
-		// Everything else here is the staleness path: only 'complete' items past
-		// their refresh window. The window is automatic and keyed off the item's
-		// production status — finished content barely changes, so it refreshes
-		// slowly; still-airing content refreshes often. force=true because the
-		// enrich worker short-circuits non-forced refreshes of 'complete' items —
-		// without it the sweep would no-op.
-		if enrichStatus != enrichStatusComplete {
-			continue
-		}
-		window := refreshWindowDays(mediaStatus)
-		if refreshedAt == nil {
-			items = append(items, stale{ID: id, MediaType: sqlc.MediaType(mt), Title: title, Force: true})
-			continue
-		}
-		cutoff := now.AddDate(0, 0, -window)
-		if refreshedAt.Before(cutoff) {
-			items = append(items, stale{ID: id, MediaType: sqlc.MediaType(mt), Title: title, Force: true})
-		}
-	}
-
-	enqueued := 0
-	failed := 0
-	for _, it := range items {
-		if err := ctx.Err(); err != nil {
-			finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, err)
-			return err
-		}
-		w.Progress.Set("refresh_stale_items", "kickoff_refresh_stale", it.Title)
-		if err := enqueueEnrichWithMetadata(ctx, rc, it.ID, it.MediaType, EnrichSourceScheduled, it.Force, taskID, 0, 0, 0, scheduledJobMetadata(source)); err != nil {
-			log.Warn().Err(err).Int64("item_id", it.ID).Msg("kickoff_refresh_stale: enqueue failed")
-			failed++
-			continue
-		}
-		enqueued++
-	}
-
-	if enqueued > 0 {
-		log.Info().Int("enqueued", enqueued).Msg("kickoff_refresh_stale: enqueued enrich jobs")
-	}
-	finishKickoff(ctx, q, taskID, startedAt, enqueued, failed, nil)
+	log.Info().Msg("kickoff_refresh_stale is retired; metadata changes drive refresh")
+	finishKickoff(ctx, q, job.Args.ScheduledTaskID, time.Now(), 0, 0, nil)
 	return nil
-}
-
-// Automatic metadata-refresh windows. Finished content (ended/cancelled TV,
-// released movies) almost never changes upstream, so it refreshes on a long
-// cadence; anything still in motion (airing series, unreleased titles, and
-// music/books which carry no status) refreshes far more often. These replace
-// the old per-library metadata_refresh_days knob.
-const (
-	refreshWindowActiveDays = 14
-	refreshWindowFinalDays  = 180
-)
-
-// refreshWindowDays maps a media_items.status string to its staleness window
-// in days. Status arrives lowercase and unnormalized from heya.media; the same
-// finished-vs-active split the Jellyfin mapper uses.
-func refreshWindowDays(status string) int {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "ended", "canceled", "cancelled", "released":
-		return refreshWindowFinalDays
-	default:
-		return refreshWindowActiveDays
-	}
 }
 
 // ---------------------------------------------------------------------------

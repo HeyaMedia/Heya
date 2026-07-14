@@ -43,7 +43,7 @@ var setupCmd = &cobra.Command{
 		port := cfg.Port.Value
 		logLevel := cfg.LogLevel.Value
 		dataDir := cfg.DataDir.Value
-		heyaMediaURL := cfg.HeyaMediaURL.Value
+		heyaMetadataURL := cfg.HeyaMetadataURL.Value
 
 		err := huh.NewForm(
 			huh.NewGroup(
@@ -70,9 +70,9 @@ var setupCmd = &cobra.Command{
 					Title("Data dir").
 					Value(&dataDir),
 				huh.NewInput().
-					Title("heya.media URL").
-					Description("Upstream metadata aggregator").
-					Value(&heyaMediaURL),
+					Title("HeyaMetadata URL").
+					Description("Canonical V2 metadata service").
+					Value(&heyaMetadataURL),
 			),
 		).Run()
 		if err != nil {
@@ -130,13 +130,13 @@ var setupCmd = &cobra.Command{
 		q := sqlc.New(pool)
 
 		bootCfg := &config.Config{
-			DatabaseURL:  config.Field[string]{Value: databaseURL, Source: config.SourceEnv, EnvVar: "HEYA_DATABASE_URL"},
-			Host:         config.Field[string]{Value: host, Source: config.SourceEnv, EnvVar: "HEYA_HOST"},
-			Port:         config.Field[string]{Value: port, Source: config.SourceEnv, EnvVar: "HEYA_PORT"},
-			LogLevel:     config.Field[string]{Value: logLevel, Source: config.SourceEnv, EnvVar: "HEYA_LOG_LEVEL"},
-			LogFormat:    config.Field[string]{Value: cfg.LogFormat.Value, Source: cfg.LogFormat.Source, EnvVar: cfg.LogFormat.EnvVar},
-			DataDir:      config.Field[string]{Value: dataDir, Source: config.SourceEnv, EnvVar: "HEYA_DATA_DIR"},
-			HeyaMediaURL: config.Field[string]{Value: heyaMediaURL, Source: config.SourceEnv, EnvVar: "HEYA_MEDIA_URL"},
+			DatabaseURL:     config.Field[string]{Value: databaseURL, Source: config.SourceEnv, EnvVar: "HEYA_DATABASE_URL"},
+			Host:            config.Field[string]{Value: host, Source: config.SourceEnv, EnvVar: "HEYA_HOST"},
+			Port:            config.Field[string]{Value: port, Source: config.SourceEnv, EnvVar: "HEYA_PORT"},
+			LogLevel:        config.Field[string]{Value: logLevel, Source: config.SourceEnv, EnvVar: "HEYA_LOG_LEVEL"},
+			LogFormat:       config.Field[string]{Value: cfg.LogFormat.Value, Source: cfg.LogFormat.Source, EnvVar: cfg.LogFormat.EnvVar},
+			DataDir:         config.Field[string]{Value: dataDir, Source: config.SourceEnv, EnvVar: "HEYA_DATA_DIR"},
+			HeyaMetadataURL: config.Field[string]{Value: heyaMetadataURL, Source: config.SourceEnv, EnvVar: "HEYA_METADATA_URL"},
 		}
 
 		userCount, _ := q.CountUsers(ctx)
@@ -264,7 +264,7 @@ var setupCmd = &cobra.Command{
 				"HEYA_PORT":         port,
 				"HEYA_LOG_LEVEL":    logLevel,
 				"HEYA_DATA_DIR":     dataDir,
-				"HEYA_MEDIA_URL":    heyaMediaURL,
+				"HEYA_METADATA_URL": heyaMetadataURL,
 			}); err != nil {
 				ui.Error("failed to write %s: %v", envPath, err)
 			} else {
@@ -296,7 +296,7 @@ func writeDotEnv(path string, vals map[string]string) error {
 		"HEYA_PORT":         "8080",
 		"HEYA_LOG_LEVEL":    "info",
 		"HEYA_DATA_DIR":     "./data",
-		"HEYA_MEDIA_URL":    "https://heya.media",
+		"HEYA_METADATA_URL": "http://localhost:3030",
 	}
 
 	keys := make([]string, 0, len(vals))

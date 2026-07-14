@@ -560,7 +560,7 @@ func (q *Queries) SearchPeopleCount(ctx context.Context, query string) (int64, e
 }
 
 const searchTracks = `-- name: SearchTracks :many
-SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.file_path, t.lyrics_path, t.search_vector, t.library_file_id, t.external_ids, t.isrc, t.recording_mbid, t.preview_url, t.explicit, t.artist_credits,
+SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.file_path, t.lyrics_path, t.search_vector, t.library_file_id, t.external_ids, t.isrc, t.recording_mbid, t.preview_url, t.explicit, t.artist_credits, t.lyrics_available,
        a.title AS album_title,
        a.slug AS album_slug,
        a.cover_path AS album_cover_path,
@@ -570,7 +570,7 @@ SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.f
        mi.slug AS artist_slug,
        EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL) AS available
 FROM (
-  SELECT tr.id, tr.album_id, tr.disc_number, tr.track_number, tr.title, tr.duration, tr.file_path, tr.lyrics_path, tr.search_vector, tr.library_file_id, tr.external_ids, tr.isrc, tr.recording_mbid, tr.preview_url, tr.explicit, tr.artist_credits
+  SELECT tr.id, tr.album_id, tr.disc_number, tr.track_number, tr.title, tr.duration, tr.file_path, tr.lyrics_path, tr.search_vector, tr.library_file_id, tr.external_ids, tr.isrc, tr.recording_mbid, tr.preview_url, tr.explicit, tr.artist_credits, tr.lyrics_available
   FROM tracks tr
   WHERE (
       tr.search_vector @@ websearch_to_tsquery('simple', $1)
@@ -618,6 +618,7 @@ type SearchTracksRow struct {
 	PreviewUrl              string      `json:"preview_url"`
 	Explicit                bool        `json:"explicit"`
 	ArtistCredits           []byte      `json:"artist_credits"`
+	LyricsAvailable         bool        `json:"lyrics_available"`
 	AlbumTitle              string      `json:"album_title"`
 	AlbumSlug               string      `json:"album_slug"`
 	AlbumCoverPath          string      `json:"album_cover_path"`
@@ -663,6 +664,7 @@ func (q *Queries) SearchTracks(ctx context.Context, arg SearchTracksParams) ([]S
 			&i.PreviewUrl,
 			&i.Explicit,
 			&i.ArtistCredits,
+			&i.LyricsAvailable,
 			&i.AlbumTitle,
 			&i.AlbumSlug,
 			&i.AlbumCoverPath,

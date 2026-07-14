@@ -109,7 +109,7 @@ func TestMovieFixtureProducesLocalPlans(t *testing.T) {
 	assertMovieMatch(t, byMatch, "The Matrix", "1999", "tmdb:603", "tmdb", 0.99, 1)
 	assertMovieMatch(t, byMatch, "A Goofy Movie", "1995", "imdb:tt0113198", "imdb", 0.99, 1)
 	assertMovieMatch(t, byMatch, "Avatar The Way of Water", "2022", "title_year:avatar the way of water|2022", "title_year", 0.82, 1)
-	assertMovieMatch(t, byMatch, "The Naked Gun", "2025", "title_year:naked gun|2025", "title_year", 0.82, 1)
+	assertMovieMatch(t, byMatch, "The Naked Gun", "2025", "title_year:the naked gun|2025", "title_year", 0.82, 1)
 	assertMovieMatch(t, byMatch, "Actually Corrected By NFO", "2021", "tmdb:999001", "tmdb", 0.99, 1)
 	assertMovieMatch(t, byMatch, "Jackass Presents Bad Grandpa .5", "2014", "title_year:jackass presents bad grandpa 5|2014", "title_year", 0.82, 1)
 	assertMovieMatch(t, byMatch, "Kill Bill Vol 1", "2003", "title_year:kill bill vol 1|2003", "title_year", 0.82, 1)

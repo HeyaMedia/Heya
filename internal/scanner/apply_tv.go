@@ -154,6 +154,9 @@ func ApplyTVMaterialization(ctx context.Context, lib sqlc.Library, result Result
 			emitTVApplyResult(applied, domain, emit)
 			return results, fmt.Errorf("apply TV rows %s: %w", preview.Key, err)
 		}
+		if err := txMatcher.StoreRichMetadata(ctx, item.ID, detail); err != nil {
+			return results, fmt.Errorf("apply TV relationships %s: %w", preview.Key, err)
+		}
 		if preview.TVSeriesAction != "" {
 			applied.TVSeriesAction = preview.TVSeriesAction
 		}

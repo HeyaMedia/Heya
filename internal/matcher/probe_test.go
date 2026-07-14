@@ -8,16 +8,16 @@ import (
 	"time"
 
 	"github.com/karbowiak/heya/internal/metadata"
-	"github.com/karbowiak/heya/internal/metadata/heyamedia"
+	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 )
 
 // TestProbeAutoMatch is a manual benchmark for the auto-match gate: hit a
-// running heya.media server (default localhost:3030) with a corpus of
+// running HeyaMetadata server (default localhost:3030) with a corpus of
 // realistic filename → expected-title pairs and report the score
 // distribution. Use this to tune AutoMatchThreshold without having to run a
 // full library scan.
 //
-// Skipped when heya.media isn't reachable, so it doesn't break CI. Run
+// Skipped when HeyaMetadata isn't reachable, so it doesn't break CI. Run
 // locally with:
 //
 //	go test -v -run TestProbeAutoMatch ./internal/matcher/
@@ -27,11 +27,14 @@ import (
 func TestProbeAutoMatch(t *testing.T) {
 	const heyaURL = "http://localhost:3030"
 	if !portOpen("localhost:3030") {
-		t.Skip("heya.media not reachable at localhost:3030 — skipping probe")
+		t.Skip("HeyaMetadata not reachable at localhost:3030 — skipping probe")
 	}
 
-	client := heyamedia.NewClient(heyaURL)
-	heya := heyamedia.NewHeyaProvider(client)
+	client, err := heyametadata.NewClient(heyaURL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	heya := heyametadata.NewHeyaProvider(client)
 
 	cases := []struct {
 		kind         metadata.MediaKind
@@ -121,7 +124,7 @@ func TestProbeAutoMatch(t *testing.T) {
 	t.Logf("─────────────────────────────────────────────────────────────────────")
 
 	for i, c := range cases {
-		// Pace the queries — HeyaMedia's alt-title fan-out hits multiple
+		// Pace the queries — HeyaMetadata's alt-title fan-out hits multiple
 		// upstream providers per hit on cold cache, and slamming the
 		// full corpus back-to-back has been observed to crash the
 		// server. 400ms between requests is gentle enough to avoid
@@ -131,7 +134,7 @@ func TestProbeAutoMatch(t *testing.T) {
 		}
 		query := metadata.SearchQuery{Title: c.title, Year: c.year}
 		hits, err := heya.Search(ctx, c.kind, query)
-		// HeyaMedia is occasionally flaky during active development —
+		// HeyaMetadata is occasionally flaky during active development —
 		// wait 10s and retry once on transport-level errors so a single
 		// corpus run isn't ruined by a server hiccup.
 		if err != nil {

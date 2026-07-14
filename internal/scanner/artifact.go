@@ -10,6 +10,8 @@ import (
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/mediatype"
+	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/metadata/heyametadata"
 )
 
 const (
@@ -174,7 +176,7 @@ func movieFetchCoverage(items []MovieFetchPreview) map[string]bool {
 		if strings.TrimSpace(item.Error) == "" && item.Detail == nil {
 			continue
 		}
-		out[searchFetchKey(item.Key, item.ProviderID)] = true
+		addFetchCoverage(out, item.Key, item.ProviderID, item.Detail)
 	}
 	return out
 }
@@ -185,7 +187,7 @@ func bookFetchCoverage(items []BookFetchPreview) map[string]bool {
 		if strings.TrimSpace(item.Error) == "" && item.Detail == nil {
 			continue
 		}
-		out[searchFetchKey(item.Key, item.ProviderID)] = true
+		addFetchCoverage(out, item.Key, item.ProviderID, item.Detail)
 	}
 	return out
 }
@@ -196,7 +198,10 @@ func musicFetchCoverage(items []MusicFetchPreview) map[string]bool {
 		if strings.TrimSpace(item.Error) == "" && item.Detail == nil {
 			continue
 		}
-		out[searchFetchKey(item.Key, item.ProviderID)] = true
+		addFetchCoverage(out, item.Key, item.ProviderID, item.Detail)
+		if item.SearchProviderID != "" {
+			addFetchCoverage(out, item.Key, item.SearchProviderID, item.Detail)
+		}
 	}
 	return out
 }
@@ -207,12 +212,23 @@ func tvFetchCoverage(items []TVFetchPreview) map[string]bool {
 		if strings.TrimSpace(item.Error) == "" && item.Detail == nil {
 			continue
 		}
-		out[searchFetchKey(item.Key, item.ProviderID)] = true
+		addFetchCoverage(out, item.Key, item.ProviderID, item.Detail)
 		for _, key := range item.Keys {
-			out[searchFetchKey(key, item.ProviderID)] = true
+			addFetchCoverage(out, key, item.ProviderID, item.Detail)
 		}
 	}
 	return out
+}
+
+func addFetchCoverage(out map[string]bool, key, providerID string, detail *metadata.MediaDetail) {
+	out[searchFetchKey(key, providerID)] = true
+	if detail == nil || strings.TrimSpace(detail.CanonicalID) == "" {
+		return
+	}
+	// HeyaMetadata candidates are opaque workflow references. Resolving one
+	// legitimately promotes it to a canonical entity UUID between fetch and
+	// apply; both references describe the same accepted search decision.
+	out[searchFetchKey(key, heyametadata.EncodeEntityProviderID(detail.CanonicalID))] = true
 }
 
 func searchFetchKey(key, providerID string) string {

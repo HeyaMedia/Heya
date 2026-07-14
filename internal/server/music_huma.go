@@ -391,7 +391,10 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 		func(ctx context.Context, in *IDPath) (*JSONOutput[LyricsResponse], error) {
 			body, err := readTrackLyrics(ctx, app, in.ID)
 			if err != nil {
-				return nil, huma.Error404NotFound(err.Error())
+				if errors.Is(err, service.ErrTrackLyricsUnavailable) {
+					return nil, huma.Error404NotFound(err.Error())
+				}
+				return nil, huma.Error502BadGateway(err.Error())
 			}
 			return cachedJSON(parseLyrics(body), 300), nil
 		})

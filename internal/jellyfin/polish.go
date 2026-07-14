@@ -2,14 +2,15 @@ package jellyfin
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
 
 	json "github.com/goccy/go-json"
+	"github.com/karbowiak/heya/internal/service"
 )
 
 // Display preferences, filters, similar items, lyrics, session listing —
@@ -183,21 +184,20 @@ type lyricLine struct {
 
 var lrcTimestamp = regexp.MustCompile(`^\[(\d+):(\d{2})(?:[.:](\d{1,3}))?\](.*)$`)
 
-// GET /Audio/{itemId}/Lyrics — serves the track's sidecar lyrics, parsing
-// LRC timestamps into synced-lyric ticks (Finamp renders these live).
+// GET /Audio/{itemId}/Lyrics — serves local or canonical recording lyrics,
+// parsing LRC timestamps into synced-lyric ticks (Finamp renders these live).
 func (s *Server) handleLyrics(w http.ResponseWriter, r *http.Request, p Params) {
 	trackID, err := DecodeIDKind(p["itemId"], KindTrack)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	path, ok := s.lyricsPath(r, trackID)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	data, err := os.ReadFile(path) //nolint:gosec // path comes from track_files rows, not request input
+	data, err := s.app.TrackLyrics(r.Context(), trackID)
 	if err != nil {
+		if !errors.Is(err, service.ErrTrackLyricsUnavailable) {
+			http.Error(w, "lyrics upstream unavailable", http.StatusBadGateway)
+			return
+		}
 		http.NotFound(w, r)
 		return
 	}
@@ -237,19 +237,6 @@ func (s *Server) handleLyrics(w http.ResponseWriter, r *http.Request, p Params) 
 		return
 	}
 	writeJSON(w, http.StatusOK, dto)
-}
-
-func (s *Server) lyricsPath(r *http.Request, trackID int64) (string, bool) {
-	files, err := s.app.ListTrackFiles(r.Context(), trackID)
-	if err != nil {
-		return "", false
-	}
-	for _, tf := range files {
-		if tf.LyricsPath != "" {
-			return tf.LyricsPath, true
-		}
-	}
-	return "", false
 }
 
 // --- Sessions ---

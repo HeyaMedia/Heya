@@ -55,6 +55,31 @@ func TestStatusAndGenerateDoNotCreateOrDownloadArtifacts(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
+func TestParseDevices(t *testing.T) {
+	devices := parseDevices([]byte("Vulkan0\tIntel Arc A380\nVulkan1\tAMD Radeon Graphics\nCPU\tx86_64 CPU\n"))
+	require.Equal(t, []ComputeDevice{
+		{Name: "Vulkan0", Description: "Intel Arc A380"},
+		{Name: "Vulkan1", Description: "AMD Radeon Graphics"},
+		{Name: "CPU", Description: "x86_64 CPU"},
+	}, devices)
+}
+
+func TestGenerationDeviceArgs(t *testing.T) {
+	devices := []ComputeDevice{{Name: "Vulkan0", Description: "Intel Arc"}, {Name: "Vulkan1", Description: "AMD Radeon"}}
+	require.Equal(t, []string{"--auto-fit"}, mustDeviceArgs(t, "auto", devices))
+	require.Equal(t, []string{"--auto-fit"}, mustDeviceArgs(t, "", devices))
+	require.Equal(t, []string{"--backend", "Vulkan1"}, mustDeviceArgs(t, "vulkan1", devices))
+	_, err := generationDeviceArgs("Vulkan2", devices)
+	require.ErrorContains(t, err, `unknown compute device "Vulkan2"`)
+}
+
+func mustDeviceArgs(t *testing.T, requested string, devices []ComputeDevice) []string {
+	t.Helper()
+	args, err := generationDeviceArgs(requested, devices)
+	require.NoError(t, err)
+	return args
+}
+
 func TestExtractZipFlattenFindsCLI(t *testing.T) {
 	dir := t.TempDir()
 	archive := filepath.Join(dir, "runtime.zip")

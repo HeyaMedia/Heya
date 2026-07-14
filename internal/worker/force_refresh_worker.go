@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
-	"github.com/karbowiak/heya/internal/metadata/heyamedia"
+	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
@@ -17,7 +17,7 @@ func pickRefreshProvider(mediaType string, externalIDsJSON []byte, heyaSlug stri
 	var ids map[string]string
 	json.Unmarshal(externalIDsJSON, &ids)
 
-	if pid := heyamedia.BuildLookupID(metadata.MediaKind(mediaType), ids, heyaSlug); pid != "" {
+	if pid := heyametadata.BuildLookupID(metadata.MediaKind(mediaType), ids, heyaSlug); pid != "" {
 		return "heya", pid
 	}
 	return "", ""

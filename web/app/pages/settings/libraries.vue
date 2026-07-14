@@ -58,7 +58,16 @@ function closeScanner() {
 // Latest persisted scan run per scannable library — a cheap runs-only fetch
 // (no identity/finding payload) so each card can show a scanner status line
 // without pulling the full scanner view.
-type ScanRunLite = { id: number; status: string; mode: string; summary: Record<string, any>; started_at?: string; finished_at?: string }
+type ScanRunLite = {
+  id: number
+  status: string
+  mode: string
+  summary: Record<string, any>
+  pipeline_failure_count?: number
+  pipeline_error_message?: string
+  started_at?: string
+  finished_at?: string
+}
 const latestRun = ref<Record<number, ScanRunLite | null>>({})
 
 async function fetchLatestRuns() {
@@ -172,23 +181,49 @@ const SCANNER_EVENT_LABELS: Record<string, string> = {
   'materialize.apply': 'Applying',
   'materialize.apply_summary': 'Apply summary',
   'scan.summary': 'Scan summary',
-  'scan.persisted': 'Saved scan result',
+  'scan.persisted': 'Stage complete',
+  'scan.persist_failed': 'Could not save scan state',
+  'scan.error': 'Scan failed',
+  'scan.deferred': 'Waiting for metadata',
 }
 
 function scanEventLabel(ev: ScannerEventPayload): string {
   const phase = ev.phase ? `${ev.phase}` : ''
-  const action = SCANNER_EVENT_LABELS[ev.event] ?? ev.event.replaceAll('.', ' ')
+  const action = ev.event === 'scan.persisted'
+    ? persistedStageLabel(String(ev.data?.mode || ''))
+    : (SCANNER_EVENT_LABELS[ev.event] ?? ev.event.replaceAll('.', ' '))
   const target = scanEventTarget(ev)
   return [phase, action, target].filter(Boolean).join(' · ')
 }
 
+function persistedStageLabel(mode: string): string {
+  switch (mode) {
+    case 'search': return 'Identification complete'
+    case 'fetch': return 'Metadata fetched'
+    case 'materialize': return 'Apply plan ready'
+    case 'apply': return 'Metadata applied'
+    default: return 'Stage complete'
+  }
+}
+
 function scanEventTarget(ev: ScannerEventPayload): string {
+  if (ev.message && (ev.event === 'scan.error' || ev.event.includes('failed'))) return ev.message
   if (ev.detail) return ev.detail
   const data = ev.data ?? {}
   return ev.rel_path ||
     ev.root ||
     ev.path ||
     String(data.title || data.artist || data.album || data.key || data.provider_id || '')
+}
+
+function scanEventFailed(ev: ScannerEventPayload): boolean {
+  return ev.event === 'scan.error' || ev.event.includes('failed') || ev.severity === 'error'
+}
+
+function scannerRunStatus(run: ScanRunLite): string {
+  const failures = run.pipeline_failure_count ?? 0
+  if (failures > 0) return `${failures} pipeline failure${failures === 1 ? '' : 's'}`
+  return run.status
 }
 
 async function fetchLibraries() {
@@ -207,11 +242,11 @@ watch(() => librariesData.data.value, value => {
   void fetchLatestRuns()
 }, { immediate: true })
 
-async function scanLib(id: number) {
+async function scanLib(id: number, force = false) {
   scanning.value = id
   try {
-    await $heya('/api/libraries/{id}/scan', { method: 'POST', path: { id } })
-    flash.value = { kind: 'ok', text: 'Scan queued.' }
+    await $heya('/api/libraries/{id}/scan', { method: 'POST', path: { id }, query: { force } })
+    flash.value = { kind: 'ok', text: force ? 'Forced rescan queued.' : 'Scan queued.' }
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Scan failed.' }
   } finally {
@@ -447,9 +482,9 @@ watch(() => route.query.library, () => syncScannerFromRoute())
           <Icon name="close" :size="12" />
           Cancel all
         </button>
-        <button v-if="libraries.length" class="sv2-btn ghost" :disabled="scanningAll" @click="scanAll">
+        <button v-if="libraries.length" class="sv2-btn ghost" :disabled="scanningAll" title="Scan filesystem changes in every library" @click="scanAll">
           <Icon :name="scanningAll ? 'spinner' : 'refresh'" :size="12" />
-          {{ scanningAll ? 'Queuing…' : 'Scan all' }}
+          {{ scanningAll ? 'Queuing…' : 'Scan all changes' }}
         </button>
         <button class="sv2-btn primary" @click="openAdd">
           <Icon name="plus" :size="12" />
@@ -508,8 +543,13 @@ watch(() => route.query.library, () => syncScannerFromRoute())
                 Processed {{ libProgress(lib.id)!.processed }} / {{ libProgress(lib.id)!.total }} files
                 <template v-if="libProgress(lib.id)!.matched">· {{ libProgress(lib.id)!.matched }} matched</template>
               </div>
-              <div v-if="libScanEvent(lib.id)" class="prog-current" :title="scanEventLabel(libScanEvent(lib.id)!)">
-                <Icon name="spinner" :size="11" />
+              <div
+                v-if="libScanEvent(lib.id)"
+                class="prog-current"
+                :class="{ error: scanEventFailed(libScanEvent(lib.id)!) }"
+                :title="scanEventLabel(libScanEvent(lib.id)!)"
+              >
+                <Icon :name="scanEventFailed(libScanEvent(lib.id)!) ? 'warning' : 'spinner'" :size="11" />
                 <span>{{ scanEventLabel(libScanEvent(lib.id)!) }}</span>
               </div>
             </div>
@@ -522,7 +562,7 @@ watch(() => route.query.library, () => syncScannerFromRoute())
             </div>
 
             <div class="lib-tags">
-              <span class="tag">heya.media</span>
+              <span class="tag">HeyaMetadata V2</span>
               <span v-if="lib.settings?.fetch_ratings" class="tag rate"><Icon name="star" :size="9" /> Ratings</span>
               <span v-if="lib.settings?.save_nfo"      class="tag nfo"><Icon name="clipboard" :size="9" /> NFO</span>
               <span v-if="lib.settings?.save_images"   class="tag img"><Icon name="image" :size="9" /> Images</span>
@@ -531,10 +571,19 @@ watch(() => route.query.library, () => syncScannerFromRoute())
               <span v-if="lib.settings?.preferred_language" class="tag lang">{{ lib.settings.preferred_language.toUpperCase() }}</span>
             </div>
 
-            <button v-if="isScannable(lib)" class="lib-scanner" @click="openScanner(lib)">
+            <div
+              v-if="latestRun[lib.id]?.pipeline_error_message"
+              class="lib-pipeline-error"
+              :title="latestRun[lib.id]!.pipeline_error_message"
+            >
+              <Icon name="warning" :size="11" />
+              <span>{{ latestRun[lib.id]!.pipeline_error_message }}</span>
+            </div>
+
+            <button v-if="isScannable(lib)" class="lib-scanner" :class="{ error: latestRun[lib.id]?.pipeline_failure_count }" @click="openScanner(lib)">
               <Icon name="database" :size="11" />
               <span v-if="latestRun[lib.id]">
-                Scanner · {{ latestRun[lib.id]!.status }} · {{ shortDate(latestRun[lib.id]!.finished_at || latestRun[lib.id]!.started_at) }}
+                Scanner · {{ scannerRunStatus(latestRun[lib.id]!) }} · {{ shortDate(latestRun[lib.id]!.finished_at || latestRun[lib.id]!.started_at) }}
               </span>
               <span v-else>Scanner · not run yet</span>
               <Icon name="chevright" :size="11" class="lib-sv2-go" />
@@ -555,6 +604,10 @@ watch(() => route.query.library, () => syncScannerFromRoute())
                 <span class="row-btn"><Icon name="more" :size="14" /></span>
               </template>
               <template #default="{ close }">
+                <button class="menu-item" @click="scanLib(lib.id, true); close()">
+                  <Icon name="refresh" :size="13" />
+                  Force rescan
+                </button>
                 <button class="menu-item" @click="forceRefreshMetadata(lib.id); close()">
                   <Icon name="refresh" :size="13" />
                   Refresh metadata
@@ -569,7 +622,7 @@ watch(() => route.query.library, () => syncScannerFromRoute())
             <button v-if="libProgress(lib.id)" class="row-btn danger" title="Cancel scan" aria-label="Cancel scan" @click="cancelLib(lib.id)">
               <Icon name="close" :size="14" />
             </button>
-            <button v-else class="row-btn" :disabled="scanning === lib.id" title="Scan now" aria-label="Scan now" @click="scanLib(lib.id)">
+            <button v-else class="row-btn" :disabled="scanning === lib.id" title="Scan filesystem changes" aria-label="Scan filesystem changes" @click="scanLib(lib.id)">
               <Icon :name="scanning === lib.id ? 'spinner' : 'refresh'" :size="14" />
             </button>
 
@@ -844,6 +897,7 @@ watch(() => route.query.library, () => syncScannerFromRoute())
   font-size: 11px;
   color: var(--gold);
 }
+.prog-current.error { color: var(--bad); }
 .prog-current span {
   min-width: 0;
   overflow: hidden;
@@ -880,7 +934,15 @@ watch(() => route.query.library, () => syncScannerFromRoute())
   transition: color 0.12s, border-color 0.12s, background 0.12s;
 }
 .lib-scanner:hover { color: var(--fg-0); border-color: var(--border-strong); background: rgb(var(--ink) / 0.04); }
+.lib-scanner.error { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
 .lib-sv2-go { color: var(--fg-4); }
+
+.lib-pipeline-error {
+  display: flex; align-items: center; gap: 5px;
+  max-width: min(620px, 100%);
+  color: var(--bad); font-size: 11px;
+}
+.lib-pipeline-error span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .lib-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .row-btn {

@@ -103,7 +103,7 @@ func TestPlanTVMaterializationCreatesUniqueTargetsAndBlocksRejected(t *testing.T
 				Episodes: []TVEpisodeRef{{Season: 1, Episode: 1}},
 			},
 			{
-				Key:      "title:bear",
+				Key:      "title:the bear",
 				Title:    "The Bear",
 				Files:    []string{"Loose/The.Bear.S03E01.mkv"},
 				Episodes: []TVEpisodeRef{{Season: 3, Episode: 1}},
@@ -111,12 +111,12 @@ func TestPlanTVMaterializationCreatesUniqueTargetsAndBlocksRejected(t *testing.T
 		},
 		TVSearch: []TVSearchMatch{
 			{Accepted: true, Key: "tmdb:136315", ProviderID: "heya:tv:tmdb:136315", Title: "The Bear", Year: "2022", ExternalIDs: map[string]string{"tmdb": "136315"}},
-			{Accepted: true, Key: "title:bear", ProviderID: "heya:tv:tmdb:136315", Title: "The Bear", Year: "2022", ExternalIDs: map[string]string{"tmdb": "136315"}},
+			{Accepted: true, Key: "title:the bear", ProviderID: "heya:tv:tmdb:136315", Title: "The Bear", Year: "2022", ExternalIDs: map[string]string{"tmdb": "136315"}},
 			{Accepted: false, Key: "title:poker face", Query: TVSearchQuery{Title: "Poker Face"}, Reason: "ambiguous_or_low_confidence"},
 		},
 		TVMetadata: []TVFetchPreview{{
-			Key:             "title:bear,tmdb:136315",
-			Keys:            []string{"title:bear", "tmdb:136315"},
+			Key:             "title:the bear,tmdb:136315",
+			Keys:            []string{"title:the bear", "tmdb:136315"},
 			ProviderID:      "heya:tv:tmdb:136315",
 			Title:           "The Bear",
 			Year:            "2022",

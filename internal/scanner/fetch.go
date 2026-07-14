@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/titlematch"
@@ -22,6 +23,14 @@ type TVDetailProvider interface {
 
 type MusicDetailProvider interface {
 	GetDetail(context.Context, string, *metadata.FetchOptions) (*metadata.MediaDetail, error)
+}
+
+// MusicReleaseGroupProvider is optional because non-Heya test/offline
+// providers may only expose artist detail. HeyaMetadata implements it so an
+// unresolved discography observation can be materialized only when a local
+// album actually needs it.
+type MusicReleaseGroupProvider interface {
+	ResolveReleaseGroup(context.Context, metadata.SearchQuery) (*metadata.MediaDetail, error)
 }
 
 type BookDetailProvider interface {
@@ -202,6 +211,9 @@ func FetchMovieMetadataPreviews(ctx context.Context, search []MovieSearchMatch, 
 
 		detail, err := provider.GetDetail(ctx, match.ProviderID, nil)
 		if err != nil {
+			if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
+				return previews, err
+			}
 			preview.Error = err.Error()
 			emit.Emit(Event{
 				Event:    "metadata.fetch_failed",
@@ -273,6 +285,9 @@ func FetchBookMetadataPreviews(ctx context.Context, search []BookSearchMatch, pr
 
 		detail, err := provider.GetDetail(ctx, match.ProviderID, nil)
 		if err != nil {
+			if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
+				return previews, err
+			}
 			preview.Error = err.Error()
 			emit.Emit(Event{
 				Event:    "metadata.fetch_failed",
@@ -370,7 +385,12 @@ func FetchMusicMetadataPreviews(ctx context.Context, search []MusicSearchMatch, 
 				setErr(err)
 				return
 			}
-			previews[i] = fetchOneMusicMetadataPreview(ctx, match, artistByKey[match.Key], provider, emit)
+			preview, err := fetchOneMusicMetadataPreview(ctx, match, artistByKey[match.Key], provider, emit)
+			if err != nil {
+				setErr(err)
+				return
+			}
+			previews[i] = preview
 		}(i, match)
 	}
 	wg.Wait()
@@ -388,7 +408,7 @@ func FetchMusicMetadataPreviews(ctx context.Context, search []MusicSearchMatch, 
 	return previews, nil
 }
 
-func fetchOneMusicMetadataPreview(ctx context.Context, match MusicSearchMatch, artist MusicArtistPlan, provider MusicDetailProvider, emit Emitter) MusicFetchPreview {
+func fetchOneMusicMetadataPreview(ctx context.Context, match MusicSearchMatch, artist MusicArtistPlan, provider MusicDetailProvider, emit Emitter) (MusicFetchPreview, error) {
 	preview := MusicFetchPreview{
 		Key:         match.Key,
 		ProviderID:  match.ProviderID,
@@ -428,7 +448,10 @@ func fetchOneMusicMetadataPreview(ctx context.Context, match MusicSearchMatch, a
 		if !primaryCandidate && !musicFetchCandidateEligibleForRerank(candidate) {
 			continue
 		}
-		candidatePreview := fetchMusicCandidatePreview(ctx, match, artist, candidate, provider, emit)
+		candidatePreview, err := fetchMusicCandidatePreview(ctx, match, artist, candidate, provider, emit)
+		if err != nil {
+			return preview, err
+		}
 		evaluation := musicCandidateFetchEvaluation(candidate, candidatePreview)
 		preview.CandidateEvaluations = append(preview.CandidateEvaluations, evaluation)
 		if candidatePreview.Error != "" {
@@ -454,7 +477,7 @@ func fetchOneMusicMetadataPreview(ctx context.Context, match MusicSearchMatch, a
 
 	if !bestSet {
 		preview.Error = "music metadata candidates could not be fetched"
-		return preview
+		return preview, nil
 	}
 	for i := range preview.CandidateEvaluations {
 		preview.CandidateEvaluations[i].Selected = preview.CandidateEvaluations[i].ProviderID == best.ProviderID
@@ -498,14 +521,17 @@ func fetchOneMusicMetadataPreview(ctx context.Context, match MusicSearchMatch, a
 			"issues":        len(preview.Issues),
 		},
 	})
-	return preview
+	return preview, nil
 }
 
-func fetchMusicCandidatePreview(ctx context.Context, match MusicSearchMatch, artist MusicArtistPlan, candidate MusicSearchCandidate, provider MusicDetailProvider, emit Emitter) MusicFetchPreview {
+func fetchMusicCandidatePreview(ctx context.Context, match MusicSearchMatch, artist MusicArtistPlan, candidate MusicSearchCandidate, provider MusicDetailProvider, emit Emitter) (MusicFetchPreview, error) {
 	fetchCtx, cancel := context.WithTimeout(ctx, musicMetadataFetchTimeout)
 	detail, err := provider.GetDetail(fetchCtx, candidate.ProviderID, nil)
-	cancel()
 	if err != nil {
+		cancel()
+		if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
+			return MusicFetchPreview{}, err
+		}
 		emit.Emit(Event{
 			Event:    "metadata.fetch_failed",
 			Severity: SeverityWarn,
@@ -525,13 +551,139 @@ func fetchMusicCandidatePreview(ctx context.Context, match MusicSearchMatch, art
 			LocalTracks: countMusicArtistTracks(artist),
 			ExternalIDs: cloneStringMap(candidate.ExternalIDs),
 			Error:       err.Error(),
+		}, nil
+	}
+	if resolver, ok := provider.(MusicReleaseGroupProvider); ok {
+		if err := resolveLocalMusicReleaseGroups(fetchCtx, artist, detail, resolver, emit); err != nil {
+			cancel()
+			if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
+				return MusicFetchPreview{}, err
+			}
+			emit.Emit(Event{
+				Event: "metadata.release_group_failed", Severity: SeverityWarn,
+				Kind: "music", Reason: "release_group_discovery_failed", Message: err.Error(),
+				Data: map[string]any{"key": match.Key, "artist": artist.Artist},
+			})
+		} else {
+			cancel()
 		}
+	} else {
+		cancel()
 	}
 	candidateMatch := match
 	candidateMatch.ProviderID = candidate.ProviderID
 	candidateMatch.Artist = firstNonEmpty(candidate.Artist, match.Artist)
 	candidateMatch.ExternalIDs = candidate.ExternalIDs
-	return musicFetchPreview(candidateMatch, artist, detail)
+	return musicFetchPreview(candidateMatch, artist, detail), nil
+}
+
+func resolveLocalMusicReleaseGroups(ctx context.Context, artist MusicArtistPlan, detail *metadata.MediaDetail, provider MusicReleaseGroupProvider, emit Emitter) error {
+	if detail == nil || provider == nil {
+		return nil
+	}
+	for _, local := range artist.Albums {
+		remote, _, _, matched := findMusicRemoteAlbum(local, detail.Albums)
+		if matched && remote.CanonicalID != "" && len(remote.Tracks) > 0 {
+			continue
+		}
+
+		resolved, err := provider.ResolveReleaseGroup(ctx, metadata.SearchQuery{
+			CanonicalKind: "release_group",
+			Identifiers:   musicReleaseGroupDiscoveryIDs(local.ExternalIDs),
+			Title:         local.Album,
+			Year:          local.Year,
+			Artist:        firstNonEmpty(local.Artist, artist.Artist),
+			Format:        local.ReleaseKind,
+		})
+		if err != nil {
+			if retryAfter, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
+				// Artist identity has already been resolved. Issued releases and
+				// tracklists are enrichment, so initiate their discovery without
+				// holding the artist scan open. Local album/track mappings keep the
+				// library usable until a later refresh sees the canonical release.
+				emit.Emit(Event{
+					Event: "metadata.release_group_deferred", Severity: SeverityInfo,
+					Kind: "music", Reason: "release_group_discovery_pending",
+					Data: map[string]any{
+						"artist": artist.Artist, "album": local.Album,
+						"retry_after_ms": retryAfter.Milliseconds(),
+					},
+				})
+				continue
+			}
+			return fmt.Errorf("resolve release group %q: %w", local.Album, err)
+		}
+		album, ok := albumEntryFromReleaseGroupDetail(resolved)
+		if !ok {
+			continue
+		}
+		// Prepending ensures canonical materialized data wins a score tie with
+		// the unresolved relation evidence that led us here.
+		detail.Albums = append([]metadata.AlbumEntry{album}, detail.Albums...)
+		emit.Emit(Event{
+			Event: "metadata.release_group_resolved", Kind: "music",
+			Data: map[string]any{
+				"artist": artist.Artist, "album": local.Album,
+				"entity_id": album.CanonicalID, "tracks": len(album.Tracks),
+			},
+		})
+	}
+	return nil
+}
+
+func musicReleaseGroupDiscoveryIDs(values map[string]string) map[string]string {
+	result := map[string]string{}
+	for key, value := range values {
+		normalized := strings.ToLower(strings.TrimSpace(key))
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		switch normalized {
+		case "musicbrainz_release_group", "mb_release_group":
+			result["musicbrainz_release_group"] = value
+		case "musicbrainz_album", "mb_release":
+			if result["musicbrainz_release_group"] == "" {
+				result["musicbrainz_album"] = value
+			}
+		case "itunes_album", "apple_album":
+			result["apple"] = value
+		case "audiodb_album":
+			result["audiodb"] = value
+		case "deezer_album":
+			result["deezer"] = value
+		case "discogs_album":
+			result["discogs"] = value
+		}
+	}
+	if result["musicbrainz_release_group"] != "" {
+		delete(result, "musicbrainz_album")
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func albumEntryFromReleaseGroupDetail(detail *metadata.MediaDetail) (metadata.AlbumEntry, bool) {
+	if detail == nil || detail.CanonicalKind != "release_group" || detail.CanonicalID == "" {
+		return metadata.AlbumEntry{}, false
+	}
+	if len(detail.Albums) > 0 {
+		return detail.Albums[0], true
+	}
+	return metadata.AlbumEntry{
+		CanonicalID: detail.CanonicalID,
+		Title:       firstNonEmpty(detail.AlbumTitle, detail.Title),
+		Type:        detail.AlbumType,
+		Year:        atoiDigits(detail.Year),
+		Label:       detail.Label,
+		Country:     detail.Country,
+		Barcode:     detail.Barcode,
+		CoverURL:    detail.CoverURL,
+		ExternalIDs: cloneStringMap(detail.ExternalIDs),
+		Tracks:      append([]metadata.TrackDetail(nil), detail.Tracks...),
+	}, true
 }
 
 func musicFetchCandidates(match MusicSearchMatch, limit int) []MusicSearchCandidate {
@@ -576,14 +728,8 @@ func musicFetchCandidates(match MusicSearchMatch, limit int) []MusicSearchCandid
 		if iCase != jCase {
 			return iCase
 		}
-		if iCount, jCount := len(candidates[i].ExternalIDs), len(candidates[j].ExternalIDs); iCount != jCount {
-			return iCount > jCount
-		}
 		if candidates[i].Confidence != candidates[j].Confidence {
 			return candidates[i].Confidence > candidates[j].Confidence
-		}
-		if rankI, rankJ := musicCandidateProviderRank(candidates[i]), musicCandidateProviderRank(candidates[j]); rankI != rankJ {
-			return rankI < rankJ
 		}
 		return candidates[i].ProviderID < candidates[j].ProviderID
 	})
@@ -644,13 +790,6 @@ func musicFetchPreviewHasLocalCoverage(preview MusicFetchPreview) bool {
 	return preview.MappedAlbums > 0 || preview.MappedTracks > 0
 }
 
-func musicCandidateProviderRank(candidate MusicSearchCandidate) int {
-	if len(candidate.ExternalIDs) > 0 {
-		return musicExternalIDsProviderRank(candidate.ExternalIDs)
-	}
-	return musicProviderRank(musicSearchProviderFromID(candidate.ProviderID))
-}
-
 func fetchTVLikeMetadataPreviews(ctx context.Context, search []TVSearchMatch, matches []TVMatch, provider TVDetailProvider, emit Emitter, domain string) ([]TVFetchPreview, error) {
 	if provider == nil {
 		return nil, fmt.Errorf("%s detail provider is required", domain)
@@ -690,6 +829,9 @@ func fetchTVLikeMetadataPreviews(ctx context.Context, search []TVSearchMatch, ma
 
 		detail, err := provider.GetDetail(ctx, searchMatch.ProviderID, nil)
 		if err != nil {
+			if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
+				return previews, err
+			}
 			preview.Error = err.Error()
 			emit.Emit(Event{
 				Event:    "metadata.fetch_failed",
@@ -1091,6 +1233,15 @@ func mapMusicAlbumFetch(local MusicAlbumPlan, remoteAlbums []metadata.AlbumEntry
 	mapping.Issues = append(mapping.Issues, musicAlbumFetchIssues(local, remote, reason)...)
 	for _, track := range local.Tracks {
 		trackMapping := mapMusicTrackFetch(track, remote.Tracks)
+		if strings.HasPrefix(reason, "external_id:") &&
+			strings.HasPrefix(trackMapping.Issue, "track_title_mismatch ") &&
+			musicTrackTitlesUseDifferentScripts(trackMapping.LocalTitle, trackMapping.RemoteTitle) {
+			// An externally identified album plus an exact disc/track position is
+			// stronger evidence than a low string score between an original-script
+			// title and its romanization. Keep genuine same-script conflicts visible.
+			trackMapping.Issue = ""
+			trackMapping.Reason = "disc_track_localized"
+		}
 		mapping.TrackMappings = append(mapping.TrackMappings, trackMapping)
 		if trackMapping.Matched {
 			mapping.MappedTracks++
@@ -1110,6 +1261,27 @@ func mapMusicAlbumFetch(local MusicAlbumPlan, remoteAlbums []metadata.AlbumEntry
 		return mapping.TrackMappings[i].LocalDisc < mapping.TrackMappings[j].LocalDisc
 	})
 	return mapping
+}
+
+func musicTrackTitlesUseDifferentScripts(local, remote string) bool {
+	localLatin, localNonLatin := musicTitleLetterScripts(local)
+	remoteLatin, remoteNonLatin := musicTitleLetterScripts(remote)
+	return (localNonLatin && remoteLatin && !remoteNonLatin) ||
+		(remoteNonLatin && localLatin && !localNonLatin)
+}
+
+func musicTitleLetterScripts(value string) (latin, nonLatin bool) {
+	for _, r := range value {
+		if !unicode.IsLetter(r) {
+			continue
+		}
+		if unicode.In(r, unicode.Latin) {
+			latin = true
+		} else {
+			nonLatin = true
+		}
+	}
+	return latin, nonLatin
 }
 
 func findMusicRemoteAlbum(local MusicAlbumPlan, remoteAlbums []metadata.AlbumEntry) (metadata.AlbumEntry, float64, string, bool) {
@@ -1264,20 +1436,24 @@ func musicArtistFetchIssues(local MusicArtistPlan, detail *metadata.MediaDetail)
 }
 
 func musicAlbumFetchIssues(local MusicAlbumPlan, remote metadata.AlbumEntry, reason string) []string {
-	issues := musicExternalIDConflictIssues("album", local.ExternalIDs, remote.ExternalIDs, []musicIDCompare{
+	compares := []musicIDCompare{
 		{Local: []string{"musicbrainz_release_group"}, Remote: []string{"mb_release_group", "musicbrainz_release_group"}},
-		{Local: []string{"musicbrainz_album"}, Remote: []string{"mb_release", "musicbrainz_album", "mbid"}},
 		{Local: []string{"itunes_album"}, Remote: []string{"apple", "itunes_album"}},
 		{Local: []string{"audiodb_album"}, Remote: []string{"audiodb", "audiodb_album"}},
 		{Local: []string{"deezer_album"}, Remote: []string{"deezer", "deezer_album"}},
 		{Local: []string{"discogs_album"}, Remote: []string{"discogs", "discogs_album"}},
-	})
-	if local.Year != "" && remote.Year > 0 {
-		localYear := atoiDigits(local.Year)
-		if localYear > 0 && localYear != remote.Year {
-			issues = append(issues, fmt.Sprintf("album_year_mismatch remote=%d", remote.Year))
-		}
 	}
+	groupCompare := compares[0]
+	if !musicIDCompareMatches(local.ExternalIDs, remote.ExternalIDs, groupCompare) {
+		// Different issued releases may legitimately belong to the same release
+		// group. Only compare edition IDs when a shared group has not already
+		// established that relationship.
+		compares = append(compares, musicIDCompare{Local: []string{"musicbrainz_album"}, Remote: []string{"mb_release", "musicbrainz_album"}})
+	}
+	issues := musicExternalIDConflictIssues("album", local.ExternalIDs, remote.ExternalIDs, compares)
+	// Release-group years are the earliest known issue, while a local file may
+	// describe any later country/format edition. Keep year as scoring evidence,
+	// but never make that edition-date drift a review blocker by itself.
 	if strings.HasPrefix(reason, "external_id:") {
 		titleScore := musicNameSimilarity(local.Album, remote.Title)
 		if titleScore < 0.55 {
@@ -1308,7 +1484,7 @@ func musicExternalIDConflictIssues(label string, localIDs, remoteIDs map[string]
 func musicAlbumSharedExternalID(localIDs, remoteIDs map[string]string) (string, bool) {
 	for _, compare := range []musicIDCompare{
 		{Local: []string{"musicbrainz_release_group"}, Remote: []string{"mb_release_group", "musicbrainz_release_group"}},
-		{Local: []string{"musicbrainz_album"}, Remote: []string{"mb_release", "musicbrainz_album", "mbid"}},
+		{Local: []string{"musicbrainz_album"}, Remote: []string{"mb_release", "musicbrainz_album"}},
 		{Local: []string{"itunes_album"}, Remote: []string{"apple", "itunes_album"}},
 		{Local: []string{"audiodb_album"}, Remote: []string{"audiodb", "audiodb_album"}},
 		{Local: []string{"deezer_album"}, Remote: []string{"deezer", "deezer_album"}},
@@ -1324,6 +1500,12 @@ func musicAlbumSharedExternalID(localIDs, remoteIDs map[string]string) (string, 
 		}
 	}
 	return "", false
+}
+
+func musicIDCompareMatches(localIDs, remoteIDs map[string]string, compare musicIDCompare) bool {
+	_, localValue := firstMusicID(localIDs, compare.Local)
+	_, remoteValue := firstMusicID(remoteIDs, compare.Remote)
+	return localValue != "" && remoteValue != "" && strings.EqualFold(localValue, remoteValue)
 }
 
 func firstMusicID(values map[string]string, keys []string) (string, string) {

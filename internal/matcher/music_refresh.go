@@ -17,12 +17,12 @@ import (
 // RefreshArtistResult summarises a single RefreshMusicArtist call. Useful for
 // logging + UI progress feedback.
 type RefreshArtistResult struct {
-	ArtistID       int64
-	Skipped        bool   // heya.media had no record
-	AlbumsMatched  int    // DB albums that found a match in payload.albums
-	AlbumsUpdated  int    // DB albums whose fields actually changed
-	TracksUpdated  int    // tracks whose title or duration was upgraded
-	HeyaProviderID string // for telemetry
+	ArtistID      int64
+	Skipped       bool   // heya.media had no record
+	AlbumsMatched int    // DB albums that found a match in payload.albums
+	AlbumsUpdated int    // DB albums whose fields actually changed
+	TracksUpdated int    // tracks whose title or duration was upgraded
+	HeyaEntityID  string // canonical UUID for telemetry
 	// Artist-level artwork from heya.media. PosterURL / BackdropURL are the
 	// upstream's "primary" picks; ArtistImages is the full classified pool
 	// the worker uses to fill remaining gaps (logo / banner / clearart /
@@ -133,11 +133,17 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 		artist = *canonical
 		artistID = canonical.ID
 	}
+	if err := m.bindCanonical(ctx, "media_item", artist.MediaItemID, detail.CanonicalID, detail.CanonicalKind, detail.SchemaVersion, detail.ProjectionVersion); err != nil {
+		return res, fmt.Errorf("bind artist media item to canonical metadata: %w", err)
+	}
+	if err := m.bindCanonical(ctx, "artist", artistID, detail.CanonicalID, detail.CanonicalKind, detail.SchemaVersion, detail.ProjectionVersion); err != nil {
+		return res, fmt.Errorf("bind artist to canonical metadata: %w", err)
+	}
 
 	// The upstream payload only reaches the result AFTER every identity gate
 	// has passed — a skip return must never carry another act's artwork or
 	// slug, or the enrich worker would enqueue the wrong artist's images.
-	res.HeyaProviderID = "heya:" + detail.HeyaSlug
+	res.HeyaEntityID = detail.CanonicalID
 	res.PosterURL = detail.PosterURL
 	res.BackdropURL = detail.BackdropURL
 	res.ArtistImages = detail.ArtistImages
@@ -227,8 +233,10 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 	if err := m.writeArtistExtendedMetadata(ctx, artistID, detail); err != nil {
 		log.Warn().Err(err).Int64("artist_id", artistID).Msg("write artist extended metadata failed")
 	}
-	if err := m.writeArtistTopTracks(ctx, artistID, detail.ArtistTopTracks); err != nil {
-		log.Warn().Err(err).Int64("artist_id", artistID).Msg("write artist top tracks failed")
+	if detail.ArtistTopTracksLoaded {
+		if err := m.writeArtistTopTracks(ctx, artistID, detail.ArtistTopTracks); err != nil {
+			log.Warn().Err(err).Int64("artist_id", artistID).Msg("write artist top tracks failed")
+		}
 	}
 	if err := m.writeArtistSimilarArtists(ctx, artistID, detail.ArtistSimilarArtists); err != nil {
 		log.Warn().Err(err).Int64("artist_id", artistID).Msg("write artist similar artists failed")
@@ -267,6 +275,9 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 			continue
 		}
 		res.AlbumsMatched++
+		if err := m.bindCanonical(ctx, "album", dbAlbum.ID, embedded.CanonicalID, "release_group", 1, 0); err != nil {
+			log.Warn().Err(err).Int64("album_id", dbAlbum.ID).Msg("bind canonical release group")
+		}
 
 		albumMBID := dbAlbum.MusicbrainzID
 		if albumMBID == "" {
@@ -374,6 +385,9 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 			embeddedTrack := findEmbeddedTrack(embedded, int(dbTrack.DiscNumber), int(dbTrack.TrackNumber))
 			if embeddedTrack == nil {
 				continue
+			}
+			if err := m.bindCanonical(ctx, "track", dbTrack.ID, embeddedTrack.CanonicalID, "recording", 1, 0); err != nil {
+				log.Warn().Err(err).Int64("track_id", dbTrack.ID).Msg("bind canonical recording")
 			}
 			newTitle := dbTrack.Title
 			if embeddedTrack.Title != "" {

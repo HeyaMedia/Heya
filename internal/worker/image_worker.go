@@ -13,7 +13,6 @@ import (
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/metadata"
-	"github.com/karbowiak/heya/internal/metadata/heyamedia"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
@@ -22,7 +21,6 @@ type DownloadImageWorker struct {
 	river.WorkerDefaults[DownloadImageArgs]
 	DB         *pgxpool.Pool
 	Downloader *images.Downloader
-	HeyaMedia  *heyamedia.Client
 	Hub        EventPublisher
 	Progress   *TaskProgressBroadcaster
 }

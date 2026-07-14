@@ -13,7 +13,7 @@ import (
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/matcher"
 	"github.com/karbowiak/heya/internal/metadata"
-	"github.com/karbowiak/heya/internal/metadata/heyamedia"
+	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
@@ -33,7 +33,7 @@ type EnrichMediaItemWorker struct {
 	river.WorkerDefaults[EnrichMediaItemArgs]
 	DB      *pgxpool.Pool
 	Matcher MatchService
-	Heya    *heyamedia.HeyaProvider
+	Heya    *heyametadata.HeyaProvider
 	Hub     EventPublisher
 	// DataDir is the root for cached artwork copies (data/images/...). The
 	// music enrich path reads local poster/backdrop/logo from the artist
@@ -84,7 +84,7 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 		externalIDs = map[string]string{}
 	}
 
-	providerIDs := heyamedia.BuildLookupIDs(kind, externalIDs, item.HeyaSlug)
+	providerIDs := heyametadata.BuildLookupIDs(kind, externalIDs, item.HeyaSlug)
 	if len(providerIDs) == 0 {
 		// A pure-local entity (materialized from filename/tags, no NFO/filename
 		// provider id) has nothing to fetch yet — leave it visible and 'local'
@@ -104,9 +104,19 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 	}
 	settings := metadata.ParseSettings(lib.Settings)
 
-	var fetchOpts *metadata.FetchOptions
+	fetchOpts := &metadata.FetchOptions{
+		Language: settings.PreferredLanguage,
+		Country:  settings.PreferredCountry,
+		Title:    item.Title,
+		Year:     item.Year,
+	}
+	switch item.MediaType {
+	case sqlc.MediaTypeAnime:
+		fetchOpts.CanonicalKind = "anime"
+	case sqlc.MediaTypeTv:
+		fetchOpts.CanonicalKind = "tv_show"
+	}
 	if settings.PreferredLanguage != "" || settings.PreferredCountry != "" {
-		fetchOpts = &metadata.FetchOptions{Language: settings.PreferredLanguage, Country: settings.PreferredCountry}
 		log.Debug().Int64("item_id", item.ID).Str("language", settings.PreferredLanguage).Str("country", settings.PreferredCountry).Msg("enrich: using library language/country preference")
 	}
 
@@ -114,10 +124,10 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 	if err != nil {
 		// Transient upstream failure (429/5xx, timeout, connection blip) — let
 		// River retry the whole job rather than stamping the item failed on
-		// something heya.media will likely serve on a later attempt. Only a
+		// something HeyaMetadata will likely serve on a later attempt. Only a
 		// terminal error (every id 404'd, bad data) marks it failed for the
 		// stale-refresh sweep to re-drive.
-		if ctx.Err() != nil || heyamedia.IsRetryable(err) {
+		if ctx.Err() != nil || heyametadata.IsRetryable(err) {
 			return fmt.Errorf("enrich %d: get detail (tried %d ids): %w", item.ID, len(providerIDs), err)
 		}
 		return w.markFailed(ctx, q, item.ID, fmt.Sprintf("get detail (tried %d ids): %v", len(providerIDs), err))
@@ -162,9 +172,8 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 		}
 	}
 
-	// Persist heya.media's canonical slug. It's a stable lookup key
-	// (heya.media accepts slug:<slug> alongside mbid:<id>) and lets
-	// future refreshes / cross-service joins skip the search step.
+	// Preserve the presentation slug for compatibility. Canonical identity and
+	// future refreshes use the bound HeyaMetadata UUID, never this slug.
 	if detail.HeyaSlug != "" && detail.HeyaSlug != item.HeyaSlug {
 		if err := q.UpdateMediaItemHeyaSlug(ctx, sqlc.UpdateMediaItemHeyaSlugParams{
 			ID:       item.ID,
@@ -282,7 +291,7 @@ func (w *EnrichMediaItemWorker) enrichMusic(ctx context.Context, q *sqlc.Queries
 	if err != nil {
 		return w.markFailed(ctx, q, item.ID, fmt.Sprintf("refresh music artist: %v", err))
 	}
-	log.Debug().Int64("artist_id", artist.ID).Str("provider_id", res.HeyaProviderID).Bool("skipped", res.Skipped).Int("albums_matched", res.AlbumsMatched).Int("albums_updated", res.AlbumsUpdated).Int("tracks_updated", res.TracksUpdated).Msg("enrich: music artist refreshed")
+	log.Debug().Int64("artist_id", artist.ID).Str("entity_id", res.HeyaEntityID).Bool("skipped", res.Skipped).Int("albums_matched", res.AlbumsMatched).Int("albums_updated", res.AlbumsUpdated).Int("tracks_updated", res.TracksUpdated).Msg("enrich: music artist refreshed")
 
 	// RefreshMusicArtist already stamps artists.discography_enriched_at
 	// inside the matcher. Mirror that onto media_items' base/structure

@@ -194,7 +194,7 @@ func (a *App) doctorConfigSection() DoctorConfigSection {
 		"infra.log_level":           cfg.LogLevel.Value,
 		"infra.log_format":          cfg.LogFormat.Value,
 		"infra.data_dir":            cfg.DataDir.Value,
-		"infra.heya_media_url":      cfg.HeyaMediaURL.Value,
+		"infra.heya_metadata_url":   cfg.HeyaMetadataURL.Value,
 		"transcoder.hwaccel":        cfg.HWAccel.Value,
 		"transcoder.cache_dir":      cfg.TranscodeCacheDir.Value,
 		"transcoder.cache_max_gb":   strconv.Itoa(cfg.TranscodeCacheMaxGB.Value),

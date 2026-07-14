@@ -1,0 +1,5419 @@
+components:
+  schemas:
+    APIKey:
+      additionalProperties: false
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        id:
+          format: uuid
+          type: string
+        last_used_at:
+          format: date-time
+          type: string
+        name:
+          type: string
+        prefix:
+          type: string
+        scopes:
+          items:
+            type: string
+          nullable: true
+          type: array
+      required:
+        - id
+        - name
+        - prefix
+        - scopes
+        - created_at
+      type: object
+    AdminJob:
+      additionalProperties: false
+      properties:
+        args: {}
+        attempt:
+          format: int64
+          type: integer
+        attempted_at:
+          format: date-time
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        error:
+          type: string
+        finalized_at:
+          format: date-time
+          type: string
+        id:
+          format: int64
+          type: integer
+        kind:
+          type: string
+        max_attempts:
+          format: int64
+          type: integer
+        priority:
+          format: int64
+          type: integer
+        queue:
+          type: string
+        scheduled_at:
+          format: date-time
+          type: string
+        state:
+          type: string
+      required:
+        - id
+        - kind
+        - state
+        - queue
+        - attempt
+        - max_attempts
+        - priority
+        - created_at
+        - scheduled_at
+      type: object
+    AdminJobActionInputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/AdminJobActionInputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        action:
+          description: clear_completed removes finished history; clear_queue drops waiting jobs; rescue_stuck requeues jobs stuck running
+          enum:
+            - clear_completed
+            - clear_queue
+            - rescue_stuck
+          type: string
+      required:
+        - action
+      type: object
+    AdminJobActionOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/AdminJobActionOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        action:
+          type: string
+        affected:
+          format: int64
+          type: integer
+      required:
+        - action
+        - affected
+      type: object
+    AdminJobsBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/AdminJobsBody.json
+          format: uri
+          readOnly: true
+          type: string
+        jobs:
+          items:
+            $ref: "#/components/schemas/AdminJob"
+          nullable: true
+          type: array
+        summary:
+          items:
+            $ref: "#/components/schemas/JobStateCount"
+          nullable: true
+          type: array
+        total:
+          format: int64
+          type: integer
+      required:
+        - summary
+        - jobs
+        - total
+      type: object
+    ApiKeyCreateInputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/ApiKeyCreateInputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        name:
+          description: Human-readable name for the client or device
+          maxLength: 64
+          minLength: 1
+          type: string
+      required:
+        - name
+      type: object
+    ApiKeyCreateOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/ApiKeyCreateOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        api_key:
+          $ref: "#/components/schemas/CreatedAPIKey"
+      required:
+        - api_key
+      type: object
+    ApiKeyListOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/ApiKeyListOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        api_keys:
+          items:
+            $ref: "#/components/schemas/APIKey"
+          nullable: true
+          type: array
+      required:
+        - api_keys
+      type: object
+    ArtistDisplay:
+      additionalProperties: false
+      properties:
+        join:
+          type: string
+        name:
+          type: string
+      required:
+        - name
+      type: object
+    AuthBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/AuthBody.json
+          format: uri
+          readOnly: true
+          type: string
+        user:
+          $ref: "#/components/schemas/User"
+      required:
+        - user
+      type: object
+    AuthLoginInputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/AuthLoginInputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        altcha:
+          description: Proof-of-work captcha solution; required when the captcha is enabled
+          maxLength: 2048
+          type: string
+        password:
+          format: password
+          maxLength: 128
+          minLength: 1
+          type: string
+          writeOnly: true
+        username:
+          maxLength: 64
+          minLength: 3
+          type: string
+      required:
+        - username
+        - password
+      type: object
+    AuthRegisterInputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/AuthRegisterInputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        altcha:
+          description: Proof-of-work captcha solution; required when the captcha is enabled
+          maxLength: 2048
+          type: string
+        password:
+          format: password
+          maxLength: 128
+          minLength: 10
+          type: string
+          writeOnly: true
+        username:
+          maxLength: 64
+          minLength: 3
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]{1,62}[A-Za-z0-9]$
+          type: string
+      required:
+        - username
+        - password
+      type: object
+    BrowseOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/BrowseOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        limit:
+          format: int64
+          type: integer
+        offset:
+          format: int64
+          type: integer
+        results:
+          items: {}
+          nullable: true
+          type: array
+        total:
+          format: int64
+          type: integer
+      required:
+        - results
+        - total
+        - offset
+        - limit
+      type: object
+    Candidate:
+      additionalProperties: false
+      properties:
+        candidate_ref:
+          format: uuid
+          type: string
+        confidence:
+          format: double
+          type: number
+        display:
+          $ref: "#/components/schemas/Display"
+        evidence:
+          items:
+            $ref: "#/components/schemas/Evidence"
+          nullable: true
+          type: array
+        match:
+          type: string
+        matched_episodes:
+          items:
+            $ref: "#/components/schemas/EpisodeHint"
+          nullable: true
+          type: array
+        matched_releases:
+          items:
+            $ref: "#/components/schemas/ReleaseHint"
+          nullable: true
+          type: array
+        matched_tracks:
+          items:
+            type: string
+          nullable: true
+          type: array
+        rank:
+          format: int64
+          type: integer
+      required:
+        - rank
+        - candidate_ref
+        - confidence
+        - match
+        - display
+        - evidence
+      type: object
+    Challenge:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/Challenge.json
+          format: uri
+          readOnly: true
+          type: string
+        algorithm:
+          type: string
+        challenge:
+          type: string
+        maxnumber:
+          format: int64
+          type: integer
+        salt:
+          type: string
+        signature:
+          type: string
+      required:
+        - algorithm
+        - challenge
+        - maxnumber
+        - salt
+        - signature
+      type: object
+    ChangeEntry:
+      additionalProperties: false
+      properties:
+        change_type:
+          type: string
+        changed_scopes:
+          items:
+            type: string
+          nullable: true
+          type: array
+        created_at:
+          type: string
+        entity_id:
+          format: uuid
+          type: string
+        entity_kind:
+          type: string
+        projection_version:
+          format: int64
+          type: integer
+        sequence:
+          format: int64
+          type: integer
+        slug:
+          type: string
+      required:
+        - sequence
+        - entity_id
+        - entity_kind
+        - slug
+        - change_type
+        - changed_scopes
+        - projection_version
+        - created_at
+      type: object
+    ChangesOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/ChangesOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        entries:
+          items:
+            $ref: "#/components/schemas/ChangeEntry"
+          nullable: true
+          type: array
+        next_cursor:
+          format: int64
+          type: integer
+      required:
+        - entries
+        - next_cursor
+      type: object
+    CollectionCard:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/CollectionCard.json
+          format: uri
+          readOnly: true
+          type: string
+        id:
+          format: uuid
+          type: string
+        image_id:
+          type: string
+        members:
+          items:
+            $ref: "#/components/schemas/CollectionMember"
+          nullable: true
+          type: array
+        name:
+          type: string
+        overview:
+          type: string
+        provider:
+          type: string
+        provider_id:
+          type: string
+      required:
+        - id
+        - provider
+        - provider_id
+        - name
+        - members
+      type: object
+    CollectionMember:
+      additionalProperties: false
+      properties:
+        entity_id:
+          format: uuid
+          type: string
+        image_id:
+          type: string
+        order:
+          format: int64
+          type: integer
+        provider_id:
+          type: string
+        resolution_state:
+          enum:
+            - materialized
+            - unresolved
+          type: string
+        title:
+          type: string
+        year:
+          format: int64
+          type: integer
+      required:
+        - provider_id
+        - title
+        - order
+        - resolution_state
+      type: object
+    CollectionsOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/CollectionsOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        collections:
+          items:
+            $ref: "#/components/schemas/CollectionCard"
+          nullable: true
+          type: array
+      required:
+        - collections
+      type: object
+    CreatedAPIKey:
+      additionalProperties: false
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        id:
+          format: uuid
+          type: string
+        key:
+          description: Plaintext API key; shown only in this creation response
+          readOnly: true
+          type: string
+        last_used_at:
+          format: date-time
+          type: string
+        name:
+          type: string
+        prefix:
+          type: string
+        scopes:
+          items:
+            type: string
+          nullable: true
+          type: array
+      required:
+        - id
+        - name
+        - prefix
+        - key
+        - scopes
+        - created_at
+      type: object
+    DedicatedDiscoveryRequest:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/DedicatedDiscoveryRequest.json
+          format: uri
+          readOnly: true
+          type: string
+        hints:
+          $ref: "#/components/schemas/Hints"
+        identifiers:
+          items:
+            $ref: "#/components/schemas/Identifier"
+          maxItems: 50
+          nullable: true
+          type: array
+        limit:
+          format: int64
+          type: integer
+        query:
+          type: string
+      type: object
+    DependencyHealth:
+      additionalProperties: false
+      properties:
+        status:
+          enum:
+            - ok
+            - unavailable
+          example: ok
+          type: string
+      required:
+        - status
+      type: object
+    DiscoveryResource:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/DiscoveryResource.json
+          format: uri
+          readOnly: true
+          type: string
+        error:
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        id:
+          format: uuid
+          type: string
+        job:
+          $ref: "#/components/schemas/JobResource"
+        result:
+          $ref: "#/components/schemas/Result"
+        state:
+          enum:
+            - queued
+            - working
+            - completed
+            - failed
+          type: string
+      required:
+        - id
+        - state
+        - expires_at
+      type: object
+    Display:
+      additionalProperties: false
+      properties:
+        aliases:
+          items:
+            type: string
+          nullable: true
+          type: array
+        area:
+          type: string
+        artists:
+          items:
+            $ref: "#/components/schemas/ArtistDisplay"
+          nullable: true
+          type: array
+        authors:
+          items:
+            type: string
+          nullable: true
+          type: array
+        begin_date:
+          type: string
+        catalogue:
+          type: string
+        countries:
+          items:
+            type: string
+          nullable: true
+          type: array
+        country:
+          type: string
+        date:
+          type: string
+        disambiguation:
+          type: string
+        duration_ms:
+          format: int64
+          type: integer
+        edition_count:
+          format: int64
+          type: integer
+        end_date:
+          type: string
+        ended:
+          type: boolean
+        episode_count:
+          format: int64
+          type: integer
+        isbns:
+          items:
+            type: string
+          nullable: true
+          type: array
+        isrcs:
+          items:
+            type: string
+          nullable: true
+          type: array
+        language:
+          type: string
+        languages:
+          items:
+            type: string
+          nullable: true
+          type: array
+        name:
+          type: string
+        network:
+          type: string
+        original_title:
+          type: string
+        popularity:
+          format: double
+          type: number
+        releases:
+          items:
+            $ref: "#/components/schemas/ReleaseHint"
+          nullable: true
+          type: array
+        season:
+          type: string
+        secondary_types:
+          items:
+            type: string
+          nullable: true
+          type: array
+        sort_name:
+          type: string
+        source:
+          type: string
+        status:
+          type: string
+        studios:
+          items:
+            type: string
+          nullable: true
+          type: array
+        title:
+          type: string
+        type:
+          type: string
+        year:
+          format: int64
+          type: integer
+      type: object
+    EntityCredit:
+      additionalProperties: false
+      properties:
+        character:
+          type: string
+        credit_type:
+          enum:
+            - cast
+            - crew
+          type: string
+        department:
+          type: string
+        display_name:
+          type: string
+        job:
+          type: string
+        order:
+          format: int64
+          type: integer
+        person_entity_id:
+          format: uuid
+          type: string
+        profile_image_id:
+          format: uuid
+          type: string
+        provider:
+          description: Passive provenance; never use for identity or follow-up routing
+          type: string
+        provider_person_id:
+          description: Passive provenance; use person_entity_id for all control flow
+          type: string
+      required:
+        - person_entity_id
+        - provider
+        - provider_person_id
+        - display_name
+        - credit_type
+      type: object
+    EntityCreditsOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/EntityCreditsOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        limit:
+          format: int64
+          type: integer
+        offset:
+          format: int64
+          type: integer
+        results:
+          items:
+            $ref: "#/components/schemas/EntityCredit"
+          nullable: true
+          type: array
+        total:
+          format: int64
+          type: integer
+      required:
+        - results
+        - total
+        - offset
+        - limit
+      type: object
+    EntityImageCandidate:
+      additionalProperties: false
+      properties:
+        class:
+          type: string
+        country:
+          type: string
+        height:
+          format: int64
+          type: integer
+        id:
+          type: string
+        language:
+          type: string
+        materialization_state:
+          type: string
+        provider:
+          type: string
+        provider_score:
+          format: double
+          type: number
+        selected:
+          type: boolean
+        selection_reason:
+          type: string
+        width:
+          format: int64
+          type: integer
+      required:
+        - id
+        - class
+        - provider
+        - materialization_state
+        - selected
+        - selection_reason
+      type: object
+    EntityImagesOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/EntityImagesOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        language_preferences:
+          items:
+            type: string
+          nullable: true
+          type: array
+        results:
+          items:
+            $ref: "#/components/schemas/EntityImageCandidate"
+          nullable: true
+          type: array
+        selections:
+          additionalProperties:
+            type: string
+          type: object
+      required:
+        - language_preferences
+        - selections
+        - results
+      type: object
+    EntityMetadataOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/EntityMetadataOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        limit:
+          format: int64
+          type: integer
+        offset:
+          format: int64
+          type: integer
+        results: {}
+        total:
+          format: int64
+          type: integer
+      required:
+        - results
+        - total
+        - offset
+        - limit
+      type: object
+    EntityRelation:
+      additionalProperties: false
+      properties:
+        id:
+          format: uuid
+          type: string
+        last_observed_at:
+          format: date-time
+          type: string
+        metadata: {}
+        namespace:
+          type: string
+        position:
+          format: int64
+          type: integer
+        provider:
+          type: string
+        provider_value:
+          type: string
+        relation_type:
+          type: string
+        resolution_state:
+          enum:
+            - materialized
+            - unresolved
+          type: string
+        source_kind:
+          type: string
+        target: {}
+        target_entity_id:
+          format: uuid
+          type: string
+        target_kind:
+          type: string
+      required:
+        - id
+        - relation_type
+        - source_kind
+        - target_kind
+        - provider
+        - namespace
+        - provider_value
+        - metadata
+        - last_observed_at
+        - resolution_state
+      type: object
+    EntityRelationsOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/EntityRelationsOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        limit:
+          format: int64
+          type: integer
+        offset:
+          format: int64
+          type: integer
+        relations:
+          items:
+            $ref: "#/components/schemas/EntityRelation"
+          nullable: true
+          type: array
+        total:
+          format: int64
+          type: integer
+      required:
+        - relations
+        - total
+        - offset
+        - limit
+      type: object
+    Episode:
+      additionalProperties: false
+      properties:
+        air_date:
+          type: string
+        episode_type:
+          type: string
+        external_ids:
+          items:
+            $ref: "#/components/schemas/EpisodicExternalID"
+          nullable: true
+          type: array
+        id:
+          format: uuid
+          type: string
+        images:
+          items:
+            $ref: "#/components/schemas/Image"
+          nullable: true
+          type: array
+        is_special:
+          type: boolean
+        numbers:
+          items:
+            $ref: "#/components/schemas/EpisodeNumber"
+          nullable: true
+          type: array
+        overviews:
+          items:
+            $ref: "#/components/schemas/Text"
+          nullable: true
+          type: array
+        provider_id:
+          type: string
+        ratings:
+          items:
+            $ref: "#/components/schemas/Rating"
+          nullable: true
+          type: array
+        runtime_minutes:
+          format: int64
+          type: integer
+        season_id:
+          format: uuid
+          type: string
+        summary:
+          type: string
+        titles:
+          items:
+            $ref: "#/components/schemas/Title"
+          nullable: true
+          type: array
+      required:
+        - external_ids
+        - titles
+        - overviews
+        - numbers
+        - is_special
+        - episode_type
+        - ratings
+        - images
+      type: object
+    EpisodeHint:
+      additionalProperties: false
+      properties:
+        number:
+          format: int64
+          type: integer
+        season:
+          format: int64
+          type: integer
+        title:
+          type: string
+      type: object
+    EpisodeNumber:
+      additionalProperties: false
+      properties:
+        number:
+          format: double
+          type: number
+        provider:
+          type: string
+        scheme:
+          type: string
+        season:
+          format: int64
+          type: integer
+      required:
+        - scheme
+        - number
+      type: object
+    EpisodeResource:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/EpisodeResource.json
+          format: uri
+          readOnly: true
+          type: string
+        data:
+          $ref: "#/components/schemas/Episode"
+        id:
+          format: uuid
+          type: string
+        show:
+          $ref: "#/components/schemas/ParentResource"
+      required:
+        - id
+        - show
+        - data
+      type: object
+    EpisodicExternalID:
+      additionalProperties: false
+      properties:
+        namespace:
+          type: string
+        provider:
+          type: string
+        value:
+          type: string
+      required:
+        - provider
+        - namespace
+        - value
+      type: object
+    ErrorDetail:
+      additionalProperties: false
+      properties:
+        location:
+          description: Where the error occurred, e.g. 'body.items[3].tags' or 'path.thing-id'
+          type: string
+        message:
+          description: Error message text
+          type: string
+        value:
+          description: The value at the given location
+      type: object
+    ErrorModel:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/ErrorModel.json
+          format: uri
+          readOnly: true
+          type: string
+        detail:
+          description: A human-readable explanation specific to this occurrence of the problem.
+          example: Property foo is required but is missing.
+          type: string
+        errors:
+          description: Optional list of individual error details
+          items:
+            $ref: "#/components/schemas/ErrorDetail"
+          nullable: true
+          type: array
+        instance:
+          description: A URI reference that identifies the specific occurrence of the problem.
+          example: https://example.com/error-log/abc123
+          format: uri
+          type: string
+        status:
+          description: HTTP status code
+          example: 400
+          format: int64
+          type: integer
+        title:
+          description: A short, human-readable summary of the problem type. This value should not change between occurrences of the error.
+          example: Bad Request
+          type: string
+        type:
+          default: about:blank
+          description: A URI reference to human-readable documentation for the error.
+          example: https://example.com/errors/example
+          format: uri
+          type: string
+      type: object
+    Evidence:
+      additionalProperties: false
+      properties:
+        detail:
+          type: string
+        field:
+          type: string
+        outcome:
+          type: string
+        weight:
+          format: double
+          type: number
+      required:
+        - field
+        - outcome
+        - weight
+      type: object
+    FingerprintMatchCreateInputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/FingerprintMatchCreateInputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        acoustid_fingerprint:
+          type: string
+        duration_ms:
+          format: int64
+          maximum: 86400000
+          minimum: 1000
+          type: integer
+        encoding:
+          enum:
+            - base64-uint32le
+            - acoustid
+            - base64-uint32le+acoustid
+          type: string
+        raw_fingerprint:
+          type: string
+      required:
+        - encoding
+        - duration_ms
+      type: object
+    FingerprintMatchResource:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/FingerprintMatchResource.json
+          format: uri
+          readOnly: true
+          type: string
+        error:
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        id:
+          format: uuid
+          type: string
+        job:
+          $ref: "#/components/schemas/JobResource"
+        result:
+          $ref: "#/components/schemas/MatchResult"
+        state:
+          type: string
+      required:
+        - id
+        - state
+        - expires_at
+      type: object
+    Health:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/Health.json
+          format: uri
+          readOnly: true
+          type: string
+        service:
+          example: heya-metadata
+          type: string
+        status:
+          example: ok
+          type: string
+        version:
+          example: dev
+          type: string
+      required:
+        - status
+        - service
+        - version
+      type: object
+    Hints:
+      additionalProperties: false
+      properties:
+        aliases:
+          items:
+            type: string
+          nullable: true
+          type: array
+        area:
+          type: string
+        artists:
+          items:
+            type: string
+          nullable: true
+          type: array
+        authors:
+          items:
+            type: string
+          nullable: true
+          type: array
+        begin_date:
+          type: string
+        catalogue:
+          type: string
+        composers:
+          items:
+            type: string
+          nullable: true
+          type: array
+        country:
+          type: string
+        date:
+          type: string
+        duration_ms:
+          format: int64
+          type: integer
+        end_date:
+          type: string
+        episode_count:
+          format: int64
+          type: integer
+        episodes:
+          items:
+            $ref: "#/components/schemas/EpisodeHint"
+          nullable: true
+          type: array
+        isbns:
+          items:
+            type: string
+          nullable: true
+          type: array
+        isrcs:
+          items:
+            type: string
+          nullable: true
+          type: array
+        language:
+          type: string
+        network:
+          type: string
+        original_title:
+          type: string
+        releases:
+          items:
+            $ref: "#/components/schemas/ReleaseHint"
+          nullable: true
+          type: array
+        season:
+          type: string
+        source:
+          type: string
+        status:
+          type: string
+        studios:
+          items:
+            type: string
+          nullable: true
+          type: array
+        tracks:
+          items:
+            type: string
+          nullable: true
+          type: array
+        type:
+          type: string
+        year:
+          format: int64
+          type: integer
+      type: object
+    Identifier:
+      additionalProperties: false
+      properties:
+        scheme:
+          maxLength: 50
+          minLength: 1
+          type: string
+        value:
+          maxLength: 500
+          minLength: 1
+          type: string
+      required:
+        - scheme
+        - value
+      type: object
+    IdentifierEvidence:
+      additionalProperties: false
+      properties:
+        detail:
+          type: string
+        outcome:
+          enum:
+            - resolved
+            - corroborating
+            - unused
+            - unsupported
+            - conflict
+          type: string
+        scheme:
+          type: string
+        value:
+          type: string
+      required:
+        - scheme
+        - value
+        - outcome
+      type: object
+    Image:
+      additionalProperties: false
+      properties:
+        class:
+          type: string
+        country:
+          type: string
+        height:
+          format: int64
+          type: integer
+        id:
+          type: string
+        language:
+          type: string
+        provider:
+          type: string
+        provider_id:
+          type: string
+        provider_score:
+          format: double
+          type: number
+        url:
+          type: string
+        width:
+          format: int64
+          type: integer
+      required:
+        - provider_id
+        - class
+      type: object
+    JobResource:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/JobResource.json
+          format: uri
+          readOnly: true
+          type: string
+        entity_id:
+          format: uuid
+          type: string
+        error:
+          type: string
+        id:
+          format: int64
+          type: integer
+        kind:
+          type: string
+        state:
+          type: string
+      required:
+        - id
+        - kind
+        - state
+      type: object
+    JobStateCount:
+      additionalProperties: false
+      properties:
+        count:
+          format: int64
+          type: integer
+        state:
+          type: string
+      required:
+        - state
+        - count
+      type: object
+    MatchCandidate:
+      additionalProperties: false
+      properties:
+        artists:
+          items:
+            type: string
+          nullable: true
+          type: array
+        candidate_ref:
+          format: uuid
+          type: string
+        confidence:
+          format: double
+          type: number
+        entity_id:
+          format: uuid
+          type: string
+        match:
+          type: string
+        resolution_state:
+          enum:
+            - materialized
+            - unresolved
+          type: string
+        sources:
+          items:
+            $ref: "#/components/schemas/MatchSource"
+          nullable: true
+          type: array
+        title:
+          type: string
+      required:
+        - confidence
+        - match
+        - sources
+        - resolution_state
+      type: object
+    MatchResult:
+      additionalProperties: false
+      properties:
+        candidates:
+          items:
+            $ref: "#/components/schemas/MatchCandidate"
+          nullable: true
+          type: array
+        matched_at:
+          format: date-time
+          type: string
+        providers:
+          items:
+            type: string
+          nullable: true
+          type: array
+        recommendation:
+          type: string
+        schema_version:
+          format: int64
+          type: integer
+        status:
+          type: string
+        warnings:
+          items:
+            type: string
+          nullable: true
+          type: array
+      required:
+        - schema_version
+        - status
+        - recommendation
+        - candidates
+        - providers
+        - matched_at
+      type: object
+    MatchSource:
+      additionalProperties: false
+      properties:
+        acoustid:
+          type: string
+        bit_error:
+          format: double
+          type: number
+        offset:
+          format: int64
+          type: integer
+        overlap:
+          format: int64
+          type: integer
+        provider:
+          type: string
+        score:
+          format: double
+          type: number
+      required:
+        - provider
+        - score
+      type: object
+    ParentResource:
+      additionalProperties: false
+      properties:
+        entity_id:
+          format: uuid
+          type: string
+        image_id:
+          type: string
+        kind:
+          type: string
+        title:
+          type: string
+      required:
+        - entity_id
+        - kind
+        - title
+      type: object
+    PersonCredit:
+      additionalProperties: false
+      properties:
+        character:
+          type: string
+        credit_type:
+          type: string
+        department:
+          type: string
+        entity_id:
+          format: uuid
+          type: string
+        image_id:
+          format: uuid
+          type: string
+        job:
+          type: string
+        kind:
+          type: string
+        order:
+          format: int64
+          type: integer
+        provider:
+          type: string
+        provider_target_id:
+          type: string
+        resolution_state:
+          enum:
+            - materialized
+            - unresolved
+          type: string
+        title:
+          type: string
+        year:
+          format: int64
+          type: integer
+      required:
+        - kind
+        - title
+        - credit_type
+        - provider
+        - resolution_state
+      type: object
+    PersonCreditsOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/PersonCreditsOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        credits:
+          items:
+            $ref: "#/components/schemas/PersonCredit"
+          nullable: true
+          type: array
+        limit:
+          format: int64
+          type: integer
+        offset:
+          format: int64
+          type: integer
+        person:
+          $ref: "#/components/schemas/PersonSummary"
+        total:
+          format: int64
+          type: integer
+      required:
+        - person
+        - credits
+        - total
+        - offset
+        - limit
+      type: object
+    PersonData:
+      additionalProperties: false
+      properties:
+        biographies:
+          additionalProperties:
+            type: string
+          type: object
+        biography:
+          type: string
+        birth_date:
+          type: string
+        credit_total:
+          format: int64
+          type: integer
+        credits:
+          items:
+            $ref: "#/components/schemas/PersonCredit"
+          nullable: true
+          type: array
+        death_date:
+          type: string
+        gender:
+          type: string
+        homepage:
+          type: string
+        known_for_department:
+          type: string
+        names:
+          items:
+            type: string
+          nullable: true
+          type: array
+        place_of_birth:
+          type: string
+        popularity:
+          format: double
+          type: number
+      required:
+        - names
+        - credits
+        - credit_total
+      type: object
+    PersonDisplay:
+      additionalProperties: false
+      properties:
+        image_id:
+          type: string
+        title:
+          type: string
+      required:
+        - title
+      type: object
+    PersonDocument:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/PersonDocument.json
+          format: uri
+          readOnly: true
+          type: string
+        data:
+          $ref: "#/components/schemas/PersonData"
+        display:
+          $ref: "#/components/schemas/PersonDisplay"
+        external_ids:
+          items:
+            $ref: "#/components/schemas/PersonExternalID"
+          nullable: true
+          type: array
+        freshness:
+          $ref: "#/components/schemas/PersonFreshness"
+        id:
+          format: uuid
+          type: string
+        kind:
+          type: string
+        projection_version:
+          format: int64
+          type: integer
+        schema_version:
+          format: int64
+          type: integer
+        slug:
+          type: string
+      required:
+        - schema_version
+        - projection_version
+        - id
+        - kind
+        - slug
+        - display
+        - external_ids
+        - data
+        - freshness
+      type: object
+    PersonExternalID:
+      additionalProperties: false
+      properties:
+        namespace:
+          type: string
+        provider:
+          type: string
+        value:
+          type: string
+      required:
+        - provider
+        - namespace
+        - value
+      type: object
+    PersonFreshness:
+      additionalProperties: false
+      properties:
+        fresh_until:
+          format: date-time
+          type: string
+        state:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - state
+      type: object
+    PersonSummary:
+      additionalProperties: false
+      properties:
+        display_name:
+          type: string
+        entity_id:
+          format: uuid
+          type: string
+        profile_image_id:
+          format: uuid
+          type: string
+      required:
+        - entity_id
+        - display_name
+      type: object
+    Rating:
+      additionalProperties: false
+      properties:
+        scale_max:
+          format: double
+          type: number
+        scale_min:
+          format: double
+          type: number
+        system:
+          type: string
+        value:
+          format: double
+          type: number
+        votes:
+          format: int64
+          type: integer
+      required:
+        - system
+        - value
+        - scale_min
+        - scale_max
+      type: object
+    Readiness:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/Readiness.json
+          format: uri
+          readOnly: true
+          type: string
+        dependencies:
+          additionalProperties:
+            $ref: "#/components/schemas/DependencyHealth"
+          type: object
+        service:
+          example: heya-metadata
+          type: string
+        status:
+          enum:
+            - ok
+            - not_ready
+          example: ok
+          type: string
+        version:
+          example: dev
+          type: string
+      required:
+        - status
+        - service
+        - version
+        - dependencies
+      type: object
+    RecordingFingerprint:
+      additionalProperties: false
+      properties:
+        algorithm:
+          type: string
+        algorithm_version:
+          type: string
+        duration_ms:
+          format: int64
+          type: integer
+        encoding:
+          type: string
+        fingerprint:
+          type: string
+        generated_at:
+          format: date-time
+          type: string
+        generator_version:
+          type: string
+        hash_count:
+          format: int64
+          type: integer
+        id:
+          format: uuid
+          type: string
+        source_checksum:
+          type: string
+        source_provider:
+          type: string
+        source_track_id:
+          type: string
+      required:
+        - id
+        - algorithm
+        - algorithm_version
+        - generator_version
+        - encoding
+        - fingerprint
+        - hash_count
+        - source_provider
+        - source_track_id
+        - source_checksum
+        - generated_at
+      type: object
+    RecordingFingerprintsOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/RecordingFingerprintsOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        items:
+          items:
+            $ref: "#/components/schemas/RecordingFingerprint"
+          nullable: true
+          type: array
+        recording_id:
+          format: uuid
+          type: string
+      required:
+        - recording_id
+        - items
+      type: object
+    RecordingLyrics:
+      additionalProperties: false
+      properties:
+        album_name:
+          type: string
+        artist_name:
+          type: string
+        content_checksum:
+          type: string
+        duration_ms:
+          format: int64
+          type: integer
+        id:
+          format: uuid
+          type: string
+        instrumental:
+          type: boolean
+        observed_at:
+          format: date-time
+          type: string
+        plain_lyrics:
+          type: string
+        provider:
+          type: string
+        provider_record_id:
+          type: string
+        scope:
+          enum:
+            - recording
+            - musical_work
+          type: string
+        source_observation_id:
+          type: string
+        source_recording_id:
+          format: uuid
+          type: string
+        synced_lyrics:
+          type: string
+        track_name:
+          type: string
+      required:
+        - id
+        - source_recording_id
+        - scope
+        - provider
+        - provider_record_id
+        - track_name
+        - artist_name
+        - instrumental
+        - content_checksum
+        - source_observation_id
+        - observed_at
+      type: object
+    RecordingLyricsOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/RecordingLyricsOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        items:
+          items:
+            $ref: "#/components/schemas/RecordingLyrics"
+          nullable: true
+          type: array
+        recording_id:
+          format: uuid
+          type: string
+      required:
+        - recording_id
+        - items
+      type: object
+    ReleaseHint:
+      additionalProperties: false
+      properties:
+        identifiers:
+          items:
+            $ref: "#/components/schemas/Identifier"
+          maxItems: 20
+          nullable: true
+          type: array
+        title:
+          type: string
+        type:
+          type: string
+        year:
+          format: int64
+          type: integer
+      required:
+        - title
+      type: object
+    Request:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/Request.json
+          format: uri
+          readOnly: true
+          type: string
+        hints:
+          $ref: "#/components/schemas/Hints"
+        identifiers:
+          items:
+            $ref: "#/components/schemas/Identifier"
+          maxItems: 50
+          nullable: true
+          type: array
+        kind:
+          type: string
+        limit:
+          format: int64
+          type: integer
+        query:
+          type: string
+      required:
+        - kind
+      type: object
+    ResolutionBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/ResolutionBody.json
+          format: uri
+          readOnly: true
+          type: string
+        entity: {}
+        entity_id:
+          format: uuid
+          type: string
+        job:
+          $ref: "#/components/schemas/JobResource"
+        state:
+          enum:
+            - completed
+            - accepted
+          type: string
+      required:
+        - state
+      type: object
+    ResolutionInputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/ResolutionInputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        candidate_ref:
+          format: uuid
+          type: string
+      required:
+        - candidate_ref
+      type: object
+    Result:
+      additionalProperties: false
+      properties:
+        candidates:
+          items:
+            $ref: "#/components/schemas/Candidate"
+          nullable: true
+          type: array
+        entity_id:
+          format: uuid
+          type: string
+        identifier_evidence:
+          items:
+            $ref: "#/components/schemas/IdentifierEvidence"
+          nullable: true
+          type: array
+        kind:
+          type: string
+        observed_at:
+          format: date-time
+          type: string
+        query:
+          type: string
+        recommendation:
+          type: string
+        schema_version:
+          format: int64
+          type: integer
+        status:
+          enum:
+            - completed
+            - needs_selection
+          type: string
+        warnings:
+          items:
+            type: string
+          nullable: true
+          type: array
+      required:
+        - schema_version
+        - kind
+        - status
+        - recommendation
+        - observed_at
+      type: object
+    SearchOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/SearchOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        results:
+          items: {}
+          nullable: true
+          type: array
+      required:
+        - results
+      type: object
+    Season:
+      additionalProperties: false
+      properties:
+        aired_episode_count:
+          format: int64
+          type: integer
+        end_date:
+          type: string
+        episode_count:
+          format: int64
+          type: integer
+        episode_ids:
+          items:
+            type: string
+          nullable: true
+          type: array
+        episode_order:
+          format: int64
+          type: integer
+        external_ids:
+          items:
+            $ref: "#/components/schemas/EpisodicExternalID"
+          nullable: true
+          type: array
+        id:
+          format: uuid
+          type: string
+        images:
+          items:
+            $ref: "#/components/schemas/Image"
+          nullable: true
+          type: array
+        name:
+          type: string
+        number:
+          format: int64
+          type: integer
+        overviews:
+          items:
+            $ref: "#/components/schemas/Text"
+          nullable: true
+          type: array
+        premiere_date:
+          type: string
+        provider_id:
+          type: string
+        status:
+          type: string
+        titles:
+          items:
+            $ref: "#/components/schemas/Title"
+          nullable: true
+          type: array
+      required:
+        - number
+        - titles
+        - overviews
+        - external_ids
+        - images
+        - episode_ids
+      type: object
+    SeasonResource:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/SeasonResource.json
+          format: uri
+          readOnly: true
+          type: string
+        data:
+          $ref: "#/components/schemas/Season"
+        episodes:
+          items:
+            $ref: "#/components/schemas/Episode"
+          nullable: true
+          type: array
+        id:
+          format: uuid
+          type: string
+        show:
+          $ref: "#/components/schemas/ParentResource"
+      required:
+        - id
+        - show
+        - data
+        - episodes
+      type: object
+    StatsOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/StatsOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        entities:
+          format: int64
+          type: integer
+        fresh:
+          format: int64
+          type: integer
+        generated_at:
+          format: date-time
+          type: string
+        images:
+          format: int64
+          type: integer
+        kinds:
+          additionalProperties:
+            format: int64
+            type: integer
+          type: object
+        materialized_images:
+          format: int64
+          type: integer
+        provider_claims:
+          additionalProperties:
+            format: int64
+            type: integer
+          type: object
+        provider_records:
+          format: int64
+          type: integer
+        stale:
+          format: int64
+          type: integer
+      required:
+        - entities
+        - kinds
+        - provider_claims
+        - images
+        - materialized_images
+        - provider_records
+        - fresh
+        - stale
+        - generated_at
+      type: object
+    Text:
+      additionalProperties: false
+      properties:
+        country:
+          type: string
+        language:
+          type: string
+        type:
+          type: string
+        value:
+          type: string
+      required:
+        - value
+        - type
+      type: object
+    Title:
+      additionalProperties: false
+      properties:
+        country:
+          type: string
+        language:
+          type: string
+        type:
+          type: string
+        value:
+          type: string
+      required:
+        - value
+        - type
+      type: object
+    TopTrack:
+      additionalProperties: false
+      properties:
+        external_ids:
+          items:
+            $ref: "#/components/schemas/TopTrackExternalID"
+          nullable: true
+          type: array
+        listeners:
+          format: int64
+          type: integer
+        playcount:
+          format: int64
+          type: integer
+        provider:
+          type: string
+        provider_track_id:
+          type: string
+        rank:
+          format: int64
+          type: integer
+        recording_entity_id:
+          format: uuid
+          type: string
+        resolution_state:
+          enum:
+            - materialized
+            - unresolved
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+      required:
+        - rank
+        - title
+        - provider
+        - external_ids
+        - resolution_state
+      type: object
+    TopTrackExternalID:
+      additionalProperties: false
+      properties:
+        namespace:
+          type: string
+        provider:
+          type: string
+        value:
+          type: string
+      required:
+        - provider
+        - namespace
+        - value
+      type: object
+    TopTrackSource:
+      additionalProperties: false
+      properties:
+        item_count:
+          format: int64
+          type: integer
+        observed_at:
+          format: date-time
+          type: string
+        projection_version:
+          format: int64
+          type: integer
+        provider:
+          type: string
+        reported_total:
+          format: int64
+          type: integer
+        source_observation_id:
+          type: string
+        truncated:
+          type: boolean
+      required:
+        - provider
+        - item_count
+        - reported_total
+        - truncated
+        - observed_at
+        - projection_version
+      type: object
+    TopTracksPage:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/TopTracksPage.json
+          format: uri
+          readOnly: true
+          type: string
+        artist_id:
+          format: uuid
+          type: string
+        limit:
+          format: int64
+          type: integer
+        offset:
+          format: int64
+          type: integer
+        results:
+          items:
+            $ref: "#/components/schemas/TopTrack"
+          nullable: true
+          type: array
+        sources:
+          items:
+            $ref: "#/components/schemas/TopTrackSource"
+          nullable: true
+          type: array
+        total:
+          format: int64
+          type: integer
+      required:
+        - artist_id
+        - results
+        - sources
+        - total
+        - offset
+        - limit
+      type: object
+    User:
+      additionalProperties: false
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        id:
+          format: uuid
+          type: string
+        role:
+          enum:
+            - user
+            - moderator
+            - trusted
+            - admin
+          type: string
+        username:
+          type: string
+      required:
+        - id
+        - username
+        - role
+        - created_at
+      type: object
+info:
+  description: Canonical, provenance-aware metadata for Heya media servers.
+  title: Heya Metadata API
+  version: v2
+openapi: 3.0.3
+paths:
+  /api/v2/admin/jobs:
+    get:
+      description: Returns queue state counts and a recent slice of jobs. Admin role required.
+      operationId: admin-jobs
+      parameters:
+        - description: Opaque browser session
+          in: cookie
+          name: __Host-heya_session
+          schema:
+            description: Opaque browser session
+            type: string
+        - description: Optional Heya API key using the Bearer scheme
+          in: header
+          name: Authorization
+          schema:
+            description: Optional Heya API key using the Bearer scheme
+            type: string
+        - description: Filter by River state (available, running, retryable, scheduled, completed, cancelled, discarded); empty for all
+          explode: false
+          in: query
+          name: state
+          schema:
+            description: Filter by River state (available, running, retryable, scheduled, completed, cancelled, discarded); empty for all
+            type: string
+        - description: Filter by job kind
+          explode: false
+          in: query
+          name: kind
+          schema:
+            description: Filter by job kind
+            type: string
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            default: 50
+            format: int64
+            maximum: 200
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminJobsBody"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "503":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Service Unavailable
+      summary: Inspect the River job queue
+      tags:
+        - Admin
+  /api/v2/admin/jobs/actions:
+    post:
+      description: clear_completed deletes finished job history; clear_queue deletes waiting (available/scheduled/retryable/pending) jobs; rescue_stuck requeues jobs stuck running past the abandonment threshold. Admin role required.
+      operationId: admin-job-action
+      parameters:
+        - in: cookie
+          name: __Host-heya_session
+          schema:
+            type: string
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminJobActionInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminJobActionOutputBody"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Bad Request
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Forbidden
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "503":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Service Unavailable
+      summary: Bulk-manage the River job queue
+      tags:
+        - Admin
+  /api/v2/anime/discoveries:
+    post:
+      operationId: discover-anime
+      parameters:
+        - description: respond-async or wait=N (maximum 5 seconds)
+          in: header
+          name: Prefer
+          schema:
+            description: respond-async or wait=N (maximum 5 seconds)
+            type: string
+        - description: Optional request-scoped TMDB API key; never persisted
+          in: header
+          name: X-Heya-TMDB-API-Key
+          schema:
+            description: Optional request-scoped TMDB API key; never persisted
+            type: string
+        - description: Optional request-scoped OMDb API key; never persisted
+          in: header
+          name: X-Heya-OMDB-API-Key
+          schema:
+            description: Optional request-scoped OMDb API key; never persisted
+            type: string
+        - description: Optional request-scoped TVDB API key; never persisted
+          in: header
+          name: X-Heya-TVDB-API-Key
+          schema:
+            description: Optional request-scoped TVDB API key; never persisted
+            type: string
+        - description: Optional request-scoped Fanart.tv personal API key; never persisted
+          in: header
+          name: X-Heya-Fanart-API-Key
+          schema:
+            description: Optional request-scoped Fanart.tv personal API key; never persisted
+            type: string
+        - description: Optional request-scoped Apple Music developer token; never persisted
+          in: header
+          name: X-Heya-Apple-API-Key
+          schema:
+            description: Optional request-scoped Apple Music developer token; never persisted
+            type: string
+        - description: Optional request-scoped Discogs token; never persisted
+          in: header
+          name: X-Heya-Discogs-API-Key
+          schema:
+            description: Optional request-scoped Discogs token; never persisted
+            type: string
+        - description: Optional request-scoped Last.fm API key; never persisted
+          in: header
+          name: X-Heya-LastFM-API-Key
+          schema:
+            description: Optional request-scoped Last.fm API key; never persisted
+            type: string
+        - description: Optional request-scoped Google Books API key; never persisted
+          in: header
+          name: X-Heya-Google-Books-API-Key
+          schema:
+            description: Optional request-scoped Google Books API key; never persisted
+            type: string
+        - description: Optional request-scoped MyAnimeList client ID; never persisted
+          in: header
+          name: X-Heya-MAL-Client-ID
+          schema:
+            description: Optional request-scoped MyAnimeList client ID; never persisted
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DedicatedDiscoveryRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: OK
+          headers:
+            Retry-After:
+              schema:
+                type: string
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: Accepted for asynchronous processing
+          headers:
+            Retry-After:
+              description: Suggested number of seconds before polling the returned resource or job
+              schema:
+                type: string
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: Processing failed after retries; the request may be submitted again
+          headers:
+            Retry-After:
+              description: Suggested number of seconds before polling the returned resource or job
+              schema:
+                type: string
+      summary: Discover anime identities
+      tags:
+        - Anime
+        - Discovery
+  /api/v2/anime/{id}:
+    get:
+      operationId: anime-detail
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - description: Preferred BCP 47 presentation language
+          explode: false
+          in: query
+          name: language
+          schema:
+            description: Preferred BCP 47 presentation language
+            type: string
+        - description: Comma-separated ordered presentation language fallbacks
+          explode: false
+          in: query
+          name: fallback_languages
+          schema:
+            description: Comma-separated ordered presentation language fallbacks
+            type: string
+        - description: Presentation preferences used after explicit query preferences
+          in: header
+          name: Accept-Language
+          schema:
+            description: Presentation preferences used after explicit query preferences
+            type: string
+        - description: Optional ISO 3166-1 alpha-2 presentation region
+          explode: false
+          in: query
+          name: country
+          schema:
+            description: Optional ISO 3166-1 alpha-2 presentation region
+            maxLength: 2
+            minLength: 2
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: {}
+          description: OK
+          headers:
+            Vary:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Get a canonical Anime entity
+      tags:
+        - Anime
+  /api/v2/auth/api-keys:
+    get:
+      description: Lists active key metadata. Plaintext API keys are never returned after creation.
+      operationId: list-api-keys
+      parameters:
+        - description: Opaque browser session; set and read only by the browser
+          in: cookie
+          name: __Host-heya_session
+          schema:
+            description: Opaque browser session; set and read only by the browser
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyListOutputBody"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unauthorized
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "503":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Service Unavailable
+      summary: List the current user's API keys
+      tags:
+        - Authentication
+    post:
+      description: Returns the plaintext API key once. Only a non-reversible digest is retained afterward.
+      operationId: create-api-key
+      parameters:
+        - description: Opaque browser session; set and read only by the browser
+          in: cookie
+          name: __Host-heya_session
+          schema:
+            description: Opaque browser session; set and read only by the browser
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApiKeyCreateInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyCreateOutputBody"
+          description: Created
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unauthorized
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "503":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Service Unavailable
+      summary: Create a user API key
+      tags:
+        - Authentication
+  /api/v2/auth/api-keys/{id}:
+    delete:
+      operationId: revoke-api-key
+      parameters:
+        - description: Opaque browser session; set and read only by the browser
+          in: cookie
+          name: __Host-heya_session
+          schema:
+            description: Opaque browser session; set and read only by the browser
+            type: string
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "204":
+          description: No Content
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unauthorized
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "503":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Service Unavailable
+      summary: Revoke a user API key
+      tags:
+        - Authentication
+  /api/v2/auth/challenge:
+    get:
+      description: Returns an Altcha-style proof-of-work challenge the client solves before register/login. Returns 404 when the captcha is disabled.
+      operationId: auth-challenge
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Challenge"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Not Found
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "503":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Service Unavailable
+      summary: Issue a proof-of-work captcha challenge
+      tags:
+        - Authentication
+  /api/v2/auth/login:
+    post:
+      operationId: auth-login
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthLoginInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthBody"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            Set-Cookie:
+              schema:
+                type: string
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Bad Request
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unauthorized
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "503":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Service Unavailable
+      summary: Sign in with a local account
+      tags:
+        - Authentication
+  /api/v2/auth/logout:
+    post:
+      operationId: auth-logout
+      parameters:
+        - description: Opaque browser session; set and read only by the browser
+          in: cookie
+          name: __Host-heya_session
+          schema:
+            description: Opaque browser session; set and read only by the browser
+            type: string
+      responses:
+        "204":
+          description: No Content
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            Set-Cookie:
+              schema:
+                type: string
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "503":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Service Unavailable
+      summary: End the current browser session
+      tags:
+        - Authentication
+  /api/v2/auth/me:
+    get:
+      operationId: auth-me
+      parameters:
+        - description: Opaque browser session; set and read only by the browser
+          in: cookie
+          name: __Host-heya_session
+          schema:
+            description: Opaque browser session; set and read only by the browser
+            type: string
+        - description: Optional Heya API key using the Bearer scheme
+          in: header
+          name: Authorization
+          schema:
+            description: Optional Heya API key using the Bearer scheme
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthBody"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        "401":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unauthorized
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "503":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Service Unavailable
+      summary: Get the signed-in user
+      tags:
+        - Authentication
+  /api/v2/auth/register:
+    post:
+      description: Creates a UUID-backed user, hashes the password with Argon2id, and starts an opaque browser session.
+      operationId: auth-register
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthRegisterInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthBody"
+          description: Created
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            Set-Cookie:
+              schema:
+                type: string
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Bad Request
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Conflict
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "503":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Service Unavailable
+      summary: Create a local user account
+      tags:
+        - Authentication
+  /api/v2/browse:
+    get:
+      operationId: browse-library
+      parameters:
+        - description: Optional local title/name query
+          explode: false
+          in: query
+          name: q
+          schema:
+            description: Optional local title/name query
+            maxLength: 200
+            type: string
+        - description: Optional exact canonical kind
+          explode: false
+          in: query
+          name: kind
+          schema:
+            description: Optional exact canonical kind
+            maxLength: 50
+            type: string
+        - explode: false
+          in: query
+          name: sort
+          schema:
+            default: updated
+            enum:
+              - updated
+              - title
+              - year
+              - popular
+            type: string
+        - explode: false
+          in: query
+          name: offset
+          schema:
+            default: 0
+            format: int64
+            minimum: 0
+            type: integer
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            default: 24
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Preferred presentation languages for compact titles and names
+          in: header
+          name: Accept-Language
+          schema:
+            description: Preferred presentation languages for compact titles and names
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrowseOutputBody"
+          description: OK
+          headers:
+            Vary:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Browse canonical entities
+      tags:
+        - Library
+  /api/v2/changes:
+    get:
+      operationId: public-changes
+      parameters:
+        - explode: false
+          in: query
+          name: after
+          schema:
+            format: int64
+            minimum: 0
+            type: integer
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            default: 100
+            format: int64
+            maximum: 500
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChangesOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Read the gap-free public change feed
+      tags:
+        - Changes
+  /api/v2/collections:
+    get:
+      operationId: collections-list
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionsOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Movie franchises encountered in canonical metadata
+      tags:
+        - Library
+        - Collections
+  /api/v2/collections/{id}:
+    get:
+      operationId: collection-detail
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionCard"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: One movie franchise and its known members
+      tags:
+        - Library
+        - Collections
+  /api/v2/comics/discoveries:
+    post:
+      operationId: discover-comic
+      parameters:
+        - description: respond-async or wait=N (maximum 5 seconds)
+          in: header
+          name: Prefer
+          schema:
+            description: respond-async or wait=N (maximum 5 seconds)
+            type: string
+        - description: Optional request-scoped TMDB API key; never persisted
+          in: header
+          name: X-Heya-TMDB-API-Key
+          schema:
+            description: Optional request-scoped TMDB API key; never persisted
+            type: string
+        - description: Optional request-scoped OMDb API key; never persisted
+          in: header
+          name: X-Heya-OMDB-API-Key
+          schema:
+            description: Optional request-scoped OMDb API key; never persisted
+            type: string
+        - description: Optional request-scoped TVDB API key; never persisted
+          in: header
+          name: X-Heya-TVDB-API-Key
+          schema:
+            description: Optional request-scoped TVDB API key; never persisted
+            type: string
+        - description: Optional request-scoped Fanart.tv personal API key; never persisted
+          in: header
+          name: X-Heya-Fanart-API-Key
+          schema:
+            description: Optional request-scoped Fanart.tv personal API key; never persisted
+            type: string
+        - description: Optional request-scoped Apple Music developer token; never persisted
+          in: header
+          name: X-Heya-Apple-API-Key
+          schema:
+            description: Optional request-scoped Apple Music developer token; never persisted
+            type: string
+        - description: Optional request-scoped Discogs token; never persisted
+          in: header
+          name: X-Heya-Discogs-API-Key
+          schema:
+            description: Optional request-scoped Discogs token; never persisted
+            type: string
+        - description: Optional request-scoped Last.fm API key; never persisted
+          in: header
+          name: X-Heya-LastFM-API-Key
+          schema:
+            description: Optional request-scoped Last.fm API key; never persisted
+            type: string
+        - description: Optional request-scoped Google Books API key; never persisted
+          in: header
+          name: X-Heya-Google-Books-API-Key
+          schema:
+            description: Optional request-scoped Google Books API key; never persisted
+            type: string
+        - description: Optional request-scoped MyAnimeList client ID; never persisted
+          in: header
+          name: X-Heya-MAL-Client-ID
+          schema:
+            description: Optional request-scoped MyAnimeList client ID; never persisted
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DedicatedDiscoveryRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: OK
+          headers:
+            Retry-After:
+              schema:
+                type: string
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: Accepted for asynchronous processing
+          headers:
+            Retry-After:
+              description: Suggested number of seconds before polling the returned resource or job
+              schema:
+                type: string
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: Processing failed after retries; the request may be submitted again
+          headers:
+            Retry-After:
+              description: Suggested number of seconds before polling the returned resource or job
+              schema:
+                type: string
+      summary: Discover comic publications
+      tags:
+        - Comics
+        - Discovery
+  /api/v2/comics/volumes/{id}:
+    get:
+      operationId: comic-volume-detail
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - description: Preferred BCP 47 presentation language
+          explode: false
+          in: query
+          name: language
+          schema:
+            description: Preferred BCP 47 presentation language
+            type: string
+        - description: Comma-separated ordered presentation language fallbacks
+          explode: false
+          in: query
+          name: fallback_languages
+          schema:
+            description: Comma-separated ordered presentation language fallbacks
+            type: string
+        - description: Presentation preferences used after explicit query preferences
+          in: header
+          name: Accept-Language
+          schema:
+            description: Presentation preferences used after explicit query preferences
+            type: string
+        - description: Optional ISO 3166-1 alpha-2 presentation region
+          explode: false
+          in: query
+          name: country
+          schema:
+            description: Optional ISO 3166-1 alpha-2 presentation region
+            maxLength: 2
+            minLength: 2
+            type: string
+        - description: Optional request-scoped Google Books API key; never persisted
+          in: header
+          name: X-Heya-Google-Books-API-Key
+          schema:
+            description: Optional request-scoped Google Books API key; never persisted
+            type: string
+        - description: Optional request-scoped MyAnimeList client ID; never persisted
+          in: header
+          name: X-Heya-MAL-Client-ID
+          schema:
+            description: Optional request-scoped MyAnimeList client ID; never persisted
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: {}
+          description: OK
+          headers:
+            Vary:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Get a canonical comic volume
+      tags:
+        - Comics
+  /api/v2/discoveries:
+    post:
+      description: Resolves known identifiers locally, internally crosswalks fresh identifiers into the canonical pipeline, or searches upstream by descriptive hints. Provider routing is never returned to the caller.
+      operationId: create-discovery
+      parameters:
+        - description: respond-async or wait=N (maximum 5 seconds)
+          in: header
+          name: Prefer
+          schema:
+            description: respond-async or wait=N (maximum 5 seconds)
+            type: string
+        - description: Optional request-scoped TMDB API key; never persisted
+          in: header
+          name: X-Heya-TMDB-API-Key
+          schema:
+            description: Optional request-scoped TMDB API key; never persisted
+            type: string
+        - description: Optional request-scoped OMDb API key; never persisted
+          in: header
+          name: X-Heya-OMDB-API-Key
+          schema:
+            description: Optional request-scoped OMDb API key; never persisted
+            type: string
+        - description: Optional request-scoped TVDB API key; never persisted
+          in: header
+          name: X-Heya-TVDB-API-Key
+          schema:
+            description: Optional request-scoped TVDB API key; never persisted
+            type: string
+        - description: Optional request-scoped Fanart.tv personal API key; never persisted
+          in: header
+          name: X-Heya-Fanart-API-Key
+          schema:
+            description: Optional request-scoped Fanart.tv personal API key; never persisted
+            type: string
+        - description: Optional request-scoped Apple Music developer token; never persisted
+          in: header
+          name: X-Heya-Apple-API-Key
+          schema:
+            description: Optional request-scoped Apple Music developer token; never persisted
+            type: string
+        - description: Optional request-scoped Discogs token; never persisted
+          in: header
+          name: X-Heya-Discogs-API-Key
+          schema:
+            description: Optional request-scoped Discogs token; never persisted
+            type: string
+        - description: Optional request-scoped Last.fm API key; never persisted
+          in: header
+          name: X-Heya-LastFM-API-Key
+          schema:
+            description: Optional request-scoped Last.fm API key; never persisted
+            type: string
+        - description: Optional request-scoped Google Books API key; never persisted
+          in: header
+          name: X-Heya-Google-Books-API-Key
+          schema:
+            description: Optional request-scoped Google Books API key; never persisted
+            type: string
+        - description: Optional request-scoped MyAnimeList client ID; never persisted
+          in: header
+          name: X-Heya-MAL-Client-ID
+          schema:
+            description: Optional request-scoped MyAnimeList client ID; never persisted
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Request"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: OK
+          headers:
+            Retry-After:
+              schema:
+                type: string
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: Accepted for asynchronous processing
+          headers:
+            Retry-After:
+              description: Suggested number of seconds before polling the returned resource or job
+              schema:
+                type: string
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: Processing failed after retries; the request may be submitted again
+          headers:
+            Retry-After:
+              description: Suggested number of seconds before polling the returned resource or job
+              schema:
+                type: string
+      summary: Identify an entity from local facts and opaque external evidence
+      tags:
+        - Discovery
+  /api/v2/discoveries/{id}:
+    get:
+      operationId: get-discovery
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: OK
+          headers:
+            Retry-After:
+              schema:
+                type: string
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: Processing failed after retries; the request may be submitted again
+          headers:
+            Retry-After:
+              description: Suggested number of seconds before polling the returned resource or job
+              schema:
+                type: string
+      summary: Get smart-discovery status and candidates
+      tags:
+        - Discovery
+  /api/v2/entities/{id}:
+    get:
+      operationId: entity-detail
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - description: Preferred BCP 47 presentation language
+          explode: false
+          in: query
+          name: language
+          schema:
+            description: Preferred BCP 47 presentation language
+            type: string
+        - description: Comma-separated ordered presentation language fallbacks
+          explode: false
+          in: query
+          name: fallback_languages
+          schema:
+            description: Comma-separated ordered presentation language fallbacks
+            type: string
+        - description: Presentation preferences used after explicit query preferences
+          in: header
+          name: Accept-Language
+          schema:
+            description: Presentation preferences used after explicit query preferences
+            type: string
+        - description: Optional ISO 3166-1 alpha-2 presentation region
+          explode: false
+          in: query
+          name: country
+          schema:
+            description: Optional ISO 3166-1 alpha-2 presentation region
+            maxLength: 2
+            minLength: 2
+            type: string
+        - description: Optional request-scoped TMDB API key; never persisted
+          in: header
+          name: X-Heya-TMDB-API-Key
+          schema:
+            description: Optional request-scoped TMDB API key; never persisted
+            type: string
+        - description: Optional request-scoped OMDb API key; never persisted
+          in: header
+          name: X-Heya-OMDB-API-Key
+          schema:
+            description: Optional request-scoped OMDb API key; never persisted
+            type: string
+        - description: Optional request-scoped TVDB API key; never persisted
+          in: header
+          name: X-Heya-TVDB-API-Key
+          schema:
+            description: Optional request-scoped TVDB API key; never persisted
+            type: string
+        - description: Optional request-scoped Fanart.tv personal API key; never persisted
+          in: header
+          name: X-Heya-Fanart-API-Key
+          schema:
+            description: Optional request-scoped Fanart.tv personal API key; never persisted
+            type: string
+        - description: Optional request-scoped Apple Music developer token; never persisted
+          in: header
+          name: X-Heya-Apple-API-Key
+          schema:
+            description: Optional request-scoped Apple Music developer token; never persisted
+            type: string
+        - description: Optional request-scoped Discogs token; never persisted
+          in: header
+          name: X-Heya-Discogs-API-Key
+          schema:
+            description: Optional request-scoped Discogs token; never persisted
+            type: string
+        - description: Optional request-scoped Last.fm API key; never persisted
+          in: header
+          name: X-Heya-LastFM-API-Key
+          schema:
+            description: Optional request-scoped Last.fm API key; never persisted
+            type: string
+        - description: Optional request-scoped Google Books API key; never persisted
+          in: header
+          name: X-Heya-Google-Books-API-Key
+          schema:
+            description: Optional request-scoped Google Books API key; never persisted
+            type: string
+        - description: Optional request-scoped MyAnimeList client ID; never persisted
+          in: header
+          name: X-Heya-MAL-Client-ID
+          schema:
+            description: Optional request-scoped MyAnimeList client ID; never persisted
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: {}
+          description: OK
+          headers:
+            Vary:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Get a canonical entity
+      tags:
+        - Entities
+  /api/v2/entities/{id}/credits:
+    get:
+      description: Every credit carries a canonical Heya person_entity_id. Provider fields are passive provenance only.
+      operationId: entity-credits
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - description: Optional credit type filter
+          explode: false
+          in: query
+          name: credit_type
+          schema:
+            description: Optional credit type filter
+            enum:
+              - cast
+              - crew
+            type: string
+        - explode: false
+          in: query
+          name: offset
+          schema:
+            default: 0
+            format: int64
+            minimum: 0
+            type: integer
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            default: 100
+            format: int64
+            maximum: 250
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntityCreditsOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Get canonical cast and crew credits
+      tags:
+        - Entities
+        - Credits
+  /api/v2/entities/{id}/images:
+    get:
+      description: Ranks artwork within each class by requested language, neutral fallback, country, provider score, and dimensions. The selected candidate for every returned class is also exposed in selections so clients do not need to reproduce ranking rules.
+      operationId: entity-images
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - description: Optional artwork class such as poster, backdrop, logo, banner, cover, or profile
+          explode: false
+          in: query
+          name: class
+          schema:
+            description: Optional artwork class such as poster, backdrop, logo, banner, cover, or profile
+            type: string
+        - description: Preferred BCP 47 artwork language, for example en-GB
+          explode: false
+          in: query
+          name: language
+          schema:
+            description: Preferred BCP 47 artwork language, for example en-GB
+            type: string
+        - description: Comma-separated ordered language fallbacks
+          explode: false
+          in: query
+          name: fallback_languages
+          schema:
+            description: Comma-separated ordered language fallbacks
+            type: string
+        - description: Used after explicit language query preferences
+          in: header
+          name: Accept-Language
+          schema:
+            description: Used after explicit language query preferences
+            type: string
+        - description: Optional ISO 3166-1 alpha-2 regional preference
+          explode: false
+          in: query
+          name: country
+          schema:
+            description: Optional ISO 3166-1 alpha-2 regional preference
+            maxLength: 2
+            minLength: 2
+            type: string
+        - description: Maximum candidates returned per artwork class
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Maximum candidates returned per artwork class
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntityImagesOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Select language-aware artwork for an entity
+      tags:
+        - Entities
+        - Images
+  /api/v2/entities/{id}/ratings:
+    get:
+      operationId: entity-ratings
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - explode: false
+          in: query
+          name: offset
+          schema:
+            default: 0
+            format: int64
+            minimum: 0
+            type: integer
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            default: 100
+            format: int64
+            maximum: 250
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntityMetadataOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Get provider-native ratings without scale coercion
+      tags:
+        - Entities
+        - Ratings
+  /api/v2/entities/{id}/refreshes:
+    post:
+      operationId: refresh-entity
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - description: Preferred BCP 47 presentation language
+          explode: false
+          in: query
+          name: language
+          schema:
+            description: Preferred BCP 47 presentation language
+            type: string
+        - description: Comma-separated ordered presentation language fallbacks
+          explode: false
+          in: query
+          name: fallback_languages
+          schema:
+            description: Comma-separated ordered presentation language fallbacks
+            type: string
+        - description: Presentation preferences used after explicit query preferences
+          in: header
+          name: Accept-Language
+          schema:
+            description: Presentation preferences used after explicit query preferences
+            type: string
+        - description: Optional ISO 3166-1 alpha-2 presentation region
+          explode: false
+          in: query
+          name: country
+          schema:
+            description: Optional ISO 3166-1 alpha-2 presentation region
+            maxLength: 2
+            minLength: 2
+            type: string
+        - description: Optional request-scoped TMDB API key; never persisted
+          in: header
+          name: X-Heya-TMDB-API-Key
+          schema:
+            description: Optional request-scoped TMDB API key; never persisted
+            type: string
+        - description: Optional request-scoped OMDb API key; never persisted
+          in: header
+          name: X-Heya-OMDB-API-Key
+          schema:
+            description: Optional request-scoped OMDb API key; never persisted
+            type: string
+        - description: Optional request-scoped TVDB API key; never persisted
+          in: header
+          name: X-Heya-TVDB-API-Key
+          schema:
+            description: Optional request-scoped TVDB API key; never persisted
+            type: string
+        - description: Optional request-scoped Fanart.tv personal API key; never persisted
+          in: header
+          name: X-Heya-Fanart-API-Key
+          schema:
+            description: Optional request-scoped Fanart.tv personal API key; never persisted
+            type: string
+        - description: Optional request-scoped Apple Music developer token; never persisted
+          in: header
+          name: X-Heya-Apple-API-Key
+          schema:
+            description: Optional request-scoped Apple Music developer token; never persisted
+            type: string
+        - description: Optional request-scoped Discogs token; never persisted
+          in: header
+          name: X-Heya-Discogs-API-Key
+          schema:
+            description: Optional request-scoped Discogs token; never persisted
+            type: string
+        - description: Optional request-scoped Last.fm API key; never persisted
+          in: header
+          name: X-Heya-LastFM-API-Key
+          schema:
+            description: Optional request-scoped Last.fm API key; never persisted
+            type: string
+        - description: Optional request-scoped Google Books API key; never persisted
+          in: header
+          name: X-Heya-Google-Books-API-Key
+          schema:
+            description: Optional request-scoped Google Books API key; never persisted
+            type: string
+        - description: Optional request-scoped MyAnimeList client ID; never persisted
+          in: header
+          name: X-Heya-MAL-Client-ID
+          schema:
+            description: Optional request-scoped MyAnimeList client ID; never persisted
+            type: string
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobResource"
+          description: Accepted
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Refresh a canonical entity
+      tags:
+        - Entities
+  /api/v2/entities/{id}/relations:
+    get:
+      operationId: entity-relations
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            maxLength: 100
+            minLength: 1
+            type: string
+        - description: Optional exact relation type, such as discography
+          explode: false
+          in: query
+          name: type
+          schema:
+            description: Optional exact relation type, such as discography
+            maxLength: 100
+            type: string
+        - explode: false
+          in: query
+          name: offset
+          schema:
+            default: 0
+            format: int64
+            minimum: 0
+            type: integer
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            default: 50
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntityRelationsOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Canonical and provider-backed entity relationships
+      tags:
+        - Entities
+        - Relations
+  /api/v2/entities/{id}/top-tracks:
+    get:
+      description: Returns the complete persisted canonical ranking snapshot, ordered by provider and rank. Collection is capped at the provider's top 100 tracks; sources reports the upstream total and whether that snapshot was truncated. Existing MusicBrainz recording claims are linked at read time, while unresolved tracks remain provider evidence and never create recording entities.
+      operationId: artist-top-tracks
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - explode: false
+          in: query
+          name: offset
+          schema:
+            default: 0
+            format: int64
+            minimum: 0
+            type: integer
+        - description: Maximum ranked provider tracks returned
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 50
+            description: Maximum ranked provider tracks returned
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopTracksPage"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Read ranked provider top tracks for an artist
+      tags:
+        - Music
+  /api/v2/episodes/{id}:
+    get:
+      operationId: episode-detail
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EpisodeResource"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Get a canonical episode resource
+      tags:
+        - TV
+        - Anime
+  /api/v2/fingerprint-matches:
+    post:
+      description: Runs local preview matching and optional AcoustID lookup as one durable, short-lived job. Submitted fingerprints expire after one hour and are erased immediately after completion.
+      operationId: match-recording-fingerprint
+      parameters:
+        - in: header
+          name: Prefer
+          schema:
+            type: string
+        - in: header
+          name: X-Heya-AcoustID-API-Key
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FingerprintMatchCreateInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FingerprintMatchResource"
+          description: OK
+          headers:
+            Retry-After:
+              schema:
+                type: string
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FingerprintMatchResource"
+          description: Accepted for asynchronous processing
+          headers:
+            Retry-After:
+              description: Suggested number of seconds before polling the returned resource or job
+              schema:
+                type: string
+      summary: Match a client Chromaprint against canonical recordings
+      tags:
+        - Music
+  /api/v2/fingerprint-matches/{id}:
+    get:
+      operationId: get-fingerprint-match
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FingerprintMatchResource"
+          description: OK
+          headers:
+            Retry-After:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Get fingerprint match status
+      tags:
+        - Music
+  /api/v2/health/live:
+    get:
+      operationId: health-live
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Liveness probe
+      tags:
+        - System
+  /api/v2/health/ready:
+    get:
+      operationId: health-ready
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readiness"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Dependency-aware readiness probe
+      tags:
+        - System
+  /api/v2/images/{id}:
+    get:
+      operationId: image-original
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            image/avif:
+              schema:
+                format: binary
+                type: string
+                x-contentMediaType: application/octet-stream
+            image/gif:
+              schema:
+                format: binary
+                type: string
+                x-contentMediaType: application/octet-stream
+            image/jpeg:
+              schema:
+                format: binary
+                type: string
+                x-contentMediaType: application/octet-stream
+            image/png:
+              schema:
+                format: binary
+                type: string
+                x-contentMediaType: application/octet-stream
+            image/webp:
+              schema:
+                format: binary
+                type: string
+                x-contentMediaType: application/octet-stream
+          description: Canonical image bytes
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            Content-Type:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+            Retry-After:
+              schema:
+                type: string
+            X-Image-Height:
+              schema:
+                format: int64
+                type: integer
+            X-Image-Width:
+              schema:
+                format: int64
+                type: integer
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobResource"
+          description: Accepted for asynchronous processing
+          headers:
+            Retry-After:
+              description: Suggested number of seconds before polling the returned resource or job
+              schema:
+                type: string
+      summary: Read or queue a canonical image original
+      tags:
+        - Images
+  /api/v2/images/{id}/variants/{format}/{width}:
+    get:
+      operationId: image-variant
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - in: path
+          name: format
+          required: true
+          schema:
+            enum:
+              - webp
+              - avif
+            type: string
+        - in: path
+          name: width
+          required: true
+          schema:
+            format: int64
+            maximum: 3840
+            minimum: 64
+            type: integer
+      responses:
+        "200":
+          content:
+            image/avif:
+              schema:
+                format: binary
+                type: string
+                x-contentMediaType: application/octet-stream
+            image/webp:
+              schema:
+                format: binary
+                type: string
+                x-contentMediaType: application/octet-stream
+          description: Canonical image bytes
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            Content-Type:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+            Retry-After:
+              schema:
+                type: string
+            X-Image-Height:
+              schema:
+                format: int64
+                type: integer
+            X-Image-Width:
+              schema:
+                format: int64
+                type: integer
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobResource"
+          description: Accepted for asynchronous processing
+          headers:
+            Retry-After:
+              description: Suggested number of seconds before polling the returned resource or job
+              schema:
+                type: string
+      summary: Read or queue an optimized image variant
+      tags:
+        - Images
+  /api/v2/jobs/{id}:
+    get:
+      operationId: job-status
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: int64
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobResource"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Get durable job status
+      tags:
+        - Jobs
+  /api/v2/latest:
+    get:
+      operationId: latest-library
+      parameters:
+        - description: Optional exact canonical kind
+          explode: false
+          in: query
+          name: kind
+          schema:
+            description: Optional exact canonical kind
+            maxLength: 50
+            type: string
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            default: 24
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Preferred presentation languages for compact titles and names
+          in: header
+          name: Accept-Language
+          schema:
+            description: Preferred presentation languages for compact titles and names
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrowseOutputBody"
+          description: OK
+          headers:
+            Vary:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Recently updated canonical entities
+      tags:
+        - Library
+  /api/v2/manga/discoveries:
+    post:
+      operationId: discover-manga
+      parameters:
+        - description: respond-async or wait=N (maximum 5 seconds)
+          in: header
+          name: Prefer
+          schema:
+            description: respond-async or wait=N (maximum 5 seconds)
+            type: string
+        - description: Optional request-scoped TMDB API key; never persisted
+          in: header
+          name: X-Heya-TMDB-API-Key
+          schema:
+            description: Optional request-scoped TMDB API key; never persisted
+            type: string
+        - description: Optional request-scoped OMDb API key; never persisted
+          in: header
+          name: X-Heya-OMDB-API-Key
+          schema:
+            description: Optional request-scoped OMDb API key; never persisted
+            type: string
+        - description: Optional request-scoped TVDB API key; never persisted
+          in: header
+          name: X-Heya-TVDB-API-Key
+          schema:
+            description: Optional request-scoped TVDB API key; never persisted
+            type: string
+        - description: Optional request-scoped Fanart.tv personal API key; never persisted
+          in: header
+          name: X-Heya-Fanart-API-Key
+          schema:
+            description: Optional request-scoped Fanart.tv personal API key; never persisted
+            type: string
+        - description: Optional request-scoped Apple Music developer token; never persisted
+          in: header
+          name: X-Heya-Apple-API-Key
+          schema:
+            description: Optional request-scoped Apple Music developer token; never persisted
+            type: string
+        - description: Optional request-scoped Discogs token; never persisted
+          in: header
+          name: X-Heya-Discogs-API-Key
+          schema:
+            description: Optional request-scoped Discogs token; never persisted
+            type: string
+        - description: Optional request-scoped Last.fm API key; never persisted
+          in: header
+          name: X-Heya-LastFM-API-Key
+          schema:
+            description: Optional request-scoped Last.fm API key; never persisted
+            type: string
+        - description: Optional request-scoped Google Books API key; never persisted
+          in: header
+          name: X-Heya-Google-Books-API-Key
+          schema:
+            description: Optional request-scoped Google Books API key; never persisted
+            type: string
+        - description: Optional request-scoped MyAnimeList client ID; never persisted
+          in: header
+          name: X-Heya-MAL-Client-ID
+          schema:
+            description: Optional request-scoped MyAnimeList client ID; never persisted
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DedicatedDiscoveryRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: OK
+          headers:
+            Retry-After:
+              schema:
+                type: string
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: Accepted for asynchronous processing
+          headers:
+            Retry-After:
+              description: Suggested number of seconds before polling the returned resource or job
+              schema:
+                type: string
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: Processing failed after retries; the request may be submitted again
+          headers:
+            Retry-After:
+              description: Suggested number of seconds before polling the returned resource or job
+              schema:
+                type: string
+      summary: Discover manga publications
+      tags:
+        - Manga
+        - Discovery
+  /api/v2/manga/volumes/discoveries:
+    post:
+      operationId: discover-manga-volume
+      parameters:
+        - description: respond-async or wait=N (maximum 5 seconds)
+          in: header
+          name: Prefer
+          schema:
+            description: respond-async or wait=N (maximum 5 seconds)
+            type: string
+        - description: Optional request-scoped TMDB API key; never persisted
+          in: header
+          name: X-Heya-TMDB-API-Key
+          schema:
+            description: Optional request-scoped TMDB API key; never persisted
+            type: string
+        - description: Optional request-scoped OMDb API key; never persisted
+          in: header
+          name: X-Heya-OMDB-API-Key
+          schema:
+            description: Optional request-scoped OMDb API key; never persisted
+            type: string
+        - description: Optional request-scoped TVDB API key; never persisted
+          in: header
+          name: X-Heya-TVDB-API-Key
+          schema:
+            description: Optional request-scoped TVDB API key; never persisted
+            type: string
+        - description: Optional request-scoped Fanart.tv personal API key; never persisted
+          in: header
+          name: X-Heya-Fanart-API-Key
+          schema:
+            description: Optional request-scoped Fanart.tv personal API key; never persisted
+            type: string
+        - description: Optional request-scoped Apple Music developer token; never persisted
+          in: header
+          name: X-Heya-Apple-API-Key
+          schema:
+            description: Optional request-scoped Apple Music developer token; never persisted
+            type: string
+        - description: Optional request-scoped Discogs token; never persisted
+          in: header
+          name: X-Heya-Discogs-API-Key
+          schema:
+            description: Optional request-scoped Discogs token; never persisted
+            type: string
+        - description: Optional request-scoped Last.fm API key; never persisted
+          in: header
+          name: X-Heya-LastFM-API-Key
+          schema:
+            description: Optional request-scoped Last.fm API key; never persisted
+            type: string
+        - description: Optional request-scoped Google Books API key; never persisted
+          in: header
+          name: X-Heya-Google-Books-API-Key
+          schema:
+            description: Optional request-scoped Google Books API key; never persisted
+            type: string
+        - description: Optional request-scoped MyAnimeList client ID; never persisted
+          in: header
+          name: X-Heya-MAL-Client-ID
+          schema:
+            description: Optional request-scoped MyAnimeList client ID; never persisted
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DedicatedDiscoveryRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: OK
+          headers:
+            Retry-After:
+              schema:
+                type: string
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: Accepted for asynchronous processing
+          headers:
+            Retry-After:
+              description: Suggested number of seconds before polling the returned resource or job
+              schema:
+                type: string
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: Processing failed after retries; the request may be submitted again
+          headers:
+            Retry-After:
+              description: Suggested number of seconds before polling the returned resource or job
+              schema:
+                type: string
+      summary: Discover physical manga volumes
+      tags:
+        - Manga
+        - Discovery
+  /api/v2/manga/volumes/{id}:
+    get:
+      operationId: manga-volume-detail
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - description: Preferred BCP 47 presentation language
+          explode: false
+          in: query
+          name: language
+          schema:
+            description: Preferred BCP 47 presentation language
+            type: string
+        - description: Comma-separated ordered presentation language fallbacks
+          explode: false
+          in: query
+          name: fallback_languages
+          schema:
+            description: Comma-separated ordered presentation language fallbacks
+            type: string
+        - description: Presentation preferences used after explicit query preferences
+          in: header
+          name: Accept-Language
+          schema:
+            description: Presentation preferences used after explicit query preferences
+            type: string
+        - description: Optional ISO 3166-1 alpha-2 presentation region
+          explode: false
+          in: query
+          name: country
+          schema:
+            description: Optional ISO 3166-1 alpha-2 presentation region
+            maxLength: 2
+            minLength: 2
+            type: string
+        - description: Optional request-scoped Google Books API key; never persisted
+          in: header
+          name: X-Heya-Google-Books-API-Key
+          schema:
+            description: Optional request-scoped Google Books API key; never persisted
+            type: string
+        - description: Optional request-scoped MyAnimeList client ID; never persisted
+          in: header
+          name: X-Heya-MAL-Client-ID
+          schema:
+            description: Optional request-scoped MyAnimeList client ID; never persisted
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: {}
+          description: OK
+          headers:
+            Vary:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Get a canonical physical manga volume
+      tags:
+        - Manga
+  /api/v2/manga/{id}:
+    get:
+      operationId: manga-detail
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - description: Preferred BCP 47 presentation language
+          explode: false
+          in: query
+          name: language
+          schema:
+            description: Preferred BCP 47 presentation language
+            type: string
+        - description: Comma-separated ordered presentation language fallbacks
+          explode: false
+          in: query
+          name: fallback_languages
+          schema:
+            description: Comma-separated ordered presentation language fallbacks
+            type: string
+        - description: Presentation preferences used after explicit query preferences
+          in: header
+          name: Accept-Language
+          schema:
+            description: Presentation preferences used after explicit query preferences
+            type: string
+        - description: Optional ISO 3166-1 alpha-2 presentation region
+          explode: false
+          in: query
+          name: country
+          schema:
+            description: Optional ISO 3166-1 alpha-2 presentation region
+            maxLength: 2
+            minLength: 2
+            type: string
+        - description: Optional request-scoped Google Books API key; never persisted
+          in: header
+          name: X-Heya-Google-Books-API-Key
+          schema:
+            description: Optional request-scoped Google Books API key; never persisted
+            type: string
+        - description: Optional request-scoped MyAnimeList client ID; never persisted
+          in: header
+          name: X-Heya-MAL-Client-ID
+          schema:
+            description: Optional request-scoped MyAnimeList client ID; never persisted
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: {}
+          description: OK
+          headers:
+            Vary:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Get a canonical manga series
+      tags:
+        - Manga
+  /api/v2/persons/{id}:
+    get:
+      operationId: person-detail
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - description: Optional request-scoped TMDB API key; never persisted
+          in: header
+          name: X-Heya-TMDB-API-Key
+          schema:
+            description: Optional request-scoped TMDB API key; never persisted
+            type: string
+        - description: Optional request-scoped TVDB API key; never persisted
+          in: header
+          name: X-Heya-TVDB-API-Key
+          schema:
+            description: Optional request-scoped TVDB API key; never persisted
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PersonDocument"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Get a canonical person and combined filmography
+      tags:
+        - People
+        - Credits
+  /api/v2/persons/{id}/credits:
+    get:
+      description: All control flow uses the canonical Heya person ID; upstream person IDs remain passive provenance.
+      operationId: person-credits
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - explode: false
+          in: query
+          name: offset
+          schema:
+            default: 0
+            format: int64
+            minimum: 0
+            type: integer
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            default: 100
+            format: int64
+            maximum: 250
+            minimum: 1
+            type: integer
+        - description: Optional request-scoped TMDB API key; never persisted
+          in: header
+          name: X-Heya-TMDB-API-Key
+          schema:
+            description: Optional request-scoped TMDB API key; never persisted
+            type: string
+        - description: Optional request-scoped TVDB API key; never persisted
+          in: header
+          name: X-Heya-TVDB-API-Key
+          schema:
+            description: Optional request-scoped TVDB API key; never persisted
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PersonCreditsOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Get complete filmography for a canonical person
+      tags:
+        - People
+        - Credits
+  /api/v2/recordings/{id}:
+    get:
+      operationId: recording-detail
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: {}
+          description: OK
+          headers:
+            Vary:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Get a canonical music recording
+      tags:
+        - Music
+  /api/v2/recordings/{id}/fingerprints:
+    get:
+      operationId: recording-fingerprints
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordingFingerprintsOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Get derived Chromaprint evidence for a recording
+      tags:
+        - Music
+  /api/v2/recordings/{id}/lyrics:
+    get:
+      operationId: recording-lyrics
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordingLyricsOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Get plain and synchronized lyrics evidence for a recording
+      tags:
+        - Music
+  /api/v2/releases/{id}:
+    get:
+      operationId: release-detail
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: {}
+          description: OK
+          headers:
+            Vary:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Get a canonical issued music release
+      tags:
+        - Music
+  /api/v2/resolutions:
+    post:
+      description: The candidate reference is issued by HeyaMetadata. Provider identity and ingestion routing remain internal.
+      operationId: resolve-entity
+      parameters:
+        - in: header
+          name: Prefer
+          schema:
+            type: string
+        - description: Optional request-scoped TMDB API key; never persisted
+          in: header
+          name: X-Heya-TMDB-API-Key
+          schema:
+            description: Optional request-scoped TMDB API key; never persisted
+            type: string
+        - description: Optional request-scoped OMDb API key; never persisted
+          in: header
+          name: X-Heya-OMDB-API-Key
+          schema:
+            description: Optional request-scoped OMDb API key; never persisted
+            type: string
+        - description: Optional request-scoped TVDB API key; never persisted
+          in: header
+          name: X-Heya-TVDB-API-Key
+          schema:
+            description: Optional request-scoped TVDB API key; never persisted
+            type: string
+        - description: Optional request-scoped Fanart.tv personal API key; never persisted
+          in: header
+          name: X-Heya-Fanart-API-Key
+          schema:
+            description: Optional request-scoped Fanart.tv personal API key; never persisted
+            type: string
+        - description: Optional request-scoped Apple Music developer token; never persisted
+          in: header
+          name: X-Heya-Apple-API-Key
+          schema:
+            description: Optional request-scoped Apple Music developer token; never persisted
+            type: string
+        - description: Optional request-scoped Discogs token; never persisted
+          in: header
+          name: X-Heya-Discogs-API-Key
+          schema:
+            description: Optional request-scoped Discogs token; never persisted
+            type: string
+        - description: Optional request-scoped Last.fm API key; never persisted
+          in: header
+          name: X-Heya-LastFM-API-Key
+          schema:
+            description: Optional request-scoped Last.fm API key; never persisted
+            type: string
+        - description: Optional request-scoped Google Books API key; never persisted
+          in: header
+          name: X-Heya-Google-Books-API-Key
+          schema:
+            description: Optional request-scoped Google Books API key; never persisted
+            type: string
+        - description: Optional request-scoped MyAnimeList client ID; never persisted
+          in: header
+          name: X-Heya-MAL-Client-ID
+          schema:
+            description: Optional request-scoped MyAnimeList client ID; never persisted
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolutionInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResolutionBody"
+          description: OK
+          headers:
+            Retry-After:
+              schema:
+                type: string
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResolutionBody"
+          description: Accepted for asynchronous processing
+          headers:
+            Retry-After:
+              description: Suggested number of seconds before polling the returned resource or job
+              schema:
+                type: string
+      summary: Select an opaque discovery candidate
+      tags:
+        - Entities
+  /api/v2/search:
+    get:
+      operationId: search-entities
+      parameters:
+        - explode: false
+          in: query
+          name: q
+          schema:
+            minLength: 1
+            type: string
+        - description: Optional canonical domain filter
+          explode: false
+          in: query
+          name: kind
+          schema:
+            description: Optional canonical domain filter
+            enum:
+              - movie
+              - artist
+              - release_group
+              - release
+              - recording
+              - musical_work
+              - tv_show
+              - anime
+              - book_work
+              - book_edition
+              - manga
+              - manga_volume
+              - manga_edition
+              - comic_volume
+              - comic_edition
+              - author
+              - person
+            type: string
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            default: 20
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - explode: false
+          in: query
+          name: year
+          schema:
+            format: int64
+            maximum: 2200
+            minimum: 1800
+            type: integer
+        - explode: false
+          in: query
+          name: genre
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: country
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: language
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: status
+          schema:
+            type: string
+        - description: Preferred presentation languages for compact titles and names
+          in: header
+          name: Accept-Language
+          schema:
+            description: Preferred presentation languages for compact titles and names
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchOutputBody"
+          description: OK
+          headers:
+            Vary:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Search canonical entities
+      tags:
+        - Search
+  /api/v2/seasons/{id}:
+    get:
+      operationId: season-detail
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeasonResource"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Get a canonical season resource
+      tags:
+        - TV
+        - Anime
+  /api/v2/stats:
+    get:
+      operationId: library-stats
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Canonical library coverage statistics
+      tags:
+        - Library
+  /api/v2/tv/discoveries:
+    post:
+      operationId: discover-tv-show
+      parameters:
+        - description: respond-async or wait=N (maximum 5 seconds)
+          in: header
+          name: Prefer
+          schema:
+            description: respond-async or wait=N (maximum 5 seconds)
+            type: string
+        - description: Optional request-scoped TMDB API key; never persisted
+          in: header
+          name: X-Heya-TMDB-API-Key
+          schema:
+            description: Optional request-scoped TMDB API key; never persisted
+            type: string
+        - description: Optional request-scoped OMDb API key; never persisted
+          in: header
+          name: X-Heya-OMDB-API-Key
+          schema:
+            description: Optional request-scoped OMDb API key; never persisted
+            type: string
+        - description: Optional request-scoped TVDB API key; never persisted
+          in: header
+          name: X-Heya-TVDB-API-Key
+          schema:
+            description: Optional request-scoped TVDB API key; never persisted
+            type: string
+        - description: Optional request-scoped Fanart.tv personal API key; never persisted
+          in: header
+          name: X-Heya-Fanart-API-Key
+          schema:
+            description: Optional request-scoped Fanart.tv personal API key; never persisted
+            type: string
+        - description: Optional request-scoped Apple Music developer token; never persisted
+          in: header
+          name: X-Heya-Apple-API-Key
+          schema:
+            description: Optional request-scoped Apple Music developer token; never persisted
+            type: string
+        - description: Optional request-scoped Discogs token; never persisted
+          in: header
+          name: X-Heya-Discogs-API-Key
+          schema:
+            description: Optional request-scoped Discogs token; never persisted
+            type: string
+        - description: Optional request-scoped Last.fm API key; never persisted
+          in: header
+          name: X-Heya-LastFM-API-Key
+          schema:
+            description: Optional request-scoped Last.fm API key; never persisted
+            type: string
+        - description: Optional request-scoped Google Books API key; never persisted
+          in: header
+          name: X-Heya-Google-Books-API-Key
+          schema:
+            description: Optional request-scoped Google Books API key; never persisted
+            type: string
+        - description: Optional request-scoped MyAnimeList client ID; never persisted
+          in: header
+          name: X-Heya-MAL-Client-ID
+          schema:
+            description: Optional request-scoped MyAnimeList client ID; never persisted
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DedicatedDiscoveryRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: OK
+          headers:
+            Retry-After:
+              schema:
+                type: string
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: Accepted for asynchronous processing
+          headers:
+            Retry-After:
+              description: Suggested number of seconds before polling the returned resource or job
+              schema:
+                type: string
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryResource"
+          description: Processing failed after retries; the request may be submitted again
+          headers:
+            Retry-After:
+              description: Suggested number of seconds before polling the returned resource or job
+              schema:
+                type: string
+      summary: Discover conventional television shows
+      tags:
+        - TV
+        - Discovery
+  /api/v2/tv/shows/{id}:
+    get:
+      operationId: tv-show-detail
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - description: Preferred BCP 47 presentation language
+          explode: false
+          in: query
+          name: language
+          schema:
+            description: Preferred BCP 47 presentation language
+            type: string
+        - description: Comma-separated ordered presentation language fallbacks
+          explode: false
+          in: query
+          name: fallback_languages
+          schema:
+            description: Comma-separated ordered presentation language fallbacks
+            type: string
+        - description: Presentation preferences used after explicit query preferences
+          in: header
+          name: Accept-Language
+          schema:
+            description: Presentation preferences used after explicit query preferences
+            type: string
+        - description: Optional ISO 3166-1 alpha-2 presentation region
+          explode: false
+          in: query
+          name: country
+          schema:
+            description: Optional ISO 3166-1 alpha-2 presentation region
+            maxLength: 2
+            minLength: 2
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: {}
+          description: OK
+          headers:
+            Vary:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Get a canonical conventional TV show
+      tags:
+        - TV
+servers:
+  - description: Local development
+    url: http://localhost:3030

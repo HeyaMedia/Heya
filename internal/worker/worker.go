@@ -7,11 +7,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/karbowiak/heya/internal/communitysegments"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/matcher"
 	"github.com/karbowiak/heya/internal/metadata"
-	"github.com/karbowiak/heya/internal/metadata/heyamedia"
+	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
 	"github.com/karbowiak/heya/internal/transcoder"
@@ -42,8 +43,9 @@ type EventPublisher interface {
 type Config struct {
 	DB             *pgxpool.Pool
 	DataDir        string
-	HeyaMedia      *heyamedia.Client
-	Heya           *heyamedia.HeyaProvider
+	HeyaMetadata   *heyametadata.Client
+	Heya           *heyametadata.HeyaProvider
+	Segments       *communitysegments.Service
 	Matcher        MatchService
 	Downloader     *images.Downloader
 	TranscodeCache *transcoder.CacheManager
@@ -113,11 +115,11 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &EnrichMediaItemWorker{DB: cfg.DB, Matcher: cfg.Matcher, Heya: cfg.Heya, Hub: cfg.Hub, DataDir: cfg.DataDir, Progress: cfg.Progress})
-	river.AddWorker(workers, &DownloadImageWorker{DB: cfg.DB, Downloader: cfg.Downloader, HeyaMedia: cfg.HeyaMedia, Hub: cfg.Hub, Progress: cfg.Progress})
+	river.AddWorker(workers, &DownloadImageWorker{DB: cfg.DB, Downloader: cfg.Downloader, Hub: cfg.Hub, Progress: cfg.Progress})
 	river.AddWorker(workers, &FFProbeWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &ScanKeyframesWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &DetectLocalAssetsWorker{DB: cfg.DB, DataDir: cfg.DataDir, Hub: cfg.Hub, Progress: cfg.Progress})
-	river.AddWorker(workers, &PersonFetchWorker{DB: cfg.DB, HeyaMedia: cfg.HeyaMedia, Progress: cfg.Progress})
+	river.AddWorker(workers, &PersonFetchWorker{DB: cfg.DB, HeyaMetadata: cfg.HeyaMetadata, Progress: cfg.Progress})
 	river.AddWorker(workers, &FetchArtworkWorker{DB: cfg.DB, Heya: cfg.Heya, Progress: cfg.Progress})
 	river.AddWorker(workers, &RatingsFetchWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Progress: cfg.Progress})
 	river.AddWorker(workers, &SaveNFOWorker{DB: cfg.DB, Progress: cfg.Progress})
@@ -130,7 +132,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	river.AddWorker(workers, &ScanTrackLoudnessWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &ScanAlbumLoudnessWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &ScanTrackFingerprintWorker{DB: cfg.DB, Progress: cfg.Progress})
-	river.AddWorker(workers, &ScanMediaSegmentsFileWorker{DB: cfg.DB, Heya: cfg.Heya, Progress: cfg.Progress})
+	river.AddWorker(workers, &ScanMediaSegmentsFileWorker{DB: cfg.DB, Segments: cfg.Segments, Progress: cfg.Progress})
 	river.AddWorker(workers, &DetectSeasonSegmentsWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &DetectMovieCreditsWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &TrickplayFileWorker{DB: cfg.DB, Progress: cfg.Progress})
@@ -169,13 +171,14 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	// Debounce sweep — owns its own queue and fires every 10s via the
 	// periodic-jobs entry below.
 	river.AddWorker(workers, &DebounceSweepWorker{DB: cfg.DB})
+	river.AddWorker(workers, &SyncMetadataChangesWorker{DB: cfg.DB, Source: cfg.HeyaMetadata})
 
 	client, err := river.NewClient(riverpgxv5.New(cfg.DB), &river.Config{
 		// One queue per worker kind. Two reasons:
 		//   1. Scanner / probe / match touch the source filesystem (or
 		//      SMB share); serialising each step keeps us from
 		//      hammering the source with concurrent IO.
-		//   2. Each external dependency (HeyaMedia search, TMDB people,
+		//   2. Each external dependency (HeyaMetadata search, TMDB people,
 		//      rating providers) gets its own concurrency knob without
 		//      contending against unrelated work.
 		// download_image is the lone exception — it hits provider CDNs,
@@ -214,9 +217,9 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			"scan_album_loudness":    {MaxWorkers: queueWorkers(cfg, "scan_album_loudness", 1)},    // concat demuxer + ebur128
 			"scan_track_fingerprint": {MaxWorkers: queueWorkers(cfg, "scan_track_fingerprint", 1)}, // chromaprint, first 120s only
 
-			// Skip segments — network calls to heya.media, not local
-			// decode. Parallelized: heya.media does its own rate limiting and
-			// the client caps in-flight requests (semaphore-8), so a cold sweep
+			// Skip segments — direct community-provider calls, not local
+			// decode. Parallelized within a bounded queue; per-source caches and
+			// HTTP timeouts keep a cold sweep
 			// no longer needs to trickle. Job key is per-file (unique-while-
 			// active), no cross-item state.
 			"scan_media_segments_file": {MaxWorkers: queueWorkers(cfg, "scan_media_segments_file", 8)},
@@ -262,9 +265,10 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			"sync_reactions_out":            {MaxWorkers: queueWorkers(cfg, "sync_reactions_out", 1)},
 
 			// Misc.
-			"soft_delete":      {MaxWorkers: queueWorkers(cfg, "soft_delete", 1)},
-			"debounce_sweep":   {MaxWorkers: queueWorkers(cfg, "debounce_sweep", 1)},   // periodic sweep; trailing-edge debounce of child-content enriches
-			river.QueueDefault: {MaxWorkers: queueWorkers(cfg, river.QueueDefault, 1)}, // fallback only; we shouldn't actually use it after the split
+			"soft_delete":           {MaxWorkers: queueWorkers(cfg, "soft_delete", 1)},
+			"debounce_sweep":        {MaxWorkers: queueWorkers(cfg, "debounce_sweep", 1)}, // periodic sweep; trailing-edge debounce of child-content enriches
+			"sync_metadata_changes": {MaxWorkers: queueWorkers(cfg, "sync_metadata_changes", 1)},
+			river.QueueDefault:      {MaxWorkers: queueWorkers(cfg, river.QueueDefault, 1)}, // fallback only; we shouldn't actually use it after the split
 		},
 		// Periodic jobs — River-managed cron. The DebounceSweep fires
 		// every 10s so the trailing-edge debounce on child-content
@@ -276,6 +280,13 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 					return DebounceSweepArgs{}, nil
 				},
 				&river.PeriodicJobOpts{RunOnStart: false},
+			),
+			river.NewPeriodicJob(
+				river.PeriodicInterval(30*time.Second),
+				func() (river.JobArgs, *river.InsertOpts) {
+					return SyncMetadataChangesArgs{}, nil
+				},
+				&river.PeriodicJobOpts{RunOnStart: true},
 			),
 		},
 		// Per-job context deadline. River's default JobTimeout is 1

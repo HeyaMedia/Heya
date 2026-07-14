@@ -1,0 +1,247 @@
+{
+  "captured_at": "2026-07-14",
+  "source": "Deduplicated, sanitized production scanner_entities rows from the Music library's needs_review set",
+  "notes": "Paths and user-specific data are omitted. storage_artist is the top-level production folder and is retained as grouping evidence, not identity authority.",
+  "cases": [
+    {
+      "credited_artist": "50 Cent f.Destinys Child",
+      "storage_artist": "50 Cent f.Destinys Child",
+      "fallback_artist": "50 Cent",
+      "album": "Thug Love CDS",
+      "year": "2000",
+      "track": "Extra Clean Version"
+    },
+    {
+      "credited_artist": "50 Cent Feat. Akon",
+      "storage_artist": "50 Cent Feat. Akon",
+      "fallback_artist": "50 Cent",
+      "album": "Still Will VLS",
+      "year": "2007",
+      "track": "Still Will (Clean)"
+    },
+    {
+      "credited_artist": "50 cent feat. diamonique",
+      "storage_artist": "50 cent",
+      "fallback_artist": "50 cent",
+      "album": "Disco Inferno (REMIX) Vinyl",
+      "year": "2005",
+      "track": "disco inferno acapella"
+    },
+    {
+      "credited_artist": "50 Cent feat. Dr. Dre and Alicia Keys",
+      "storage_artist": "50 Cent",
+      "fallback_artist": "50 Cent",
+      "album": "New Day",
+      "year": "2012",
+      "track": "New Day",
+      "album_identifiers": {
+        "musicbrainz_album": "f45e7956-4100-46a2-8039-a886147d0344",
+        "musicbrainz_release_group": "4e90809b-198d-43d5-a03b-0122a205c607"
+      }
+    },
+    {
+      "credited_artist": "50 cent feat. natureboy rowe justin timberlake and timbaland",
+      "storage_artist": "50 cent",
+      "fallback_artist": "50 cent",
+      "album": "Ayo Technology",
+      "year": "2007",
+      "track": "Ayo Technology (Clean)",
+      "album_identifiers": {
+        "musicbrainz_album": "09dd332a-90ca-462a-bf8e-15cf0f4cc787",
+        "musicbrainz_release_group": "3f942a70-0be8-302b-82f6-73742d1ba116"
+      }
+    },
+    {
+      "credited_artist": "50 Cent ft. Brooklyn",
+      "storage_artist": "50 Cent",
+      "fallback_artist": "50 Cent",
+      "album": "In Da Hood (CDS)",
+      "year": "2003",
+      "track": "In Da Hood (Radio)"
+    },
+    {
+      "credited_artist": "50 Cent ft. Snoop Dogg & Young Jeezy",
+      "storage_artist": "50 Cent",
+      "fallback_artist": "50 Cent",
+      "album": "Major Distribution",
+      "year": "2013",
+      "track": "Major Distribution (Superclean)",
+      "album_identifiers": {
+        "musicbrainz_album": "aa1a5a84-c848-4308-9fde-8d1065fdefb6",
+        "musicbrainz_release_group": "defe1e3a-49d9-4910-8e34-afd165e969d9"
+      }
+    },
+    {
+      "credited_artist": "Above & Beyond",
+      "storage_artist": "Above & Beyond",
+      "literal_identity": true,
+      "album": "Sun & Moon",
+      "year": "2011",
+      "track": "Sun & Moon (Radio Edit)",
+      "album_identifiers": {
+        "musicbrainz_album": "6d25b7c6-81d3-43da-b2f0-327f13f18faa",
+        "musicbrainz_release_group": "1232814a-0e48-4755-960a-1b407e4b25af"
+      }
+    },
+    {
+      "credited_artist": "Alexandre Bergheau & Ruben De Ronde",
+      "storage_artist": "Alexandre Bergheau",
+      "fallback_artist": "Alexandre Bergheau",
+      "album": "All That Matters",
+      "year": "2014",
+      "track": "All That Matters"
+    },
+    {
+      "credited_artist": "Allen Watts & Paul Denton",
+      "storage_artist": "Allen Watts",
+      "fallback_artist": "Allen Watts",
+      "album": "ShellShock",
+      "year": "2023",
+      "track": "ShellShock (extended mix)",
+      "album_identifiers": {
+        "musicbrainz_album": "525583a3-d7b6-406d-ade7-e424c9533661",
+        "musicbrainz_release_group": "6157f0e3-6e95-4216-ac14-64707c5785e0"
+      }
+    },
+    {
+      "credited_artist": "Flume; Tove Lo",
+      "storage_artist": "Flume",
+      "fallback_artist": "Flume",
+      "album": "Say It (Illenium Remix)",
+      "year": "2017",
+      "track": "Say It (Illenium Remix)",
+      "album_identifiers": {
+        "musicbrainz_album": "d98dbbc4-2ca0-483a-a2cc-62e42807ec13",
+        "musicbrainz_release_group": "83bdf79a-95d1-4dfa-b0a0-ed6991019e67"
+      }
+    },
+    {
+      "credited_artist": "Kaaze; Ceres",
+      "storage_artist": "Kaaze",
+      "fallback_artist": "Kaaze",
+      "album": "Faded",
+      "year": "2024",
+      "track": "Faded",
+      "album_identifiers": {
+        "musicbrainz_album": "45891c98-7965-4412-8f95-ae72597d5de5",
+        "musicbrainz_release_group": "6d6c78ea-ad19-4c33-bdfe-5307a4e3aedb"
+      }
+    },
+    {
+      "credited_artist": "Cassius with Steve Edwards",
+      "storage_artist": "Cassius with Steve Edwards",
+      "fallback_artist": "Cassius",
+      "album": "The Sound Of Violence",
+      "year": "2002",
+      "track": "The Sound Of Violence (Radio Edit Remix)"
+    },
+    {
+      "credited_artist": "Jax Jones With Gin Lee",
+      "storage_artist": "Jax Jones With Gin Lee",
+      "fallback_artist": "Jax Jones",
+      "album": "Breathe (Mandarin Version)",
+      "year": "2019",
+      "track": "Breathe (Mandarin Version)"
+    },
+    {
+      "credited_artist": "Alex M.O.R.P.H. x Roman Messer",
+      "storage_artist": "Alex M.O.R.P.H. x Roman Messer",
+      "fallback_artist": "Alex M.O.R.P.H.",
+      "album": "Serendipity",
+      "year": "2025",
+      "track": "Tranquillity",
+      "album_identifiers": {
+        "musicbrainz_album": "063ba447-56b5-4814-8ede-2ec179585b63",
+        "musicbrainz_release_group": "2c5bcf38-b067-4707-bfee-7cf946790b9e"
+      }
+    },
+    {
+      "credited_artist": "David Guetta X Kiko X Olivier Giacomotto",
+      "storage_artist": "David Guetta X Kiko X Olivier Giacomotto",
+      "fallback_artist": "David Guetta",
+      "album": "Prayer",
+      "year": "2026",
+      "track": "Prayer (Extended Mix)",
+      "album_identifiers": {
+        "musicbrainz_album": "39f3c661-a74b-4dbd-b871-3403e6df6f68",
+        "musicbrainz_release_group": "f7bce856-bc6d-4185-8519-330a03786d32"
+      }
+    },
+    {
+      "credited_artist": "Cansis Vs Spaceship",
+      "storage_artist": "Cansis Vs Spaceship",
+      "fallback_artist": "Cansis",
+      "album": "Jump 2 Gether",
+      "year": "2013",
+      "track": "Jump 2 Gether (Radio Edit)",
+      "album_identifiers": {
+        "musicbrainz_album": "16219d1f-4f93-42d9-a884-d5cd4728305d",
+        "musicbrainz_release_group": "997144df-ec34-4392-addf-dba53d8de29a"
+      }
+    },
+    {
+      "credited_artist": "Kungs vs. Cookin' On 3 Burners",
+      "storage_artist": "Kungs vs. Cookin' On 3 Burners",
+      "fallback_artist": "Kungs",
+      "album": "This Girl EP",
+      "year": "2016",
+      "track": "This Girl (Radio Edit)"
+    },
+    {
+      "credited_artist": "Haak Presents Annunaki",
+      "storage_artist": "Haak Presents Annunaki",
+      "fallback_artist": "Haak",
+      "album": "Frenzy",
+      "year": "2004",
+      "track": "Frenzy (George Hales Remix)"
+    },
+    {
+      "credited_artist": "Jan Wayne Meets Lena",
+      "storage_artist": "Jan Wayne Meets Lena",
+      "fallback_artist": "Jan Wayne",
+      "album": "Total Eclipse Of The Heart",
+      "year": "2001",
+      "track": "Total Eclipse Of The Heart (Radio Edit)",
+      "album_identifiers": {
+        "musicbrainz_album": "c59c1217-2b44-4404-86bd-a7efe7f1606e",
+        "musicbrainz_release_group": "5da1fc30-9bb8-3810-b5f1-47b8ada76673"
+      }
+    },
+    {
+      "credited_artist": "Driftmoon / Susana",
+      "storage_artist": "Driftmoon",
+      "fallback_artist": "Driftmoon",
+      "album": "Because of You",
+      "year": "2019",
+      "track": "Because of You",
+      "album_identifiers": {
+        "musicbrainz_album": "f6297880-fb2e-4124-b16c-9e3dab3f2df6",
+        "musicbrainz_release_group": "7af433e5-2424-49ca-a38d-692737e9f98e"
+      }
+    },
+    {
+      "credited_artist": "Adrenalize / Atmozfears",
+      "storage_artist": "Atmozfears",
+      "needs_context": true,
+      "album": "She Goes EP",
+      "year": "2014",
+      "track": "She Goes",
+      "album_identifiers": {
+        "musicbrainz_album": "35ebef19-3685-497b-abe6-736eea62a5b4",
+        "musicbrainz_release_group": "0823ab13-33f1-480c-9f36-9f16433fb936"
+      }
+    },
+    {
+      "credited_artist": "Ran-D / Wildstylez",
+      "storage_artist": "Wildstylez",
+      "needs_context": true,
+      "album": "Warriors",
+      "year": "2020",
+      "track": "Warriors",
+      "album_identifiers": {
+        "musicbrainz_album": "d96d3511-61e4-43bd-92b9-13437d036711",
+        "musicbrainz_release_group": "19cf73e6-a380-4dfa-8828-eeeea2dd14a0"
+      }
+    }
+  ]
+}

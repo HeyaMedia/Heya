@@ -199,7 +199,7 @@ function onImgError(e: Event | string) {
   el.style.visibility = 'hidden'
 }
 
-// heya.media's franchise membership (parts) is the source of truth once a member
+// Canonical franchise membership (parts) is the source of truth once a member
 // movie has been enriched with the collection block. Until then parts is empty,
 // so fall back to the local owned movies (release order) as synthetic parts —
 // the page stays useful during the metadata backfill instead of showing nothing.
@@ -233,7 +233,7 @@ function isWatched(p: CollectionPart) {
 function partUrl(p: CollectionPart) {
   return mediaUrl({ id: p.local_media_item_id!, title: p.title, slug: p.local_slug ?? undefined, media_type: 'movie' })
 }
-// Owned films use our local artwork; missing ones use heya.media's CDN poster.
+// Owned films use our local artwork; missing ones use the canonical image URL.
 function partPoster(p: CollectionPart) {
   if (p.local_media_item_id || p.local_public_id) return usePosterUrl({ id: p.local_media_item_id, public_id: p.local_public_id }) ?? ''
   return p.poster_path || ''

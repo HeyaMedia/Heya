@@ -48,7 +48,9 @@ type Config struct {
 	Port                Field[string]
 	LogLevel            Field[string]
 	LogFormat           Field[string]
-	HeyaMediaURL        Field[string]
+	HeyaMetadataURL     Field[string]
+	HeyaMetadataAPIKey  Field[string] `json:"-"`
+	TheIntroDBAPIKey    Field[string] `json:"-"`
 	DataDir             Field[string]
 	HWAccel             Field[string]
 	TranscodeCacheDir   Field[string]
@@ -147,7 +149,9 @@ func Load() *Config {
 		Port:                envString("HEYA_PORT", "8080"),
 		LogLevel:            envString("HEYA_LOG_LEVEL", "info"),
 		LogFormat:           envString("HEYA_LOG_FORMAT", "console"),
-		HeyaMediaURL:        envString("HEYA_MEDIA_URL", "https://heya.media"),
+		HeyaMetadataURL:     envString("HEYA_METADATA_URL", "http://localhost:3030"),
+		HeyaMetadataAPIKey:  envString("HEYA_METADATA_API_KEY", ""),
+		TheIntroDBAPIKey:    envString("HEYA_THEINTRODB_API_KEY", ""),
 		DataDir:             dataDir,
 		HWAccel:             envString("HEYA_HWACCEL", "auto"),
 		TranscodeCacheDir:   envString("HEYA_TRANSCODE_CACHE_DIR", dataDir.Value+"/transcode"),
@@ -220,6 +224,7 @@ var DefaultJobWorkerCounts = map[string]int{
 	"kickoff_trickplay":         1,
 	"kickoff_thumbnails":        1,
 	"kickoff_sonic_analysis":    1,
+	"sync_metadata_changes":     1,
 	"soft_delete":               1,
 	"debounce_sweep":            1,
 	"default":                   1,
@@ -333,7 +338,7 @@ var sourceFields = []sourceField{
 	{"infra.log_level", func(c *Config) SourceEntry { return c.LogLevel.Entry() }},
 	{"infra.log_format", func(c *Config) SourceEntry { return c.LogFormat.Entry() }},
 	{"infra.data_dir", func(c *Config) SourceEntry { return c.DataDir.Entry() }},
-	{"infra.heya_media_url", func(c *Config) SourceEntry { return c.HeyaMediaURL.Entry() }},
+	{"infra.heya_metadata_url", func(c *Config) SourceEntry { return c.HeyaMetadataURL.Entry() }},
 	{"transcoder.hwaccel", func(c *Config) SourceEntry { return c.HWAccel.Entry() }},
 	{"transcoder.cache_dir", func(c *Config) SourceEntry { return c.TranscodeCacheDir.Entry() }},
 	{"transcoder.cache_max_gb", func(c *Config) SourceEntry { return c.TranscodeCacheMaxGB.Entry() }},

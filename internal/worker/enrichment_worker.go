@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
-	"github.com/karbowiak/heya/internal/metadata/heyamedia"
+	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
@@ -21,7 +21,7 @@ import (
 type FetchArtworkWorker struct {
 	river.WorkerDefaults[FetchArtworkArgs]
 	DB       *pgxpool.Pool
-	Heya     *heyamedia.HeyaProvider
+	Heya     *heyametadata.HeyaProvider
 	Progress *TaskProgressBroadcaster
 }
 

@@ -15,6 +15,7 @@ import (
 var imageCmd = &cobra.Command{Use: "image", Short: "Local image generation with stable-diffusion.cpp"}
 var imageModel = imagegen.DefaultModel
 var imageBackend = imagegen.BackendAuto
+var imageDevice = "auto"
 
 var imageModelsCmd = &cobra.Command{Use: "models", Short: "List curated image models (never downloads)", RunE: func(cmd *cobra.Command, args []string) error {
 	return withApp(func(ctx context.Context, app *service.App) error {
@@ -32,6 +33,12 @@ var imageStatusCmd = &cobra.Command{Use: "status", Short: "Show local image arti
 			return ui.OutputJSON(st)
 		}
 		fmt.Printf("stable-diffusion.cpp: %s\nbackend             : %s\nmodel               : %s\nruntime present     : %v\nmodel present       : %v\ndownload            : %s\n", st.Build, st.Backend, st.Model, st.RuntimePresent, st.ModelPresent, st.DownloadState)
+		for _, device := range st.Devices {
+			fmt.Printf("  device      %-12s %s\n", device.Name, device.Description)
+		}
+		if st.DeviceError != "" {
+			fmt.Printf("device error        : %s\n", st.DeviceError)
+		}
 		for _, a := range st.Artifacts {
 			suffix := "missing"
 			if a.Present {
@@ -84,7 +91,7 @@ var imageCFG float64
 var imageSeed int64
 var imageGenerateCmd = &cobra.Command{Use: "generate <prompt...>", Short: "Generate an image from already-downloaded artifacts", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 	return withApp(func(ctx context.Context, app *service.App) error {
-		res, err := app.ImageGenerate(ctx, imagegen.Request{ModelID: imageModel, Backend: imageBackend, Prompt: strings.Join(args, " "), NegativePrompt: imageNegative, Output: imageOutput, Width: imageWidth, Height: imageHeight, Steps: imageSteps, CFG: imageCFG, Seed: imageSeed})
+		res, err := app.ImageGenerate(ctx, imagegen.Request{ModelID: imageModel, Backend: imageBackend, Device: imageDevice, Prompt: strings.Join(args, " "), NegativePrompt: imageNegative, Output: imageOutput, Width: imageWidth, Height: imageHeight, Steps: imageSteps, CFG: imageCFG, Seed: imageSeed})
 		if err != nil {
 			return err
 		}
@@ -103,6 +110,7 @@ func init() {
 	}
 	imageGenerateCmd.Flags().StringVarP(&imageOutput, "output", "o", "", "output PNG path")
 	imageGenerateCmd.Flags().StringVar(&imageNegative, "negative", "", "negative prompt")
+	imageGenerateCmd.Flags().StringVar(&imageDevice, "device", "auto", "compute device from `heya image status` (auto uses best-fit placement)")
 	imageGenerateCmd.Flags().IntVar(&imageWidth, "width", 0, "width (model default when zero)")
 	imageGenerateCmd.Flags().IntVar(&imageHeight, "height", 0, "height (model default when zero)")
 	imageGenerateCmd.Flags().IntVar(&imageSteps, "steps", 0, "sampling steps (model default when zero)")

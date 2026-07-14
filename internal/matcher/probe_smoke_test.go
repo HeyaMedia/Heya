@@ -2,27 +2,33 @@ package matcher
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/karbowiak/heya/internal/metadata"
-	"github.com/karbowiak/heya/internal/metadata/heyamedia"
+	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 )
 
 // TestProbeAltTitlesSmoke is a minimal one-query probe to validate that
-// the new HeyaMedia search response shape (numeric external_ids + the
-// alt_titles[] field) decodes correctly and that romaji queries now
-// resolve via alt_titles matching. Single query so it doesn't hammer
-// HeyaMedia (which currently can't handle the full corpus reliably).
+// the HeyaMetadata search summary's alternate/original titles decode
+// correctly and that romaji queries resolve without a provider-shaped
+// external-ID payload. Single query so it doesn't hammer
+// HeyaMetadata (which currently can't handle the full corpus reliably).
 func TestProbeAltTitlesSmoke(t *testing.T) {
 	if !portOpen("localhost:3030") {
-		t.Skip("heya.media not reachable")
+		t.Skip("HeyaMetadata not reachable")
 	}
 
-	heya := heyamedia.NewHeyaProvider(heyamedia.NewClient("http://localhost:3030"))
+	client, err := heyametadata.NewClient("http://localhost:3030", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	heya := heyametadata.NewHeyaProvider(client)
 
 	hits, err := heya.Search(context.Background(), metadata.KindTV, metadata.SearchQuery{
-		Title: "Shingeki no Kyojin",
-		Year:  "2013",
+		CanonicalKind: "anime",
+		Title:         "Shingeki no Kyojin",
+		Year:          "2013",
 	})
 	if err != nil {
 		t.Fatalf("search error (decode probably broke): %v", err)
@@ -37,21 +43,17 @@ func TestProbeAltTitlesSmoke(t *testing.T) {
 	t.Logf("external_ids: %v", top.ExternalIDs)
 
 	if len(top.AltTitles) == 0 {
-		t.Error("alt_titles should be non-empty for Attack on Titan — HeyaMedia field missing or decode broken")
+		t.Error("alt_titles should be non-empty for Attack on Titan — HeyaMetadata field missing or decode broken")
 	}
-	foundRomaji := false
+	foundEnglish := false
 	for _, alt := range top.AltTitles {
-		if alt == "Shingeki no Kyojin" {
-			foundRomaji = true
+		if strings.Contains(strings.ToLower(alt), "attack on titan") {
+			foundEnglish = true
 			break
 		}
 	}
-	if !foundRomaji {
-		t.Errorf("expected 'Shingeki no Kyojin' in alt_titles; got %v", top.AltTitles)
-	}
-
-	if top.ExternalIDs["tmdb"] == "" {
-		t.Errorf("expected external_ids[tmdb] populated (number→string coerce); got %v", top.ExternalIDs)
+	if !foundEnglish {
+		t.Errorf("expected 'Attack on Titan' in alt_titles; got %v", top.AltTitles)
 	}
 
 	score := scoreBestTitle("Shingeki no Kyojin", top, "2013")

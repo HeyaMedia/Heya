@@ -3,14 +3,14 @@ package worker
 import (
 	"testing"
 
-	"github.com/karbowiak/heya/internal/metadata/heyamedia"
+	"github.com/karbowiak/heya/internal/communitysegments"
 )
 
 func ms(v int64) *int64 { return &v }
 
 func TestPickSegmentsDurationGate(t *testing.T) {
 	fileDur := int64(3_600_000)
-	cands := []heyamedia.SegmentCandidate{
+	cands := []communitysegments.Candidate{
 		// Exact-cut skipme candidate.
 		{Type: "intro", StartMs: 229_500, EndMs: ms(246_500), DurationMs: 3_600_000, Submissions: 1, Source: "skipmedb"},
 		// TheIntroDB carries no authored runtime (server-side matched).
@@ -29,7 +29,7 @@ func TestPickSegmentsDurationGate(t *testing.T) {
 
 func TestPickSegmentsOpenEndedCredits(t *testing.T) {
 	fileDur := int64(3_600_000)
-	picked := pickSegments([]heyamedia.SegmentCandidate{
+	picked := pickSegments([]communitysegments.Candidate{
 		{Type: "credits", StartMs: 3_431_000, Source: "theintrodb"},
 	}, fileDur)
 	if len(picked) != 1 {
@@ -42,7 +42,7 @@ func TestPickSegmentsOpenEndedCredits(t *testing.T) {
 
 func TestPickSegmentsRejectsDegenerate(t *testing.T) {
 	fileDur := int64(3_600_000)
-	picked := pickSegments([]heyamedia.SegmentCandidate{
+	picked := pickSegments([]communitysegments.Candidate{
 		{Type: "intro", StartMs: -5, EndMs: ms(30_000), Source: "theintrodb"},              // negative start
 		{Type: "intro", StartMs: 10_000, EndMs: ms(10_500), Source: "theintrodb"},          // sub-second
 		{Type: "credits", StartMs: 3_700_000, EndMs: ms(3_710_000), Source: "theintrodb"},  // starts past EOF
@@ -58,7 +58,7 @@ func TestPickSegmentsRejectsDegenerate(t *testing.T) {
 
 func TestPickSegmentsSubmissionsTiebreak(t *testing.T) {
 	fileDur := int64(1_377_000)
-	picked := pickSegments([]heyamedia.SegmentCandidate{
+	picked := pickSegments([]communitysegments.Candidate{
 		{Type: "intro", StartMs: 1_039, EndMs: ms(91_039), DurationMs: 1_377_312, Source: "aniskip"},
 		{Type: "intro", StartMs: 151_891, EndMs: ms(234_261), DurationMs: 1_377_000, Submissions: 10, Source: "skipmedb"},
 	}, fileDur)
@@ -74,7 +74,7 @@ func TestPickSegmentsSubmissionsTiebreak(t *testing.T) {
 
 func TestPickSegmentsMultipleCommercials(t *testing.T) {
 	fileDur := int64(2_700_000)
-	picked := pickSegments([]heyamedia.SegmentCandidate{
+	picked := pickSegments([]communitysegments.Candidate{
 		{Type: "commercial", StartMs: 600_000, EndMs: ms(780_000), DurationMs: 2_700_000, Source: "skipmedb"},
 		{Type: "commercial", StartMs: 1_500_000, EndMs: ms(1_680_000), DurationMs: 2_700_000, Source: "skipmedb"},
 	}, fileDur)

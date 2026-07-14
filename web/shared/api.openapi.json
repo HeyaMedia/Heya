@@ -2912,6 +2912,22 @@
         ],
         "type": "object"
       },
+      "ComputeDevice": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description"
+        ],
+        "type": "object"
+      },
       "ContinueWatchingEnrichedRow": {
         "additionalProperties": false,
         "properties": {
@@ -5489,6 +5505,18 @@
           "build": {
             "type": "string"
           },
+          "device_error": {
+            "type": "string"
+          },
+          "devices": {
+            "items": {
+              "$ref": "#/components/schemas/ComputeDevice"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "download_bytes": {
             "format": "int64",
             "type": "integer"
@@ -5519,6 +5547,7 @@
           "runtime_present",
           "model_present",
           "download_state",
+          "devices",
           "artifacts",
           "download_bytes"
         ],
@@ -12127,6 +12156,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "lyrics_available": {
+            "type": "boolean"
+          },
           "lyrics_path": {
             "type": "string"
           },
@@ -12147,6 +12179,7 @@
           "title",
           "duration",
           "lyrics_path",
+          "lyrics_available",
           "album_title",
           "album_slug",
           "album_year",
@@ -14029,6 +14062,10 @@
           "poster_path": {
             "type": "string"
           },
+          "provider_score": {
+            "format": "double",
+            "type": "number"
+          },
           "release_date": {
             "type": "string"
           },
@@ -14530,6 +14567,10 @@
             "maximum": 30,
             "minimum": 0,
             "type": "number"
+          },
+          "device": {
+            "maxLength": 128,
+            "type": "string"
           },
           "height": {
             "format": "int64",
@@ -15064,6 +15105,43 @@
         ],
         "type": "object"
       },
+      "ScannerPipelineFailureView": {
+        "additionalProperties": false,
+        "properties": {
+          "error_message": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "identity_key": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "identity_key",
+          "title",
+          "status",
+          "stage",
+          "error_message"
+        ],
+        "type": "object"
+      },
       "ScannerRunView": {
         "additionalProperties": false,
         "properties": {
@@ -15091,6 +15169,13 @@
           },
           "mode": {
             "type": "string"
+          },
+          "pipeline_error_message": {
+            "type": "string"
+          },
+          "pipeline_failure_count": {
+            "format": "int64",
+            "type": "integer"
           },
           "scanner_version": {
             "type": "string"
@@ -15162,10 +15247,20 @@
               "array",
               "null"
             ]
+          },
+          "pipeline_failures": {
+            "items": {
+              "$ref": "#/components/schemas/ScannerPipelineFailureView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
         "required": [
           "bucket_counts",
+          "pipeline_failures",
           "open_findings",
           "identities"
         ],
@@ -15226,6 +15321,30 @@
         "required": [
           "items",
           "total"
+        ],
+        "type": "object"
+      },
+      "SearchEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "weight": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "field",
+          "outcome",
+          "weight"
         ],
         "type": "object"
       },
@@ -15335,6 +15454,15 @@
           "enriched": {
             "type": "boolean"
           },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/SearchEvidence"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "external_ids": {
             "additionalProperties": {
               "type": "string"
@@ -15352,6 +15480,12 @@
           },
           "provider_name": {
             "type": "string"
+          },
+          "recommendation": {
+            "type": "string"
+          },
+          "requires_review": {
+            "type": "boolean"
           },
           "title": {
             "type": "string"
@@ -17945,6 +18079,9 @@
           "library_file_id": {
             "$ref": "#/components/schemas/Int8"
           },
+          "lyrics_available": {
+            "type": "boolean"
+          },
           "lyrics_path": {
             "type": "string"
           },
@@ -17980,7 +18117,8 @@
           "recording_mbid",
           "preview_url",
           "explicit",
-          "artist_credits"
+          "artist_credits",
+          "lyrics_available"
         ],
         "type": "object"
       },

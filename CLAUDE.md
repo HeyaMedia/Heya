@@ -9,7 +9,7 @@ For deeper context, see `docs/`:
 | -------------------------------- | ------------------------------------------------------------- |
 | [docs/architecture.md](docs/architecture.md) | Repo layout, request lifecycle, design choices    |
 | [docs/development.md](docs/development.md)   | Daily dev, build, DB, tests, hitting the API, hooks, CI |
-| [docs/pipeline.md](docs/pipeline.md)         | Match + enrich pipeline, queue config, HeyaMedia client |
+| [docs/pipeline.md](docs/pipeline.md)         | Match + enrich pipeline, queue config, HeyaMetadata V2 client |
 | [docs/ui.md](docs/ui.md)                     | `App*` primitives, `surface.css`, FE conventions  |
 | [docs/api-client.md](docs/api-client.md)     | Typed OpenAPI → TS client (`useHeya` / `$heya`)   |
 | [docs/music-api.md](docs/music-api.md)       | `/api/music/*` route map and shape conventions    |
@@ -101,9 +101,10 @@ them without a discussion.
   derive from that spec at Nuxt build/prepare time (`nuxt-open-fetch`) — there
   is no separate codegen artifact. The lefthook `openapi-drift` check blocks
   the commit if you forgot.
-- **Heya Media aggregator** (`heya.media`) is the upstream metadata source;
-  TMDB / TVDB / OMDb / MusicBrainz / OpenLibrary are reached through it, not
-  directly. The only client is `internal/metadata/heyamedia/heya.go`.
+- **HeyaMetadata V2** is the canonical metadata source. Its generated contract
+  lives in `clients/heyametadata`; the adapter is
+  `internal/metadata/heyametadata`. Provider reconciliation stays there.
+  Community segments are deliberately Heya-owned direct clients.
 - **Bun lifecycle scripts stay blocked.** Don't add `trustedDependencies` to
   `web/package.json` without a deliberate reviewed PR — lefthook + CI grep
   for the key and fail if it appears.

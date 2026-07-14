@@ -38,15 +38,18 @@ type MovieSearchQuery struct {
 }
 
 type MovieSearchCandidate struct {
-	ProviderID  string            `json:"provider_id"`
-	Provider    string            `json:"provider"`
-	Title       string            `json:"title"`
-	Year        string            `json:"year,omitempty"`
-	Description string            `json:"description,omitempty"`
-	PosterURL   string            `json:"poster_url,omitempty"`
-	HeyaSlug    string            `json:"heya_slug,omitempty"`
-	Confidence  float64           `json:"confidence"`
-	ExternalIDs map[string]string `json:"external_ids,omitempty"`
+	ProviderID     string                    `json:"provider_id"`
+	Provider       string                    `json:"provider"`
+	Title          string                    `json:"title"`
+	Year           string                    `json:"year,omitempty"`
+	Description    string                    `json:"description,omitempty"`
+	PosterURL      string                    `json:"poster_url,omitempty"`
+	HeyaSlug       string                    `json:"heya_slug,omitempty"`
+	Confidence     float64                   `json:"confidence"`
+	Recommendation string                    `json:"recommendation,omitempty"`
+	Evidence       []metadata.SearchEvidence `json:"evidence,omitempty"`
+	RequiresReview bool                      `json:"requires_review,omitempty"`
+	ExternalIDs    map[string]string         `json:"external_ids,omitempty"`
 }
 
 func SearchMovieMatches(ctx context.Context, matches []MovieMatch, provider MovieSearchProvider, emit Emitter, threshold float64, decisionsOpt ...SearchDecisions) ([]MovieSearchMatch, error) {
@@ -64,7 +67,11 @@ func SearchMovieMatches(ctx context.Context, matches []MovieMatch, provider Movi
 			return results, err
 		}
 
-		query := metadata.SearchQuery{Title: match.Title, Year: match.Year}
+		query := metadata.SearchQuery{
+			Title:       match.Title,
+			Year:        match.Year,
+			Identifiers: cloneStringMap(match.ExternalIDs),
+		}
 		search := MovieSearchMatch{
 			Key:   match.Key,
 			Query: MovieSearchQuery{Title: query.Title, Year: query.Year, Aliases: match.Aliases},
@@ -88,6 +95,9 @@ func SearchMovieMatches(ctx context.Context, matches []MovieMatch, provider Movi
 
 		candidates, err := provider.Search(ctx, metadata.KindMovie, query)
 		if err != nil {
+			if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
+				return results, err
+			}
 			search.Reason = "search_error"
 			emit.Emit(Event{
 				Event:    "match.search_failed",
@@ -119,15 +129,18 @@ func SearchMovieMatches(ctx context.Context, matches []MovieMatch, provider Movi
 
 		for _, candidate := range scored {
 			search.Candidates = append(search.Candidates, MovieSearchCandidate{
-				ProviderID:  candidate.ProviderID,
-				Provider:    candidate.ProviderName,
-				Title:       candidate.Title,
-				Year:        candidate.Year,
-				Description: candidate.Description,
-				PosterURL:   candidate.PosterURL,
-				HeyaSlug:    candidate.HeyaSlug,
-				Confidence:  candidate.Confidence,
-				ExternalIDs: candidate.ExternalIDs,
+				ProviderID:     candidate.ProviderID,
+				Provider:       candidate.ProviderName,
+				Title:          candidate.Title,
+				Year:           candidate.Year,
+				Description:    candidate.Description,
+				PosterURL:      candidate.PosterURL,
+				HeyaSlug:       candidate.HeyaSlug,
+				Confidence:     candidate.Confidence,
+				Recommendation: candidate.Recommendation,
+				Evidence:       candidate.Evidence,
+				RequiresReview: candidate.RequiresReview,
+				ExternalIDs:    candidate.ExternalIDs,
 			})
 			emit.Emit(Event{
 				Event: "match.candidate",
@@ -152,7 +165,7 @@ func SearchMovieMatches(ctx context.Context, matches []MovieMatch, provider Movi
 
 		top := scored[0]
 		clearGap := movieSearchClearGap(scored, match.Title)
-		if top.Confidence >= threshold && clearGap {
+		if !top.RequiresReview && top.Confidence >= threshold && clearGap {
 			search.Accepted = true
 			search.ProviderID = top.ProviderID
 			search.Provider = top.ProviderName
@@ -363,6 +376,21 @@ func stringSimilarity(a, b string) float64 {
 }
 
 func normalizeSearchTitle(s string) string {
+	s = normalizeIdentityTitle(s)
+	for _, article := range []string{"the ", "a ", "an "} {
+		if strings.HasPrefix(s, article) {
+			s = s[len(article):]
+			break
+		}
+	}
+	return s
+}
+
+// normalizeIdentityTitle is deliberately lossless with respect to leading
+// articles. Identity keys are durable uniqueness boundaries: "The Office"
+// and "Office" may be different works even when article-insensitive fuzzy
+// matching considers them similar.
+func normalizeIdentityTitle(s string) string {
 	s = strings.ToLower(normalizeTitleSymbols(s))
 	s = strings.Map(func(r rune) rune {
 		if unicode.IsLetter(r) || unicode.IsNumber(r) || r == ' ' {
@@ -370,12 +398,6 @@ func normalizeSearchTitle(s string) string {
 		}
 		return ' '
 	}, s)
-	for _, article := range []string{"the ", "a ", "an "} {
-		if strings.HasPrefix(s, article) {
-			s = s[len(article):]
-			break
-		}
-	}
 	return strings.Join(strings.Fields(s), " ")
 }
 

@@ -69,6 +69,7 @@ type Backend interface {
 
 	// Media + misc.
 	ListTrackFiles(ctx context.Context, trackID int64) ([]sqlc.TrackFile, error)
+	TrackLyrics(ctx context.Context, trackID int64) ([]byte, error)
 	ListUsers(ctx context.Context) ([]sqlc.User, error)
 	Sessions() *sessions.Store
 	EnqueueScanLibrary(id int64, force bool)

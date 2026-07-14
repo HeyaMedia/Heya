@@ -20,11 +20,12 @@ import (
 )
 
 type ScannerView struct {
-	LatestRun    *ScannerRunView        `json:"latest_run,omitempty"`
-	BucketCounts ScannerBucketCounts    `json:"bucket_counts"`
-	OpenFindings []ScannerFindingView   `json:"open_findings"`
-	Identities   []ScannerIdentityView  `json:"identities"`
-	Candidates   []ScannerCandidateView `json:"candidates,omitempty"`
+	LatestRun        *ScannerRunView              `json:"latest_run,omitempty"`
+	BucketCounts     ScannerBucketCounts          `json:"bucket_counts"`
+	PipelineFailures []ScannerPipelineFailureView `json:"pipeline_failures"`
+	OpenFindings     []ScannerFindingView         `json:"open_findings"`
+	Identities       []ScannerIdentityView        `json:"identities"`
+	Candidates       []ScannerCandidateView       `json:"candidates,omitempty"`
 }
 
 type ScannerBucketCounts struct {
@@ -37,17 +38,29 @@ type ScannerBucketCounts struct {
 }
 
 type ScannerRunView struct {
-	ID             int64          `json:"id"`
-	LibraryID      int64          `json:"library_id"`
-	MediaType      string         `json:"media_type"`
-	ScannerVersion string         `json:"scanner_version"`
-	Mode           string         `json:"mode"`
-	Status         string         `json:"status"`
-	Summary        map[string]any `json:"summary"`
-	ErrorMessage   string         `json:"error_message,omitempty"`
-	StartedAt      *time.Time     `json:"started_at,omitempty"`
-	FinishedAt     *time.Time     `json:"finished_at,omitempty"`
-	CreatedAt      *time.Time     `json:"created_at,omitempty"`
+	ID                   int64          `json:"id"`
+	LibraryID            int64          `json:"library_id"`
+	MediaType            string         `json:"media_type"`
+	ScannerVersion       string         `json:"scanner_version"`
+	Mode                 string         `json:"mode"`
+	Status               string         `json:"status"`
+	Summary              map[string]any `json:"summary"`
+	ErrorMessage         string         `json:"error_message,omitempty"`
+	PipelineFailureCount int            `json:"pipeline_failure_count,omitempty"`
+	PipelineErrorMessage string         `json:"pipeline_error_message,omitempty"`
+	StartedAt            *time.Time     `json:"started_at,omitempty"`
+	FinishedAt           *time.Time     `json:"finished_at,omitempty"`
+	CreatedAt            *time.Time     `json:"created_at,omitempty"`
+}
+
+type ScannerPipelineFailureView struct {
+	ID           int64      `json:"id"`
+	IdentityKey  string     `json:"identity_key"`
+	Title        string     `json:"title"`
+	Status       string     `json:"status"`
+	Stage        string     `json:"stage"`
+	ErrorMessage string     `json:"error_message"`
+	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
 }
 
 type ScannerFindingView struct {
@@ -152,8 +165,9 @@ type ScannerBulkApproveResult struct {
 func (a *App) GetLibraryScannerView(ctx context.Context, libraryID int64, includeCandidates bool) (ScannerView, error) {
 	q := sqlc.New(a.db)
 	view := ScannerView{
-		OpenFindings: []ScannerFindingView{},
-		Identities:   []ScannerIdentityView{},
+		PipelineFailures: []ScannerPipelineFailureView{},
+		OpenFindings:     []ScannerFindingView{},
+		Identities:       []ScannerIdentityView{},
 	}
 
 	latest, err := q.GetLatestScannerRunByLibrary(ctx, libraryID)
@@ -163,6 +177,19 @@ func (a *App) GetLibraryScannerView(ctx context.Context, libraryID int64, includ
 	if err == nil {
 		latestView := scannerRunView(latest)
 		view.LatestRun = &latestView
+	}
+
+	failures, err := q.ListFailedScannerEntitiesByLibrary(ctx, libraryID)
+	if err != nil {
+		return view, err
+	}
+	view.PipelineFailures = make([]ScannerPipelineFailureView, 0, len(failures))
+	for _, failure := range failures {
+		view.PipelineFailures = append(view.PipelineFailures, scannerPipelineFailureView(failure))
+	}
+	if view.LatestRun != nil && len(view.PipelineFailures) > 0 {
+		view.LatestRun.PipelineFailureCount = len(view.PipelineFailures)
+		view.LatestRun.PipelineErrorMessage = view.PipelineFailures[0].ErrorMessage
 	}
 
 	findings, err := q.ListOpenScannerFindingsByLibrary(ctx, libraryID)
@@ -484,13 +511,7 @@ func scannerSearchKind(mediaType sqlc.MediaType) metadata.MediaKind {
 	return metadata.KindMovie
 }
 
-// scannerProviderKindFromID mirrors the scanner's providerKindFromID: a
-// "heya:<kind>:<provider>:<value>" id yields the source provider segment.
 func scannerProviderKindFromID(providerID string) string {
-	parts := strings.Split(providerID, ":")
-	if len(parts) >= 4 && parts[0] == "heya" {
-		return parts[2]
-	}
 	return "heya"
 }
 
@@ -570,6 +591,16 @@ func (a *App) ListLibraryScannerRuns(ctx context.Context, libraryID int64, limit
 	for _, run := range runs {
 		out = append(out, scannerRunView(run))
 	}
+	if offset == 0 && len(out) > 0 {
+		failures, err := q.ListFailedScannerEntitiesByLibrary(ctx, libraryID)
+		if err != nil {
+			return nil, err
+		}
+		if len(failures) > 0 {
+			out[0].PipelineFailureCount = len(failures)
+			out[0].PipelineErrorMessage = failures[0].ErrorMessage
+		}
+	}
 	return out, nil
 }
 
@@ -586,6 +617,25 @@ func scannerRunView(row sqlc.ScanRun) ScannerRunView {
 		StartedAt:      timePtr(row.StartedAt),
 		FinishedAt:     timePtr(row.FinishedAt),
 		CreatedAt:      timePtr(row.CreatedAt),
+	}
+}
+
+func scannerPipelineFailureView(row sqlc.ScannerEntity) ScannerPipelineFailureView {
+	stage := "scanner"
+	switch row.Status {
+	case "metadata_error":
+		stage = "metadata fetch"
+	case "apply_error":
+		stage = "metadata apply"
+	}
+	return ScannerPipelineFailureView{
+		ID:           row.ID,
+		IdentityKey:  row.IdentityKey,
+		Title:        row.Title,
+		Status:       row.Status,
+		Stage:        stage,
+		ErrorMessage: row.ErrorMessage,
+		UpdatedAt:    timePtr(row.UpdatedAt),
 	}
 }
 

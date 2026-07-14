@@ -248,6 +248,26 @@ WHERE library_id = $1
   AND resolved_at IS NULL
   AND code = ANY($3::text[]);
 
+-- name: ResolveOpenScanFindingsByIdentities :exec
+UPDATE scan_findings
+SET resolved_at = now()
+WHERE library_id = sqlc.arg(library_id)
+  AND media_type = sqlc.arg(media_type)
+  AND resolved_at IS NULL
+  AND code = ANY(sqlc.arg(codes)::text[])
+  AND identity_id = ANY(sqlc.arg(identity_ids)::bigint[]);
+
+-- name: ResolveMatchingOpenUnscopedScanFinding :exec
+UPDATE scan_findings
+SET resolved_at = now()
+WHERE library_id = sqlc.arg(library_id)
+  AND media_type = sqlc.arg(media_type)
+  AND identity_id IS NULL
+  AND resolved_at IS NULL
+  AND code = sqlc.arg(code)
+  AND rel_path = sqlc.arg(rel_path)
+  AND message = sqlc.arg(message);
+
 -- name: DeleteLibraryFileLinksByFile :exec
 DELETE FROM library_file_links WHERE library_file_id = $1;
 
@@ -324,6 +344,17 @@ SELECT * FROM scan_runs
 WHERE library_id = $1
 ORDER BY started_at DESC, id DESC
 LIMIT 1;
+
+-- name: ListFailedScannerEntitiesByLibrary :many
+-- Pipeline failures happen after a search run has already been persisted, so
+-- scan_runs alone cannot describe the final outcome. Keep this query scoped to
+-- terminal error states; transient matched/fetching rows and review decisions
+-- are represented elsewhere in the scanner view.
+SELECT * FROM scanner_entities
+WHERE library_id = $1
+  AND error_message <> ''
+  AND status IN ('metadata_error', 'apply_error', 'error', 'failed')
+ORDER BY updated_at DESC, id DESC;
 
 -- name: ListOpenScannerFindingsByLibrary :many
 SELECT

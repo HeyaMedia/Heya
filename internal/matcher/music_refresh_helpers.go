@@ -80,23 +80,28 @@ func (m *Matcher) writeArtistExtendedMetadata(ctx context.Context, artistID int6
 }
 
 func (m *Matcher) writeArtistTopTracks(ctx context.Context, artistID int64, tops []metadata.TopTrackEntry) error {
-	if err := m.q.ReplaceArtistTopTracks(ctx, artistID); err != nil {
+	type topTrackRow struct {
+		Rank              int    `json:"rank"`
+		Provider          string `json:"provider"`
+		ProviderRank      int    `json:"provider_rank"`
+		Title             string `json:"title"`
+		MBID              string `json:"mbid"`
+		RecordingEntityID string `json:"recording_entity_id"`
+		Playcount         int64  `json:"playcount"`
+		Listeners         int64  `json:"listeners"`
+		URL               string `json:"url"`
+	}
+	rows := make([]topTrackRow, 0, len(tops))
+	for i, t := range tops {
+		rows = append(rows, topTrackRow{Rank: i + 1, Provider: t.Provider, ProviderRank: t.Rank, Title: t.Title, MBID: t.MBID,
+			RecordingEntityID: t.RecordingEntityID, Playcount: t.Playcount,
+			Listeners: t.Listeners, URL: t.URL})
+	}
+	body, err := json.Marshal(rows)
+	if err != nil {
 		return err
 	}
-	for i, t := range tops {
-		if err := m.q.CreateArtistTopTrack(ctx, sqlc.CreateArtistTopTrackParams{
-			ArtistID:  artistID,
-			Rank:      int32(i),
-			Title:     t.Title,
-			Mbid:      t.MBID,
-			Playcount: t.Playcount,
-			Listeners: t.Listeners,
-			Url:       t.URL,
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
+	return m.q.ReplaceArtistTopTracks(ctx, sqlc.ReplaceArtistTopTracksParams{ArtistID: artistID, Tracks: body})
 }
 
 func (m *Matcher) writeArtistSimilarArtists(ctx context.Context, artistID int64, sims []metadata.SimilarArtistEntry) error {

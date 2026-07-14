@@ -16,6 +16,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestScannerWorkerErrorSnoozesDeferredMetadataWork(t *testing.T) {
+	err := scannerWorkerError(&metadata.DeferredWorkError{Operation: "test discovery", RetryAfter: 30 * time.Second})
+	var snooze *river.JobSnoozeError
+	require.ErrorAs(t, err, &snooze)
+	require.Equal(t, 30*time.Second, snooze.Duration)
+}
+
 // The DB round-trips mtimes at Postgres's µs precision while a fresh
 // os.Stat carries nanoseconds — the comparison must truncate both sides or
 // every file with sub-µs mtime residue reads as changed on every scan,

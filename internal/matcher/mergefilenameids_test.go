@@ -8,9 +8,8 @@ import (
 )
 
 func TestMergeFilenameIDs(t *testing.T) {
-	// Filename-only ID must carry id + title + year, so the new-item strong-ID
-	// stub path (tryNFOLookup → stubDetailFromNFO) fires instead of bailing to a
-	// fuzzy title search.
+	// Filename-only ID must carry id + title + year so unified discovery gets
+	// both exact identifier evidence and useful corroborating hints.
 	got := mergeFilenameIDs(nil, &parser.SceneReleaseParse{Title: "A Goofy Movie", Year: "1995", ImdbID: "tt0113198"})
 	if got == nil {
 		t.Fatal("expected non-nil ids for a filename with an embedded id")
@@ -35,5 +34,21 @@ func TestMergeFilenameIDs(t *testing.T) {
 	// No filename ID → don't synthesize an NFOIDs (nil stays nil).
 	if mergeFilenameIDs(nil, &parser.SceneReleaseParse{Title: "X"}) != nil {
 		t.Error("no filename ID must not synthesize an NFOIDs")
+	}
+}
+
+func TestNFOIdentifierEvidenceKeepsEveryKnownID(t *testing.T) {
+	ids := &metadata.NFOIDs{
+		TMDBID: "1396", IMDBID: "tt0903747", TVDBID: "81189",
+		AniDBID: "123", MALID: "456", MBID: "artist-mbid",
+	}
+	got := nfoIdentifierEvidence(ids)
+	for key, want := range map[string]string{
+		"tmdb": "1396", "imdb": "tt0903747", "tvdb": "81189",
+		"anidb": "123", "myanimelist": "456", "musicbrainz": "artist-mbid",
+	} {
+		if got[key] != want {
+			t.Fatalf("identifier %s = %q, want %q (all: %#v)", key, got[key], want, got)
+		}
 	}
 }

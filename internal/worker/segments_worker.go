@@ -10,18 +10,18 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/karbowiak/heya/internal/communitysegments"
 	"github.com/karbowiak/heya/internal/database/sqlc"
-	"github.com/karbowiak/heya/internal/metadata/heyamedia"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
 
 // Community skip segments — intro/recap/credits/preview/commercial
-// markers fetched from heya.media (which aggregates TheIntroDB,
-// SkipMe.db, and AniSkip). heya.media returns every candidate with
-// per-source provenance and the runtime each marker was authored
-// against; this worker applies the duration gate against the file's
+// markers fetched directly by Heya from TheIntroDB, SkipMeDB, and AniSkip.
+// The communitysegments service normalizes every candidate with per-source
+// provenance and the runtime each marker was authored against; this worker
+// applies the duration gate against the file's
 // actual probed runtime and stores only the winners, so the player and
 // the Jellyfin compat layer never see conflicting release cuts.
 
@@ -61,9 +61,9 @@ type pickedSegment struct {
 // from the winning source is kept). Open-ended markers ("to end of
 // media") are materialized against the file runtime so nothing
 // downstream handles nulls.
-func pickSegments(cands []heyamedia.SegmentCandidate, fileDurationMs int64) []pickedSegment {
+func pickSegments(cands []communitysegments.Candidate, fileDurationMs int64) []pickedSegment {
 	type scored struct {
-		c    heyamedia.SegmentCandidate
+		c    communitysegments.Candidate
 		dist int64
 	}
 	best := map[string]scored{}
@@ -107,7 +107,7 @@ func pickSegments(cands []heyamedia.SegmentCandidate, fileDurationMs int64) []pi
 
 // scoreCandidate validates a candidate against the file and returns its
 // duration-gate distance (lower = more trusted). ok=false rejects it.
-func scoreCandidate(c heyamedia.SegmentCandidate, fileDurationMs int64) (int64, bool) {
+func scoreCandidate(c communitysegments.Candidate, fileDurationMs int64) (int64, bool) {
 	if c.StartMs < 0 {
 		return 0, false
 	}
@@ -142,7 +142,7 @@ func scoreCandidate(c heyamedia.SegmentCandidate, fileDurationMs int64) (int64, 
 // segmentBeats reports whether candidate a (distance da) outranks b:
 // closer authored runtime, then more community submissions, then the
 // fixed source order.
-func segmentBeats(a heyamedia.SegmentCandidate, da int64, b heyamedia.SegmentCandidate, db int64) bool {
+func segmentBeats(a communitysegments.Candidate, da int64, b communitysegments.Candidate, db int64) bool {
 	if da != db {
 		return da < db
 	}
@@ -152,7 +152,7 @@ func segmentBeats(a heyamedia.SegmentCandidate, da int64, b heyamedia.SegmentCan
 	return segmentSourceRank[a.Source] < segmentSourceRank[b.Source]
 }
 
-func materializeSegment(c heyamedia.SegmentCandidate, fileDurationMs int64) pickedSegment {
+func materializeSegment(c communitysegments.Candidate, fileDurationMs int64) pickedSegment {
 	end := fileDurationMs
 	if c.EndMs != nil {
 		end = *c.EndMs
@@ -213,12 +213,12 @@ func parseFirstEpisodeRef(raw []byte) (season, episode int, ok bool) {
 }
 
 // ScanMediaSegmentsFileWorker fetches community segments for one file.
-// Pure network work against heya.media; runs on its own queue at
-// MaxWorkers=1 so a cold library sweep stays a polite trickle.
+// Pure network work against the community providers; runs on its own bounded
+// queue so a cold library sweep cannot starve unrelated work.
 type ScanMediaSegmentsFileWorker struct {
 	river.WorkerDefaults[ScanMediaSegmentsFileArgs]
 	DB       *pgxpool.Pool
-	Heya     *heyamedia.HeyaProvider
+	Segments *communitysegments.Service
 	Progress *TaskProgressBroadcaster
 }
 
@@ -226,7 +226,7 @@ func (w *ScanMediaSegmentsFileWorker) Work(ctx context.Context, job *river.Job[S
 	if err := snoozeIfMatchingPending(ctx, w.DB); err != nil {
 		return err
 	}
-	if w.Heya == nil {
+	if w.Segments == nil {
 		return nil
 	}
 
@@ -253,10 +253,8 @@ func (w *ScanMediaSegmentsFileWorker) Work(ctx context.Context, job *river.Job[S
 		return fmt.Errorf("get media_item %d: %w", mediaItemID, err)
 	}
 
-	providerID := heyamedia.SegmentProviderID(externalIDStrings(mi.ExternalIds))
-	if providerID == "" {
-		return nil // no usable id yet; the pending query keeps it out of the pump until enrichment fills one
-	}
+	segmentIDs := communitysegments.IDsFromMap(externalIDStrings(mi.ExternalIds))
+	segmentIDs.Anime = mi.MediaType == sqlc.MediaTypeAnime
 
 	var durationMs int64
 	if len(lf.MediaInfo) > 0 {
@@ -271,10 +269,10 @@ func (w *ScanMediaSegmentsFileWorker) Work(ctx context.Context, job *river.Job[S
 	fetchCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
-	var cands []heyamedia.SegmentCandidate
+	var cands []communitysegments.Candidate
 	switch mi.MediaType {
 	case sqlc.MediaTypeMovie:
-		cands, _, err = w.Heya.MovieSegments(fetchCtx, providerID, durationMs)
+		cands, _, err = w.Segments.Movie(fetchCtx, segmentIDs, durationMs)
 	case sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
 		season, episode, ok := parseFirstEpisodeRef(lf.ParseResult)
 		if !ok {
@@ -282,12 +280,12 @@ func (w *ScanMediaSegmentsFileWorker) Work(ctx context.Context, job *river.Job[S
 			// pump doesn't revisit every sweep.
 			return q.MarkFileSegmentsAnalyzed(ctx, lf.ID)
 		}
-		cands, _, err = w.Heya.EpisodeSegments(fetchCtx, providerID, season, episode, durationMs)
+		cands, _, err = w.Segments.Episode(fetchCtx, segmentIDs, season, episode, durationMs)
 	default:
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("segments fetch %s: %w", providerID, err)
+		return fmt.Errorf("community segments fetch: %w", err)
 	}
 
 	picked := pickSegments(cands, durationMs)
@@ -359,7 +357,7 @@ func mediaItemIDForSegmentFile(ctx context.Context, q *sqlc.Queries, lf sqlc.Lib
 //
 // Factored out of ScanMediaSegmentsFileWorker.Work so the precedence
 // matrix (manual/chromaprint block, blackframe replace) is testable
-// without a live heya.media fetch.
+// without live community-provider fetches.
 func writeCommunitySegments(ctx context.Context, qtx *sqlc.Queries, fileID int64, picked []pickedSegment) error {
 	if err := qtx.DeleteCommunityMediaSegmentsForFile(ctx, fileID); err != nil {
 		return err
@@ -424,9 +422,8 @@ func writeCommunitySegments(ctx context.Context, qtx *sqlc.Queries, fileID int64
 // kickoff_media_segments
 // ---------------------------------------------------------------------------
 
-// Per-wave cap. Each job is one or two heya.media round-trips (~a second
-// each behind its caches), so the MaxWorkers=1 queue drains a wave
-// quickly; the pump tops it back up each wake.
+// Per-wave cap. Each job fans out to the applicable community providers, with
+// per-source caches; the pump tops the bounded queue back up each wake.
 const kickoffSegmentsFileBatch = 500
 
 // KickoffMediaSegmentsWorker is the single-phase fingerprint-pump clone

@@ -255,14 +255,17 @@ type ArtistSimilarArtist struct {
 }
 
 type ArtistTopTrack struct {
-	ID        int64  `json:"id"`
-	ArtistID  int64  `json:"artist_id"`
-	Rank      int32  `json:"rank"`
-	Title     string `json:"title"`
-	Mbid      string `json:"mbid"`
-	Playcount int64  `json:"playcount"`
-	Listeners int64  `json:"listeners"`
-	Url       string `json:"url"`
+	ID                int64       `json:"id"`
+	ArtistID          int64       `json:"artist_id"`
+	Rank              int32       `json:"rank"`
+	Title             string      `json:"title"`
+	Mbid              string      `json:"mbid"`
+	Playcount         int64       `json:"playcount"`
+	Listeners         int64       `json:"listeners"`
+	Url               string      `json:"url"`
+	RecordingEntityID pgtype.UUID `json:"recording_entity_id"`
+	Provider          string      `json:"provider"`
+	ProviderRank      int32       `json:"provider_rank"`
 }
 
 type Author struct {
@@ -302,6 +305,20 @@ type Collection struct {
 	BackdropPath string      `json:"backdrop_path"`
 	SearchVector interface{} `json:"search_vector"`
 	Parts        []byte      `json:"-"`
+}
+
+type CommunitySegmentAnimeMapCache struct {
+	CacheID   bool               `json:"cache_id"`
+	Entries   []byte             `json:"entries"`
+	FetchedAt pgtype.Timestamptz `json:"fetched_at"`
+}
+
+type CommunitySegmentCache struct {
+	CacheKey   string             `json:"cache_key"`
+	Source     string             `json:"source"`
+	Candidates []byte             `json:"candidates"`
+	FetchOk    bool               `json:"fetch_ok"`
+	FetchedAt  pgtype.Timestamptz `json:"fetched_at"`
 }
 
 type Creator struct {
@@ -664,14 +681,15 @@ type MediaProductionCompany struct {
 }
 
 type MediaRecommendation struct {
-	ID          int64          `json:"id"`
-	MediaItemID int64          `json:"media_item_id"`
-	ExternalIds []byte         `json:"external_ids"`
-	Title       string         `json:"title"`
-	PosterPath  string         `json:"poster_path"`
-	MediaType   string         `json:"media_type"`
-	VoteAverage pgtype.Numeric `json:"vote_average"`
-	ReleaseDate string         `json:"release_date"`
+	ID            int64          `json:"id"`
+	MediaItemID   int64          `json:"media_item_id"`
+	ExternalIds   []byte         `json:"external_ids"`
+	Title         string         `json:"title"`
+	PosterPath    string         `json:"poster_path"`
+	MediaType     string         `json:"media_type"`
+	VoteAverage   pgtype.Numeric `json:"vote_average"`
+	ReleaseDate   string         `json:"release_date"`
+	ProviderScore float64        `json:"provider_score"`
 }
 
 type MediaSegment struct {
@@ -707,6 +725,23 @@ type MediaVideo struct {
 	PublishedAt pgtype.Timestamptz `json:"published_at"`
 }
 
+type MetadataChangeConsumer struct {
+	Consumer   string             `json:"consumer"`
+	NextCursor int64              `json:"next_cursor"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MetadataEntityBinding struct {
+	LocalKind         string             `json:"local_kind"`
+	LocalID           int64              `json:"local_id"`
+	EntityID          uuid.UUID          `json:"entity_id"`
+	EntityKind        string             `json:"entity_kind"`
+	SchemaVersion     int32              `json:"schema_version"`
+	ProjectionVersion int64              `json:"projection_version"`
+	BoundAt           pgtype.Timestamptz `json:"bound_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type MetadataMatchCandidate struct {
 	ID              int64              `json:"id"`
 	IdentityID      int64              `json:"identity_id"`
@@ -724,6 +759,24 @@ type MetadataMatchCandidate struct {
 	RawData         []byte             `json:"raw_data"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MetadataResolutionWorkflow struct {
+	ID                 int64              `json:"id"`
+	RequestKey         string             `json:"request_key"`
+	IdentityID         pgtype.Int8        `json:"identity_id"`
+	Kind               string             `json:"kind"`
+	Query              string             `json:"query"`
+	Hints              []byte             `json:"hints"`
+	SelectedResolution []byte             `json:"selected_resolution"`
+	DiscoveryID        pgtype.UUID        `json:"discovery_id"`
+	JobID              pgtype.Int8        `json:"job_id"`
+	EntityID           pgtype.UUID        `json:"entity_id"`
+	State              string             `json:"state"`
+	LastError          string             `json:"last_error"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	CompletedAt        pgtype.Timestamptz `json:"completed_at"`
 }
 
 type Movie struct {
@@ -989,22 +1042,23 @@ type ThumbnailEligibleExtra struct {
 }
 
 type Track struct {
-	ID            int64       `json:"id"`
-	AlbumID       int64       `json:"album_id"`
-	DiscNumber    int32       `json:"disc_number"`
-	TrackNumber   int32       `json:"track_number"`
-	Title         string      `json:"title"`
-	Duration      int32       `json:"duration"`
-	FilePath      string      `json:"file_path"`
-	LyricsPath    string      `json:"lyrics_path"`
-	SearchVector  interface{} `json:"search_vector"`
-	LibraryFileID pgtype.Int8 `json:"library_file_id"`
-	ExternalIds   []byte      `json:"external_ids"`
-	Isrc          string      `json:"isrc"`
-	RecordingMbid string      `json:"recording_mbid"`
-	PreviewUrl    string      `json:"preview_url"`
-	Explicit      bool        `json:"explicit"`
-	ArtistCredits []byte      `json:"artist_credits"`
+	ID              int64       `json:"id"`
+	AlbumID         int64       `json:"album_id"`
+	DiscNumber      int32       `json:"disc_number"`
+	TrackNumber     int32       `json:"track_number"`
+	Title           string      `json:"title"`
+	Duration        int32       `json:"duration"`
+	FilePath        string      `json:"file_path"`
+	LyricsPath      string      `json:"lyrics_path"`
+	SearchVector    interface{} `json:"search_vector"`
+	LibraryFileID   pgtype.Int8 `json:"library_file_id"`
+	ExternalIds     []byte      `json:"external_ids"`
+	Isrc            string      `json:"isrc"`
+	RecordingMbid   string      `json:"recording_mbid"`
+	PreviewUrl      string      `json:"preview_url"`
+	Explicit        bool        `json:"explicit"`
+	ArtistCredits   []byte      `json:"artist_credits"`
+	LyricsAvailable bool        `json:"lyrics_available"`
 }
 
 type TrackFacet struct {

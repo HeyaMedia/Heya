@@ -3,14 +3,16 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
-	"github.com/karbowiak/heya/internal/metadata/heyamedia"
+	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/karbowiak/heya/internal/slug"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
@@ -18,13 +20,13 @@ import (
 
 type PersonFetchWorker struct {
 	river.WorkerDefaults[PersonFetchArgs]
-	DB        *pgxpool.Pool
-	HeyaMedia *heyamedia.Client
-	Progress  *TaskProgressBroadcaster
+	DB           *pgxpool.Pool
+	HeyaMetadata *heyametadata.Client
+	Progress     *TaskProgressBroadcaster
 }
 
 func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetchArgs]) error {
-	if w.HeyaMedia == nil {
+	if w.HeyaMetadata == nil {
 		return nil
 	}
 
@@ -41,7 +43,7 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 	//    people who were enriched before the cast/crew/known-for columns
 	//    started flowing; the next PersonFetch tick picks them up once
 	//    and they don't re-enter the worker after.
-	if existing.HeyaEnrichedAt.Valid {
+	if existing.HeyaEnrichedAt.Valid && !job.Args.Force {
 		creds, _ := q.ListPersonExternalCredits(ctx, job.Args.PersonID)
 		if len(creds) > 0 {
 			return nil
@@ -50,7 +52,20 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 
 	w.Progress.SetCurrentByKind(PersonFetchArgs{}.Kind(), existing.Name)
 
-	// 3. Get TMDB ID from job args (already provided).
+	// 3. Resolve the local person to its canonical Heya UUID. New jobs always
+	//    carry this value or have a metadata binding created with the credit.
+	entityID := job.Args.EntityID
+	if entityID == "" {
+		binding, bindErr := q.GetMetadataEntityBinding(ctx, sqlc.GetMetadataEntityBindingParams{LocalKind: "person", LocalID: job.Args.PersonID})
+		if bindErr == nil {
+			entityID = binding.EntityID.String()
+		} else if !errors.Is(bindErr, pgx.ErrNoRows) {
+			return fmt.Errorf("read canonical person binding: %w", bindErr)
+		}
+	}
+
+	// Keep the old argument only to drain jobs queued before the V2 cutover and
+	// to preserve the value in the local external-ID display.
 	tmdbID := int(job.Args.TmdbID)
 	if tmdbID == 0 {
 		// Try to extract from the person's external_ids JSONB.
@@ -65,18 +80,18 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 				}
 			}
 		}
-		if tmdbID == 0 {
-			log.Debug().Int64("person_id", job.Args.PersonID).Msg("person has no tmdb_id, skipping")
-			return nil
-		}
+	}
+	if entityID == "" {
+		log.Debug().Int64("person_id", job.Args.PersonID).Msg("person has no canonical metadata binding, skipping")
+		return nil
 	}
 
-	// 4. Call HeyaMedia person lookup.
-	resp, err := heyamedia.GetPersonFromHeya(ctx, w.HeyaMedia, tmdbID)
+	// 4. Read person detail and reverse credits by canonical UUID.
+	resp, err := heyametadata.GetPersonByEntityFromHeya(ctx, w.HeyaMetadata, entityID)
 	if err != nil {
 		// Retry transient upstream failures at the job level; a terminal 404
 		// (person genuinely absent upstream) is a no-op, not a retry.
-		if ctx.Err() != nil || heyamedia.IsRetryable(err) {
+		if ctx.Err() != nil || heyametadata.IsRetryable(err) {
 			return fmt.Errorf("person fetch tmdb:%d: %w", tmdbID, err)
 		}
 		log.Debug().Err(err).Int("tmdb_id", tmdbID).Msg("person fetch from heya failed (terminal)")
@@ -90,11 +105,16 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 
 	// Build external_ids JSON: merge tmdb + payload external_ids.
 	mergedIDs := make(map[string]string)
-	mergedIDs["tmdb"] = fmt.Sprintf("%d", tmdbID)
+	if tmdbID > 0 {
+		mergedIDs["tmdb"] = fmt.Sprintf("%d", tmdbID)
+	}
 	for k, v := range pay.ExternalIDs {
 		if v != "" {
 			mergedIDs[k] = v
 		}
+	}
+	if tmdbID == 0 {
+		_, _ = fmt.Sscanf(mergedIDs["tmdb"], "%d", &tmdbID)
 	}
 	extIDsJSON, _ := json.Marshal(mergedIDs)
 
@@ -179,6 +199,20 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 		log.Warn().Err(err).Int64("person_id", job.Args.PersonID).Msg("failed to update person")
 		return nil
 	}
+	canonicalUUID, parseErr := uuid.Parse(resp.ID)
+	if parseErr != nil {
+		return fmt.Errorf("canonical person returned invalid UUID %q: %w", resp.ID, parseErr)
+	}
+	schemaVersion := resp.SchemaVersion
+	if schemaVersion <= 0 {
+		schemaVersion = 1
+	}
+	if _, bindErr := q.UpsertMetadataEntityBinding(ctx, sqlc.UpsertMetadataEntityBindingParams{
+		LocalKind: "person", LocalID: job.Args.PersonID, EntityID: canonicalUUID, EntityKind: "person",
+		SchemaVersion: int32(schemaVersion), ProjectionVersion: resp.ProjectionVersion,
+	}); bindErr != nil {
+		return fmt.Errorf("bind person %d to canonical metadata: %w", job.Args.PersonID, bindErr)
+	}
 
 	// 8. Store biographies.
 	for lang, bio := range pay.Biographies {
@@ -255,7 +289,7 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 // the upstream payload. Each row carries the union of external IDs we
 // receive so the FE LEFT JOIN against media_items can resolve the
 // "already in library" link without a roundtrip per row.
-func storeExternalCredits(ctx context.Context, q *sqlc.Queries, personID int64, kind string, credits []heyamedia.HeyaCredit) {
+func storeExternalCredits(ctx context.Context, q *sqlc.Queries, personID int64, kind string, credits []heyametadata.HeyaCredit) {
 	for i, c := range credits {
 		ids := map[string]string{}
 		if c.TmdbID > 0 {

@@ -8,6 +8,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/metadata/heyametadata"
 )
 
 type scanFindingDraft struct {
@@ -56,18 +58,36 @@ func PersistScanResult(ctx context.Context, lib sqlc.Library, result Result, eve
 	}
 
 	findings := scanFindingDrafts(result, events)
-	if err := q.ResolveOpenScanFindingsByLibrary(ctx, sqlc.ResolveOpenScanFindingsByLibraryParams{
-		LibraryID: lib.ID,
-		MediaType: lib.MediaType,
-		Column3:   managedScanFindingCodes(opts),
-	}); err != nil {
-		return 0, fmt.Errorf("resolve previous scan findings: %w", err)
+	identityIDs := make([]int64, 0, len(identityByKey))
+	for _, identity := range identityByKey {
+		identityIDs = append(identityIDs, identity.ID)
+	}
+	if len(identityIDs) > 0 {
+		if err := q.ResolveOpenScanFindingsByIdentities(ctx, sqlc.ResolveOpenScanFindingsByIdentitiesParams{
+			LibraryID:   lib.ID,
+			MediaType:   lib.MediaType,
+			Codes:       managedScanFindingCodes(opts),
+			IdentityIds: identityIDs,
+		}); err != nil {
+			return 0, fmt.Errorf("resolve previous scan findings: %w", err)
+		}
 	}
 	for _, finding := range findings {
 		identityID := int64(0)
 		if finding.Key != "" {
 			if identity, ok := identityByKey[finding.Key]; ok {
 				identityID = identity.ID
+			}
+		}
+		if identityID == 0 {
+			if err := q.ResolveMatchingOpenUnscopedScanFinding(ctx, sqlc.ResolveMatchingOpenUnscopedScanFindingParams{
+				LibraryID: lib.ID,
+				MediaType: lib.MediaType,
+				Code:      finding.Code,
+				RelPath:   finding.RelPath,
+				Message:   finding.Message,
+			}); err != nil {
+				return 0, fmt.Errorf("resolve duplicate unscoped scan finding %s: %w", finding.Code, err)
 			}
 		}
 		if _, err := q.CreateScanFinding(ctx, sqlc.CreateScanFindingParams{
@@ -527,11 +547,44 @@ func scanIdentityTargets(result Result) (map[string]string, map[string]int64) {
 			mediaItemByKey[applied.Key] = applied.MediaItemID
 		}
 	}
+
+	// Fetching an opaque candidate resolves it to a durable Heya entity. Apply
+	// results still carry the original candidate for auditability, so make the
+	// canonical detail the final identity authority before persistence.
+	for _, preview := range result.MovieMetadata {
+		promoteCanonicalIdentityProvider(providerByKey, []string{preview.Key}, preview.Detail)
+	}
+	for _, preview := range result.TVMetadata {
+		keys := preview.Keys
+		if len(keys) == 0 && preview.Key != "" {
+			keys = []string{preview.Key}
+		}
+		promoteCanonicalIdentityProvider(providerByKey, keys, preview.Detail)
+	}
+	for _, preview := range result.MusicMetadata {
+		promoteCanonicalIdentityProvider(providerByKey, []string{preview.Key}, preview.Detail)
+	}
+	for _, preview := range result.BookMetadata {
+		promoteCanonicalIdentityProvider(providerByKey, []string{preview.Key}, preview.Detail)
+	}
 	return providerByKey, mediaItemByKey
+}
+
+func promoteCanonicalIdentityProvider(targets map[string]string, keys []string, detail *metadata.MediaDetail) {
+	if detail == nil || detail.CanonicalID == "" {
+		return
+	}
+	providerID := heyametadata.EncodeEntityProviderID(detail.CanonicalID)
+	for _, key := range keys {
+		if key != "" {
+			targets[key] = providerID
+		}
+	}
 }
 
 func scanIdentityReviewStatuses(result Result) map[string]string {
 	out := map[string]string{}
+	trustedMusicArtists := trustedMusicArtistMatches(result.MusicSearch)
 	for _, match := range result.MovieMatches {
 		if len(match.Issues) > 0 {
 			out[match.Key] = "needs_review"
@@ -571,6 +624,10 @@ func scanIdentityReviewStatuses(result Result) map[string]string {
 		}
 		if !search.Accepted || tvSearchSelectionLooksSuspicious(search) {
 			out[search.Key] = "needs_review"
+		} else {
+			// A title-only local identity is provisional, but a subsequent
+			// clear-gap canonical match is the evidence that resolves it.
+			delete(out, search.Key)
 		}
 	}
 	for _, preview := range result.TVMaterialize {
@@ -583,13 +640,20 @@ func scanIdentityReviewStatuses(result Result) map[string]string {
 		}
 	}
 	for _, artist := range result.MusicArtists {
+		if trustedMusicArtists[artist.Key] {
+			continue
+		}
 		if len(artist.Issues) > 0 || musicArtistHasAlbumIssues(artist) {
 			out[artist.Key] = "needs_review"
 		}
 	}
 	for _, track := range result.MusicTracks {
+		key := musicArtistKey(track.Artist, track.ArtistDisambiguation)
+		if trustedMusicArtists[key] {
+			continue
+		}
 		if len(track.Issues) > 0 {
-			out[musicArtistKey(track.Artist, track.ArtistDisambiguation)] = "needs_review"
+			out[key] = "needs_review"
 		}
 	}
 	for _, search := range result.MusicSearch {
@@ -601,17 +665,19 @@ func scanIdentityReviewStatuses(result Result) map[string]string {
 			}
 			continue
 		}
-		if !search.Accepted || musicSearchSelectionLooksSuspicious(search) {
+		if !trustedMusicArtists[search.Key] {
 			out[search.Key] = "needs_review"
+		} else {
+			delete(out, search.Key)
 		}
 	}
 	for _, meta := range result.MusicMetadata {
-		if meta.Error != "" || musicMetadataMappingNeedsReview(meta) {
+		if meta.Error != "" {
 			out[meta.Key] = "needs_review"
 		}
 	}
 	for _, preview := range result.MusicMaterialize {
-		if preview.Action == "blocked" || len(preview.Issues) > 0 {
+		if preview.Action == "blocked" {
 			out[preview.Key] = "needs_review"
 		}
 	}
@@ -656,9 +722,25 @@ func scanIdentityReviewStatuses(result Result) map[string]string {
 	return out
 }
 
+func trustedMusicArtistMatches(search []MusicSearchMatch) map[string]bool {
+	trusted := make(map[string]bool, len(search))
+	for _, item := range search {
+		trusted[item.Key] = item.ManualDecision == "accepted" ||
+			(item.Accepted && item.Confidence >= musicArtistAutoMatchThreshold)
+	}
+	return trusted
+}
+
 func scanFindingDrafts(result Result, events []Event) []scanFindingDraft {
 	var out []scanFindingDraft
 	manualDecisionByKey := scanManualDecisions(result)
+	trustedMusicArtists := trustedMusicArtistMatches(result.MusicSearch)
+	safeTVSelectionByKey := make(map[string]bool, len(result.TVSearch))
+	for _, search := range result.TVSearch {
+		if search.Accepted && !tvSearchSelectionLooksSuspicious(search) {
+			safeTVSelectionByKey[search.Key] = true
+		}
+	}
 	for _, ev := range events {
 		switch ev.Event {
 		case "movie.file.unplanned", "tv.file.unplanned", "anime.file.unplanned", "book.file.unplanned":
@@ -710,7 +792,7 @@ func scanFindingDrafts(result Result, events []Event) []scanFindingDraft {
 	}
 
 	for _, match := range result.TVMatches {
-		if match.KeyType == "title" && manualDecisionByKey[match.Key] == "" {
+		if match.KeyType == "title" && manualDecisionByKey[match.Key] == "" && !safeTVSelectionByKey[match.Key] {
 			out = append(out, scanFindingDraft{Code: "title_only_identity", Severity: string(SeverityWarn), Key: match.Key, Message: "TV show identity is title-only", Data: match})
 		}
 		for _, issue := range match.Issues {
@@ -734,16 +816,25 @@ func scanFindingDrafts(result Result, events []Event) []scanFindingDraft {
 	}
 
 	for _, artist := range result.MusicArtists {
+		if trustedMusicArtists[artist.Key] {
+			continue
+		}
 		for _, issue := range artist.Issues {
 			out = append(out, scanFindingDraft{Code: "local_identity_issue", Severity: string(SeverityWarn), Key: artist.Key, Message: issue, Data: artist})
 		}
 	}
 	for _, album := range result.MusicAlbums {
+		if trustedMusicArtists[musicArtistKey(album.Artist, album.ArtistDisambiguation)] {
+			continue
+		}
 		for _, issue := range album.Issues {
 			out = append(out, scanFindingDraft{Code: "music_album_issue", Severity: string(SeverityWarn), Key: musicArtistKey(album.Artist, album.ArtistDisambiguation), Message: musicAlbumIssueMessage(album, issue), Data: album})
 		}
 	}
 	for _, track := range result.MusicTracks {
+		if trustedMusicArtists[musicArtistKey(track.Artist, track.ArtistDisambiguation)] {
+			continue
+		}
 		for _, issue := range track.Issues {
 			out = append(out, scanFindingDraft{Code: "music_track_issue", Severity: string(SeverityWarn), Key: musicArtistKey(track.Artist, track.ArtistDisambiguation), RelPath: track.RelPath, Message: musicTrackIssueMessage(track, issue), Data: track})
 		}
@@ -756,16 +847,13 @@ func scanFindingDrafts(result Result, events []Event) []scanFindingDraft {
 			out = append(out, scanFindingDraft{Code: "search_error", Severity: string(SeverityWarn), Key: search.Key, Message: firstNonEmpty(search.Error, search.Reason, "search error"), Data: search})
 		} else if !search.Accepted {
 			out = append(out, scanFindingDraft{Code: "search_rejected", Severity: string(SeverityWarn), Key: search.Key, Message: firstNonEmpty(search.Reason, "search rejected"), Data: search})
-		} else if musicSearchSelectionLooksSuspicious(search) {
+		} else if !trustedMusicArtists[search.Key] {
 			out = append(out, scanFindingDraft{Code: "search_suspicious", Severity: string(SeverityWarn), Key: search.Key, Message: "selected music artist result needs review", Data: search})
 		}
 	}
 	for _, meta := range result.MusicMetadata {
 		if meta.Error != "" {
 			out = append(out, scanFindingDraft{Code: "metadata_fetch_failed", Severity: string(SeverityWarn), Key: meta.Key, Message: meta.Error, Data: meta})
-		}
-		if musicMetadataMappingNeedsReview(meta) {
-			out = append(out, scanFindingDraft{Code: "music_metadata_mapping", Severity: string(SeverityWarn), Key: meta.Key, Message: musicMetadataMappingMessage(meta), Data: meta})
 		}
 	}
 	for _, preview := range result.MusicMaterialize {
@@ -882,19 +970,6 @@ func musicAlbumIssueMessage(album MusicAlbumPlan, issue string) string {
 func musicTrackIssueMessage(track MusicTrackPlan, issue string) string {
 	title := firstNonEmpty(track.TrackTitle, track.RelPath, "track")
 	return title + ": " + issue
-}
-
-func musicMetadataMappingMessage(meta MusicFetchPreview) string {
-	if meta.LocalAlbums > 0 && meta.MappedAlbums < meta.LocalAlbums {
-		return fmt.Sprintf("mapped %d/%d albums and %d/%d tracks", meta.MappedAlbums, meta.LocalAlbums, meta.MappedTracks, meta.LocalTracks)
-	}
-	if meta.LocalTracks > 0 && meta.MappedTracks < meta.LocalTracks {
-		return fmt.Sprintf("mapped %d/%d tracks", meta.MappedTracks, meta.LocalTracks)
-	}
-	if len(meta.Issues) > 0 {
-		return meta.Issues[0]
-	}
-	return "music metadata mapping needs review"
 }
 
 func pgNumericFromFloat64(f float64) pgtype.Numeric {

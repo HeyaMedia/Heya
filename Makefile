@@ -3,12 +3,12 @@ GO_CACHE_DIR ?= $(CURDIR)/.cache/go-build
 GO_MODCACHE_DIR ?= $(CURDIR)/.cache/go-mod
 GO := GOCACHE=$(GO_CACHE_DIR) GOMODCACHE=$(GO_MODCACHE_DIR) go
 
-.PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev dev-front dev-go dev-web gen-api-client gen-heyamedia-client deadcode dead-components docker-runtime-cpu docker-runtime-cuda docker-runtime-openvino docker docker-cuda docker-openvino docker-multiarch docker-run docker-run-gpu
+.PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev dev-front dev-go dev-web gen-api-client gen-heyametadata-client check-heyametadata-client deadcode dead-components docker-runtime-cpu docker-runtime-cuda docker-runtime-openvino docker docker-cuda docker-openvino docker-multiarch docker-run docker-run-gpu
 
 # Pinned at the same version HeyaMedia uses for its self-client; oapi-codegen
 # bumps occasionally break field shapes and we want clients to match.
-OAPI_CODEGEN := github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.4.1
-HEYAMEDIA_URL ?= https://heya.media
+OAPI_CODEGEN_V2 := github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.7.2
+HEYAMETADATA_SPEC ?= ../HeyaMetadata/api/openapi.yaml
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 build-frontend:
@@ -120,24 +120,22 @@ migrate-down:
 gen-api-client:
 	go run ./cmd/heya openapi-spec --format json -o web/shared/api.openapi.json
 
-# Regenerate the typed Go client for the upstream heya.media metadata
-# server. The TS counterpart isn't wired — the FE only talks to Heya's
-# own API, which proxies heya.media server-side. If the FE ever needs
-# direct upstream types, add an `openapi-typescript` step here outputting
-# to a non-auto-imported path (Nuxt would otherwise hit duplicate-symbol
-# warnings with shared/types/api.gen.ts, which exports the same
-# openapi-typescript top-level names).
-#
-# Fetches the 3.0 spec directly from HEYAMEDIA_URL — oapi-codegen v2.4.x
-# needs 3.0; heya.media downgrades its 3.1 master server-side and exposes
-# both. Spec snapshot gets committed so the build is reproducible without
-# network. CI runs this + diffs to enforce regen-on-spec-bump.
-gen-heyamedia-client:
-	@command -v curl >/dev/null || { echo "curl is required"; exit 1; }
-	curl -fsSL "$(HEYAMEDIA_URL)/api/openapi-3.0.json" -o clients/heyamedia/openapi-3.0.json
-	go run $(OAPI_CODEGEN) \
-		-config clients/heyamedia/cfg.yaml \
-		clients/heyamedia/openapi-3.0.json
+# Regenerate the committed HeyaMetadata V2 client from a checked-out sibling
+# contract. Both the spec snapshot and generated client are committed so normal
+# and container builds never depend on ../HeyaMetadata being present.
+gen-heyametadata-client:
+	cp "$(HEYAMETADATA_SPEC)" clients/heyametadata/openapi.yaml
+	go run $(OAPI_CODEGEN_V2) \
+		-config clients/heyametadata/cfg.yaml \
+		clients/heyametadata/openapi.yaml
+
+check-heyametadata-client:
+	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	cp clients/heyametadata/openapi.yaml "$$tmp/openapi.yaml"; \
+	cp clients/heyametadata/client.gen.go "$$tmp/client.gen.go"; \
+	$(MAKE) gen-heyametadata-client >/dev/null; \
+	diff -u "$$tmp/openapi.yaml" clients/heyametadata/openapi.yaml; \
+	diff -u "$$tmp/client.gen.go" clients/heyametadata/client.gen.go
 
 # Build the production container locally. Runtime images live in `.docker/`;
 # the app image builds frontend/backend and copies only the Heya binary onto

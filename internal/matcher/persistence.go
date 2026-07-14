@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
+	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/karbowiak/heya/internal/slug"
 	"github.com/rs/zerolog/log"
 )
@@ -278,6 +280,9 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 			re.misses++
 			continue
 		}
+		if err := m.bindCanonical(ctx, "person", person.ID, c.CanonicalID, "person", 1, 0); err != nil {
+			re.add(fmt.Errorf("bind cast person %q: %w", c.Name, err))
+		}
 		if err := m.q.CreateMediaCast(ctx, sqlc.CreateMediaCastParams{
 			MediaItemID:  mediaItemID,
 			PersonID:     person.ID,
@@ -308,6 +313,9 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 		if person.ID == 0 {
 			re.misses++
 			continue
+		}
+		if err := m.bindCanonical(ctx, "person", person.ID, c.CanonicalID, "person", 1, 0); err != nil {
+			re.add(fmt.Errorf("bind crew person %q: %w", c.Name, err))
 		}
 		if err := m.q.CreateMediaCrew(ctx, sqlc.CreateMediaCrewParams{
 			MediaItemID: mediaItemID,
@@ -421,13 +429,14 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 			return re.result()
 		}
 		if err := m.q.CreateMediaRecommendation(ctx, sqlc.CreateMediaRecommendationParams{
-			MediaItemID: mediaItemID,
-			ExternalIds: mustJSON(r.ExternalIDs),
-			Title:       r.Title,
-			PosterPath:  r.PosterPath,
-			MediaType:   r.MediaType,
-			VoteAverage: numericFromFloat(r.VoteAverage),
-			ReleaseDate: r.ReleaseDate,
+			MediaItemID:   mediaItemID,
+			ExternalIds:   mustJSON(r.ExternalIDs),
+			Title:         r.Title,
+			PosterPath:    r.PosterPath,
+			MediaType:     r.MediaType,
+			VoteAverage:   numericFromFloat(r.VoteAverage),
+			ProviderScore: r.ProviderScore,
+			ReleaseDate:   r.ReleaseDate,
 		}); err != nil {
 			re.add(fmt.Errorf("recommendation %q: %w", r.Title, err))
 			if ctx.Err() != nil {
@@ -733,6 +742,9 @@ func (m *Matcher) createTVSeries(ctx context.Context, mediaItemID int64, d *meta
 			log.Warn().Err(err).Int("season", sd.Number).Msg("error creating season")
 			continue
 		}
+		if err := m.bindCanonical(ctx, "tv_season", season.ID, sd.CanonicalID, "season", d.SchemaVersion, d.ProjectionVersion); err != nil {
+			log.Warn().Err(err).Int64("season_id", season.ID).Msg("bind canonical TV season")
+		}
 
 		for _, ep := range sd.Episodes {
 			epExtIDs := map[string]string{}
@@ -761,11 +773,14 @@ func (m *Matcher) createTVSeries(ctx context.Context, mediaItemID int64, d *meta
 			// DO NOTHING → episode already exists; preserve it (incl. user edits)
 			// and skip its title/overview re-insert below.
 			if errors.Is(err, pgx.ErrNoRows) {
-				continue
+				tvEp, err = m.q.GetTVEpisode(ctx, sqlc.GetTVEpisodeParams{SeasonID: season.ID, EpisodeNumber: int32(ep.Number)})
 			}
 			if err != nil {
 				log.Warn().Err(err).Int("episode", ep.Number).Msg("error creating episode")
 				continue
+			}
+			if err := m.bindCanonical(ctx, "tv_episode", tvEp.ID, ep.CanonicalID, "episode", d.SchemaVersion, d.ProjectionVersion); err != nil {
+				log.Warn().Err(err).Int64("episode_id", tvEp.ID).Msg("bind canonical TV episode")
 			}
 			for _, t := range ep.Titles {
 				m.q.CreateEpisodeTitle(ctx, sqlc.CreateEpisodeTitleParams{
@@ -948,7 +963,7 @@ func (m *Matcher) createBook(ctx context.Context, mediaItemID int64, d *metadata
 		} else {
 			author, err := m.q.CreateAuthor(ctx, sqlc.CreateAuthorParams{
 				Name:          d.AuthorName,
-				OpenlibraryID: d.ExternalIDs["openlibrary_author"],
+				OpenlibraryID: firstNonEmptyString(d.AuthorExternalIDs["openlibrary"], d.AuthorExternalIDs["ol_author_id"], d.ExternalIDs["openlibrary_author"]),
 				Biography:     d.AuthorBio,
 				BirthDate:     d.AuthorBirthDate,
 				DeathDate:     d.AuthorDeathDate,
@@ -957,6 +972,11 @@ func (m *Matcher) createBook(ctx context.Context, mediaItemID int64, d *metadata
 				log.Warn().Err(err).Str("author", d.AuthorName).Msg("error creating author")
 			} else {
 				authorID = pgtype.Int8{Int64: author.ID, Valid: true}
+			}
+		}
+		if authorID.Valid {
+			if err := m.bindCanonical(ctx, "author", authorID.Int64, d.AuthorCanonicalID, "author", 1, 0); err != nil {
+				return fmt.Errorf("bind author %d to canonical metadata: %w", authorID.Int64, err)
 			}
 		}
 	}
@@ -1078,7 +1098,39 @@ func (m *Matcher) StoreEntityMetadata(ctx context.Context, mediaItemID int64, ki
 	if err := m.createTypeSpecificRow(ctx, mediaItemID, kind, detail, ""); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("store type-specific metadata (media %d, %s): %w", mediaItemID, kind, err)
 	}
+	if err := m.bindCanonical(ctx, "media_item", mediaItemID, detail.CanonicalID, detail.CanonicalKind, detail.SchemaVersion, detail.ProjectionVersion); err != nil {
+		return fmt.Errorf("store canonical metadata binding (media %d): %w", mediaItemID, err)
+	}
+	if detail.CanonicalID != "" {
+		if err := m.q.PromoteCanonicalMetadataProviderID(ctx, sqlc.PromoteCanonicalMetadataProviderIDParams{
+			MediaItemID:        pgInt8(mediaItemID),
+			MetadataProviderID: heyametadata.EncodeEntityProviderID(detail.CanonicalID),
+		}); err != nil {
+			return fmt.Errorf("promote local metadata identity %d to canonical UUID: %w", mediaItemID, err)
+		}
+	}
 	return nil
+}
+
+func (m *Matcher) bindCanonical(ctx context.Context, localKind string, localID int64, entityID, entityKind string, schemaVersion int, projectionVersion int64) error {
+	if entityID == "" {
+		return nil
+	}
+	id, err := uuid.Parse(entityID)
+	if err != nil {
+		return fmt.Errorf("invalid canonical entity UUID %q: %w", entityID, err)
+	}
+	if entityKind == "" {
+		return fmt.Errorf("canonical entity %s has no kind", entityID)
+	}
+	if schemaVersion <= 0 {
+		schemaVersion = 1
+	}
+	_, err = m.q.UpsertMetadataEntityBinding(ctx, sqlc.UpsertMetadataEntityBindingParams{
+		LocalKind: localKind, LocalID: localID, EntityID: id, EntityKind: entityKind,
+		SchemaVersion: int32(schemaVersion), ProjectionVersion: projectionVersion,
+	})
+	return err
 }
 
 // StoreRichMetadata persists cast, crew, keywords, production companies, videos,

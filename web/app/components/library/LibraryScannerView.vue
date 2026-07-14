@@ -10,9 +10,21 @@ type ScanRun = {
   status: string
   summary: Record<string, any>
   error_message?: string
+  pipeline_failure_count?: number
+  pipeline_error_message?: string
   started_at?: string
   finished_at?: string
   created_at?: string
+}
+
+type PipelineFailure = {
+  id: number
+  identity_key: string
+  title: string
+  status: string
+  stage: string
+  error_message: string
+  updated_at?: string
 }
 
 type ScanFinding = {
@@ -112,6 +124,7 @@ type BucketCounts = {
 type ScannerView = {
   latest_run?: ScanRun
   bucket_counts?: BucketCounts
+  pipeline_failures: PipelineFailure[]
   open_findings: ScanFinding[]
   identities: ScanIdentity[]
   candidates?: ScanCandidate[]
@@ -135,6 +148,7 @@ const { $heya } = useNuxtApp()
 
 const includeCandidates = ref(false)
 const loading = ref(false)
+const forceScanning = ref(false)
 const error = ref('')
 const view = ref<ScannerView | null>(null)
 const runs = ref<ScanRun[]>([])
@@ -197,6 +211,7 @@ watch(() => props.library.id, () => {
 watch(includeCandidates, () => refresh())
 
 const summary = computed(() => view.value?.latest_run?.summary ?? {})
+const pipelineFailures = computed(() => view.value?.pipeline_failures ?? [])
 const identities = computed(() => view.value?.identities ?? [])
 const findings = computed(() => view.value?.open_findings ?? [])
 const candidates = computed(() => view.value?.candidates ?? [])
@@ -307,6 +322,26 @@ async function refresh(opts: { silent?: boolean } = {}) {
     error.value = e?.data?.error || e?.message || 'Failed to load scanner state.'
   } finally {
     if (!opts.silent) loading.value = false
+  }
+}
+
+async function forceRescan() {
+  if (forceScanning.value) return
+  forceScanning.value = true
+  actionNote.value = ''
+  actionError.value = ''
+  try {
+    const heya = $heya as any
+    await heya('/api/libraries/{id}/scan', {
+      method: 'POST',
+      path: { id: props.library.id },
+      query: { force: true },
+    })
+    actionNote.value = `Forced rescan queued for ${props.library.name}. Existing identities will be re-evaluated.`
+  } catch (e: any) {
+    actionError.value = e?.data?.error || e?.message || 'Failed to queue forced rescan.'
+  } finally {
+    forceScanning.value = false
   }
 }
 
@@ -494,21 +529,19 @@ function candidateDetailTags(detail: ScanCandidateDetail): string[] {
   return (detail.genres?.length ? detail.genres : detail.subjects)?.slice(0, 8) ?? []
 }
 
-function candidateDetailHeyaURL(detail: ScanCandidateDetail): string {
-  if (detail.heya_slug) return `https://heya.media/${detail.heya_slug}`
-  const parts = detail.provider_id.split(':')
-  if (parts.length >= 4 && parts[0] === 'heya') {
-    const kind = parts[1]
-    const provider = parts[2]
-    const value = parts.slice(3).join(':')
-    return `https://heya.media/heya_${kind}:${provider}:${value}`
-  }
-  return 'https://heya.media'
+function candidateDetailProviderURL(detail: ScanCandidateDetail): string {
+  return externalProviderUrl(detail.provider_kind, detail.external_ids)
 }
 
 function runFiles(run: ScanRun): number {
   const v = run.summary?.files
   return typeof v === 'number' ? v : 0
+}
+
+function latestRunStatus(): string {
+  const failures = pipelineFailures.value.length
+  if (failures > 0) return `${failures} pipeline failure${failures === 1 ? '' : 's'}`
+  return view.value?.latest_run?.status ?? 'not run'
 }
 </script>
 
@@ -528,13 +561,17 @@ function runFiles(run: ScanRun): number {
           <p class="mono">
             {{ library.media_type }} ·
             <template v-if="view?.latest_run">
-              last run {{ view.latest_run.status }} · {{ formatDate(view.latest_run.finished_at || view.latest_run.started_at) }}
+              last run {{ latestRunStatus() }} · {{ formatDate(view.latest_run.finished_at || view.latest_run.started_at) }}
             </template>
             <template v-else>no persisted run yet</template>
           </p>
         </div>
       </div>
       <div class="head-actions">
+        <button class="sv2-btn ghost" :disabled="forceScanning" @click="forceRescan">
+          <Icon :name="forceScanning ? 'spinner' : 'refresh'" :size="12" />
+          {{ forceScanning ? 'Queuing…' : 'Force rescan' }}
+        </button>
         <button class="sv2-btn ghost" :class="{ active: includeCandidates }" @click="includeCandidates = !includeCandidates">
           <Icon name="search" :size="12" />
           Candidates
@@ -556,6 +593,15 @@ function runFiles(run: ScanRun): number {
       </div>
       <div v-else-if="actionNote" class="sv2-note ok">
         <Icon name="check" :size="13" /> {{ actionNote }}
+      </div>
+
+      <div v-if="pipelineFailures.length" class="sv2-note error pipeline-summary">
+        <Icon name="warning" :size="13" />
+        <span>
+          <strong>{{ pipelineFailures[0]!.stage }} failed for {{ pipelineFailures[0]!.title || pipelineFailures[0]!.identity_key }}:</strong>
+          {{ pipelineFailures[0]!.error_message }}
+          <template v-if="pipelineFailures.length > 1"> · {{ pipelineFailures.length - 1 }} more below</template>
+        </span>
       </div>
 
       <div class="sv2-tiles">
@@ -794,15 +840,15 @@ function runFiles(run: ScanRun): number {
                               <div v-if="candidateDetailTags(candidateDetails[candidate.id]!).length" class="candidate-detail-genres">
                                 <span v-for="tag in candidateDetailTags(candidateDetails[candidate.id]!)" :key="tag">{{ tag }}</span>
                               </div>
-                              <div class="candidate-detail-actions">
+                              <div v-if="candidateDetailProviderURL(candidateDetails[candidate.id]!)" class="candidate-detail-actions">
                                 <a
                                   class="mini-btn link"
-                                  :href="candidateDetailHeyaURL(candidateDetails[candidate.id]!)"
+                                  :href="candidateDetailProviderURL(candidateDetails[candidate.id]!)"
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   @click.stop
                                 >
-                                  <Icon name="link" :size="11" /> Open on Heya
+                                  <Icon name="link" :size="11" /> Open provider
                                 </a>
                               </div>
                             </div>
@@ -860,6 +906,23 @@ function runFiles(run: ScanRun): number {
             <div class="finding-main">
               <div class="finding-title">{{ finding.rel_path || finding.code }}</div>
               <div class="finding-msg">{{ finding.message }}</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section v-if="pipelineFailures.length" class="findings-panel pipeline-failures">
+        <div class="panel-head">
+          <h4>Pipeline failures</h4>
+          <span>{{ pipelineFailures.length }} require attention</span>
+        </div>
+        <div class="finding-list">
+          <div v-for="failure in pipelineFailures" :key="failure.id" class="finding-row">
+            <StatusBadge state="error">{{ failure.stage }}</StatusBadge>
+            <div class="finding-main">
+              <div class="finding-title">{{ failure.title || failure.identity_key }}</div>
+              <div class="finding-msg failure-message">{{ failure.error_message }}</div>
+              <div class="finding-path mono">{{ failure.identity_key }} · {{ formatDate(failure.updated_at) }}</div>
             </div>
           </div>
         </div>
@@ -956,6 +1019,9 @@ function runFiles(run: ScanRun): number {
   border-color: color-mix(in srgb, var(--good) 28%, transparent);
   color: var(--good);
 }
+.pipeline-summary { align-items: flex-start; line-height: 1.45; }
+.pipeline-summary span { min-width: 0; overflow-wrap: anywhere; }
+.pipeline-summary strong { color: var(--bad); }
 
 .filter-bar {
   display: flex;
@@ -1093,7 +1159,12 @@ function runFiles(run: ScanRun): number {
   background: rgb(var(--ink) / 0.04); color: var(--fg-3);
   white-space: nowrap;
 }
-.flag.issue { background: var(--gold-soft); color: var(--gold); }
+.flag.issue {
+  background: color-mix(in srgb, var(--gold) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent);
+  color: var(--fg-0);
+  font-weight: 600;
+}
 .flag.apply { background: rgba(140,160,255,0.12); color: rgb(150,170,255); }
 .dim { color: var(--fg-3); }
 
@@ -1211,6 +1282,7 @@ function runFiles(run: ScanRun): number {
 .finding-main, .run-main { flex: 1; min-width: 0; }
 .finding-title, .run-title { font-size: 12.5px; font-weight: 600; color: var(--fg-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .finding-msg, .finding-path, .run-sub { margin-top: 3px; font-size: 11px; color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.failure-message { color: var(--bad); white-space: normal; overflow-wrap: anywhere; }
 .run-stats { color: var(--fg-3); font-size: 11px; flex-shrink: 0; }
 
 .mono { font-family: var(--font-mono); }

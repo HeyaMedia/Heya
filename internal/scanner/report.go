@@ -461,7 +461,7 @@ func writeMusicReport(w io.Writer, lib sqlc.Library, result Result, events []Eve
 	}
 
 	if len(musicMappingIssues) > 0 {
-		fmt.Fprintln(w, "\nNeeds review: metadata mapping")
+		fmt.Fprintln(w, "\nAlbum mapping diagnostics (non-blocking)")
 		for _, item := range musicMappingIssues {
 			fmt.Fprintf(w, "  - %s [%s] provider=%s mapped_albums=%d/%d mapped_tracks=%d/%d\n", item.Artist, item.Key, item.ProviderID, item.MappedAlbums, item.LocalAlbums, item.MappedTracks, item.LocalTracks)
 			if item.SearchProviderID != "" {
@@ -1634,11 +1634,17 @@ func splitTVSearchResults(search []TVSearchMatch) (rejected, selected, suspiciou
 }
 
 func tvSearchSelectionLooksSuspicious(item TVSearchMatch) bool {
-	if item.Confidence < 0.95 {
+	if item.Confidence < tvAutoMatchThreshold {
 		return true
 	}
 	if item.Query.Year != "" && item.Year != "" && item.Query.Year != item.Year {
 		return true
+	}
+	for _, candidate := range item.Candidates {
+		if candidate.ProviderID == item.ProviderID && candidate.Provider == "heya" && !candidate.RequiresReview &&
+			heyaEvidenceClearsTVAmbiguity(item.Query.Year, item.Year, candidate.Evidence) {
+			return false
+		}
 	}
 	selected := normalizeSearchTitle(item.Title)
 	if normalizeSearchTitle(item.Query.Title) == selected {
@@ -1734,10 +1740,10 @@ func sortBookSearchResults(items []BookSearchMatch) {
 }
 
 func musicSearchSelectionLooksSuspicious(item MusicSearchMatch) bool {
-	if item.Confidence < 0.95 {
-		return true
-	}
-	return normalizeMusicKeyPart(item.Query.Artist) != normalizeMusicKeyPart(item.Artist)
+	// Search has already required a provider-approved candidate and a clear
+	// gap. Alias/localization differences must not re-open a confident artist
+	// identity merely because the displayed canonical name differs.
+	return item.Confidence < musicArtistAutoMatchThreshold
 }
 
 func musicTracksWithIssues(tracks []MusicTrackPlan) []MusicTrackPlan {

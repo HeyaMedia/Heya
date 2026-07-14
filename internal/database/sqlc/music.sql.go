@@ -450,38 +450,10 @@ func (q *Queries) CreateArtistSimilarArtist(ctx context.Context, arg CreateArtis
 	return err
 }
 
-const createArtistTopTrack = `-- name: CreateArtistTopTrack :exec
-INSERT INTO artist_top_tracks (artist_id, rank, title, mbid, playcount, listeners, url)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-`
-
-type CreateArtistTopTrackParams struct {
-	ArtistID  int64  `json:"artist_id"`
-	Rank      int32  `json:"rank"`
-	Title     string `json:"title"`
-	Mbid      string `json:"mbid"`
-	Playcount int64  `json:"playcount"`
-	Listeners int64  `json:"listeners"`
-	Url       string `json:"url"`
-}
-
-func (q *Queries) CreateArtistTopTrack(ctx context.Context, arg CreateArtistTopTrackParams) error {
-	_, err := q.db.Exec(ctx, createArtistTopTrack,
-		arg.ArtistID,
-		arg.Rank,
-		arg.Title,
-		arg.Mbid,
-		arg.Playcount,
-		arg.Listeners,
-		arg.Url,
-	)
-	return err
-}
-
 const createTrack = `-- name: CreateTrack :one
 INSERT INTO tracks (album_id, disc_number, track_number, title, duration, file_path, lyrics_path, library_file_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits
+RETURNING id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available
 `
 
 type CreateTrackParams struct {
@@ -524,6 +496,7 @@ func (q *Queries) CreateTrack(ctx context.Context, arg CreateTrackParams) (Track
 		&i.PreviewUrl,
 		&i.Explicit,
 		&i.ArtistCredits,
+		&i.LyricsAvailable,
 	)
 	return i, err
 }
@@ -1299,7 +1272,7 @@ VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (album_id, disc_number, track_number) DO UPDATE
     SET title = CASE WHEN tracks.title = '' THEN EXCLUDED.title ELSE tracks.title END,
         duration = CASE WHEN tracks.duration = 0 THEN EXCLUDED.duration ELSE tracks.duration END
-RETURNING id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits
+RETURNING id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available
 `
 
 type GetOrCreateTrackParams struct {
@@ -1339,6 +1312,7 @@ func (q *Queries) GetOrCreateTrack(ctx context.Context, arg GetOrCreateTrackPara
 		&i.PreviewUrl,
 		&i.Explicit,
 		&i.ArtistCredits,
+		&i.LyricsAvailable,
 	)
 	return i, err
 }
@@ -1391,7 +1365,7 @@ func (q *Queries) GetPrimaryTrackFile(ctx context.Context, trackID int64) (Track
 }
 
 const getTrackByAlbumDiscTrack = `-- name: GetTrackByAlbumDiscTrack :one
-SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits FROM tracks
+SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available FROM tracks
 WHERE album_id = $1
   AND disc_number = $2
   AND track_number = $3
@@ -1423,12 +1397,13 @@ func (q *Queries) GetTrackByAlbumDiscTrack(ctx context.Context, arg GetTrackByAl
 		&i.PreviewUrl,
 		&i.Explicit,
 		&i.ArtistCredits,
+		&i.LyricsAvailable,
 	)
 	return i, err
 }
 
 const getTrackByID = `-- name: GetTrackByID :one
-SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits FROM tracks WHERE id = $1
+SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available FROM tracks WHERE id = $1
 `
 
 func (q *Queries) GetTrackByID(ctx context.Context, id int64) (Track, error) {
@@ -1451,12 +1426,13 @@ func (q *Queries) GetTrackByID(ctx context.Context, id int64) (Track, error) {
 		&i.PreviewUrl,
 		&i.Explicit,
 		&i.ArtistCredits,
+		&i.LyricsAvailable,
 	)
 	return i, err
 }
 
 const getTrackByLibraryFileID = `-- name: GetTrackByLibraryFileID :one
-SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits FROM tracks WHERE library_file_id = $1
+SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available FROM tracks WHERE library_file_id = $1
 `
 
 func (q *Queries) GetTrackByLibraryFileID(ctx context.Context, libraryFileID pgtype.Int8) (Track, error) {
@@ -1479,6 +1455,7 @@ func (q *Queries) GetTrackByLibraryFileID(ctx context.Context, libraryFileID pgt
 		&i.PreviewUrl,
 		&i.Explicit,
 		&i.ArtistCredits,
+		&i.LyricsAvailable,
 	)
 	return i, err
 }
@@ -1491,6 +1468,7 @@ SELECT t.id,
        t.title,
        t.duration,
        t.lyrics_path,
+       t.lyrics_available,
        al.title          AS album_title,
        al.slug           AS album_slug,
        al.year           AS album_year,
@@ -1516,6 +1494,7 @@ type GetTrackDetailByIDRow struct {
 	Title               string         `json:"title"`
 	Duration            int32          `json:"duration"`
 	LyricsPath          string         `json:"lyrics_path"`
+	LyricsAvailable     bool           `json:"lyrics_available"`
 	AlbumTitle          string         `json:"album_title"`
 	AlbumSlug           string         `json:"album_slug"`
 	AlbumYear           string         `json:"album_year"`
@@ -1540,6 +1519,7 @@ func (q *Queries) GetTrackDetailByID(ctx context.Context, id int64) (GetTrackDet
 		&i.Title,
 		&i.Duration,
 		&i.LyricsPath,
+		&i.LyricsAvailable,
 		&i.AlbumTitle,
 		&i.AlbumSlug,
 		&i.AlbumYear,
@@ -2125,7 +2105,7 @@ func (q *Queries) ListArtistSimilarLocalArtistsByArtistID(ctx context.Context, a
 }
 
 const listArtistTopTracksRawByArtistID = `-- name: ListArtistTopTracksRawByArtistID :many
-SELECT rank, title, mbid, playcount, listeners, url
+SELECT rank, provider, provider_rank, title, mbid, recording_entity_id, playcount, listeners, url
 FROM artist_top_tracks
 WHERE artist_id = $1
 ORDER BY rank ASC
@@ -2138,12 +2118,15 @@ type ListArtistTopTracksRawByArtistIDParams struct {
 }
 
 type ListArtistTopTracksRawByArtistIDRow struct {
-	Rank      int32  `json:"rank"`
-	Title     string `json:"title"`
-	Mbid      string `json:"mbid"`
-	Playcount int64  `json:"playcount"`
-	Listeners int64  `json:"listeners"`
-	Url       string `json:"url"`
+	Rank              int32       `json:"rank"`
+	Provider          string      `json:"provider"`
+	ProviderRank      int32       `json:"provider_rank"`
+	Title             string      `json:"title"`
+	Mbid              string      `json:"mbid"`
+	RecordingEntityID pgtype.UUID `json:"recording_entity_id"`
+	Playcount         int64       `json:"playcount"`
+	Listeners         int64       `json:"listeners"`
+	Url               string      `json:"url"`
 }
 
 // Raw artist_top_tracks rows. The service layer joins these against the
@@ -2161,8 +2144,11 @@ func (q *Queries) ListArtistTopTracksRawByArtistID(ctx context.Context, arg List
 		var i ListArtistTopTracksRawByArtistIDRow
 		if err := rows.Scan(
 			&i.Rank,
+			&i.Provider,
+			&i.ProviderRank,
 			&i.Title,
 			&i.Mbid,
+			&i.RecordingEntityID,
 			&i.Playcount,
 			&i.Listeners,
 			&i.Url,
@@ -3193,7 +3179,7 @@ func (q *Queries) ListTrackFilesPendingLoudness(ctx context.Context, arg ListTra
 }
 
 const listTracksByAlbum = `-- name: ListTracksByAlbum :many
-SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits FROM tracks WHERE album_id = $1 ORDER BY disc_number ASC, track_number ASC
+SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available FROM tracks WHERE album_id = $1 ORDER BY disc_number ASC, track_number ASC
 `
 
 func (q *Queries) ListTracksByAlbum(ctx context.Context, albumID int64) ([]Track, error) {
@@ -3222,6 +3208,7 @@ func (q *Queries) ListTracksByAlbum(ctx context.Context, albumID int64) ([]Track
 			&i.PreviewUrl,
 			&i.Explicit,
 			&i.ArtistCredits,
+			&i.LyricsAvailable,
 		); err != nil {
 			return nil, err
 		}
@@ -3234,7 +3221,7 @@ func (q *Queries) ListTracksByAlbum(ctx context.Context, albumID int64) ([]Track
 }
 
 const listTracksByArtist = `-- name: ListTracksByArtist :many
-SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.file_path, t.lyrics_path, t.search_vector, t.library_file_id, t.external_ids, t.isrc, t.recording_mbid, t.preview_url, t.explicit, t.artist_credits FROM tracks t
+SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.file_path, t.lyrics_path, t.search_vector, t.library_file_id, t.external_ids, t.isrc, t.recording_mbid, t.preview_url, t.explicit, t.artist_credits, t.lyrics_available FROM tracks t
 JOIN albums al ON al.id = t.album_id
 WHERE al.artist_id = $1
 ORDER BY t.album_id ASC, t.disc_number ASC, t.track_number ASC
@@ -3268,6 +3255,7 @@ func (q *Queries) ListTracksByArtist(ctx context.Context, artistID int64) ([]Tra
 			&i.PreviewUrl,
 			&i.Explicit,
 			&i.ArtistCredits,
+			&i.LyricsAvailable,
 		); err != nil {
 			return nil, err
 		}
@@ -3832,16 +3820,42 @@ func (q *Queries) ReplaceArtistSimilarArtists(ctx context.Context, artistID int6
 }
 
 const replaceArtistTopTracks = `-- name: ReplaceArtistTopTracks :exec
-DELETE FROM artist_top_tracks WHERE artist_id = $1
+WITH deleted AS (
+  DELETE FROM artist_top_tracks WHERE artist_id = $1
+), incoming AS (
+  SELECT value
+  FROM jsonb_to_recordset($2::jsonb) AS value(
+    rank integer,
+    provider text,
+    provider_rank integer,
+    title text,
+    mbid text,
+    recording_entity_id text,
+    playcount bigint,
+    listeners bigint,
+    url text
+  )
+)
+INSERT INTO artist_top_tracks (
+  artist_id, rank, provider, provider_rank, title, mbid,
+  recording_entity_id, playcount, listeners, url
+)
+SELECT $1, rank, provider, provider_rank, title, mbid,
+       NULLIF(recording_entity_id, '')::uuid, playcount, listeners, url
+FROM incoming
 `
+
+type ReplaceArtistTopTracksParams struct {
+	ArtistID int64  `json:"artist_id"`
+	Tracks   []byte `json:"tracks"`
+}
 
 // Top tracks are a small ranked list per artist. We replace-on-refresh
 // rather than upsert because the rank ordering is what we actually
-// care about — partial updates would leave stale rows interleaved with
-// new ones. Caller is expected to issue this DELETE followed by N inserts
-// inside the same transaction.
-func (q *Queries) ReplaceArtistTopTracks(ctx context.Context, artistID int64) error {
-	_, err := q.db.Exec(ctx, replaceArtistTopTracks, artistID)
+// care about. The data-modifying CTE makes deletion + replacement one SQL
+// statement, so a failed decode/insert cannot expose a partial ranking.
+func (q *Queries) ReplaceArtistTopTracks(ctx context.Context, arg ReplaceArtistTopTracksParams) error {
+	_, err := q.db.Exec(ctx, replaceArtistTopTracks, arg.ArtistID, arg.Tracks)
 	return err
 }
 
@@ -4340,22 +4354,25 @@ UPDATE tracks SET
     recording_mbid = CASE WHEN $4::text != '' THEN $4 ELSE recording_mbid END,
     preview_url    = CASE WHEN $5::text != '' THEN $5 ELSE preview_url END,
     explicit       = $6,
-    artist_credits = $7
+    artist_credits = $7,
+    lyrics_available = $8
 WHERE id = $1
 `
 
 type UpdateTrackExtendedMetadataParams struct {
-	ID            int64  `json:"id"`
-	ExternalIds   []byte `json:"external_ids"`
-	Column3       string `json:"column_3"`
-	Column4       string `json:"column_4"`
-	Column5       string `json:"column_5"`
-	Explicit      bool   `json:"explicit"`
-	ArtistCredits []byte `json:"artist_credits"`
+	ID              int64  `json:"id"`
+	ExternalIds     []byte `json:"external_ids"`
+	Column3         string `json:"column_3"`
+	Column4         string `json:"column_4"`
+	Column5         string `json:"column_5"`
+	Explicit        bool   `json:"explicit"`
+	ArtistCredits   []byte `json:"artist_credits"`
+	LyricsAvailable bool   `json:"lyrics_available"`
 }
 
-// The post-00019 track columns. external_ids / isrc / recording_mbid are
-// the keys that unlock LRCLIB lyrics lookups + cross-service deep links.
+// The post-00019 track columns. external_ids / isrc / recording_mbid remain
+// compatibility evidence; lyrics_available comes from HeyaMetadata's batched
+// canonical release projection and must not trigger per-track probes.
 // preview_url is the iTunes/Deezer 30-second sample for hover previews.
 func (q *Queries) UpdateTrackExtendedMetadata(ctx context.Context, arg UpdateTrackExtendedMetadataParams) error {
 	_, err := q.db.Exec(ctx, updateTrackExtendedMetadata,
@@ -4366,6 +4383,7 @@ func (q *Queries) UpdateTrackExtendedMetadata(ctx context.Context, arg UpdateTra
 		arg.Column5,
 		arg.Explicit,
 		arg.ArtistCredits,
+		arg.LyricsAvailable,
 	)
 	return err
 }
@@ -4569,7 +4587,7 @@ func (q *Queries) UpdateTrackPrimary(ctx context.Context, arg UpdateTrackPrimary
 }
 
 const updateTrackTitleAndDuration = `-- name: UpdateTrackTitleAndDuration :one
-UPDATE tracks SET title = $2, duration = $3 WHERE id = $1 RETURNING id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits
+UPDATE tracks SET title = $2, duration = $3 WHERE id = $1 RETURNING id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available
 `
 
 type UpdateTrackTitleAndDurationParams struct {
@@ -4600,6 +4618,7 @@ func (q *Queries) UpdateTrackTitleAndDuration(ctx context.Context, arg UpdateTra
 		&i.PreviewUrl,
 		&i.Explicit,
 		&i.ArtistCredits,
+		&i.LyricsAvailable,
 	)
 	return i, err
 }

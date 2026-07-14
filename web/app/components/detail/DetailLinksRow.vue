@@ -18,7 +18,7 @@
 <script setup lang="ts">
 // Provenance rail across the top of detail heroes: the collection first
 // (prominent — it's internal navigation), then the title's external
-// identities (IMDb / TMDB / TVDB / AniDB / heya.media) as quiet glass chips
+// identities (IMDb / TMDB / TVDB / AniDB) as quiet glass chips
 // opening in new tabs. One place to gather everything that says "this title
 // elsewhere".
 import type { MediaItem } from '~~/shared/types'
@@ -55,12 +55,6 @@ const links = computed<RowLink[]>(() => {
   if (ids.tmdb) out.push({ key: 'tmdb', label: 'TMDB', to: `https://www.themoviedb.org/${kind}/${ids.tmdb}`, external: true })
   if (ids.tvdb) out.push({ key: 'tvdb', label: 'TVDB', to: `https://thetvdb.com/dereferrer/series/${ids.tvdb}`, external: true })
   if (ids.anidb) out.push({ key: 'anidb', label: 'AniDB', to: `https://anidb.net/anime/${ids.anidb}`, external: true })
-  // heya.media: the stored slug when the item has one, else the
-  // fetch-on-demand provider-id construction.
-  const heya = props.mediaItem.heya_slug
-    ? `https://heya.media/${props.mediaItem.heya_slug}`
-    : heyaMediaExternalUrl(props.mediaItem.media_type, ids)
-  if (heya) out.push({ key: 'heya', label: 'heya.media', to: heya, external: true })
   return out
 })
 </script>

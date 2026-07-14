@@ -138,6 +138,12 @@ func ApplyMusicMaterialization(ctx context.Context, lib sqlc.Library, result Res
 			applied.MediaItemID = item.ID
 			applied.MediaItemAction = mediaAction
 		}
+		if err := bindCanonicalMetadata(ctx, q, "media_item", item.ID, detail); err != nil {
+			return results, fmt.Errorf("bind music item %s to canonical metadata: %w", preview.Key, err)
+		}
+		if err := bindCanonicalMetadata(ctx, q, "artist", artist.ID, detail); err != nil {
+			return results, fmt.Errorf("bind artist %s to canonical metadata: %w", preview.Key, err)
+		}
 
 		counts, err := applyMusicAlbumsTracksAndFiles(ctx, q, lib.ID, item.ID, artist.ID, preview, meta, tracksByRel, filesByRel)
 		if err != nil {
@@ -479,6 +485,9 @@ func applyMusicAlbumsTracksAndFiles(ctx context.Context, q *sqlc.Queries, librar
 		} else {
 			counts.albumsUpdated++
 		}
+		if err := bindCanonicalChild(ctx, q, "album", album.ID, remoteAlbum.CanonicalID, "release_group"); err != nil {
+			return counts, err
+		}
 
 		for _, trackMapping := range mapping.TrackMappings {
 			if !trackMapping.Matched {
@@ -500,6 +509,9 @@ func applyMusicAlbumsTracksAndFiles(ctx context.Context, q *sqlc.Queries, librar
 				counts.tracksCreated++
 			} else {
 				counts.tracksUpdated++
+			}
+			if err := bindCanonicalChild(ctx, q, "track", track.ID, remoteTrack.CanonicalID, "recording"); err != nil {
+				return counts, err
 			}
 			fileCounts, err := applyMusicTrackFile(ctx, q, libraryID, mediaItemID, track.ID, localTrack, fileActionByRel[trackMapping.RelPath], filesByRel)
 			if err != nil {
@@ -690,13 +702,14 @@ func applyMusicTrack(ctx context.Context, q *sqlc.Queries, albumID int64, local 
 		}
 	}
 	_ = q.UpdateTrackExtendedMetadata(ctx, sqlc.UpdateTrackExtendedMetadataParams{
-		ID:            track.ID,
-		ExternalIds:   mustJSONBytes(remote.ExternalIDs),
-		Column3:       remote.ISRC,
-		Column4:       remote.RecordingMBID,
-		Column5:       remote.PreviewURL,
-		Explicit:      remote.Explicit,
-		ArtistCredits: mustJSONBytes(remote.ArtistCredits),
+		ID:              track.ID,
+		ExternalIds:     mustJSONBytes(remote.ExternalIDs),
+		Column3:         remote.ISRC,
+		Column4:         remote.RecordingMBID,
+		Column5:         remote.PreviewURL,
+		Explicit:        remote.Explicit,
+		ArtistCredits:   mustJSONBytes(remote.ArtistCredits),
+		LyricsAvailable: remote.LyricsAvailable,
 	})
 	return track, !found, nil
 }

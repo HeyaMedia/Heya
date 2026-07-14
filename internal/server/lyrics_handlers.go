@@ -2,17 +2,9 @@ package server
 
 import (
 	"bufio"
-	"context"
-	"errors"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
-
-	"github.com/karbowiak/heya/internal/database/sqlc"
-	"github.com/karbowiak/heya/internal/service"
-	"github.com/karbowiak/heya/internal/vfs"
 )
 
 type LyricsLine struct {
@@ -23,58 +15,6 @@ type LyricsLine struct {
 type LyricsResponse struct {
 	Synced bool         `json:"synced"`
 	Lines  []LyricsLine `json:"lines"`
-}
-
-// primaryLyricsPathCtx finds the lyrics path for the highest-quality file
-// associated with this track. Returns an error if no track file or no
-// lyrics is available.
-func primaryLyricsPathCtx(ctx context.Context, app *service.App, trackID int64) (string, error) {
-	files, err := app.ListTrackFiles(ctx, trackID)
-	if err != nil || len(files) == 0 {
-		return "", errors.New("no files for track")
-	}
-	for _, tf := range files {
-		if tf.LyricsPath != "" {
-			return tf.LyricsPath, nil
-		}
-	}
-	// Fall back to the legacy denormalized path on the tracks row in case
-	// a matcher pre-track_files era still has data there.
-	if t, err := sqlc.New(app.DBPool()).GetTrackByID(ctx, trackID); err == nil && t.LyricsPath != "" {
-		return t.LyricsPath, nil
-	}
-	return "", errors.New("no lyrics for track")
-}
-
-func readLyricsFile(path string) ([]byte, error) {
-	if vfs.IsSMBPath(path) {
-		// Lyrics files are tiny — open through VFS and slurp.
-		lastSlash := strings.LastIndex(path, "/")
-		if lastSlash < 0 {
-			return nil, errors.New("invalid smb path")
-		}
-		dirPath := path[:lastSlash]
-		fileName := path[lastSlash+1:]
-		src, err := vfs.Open(dirPath)
-		if err != nil {
-			return nil, err
-		}
-		defer func() { _ = src.Close() }()
-		f, err := src.FS.Open(fileName)
-		if err != nil {
-			return nil, err
-		}
-		defer func() { _ = f.Close() }()
-		var buf strings.Builder
-		s := bufio.NewScanner(f)
-		s.Buffer(make([]byte, 64*1024), 1024*1024)
-		for s.Scan() {
-			buf.WriteString(s.Text())
-			buf.WriteByte('\n')
-		}
-		return []byte(buf.String()), nil
-	}
-	return os.ReadFile(filepath.Clean(path)) //nolint:gosec // path comes from track_files which we control
 }
 
 // LRC time codes: [mm:ss.cc] or [mm:ss.ccc] or [mm:ss], optionally repeated

@@ -32,7 +32,8 @@ datastore — no Redis, no Mongo, no separate job queue daemon.
                   └───────────────────┘
 
 External:
-  • HeyaMedia/metadata-server  — all upstream metadata (TMDB, TVDB, AniDB, …)
+  • HeyaMetadata V2            — canonical metadata (TMDB, TVDB, AniDB, …)
+  • Community segment APIs     — TheIntroDB, SkipMeDB, AniSkip
   • ffmpeg / ffprobe           — analysis + HLS transcoding
   • SMB shares (optional)      — library sources
 ```
@@ -41,7 +42,7 @@ External:
 
 ```
 cmd/heya/           # CLI entrypoint (cobra)
-clients/            # Generated HeyaMedia OpenAPI client (oapi-codegen)
+clients/            # Generated HeyaMetadata V2 OpenAPI client (oapi-codegen)
 internal/
   auth/             # bcrypt + session tokens (PG-backed)
   config/           # Env-only config loader (.env + .env.local), Field[T] provenance
@@ -50,7 +51,7 @@ internal/
   eventhub/         # WebSocket event bus (real-time UI updates)
   images/           # poster/backdrop fetcher
   matcher/          # filename → media-item matching
-  metadata/         # provider clients (heya.media aggregator + NFO)
+  metadata/         # HeyaMetadata V2 adapter + local NFO evidence
   nfo/              # NFO file parser
   parser/           # ~/Private/yarr port — filename parser w/ 2700+ test cases
   podcastindex/     # Podcast Index API client + RSS parser
@@ -130,15 +131,17 @@ ACID transaction. No queue / data split to keep in sync.
 
 ### Metadata is upstream
 
-Heya never talks to TMDB/TVDB/AniDB/etc. directly. All upstream metadata is
-fetched through [`HeyaMedia/metadata-server`](https://github.com/HeyaMedia/metadata-server)
-(a separate Go service that aggregates and normalizes those sources behind one
-JSON API). Heya's `internal/metadata/heyamedia/heya.go` is the only client.
+Heya never talks to canonical metadata providers directly. All metadata is
+fetched through HeyaMetadata V2, whose committed OpenAPI contract generates
+`clients/heyametadata` and whose adapter lives in
+`internal/metadata/heyametadata`. Heya persists canonical UUID bindings and
+consumes the gap-free V2 change cursor transactionally.
 
 Benefits: rate-limit budgets aren't shared across Heya instances, one cache
 serves many users, schema changes upstream don't propagate to Heya's matcher,
-and the metadata server can run in any deployment topology (own machine, LAN,
-or the hosted `https://heya.media`).
+and the metadata server can run in any deployment topology. Community skip
+segments are the deliberate exception: Heya owns TheIntroDB, SkipMeDB, and
+AniSkip clients because segments are playback-server behavior.
 
 ### Transcoding decision matrix
 
@@ -188,7 +191,7 @@ Concurrency rules of thumb (full table in [`pipeline.md`](./pipeline.md#queue-co
 
 Real-time progress for those jobs streams to the UI via the WebSocket event
 bus (`internal/eventhub/`). The full match → enrich pipeline (including
-HeyaMedia client structure, orphan-job rescue, and the progress event shape)
+HeyaMetadata client structure, orphan-job rescue, and the progress event shape)
 is documented in [`pipeline.md`](./pipeline.md).
 
 ## Tests

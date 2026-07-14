@@ -42,10 +42,19 @@ type ArtifactStatus struct {
 	Shared  bool   `json:"shared"`
 }
 
+// ComputeDevice is a compute target reported by stable-diffusion.cpp. Name is the
+// stable token accepted by sd-cli's --backend option (for example Vulkan0).
+type ComputeDevice struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 type Runtime struct {
 	dir         string
 	mu          sync.RWMutex
 	generateMu  sync.Mutex
+	devicesMu   sync.Mutex
+	devices     map[string][]ComputeDevice
 	state       DownloadState
 	progress    ImageDownloadProgress
 	downloadErr string
@@ -55,7 +64,7 @@ func NewRuntime(dir string) *Runtime {
 	if absolute, err := filepath.Abs(dir); err == nil {
 		dir = absolute
 	}
-	return &Runtime{dir: dir, state: DownloadIdle}
+	return &Runtime{dir: dir, state: DownloadIdle, devices: make(map[string][]ComputeDevice)}
 }
 func (r *Runtime) modelPath(a ModelArtifact) string { return filepath.Join(r.dir, "models", a.Name) }
 func (r *Runtime) artifactPath(a ModelArtifact) string {
@@ -122,6 +131,67 @@ func (r *Runtime) RuntimePresent(backend string) bool {
 	}
 	st, e := os.Stat(r.binaryPath(a))
 	return e == nil && st.Mode().IsRegular()
+}
+
+// Devices asks the installed runtime for its own device names. This avoids
+// trying to infer Vulkan/CUDA numbering from PCI data, which can disagree with
+// the order exposed by ggml. Successful probes are cached because status is
+// polled frequently by the settings page.
+func (r *Runtime) Devices(backend string) ([]ComputeDevice, error) {
+	a, err := RuntimeArtifactFor(backend)
+	if err != nil {
+		return nil, err
+	}
+	if !r.RuntimePresent(backend) {
+		return nil, nil
+	}
+	key := ResolveBackend(backend)
+	r.devicesMu.Lock()
+	defer r.devicesMu.Unlock()
+	if cached, ok := r.devices[key]; ok {
+		return append([]ComputeDevice(nil), cached...), nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, r.binaryPath(a), "--list-devices") //nolint:gosec // pinned server-controlled binary
+	cmd.Dir = r.runtimeDir(a)
+	cmd.Env = append(os.Environ(), "LD_LIBRARY_PATH="+r.runtimeDir(a))
+	out, err := cmd.Output()
+	if err != nil {
+		detail := ""
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			detail = strings.TrimSpace(string(exitErr.Stderr))
+		}
+		if detail != "" {
+			return nil, fmt.Errorf("imagegen: list devices: %w: %s", err, detail)
+		}
+		return nil, fmt.Errorf("imagegen: list devices: %w", err)
+	}
+	devices := parseDevices(out)
+	if len(devices) == 0 {
+		return nil, fmt.Errorf("imagegen: sd-cli reported no compute devices")
+	}
+	r.devices[key] = devices
+	return append([]ComputeDevice(nil), devices...), nil
+}
+
+func parseDevices(out []byte) []ComputeDevice {
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	devices := make([]ComputeDevice, 0, len(lines))
+	for _, line := range lines {
+		parts := strings.SplitN(strings.TrimSpace(line), "\t", 2)
+		name := strings.TrimSpace(parts[0])
+		if name == "" {
+			continue
+		}
+		description := name
+		if len(parts) == 2 && strings.TrimSpace(parts[1]) != "" {
+			description = strings.TrimSpace(parts[1])
+		}
+		devices = append(devices, ComputeDevice{Name: name, Description: description})
+	}
+	return devices
 }
 func (r *Runtime) DownloadStatus() (DownloadState, *ImageDownloadProgress, string) {
 	r.mu.RLock()
@@ -314,6 +384,7 @@ func extractZipFlatten(src, dest string) error {
 type Request struct {
 	ModelID        string  `json:"model_id,omitempty"`
 	Backend        string  `json:"backend,omitempty"`
+	Device         string  `json:"device,omitempty" maxLength:"128"`
 	Prompt         string  `json:"prompt" minLength:"1" maxLength:"4000"`
 	NegativePrompt string  `json:"negative_prompt,omitempty" maxLength:"2000"`
 	Output         string  `json:"-"`
@@ -344,6 +415,14 @@ func (r *Runtime) Generate(ctx context.Context, in Request) (Result, error) {
 	if !r.RuntimePresent(in.Backend) || !r.ModelPresent(in.ModelID) {
 		return Result{}, fmt.Errorf("imagegen: runtime or model is not downloaded; run `heya image fetch` explicitly")
 	}
+	devices, err := r.Devices(in.Backend)
+	if err != nil {
+		return Result{}, err
+	}
+	deviceArgs, err := generationDeviceArgs(in.Device, devices)
+	if err != nil {
+		return Result{}, err
+	}
 	if in.Width == 0 {
 		in.Width = m.DefaultWidth
 	}
@@ -369,6 +448,7 @@ func (r *Runtime) Generate(ctx context.Context, in Request) (Result, error) {
 		in.Output = abs
 	}
 	args := []string{"-p", in.Prompt, "-o", in.Output, "-W", strconv.Itoa(in.Width), "-H", strconv.Itoa(in.Height), "--steps", strconv.Itoa(in.Steps), "--cfg-scale", strconv.FormatFloat(in.CFG, 'f', -1, 64), "--seed", strconv.FormatInt(in.Seed, 10), "--diffusion-fa", "--vae-tiling", "--vae-conv-direct"}
+	args = append(args, deviceArgs...)
 	for _, item := range m.Artifacts {
 		flag := map[string]string{"diffusion": "--diffusion-model", "llm": "--llm", "vae": "--vae"}[item.Role]
 		if flag == "" {
@@ -400,6 +480,26 @@ func (r *Runtime) Generate(ctx context.Context, in Request) (Result, error) {
 		return Result{}, fmt.Errorf("imagegen: sd-cli produced no image: %w", err)
 	}
 	return Result{Path: in.Output, Model: m.ID, Seed: in.Seed, DurationMs: time.Since(start).Milliseconds()}, nil
+}
+
+func generationDeviceArgs(requested string, devices []ComputeDevice) ([]string, error) {
+	requested = strings.TrimSpace(requested)
+	if requested == "" || strings.EqualFold(requested, "auto") {
+		// The pinned runtime's auto-fit mode measures current free memory and
+		// places/splits model components accordingly, falling back to CPU when a
+		// GPU cannot safely hold a component and its compute reserve.
+		return []string{"--auto-fit"}, nil
+	}
+	for _, device := range devices {
+		if strings.EqualFold(requested, device.Name) {
+			return []string{"--backend", device.Name}, nil
+		}
+	}
+	available := make([]string, 0, len(devices))
+	for _, device := range devices {
+		available = append(available, device.Name)
+	}
+	return nil, fmt.Errorf("imagegen: unknown compute device %q (available: %s)", requested, strings.Join(available, ", "))
 }
 
 func (r *Runtime) OutputPath(name string) (string, bool) {

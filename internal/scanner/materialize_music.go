@@ -290,9 +290,6 @@ func PlanMusicMaterialization(ctx context.Context, lib sqlc.Library, result Resu
 				preview.Issues = append(preview.Issues, meta.Error)
 			} else if meta.Detail == nil {
 				preview.Reason = "metadata_detail_missing"
-			} else if musicMetadataMappingNeedsReview(meta) {
-				preview.Reason = "metadata_mapping_review"
-				preview.Issues = append(preview.Issues, musicMaterializeMappingIssues(meta)...)
 			}
 		}
 
@@ -387,7 +384,11 @@ func musicMaterializeAlbumMappings(local MusicArtistPlan, meta MusicFetchPreview
 			mappings = append(mappings, remote)
 			continue
 		}
-		mappings = append(mappings, musicLocalAlbumMapping(album))
+		localMapping := musicLocalAlbumMapping(album)
+		if ok && remote.RemoteAlbum != "" {
+			localMapping = musicAlbumMappingWithLocalTrackFallback(localMapping, remote)
+		}
+		mappings = append(mappings, localMapping)
 	}
 	sort.Slice(mappings, func(i, j int) bool {
 		if mappings[i].LocalYear == mappings[j].LocalYear {
@@ -396,6 +397,32 @@ func musicMaterializeAlbumMappings(local MusicArtistPlan, meta MusicFetchPreview
 		return mappings[i].LocalYear < mappings[j].LocalYear
 	})
 	return mappings
+}
+
+func musicAlbumMappingWithLocalTrackFallback(local, remote MusicAlbumFetchMatch) MusicAlbumFetchMatch {
+	// The remote release-group match remains useful even when none of its many
+	// issued editions has been materialized into a tracklist yet. Preserve that
+	// canonical album evidence, but use the local files as the track authority.
+	local.RemoteAlbum = remote.RemoteAlbum
+	local.RemoteYear = remote.RemoteYear
+	local.RemoteKind = remote.RemoteKind
+	local.RemoteExternalIDs = copyMusicExternalIDs(remote.RemoteExternalIDs)
+	local.Confidence = remote.Confidence
+	local.Reason = firstNonEmpty(remote.Reason, "remote_album") + "_local_tracks"
+	local.RemoteTracks = remote.RemoteTracks
+
+	remoteByPath := make(map[string]MusicTrackFetchMatch, len(remote.TrackMappings))
+	for _, track := range remote.TrackMappings {
+		if track.RelPath != "" && track.Matched && track.Issue == "" {
+			remoteByPath[track.RelPath] = track
+		}
+	}
+	for i, track := range local.TrackMappings {
+		if remoteTrack, ok := remoteByPath[track.RelPath]; ok {
+			local.TrackMappings[i] = remoteTrack
+		}
+	}
+	return local
 }
 
 func musicRemoteAlbumMappingClean(mapping MusicAlbumFetchMatch) bool {
@@ -623,27 +650,6 @@ func canRepairMusicFileAttachment(existing sqlc.MediaItemCard, targetArtist stri
 		return false
 	}
 	return normalizeSearchTitle(existing.Title) != normalizeSearchTitle(targetArtist)
-}
-
-func musicMetadataMappingNeedsReview(meta MusicFetchPreview) bool {
-	if meta.LocalAlbums > 0 && meta.MappedAlbums < meta.LocalAlbums {
-		return true
-	}
-	if meta.LocalTracks > 0 && meta.MappedTracks < meta.LocalTracks {
-		return true
-	}
-	return len(meta.Issues) > 0
-}
-
-func musicMaterializeMappingIssues(meta MusicFetchPreview) []string {
-	issues := append([]string{}, meta.Issues...)
-	if meta.LocalAlbums > 0 && meta.MappedAlbums < meta.LocalAlbums {
-		issues = append(issues, fmt.Sprintf("only mapped %d/%d local albums", meta.MappedAlbums, meta.LocalAlbums))
-	}
-	if meta.LocalTracks > 0 && meta.MappedTracks < meta.LocalTracks {
-		issues = append(issues, fmt.Sprintf("only mapped %d/%d local tracks", meta.MappedTracks, meta.LocalTracks))
-	}
-	return sortedUnique(issues)
 }
 
 func musicMappedRelPaths(mappings []MusicAlbumFetchMatch) []string {

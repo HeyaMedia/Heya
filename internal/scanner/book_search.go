@@ -41,16 +41,19 @@ type BookSearchQuery struct {
 }
 
 type BookSearchCandidate struct {
-	ProviderID  string            `json:"provider_id"`
-	Provider    string            `json:"provider"`
-	Title       string            `json:"title"`
-	Author      string            `json:"author,omitempty"`
-	Year        string            `json:"year,omitempty"`
-	Description string            `json:"description,omitempty"`
-	PosterURL   string            `json:"poster_url,omitempty"`
-	HeyaSlug    string            `json:"heya_slug,omitempty"`
-	Confidence  float64           `json:"confidence"`
-	ExternalIDs map[string]string `json:"external_ids,omitempty"`
+	ProviderID     string                    `json:"provider_id"`
+	Provider       string                    `json:"provider"`
+	Title          string                    `json:"title"`
+	Author         string                    `json:"author,omitempty"`
+	Year           string                    `json:"year,omitempty"`
+	Description    string                    `json:"description,omitempty"`
+	PosterURL      string                    `json:"poster_url,omitempty"`
+	HeyaSlug       string                    `json:"heya_slug,omitempty"`
+	Confidence     float64                   `json:"confidence"`
+	Recommendation string                    `json:"recommendation,omitempty"`
+	Evidence       []metadata.SearchEvidence `json:"evidence,omitempty"`
+	RequiresReview bool                      `json:"requires_review,omitempty"`
+	ExternalIDs    map[string]string         `json:"external_ids,omitempty"`
 }
 
 func SearchBookPlans(ctx context.Context, plans []BookPlan, provider BookSearchProvider, emit Emitter, threshold float64, decisionsOpt ...SearchDecisions) ([]BookSearchMatch, error) {
@@ -67,10 +70,11 @@ func SearchBookPlans(ctx context.Context, plans []BookPlan, provider BookSearchP
 			return results, err
 		}
 		query := metadata.SearchQuery{
-			Title:  plan.Title,
-			Year:   plan.Year,
-			Author: plan.Author,
-			Format: plan.Format,
+			Title:       plan.Title,
+			Year:        plan.Year,
+			Author:      plan.Author,
+			Format:      plan.Format,
+			Identifiers: cloneStringMap(plan.ExternalIDs),
 		}
 		search := BookSearchMatch{
 			Key:    plan.Key,
@@ -99,6 +103,9 @@ func SearchBookPlans(ctx context.Context, plans []BookPlan, provider BookSearchP
 
 		candidates, err := searchBookCandidates(ctx, provider, query, search.Query.Aliases)
 		if err != nil {
+			if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
+				return results, err
+			}
 			search.Reason = "search_error"
 			emit.Emit(Event{
 				Event:    "match.search_failed",
@@ -131,16 +138,19 @@ func SearchBookPlans(ctx context.Context, plans []BookPlan, provider BookSearchP
 
 		for _, candidate := range scored {
 			search.Candidates = append(search.Candidates, BookSearchCandidate{
-				ProviderID:  candidate.ProviderID,
-				Provider:    candidate.ProviderName,
-				Title:       candidate.Title,
-				Author:      candidate.Description,
-				Year:        candidate.Year,
-				Description: candidate.Description,
-				PosterURL:   candidate.PosterURL,
-				HeyaSlug:    candidate.HeyaSlug,
-				Confidence:  candidate.Confidence,
-				ExternalIDs: candidate.ExternalIDs,
+				ProviderID:     candidate.ProviderID,
+				Provider:       candidate.ProviderName,
+				Title:          candidate.Title,
+				Author:         candidate.Description,
+				Year:           candidate.Year,
+				Description:    candidate.Description,
+				PosterURL:      candidate.PosterURL,
+				HeyaSlug:       candidate.HeyaSlug,
+				Confidence:     candidate.Confidence,
+				Recommendation: candidate.Recommendation,
+				Evidence:       candidate.Evidence,
+				RequiresReview: candidate.RequiresReview,
+				ExternalIDs:    candidate.ExternalIDs,
 			})
 			emit.Emit(Event{
 				Event: "match.candidate",
@@ -164,7 +174,7 @@ func SearchBookPlans(ctx context.Context, plans []BookPlan, provider BookSearchP
 		}
 
 		top := scored[0]
-		if top.Confidence >= threshold && bookTitleAcceptable(plan.Title, top.Title) {
+		if !top.RequiresReview && top.Confidence >= threshold && bookTitleAcceptable(plan.Title, top.Title) {
 			search.Accepted = true
 			search.ProviderID = top.ProviderID
 			search.Provider = top.ProviderName

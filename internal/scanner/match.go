@@ -228,7 +228,7 @@ func movieMatchKey(plan MoviePlan) (string, string) {
 			return provider + ":" + strings.ToLower(value), provider
 		}
 	}
-	title := normalizeSearchTitle(plan.Title)
+	title := normalizeIdentityTitle(plan.Title)
 	if title == "" {
 		return "", ""
 	}

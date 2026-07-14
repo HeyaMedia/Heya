@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/mediatype"
+	"github.com/karbowiak/heya/internal/metadata"
 )
 
 type Options struct {
@@ -524,6 +525,17 @@ func (r *LibraryRun) refreshSearchDecisions(ctx context.Context) error {
 
 func (r *LibraryRun) fail(err error) error {
 	if err != nil {
+		if retryAfter, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
+			r.sink.Emit(Event{
+				Event:    "scan.deferred",
+				Severity: SeverityInfo,
+				Message:  "waiting for metadata",
+				Data: map[string]any{
+					"retry_after_ms": retryAfter.Milliseconds(),
+				},
+			})
+			return err
+		}
 		r.sink.Emit(Event{Event: "scan.error", Severity: SeverityWarn, Message: err.Error()})
 	}
 	return err

@@ -13,6 +13,47 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAcceptedCanonicalTVSearchClearsTitleOnlyReview(t *testing.T) {
+	const key = "title:the bear"
+	result := Result{
+		TVMatches: []TVMatch{{Key: key, KeyType: "title", Title: "The Bear"}},
+		TVSearch: []TVSearchMatch{{
+			Key: key, Query: TVSearchQuery{Title: "The Bear"}, Accepted: true,
+			ProviderID: "heyametadata:v2:entity:2a48be9f-f363-4f0c-be5c-26627da07e10",
+			Title:      "The Bear", Year: "2022", Confidence: tvAutoMatchThreshold,
+		}},
+	}
+
+	if status := scanIdentityReviewStatuses(result)[key]; status != "" {
+		t.Fatalf("accepted canonical title-only review status = %q", status)
+	}
+	for _, finding := range scanFindingDrafts(result, nil) {
+		if finding.Key == key && (finding.Code == "title_only_identity" || finding.Code == "search_suspicious") {
+			t.Fatalf("accepted canonical title-only finding = %#v", finding)
+		}
+	}
+}
+
+func TestScanIdentityTargetsPromotesResolvedCandidateToCanonicalEntity(t *testing.T) {
+	const (
+		key       = "artist:daft punk"
+		entityID  = "27cf4a80-dfd4-4e36-a262-f457e9671861"
+		candidate = "heyametadata:v2:candidate:artist:0ef2e00c-cbbb-4717-992b-60ffcc1b70ff"
+	)
+	providers, _ := scanIdentityTargets(Result{
+		MusicSearch:      []MusicSearchMatch{{Key: key, ProviderID: candidate}},
+		MusicMaterialize: []MusicMaterializePreview{{Key: key, ProviderID: candidate}},
+		MusicApply:       []MusicApplyResult{{Key: key, ProviderID: candidate}},
+		MusicMetadata: []MusicFetchPreview{{
+			Key: key,
+			Detail: &metadata.MediaDetail{
+				CanonicalID: entityID, CanonicalKind: "artist",
+			},
+		}},
+	})
+	require.Equal(t, "heyametadata:v2:entity:"+entityID, providers[key])
+}
+
 func TestPersistScanResultPersistsMusicScannerReviewState(t *testing.T) {
 	pool := testutil.SetupDB(t)
 	ctx := context.Background()
@@ -141,7 +182,7 @@ func TestPersistScanResultPersistsMusicScannerReviewState(t *testing.T) {
 	require.True(t, byKey["artist:ado"].MediaItemID.Valid)
 	require.Equal(t, matchedItem.ID, byKey["artist:ado"].MediaItemID.Int64)
 	require.Equal(t, "needs_review", byKey["artist:broken artist"].ReviewStatus)
-	require.Equal(t, "needs_review", byKey["artist:mapping artist"].ReviewStatus)
+	require.Equal(t, "accepted", byKey["artist:mapping artist"].ReviewStatus)
 	require.Equal(t, "accepted", byKey["artist:local only"].ReviewStatus)
 
 	candidates, err := q.ListScannerCandidatesByLibrary(ctx, lib.ID)
@@ -154,13 +195,27 @@ func TestPersistScanResultPersistsMusicScannerReviewState(t *testing.T) {
 	findings, err := q.ListOpenScannerFindingsByLibrary(ctx, lib.ID)
 	require.NoError(t, err)
 	require.Equal(t, map[string]int{
-		"music_album_issue":      1,
-		"music_metadata_mapping": 1,
-		"music_track_issue":      1,
-		"nfo_parse_failed":       1,
-		"search_rejected":        1,
-		"search_suspicious":      1,
+		"music_album_issue": 1,
+		"music_track_issue": 1,
+		"nfo_parse_failed":  1,
+		"search_rejected":   1,
 	}, scannerFindingCounts(findings))
+
+	// Stage retries and force scans can replay the same path-scoped parse
+	// event. It should replace the prior open finding instead of accumulating
+	// another scan-level issue with no identity.
+	_, err = PersistScanResult(ctx, lib, result, events, Options{
+		Apply:              true,
+		FetchPreview:       true,
+		MaterializePreview: true,
+		RemoteSearch:       true,
+	}, pool, map[string]any{"music_artists": len(result.MusicArtists)})
+	require.NoError(t, err)
+	findings, err = q.ListOpenScannerFindingsByLibrary(ctx, lib.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, scannerFindingCounts(findings)["nfo_parse_failed"])
+	candidates, err = q.ListScannerCandidatesByLibrary(ctx, lib.ID)
+	require.NoError(t, err)
 
 	approved, err := q.ApproveScannerCandidate(ctx, sqlc.ApproveScannerCandidateParams{
 		LibraryID:   lib.ID,

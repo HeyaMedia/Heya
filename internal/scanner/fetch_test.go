@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
@@ -30,6 +31,22 @@ type fakeMusicDetailProvider struct {
 	mu      sync.Mutex
 	details map[string]*metadata.MediaDetail
 	calls   []string
+}
+
+type fakeMusicReleaseGroupProvider struct {
+	artist  *metadata.MediaDetail
+	release *metadata.MediaDetail
+	err     error
+	queries []metadata.SearchQuery
+}
+
+func (f *fakeMusicReleaseGroupProvider) GetDetail(_ context.Context, _ string, _ *metadata.FetchOptions) (*metadata.MediaDetail, error) {
+	return f.artist, nil
+}
+
+func (f *fakeMusicReleaseGroupProvider) ResolveReleaseGroup(_ context.Context, query metadata.SearchQuery) (*metadata.MediaDetail, error) {
+	f.queries = append(f.queries, query)
+	return f.release, f.err
 }
 
 func (f *fakeMusicDetailProvider) GetDetail(_ context.Context, providerID string, _ *metadata.FetchOptions) (*metadata.MediaDetail, error) {
@@ -325,7 +342,7 @@ func TestFetchMusicMetadataPreviewsMapsArtistDiscography(t *testing.T) {
 	for _, want := range []string{
 		"Metadata fetched:       1/1 artists",
 		"Discography mapped:     2/3 albums, 3/4 tracks",
-		"Needs review: metadata mapping",
+		"Album mapping diagnostics (non-blocking)",
 		"Metadata fetch preview",
 		"album: 狂言 (2022) -> 狂言 (2022) reason=external_id:musicbrainz_release_group=mb_release_group",
 		"album: Missing Album (2024) -> unmatched tracks=0/1",
@@ -333,6 +350,177 @@ func TestFetchMusicMetadataPreviewsMapsArtistDiscography(t *testing.T) {
 		if !strings.Contains(report.String(), want) {
 			t.Fatalf("music fetch report missing %q:\n%s", want, report.String())
 		}
+	}
+}
+
+func TestMusicMaterializationKeepsRemoteAlbumWithLocalTrackFallback(t *testing.T) {
+	local := MusicArtistPlan{Albums: []MusicAlbumPlan{{
+		Key: "artist_album:aphex twin|selected ambient works 85 92|1992", Artist: "Aphex Twin",
+		Album: "Selected Ambient Works 85-92", Year: "1992", ReleaseKind: "album",
+		Tracks: []MusicTrackPlan{
+			{RelPath: "Aphex Twin/SAW/01 - Xtal.flac", TrackTitle: "Xtal", DiscNumber: 1, TrackNumber: 1},
+			{RelPath: "Aphex Twin/SAW/02 - Tha.flac", TrackTitle: "Tha", DiscNumber: 1, TrackNumber: 2},
+		},
+	}}}
+	meta := MusicFetchPreview{Detail: &metadata.MediaDetail{}, AlbumMappings: []MusicAlbumFetchMatch{{
+		Key:        "artist_album:aphex twin|selected ambient works 85 92|1992",
+		LocalAlbum: "Selected Ambient Works 85-92", RemoteAlbum: "Selected Ambient Works 85–92",
+		RemoteYear: 1992, RemoteKind: "album", Confidence: 0.95, Reason: "title_year",
+		RemoteExternalIDs: map[string]string{"musicbrainz_release_group": "6842c81d-ea77-3dfd-abf7-4323add3f4d4"},
+		LocalTracks:       2,
+		Issues:            []string{"Xtal: remote_album_has_no_tracks", "Tha: remote_album_has_no_tracks"},
+	}}}
+
+	mappings := musicMaterializeAlbumMappings(local, meta)
+	if len(mappings) != 1 {
+		t.Fatalf("mappings = %#v", mappings)
+	}
+	mapping := mappings[0]
+	if mapping.RemoteAlbum != "Selected Ambient Works 85–92" || mapping.MappedTracks != 2 || len(mapping.TrackMappings) != 2 {
+		t.Fatalf("remote album/local track fallback = %#v", mapping)
+	}
+	if mapping.RemoteExternalIDs["musicbrainz_release_group"] == "" || len(mapping.Issues) != 0 {
+		t.Fatalf("canonical album evidence was not retained cleanly: %#v", mapping)
+	}
+	for _, track := range mapping.TrackMappings {
+		if !track.Matched || track.Reason != "local_only" {
+			t.Fatalf("local track fallback = %#v", mapping.TrackMappings)
+		}
+	}
+}
+
+func TestFetchMusicMetadataPreviewsMaterializesOnlyNeededUnresolvedReleaseGroup(t *testing.T) {
+	provider := &fakeMusicReleaseGroupProvider{
+		artist: &metadata.MediaDetail{
+			CanonicalID:   "artist-id",
+			CanonicalKind: "artist",
+			Title:         "Daft Punk",
+			ArtistName:    "Daft Punk",
+			Albums: []metadata.AlbumEntry{{
+				Title: "Da Funk", Type: "single", Year: 1995,
+			}},
+		},
+		release: &metadata.MediaDetail{
+			CanonicalID:   "release-group-id",
+			CanonicalKind: "release_group",
+			Albums: []metadata.AlbumEntry{{
+				CanonicalID: "release-group-id", Title: "Da Funk", Type: "single", Year: 1995,
+				Tracks: []metadata.TrackDetail{
+					{DiscNumber: 1, TrackNumber: 1, Title: "Da Funk"},
+					{DiscNumber: 1, TrackNumber: 2, Title: "Musique"},
+				},
+			}},
+		},
+	}
+	artists := []MusicArtistPlan{{
+		Key: "artist:daft punk", Artist: "Daft Punk",
+		Albums: []MusicAlbumPlan{{
+			Key: "artist_album:daft punk|da funk|1997", Artist: "Daft Punk",
+			Album: "Da Funk", Year: "1997", ReleaseKind: "single",
+			Tracks: []MusicTrackPlan{
+				{RelPath: "Daft Punk/Da Funk/01.flac", TrackTitle: "Da Funk", DiscNumber: 1, TrackNumber: 1},
+				{RelPath: "Daft Punk/Da Funk/02.flac", TrackTitle: "Musique", DiscNumber: 1, TrackNumber: 2},
+			},
+		}},
+	}}
+	search := []MusicSearchMatch{{
+		Accepted: true, Key: "artist:daft punk", ProviderID: "heyametadata:v2:entity:artist-id",
+		Artist: "Daft Punk", Query: MusicSearchQuery{Artist: "Daft Punk"},
+	}}
+
+	previews, err := FetchMusicMetadataPreviews(context.Background(), search, artists, provider, &captureEmitter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.queries) != 1 {
+		t.Fatalf("release discovery queries = %#v, want one", provider.queries)
+	}
+	query := provider.queries[0]
+	if query.CanonicalKind != "release_group" || query.Title != "Da Funk" || query.Year != "1997" || query.Artist != "Daft Punk" || query.Format != "single" {
+		t.Fatalf("release discovery query = %#v", query)
+	}
+	if len(previews) != 1 || previews[0].MappedAlbums != 1 || previews[0].MappedTracks != 2 {
+		t.Fatalf("preview did not use materialized release group: %#v", previews)
+	}
+	if issues := strings.Join(previews[0].Issues, "\n"); strings.Contains(issues, "album_year_mismatch") {
+		t.Fatalf("edition year drift remained a review blocker: %s", issues)
+	}
+}
+
+func TestFetchMusicMetadataPreviewsDoesNotBlockArtistOnDeferredReleaseGroups(t *testing.T) {
+	provider := &fakeMusicReleaseGroupProvider{
+		artist: &metadata.MediaDetail{
+			CanonicalID: "gorillaz-id", CanonicalKind: "artist", Title: "Gorillaz", ArtistName: "Gorillaz",
+			Albums: []metadata.AlbumEntry{
+				{Title: "Gorillaz", Type: "album", Year: 2001},
+				{Title: "Demon Days", Type: "album", Year: 2005},
+			},
+		},
+		err: &metadata.DeferredWorkError{Operation: "release-group discovery", RetryAfter: 30 * time.Second},
+	}
+	artist := MusicArtistPlan{
+		Key: "artist:gorillaz", Artist: "Gorillaz",
+		Albums: []MusicAlbumPlan{
+			{Key: "artist_album:gorillaz|gorillaz|2001", Artist: "Gorillaz", Album: "Gorillaz", Year: "2001", Tracks: []MusicTrackPlan{{RelPath: "Gorillaz/01.flac", TrackTitle: "Re-Hash", TrackNumber: 1}}},
+			{Key: "artist_album:gorillaz|demon days|2005", Artist: "Gorillaz", Album: "Demon Days", Year: "2005", Tracks: []MusicTrackPlan{{RelPath: "Demon Days/01.flac", TrackTitle: "Intro", TrackNumber: 1}}},
+		},
+	}
+	search := []MusicSearchMatch{{
+		Accepted: true, Key: artist.Key, ProviderID: "heyametadata:v2:entity:gorillaz-id",
+		Artist: "Gorillaz", Confidence: 1, Query: MusicSearchQuery{Artist: "Gorillaz"},
+	}}
+
+	previews, err := FetchMusicMetadataPreviews(context.Background(), search, []MusicArtistPlan{artist}, provider, &captureEmitter{})
+	if err != nil {
+		t.Fatalf("deferred release-group enrichment blocked artist fetch: %v", err)
+	}
+	if len(previews) != 1 || previews[0].Artist != "Gorillaz" || previews[0].Error != "" {
+		t.Fatalf("artist preview = %#v", previews)
+	}
+	if len(provider.queries) != 2 {
+		t.Fatalf("release discoveries initiated = %d, want 2: %#v", len(provider.queries), provider.queries)
+	}
+}
+
+func TestMusicAlbumFetchDoesNotConflictEditionsWithinMatchingReleaseGroup(t *testing.T) {
+	local := MusicAlbumPlan{
+		Album: "Example Album",
+		ExternalIDs: map[string]string{
+			"musicbrainz_release_group": "shared-group",
+			"musicbrainz_album":         "local-edition",
+		},
+	}
+	remote := metadata.AlbumEntry{
+		Title: "Example Album",
+		ExternalIDs: map[string]string{
+			"musicbrainz_release_group": "shared-group",
+			"musicbrainz_album":         "different-issued-release",
+		},
+	}
+	issues := musicAlbumFetchIssues(local, remote, "external_id:musicbrainz_release_group=musicbrainz_release_group")
+	if strings.Contains(strings.Join(issues, "\n"), "album_external_id_conflict") {
+		t.Fatalf("editions in one release group were treated as conflicting: %#v", issues)
+	}
+}
+
+func TestMusicReleaseGroupDiscoveryPreservesUnifiedProviderEvidence(t *testing.T) {
+	ids := musicReleaseGroupDiscoveryIDs(map[string]string{
+		"musicbrainz_album":         "issued-release",
+		"musicbrainz_release_group": "release-group",
+		"itunes_album":              "1630125755",
+		"audiodb_album":             "audiodb-release",
+		"deezer_album":              "deezer-release",
+		"discogs_album":             "discogs-release",
+	})
+	want := map[string]string{
+		"musicbrainz_release_group": "release-group",
+		"apple":                     "1630125755",
+		"audiodb":                   "audiodb-release",
+		"deezer":                    "deezer-release",
+		"discogs":                   "discogs-release",
+	}
+	if fmt.Sprint(ids) != fmt.Sprint(want) {
+		t.Fatalf("release discovery IDs = %#v, want %#v", ids, want)
 	}
 }
 
@@ -743,5 +931,38 @@ func TestMapMusicTrackFetchSuppressesWeakLocalTitleMismatch(t *testing.T) {
 		if mapping.Issue != "" {
 			t.Fatalf("%q should not report title mismatch: %#v", title, mapping)
 		}
+	}
+}
+
+func TestMapMusicAlbumFetchAcceptsLocalizedTrackTitleForIdentifiedAlbum(t *testing.T) {
+	local := MusicAlbumPlan{
+		Album: "猫猫吐吐",
+		ExternalIDs: map[string]string{
+			"musicbrainz_release_group": "shared-group",
+		},
+		Tracks: []MusicTrackPlan{{
+			RelPath: "ano/猫猫吐吐/0101.flac", TrackTitle: "猫吐序曲", DiscNumber: 1, TrackNumber: 1,
+		}},
+	}
+	remote := []metadata.AlbumEntry{{
+		Title: "猫猫吐吐",
+		ExternalIDs: map[string]string{
+			"musicbrainz_release_group": "shared-group",
+		},
+		Tracks: []metadata.TrackDetail{{Title: "Nyang Oeeee Jyokyoku", DiscNumber: 1, TrackNumber: 1}},
+	}}
+
+	mapping := mapMusicAlbumFetch(local, remote)
+	if mapping.MappedTracks != 1 || len(mapping.Issues) != 0 {
+		t.Fatalf("localized exact-album track should map cleanly: %#v", mapping)
+	}
+	if len(mapping.TrackMappings) != 1 || mapping.TrackMappings[0].Reason != "disc_track_localized" {
+		t.Fatalf("localized mapping reason = %#v", mapping.TrackMappings)
+	}
+
+	local.Tracks[0].TrackTitle = "Wrong Latin Title"
+	mapping = mapMusicAlbumFetch(local, remote)
+	if len(mapping.Issues) != 1 || !strings.Contains(mapping.Issues[0], "track_title_mismatch") {
+		t.Fatalf("same-script conflict was hidden: %#v", mapping)
 	}
 }

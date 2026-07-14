@@ -4,6 +4,36 @@
   <artist>Ado</artist>
   <albumartist>Ado</albumartist>
   <year>2022</year>
-  <releasedate>2022-01-01</releasedate>
+  <releasedate>2022-01-26</releasedate>
+  <type>album</type>
+  <country>JP</country>
+  <musicbrainzalbumid>d9fbf729-3bcf-46b1-94a4-7b4bf7babced</musicbrainzalbumid>
+  <musicbrainzalbumartistid>e134b52f-2e9e-4734-9bc3-bea9648d1fa1</musicbrainzalbumartistid>
+  <musicbrainzreleasegroupid>000b747c-a83b-4b00-aa47-a839f6527a92</musicbrainzreleasegroupid>
   <genre>J-Pop</genre>
+  <track>
+    <disc>1</disc>
+    <position>1</position>
+    <title>レディメイド</title>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>2</position>
+    <title>踊</title>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>3</position>
+    <title>ドメスティックでバイオレンス</title>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>4</position>
+    <title>FREEDOM</title>
+  </track>
+  <track>
+    <disc>1</disc>
+    <position>5</position>
+    <title>花火</title>
+  </track>
 </album>

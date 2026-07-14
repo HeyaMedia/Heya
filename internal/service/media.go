@@ -1071,14 +1071,12 @@ func (a *App) GetPerson(ctx context.Context, idOrSlug string) (map[string]any, e
 	// outer, so we check `!= 0` rather than a typed `.Valid`.
 	ext, _ := q.ListPersonExternalCredits(ctx, person.ID)
 
-	// Backfill kicker: if we have no external credits AND we have a
-	// tmdb_id, queue a PersonFetch in the background. The worker's own
-	// short-circuit logic (skip when external creds exist) keeps this
-	// from looping — once the worker fills the rows, future visits stop
-	// re-enqueueing.
+	// Backfill kicker: reverse filmography is a canonical-person operation.
+	// Queue it only when this local person is bound to a Heya UUID; provider
+	// person IDs remain display metadata and are never transport identities.
 	if len(ext) == 0 && a.river != nil {
-		if tmdbID := personTmdbID(person.ExternalIds); tmdbID > 0 {
-			_, _ = a.river.Insert(ctx, worker.PersonFetchArgs{PersonID: person.ID, TmdbID: int32(tmdbID)}, nil)
+		if binding, bindErr := q.GetMetadataEntityBinding(ctx, sqlc.GetMetadataEntityBindingParams{LocalKind: "person", LocalID: person.ID}); bindErr == nil {
+			_, _ = a.river.Insert(ctx, worker.PersonFetchArgs{PersonID: person.ID, EntityID: binding.EntityID.String()}, nil)
 		}
 	}
 

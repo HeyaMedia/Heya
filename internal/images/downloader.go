@@ -6,8 +6,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,7 +23,7 @@ const maxImageBytes = 25 << 20
 // status. Permanent reports whether a retry is pointless: a 4xx (other than
 // 408 Request Timeout and 429 Too Many Requests) means the image simply isn't
 // available upstream. That's the common, expected case for episode stills and
-// some person headshots — heya.media hands out a URL it can't actually serve —
+// some person headshots — a provider may have no materializable image —
 // so callers swallow it instead of retrying and spamming the logs.
 type StatusError struct {
 	Code int
@@ -39,11 +41,18 @@ func (e *StatusError) Permanent() bool {
 }
 
 type Downloader struct {
-	dataDir string
-	client  *http.Client
+	dataDir       string
+	client        *http.Client
+	trustedClient *http.Client
+	trusted       map[string]http.Header
 }
 
-func NewDownloader(dataDir string) *Downloader {
+type TrustedSource struct {
+	BaseURL     string
+	BearerToken string
+}
+
+func NewDownloader(dataDir string, trustedSources ...TrustedSource) *Downloader {
 	// Raise the per-host connection pool (stock is 2): on-demand image serving
 	// fetches artwork on first view, so a fresh library grid can burst dozens of
 	// concurrent downloads from the same CDN host — reuse warm connections
@@ -57,9 +66,37 @@ func NewDownloader(dataDir string) *Downloader {
 	// disable Proxy so an HTTP_PROXY can't tunnel past the guard.
 	t.Proxy = nil
 	t.DialContext = (&net.Dialer{Timeout: 10 * time.Second, Control: safedial.Control}).DialContext
+	trustedTransport := http.DefaultTransport.(*http.Transport).Clone()
+	trustedTransport.Proxy = nil
+	trustedTransport.MaxIdleConns = 100
+	trustedTransport.MaxIdleConnsPerHost = 16
+	trusted := make(map[string]http.Header)
+	for _, source := range trustedSources {
+		parsed, err := url.Parse(source.BaseURL)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			continue
+		}
+		header := make(http.Header)
+		if token := strings.TrimSpace(source.BearerToken); token != "" {
+			header.Set("Authorization", "Bearer "+token)
+		}
+		trusted[parsed.Scheme+"://"+parsed.Host] = header
+	}
+	trustedClient := &http.Client{
+		Timeout: 30 * time.Second, Transport: trustedTransport,
+		CheckRedirect: func(request *http.Request, _ []*http.Request) error {
+			origin := request.URL.Scheme + "://" + request.URL.Host
+			if _, ok := trusted[origin]; !ok {
+				return http.ErrUseLastResponse
+			}
+			return nil
+		},
+	}
 	return &Downloader{
-		dataDir: dataDir,
-		client:  &http.Client{Timeout: 30 * time.Second, Transport: t},
+		dataDir:       dataDir,
+		client:        &http.Client{Timeout: 30 * time.Second, Transport: t},
+		trustedClient: trustedClient,
+		trusted:       trusted,
 	}
 }
 
@@ -83,14 +120,31 @@ func (d *Downloader) Download(ctx context.Context, url, mediaType string, dirNam
 		return localPath, nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return "", err
-	}
-
-	resp, err := d.client.Do(req)
-	if err != nil {
-		return "", err
+	client, headers := d.clientForURL(url)
+	pollCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	var resp *http.Response
+	for {
+		req, err := http.NewRequestWithContext(pollCtx, http.MethodGet, url, nil)
+		if err != nil {
+			return "", err
+		}
+		for name, values := range headers {
+			for _, value := range values {
+				req.Header.Add(name, value)
+			}
+		}
+		resp, err = client.Do(req)
+		if err != nil {
+			return "", err
+		}
+		if resp.StatusCode != http.StatusAccepted {
+			break
+		}
+		_ = resp.Body.Close()
+		if err := waitForImage(pollCtx, imageRetryAfter(resp.Header.Get("Retry-After"))); err != nil {
+			return "", &StatusError{Code: http.StatusAccepted, URL: url}
+		}
 	}
 	defer resp.Body.Close()
 
@@ -124,4 +178,32 @@ func (d *Downloader) Download(ctx context.Context, url, mediaType string, dirNam
 
 	log.Debug().Str("url", url).Str("path", localPath).Msg("downloaded image")
 	return localPath, nil
+}
+
+func (d *Downloader) clientForURL(rawURL string) (*http.Client, http.Header) {
+	parsed, err := url.Parse(rawURL)
+	if err == nil {
+		if header, ok := d.trusted[parsed.Scheme+"://"+parsed.Host]; ok {
+			return d.trustedClient, header
+		}
+	}
+	return d.client, nil
+}
+
+func imageRetryAfter(value string) time.Duration {
+	if seconds, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && seconds >= 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	return time.Second
+}
+
+func waitForImage(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

@@ -7,12 +7,14 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/matcher"
 	"github.com/karbowiak/heya/internal/metadata"
+	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/karbowiak/heya/internal/parser"
 	"github.com/karbowiak/heya/internal/slug"
 )
@@ -138,6 +140,9 @@ func ApplyMovieMaterialization(ctx context.Context, lib sqlc.Library, result Res
 			results = append(results, applied)
 			emitMovieApplyResult(applied, emit)
 			return results, fmt.Errorf("apply movie row %s: %w", preview.Key, err)
+		}
+		if err := txMatcher.StoreRichMetadata(ctx, item.ID, detail); err != nil {
+			return results, fmt.Errorf("apply movie relationships %s: %w", preview.Key, err)
 		}
 		if preview.MovieRowAction != "" {
 			applied.MovieRowAction = preview.MovieRowAction
@@ -662,11 +667,45 @@ func movieRemoteAssetType(raw string) (sqlc.AssetType, bool) {
 }
 
 func providerKindFromID(providerID string) string {
-	parts := strings.Split(providerID, ":")
-	if len(parts) >= 4 && parts[0] == "heya" {
-		return parts[2]
-	}
 	return "heya"
+}
+
+func bindCanonicalMetadata(ctx context.Context, q *sqlc.Queries, localKind string, localID int64, detail *metadata.MediaDetail) error {
+	if detail == nil || detail.CanonicalID == "" {
+		return nil
+	}
+	entityID, err := uuid.Parse(detail.CanonicalID)
+	if err != nil {
+		return fmt.Errorf("invalid canonical metadata UUID %q: %w", detail.CanonicalID, err)
+	}
+	if detail.CanonicalKind == "" {
+		return fmt.Errorf("canonical metadata %s has no kind", detail.CanonicalID)
+	}
+	schemaVersion := detail.SchemaVersion
+	if schemaVersion <= 0 {
+		schemaVersion = 1
+	}
+	if _, err := q.UpsertMetadataEntityBinding(ctx, sqlc.UpsertMetadataEntityBindingParams{
+		LocalKind: localKind, LocalID: localID, EntityID: entityID, EntityKind: detail.CanonicalKind,
+		SchemaVersion: int32(schemaVersion), ProjectionVersion: detail.ProjectionVersion,
+	}); err != nil {
+		return err
+	}
+	if localKind == "media_item" {
+		return q.PromoteCanonicalMetadataProviderID(ctx, sqlc.PromoteCanonicalMetadataProviderIDParams{
+			MediaItemID: pgInt8(localID), MetadataProviderID: heyametadata.EncodeEntityProviderID(detail.CanonicalID),
+		})
+	}
+	return nil
+}
+
+func bindCanonicalChild(ctx context.Context, q *sqlc.Queries, localKind string, localID int64, entityID, entityKind string) error {
+	if entityID == "" {
+		return nil
+	}
+	return bindCanonicalMetadata(ctx, q, localKind, localID, &metadata.MediaDetail{
+		CanonicalID: entityID, CanonicalKind: entityKind, SchemaVersion: 1,
+	})
 }
 
 func pgInt8(id int64) pgtype.Int8 {

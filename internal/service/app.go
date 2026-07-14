@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/auth"
 	"github.com/karbowiak/heya/internal/cast"
+	"github.com/karbowiak/heya/internal/communitysegments"
 	"github.com/karbowiak/heya/internal/config"
 	"github.com/karbowiak/heya/internal/database"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -20,7 +21,7 @@ import (
 	"github.com/karbowiak/heya/internal/imageserve"
 	"github.com/karbowiak/heya/internal/llm"
 	"github.com/karbowiak/heya/internal/matcher"
-	"github.com/karbowiak/heya/internal/metadata/heyamedia"
+	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/karbowiak/heya/internal/podcastindex"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/radiobrowser"
@@ -44,7 +45,7 @@ type App struct {
 	downloader     *images.Downloader
 	river          *river.Client[pgx.Tx]
 	watcher        *watcher.Manager
-	heya           *heyamedia.HeyaProvider
+	heya           *heyametadata.HeyaProvider
 	transcoder     *transcoder.SessionManager
 	transcodeCache *transcoder.CacheManager
 	audioSessions  *transcoder.AudioSessionManager
@@ -112,7 +113,7 @@ func (a *App) EventHub() *eventhub.Hub                        { return a.hub }
 func (a *App) ConfigSnapshot() *config.Config                 { return a.config }
 func (a *App) WatcherManager() *watcher.Manager               { return a.watcher }
 func (a *App) TaskScheduler() *scheduler.Trigger              { return a.scheduler }
-func (a *App) Metadata() *heyamedia.HeyaProvider              { return a.heya }
+func (a *App) Metadata() *heyametadata.HeyaProvider           { return a.heya }
 func (a *App) DBPool() *pgxpool.Pool                          { return a.db }
 func (a *App) RiverClient() *river.Client[pgx.Tx]             { return a.river }
 func (a *App) Sessions() *sessions.Store                      { return a.sessions }
@@ -175,12 +176,30 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 		return nil, err
 	}
 
-	dl := images.NewDownloader(cfg.DataDir.Value)
+	dl := images.NewDownloader(cfg.DataDir.Value, images.TrustedSource{
+		BaseURL: cfg.HeyaMetadataURL.Value, BearerToken: cfg.HeyaMetadataAPIKey.Value,
+	})
 
-	hm := heyamedia.NewClient(cfg.HeyaMediaURL.Value)
-	heya := heyamedia.NewHeyaProvider(hm)
+	hm, err := heyametadata.NewClient(cfg.HeyaMetadataURL.Value, cfg.HeyaMetadataAPIKey.Value)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	if !cfg.PassiveMode.Value {
+		readyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		readyErr := hm.Ready(readyCtx)
+		cancel()
+		if readyErr != nil {
+			db.Close()
+			return nil, fmt.Errorf("HeyaMetadata is not ready: %w", readyErr)
+		}
+	}
+	heya := heyametadata.NewHeyaProvider(hm, db).WithProviderCredentials(heyametadata.ProviderCredentials{
+		LastFMAPIKey: cfg.LastfmAPIKey.Value,
+	})
+	segmentService := communitysegments.New(db, communitysegments.Options{TheIntroDBAPIKey: cfg.TheIntroDBAPIKey.Value})
 
-	log.Info().Str("url", cfg.HeyaMediaURL.Value).Msg("metadata provider registered via heya.media")
+	log.Info().Str("url", cfg.HeyaMetadataURL.Value).Msg("canonical metadata provider registered via HeyaMetadata V2")
 
 	hub := eventhub.New()
 
@@ -233,8 +252,9 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	riverClient, err := worker.Setup(ctx, worker.Config{
 		DB:             db,
 		DataDir:        cfg.DataDir.Value,
-		HeyaMedia:      hm,
+		HeyaMetadata:   hm,
 		Heya:           heya,
+		Segments:       segmentService,
 		Matcher:        m,
 		Downloader:     dl,
 		TranscodeCache: tcCache,

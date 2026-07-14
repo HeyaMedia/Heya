@@ -331,13 +331,14 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 				var extIDs map[string]string
 				_ = json.Unmarshal(r.ExternalIds, &extIDs)
 				items[i] = recItem{
-					ExternalIDs: extIDs,
-					Title:       r.Title,
-					PosterPath:  r.PosterPath,
-					MediaType:   r.MediaType,
-					VoteAverage: r.VoteAverage,
-					ReleaseDate: r.ReleaseDate,
-					SourceCount: r.SourceCount,
+					ExternalIDs:   extIDs,
+					Title:         r.Title,
+					PosterPath:    r.PosterPath,
+					MediaType:     r.MediaType,
+					VoteAverage:   r.VoteAverage,
+					ProviderScore: r.ProviderScore,
+					ReleaseDate:   r.ReleaseDate,
+					SourceCount:   r.SourceCount,
 				}
 				if r.LocalMediaItemID != 0 {
 					items[i].LocalMediaID = &r.LocalMediaItemID
@@ -477,6 +478,7 @@ type recItem struct {
 	PosterPath      string            `json:"poster_path"`
 	MediaType       string            `json:"media_type"`
 	VoteAverage     any               `json:"vote_average"`
+	ProviderScore   float64           `json:"provider_score,omitempty"`
 	ReleaseDate     string            `json:"release_date"`
 	LocalMediaID    *int64            `json:"local_media_item_id,omitempty"`
 	LocalSlug       *string           `json:"local_slug,omitempty"`

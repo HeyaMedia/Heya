@@ -714,16 +714,34 @@ const SCANNER_EVENT_LABELS: Record<string, string> = {
   'materialize.apply': 'Applying',
   'materialize.apply_summary': 'Apply summary',
   'scan.summary': 'Scan summary',
-  'scan.persisted': 'Saved scan result',
+  'scan.persisted': 'Stage complete',
+  'scan.persist_failed': 'Could not save scan state',
+  'scan.error': 'Scan failed',
+  'scan.deferred': 'Waiting for metadata',
 }
 
 function scanEventDetail(ev?: ScannerEventPayload): string {
   if (!ev) return ''
+  if (ev.message && (ev.event === 'scan.error' || ev.event.includes('failed'))) {
+    return [ev.phase, SCANNER_EVENT_LABELS[ev.event] ?? 'Scan failed', ev.message].filter(Boolean).join(' · ')
+  }
   if (ev.detail) return ev.detail
   const data = ev.data ?? {}
-  const action = SCANNER_EVENT_LABELS[ev.event] ?? ev.event.replaceAll('.', ' ')
+  const action = ev.event === 'scan.persisted'
+    ? persistedStageLabel(String(data.mode || ''))
+    : (SCANNER_EVENT_LABELS[ev.event] ?? ev.event.replaceAll('.', ' '))
   const target = ev.rel_path || ev.root || ev.path || String(data.title || data.artist || data.album || data.key || '')
   return [ev.phase, action, target].filter(Boolean).join(' · ')
+}
+
+function persistedStageLabel(mode: string): string {
+  switch (mode) {
+    case 'search': return 'Identification complete'
+    case 'fetch': return 'Metadata fetched'
+    case 'materialize': return 'Apply plan ready'
+    case 'apply': return 'Metadata applied'
+    default: return 'Stage complete'
+  }
 }
 
 // Live playback sessions — populated by the WS push from

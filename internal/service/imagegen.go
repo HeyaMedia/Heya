@@ -17,6 +17,8 @@ type ImageStatus struct {
 	DownloadState  imagegen.DownloadState          `json:"download_state"`
 	Progress       *imagegen.ImageDownloadProgress `json:"progress,omitempty"`
 	DownloadError  string                          `json:"download_error,omitempty"`
+	Devices        []imagegen.ComputeDevice        `json:"devices"`
+	DeviceError    string                          `json:"device_error,omitempty"`
 	Artifacts      []imagegen.ArtifactStatus       `json:"artifacts"`
 	DownloadBytes  int64                           `json:"download_bytes"`
 }
@@ -32,9 +34,15 @@ func (a *App) ImageStatus(model, backend string) ImageStatus {
 	}
 	state, progress, downloadErr := a.imageRuntime.DownloadStatus()
 	artifacts, downloadBytes := a.imageRuntime.ModelArtifactStatus(model)
+	devices, devicesErr := a.imageRuntime.Devices(backend)
+	deviceError := ""
+	if devicesErr != nil {
+		deviceError = devicesErr.Error()
+	}
 	return ImageStatus{Build: imagegen.RuntimeBuild, Backend: imagegen.ResolveBackend(backend), Model: model,
 		RuntimePresent: a.imageRuntime.RuntimePresent(backend), ModelPresent: a.imageRuntime.ModelPresent(model),
-		DownloadState: state, Progress: progress, DownloadError: downloadErr, Artifacts: artifacts, DownloadBytes: downloadBytes}
+		DownloadState: state, Progress: progress, DownloadError: downloadErr, Devices: devices, DeviceError: deviceError,
+		Artifacts: artifacts, DownloadBytes: downloadBytes}
 }
 
 // ImageDownloadWait is intentionally the only service entry point that can

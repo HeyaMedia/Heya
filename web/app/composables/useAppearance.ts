@@ -27,7 +27,7 @@ export interface AppearancePrefs {
   ambientMode: 'on' | 'off'
   ambientIntensity: number // scrim-relative backdrop visibility, 5–60 (%)
   /** "More Like This" on detail pages: also show titles NOT in the library
-   *  (they link out to heya.media, which fetches on demand). */
+   *  (they link out to the strongest public metadata provider). */
   showUnavailableRecs: boolean
 }
 

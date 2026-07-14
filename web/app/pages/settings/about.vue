@@ -117,7 +117,7 @@ function componentIcon(name: string): string {
     </SettingsSection>
 
     <SettingsSection title="Data sources" icon="database"
-      description="Upstream metadata providers. Reached through heya.media — the only outbound client in the binary.">
+      description="Canonical metadata providers reached through HeyaMetadata V2. Community skip-segment databases are queried directly by Heya.">
       <div class="src-list">
         <div v-for="s in SOURCES" :key="s.name" class="src-row">
           <span class="src-name">{{ s.name }}</span>

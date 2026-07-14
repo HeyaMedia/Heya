@@ -1,5 +1,11 @@
 # Music coverage — next pass plan
 
+> Archived on 2026-07-13. This plan describes the removed heya.media V1
+> adapter and must not be used as an implementation guide. Canonical metadata
+> now flows through the generated HeyaMetadata V2 client; see
+> `../HeyaMetadata/HEYAMEDIA_V2_MIGRATION.md` and the current architecture and
+> pipeline documentation.
+
 Written 2026-05-25 to survive session compaction. Two tasks, each
 self-contained. Read CLAUDE.md first, then this, then start.
 

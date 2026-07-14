@@ -10,32 +10,71 @@ const (
 )
 
 type SearchQuery struct {
-	Title    string
-	Year     string
-	Artist   string
-	Album    string
-	Author   string
-	ISBN     string
-	Format   string
-	Seasons  []int
-	Language string
-	Country  string
+	// CanonicalKind disambiguates local umbrella kinds. In particular, Heya's
+	// legacy KindTV covers both V2 tv_show and anime.
+	CanonicalKind string
+	// Identifiers are external identity evidence already known to the scanner.
+	// When non-empty, the HeyaMetadata adapter skips fuzzy local search and
+	// submits every identifier to provider-transparent discovery together.
+	Identifiers map[string]string
+	Title       string
+	Year        string
+	Artist      string
+	Album       string
+	Author      string
+	ISBN        string
+	Format      string
+	Seasons     []int
+	Aliases     []string
+	Episodes    []EpisodeHint
+	Releases    []ReleaseHint
+	Language    string
+	Country     string
+}
+
+// EpisodeHint is structured local-library evidence supplied to metadata
+// discovery. Zero values are omitted so callers can provide either aired
+// season/episode numbering or an absolute episode number as appropriate for
+// the canonical kind.
+type EpisodeHint struct {
+	Title  string
+	Season int
+	Number int
+}
+
+// ReleaseHint is compact discography evidence for resolving an artist. It is
+// intentionally limited to identity-bearing fields; callers should not send
+// complete local tracklists through artist discovery.
+type ReleaseHint struct {
+	Title       string
+	Year        string
+	Type        string
+	Identifiers map[string]string
 }
 
 type FetchOptions struct {
-	Language string
-	Country  string
+	Language      string
+	Country       string
+	Title         string
+	Year          string
+	CanonicalKind string
 }
 
 type SearchResult struct {
-	ProviderID   string            `json:"provider_id"`
-	ProviderName string            `json:"provider_name"`
-	Title        string            `json:"title"`
-	Year         string            `json:"year"`
-	Description  string            `json:"description"`
-	PosterURL    string            `json:"poster_url"`
-	Confidence   float64           `json:"confidence"`
-	ExternalIDs  map[string]string `json:"external_ids,omitempty"`
+	ProviderID   string  `json:"provider_id"`
+	ProviderName string  `json:"provider_name"`
+	Title        string  `json:"title"`
+	Year         string  `json:"year"`
+	Description  string  `json:"description"`
+	PosterURL    string  `json:"poster_url"`
+	Confidence   float64 `json:"confidence"`
+	// Recommendation and Evidence preserve the V2 discovery decision instead
+	// of letting a downstream title scorer silently turn an ambiguous provider
+	// result into an automatic match.
+	Recommendation string            `json:"recommendation,omitempty"`
+	Evidence       []SearchEvidence  `json:"evidence,omitempty"`
+	RequiresReview bool              `json:"requires_review,omitempty"`
+	ExternalIDs    map[string]string `json:"external_ids,omitempty"`
 	// AltTitles holds the union of every known title variant for this hit
 	// — locale forms, romanizations, native scripts, AKA titles, aliases.
 	// Empty list (or absent) means the upstream(s) didn't provide
@@ -52,6 +91,13 @@ type SearchResult struct {
 	RawData  any  `json:"-"`
 }
 
+type SearchEvidence struct {
+	Field   string  `json:"field"`
+	Outcome string  `json:"outcome"`
+	Weight  float64 `json:"weight"`
+	Detail  string  `json:"detail,omitempty"`
+}
+
 type TitleEntry struct {
 	Title     string `json:"title"`
 	Language  string `json:"language"`
@@ -61,6 +107,14 @@ type TitleEntry struct {
 }
 
 type MediaDetail struct {
+	// Canonical identity belongs to HeyaMetadata V2. Heya persists these fields
+	// separately from its local relational read models; provider IDs and slugs
+	// remain evidence/presentation only.
+	CanonicalID       string `json:"canonical_id,omitempty"`
+	CanonicalKind     string `json:"canonical_kind,omitempty"`
+	SchemaVersion     int    `json:"schema_version,omitempty"`
+	ProjectionVersion int64  `json:"projection_version,omitempty"`
+
 	Title        string            `json:"title"`
 	SortTitle    string            `json:"sort_title"`
 	Year         string            `json:"year"`
@@ -127,18 +181,20 @@ type MediaDetail struct {
 	Tracks     []TrackDetail `json:"tracks,omitempty"`
 
 	// Book
-	AuthorName      string   `json:"author_name,omitempty"`
-	AuthorBio       string   `json:"author_bio,omitempty"`
-	AuthorBirthDate string   `json:"author_birth_date,omitempty"`
-	AuthorDeathDate string   `json:"author_death_date,omitempty"`
-	ISBN            string   `json:"isbn,omitempty"`
-	PageCount       int      `json:"page_count,omitempty"`
-	Publisher       string   `json:"publisher,omitempty"`
-	PublishDate     string   `json:"publish_date,omitempty"`
-	Subjects        []string `json:"subjects,omitempty"`
-	Language        string   `json:"language,omitempty"`
-	SeriesName      string   `json:"series_name,omitempty"`
-	SeriesNum       int      `json:"series_num,omitempty"`
+	AuthorName        string            `json:"author_name,omitempty"`
+	AuthorCanonicalID string            `json:"author_canonical_id,omitempty"`
+	AuthorExternalIDs map[string]string `json:"author_external_ids,omitempty"`
+	AuthorBio         string            `json:"author_bio,omitempty"`
+	AuthorBirthDate   string            `json:"author_birth_date,omitempty"`
+	AuthorDeathDate   string            `json:"author_death_date,omitempty"`
+	ISBN              string            `json:"isbn,omitempty"`
+	PageCount         int               `json:"page_count,omitempty"`
+	Publisher         string            `json:"publisher,omitempty"`
+	PublishDate       string            `json:"publish_date,omitempty"`
+	Subjects          []string          `json:"subjects,omitempty"`
+	Language          string            `json:"language,omitempty"`
+	SeriesName        string            `json:"series_name,omitempty"`
+	SeriesNum         int               `json:"series_num,omitempty"`
 
 	// Music (extra)
 	ArtistBio            string       `json:"artist_bio,omitempty"`
@@ -156,23 +212,27 @@ type MediaDetail struct {
 
 	// Music (full coverage — mirrors heya.media ArtistDetail). Captured
 	// into the artists table via the migration in 00019_music_full_metadata.
-	ArtistAliases        []string              `json:"artist_aliases,omitempty"`
-	ArtistAnnotation     string                `json:"artist_annotation,omitempty"`
-	ArtistEndDate        string                `json:"artist_end_date,omitempty"`
-	ArtistEnded          bool                  `json:"artist_ended,omitempty"`
-	ArtistDeathday       string                `json:"artist_deathday,omitempty"`
-	ArtistListeners      int64                 `json:"artist_listeners,omitempty"`
-	ArtistPlaycount      int64                 `json:"artist_playcount,omitempty"`
-	ArtistPopularity     int                   `json:"artist_popularity,omitempty"`
-	ArtistTags           []string              `json:"artist_tags,omitempty"`
-	ArtistURLs           []URLEntry            `json:"artist_urls,omitempty"`
-	ArtistWikipedia      map[string]string     `json:"artist_wikipedia,omitempty"`
-	ArtistProfiles       map[string]string     `json:"artist_profiles,omitempty"`
-	ArtistImages         []ArtworkResult       `json:"artist_images,omitempty"`
-	ArtistGroups         []ArtistRelationEntry `json:"artist_groups,omitempty"`
-	ArtistMembers        []ArtistRelationEntry `json:"artist_members,omitempty"`
-	ArtistTopTracks      []TopTrackEntry       `json:"artist_top_tracks,omitempty"`
-	ArtistSimilarArtists []SimilarArtistEntry  `json:"artist_similar_artists,omitempty"`
+	ArtistAliases    []string              `json:"artist_aliases,omitempty"`
+	ArtistAnnotation string                `json:"artist_annotation,omitempty"`
+	ArtistEndDate    string                `json:"artist_end_date,omitempty"`
+	ArtistEnded      bool                  `json:"artist_ended,omitempty"`
+	ArtistDeathday   string                `json:"artist_deathday,omitempty"`
+	ArtistListeners  int64                 `json:"artist_listeners,omitempty"`
+	ArtistPlaycount  int64                 `json:"artist_playcount,omitempty"`
+	ArtistPopularity int                   `json:"artist_popularity,omitempty"`
+	ArtistTags       []string              `json:"artist_tags,omitempty"`
+	ArtistURLs       []URLEntry            `json:"artist_urls,omitempty"`
+	ArtistWikipedia  map[string]string     `json:"artist_wikipedia,omitempty"`
+	ArtistProfiles   map[string]string     `json:"artist_profiles,omitempty"`
+	ArtistImages     []ArtworkResult       `json:"artist_images,omitempty"`
+	ArtistGroups     []ArtistRelationEntry `json:"artist_groups,omitempty"`
+	ArtistMembers    []ArtistRelationEntry `json:"artist_members,omitempty"`
+	ArtistTopTracks  []TopTrackEntry       `json:"artist_top_tracks,omitempty"`
+	// ArtistTopTracksLoaded distinguishes an authoritative empty list from a
+	// failed dedicated endpoint read. The latter must retain the last known
+	// local ranking instead of silently clearing it.
+	ArtistTopTracksLoaded bool                 `json:"-"`
+	ArtistSimilarArtists  []SimilarArtistEntry `json:"artist_similar_artists,omitempty"`
 }
 
 // URLEntry is one external link on an artist ({type: "AllMusic", url: "..."}).
@@ -195,11 +255,14 @@ type ArtistRelationEntry struct {
 
 // TopTrackEntry is a popularity-ranked track from Last.fm.
 type TopTrackEntry struct {
-	Title     string `json:"title"`
-	MBID      string `json:"mbid,omitempty"`
-	Playcount int64  `json:"playcount,omitempty"`
-	Listeners int64  `json:"listeners,omitempty"`
-	URL       string `json:"url,omitempty"`
+	Rank              int    `json:"rank"`
+	Provider          string `json:"provider,omitempty"`
+	Title             string `json:"title"`
+	MBID              string `json:"mbid,omitempty"`
+	RecordingEntityID string `json:"recording_entity_id,omitempty"`
+	Playcount         int64  `json:"playcount,omitempty"`
+	Listeners         int64  `json:"listeners,omitempty"`
+	URL               string `json:"url,omitempty"`
 }
 
 // SimilarArtistEntry is one Last.fm / ListenBrainz similarity hit.
@@ -220,6 +283,7 @@ type ArtistCreditEntry struct {
 }
 
 type ArtworkResult struct {
+	ImageID   string  `json:"image_id,omitempty"`
 	URL       string  `json:"url"`
 	AssetType string  `json:"asset_type"`
 	Language  string  `json:"language,omitempty"`
@@ -232,6 +296,7 @@ type ArtworkResult struct {
 }
 
 type NetworkDetail struct {
+	CanonicalID string            `json:"canonical_id,omitempty"`
 	ExternalIDs map[string]string `json:"external_ids,omitempty"`
 	Name        string            `json:"name"`
 	LogoPath    string            `json:"logo_path,omitempty"`
@@ -239,6 +304,7 @@ type NetworkDetail struct {
 }
 
 type CreatorDetail struct {
+	CanonicalID string            `json:"canonical_id,omitempty"`
 	ExternalIDs map[string]string `json:"external_ids,omitempty"`
 	Name        string            `json:"name"`
 }
@@ -257,6 +323,7 @@ type ProfileImage struct {
 }
 
 type CastMember struct {
+	CanonicalID string            `json:"canonical_id,omitempty"`
 	ExternalIDs map[string]string `json:"external_ids,omitempty"`
 	Name        string            `json:"name"`
 	Character   string            `json:"character"`
@@ -269,6 +336,7 @@ type CastMember struct {
 }
 
 type CrewMember struct {
+	CanonicalID string            `json:"canonical_id,omitempty"`
 	ExternalIDs map[string]string `json:"external_ids,omitempty"`
 	Name        string            `json:"name"`
 	Job         string            `json:"job"`
@@ -304,12 +372,16 @@ type CertificationDetail struct {
 }
 
 type RecommendationDetail struct {
+	CanonicalID string            `json:"canonical_id,omitempty"`
 	ExternalIDs map[string]string `json:"external_ids,omitempty"`
 	Title       string            `json:"title"`
 	PosterPath  string            `json:"poster_path"`
 	MediaType   string            `json:"media_type"`
 	VoteAverage float64           `json:"vote_average"`
-	ReleaseDate string            `json:"release_date,omitempty"`
+	// ProviderScore is provider-native ranking evidence, not a normalized
+	// audience rating. It may legitimately be much greater than 10.
+	ProviderScore float64 `json:"provider_score,omitempty"`
+	ReleaseDate   string  `json:"release_date,omitempty"`
 }
 
 type CollectionDetail struct {
@@ -342,6 +414,7 @@ type ProductionCompanyDetail struct {
 }
 
 type SeasonDetail struct {
+	CanonicalID   string          `json:"canonical_id,omitempty"`
 	Number        int             `json:"number"`
 	Title         string          `json:"title"`
 	Overview      string          `json:"overview"`
@@ -357,6 +430,7 @@ type SeasonDetail struct {
 }
 
 type EpisodeDetail struct {
+	CanonicalID    string            `json:"canonical_id,omitempty"`
 	Number         int               `json:"number"`
 	Title          string            `json:"title"`
 	Titles         []TitleEntry      `json:"titles,omitempty"`
@@ -376,22 +450,26 @@ type EpisodeDetail struct {
 }
 
 type TrackDetail struct {
+	CanonicalID string `json:"canonical_id,omitempty"`
 	DiscNumber  int    `json:"disc_number"`
 	TrackNumber int    `json:"track_number"`
 	Title       string `json:"title"`
 	// Duration in seconds (heya.media's native unit).
-	Duration      int                 `json:"duration"`
-	ISRC          string              `json:"isrc,omitempty"`
-	RecordingMBID string              `json:"recording_mbid,omitempty"`
-	PreviewURL    string              `json:"preview_url,omitempty"`
-	ExternalIDs   map[string]string   `json:"external_ids,omitempty"`
-	Explicit      bool                `json:"explicit,omitempty"`
-	ArtistCredits []ArtistCreditEntry `json:"artist_credits,omitempty"`
+	Duration        int                 `json:"duration"`
+	ISRC            string              `json:"isrc,omitempty"`
+	RecordingMBID   string              `json:"recording_mbid,omitempty"`
+	PreviewURL      string              `json:"preview_url,omitempty"`
+	LyricsAvailable bool                `json:"lyrics_available,omitempty"`
+	ExternalIDs     map[string]string   `json:"external_ids,omitempty"`
+	Explicit        bool                `json:"explicit,omitempty"`
+	ArtistCredits   []ArtistCreditEntry `json:"artist_credits,omitempty"`
 }
 
 // AlbumEntry is one album as returned in payload.albums on an artist lookup.
 // Carries full track listing — no extra request needed to enrich tracks.
 type AlbumEntry struct {
+	CanonicalID string            `json:"canonical_id,omitempty"`
+	ReleaseID   string            `json:"release_id,omitempty"`
 	Title       string            `json:"title"`
 	Type        string            `json:"type"` // "album" | "single" | "ep" | "compilation"
 	ReleaseDate string            `json:"release_date,omitempty"`

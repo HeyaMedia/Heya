@@ -15,10 +15,12 @@ const fallbackModel = {
 }
 const models = computed(() => catalogData.data.value?.models?.length ? catalogData.data.value.models : [fallbackModel])
 const selectedModel = ref('z-image-turbo-q4')
+const selectedDevice = ref('auto')
 const downloading = ref(false)
 const prompt = ref('A cinematic retro-futurist media library floating in deep space, orange and teal light, detailed digital illustration, no text')
 const generating = ref(false)
 const generated = ref<{ url: string, duration_ms: number } | null>(null)
+const testError = ref('')
 const apiError = computed(() => statusData.error.value || catalogData.error.value)
 const dlActive = computed(() => status.value?.download_state === 'downloading')
 const ready = computed(() => !!status.value?.runtime_present && !!status.value?.model_present)
@@ -50,10 +52,14 @@ async function generateTest() {
   if (!prompt.value.trim() || generating.value) return
   generating.value = true
   generated.value = null
+  testError.value = ''
   try {
-    generated.value = await generateLocalImage({ prompt: prompt.value, model_id: selectedModel.value, backend: 'auto' })
+    generated.value = await generateLocalImage({ prompt: prompt.value, model_id: selectedModel.value, backend: 'auto', device: selectedDevice.value })
   } catch (e: any) {
-    flash.value = { kind: 'err', text: e?.data?.detail ?? e?.message ?? 'Image generation failed.' }
+    const detail = String(e?.data?.detail ?? e?.message ?? 'Image generation failed.')
+    testError.value = /OutOfDeviceMemory|Device memory allocation .* failed/i.test(detail)
+      ? 'The selected GPU ran out of memory. Choose Automatic (best fit) or another compute device and try again.'
+      : detail
   } finally { generating.value = false }
 }
 
@@ -74,6 +80,8 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
       description="Generate artwork locally with Z-Image Turbo through a managed stable-diffusion.cpp runtime. CPU-only servers are supported."
     />
 
+    <SettingsFlash :flash="flash" />
+
     <SettingsSection
       title="Local runtime"
       icon="cpu"
@@ -91,6 +99,20 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
         <p v-if="models[0]" class="field-note">
           {{ models[0].license }} · {{ models[0].ram_hint }} · {{ models[0].default_steps }} steps at {{ models[0].default_width }}×{{ models[0].default_height }}
         </p>
+      </SettingsField>
+
+      <SettingsField
+        label="Compute device"
+        description="Automatic checks free memory for every available device at generation time, places model components where they fit, and falls back to CPU when needed."
+        v-slot="{ fieldId }"
+      >
+        <select :id="fieldId" v-model="selectedDevice" class="sv2-select" :disabled="!ready">
+          <option value="auto">Automatic (best fit)</option>
+          <option v-for="device in status?.devices ?? []" :key="device.name" :value="device.name">
+            {{ device.description }} ({{ device.name }})
+          </option>
+        </select>
+        <p v-if="status?.device_error" class="dl-error">{{ status.device_error }}</p>
       </SettingsField>
 
       <div class="image-artifacts">
@@ -135,6 +157,10 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
           <Icon :name="generating ? 'spinner' : 'sparkle'" :size="13" />
           {{ generating ? 'Generating…' : 'Generate test image' }}
         </button>
+        <div v-if="testError" class="generation-error" role="alert" aria-live="assertive">
+          <Icon name="warning" :size="13" aria-hidden="true" />
+          <span>{{ testError }}</span>
+        </div>
         <p v-if="!ready" class="field-note">Fetch the artifacts before generating. CPU-only generation may take several minutes.</p>
         <div v-if="generated" class="generated-preview">
           <img :src="generated.url" alt="Generated Z-Image test result">
@@ -169,6 +195,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 .image-test-card { display: grid; gap: 10px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-2); }
 .test-textarea { resize: vertical; min-height: 72px; max-width: none; font-family: inherit; line-height: 1.5; }
 .image-test-card .sv2-btn { justify-self: start; }
+.generation-error { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent); border-radius: var(--r-sm); background: color-mix(in srgb, var(--bad) 8%, transparent); color: var(--bad); font-size: 12px; line-height: 1.45; }
 .generated-preview { display: grid; gap: 8px; color: var(--fg-3); font: 11px var(--font-mono); }
 .generated-preview img { width: min(100%, 512px); aspect-ratio: 1; object-fit: contain; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--bg-0); }
 @media (max-width: 620px) { .image-artifact-row { grid-template-columns: 64px minmax(0, 1fr); } .artifact-card { align-items: flex-start; flex-direction: column; } }

@@ -368,8 +368,8 @@ func (a *App) JFFileHasSegments(ctx context.Context, fileID int64) bool {
 }
 
 // JFSimilarLocalItemIDs returns local media_item ids recommended for the
-// given item, best-rated first (media_recommendations rows that matched a
-// library item by external ids).
+// given item, strongest provider recommendation first (media_recommendations
+// rows that matched a library item by external ids).
 func (a *App) JFSimilarLocalItemIDs(ctx context.Context, mediaItemID int64, limit int32) ([]int64, error) {
 	rows, err := sqlc.New(a.db).ListMediaRecommendationsWithLibrary(ctx, mediaItemID)
 	if err != nil {

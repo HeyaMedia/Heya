@@ -115,18 +115,22 @@ func LoadScannerEntityArtifactResult(ctx context.Context, db *pgxpool.Pool, arti
 	return artifact, result, nil
 }
 
-func MarkScannerEntityFailed(ctx context.Context, db *pgxpool.Pool, entityID int64, status string, err error) {
+func MarkScannerEntityFailed(ctx context.Context, db *pgxpool.Pool, entityID int64, status string, err error) error {
 	if db == nil || entityID == 0 || err == nil {
-		return
+		return nil
 	}
 	if status == "" {
 		status = "error"
 	}
-	_, _ = sqlc.New(db).MarkScannerEntityFailed(ctx, sqlc.MarkScannerEntityFailedParams{
+	_, markErr := sqlc.New(db).MarkScannerEntityFailed(ctx, sqlc.MarkScannerEntityFailedParams{
 		ID:           entityID,
 		Status:       status,
 		ErrorMessage: err.Error(),
 	})
+	if markErr != nil {
+		return fmt.Errorf("persist scanner entity failure: %w", markErr)
+	}
+	return nil
 }
 
 func persistScannerEntitiesForStage(ctx context.Context, db *pgxpool.Pool, lib sqlc.Library, opts Options, result Result, scanRunID int64, stage string) ([]ScannerEntityRef, error) {

@@ -199,7 +199,7 @@ const isDefaultSections = computed(
             <div class="ambient-row-title">Show unavailable recommendations</div>
             <div class="ambient-row-desc">
               "More Like This" normally lists only titles in your library. On,
-              it also shows the rest — they open on heya.media in a new tab.
+              it also shows the rest — they open on the public metadata provider in a new tab.
             </div>
           </div>
           <AppSwitch v-model="showUnavailableRecs" size="md" aria-label="Show unavailable recommendations" />

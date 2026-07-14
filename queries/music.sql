@@ -399,14 +399,31 @@ WHERE id = $1;
 -- name: ReplaceArtistTopTracks :exec
 -- Top tracks are a small ranked list per artist. We replace-on-refresh
 -- rather than upsert because the rank ordering is what we actually
--- care about — partial updates would leave stale rows interleaved with
--- new ones. Caller is expected to issue this DELETE followed by N inserts
--- inside the same transaction.
-DELETE FROM artist_top_tracks WHERE artist_id = $1;
-
--- name: CreateArtistTopTrack :exec
-INSERT INTO artist_top_tracks (artist_id, rank, title, mbid, playcount, listeners, url)
-VALUES ($1, $2, $3, $4, $5, $6, $7);
+-- care about. The data-modifying CTE makes deletion + replacement one SQL
+-- statement, so a failed decode/insert cannot expose a partial ranking.
+WITH deleted AS (
+  DELETE FROM artist_top_tracks WHERE artist_id = sqlc.arg(artist_id)
+), incoming AS (
+  SELECT *
+  FROM jsonb_to_recordset(sqlc.arg(tracks)::jsonb) AS value(
+    rank integer,
+    provider text,
+    provider_rank integer,
+    title text,
+    mbid text,
+    recording_entity_id text,
+    playcount bigint,
+    listeners bigint,
+    url text
+  )
+)
+INSERT INTO artist_top_tracks (
+  artist_id, rank, provider, provider_rank, title, mbid,
+  recording_entity_id, playcount, listeners, url
+)
+SELECT sqlc.arg(artist_id), rank, provider, provider_rank, title, mbid,
+       NULLIF(recording_entity_id, '')::uuid, playcount, listeners, url
+FROM incoming;
 
 -- name: ReplaceArtistSimilarArtists :exec
 -- Same replace-on-refresh story as top_tracks. The match scores and
@@ -441,8 +458,9 @@ UPDATE albums SET
 WHERE id = $1;
 
 -- name: UpdateTrackExtendedMetadata :exec
--- The post-00019 track columns. external_ids / isrc / recording_mbid are
--- the keys that unlock LRCLIB lyrics lookups + cross-service deep links.
+-- The post-00019 track columns. external_ids / isrc / recording_mbid remain
+-- compatibility evidence; lyrics_available comes from HeyaMetadata's batched
+-- canonical release projection and must not trigger per-track probes.
 -- preview_url is the iTunes/Deezer 30-second sample for hover previews.
 UPDATE tracks SET
     external_ids   = $2,
@@ -450,7 +468,8 @@ UPDATE tracks SET
     recording_mbid = CASE WHEN $4::text != '' THEN $4 ELSE recording_mbid END,
     preview_url    = CASE WHEN $5::text != '' THEN $5 ELSE preview_url END,
     explicit       = $6,
-    artist_credits = $7
+    artist_credits = $7,
+    lyrics_available = $8
 WHERE id = $1;
 
 -- name: ListTracksByAlbum :many
@@ -475,6 +494,7 @@ SELECT t.id,
        t.title,
        t.duration,
        t.lyrics_path,
+       t.lyrics_available,
        al.title          AS album_title,
        al.slug           AS album_slug,
        al.year           AS album_year,
@@ -1130,7 +1150,7 @@ DELETE FROM artists WHERE id = sqlc.arg(id);
 -- artist's local tracks in Go so it can use kagome-backed romanization
 -- (kana/kanji → romaji) for the title fallback. SQL alone can't do that
 -- and pg_trgm matches CJK poorly, so the join lives in service code.
-SELECT rank, title, mbid, playcount, listeners, url
+SELECT rank, provider, provider_rank, title, mbid, recording_entity_id, playcount, listeners, url
 FROM artist_top_tracks
 WHERE artist_id = sqlc.arg(artist_id)
 ORDER BY rank ASC
