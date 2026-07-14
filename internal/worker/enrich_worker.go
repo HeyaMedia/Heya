@@ -186,14 +186,14 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 
 	// People + extras come from the same StoreRichMetadata call. Skip when a
 	// prior attempt already enriched people and this isn't a forced refresh —
-	// re-running rewrites (and, lacking dedup, can duplicate) cast/crew/keywords.
-	// Force does a full refresh. We stamp both timestamps even though one call
-	// does the work, so the UI can surface them independently if we ever split.
+	// Force does a full refresh. Cast and crew are authoritative replacements;
+	// the remaining extras are conflict-idempotent. We stamp both timestamps
+	// even though one call does the work, so the UI can surface them independently
+	// if we ever split.
 	if job.Args.Force || !item.PeopleEnrichedAt.Valid {
-		// A partial rich write (some cast rows failed, person creates errored)
-		// must not be stamped done — mark the item failed so the refresh-stale
-		// sweep re-drives it; the fan-out is ON CONFLICT-idempotent, so the
-		// retry fills exactly the gaps.
+		// A partial rich write must not be stamped done — mark the item failed so
+		// the refresh-stale sweep re-drives it. The credit replacement is atomic
+		// and the remaining fan-out is conflict-idempotent, so retry is safe.
 		if err := w.Matcher.StoreRichMetadata(ctx, item.ID, detail); err != nil {
 			return w.markFailed(ctx, q, item.ID, fmt.Sprintf("store rich metadata: %v", err))
 		}

@@ -225,11 +225,11 @@ func (m *Matcher) lockedFields(ctx context.Context, mediaItemID int64) map[strin
 }
 
 // richErrs accumulates non-benign failures across storeRichMetadata's fan-out.
-// The fan-out keeps going on individual failures (partial rich metadata beats
-// none, and every insert is idempotent via ON CONFLICT), but the joined summary
-// stops the caller from stamping the enrich component done — so a degraded
-// cast/crew set gets retried instead of frozen. Capped: a dead connection
-// would otherwise collect thousands of identical lines.
+// The fan-out keeps going on individual failures where doing so is safe, but
+// the joined summary stops the caller from stamping the enrich component done.
+// Cast and crew are handled specially: their current projection is replaced
+// atomically only after every referenced person has been resolved. Capped: a
+// dead connection would otherwise collect thousands of identical lines.
 type richErrs struct {
 	errs   []error
 	total  int
@@ -374,6 +374,72 @@ func sortedNonEmptyExternalIDKeys(ids map[string]string) []string {
 	return keys
 }
 
+// replaceMediaPersonCredits treats one MediaDetail as the authoritative current
+// cast and crew projection. Older provider-shaped person rows may legitimately
+// remain in people, but their stale links to this title must not survive a
+// canonical HeyaMetadata refresh. The narrow transaction prevents readers from
+// observing an empty or partially rebuilt list when StoreRichMetadata is called
+// through the pool-backed worker matcher. Callers already inside a transaction
+// reuse it so the replacement stays part of the enclosing scanner apply.
+func (m *Matcher) replaceMediaPersonCredits(ctx context.Context, mediaItemID int64, resolved []resolvedPersonCredit) error {
+	replace := func(q *sqlc.Queries) error {
+		if err := q.DeleteMediaCastByItem(ctx, mediaItemID); err != nil {
+			return fmt.Errorf("clear prior cast: %w", err)
+		}
+		if err := q.DeleteMediaCrewByItem(ctx, mediaItemID); err != nil {
+			return fmt.Errorf("clear prior crew: %w", err)
+		}
+
+		for _, item := range resolved {
+			credit, person := item.credit, item.person
+			if credit.isCast {
+				if err := q.CreateMediaCast(ctx, sqlc.CreateMediaCastParams{
+					MediaItemID:  mediaItemID,
+					PersonID:     person.ID,
+					Character:    credit.character,
+					DisplayOrder: int32(credit.order),
+					Gender:       int32(credit.gender),
+					Source:       credit.source,
+				}); err != nil {
+					return fmt.Errorf("cast %q: %w", credit.name, err)
+				}
+				continue
+			}
+			if err := q.CreateMediaCrew(ctx, sqlc.CreateMediaCrewParams{
+				MediaItemID: mediaItemID,
+				PersonID:    person.ID,
+				Job:         credit.job,
+				Department:  credit.department,
+				Gender:      int32(credit.gender),
+				Source:      credit.source,
+			}); err != nil {
+				return fmt.Errorf("crew %q: %w", credit.name, err)
+			}
+		}
+		return nil
+	}
+
+	if m.inTx {
+		return replace(m.q)
+	}
+	if m.db == nil {
+		return errors.New("replace cast and crew: matcher has no database pool")
+	}
+
+	tx, err := m.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin cast and crew replacement: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := replace(m.q.WithTx(tx)); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit cast and crew replacement: %w", err)
+	}
+	return nil
+}
+
 func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *metadata.MediaDetail) error {
 	var re richErrs
 	credits := collectRichPersonCredits(d)
@@ -460,35 +526,13 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 		}
 	}
 
-	for _, item := range resolved {
-		credit, person := item.credit, item.person
-		if credit.isCast {
-			if err := m.q.CreateMediaCast(ctx, sqlc.CreateMediaCastParams{
-				MediaItemID:  mediaItemID,
-				PersonID:     person.ID,
-				Character:    credit.character,
-				DisplayOrder: int32(credit.order),
-				Gender:       int32(credit.gender),
-				Source:       credit.source,
-			}); err != nil {
-				if m.richFailure(&re, fmt.Errorf("cast %q: %w", credit.name, err)) {
-					return re.result()
-				}
-			}
-			continue
-		}
-		if err := m.q.CreateMediaCrew(ctx, sqlc.CreateMediaCrewParams{
-			MediaItemID: mediaItemID,
-			PersonID:    person.ID,
-			Job:         credit.job,
-			Department:  credit.department,
-			Gender:      int32(credit.gender),
-			Source:      credit.source,
-		}); err != nil {
-			if m.richFailure(&re, fmt.Errorf("crew %q: %w", credit.name, err)) {
-				return re.result()
-			}
-		}
+	// Do not destroy the prior complete projection when even one current person
+	// failed to resolve, profile, or bind. The caller will retry this component.
+	if err := re.result(); err != nil {
+		return err
+	}
+	if err := m.replaceMediaPersonCredits(ctx, mediaItemID, resolved); err != nil {
+		return fmt.Errorf("replace cast and crew: %w", err)
 	}
 
 	seenKeywords := map[string]bool{}
@@ -1322,7 +1366,8 @@ func (m *Matcher) bindCanonical(ctx context.Context, localKind string, localID i
 // certifications, recommendations, and collections for a media item. Called by
 // the worker pipeline (EnrichMediaItemWorker) and the metadata editor. A non-nil
 // error means at least one component failed to persist — the caller must not
-// stamp the enrich component done (the fan-out is idempotent, so a retry heals).
+// stamp the enrich component done. Cast and crew are replaced atomically; the
+// remaining fan-out is idempotent, so a retry heals a partial extras write.
 func (m *Matcher) StoreRichMetadata(ctx context.Context, mediaItemID int64, detail *metadata.MediaDetail) error {
 	return m.storeRichMetadata(ctx, mediaItemID, detail)
 }

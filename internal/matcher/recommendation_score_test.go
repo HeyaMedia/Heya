@@ -33,7 +33,7 @@ func TestRecommendationProviderScoreDoesNotOverflowVoteAverage(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	m := &Matcher{q: q}
+	m := &Matcher{q: q, inTx: true}
 	err = m.storeRichMetadata(ctx, item.ID, &metadata.MediaDetail{Recommendations: []metadata.RecommendationDetail{{
 		Title: "Better Call Saul", MediaType: "tv", ProviderScore: 164.9115,
 	}}})
