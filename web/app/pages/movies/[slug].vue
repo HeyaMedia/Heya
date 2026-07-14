@@ -34,7 +34,16 @@
             <Chip v-if="detail.movie?.runtime_minutes">{{ formatRuntime(detail.movie.runtime_minutes) }}</Chip>
           </div>
 
-          <h1 class="detail-title">{{ detail.preferred_title || detail.media_item.title }}</h1>
+          <h1 v-if="heroLogoUrl && !heroLogoFailed" class="detail-title detail-title-art">
+            <NuxtImg
+              :src="heroLogoUrl"
+              :alt="detail.preferred_title || detail.media_item.title"
+              :width="600"
+              class="detail-title-logo"
+              @error="heroLogoFailed = true"
+            />
+          </h1>
+          <h1 v-else class="detail-title">{{ detail.preferred_title || detail.media_item.title }}</h1>
           <p v-if="detail.movie?.tagline" class="detail-tagline">{{ detail.movie.tagline }}</p>
 
           <div class="hero-meta-row" v-if="rating || detail.movie?.release_date">
@@ -310,6 +319,16 @@ const detailQuery = useQuery(() => mediaDetailQuery(slug.value))
 await waitForQuery(detailQuery)
 const detail = computed<MediaDetail | null>(() => detailQuery.data.value ?? null)
 const loading = computed(() => detailQuery.isPending.value)
+
+// The home hero uses the logo asset as its title treatment. Clearart is
+// transparent decorative artwork rather than a reliable wordmark, so the
+// textual title remains the fallback when no logo exists or loading fails.
+const heroLogoFailed = ref(false)
+const heroLogoUrl = computed(() => {
+  if (!detail.value?.media_item || !detail.value.assets?.some(asset => asset.asset_type === 'logo')) return null
+  return useImageUrl(detail.value.media_item, 'logo')
+})
+watch(heroLogoUrl, () => { heroLogoFailed.value = false })
 
 // Redirect on confirmed failure rather than every transient error.
 watch(detailQuery.error, (err) => { if (err) navigateTo('/movies') }, { immediate: true })
@@ -700,6 +719,13 @@ watch(detail, async (d) => {
 
 .detail-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .detail-title { font-size: 44px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.05; margin: 0 0 4px; }
+.detail-title-art { line-height: 0; min-height: 72px; display: flex; align-items: center; }
+.detail-title-logo {
+  display: block; width: auto; height: auto;
+  max-width: min(560px, 100%); max-height: 128px;
+  object-fit: contain; object-position: left center;
+  filter: drop-shadow(0 3px 18px rgba(0, 0, 0, 0.6));
+}
 .detail-tagline { font-style: italic; color: var(--fg-2); font-size: 15px; margin: 4px 0 8px; }
 .hero-meta-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg-2); margin-top: 8px; }
 .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--fg-3); }

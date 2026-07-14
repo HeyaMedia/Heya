@@ -29,7 +29,16 @@
             <Chip v-if="detail.tv_series?.status">{{ detail.tv_series.status }}</Chip>
           </div>
 
-          <h1 class="detail-title">{{ detail.preferred_title || detail.media_item.title }}</h1>
+          <h1 v-if="heroLogoUrl && !heroLogoFailed" class="detail-title detail-title-art">
+            <NuxtImg
+              :src="heroLogoUrl"
+              :alt="detail.preferred_title || detail.media_item.title"
+              :width="600"
+              class="detail-title-logo"
+              @error="heroLogoFailed = true"
+            />
+          </h1>
+          <h1 v-else class="detail-title">{{ detail.preferred_title || detail.media_item.title }}</h1>
 
           <div class="hero-meta-row" v-if="rating">
             <Icon name="star" :size="14" style="color: var(--gold)" />
@@ -302,6 +311,16 @@ const loading = computed(() => detailQuery.isPending.value)
 watch(detailQuery.error, (err) => { if (err) navigateTo('/tv') }, { immediate: true })
 const showMetadataEditor = ref(false)
 const videoModal = ref<{ key: string; title: string } | null>(null)
+
+// Match the home hero: a logo is title artwork, while clearart remains a
+// separate decorative asset. The detail payload tells us whether a logo row
+// exists, so pages without one keep their text heading without a probe/404.
+const heroLogoFailed = ref(false)
+const heroLogoUrl = computed(() => {
+  if (!detail.value?.media_item || !detail.value.assets?.some(asset => asset.asset_type === 'logo')) return null
+  return useImageUrl(detail.value.media_item, 'logo')
+})
+watch(heroLogoUrl, () => { heroLogoFailed.value = false })
 
 // Live refresh — a debounced re-enrich folding in new seasons/episodes (or a
 // metadata edit) lands server-side while this page is open; without this the
@@ -757,7 +776,16 @@ async function loadRecommendationContextState() {
   } catch { /* ignore */ }
 }
 
-function seasonPosterUrl(s: any) {
+function seasonPosterUrl(s: NonNullable<MediaDetail['seasons']>[number]) {
+  const poster = s.poster_path?.trim()
+  if (poster) {
+    if (/^https?:\/\//i.test(poster) || poster.startsWith('/api/')) return poster
+    // Older metadata rows may still carry a provider-relative image path.
+    if (poster.startsWith('/')) return `/api/tmdb/image${poster}?size=w500`
+    return poster
+  }
+  // A missing season poster deliberately falls back to the show poster via
+  // the existing image endpoint rather than rendering a broken card.
   return `/api/media/${useMediaImageKey(detail.value?.media_item)}/image/poster?label=season-${s.season_number}`
 }
 
@@ -805,6 +833,13 @@ watch(detail, async (d) => {
 
 .detail-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .detail-title { font-size: 44px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.05; margin: 0 0 4px; }
+.detail-title-art { line-height: 0; min-height: 72px; display: flex; align-items: center; }
+.detail-title-logo {
+  display: block; width: auto; height: auto;
+  max-width: min(560px, 100%); max-height: 128px;
+  object-fit: contain; object-position: left center;
+  filter: drop-shadow(0 3px 18px rgba(0, 0, 0, 0.6));
+}
 .hero-meta-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg-2); margin-top: 8px; }
 .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--fg-3); }
 .detail-actions { display: flex; align-items: center; gap: 10px; margin: 16px 0; }
