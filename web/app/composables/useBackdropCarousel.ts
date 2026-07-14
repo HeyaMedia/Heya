@@ -66,7 +66,8 @@ export function useBackdropCarousel(detail: Ref<MediaDetail | null>, opts: Backd
     if (backdropAssets.value.length > 0) {
       const asset = backdropAssets.value[idx % backdropAssets.value.length]
       if (!asset) return null
-      return `/api/media/${useMediaImageKey(detail.value?.media_item)}/image/backdrop?sort=${asset.sort_order}`
+      const media = detail.value?.media_item
+      return withMediaImageRevision(`/api/media/${useMediaImageKey(media)}/image/backdrop?sort=${asset.sort_order}`, media)
     }
     return detail.value ? useBackdropUrl(detail.value.media_item) : null
   }

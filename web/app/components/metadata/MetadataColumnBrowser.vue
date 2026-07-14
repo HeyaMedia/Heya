@@ -37,7 +37,7 @@
                 @click.stop="toggleItem(item)"
               />
               <span v-else class="mtb-chevron-spacer" />
-              <NuxtImg
+              <LoadingImage
                 v-if="item.poster_path"
                 :src="usePosterUrl(item) ?? undefined"
                 class="mtb-thumb"

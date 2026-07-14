@@ -2836,6 +2836,7 @@ export type MatchCandidate = {
 export type MediaAsset = {
     aspect: string;
     asset_type: string;
+    content_hash: string;
     created_at: Timestamptz;
     file_size: number;
     height: number;
@@ -2849,6 +2850,7 @@ export type MediaAsset = {
     score: Numeric;
     sort_order: number;
     source: string;
+    visual_hash: string;
     width: number;
 };
 
@@ -14995,6 +14997,33 @@ export type GetWatchedEpisodesResponses = {
 };
 
 export type GetWatchedEpisodesResponse = GetWatchedEpisodesResponses[keyof GetWatchedEpisodesResponses];
+
+export type MetadataImageData = {
+    body?: never;
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/metadata/images/{id}';
+};
+
+export type MetadataImageErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type MetadataImageError = MetadataImageErrors[keyof MetadataImageErrors];
+
+export type MetadataImageResponses = {
+    /**
+     * Binary response — content type set per endpoint
+     */
+    200: Blob | File;
+};
+
+export type MetadataImageResponse = MetadataImageResponses[keyof MetadataImageResponses];
 
 export type ListMusicAlbumsData = {
     body?: never;

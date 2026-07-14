@@ -1412,6 +1412,12 @@ func (a *App) UploadMediaAsset(ctx context.Context, mediaItemID int64, file io.R
 	if err != nil {
 		return UploadMediaAssetResult{Path: localPath}, fmt.Errorf("record uploaded image: %w", err)
 	}
+	if representative, _, fingerprintErr := worker.MaterializeMediaAsset(ctx, a.db, asset, localPath); fingerprintErr != nil {
+		return UploadMediaAssetResult{Path: localPath}, fmt.Errorf("fingerprint uploaded image: %w", fingerprintErr)
+	} else {
+		asset = representative
+		localPath = representative.LocalPath
+	}
 	if assetType == "poster" && label == "" {
 		_ = q.UpdateMediaItemPosterPath(ctx, sqlc.UpdateMediaItemPosterPathParams{ID: mediaItemID, PosterPath: localPath})
 	} else if assetType == "backdrop" && label == "" && asset.SortOrder == 0 {

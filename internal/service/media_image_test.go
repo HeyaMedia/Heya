@@ -1,9 +1,16 @@
 package service
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"sync/atomic"
 	"testing"
 
+	"github.com/karbowiak/heya/internal/config"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/images"
 )
 
 func asset(at, label string, sort int, local, remote string) sqlc.MediaAsset {
@@ -83,5 +90,40 @@ func TestImageCacheFilename(t *testing.T) {
 		if got := imageCacheFilename(c.at, c.sort, c.url); got != c.want {
 			t.Errorf("imageCacheFilename(%q,%d,%q) = %q, want %q", c.at, c.sort, c.url, got, c.want)
 		}
+	}
+}
+
+func TestMetadataImagePathWaitsForCanonicalBytes(t *testing.T) {
+	t.Parallel()
+	var requests atomic.Int32
+	metadataServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte("canonical-image"))
+	}))
+	defer metadataServer.Close()
+
+	dataDir := t.TempDir()
+	app := &App{
+		config:     &config.Config{HeyaMetadataURL: config.Field[string]{Value: metadataServer.URL}},
+		downloader: images.NewDownloader(dataDir, images.TrustedSource{BaseURL: metadataServer.URL}),
+	}
+	path, ok := app.GetMetadataImagePath(context.Background(), "00000000-0000-4000-8000-000000000001")
+	if !ok {
+		t.Fatal("canonical metadata image was not materialized")
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "canonical-image" {
+		t.Fatalf("stored body = %q", body)
+	}
+	if requests.Load() != 2 {
+		t.Fatalf("metadata requests = %d, want 2", requests.Load())
 	}
 }

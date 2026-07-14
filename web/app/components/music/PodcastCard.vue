@@ -4,7 +4,7 @@
     class="pc-card card-tile"
   >
     <div class="pc-art" :class="{ 'pc-art-fallback': !podcast.artwork_url }">
-      <NuxtImg
+      <LoadingImage
         v-if="podcast.artwork_url"
         :src="podcast.artwork_url"
         :alt="podcast.title"

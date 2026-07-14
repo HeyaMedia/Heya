@@ -7,7 +7,7 @@
     @focusout="onFocus($event, false)"
   >
     <div class="newin-bg" :class="{ 'ambient-extended': ambientEnabled }">
-      <NuxtImg
+      <LoadingImage
         v-if="bgUrl"
         :src="bgUrl"
         :width="1920"
@@ -29,7 +29,7 @@
         :to="spotlight.to"
         class="newin-poster"
       >
-        <NuxtImg
+        <LoadingImage
           :key="spotlight.key"
           :src="spotlight.art"
           :width="620"

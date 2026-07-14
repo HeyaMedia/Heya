@@ -28,7 +28,7 @@
 
         <div class="ch-hero-body page-pad">
           <div v-if="collection.poster_path" class="ch-poster">
-            <NuxtImg :src="collection.poster_path" alt="" @error="onImgError" />
+            <LoadingImage :src="collection.poster_path" alt="" @error="onImgError" />
           </div>
 
           <div class="ch-info">
@@ -91,7 +91,7 @@
           >
             <div class="ch-row-idx">{{ i + 1 }}</div>
             <div class="ch-row-poster">
-              <NuxtImg v-if="partPoster(p)" :src="partPoster(p)" alt="" @error="onImgError" />
+              <LoadingImage v-if="partPoster(p)" :src="partPoster(p)" alt="" @error="onImgError" />
             </div>
             <div class="ch-row-main">
               <div class="ch-row-title">

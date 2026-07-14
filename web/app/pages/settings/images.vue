@@ -163,7 +163,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
         </div>
         <p v-if="!ready" class="field-note">Fetch the artifacts before generating. CPU-only generation may take several minutes.</p>
         <div v-if="generated" class="generated-preview">
-          <img :src="generated.url" alt="Generated Z-Image test result">
+          <LoadingImage :src="generated.url" alt="Generated Z-Image test result" />
           <span>{{ (generated.duration_ms / 1000).toFixed(1) }} seconds</span>
         </div>
       </div>

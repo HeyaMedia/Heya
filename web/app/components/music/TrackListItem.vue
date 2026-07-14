@@ -29,7 +29,7 @@
           <template v-else-if="col.kind === 'art'">
             <VuMeter v-if="vuMeterIn === 'art' && active" :playing="playing" />
             <template v-else>
-              <NuxtImg :src="track.poster ?? ''" :alt="track.album" :width="112" :quality="80" densities="1x 2x" loading="lazy" />
+              <LoadingImage :src="track.poster ?? ''" :alt="track.album" :width="112" :quality="80" densities="1x 2x" loading="lazy" />
               <div v-if="track.available !== false" class="tl-art-play"><Icon name="play" :size="artPlayIconSize" /></div>
               <div v-else class="tl-art-missing" title="Missing on disk"><Icon name="trash" :size="artPlayIconSize" /></div>
             </template>
@@ -86,7 +86,7 @@
 
       <template v-else>
         <div class="tl-phone-thumb">
-          <NuxtImg v-if="hasArt" :src="track.poster ?? ''" :alt="track.album" :width="112" :quality="80" densities="1x 2x" loading="lazy" />
+          <LoadingImage v-if="hasArt" :src="track.poster ?? ''" :alt="track.album" :width="112" :quality="80" densities="1x 2x" loading="lazy" />
           <span v-else class="tl-phone-idx">{{ displayIndex(index) }}</span>
         </div>
         <div class="tl-phone-main">

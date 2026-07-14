@@ -9,18 +9,23 @@
           Find
         </button>
       </div>
+      <div v-if="pendingSelection?.assetType === group.type" class="mei-progress" role="status" aria-live="polite">
+        <Icon name="loading" :size="14" />
+        <span>Applying selected {{ singularTypeLabel(group.type).toLowerCase() }}… It will update everywhere as soon as Heya finishes downloading it.</span>
+      </div>
       <div class="mei-grid">
         <div v-if="!group.assets.length" class="mei-empty-slot">No image selected</div>
-        <div v-for="(asset, assetIndex) in group.assets" :key="asset.id" class="mei-card" :class="{ 'mei-card-wide': wideTypes.has(asset.asset_type) }">
+        <div v-for="(asset, assetIndex) in group.assets" :key="asset.id" class="mei-card" :class="{ 'mei-card-wide': wideTypes.has(asset.asset_type), 'is-pending': asset._pending }">
           <div class="mei-img-wrap" :style="{ aspectRatio: wideTypes.has(asset.asset_type) ? '16/9' : '2/3' }">
-            <NuxtImg :src="imageUrl(asset)" class="mei-img" :width="240" :quality="80" densities="1x 2x" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
-            <div v-if="assetIndex === 0" class="mei-primary-badge">Primary</div>
-            <div class="mei-overlay">
+            <LoadingImage :src="asset._pending ? asset.remote_url : imageUrl(asset)" :persistent="!!asset._pending" class="mei-img" :width="240" :quality="80" densities="1x 2x" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
+            <div v-if="asset._pending" class="mei-primary-badge"><Icon name="loading" :size="11" /> Applying</div>
+            <div v-else-if="assetIndex === 0" class="mei-primary-badge">Primary</div>
+            <div v-if="!asset._pending" class="mei-overlay">
               <button v-if="assetIndex !== 0" class="mei-btn" title="Set as primary" @click="setPrimary(asset)">
-                <Icon name="star" :size="14" />
+                <Icon :name="busyAssetId === asset.id ? 'loading' : 'star'" :size="14" />
               </button>
               <button class="mei-btn mei-btn-danger" title="Delete" @click="deleteAsset(asset)">
-                <Icon name="trash" :size="14" />
+                <Icon :name="busyAssetId === asset.id ? 'loading' : 'trash'" :size="14" />
               </button>
             </div>
           </div>
@@ -67,12 +72,13 @@
             :key="i"
             type="button"
             class="mei-find-card"
-            :class="{ 'mei-find-card-wide': wideTypes.has(findModalType!) }"
+            :class="{ 'mei-find-card-wide': wideTypes.has(findModalType!), 'is-disabled': !!pendingSelection }"
+            :disabled="!!pendingSelection"
             :aria-label="`Add poster option ${i + 1}`"
             @click="downloadArt(art)"
           >
             <div class="mei-find-img-wrap" :style="{ aspectRatio: wideTypes.has(findModalType!) ? '16/9' : '2/3' }">
-              <NuxtImg :src="art.url" :alt="`Poster option ${i + 1}`" class="mei-find-img" />
+              <LoadingImage :src="art.url" :persistent="true" :alt="`Poster option ${i + 1}`" class="mei-find-img" />
               <div class="mei-find-source">Heya</div>
               <div class="mei-find-dl"><Icon name="plus" :size="16" /></div>
             </div>
@@ -94,12 +100,24 @@ const props = defineProps<{
   assetLabel?: string
 }>()
 
-const emit = defineEmits<{ refresh: [] }>()
+interface ArtworkActivity {
+  assetType: string
+  url: string
+}
+
+const emit = defineEmits<{
+  refresh: []
+  pending: [activity: ArtworkActivity | null]
+  ready: [activity: ArtworkActivity]
+}>()
 
 const findModalType = ref<string | null>(null)
 const findLoading = ref(false)
 const findResults = ref<ArtworkSearchResult[]>([])
 const uploadType = ref('poster')
+const pendingSelection = ref<(ArtworkActivity & { label: string, startedAt: number }) | null>(null)
+const busyAssetId = ref<number | null>(null)
+let pendingGeneration = 0
 const { toast } = useToast()
 
 const wideTypes = new Set(['backdrop', 'banner', 'still'])
@@ -149,11 +167,21 @@ const groups = computed(() => {
     if (!map.has(t)) map.set(t, [])
     map.get(t)!.push(a)
   }
-  return allowedTypes.value.map(type => ({
-    type,
-    label: typeLabels.value[type] || type,
-    assets: map.get(type) || [],
-  }))
+  return allowedTypes.value.map(type => {
+    const groupAssets = [...(map.get(type) || [])]
+    if (pendingSelection.value?.assetType === type) {
+      groupAssets.unshift({
+        id: `pending-${pendingSelection.value.startedAt}`,
+        asset_type: type,
+        remote_url: pendingSelection.value.url,
+        source: 'remote',
+        language: '',
+        sort_order: 0,
+        _pending: true,
+      })
+    }
+    return { type, label: typeLabels.value[type] || type, assets: groupAssets }
+  })
 })
 
 const findGrouped = computed(() => {
@@ -183,7 +211,11 @@ function imageUrl(asset: any) {
   if (!key) return ''
   const params = new URLSearchParams({ sort: String(asset.sort_order) })
   if (asset.label) params.set('label', asset.label)
-  return `/api/media/${key}/image/${asset.asset_type}?${params}`
+  if (asset.content_hash) params.set('content', asset.content_hash.slice(0, 16))
+  return withMediaImageRevision(`/api/media/${key}/image/${asset.asset_type}?${params}`, {
+    id: props.mediaId,
+    public_id: props.mediaPublicId,
+  })
 }
 
 function assetSourceLabel(asset: any) {
@@ -216,16 +248,24 @@ async function openFindModal(type: string) {
 }
 
 async function setPrimary(asset: any) {
+  if (busyAssetId.value != null) return
+  busyAssetId.value = asset.id
+  const previewURL = imageUrl(asset)
+  emit('pending', { assetType: asset.asset_type, url: previewURL })
   try {
     const { $heya } = useNuxtApp()
     await $heya('/api/media/{id}/assets/{asset_id}/primary', {
       method: 'PUT',
       path: { id: props.mediaId, asset_id: asset.id },
     })
+    emit('ready', { assetType: asset.asset_type, url: previewURL })
     emit('refresh')
     toast.ok('Primary image updated')
   } catch (error) {
+    emit('pending', null)
     toast.err(apiErrorMessage(error, 'Could not set the primary image'), { duration: 7000 })
+  } finally {
+    busyAssetId.value = null
   }
 }
 
@@ -236,20 +276,34 @@ async function deleteAsset(asset: any) {
     destructive: true,
   })
   if (!ok) return
+  if (busyAssetId.value != null) return
+  busyAssetId.value = asset.id
   try {
     const { $heya } = useNuxtApp()
     await $heya('/api/media/{id}/assets/{asset_id}', {
       method: 'DELETE',
       path: { id: props.mediaId, asset_id: asset.id },
     })
+    emit('ready', { assetType: asset.asset_type, url: '' })
     emit('refresh')
     toast.ok('Image deleted')
   } catch (error) {
     toast.err(apiErrorMessage(error, 'Could not delete the image'), { duration: 7000 })
+  } finally {
+    busyAssetId.value = null
   }
 }
 
 async function downloadArt(art: ArtworkSearchResult) {
+  if (pendingSelection.value) return
+  const activity = {
+    assetType: art.asset_type || findModalType.value || 'poster',
+    url: art.url,
+    label: props.assetLabel || '',
+    startedAt: Date.now(),
+  }
+  pendingSelection.value = activity
+  emit('pending', activity)
   try {
     const { $heya } = useNuxtApp()
     await $heya('/api/media/{id}/assets/download', {
@@ -258,13 +312,44 @@ async function downloadArt(art: ArtworkSearchResult) {
       body: { url: art.url, asset_type: art.asset_type || findModalType.value, label: props.assetLabel || '' } as any,
     })
     findModalType.value = null
-    toast.info('Image download queued')
-    setTimeout(() => emit('refresh'), 1500)
-    setTimeout(() => emit('refresh'), 5000)
-    setTimeout(() => emit('refresh'), 15000)
-    setTimeout(() => emit('refresh'), 30000)
+    toast.info('Selected image is downloading; this page will update automatically')
+    void waitForDownloadedAsset(activity, ++pendingGeneration)
   } catch (error) {
+    pendingSelection.value = null
+    emit('pending', null)
     toast.err(apiErrorMessage(error, 'Could not queue the image download'), { duration: 7000 })
+  }
+}
+
+async function waitForDownloadedAsset(activity: ArtworkActivity & { label: string, startedAt: number }, generation: number) {
+  const { $heya } = useNuxtApp()
+  let attempt = 0
+  while (generation === pendingGeneration && Date.now() - activity.startedAt < 24 * 60 * 60 * 1000) {
+    await new Promise(resolve => setTimeout(resolve, Math.min(1500 + attempt++ * 250, 5000)))
+    if (generation !== pendingGeneration) return
+    try {
+      const current = await $heya('/api/media/{id}', { path: { id: String(props.mediaId) } }) as any
+      const landed = (current.assets || []).some((asset: any) =>
+        asset.asset_type === activity.assetType
+        && asset.remote_url === activity.url
+        && !!asset.local_path
+        && (!activity.label || asset.label === activity.label),
+      )
+      if (!landed) continue
+      pendingSelection.value = null
+      emit('ready', activity)
+      emit('refresh')
+      toast.ok(`${singularTypeLabel(activity.assetType)} updated everywhere`)
+      return
+    } catch {
+      // Keep waiting through temporary network/server restarts. The visible
+      // pending card is the status indicator; no reload is required.
+    }
+  }
+  if (generation === pendingGeneration) {
+    pendingSelection.value = null
+    emit('pending', null)
+    toast.err('The image is still unavailable after 24 hours. You can select it again to retry.', { duration: 10000 })
   }
 }
 
@@ -287,6 +372,7 @@ async function uploadFile(e: Event) {
       body: form,
       headers: token.value ? { Authorization: `Bearer ${token.value}` } : {},
     })
+    emit('ready', { assetType: uploadType.value, url: '' })
     emit('refresh')
     toast.ok('Custom image uploaded')
   } catch (error) {
@@ -298,6 +384,8 @@ async function uploadFile(e: Event) {
 watch(allowedTypes, (types) => {
   if (!types.includes(uploadType.value)) uploadType.value = types[0] || 'poster'
 }, { immediate: true })
+
+onBeforeUnmount(() => { pendingGeneration++ })
 </script>
 
 <style scoped>
@@ -363,6 +451,19 @@ watch(allowedTypes, (types) => {
   flex-wrap: wrap;
   gap: 10px;
 }
+.mei-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -4px 0 14px;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--gold) 35%, var(--border));
+  border-radius: var(--r-sm);
+  background: var(--gold-soft);
+  color: var(--gold-bright);
+  font-size: 11px;
+  line-height: 1.4;
+}
 .mei-empty-slot {
   display: flex;
   align-items: center;
@@ -382,6 +483,9 @@ watch(allowedTypes, (types) => {
 }
 .mei-card-wide {
   width: 180px;
+}
+.mei-card.is-pending .mei-img-wrap {
+  box-shadow: 0 0 0 1px var(--gold), 0 0 24px color-mix(in srgb, var(--gold) 20%, transparent);
 }
 
 .mei-img-wrap {
@@ -408,6 +512,9 @@ watch(allowedTypes, (types) => {
   background: var(--gold);
   color: var(--bg-0);
   border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 
 .mei-overlay {
@@ -560,6 +667,10 @@ watch(allowedTypes, (types) => {
 }
 .mei-find-card-wide {
   width: 180px;
+}
+.mei-find-card.is-disabled {
+  cursor: wait;
+  opacity: 0.45;
 }
 
 .mei-find-img-wrap {

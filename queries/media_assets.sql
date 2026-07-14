@@ -76,6 +76,17 @@ UPDATE media_assets
 SET local_path = $2
 WHERE id = $1;
 
+-- name: UpdateMediaAssetMaterialization :one
+UPDATE media_assets
+SET local_path = sqlc.arg(local_path),
+    content_hash = sqlc.arg(content_hash),
+    visual_hash = sqlc.arg(visual_hash),
+    width = CASE WHEN sqlc.arg(width)::integer > 0 THEN sqlc.arg(width) ELSE width END,
+    height = CASE WHEN sqlc.arg(height)::integer > 0 THEN sqlc.arg(height) ELSE height END,
+    file_size = CASE WHEN sqlc.arg(file_size)::bigint > 0 THEN sqlc.arg(file_size) ELSE file_size END
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
 -- name: DeleteMediaAsset :exec
 DELETE FROM media_assets WHERE id = $1;
 
@@ -118,3 +129,32 @@ UPDATE media_assets AS asset
 SET sort_order = ranked.wanted_order
 FROM ranked
 WHERE asset.id = ranked.id;
+
+-- name: StageMediaAssetsAfterDedup :exec
+-- Preserve the best duplicate at the earliest position occupied by its group,
+-- then close all ordering gaps. The doubled keys place the winner before an
+-- unrelated row that happened to share that historical sort_order.
+WITH ranked AS (
+    SELECT media_assets.id,
+           row_number() OVER (
+               ORDER BY CASE
+                            WHEN media_assets.id = sqlc.arg(winner_id) THEN sqlc.arg(desired_order)::bigint * 2
+                            ELSE media_assets.sort_order::bigint * 2 + 1
+                        END,
+                        media_assets.id
+           ) - 1 AS wanted_order
+    FROM media_assets
+    WHERE media_assets.media_item_id = sqlc.arg(media_item_id)
+      AND media_assets.asset_type = sqlc.arg(asset_type)::asset_type
+)
+UPDATE media_assets AS asset
+SET sort_order = (-1000000000 + ranked.wanted_order)::integer
+FROM ranked
+WHERE asset.id = ranked.id;
+
+-- name: FinalizeStagedMediaAssetOrder :exec
+UPDATE media_assets
+SET sort_order = sort_order + 1000000000
+WHERE media_item_id = sqlc.arg(media_item_id)
+  AND asset_type = sqlc.arg(asset_type)::asset_type
+  AND sort_order < 0;

@@ -57,7 +57,7 @@ watch(() => props.src, () => { imgError.value = false })
   <div class="mc" :class="[`mc-${variant}`, { 'mc-missing': missing }]">
     <MediaMissingBadge v-if="missing" />
     <div class="mc-art">
-      <NuxtImg
+      <LoadingImage
         v-if="src && !imgError"
         :src="src"
         :alt="alt || title"

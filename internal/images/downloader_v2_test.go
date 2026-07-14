@@ -73,3 +73,32 @@ func TestDownloaderDoesNotForwardTrustedAccessAcrossOrigins(t *testing.T) {
 		t.Fatalf("cross-origin redirect was followed %d time(s)", redirected.Load())
 	}
 }
+
+func TestDownloaderFreshReplacesStableCacheFilename(t *testing.T) {
+	t.Parallel()
+	var body atomic.Value
+	body.Store("first")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte(body.Load().(string)))
+	}))
+	defer server.Close()
+
+	downloader := NewDownloader(t.TempDir(), TrustedSource{BaseURL: server.URL})
+	_, err := downloader.Download(context.Background(), server.URL+"/api/v2/images/first", "tv", "show", "poster.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body.Store("second")
+	path, err := downloader.DownloadFresh(context.Background(), server.URL+"/api/v2/images/second", "tv", "show", "poster.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(stored) != "second" {
+		t.Fatalf("fresh download stored %q, want second", stored)
+	}
+}

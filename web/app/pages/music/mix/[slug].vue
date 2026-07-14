@@ -9,7 +9,7 @@
       <!-- 4-up mosaic of the first four tracks' covers, mirroring the home
            tile so the page identity carries over. -->
       <div class="mix-hero-art">
-        <NuxtImg
+        <LoadingImage
           v-for="(t, i) in mix.tracks.slice(0, 4)"
           :key="t.track_id"
           :src="useAlbumCoverUrl(t.artist_slug, t.album_slug) || ''"

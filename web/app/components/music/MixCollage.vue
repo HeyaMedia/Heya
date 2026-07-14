@@ -77,7 +77,7 @@ watch(mode, (m) => { if (m === 'fallback') announce(null) }, { immediate: true }
        its grid cell and filled the whole .app with the cover. -->
   <div class="mcg" :class="`is-${mode}`">
     <template v-if="mode === 'grid'">
-      <NuxtImg
+      <LoadingImage
         v-for="(src, i) in covers"
         :key="src"
         :src="src"
@@ -91,7 +91,7 @@ watch(mode, (m) => { if (m === 'fallback') announce(null) }, { immediate: true }
         @error="onImgError(src)"
       />
     </template>
-    <NuxtImg
+    <LoadingImage
       v-else-if="mode === 'single'"
       :key="singleSrc"
       :src="singleSrc"

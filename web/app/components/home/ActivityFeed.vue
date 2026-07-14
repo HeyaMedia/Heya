@@ -18,7 +18,7 @@
         <div class="feed-icon" :class="item.type">
           <Icon :name="iconFor(item.type)" :size="14" />
         </div>
-        <NuxtImg
+        <LoadingImage
           v-if="item.image_url"
           :src="item.image_url"
           :width="120"

@@ -1,3 +1,5 @@
+import { reactive } from 'vue'
+
 export type MediaImageType = 'poster' | 'backdrop' | 'still' | 'logo' | 'banner' | 'clearart' | 'thumb'
 
 export type MediaImageRef =
@@ -26,10 +28,37 @@ export function useMediaImageKey(ref: MediaImageRef) {
   return key == null || key === '' ? null : String(key)
 }
 
+// Image routes are stable by design, but an explicit metadata-editor choice
+// replaces the bytes behind that route. Keep a tiny client-side revision per
+// local/public identity so every visible consumer receives a new URL as soon
+// as the selected image has landed—without reloading the page.
+const mediaImageRevisions = reactive(new Map<string, number>())
+
+export function bumpMediaImageRevision(...refs: MediaImageRef[]) {
+  for (const ref of refs) {
+    const key = useMediaImageKey(ref)
+    if (key) mediaImageRevisions.set(key, (mediaImageRevisions.get(key) || 0) + 1)
+  }
+}
+
+export function withMediaImageRevision(url: string, ref: MediaImageRef) {
+  const key = useMediaImageKey(ref)
+  const revision = key ? (mediaImageRevisions.get(key) || 0) : 0
+  if (!revision) return url
+  const separator = url.includes('?') ? '&' : '?'
+  return `${url}${separator}image_revision=${revision}`
+}
+
+export function metadataImageProxyUrl(source: string | null | undefined) {
+  if (!source) return ''
+  const match = source.match(/\/api\/v2\/images\/([0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})(?=[/?#]|$)/i)
+  return match?.[1] ? `/api/metadata/images/${match[1]}` : source
+}
+
 export function useImageUrl(media: MediaImageRef, type: MediaImageType) {
   const key = useMediaImageKey(media)
   if (!key) return null
-  return `/api/media/${key}/image/${type}`
+  return withMediaImageRevision(`/api/media/${key}/image/${type}`, media)
 }
 
 export function usePosterUrl(media: MediaImageRef) {

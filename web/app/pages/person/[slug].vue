@@ -9,8 +9,8 @@
          blurred + darkened so the headshot still reads as the focal point. -->
     <div class="hero-section">
       <div class="hero-bg" :class="{ 'ambient-extended': heroExtended }">
-        <NuxtImg v-if="backdropA" :src="backdropA" :width="1920" :quality="60" class="hero-bg-img" :class="{ visible: showA, 'bg-photo': usingPhotos }" />
-        <NuxtImg v-if="backdropB" :src="backdropB" :width="1920" :quality="60" class="hero-bg-img" :class="{ visible: !showA, 'bg-photo': usingPhotos }" />
+        <LoadingImage v-if="backdropA" :src="backdropA" :width="1920" :quality="60" class="hero-bg-img" :class="{ visible: showA, 'bg-photo': usingPhotos }" />
+        <LoadingImage v-if="backdropB" :src="backdropB" :width="1920" :quality="60" class="hero-bg-img" :class="{ visible: !showA, 'bg-photo': usingPhotos }" />
         <div class="hero-bg-fade" />
       </div>
 
@@ -31,7 +31,7 @@
         <!-- Left column: portrait + thumbnail strip -->
         <div class="hero-left">
           <div class="hero-portrait">
-            <NuxtImg
+            <LoadingImage
               v-if="data.person.profile_path && !heroImgError"
               :src="`/api/person/${data.person.id}/image`"
               :width="600"
@@ -127,7 +127,7 @@
               :aria-label="`Open photo ${idx + 1}`"
               @click="openGallery(galleryHeroOffset + idx)"
             >
-              <NuxtImg :src="url" :alt="`Profile ${idx + 1}`" class="profile-thumb" />
+              <LoadingImage :src="url" :alt="`Profile ${idx + 1}`" class="profile-thumb" />
             </button>
             <button v-if="extraProfileCount > 0" type="button" class="profile-thumb-wrap profile-more" @click="openGallery(galleryHeroOffset)">
               +{{ extraProfileCount }}

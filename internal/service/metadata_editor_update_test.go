@@ -3,9 +3,13 @@ package service
 import (
 	"context"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -218,6 +222,120 @@ func TestMetadataEditorCustomBackdropUploadMakesRoomForPrimary(t *testing.T) {
 	for i := range backdrops {
 		require.Equal(t, int32(i), backdrops[i].SortOrder)
 	}
+}
+
+func TestMaterializedBackdropsDeduplicateToBestResolution(t *testing.T) {
+	app, q, lib, ctx := metadataEditorLibrary(t, sqlc.MediaTypeTv)
+	item, err := q.CreateMediaItem(ctx, sqlc.CreateMediaItemParams{
+		LibraryID: lib.ID, MediaType: lib.MediaType, Title: "Duplicate Backdrops", SortTitle: "duplicate backdrops", ProviderKind: "heya",
+	})
+	require.NoError(t, err)
+
+	writeBackdrop := func(name string, width, height int) string {
+		t.Helper()
+		path := filepath.Join(app.config.DataDir.Value, name)
+		file, createErr := os.Create(path)
+		require.NoError(t, createErr)
+		img := image.NewRGBA(image.Rect(0, 0, width, height))
+		for y := 0; y < height; y++ {
+			for x := 0; x < width; x++ {
+				img.Set(x, y, color.RGBA{
+					R: uint8(30 + x*180/(width-1)),
+					G: uint8(20 + y*160/(height-1)),
+					B: 90, A: 255,
+				})
+			}
+		}
+		require.NoError(t, png.Encode(file, img))
+		require.NoError(t, file.Close())
+		return path
+	}
+
+	smallPath := writeBackdrop("small.png", 32, 18)
+	largePath := writeBackdrop("large.png", 64, 36)
+	small, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+		MediaItemID: item.ID, AssetType: sqlc.AssetTypeBackdrop, Source: "remote",
+		RemoteUrl: "https://metadata.invalid/small", Label: "en", SortOrder: 0,
+	})
+	require.NoError(t, err)
+	large, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+		MediaItemID: item.ID, AssetType: sqlc.AssetTypeBackdrop, Source: "remote",
+		RemoteUrl: "https://metadata.invalid/large", Label: "extra", SortOrder: 1,
+	})
+	require.NoError(t, err)
+
+	_, deduped, err := worker.MaterializeMediaAsset(ctx, app.db, small, smallPath)
+	require.NoError(t, err)
+	require.False(t, deduped)
+	winner, deduped, err := worker.MaterializeMediaAsset(ctx, app.db, large, largePath)
+	require.NoError(t, err)
+	require.True(t, deduped)
+	require.Equal(t, large.ID, winner.ID)
+	require.Equal(t, int32(0), winner.SortOrder)
+
+	backdrops, err := q.ListMediaAssetsByType(ctx, sqlc.ListMediaAssetsByTypeParams{
+		MediaItemID: item.ID, AssetType: sqlc.AssetTypeBackdrop,
+	})
+	require.NoError(t, err)
+	require.Len(t, backdrops, 1)
+	require.Equal(t, large.ID, backdrops[0].ID)
+	require.Equal(t, int32(64), backdrops[0].Width)
+	require.Equal(t, int32(36), backdrops[0].Height)
+	require.NoFileExists(t, smallPath)
+	require.FileExists(t, largePath)
+
+	updated, err := q.GetMediaItemByID(ctx, item.ID)
+	require.NoError(t, err)
+	require.Equal(t, largePath, updated.BackdropPath)
+}
+
+func TestMaterializedBackdropsDeduplicateConcurrentWorkers(t *testing.T) {
+	app, q, lib, ctx := metadataEditorLibrary(t, sqlc.MediaTypeTv)
+	item, err := q.CreateMediaItem(ctx, sqlc.CreateMediaItemParams{
+		LibraryID: lib.ID, MediaType: lib.MediaType, Title: "Concurrent Backdrops", SortTitle: "concurrent backdrops", ProviderKind: "heya",
+	})
+	require.NoError(t, err)
+
+	path := filepath.Join(app.config.DataDir.Value, "shared.png")
+	file, err := os.Create(path)
+	require.NoError(t, err)
+	require.NoError(t, png.Encode(file, image.NewRGBA(image.Rect(0, 0, 64, 36))))
+	require.NoError(t, file.Close())
+
+	assets := make([]sqlc.MediaAsset, 2)
+	for i := range assets {
+		assets[i], err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+			MediaItemID: item.ID, AssetType: sqlc.AssetTypeBackdrop, Source: "remote",
+			RemoteUrl: fmt.Sprintf("https://metadata.invalid/concurrent-%d", i), SortOrder: int32(i),
+		})
+		require.NoError(t, err)
+	}
+
+	start := make(chan struct{})
+	errors := make(chan error, len(assets))
+	var workers sync.WaitGroup
+	for _, asset := range assets {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			_, _, materializeErr := worker.MaterializeMediaAsset(ctx, app.db, asset, path)
+			errors <- materializeErr
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(errors)
+	for materializeErr := range errors {
+		require.NoError(t, materializeErr)
+	}
+
+	backdrops, err := q.ListMediaAssetsByType(ctx, sqlc.ListMediaAssetsByTypeParams{
+		MediaItemID: item.ID, AssetType: sqlc.AssetTypeBackdrop,
+	})
+	require.NoError(t, err)
+	require.Len(t, backdrops, 1)
+	require.Equal(t, int32(0), backdrops[0].SortOrder)
 }
 
 func TestMetadataEditorDeleteImageOnlyRemovesManagedCacheFiles(t *testing.T) {

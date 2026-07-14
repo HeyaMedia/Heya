@@ -1,7 +1,7 @@
 <template>
   <article class="rs-card card-tile">
     <div class="rs-art" :class="{ 'rs-art-fallback': !station.favicon }">
-      <NuxtImg
+      <LoadingImage
         v-if="station.favicon"
         :src="station.favicon"
         :alt="station.name"

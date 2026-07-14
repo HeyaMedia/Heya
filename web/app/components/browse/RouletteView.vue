@@ -91,7 +91,7 @@
             @transitionend="onReelLanded"
           >
             <div v-for="(m, i) in reel" :key="`${i}-${m.id}`" class="wheel-cell">
-              <NuxtImg
+              <LoadingImage
                 :src="usePosterUrl(m) ?? ''"
                 :width="280"
                 :quality="80"

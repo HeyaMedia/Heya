@@ -57,7 +57,7 @@
             class="pp-continue-row"
           >
             <div class="pp-continue-art">
-              <NuxtImg v-if="ep.artwork_url" :src="ep.artwork_url" :alt="ep.title" loading="lazy" />
+              <LoadingImage v-if="ep.artwork_url" :src="ep.artwork_url" :alt="ep.title" loading="lazy" />
               <Icon v-else name="mic" :size="24" />
             </div>
             <div class="pp-continue-meta">

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -23,6 +24,14 @@ type DownloadImageWorker struct {
 	Downloader *images.Downloader
 	Hub        EventPublisher
 	Progress   *TaskProgressBroadcaster
+}
+
+// Timeout disables River's one-minute job deadline. HeyaMetadata image
+// routes intentionally return 202 while a separate materialization job waits
+// on provider rate limits; the downloader follows Retry-After until bytes are
+// ready or the worker is explicitly cancelled.
+func (w *DownloadImageWorker) Timeout(*river.Job[DownloadImageArgs]) time.Duration {
+	return -1
 }
 
 func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadImageArgs]) error {
@@ -59,7 +68,15 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 		dirName = item.Slug
 	}
 
-	localPath, err := w.Downloader.Download(ctx, job.Args.URL, job.Args.MediaType, dirName, filename)
+	var (
+		localPath string
+		err       error
+	)
+	if job.Args.ReplacePrimary {
+		localPath, err = w.Downloader.DownloadFresh(ctx, job.Args.URL, job.Args.MediaType, dirName, filename)
+	} else {
+		localPath, err = w.Downloader.Download(ctx, job.Args.URL, job.Args.MediaType, dirName, filename)
+	}
 	if err != nil {
 		if imageUnavailable(err) {
 			// Upstream has no such image — expected for the bulk of episode
@@ -91,10 +108,13 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 		return nil
 	}
 
-	var assetErr error
+	var (
+		storedAsset sqlc.MediaAsset
+		assetErr    error
+	)
 	if SingleAssetTypes[job.Args.AssetType] && job.Args.Label == "" {
 		if job.Args.ReplacePrimary {
-			_, assetErr = q.ReplacePrimaryMediaAsset(ctx, sqlc.ReplacePrimaryMediaAssetParams{
+			storedAsset, assetErr = q.ReplacePrimaryMediaAsset(ctx, sqlc.ReplacePrimaryMediaAssetParams{
 				MediaItemID: job.Args.MediaItemID,
 				AssetType:   sqlc.AssetType(job.Args.AssetType),
 				Source:      "remote",
@@ -102,7 +122,7 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 				RemoteUrl:   job.Args.URL,
 			})
 		} else {
-			_, assetErr = q.UpsertPrimaryMediaAsset(ctx, sqlc.UpsertPrimaryMediaAssetParams{
+			storedAsset, assetErr = q.UpsertPrimaryMediaAsset(ctx, sqlc.UpsertPrimaryMediaAssetParams{
 				MediaItemID: job.Args.MediaItemID,
 				AssetType:   sqlc.AssetType(job.Args.AssetType),
 				Source:      "remote",
@@ -120,7 +140,7 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 			})
 			sortOrder = 0
 		}
-		_, assetErr = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+		storedAsset, assetErr = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 			MediaItemID: job.Args.MediaItemID,
 			AssetType:   sqlc.AssetType(job.Args.AssetType),
 			Source:      "remote",
@@ -133,6 +153,21 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 	if assetErr != nil {
 		if !errors.Is(assetErr, pgx.ErrNoRows) {
 			log.Debug().Err(assetErr).Str("path", localPath).Msg("failed to create media asset")
+		}
+	}
+	if assetErr == nil {
+		var deduped bool
+		storedAsset, deduped, assetErr = MaterializeMediaAsset(ctx, w.DB, storedAsset, localPath)
+		if assetErr != nil {
+			return fmt.Errorf("fingerprint downloaded %s: %w", job.Args.AssetType, assetErr)
+		}
+		localPath = storedAsset.LocalPath
+		if deduped {
+			log.Info().
+				Int64("item_id", job.Args.MediaItemID).
+				Str("asset_type", job.Args.AssetType).
+				Int64("kept_asset_id", storedAsset.ID).
+				Msg("deduplicated materialized artwork")
 		}
 	}
 

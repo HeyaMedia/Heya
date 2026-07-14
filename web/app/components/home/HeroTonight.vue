@@ -1,7 +1,7 @@
 <template>
   <section class="hero-tonight">
     <div class="tonight-bg" :class="{ 'ambient-extended': ambientEnabled }">
-      <NuxtImg
+      <LoadingImage
         v-if="bgUrl"
         :src="bgUrl"
         :width="1920"
@@ -34,7 +34,7 @@
           @click="$emit('play', it)"
         >
           <div class="tonight-still">
-            <NuxtImg
+            <LoadingImage
               :src="stillUrl(it)"
               :width="480"
               alt=""

@@ -20,7 +20,7 @@
         :key="r.provider_id"
         class="ssd-result"
       >
-        <NuxtImg v-if="r.poster_url" :src="r.poster_url" class="ssd-poster" />
+        <LoadingImage v-if="r.poster_url" :src="r.poster_url" class="ssd-poster" />
         <div v-else class="ssd-poster ssd-poster-empty" />
         <div class="ssd-info">
           <div class="ssd-result-head">

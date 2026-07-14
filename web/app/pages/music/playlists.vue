@@ -52,7 +52,7 @@
       <AppContextMenu v-for="p in filtered" :key="p.id" :items="menuFor(p)">
         <NuxtLink :to="`/music/playlist/${p.id}`" class="pls-card card-tile">
           <div class="pls-cover">
-            <NuxtImg v-if="coverFor(p)" :src="coverFor(p)!" class="pls-cover-img" width="360" :alt="p.name" />
+            <LoadingImage v-if="coverFor(p)" :src="coverFor(p)!" class="pls-cover-img" width="360" :alt="p.name" />
             <div v-else class="pls-cover-fallback"><Icon name="list" :size="34" /></div>
             <span v-if="p.pinned" class="pls-pin" title="Pinned">
               <Icon name="pin" :size="11" weight="fill" />

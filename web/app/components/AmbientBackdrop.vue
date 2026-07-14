@@ -11,14 +11,14 @@
          through untouched and the rendered file is byte-identical to the
          preloaded one. With modifier props here, NuxtImg's densities srcset
          could pick a w=3840 file the preloader never warmed. -->
-    <NuxtImg
+    <LoadingImage
       v-if="srcA"
       :src="srcA"
       class="ambient-img"
       :class="{ visible: showA, drift: !reducedMotion && !overrideUrl }"
       alt=""
     />
-    <NuxtImg
+    <LoadingImage
       v-if="srcB"
       :src="srcB"
       class="ambient-img"

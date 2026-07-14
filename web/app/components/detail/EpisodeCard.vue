@@ -31,7 +31,7 @@ const emit = defineEmits<{
       @keydown.enter="hasFile && emit('play')"
       @keydown.space.prevent="hasFile && emit('play')"
     >
-      <NuxtImg :src="stillUrl" :width="500" :quality="80" :alt="title" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
+      <LoadingImage :src="stillUrl" :width="500" :quality="80" :alt="title" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
       <div class="epc-gradient" />
 
       <button v-if="typeof watched === 'boolean'" class="epc-check" :class="{ active: watched }" :aria-pressed="watched" aria-label="Toggle watched" title="Toggle watched" @click.prevent.stop="emit('toggleWatched')">

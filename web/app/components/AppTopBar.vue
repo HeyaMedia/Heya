@@ -128,7 +128,7 @@
                     @mouseenter="selectedIdx = flatIndex(sIdx, iIdx)"
                   >
                     <div class="search-result-thumb" :class="section.thumbShape">
-                      <NuxtImg v-if="thumbUrl(section.key, item)" :src="thumbUrl(section.key, item)!" :width="80" :quality="80" loading="lazy" />
+                      <LoadingImage v-if="thumbUrl(section.key, item)" :src="thumbUrl(section.key, item)!" :width="80" :quality="80" loading="lazy" />
                       <Icon v-else :name="section.icon" :size="14" />
                     </div>
                     <div class="search-result-body">

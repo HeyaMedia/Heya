@@ -53,7 +53,7 @@
       :to="currentTo"
       :aria-label="`Go to ${ctl.current.title}`"
     >
-      <NuxtImg
+      <LoadingImage
         :src="ctl.current.poster"
         :width="240"
         :quality="80"

@@ -2,7 +2,7 @@
   <div v-if="sectionKey === 'tracks'" class="track-list">
     <button v-for="item in items" :key="item.id" class="track-row" @click="go(item)">
       <div class="track-thumb">
-        <NuxtImg v-if="item.artist_media_item_id" :src="usePosterUrl({ id: item.artist_media_item_id, public_id: item.artist_media_item_public_id }) ?? undefined" :width="100" :quality="80" loading="lazy" />
+        <LoadingImage v-if="item.artist_media_item_id" :src="usePosterUrl({ id: item.artist_media_item_id, public_id: item.artist_media_item_public_id }) ?? undefined" :width="100" :quality="80" loading="lazy" />
         <Icon v-else name="music" :size="16" />
       </div>
       <div class="track-body">
@@ -22,7 +22,7 @@
         @click="go(item)"
       >
         <div class="person-avatar">
-          <NuxtImg :src="personImageUrl(item.id)" :width="200" :quality="80" loading="lazy" @error="onImgError" />
+          <LoadingImage :src="personImageUrl(item.id)" :width="200" :quality="80" loading="lazy" @error="onImgError" />
         </div>
         <div class="person-name">{{ item.name }}</div>
         <div class="person-sub">

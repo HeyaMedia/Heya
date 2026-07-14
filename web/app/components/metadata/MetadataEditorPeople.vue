@@ -9,7 +9,7 @@
         <div class="mf-card-head">Cast</div>
         <div class="mep-list">
           <div v-for="c in cast" :key="`${c.id}-${c.character}`" class="mep-person">
-            <NuxtImg
+            <LoadingImage
               v-if="c.profile_path"
               :src="c.profile_path.startsWith('http') ? c.profile_path : `/api/person/${c.id}/image`"
               class="mep-photo"

@@ -15,7 +15,7 @@
             <DialogTitle>Image viewer</DialogTitle>
           </VisuallyHidden>
 
-          <NuxtImg v-if="!imgError" :key="currentSrc" :src="currentSrc" class="lb-img" @click.stop @error="imgError = true" />
+          <LoadingImage v-if="!imgError" :key="currentSrc" :src="currentSrc" class="lb-img" @click.stop @error="imgError = true" />
           <div v-else class="lb-fallback" @click.stop>
             <Icon name="warning" :size="40" />
             <span>Image unavailable</span>

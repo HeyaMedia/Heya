@@ -11,7 +11,7 @@
            endpoint 404s on missing assets), else the cover art blurred into
            ambience. Crossfade between slides, same rhythm as the carousel. -->
       <Transition name="mbg">
-        <NuxtImg
+        <LoadingImage
           v-if="bgUrl"
           :key="bgUrl"
           :src="bgUrl"
@@ -20,7 +20,7 @@
           class="music-bg-img"
           alt=""
         />
-        <NuxtImg
+        <LoadingImage
           v-else-if="bgFallback"
           :key="`blur:${bgFallback}`"
           :src="bgFallback"
@@ -43,7 +43,7 @@
         :to="spotlight.to"
         class="music-poster"
       >
-        <NuxtImg
+        <LoadingImage
           :key="spotlight.key"
           :src="spotlight.art"
           :width="620"

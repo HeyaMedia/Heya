@@ -7,7 +7,7 @@
     @touchend="onTouchEnd"
   >
     <div class="hero-bg" :class="{ 'ambient-extended': ambientEnabled }">
-      <NuxtImg
+      <LoadingImage
         v-if="bgA"
         :src="bgA"
         :width="1920"
@@ -16,7 +16,7 @@
         :class="{ visible: showA && !trailerVisible }"
         @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
       />
-      <NuxtImg
+      <LoadingImage
         v-if="bgB"
         :src="bgB"
         :width="1920"
@@ -57,7 +57,7 @@
         </div>
 
         <NuxtLink :to="mediaUrl(current)" class="hero-title-link">
-          <NuxtImg
+          <LoadingImage
             v-if="logoOk[current.id]"
             class="hero-logo"
             :src="logoUrl(current)"

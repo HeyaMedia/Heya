@@ -15,7 +15,7 @@
           <!-- Left: artwork + meta -->
           <div class="np-art-col">
             <div class="np-art-frame">
-              <NuxtImg v-if="coverUrl" :src="coverUrl" :width="800" :quality="80" :alt="`${title} cover`" class="np-art-img" draggable="false" />
+              <LoadingImage v-if="coverUrl" :src="coverUrl" :width="800" :quality="80" :alt="`${title} cover`" class="np-art-img" draggable="false" />
               <div v-else class="np-art-placeholder">
                 <Icon name="music" :size="64" />
               </div>

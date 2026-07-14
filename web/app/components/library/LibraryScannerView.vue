@@ -758,13 +758,14 @@ function latestRunStatus(): string {
                         class="candidate-row"
                       >
                         <div class="candidate-rank mono">{{ candidate.rank }}</div>
-                        <img
+                        <LoadingImage
                           v-if="candidate.poster_url"
                           class="candidate-poster"
                           :src="candidate.poster_url"
+                          :persistent="candidate.poster_url.includes('/api/v2/images/')"
                           alt=""
                           loading="lazy"
-                        >
+                        />
                         <div class="candidate-main">
                           <div class="candidate-title">
                             {{ candidate.title }}
@@ -816,13 +817,14 @@ function latestRunStatus(): string {
                             {{ candidateDetailError[candidate.id] }}
                           </div>
                           <div v-else-if="candidateDetails[candidate.id]" class="candidate-detail-body">
-                            <img
+                            <LoadingImage
                               v-if="candidateDetails[candidate.id]!.poster_url"
                               class="candidate-detail-poster"
                               :src="candidateDetails[candidate.id]!.poster_url"
+                              :persistent="candidateDetails[candidate.id]!.poster_url?.includes('/api/v2/images/') ?? false"
                               alt=""
                               loading="lazy"
-                            >
+                            />
                             <div class="candidate-detail-main">
                               <div class="candidate-detail-title">
                                 {{ candidateDetails[candidate.id]!.title }}

@@ -7,8 +7,8 @@
     <!-- Hero with crossfade backdrops -->
     <div class="hero-section">
       <div class="hero-bg" :class="{ 'ambient-extended': ambientEnabled }">
-        <NuxtImg v-if="backdropA" :src="backdropA" :width="1920" :quality="80" alt="" class="hero-bg-img" :class="{ visible: showA }" />
-        <NuxtImg v-if="backdropB" :src="backdropB" :width="1920" :quality="80" alt="" class="hero-bg-img" :class="{ visible: !showA }" />
+        <LoadingImage v-if="backdropA" :src="backdropA" :width="1920" :quality="80" alt="" class="hero-bg-img" :class="{ visible: showA }" />
+        <LoadingImage v-if="backdropB" :src="backdropB" :width="1920" :quality="80" alt="" class="hero-bg-img" :class="{ visible: !showA }" />
         <div class="hero-bg-fade" />
       </div>
 
@@ -30,7 +30,7 @@
           </div>
 
           <h1 v-if="heroLogoUrl && !heroLogoFailed" class="detail-title detail-title-art">
-            <NuxtImg
+            <LoadingImage
               :src="heroLogoUrl"
               :alt="detail.preferred_title || detail.media_item.title"
               :width="600"

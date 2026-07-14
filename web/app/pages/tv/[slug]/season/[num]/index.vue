@@ -7,7 +7,7 @@
     <!-- Condensed hero -->
     <div class="hero-compact">
       <div class="hero-bg">
-        <NuxtImg v-if="backdropUrl" :src="backdropUrl" :width="1920" :quality="80" class="hero-bg-img visible" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
+        <LoadingImage v-if="backdropUrl" :src="backdropUrl" :width="1920" :quality="80" class="hero-bg-img visible" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
         <div class="hero-bg-fade" />
       </div>
 

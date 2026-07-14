@@ -11,11 +11,11 @@
     <!-- Cinematic header with backdrop -->
     <div class="me-header">
       <div class="me-backdrop-wrap">
-        <NuxtImg v-if="headerBackdrop" :src="headerBackdrop" class="me-backdrop" :width="1280" :quality="85" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
+        <LoadingImage v-if="headerBackdrop" :src="headerBackdrop" :persistent="!!pendingArtwork && ['backdrop', 'still'].includes(pendingArtwork.assetType)" class="me-backdrop" :width="1280" :quality="85" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
         <div class="me-backdrop-fade" />
       </div>
       <div class="me-header-content">
-        <NuxtImg v-if="headerPoster" :src="headerPoster" class="me-poster" :width="360" :quality="80" densities="1x 2x" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
+        <LoadingImage v-if="headerPoster" :src="headerPoster" :persistent="pendingArtwork?.assetType === 'poster'" class="me-poster" :width="360" :quality="80" densities="1x 2x" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
         <div class="me-title-block">
           <div class="me-badges">
             <span class="me-type-badge">{{ headerBadge }}</span>
@@ -117,6 +117,8 @@
             :media-public-id="mediaPublicId"
             :detail="filteredDetailForImages"
             context="media"
+            @pending="onArtworkPending"
+            @ready="onArtworkReady"
             @refresh="fetchDetail"
           />
           <MetadataEditorMediaInfo
@@ -152,6 +154,8 @@
             :detail="filteredDetailForImages"
             context="season"
             :asset-label="imageContextLabel"
+            @pending="onArtworkPending"
+            @ready="onArtworkReady"
             @refresh="fetchDetail"
           />
         </template>
@@ -177,6 +181,8 @@
             :detail="filteredDetailForImages"
             context="episode"
             :asset-label="imageContextLabel"
+            @pending="onArtworkPending"
+            @ready="onArtworkReady"
             @refresh="fetchDetail"
           />
           <MetadataEditorMediaInfo
@@ -221,6 +227,7 @@ const saving = ref(false)
 const showIdentify = ref(false)
 const activeTab = ref('general')
 const refetchTimers: Array<ReturnType<typeof setTimeout>> = []
+const pendingArtwork = ref<{ assetType: string, url: string } | null>(null)
 
 const mode = computed<'media' | 'season' | 'episode'>(() => {
   if (props.episodeId) return 'episode'
@@ -335,23 +342,31 @@ const mediaPublicId = computed(() => detail.value?.media_item?.public_id || null
 const mediaImageKey = computed(() => useMediaImageKey({ id: props.mediaId, public_id: mediaPublicId.value }))
 
 const headerPoster = computed(() => {
+  if (pendingArtwork.value?.assetType === 'poster') return pendingArtwork.value.url
   const key = mediaImageKey.value
   if (!key) return null
   if (mode.value === 'season' && activeSeason.value) {
-    return `/api/media/${key}/image/poster?label=season-${activeSeason.value.season_number}`
+    return withMediaImageRevision(`/api/media/${key}/image/poster?label=season-${activeSeason.value.season_number}`, {
+      id: props.mediaId,
+      public_id: mediaPublicId.value,
+    })
   }
-  return `/api/media/${key}/image/poster`
+  return usePosterUrl({ id: props.mediaId, public_id: mediaPublicId.value })
 })
 
 const headerBackdrop = computed(() => {
+  if (pendingArtwork.value && ['backdrop', 'still'].includes(pendingArtwork.value.assetType)) return pendingArtwork.value.url
   const key = mediaImageKey.value
   if (!key) return null
   if (mode.value === 'episode' && activeEpisode.value) {
     const ep = activeEpisode.value
     const label = `s${String(ep.season.season_number).padStart(2, '0')}e${String(ep.episode.episode_number).padStart(2, '0')}`
-    return `/api/media/${key}/image/still?label=${label}`
+    return withMediaImageRevision(`/api/media/${key}/image/still?label=${label}`, {
+      id: props.mediaId,
+      public_id: mediaPublicId.value,
+    })
   }
-  return `/api/media/${key}/image/backdrop`
+  return useBackdropUrl({ id: props.mediaId, public_id: mediaPublicId.value })
 })
 
 const filteredDetailForImages = computed(() => {
@@ -484,7 +499,8 @@ function formatPgDate(d: any): string {
 
 async function fetchDetail() {
   if (!props.mediaId) return
-  loading.value = true
+  const showSkeleton = !detail.value
+  if (showSkeleton) loading.value = true
   try {
     const { $heya } = useNuxtApp()
     // Spec types `id` as `string` because the endpoint accepts a slug OR a numeric ID.
@@ -501,7 +517,17 @@ async function fetchDetail() {
     detail.value = null
     toast.err(apiErrorMessage(error, 'Could not load metadata editor data'))
   }
-  loading.value = false
+  if (showSkeleton) loading.value = false
+}
+
+function onArtworkPending(activity: { assetType: string, url: string } | null) {
+  pendingArtwork.value = activity
+}
+
+function onArtworkReady(_activity: { assetType: string, url: string }) {
+  pendingArtwork.value = null
+  bumpMediaImageRevision(props.mediaId, mediaPublicId.value)
+  queryClient.invalidateQueries({ key: ['media', 'detail'] })
 }
 
 async function save() {
@@ -628,6 +654,7 @@ watch(() => props.mediaId, () => {
   clearMetadataRefetches()
   showIdentify.value = false
   activeTab.value = 'general'
+  pendingArtwork.value = null
   if (props.mediaId) fetchDetail()
   else detail.value = null
 }, { immediate: true })

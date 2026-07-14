@@ -7,7 +7,7 @@
     <!-- Hero: backdrop + poster + info merged -->
     <div class="hero-section">
       <div class="hero-bg" :class="{ 'ambient-extended': ambientEnabled }">
-        <NuxtImg
+        <LoadingImage
           v-if="backdropA"
           :src="backdropA"
           :width="1920"
@@ -17,7 +17,7 @@
           :class="{ visible: showA }"
           @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
         />
-        <NuxtImg
+        <LoadingImage
           v-if="backdropB"
           :src="backdropB"
           :width="1920"
@@ -237,7 +237,7 @@
             <div :class="extrasExpanded[group.type] ? 'fold-grid extras-expanded' : 'hscroll'" :ref="(el: any) => setScrollRef(`extras-${group.type}`, el)">
               <div v-for="e in group.items" :key="e.id" class="extra-card">
                 <div class="extra-thumb">
-                  <NuxtImg v-if="e.thumbnail_path" :src="`/api/extras/${e.id}/thumbnail`" :width="400" :quality="80" alt="" class="extra-thumb-img" loading="lazy" />
+                  <LoadingImage v-if="e.thumbnail_path" :src="`/api/extras/${e.id}/thumbnail`" :width="400" :quality="80" alt="" class="extra-thumb-img" loading="lazy" />
                   <Icon v-else name="play" :size="20" />
                 </div>
                 <div class="extra-title">{{ e.title }}</div>

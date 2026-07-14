@@ -20,7 +20,7 @@
              built from the playlist's own albums (MixCollage dedupes to 4,
              falls back to the first album cover, then the icon tile). -->
         <div class="pl-hero-art">
-          <NuxtImg v-if="customCoverUrl" :src="customCoverUrl" :width="400" :quality="85" :alt="`${pl.name} cover`" />
+          <LoadingImage v-if="customCoverUrl" :src="customCoverUrl" :width="400" :quality="85" :alt="`${pl.name} cover`" />
           <!-- @art reports the image the collage ACTUALLY rendered (post
                error-cascade) — the tone sampler follows it, never a
                candidate URL that may 404. -->

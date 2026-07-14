@@ -824,6 +824,19 @@ func (a *App) GetMediaImagePath(ctx context.Context, mediaItemID int64, imageTyp
 	if assets, err := q.ListMediaAssets(ctx, mediaItemID); err == nil {
 		if row := pickMediaAsset(assets, imageType, sortOrder, label); row != nil {
 			if row.LocalPath != "" {
+				// Fingerprint existing cached rows lazily. This gives upgraded
+				// libraries content deduplication without an eager startup crawl
+				// of every image on disk.
+				if row.ContentHash == "" {
+					if representative, deduped, fingerprintErr := worker.MaterializeMediaAsset(ctx, a.db, *row, row.LocalPath); fingerprintErr == nil {
+						if deduped {
+							if item, itemErr := q.GetMediaItemByID(ctx, mediaItemID); itemErr == nil {
+								a.emitMediaUpdated(item.ID, item.LibraryID, item.Title, string(item.MediaType))
+							}
+						}
+						return representative.LocalPath, true
+					}
+				}
 				return row.LocalPath, true
 			}
 			remoteURL, assetType, remoteSort = row.RemoteUrl, string(row.AssetType), int(row.SortOrder)
@@ -866,11 +879,19 @@ func (a *App) GetMediaImagePath(ctx context.Context, mediaItemID int64, imageTyp
 		return "", false
 	}
 	if remoteAsset != nil {
-		if err := q.UpdateMediaAssetLocalPath(ctx, sqlc.UpdateMediaAssetLocalPathParams{
-			ID:        remoteAsset.ID,
-			LocalPath: localPath,
-		}); err != nil {
-			log.Debug().Err(err).Int64("asset_id", remoteAsset.ID).Msg("image: update media asset local path failed")
+		representative, deduped, err := worker.MaterializeMediaAsset(ctx, a.db, *remoteAsset, localPath)
+		if err != nil {
+			log.Debug().Err(err).Int64("asset_id", remoteAsset.ID).Msg("image: fingerprint media asset failed")
+			if updateErr := q.UpdateMediaAssetLocalPath(ctx, sqlc.UpdateMediaAssetLocalPathParams{
+				ID: remoteAsset.ID, LocalPath: localPath,
+			}); updateErr != nil {
+				log.Debug().Err(updateErr).Int64("asset_id", remoteAsset.ID).Msg("image: update media asset local path failed")
+			}
+		} else {
+			localPath = representative.LocalPath
+			if deduped {
+				a.emitMediaUpdated(item.ID, item.LibraryID, item.Title, string(item.MediaType))
+			}
 		}
 	} else if imageType == "poster" || imageType == "backdrop" {
 		if imageType == "poster" {
@@ -983,19 +1004,44 @@ func (a *App) GetPersonImagePath(ctx context.Context, personID int64) (string, b
 	return a.onDemandImage(ctx, person.ProfilePath, "person", dirName, "profile.jpg")
 }
 
+// GetMetadataImagePath materializes one opaque HeyaMetadata image through the
+// same trusted, Retry-After-aware downloader as library artwork. Keeping this
+// same-origin endpoint means browser image tags do not need HeyaMetadata CORS
+// access and can remain visibly pending until canonical bytes are ready.
+func (a *App) GetMetadataImagePath(ctx context.Context, imageID string) (string, bool) {
+	if _, err := uuid.Parse(imageID); err != nil || a.config == nil {
+		return "", false
+	}
+	base := strings.TrimRight(a.config.HeyaMetadataURL.Value, "/")
+	if base == "" {
+		return "", false
+	}
+	return a.onDemandImage(
+		ctx,
+		base+"/api/v2/images/"+imageID,
+		"metadata-preview",
+		imageID[:2],
+		imageID+".jpg",
+	)
+}
+
 // onDemandImage fetches + caches a remote image URL and returns the resulting
 // local path. Concurrent requests for the same cache file coalesce via
 // singleflight; the download detaches from the caller's cancellation (so one
-// client navigating away doesn't abort a fetch others are waiting on) and is
-// time-bounded so a slow CDN can't hang a page-load. The Downloader is itself a
-// content cache — a hit is a cheap stat — so repeat views serve locally.
+// client navigating away doesn't abort a fetch others are waiting on). A
+// HeyaMetadata image may legitimately remain at 202 while its durable River
+// job waits for an upstream provider, so the shared fetch gets a deliberately
+// near-infinite ceiling instead of the old ten-second deadline. The request
+// handler still stops waiting immediately when its own client disconnects;
+// the coalesced fetch carries on so a later request can receive the cached
+// result. The Downloader is itself a content cache — a hit is a cheap stat.
 func (a *App) onDemandImage(ctx context.Context, url, mediaType, dirName, filename string) (string, bool) {
 	if url == "" || !strings.HasPrefix(url, "http") {
 		return "", false
 	}
 	key := mediaType + "|" + dirName + "|" + filename
 	ch := a.imageFetch.DoChan(key, func() (any, error) {
-		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 24*time.Hour)
 		defer cancel()
 		return a.downloader.Download(dctx, url, mediaType, dirName, filename)
 	})
@@ -1025,11 +1071,9 @@ func imageCacheFilename(assetType string, sortOrder int, url string) string {
 	return assetType + ext
 }
 
-// GetAlbumCover returns the album's cover, distinguishing local files from
-// upstream URLs so the HTTP handler can decide between serving bytes
-// directly or 302'ing the client. The third return is true when `path` is
-// an external URL (heya.media / Deezer / etc.) and false when it's a local
-// file path the handler should open + stream.
+// GetAlbumCover returns a locally servable album cover. Upstream URLs are
+// materialized through the same Retry-After-aware cache as all other artwork,
+// so a HeyaMetadata 202 never reaches the browser as a broken image.
 func (a *App) GetAlbumCover(ctx context.Context, albumID int64) (path string, remote bool, ok bool) {
 	q := sqlc.New(a.db)
 	album, err := q.GetAlbumByID(ctx, albumID)
@@ -1037,7 +1081,15 @@ func (a *App) GetAlbumCover(ctx context.Context, albumID int64) (path string, re
 		return "", false, false
 	}
 	if strings.HasPrefix(album.CoverPath, "http://") || strings.HasPrefix(album.CoverPath, "https://") {
-		return album.CoverPath, true, true
+		dirName := "album-" + strconv.FormatInt(album.ID, 10)
+		localPath, downloaded := a.onDemandImage(ctx, album.CoverPath, "music", dirName, imageCacheFilename("cover", 0, album.CoverPath))
+		if !downloaded {
+			return "", false, false
+		}
+		if err := q.UpdateAlbumCoverPath(ctx, sqlc.UpdateAlbumCoverPathParams{ID: album.ID, CoverPath: localPath}); err != nil {
+			log.Debug().Err(err).Int64("album_id", album.ID).Msg("image: update album cover path failed")
+		}
+		return localPath, false, true
 	}
 	return album.CoverPath, false, true
 }

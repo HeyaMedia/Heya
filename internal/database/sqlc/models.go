@@ -531,6 +531,8 @@ type MediaAsset struct {
 	Likes       int32              `json:"likes"`
 	Aspect      string             `json:"aspect"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ContentHash string             `json:"content_hash"`
+	VisualHash  string             `json:"visual_hash"`
 }
 
 type MediaCast struct {

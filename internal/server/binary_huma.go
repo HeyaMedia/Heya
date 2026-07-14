@@ -34,6 +34,9 @@ func registerBinaryRoutes(api huma.API, app *service.App) {
 	huma.Register(api, binaryOp(http.MethodGet, "/api/person/{id}/image", "person-image", "Person photo bytes", "Images"),
 		wrapStreamAs[idBinaryInput](proxiedImage(imgProxy, handlePersonImage(app))))
 
+	huma.Register(api, binaryOp(http.MethodGet, "/api/metadata/images/{id}", "metadata-image", "Wait for canonical HeyaMetadata image bytes", "Images"),
+		wrapStreamAs[metadataImageInput](handleMetadataImage(app)))
+
 	huma.Register(api, binaryOp(http.MethodGet, "/api/studio/{id}/image", "studio-image", "Studio logo bytes", "Images"),
 		wrapStreamAs[idBinaryInput](proxiedImage(imgProxy, handleStudioImage(app))))
 
@@ -186,6 +189,10 @@ type idBinaryInput struct {
 
 type generatedImageInput struct {
 	Filename string `path:"filename" pattern:"^[A-Za-z0-9._-]+\\.png$" maxLength:"128"`
+}
+
+type metadataImageInput struct {
+	ID string `path:"id" format:"uuid"`
 }
 
 type extraBinaryInput struct {

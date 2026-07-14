@@ -105,6 +105,18 @@ func (d *Downloader) CacheDir() string {
 }
 
 func (d *Downloader) Download(ctx context.Context, url, mediaType string, dirName string, filename string) (string, error) {
+	return d.download(ctx, url, mediaType, dirName, filename, false)
+}
+
+// DownloadFresh atomically replaces an existing cache entry. Metadata-editor
+// selections deliberately keep stable public routes (poster, logo, etc.), so
+// an existing filename must not be mistaken for proof that the newly selected
+// canonical URL has already been downloaded.
+func (d *Downloader) DownloadFresh(ctx context.Context, url, mediaType string, dirName string, filename string) (string, error) {
+	return d.download(ctx, url, mediaType, dirName, filename, true)
+}
+
+func (d *Downloader) download(ctx context.Context, url, mediaType string, dirName string, filename string, replace bool) (string, error) {
 	if url == "" || !strings.HasPrefix(url, "http") {
 		return "", nil
 	}
@@ -116,16 +128,14 @@ func (d *Downloader) Download(ctx context.Context, url, mediaType string, dirNam
 
 	localPath := filepath.Join(dir, filename)
 
-	if _, err := os.Stat(localPath); err == nil {
+	if _, err := os.Stat(localPath); err == nil && !replace {
 		return localPath, nil
 	}
 
 	client, headers := d.clientForURL(url)
-	pollCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
 	var resp *http.Response
 	for {
-		req, err := http.NewRequestWithContext(pollCtx, http.MethodGet, url, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return "", err
 		}
@@ -142,7 +152,7 @@ func (d *Downloader) Download(ctx context.Context, url, mediaType string, dirNam
 			break
 		}
 		_ = resp.Body.Close()
-		if err := waitForImage(pollCtx, imageRetryAfter(resp.Header.Get("Retry-After"))); err != nil {
+		if err := waitForImage(ctx, imageRetryAfter(resp.Header.Get("Retry-After"))); err != nil {
 			return "", &StatusError{Code: http.StatusAccepted, URL: url}
 		}
 	}

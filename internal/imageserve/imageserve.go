@@ -209,12 +209,20 @@ func resize(src image.Image, p Params) image.Image {
 	return imaging.Resize(src, p.Width, p.Height, imaging.Lanczos)
 }
 
-// sourceExt returns the *output* format we'll encode for a given source path
-// when no explicit `f=` override is provided. We can decode WebP / GIF but
-// can't encode them (no pure-Go encoder), so they transcode to JPEG.
+// sourceExt returns the output format for a source when no explicit f= is
+// requested. Canonical HeyaMetadata URLs are opaque UUIDs, so their local
+// cache filenames commonly end in the fallback .jpg even when the bytes are
+// PNG. Inspect the bytes to preserve transparency for logos and clearart.
+// WebP/GIF remain decode-only and transcode to JPEG.
 func sourceExt(path string) string {
-	switch filepath.Ext(path) {
-	case ".png":
+	file, err := os.Open(path) //nolint:gosec // path is a resolved internal cache file
+	if err == nil {
+		defer func() { _ = file.Close() }()
+		if _, format, decodeErr := image.DecodeConfig(file); decodeErr == nil && format == "png" {
+			return "png"
+		}
+	}
+	if filepath.Ext(path) == ".png" {
 		return "png"
 	}
 	return "jpeg"

@@ -45,7 +45,7 @@ const createMediaAsset = `-- name: CreateMediaAsset :one
 INSERT INTO media_assets (media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT DO NOTHING
-RETURNING id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at
+RETURNING id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at, content_hash, visual_hash
 `
 
 type CreateMediaAssetParams struct {
@@ -94,6 +94,8 @@ func (q *Queries) CreateMediaAsset(ctx context.Context, arg CreateMediaAssetPara
 		&i.Likes,
 		&i.Aspect,
 		&i.CreatedAt,
+		&i.ContentHash,
+		&i.VisualHash,
 	)
 	return i, err
 }
@@ -132,8 +134,26 @@ func (q *Queries) DeleteMediaAssetsByTypeLabel(ctx context.Context, arg DeleteMe
 	return err
 }
 
+const finalizeStagedMediaAssetOrder = `-- name: FinalizeStagedMediaAssetOrder :exec
+UPDATE media_assets
+SET sort_order = sort_order + 1000000000
+WHERE media_item_id = $1
+  AND asset_type = $2::asset_type
+  AND sort_order < 0
+`
+
+type FinalizeStagedMediaAssetOrderParams struct {
+	MediaItemID int64     `json:"media_item_id"`
+	AssetType   AssetType `json:"asset_type"`
+}
+
+func (q *Queries) FinalizeStagedMediaAssetOrder(ctx context.Context, arg FinalizeStagedMediaAssetOrderParams) error {
+	_, err := q.db.Exec(ctx, finalizeStagedMediaAssetOrder, arg.MediaItemID, arg.AssetType)
+	return err
+}
+
 const getMediaAssetByID = `-- name: GetMediaAssetByID :one
-SELECT id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at FROM media_assets WHERE id = $1
+SELECT id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at, content_hash, visual_hash FROM media_assets WHERE id = $1
 `
 
 func (q *Queries) GetMediaAssetByID(ctx context.Context, id int64) (MediaAsset, error) {
@@ -156,12 +176,14 @@ func (q *Queries) GetMediaAssetByID(ctx context.Context, id int64) (MediaAsset, 
 		&i.Likes,
 		&i.Aspect,
 		&i.CreatedAt,
+		&i.ContentHash,
+		&i.VisualHash,
 	)
 	return i, err
 }
 
 const listMediaAssets = `-- name: ListMediaAssets :many
-SELECT id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at FROM media_assets
+SELECT id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at, content_hash, visual_hash FROM media_assets
 WHERE media_item_id = $1
 ORDER BY asset_type, sort_order, id
 `
@@ -192,6 +214,8 @@ func (q *Queries) ListMediaAssets(ctx context.Context, mediaItemID int64) ([]Med
 			&i.Likes,
 			&i.Aspect,
 			&i.CreatedAt,
+			&i.ContentHash,
+			&i.VisualHash,
 		); err != nil {
 			return nil, err
 		}
@@ -204,7 +228,7 @@ func (q *Queries) ListMediaAssets(ctx context.Context, mediaItemID int64) ([]Med
 }
 
 const listMediaAssetsByType = `-- name: ListMediaAssetsByType :many
-SELECT id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at FROM media_assets
+SELECT id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at, content_hash, visual_hash FROM media_assets
 WHERE media_item_id = $1 AND asset_type = $2
 ORDER BY sort_order, id
 `
@@ -240,6 +264,8 @@ func (q *Queries) ListMediaAssetsByType(ctx context.Context, arg ListMediaAssets
 			&i.Likes,
 			&i.Aspect,
 			&i.CreatedAt,
+			&i.ContentHash,
+			&i.VisualHash,
 		); err != nil {
 			return nil, err
 		}
@@ -293,7 +319,7 @@ DO UPDATE SET
     width = EXCLUDED.width,
     height = EXCLUDED.height,
     file_size = EXCLUDED.file_size
-RETURNING id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at
+RETURNING id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at, content_hash, visual_hash
 `
 
 type ReplacePrimaryMediaAssetParams struct {
@@ -340,6 +366,8 @@ func (q *Queries) ReplacePrimaryMediaAsset(ctx context.Context, arg ReplacePrima
 		&i.Likes,
 		&i.Aspect,
 		&i.CreatedAt,
+		&i.ContentHash,
+		&i.VisualHash,
 	)
 	return i, err
 }
@@ -355,6 +383,46 @@ type SetAssetSortOrderParams struct {
 
 func (q *Queries) SetAssetSortOrder(ctx context.Context, arg SetAssetSortOrderParams) error {
 	_, err := q.db.Exec(ctx, setAssetSortOrder, arg.ID, arg.SortOrder)
+	return err
+}
+
+const stageMediaAssetsAfterDedup = `-- name: StageMediaAssetsAfterDedup :exec
+WITH ranked AS (
+    SELECT media_assets.id,
+           row_number() OVER (
+               ORDER BY CASE
+                            WHEN media_assets.id = $1 THEN $2::bigint * 2
+                            ELSE media_assets.sort_order::bigint * 2 + 1
+                        END,
+                        media_assets.id
+           ) - 1 AS wanted_order
+    FROM media_assets
+    WHERE media_assets.media_item_id = $3
+      AND media_assets.asset_type = $4::asset_type
+)
+UPDATE media_assets AS asset
+SET sort_order = (-1000000000 + ranked.wanted_order)::integer
+FROM ranked
+WHERE asset.id = ranked.id
+`
+
+type StageMediaAssetsAfterDedupParams struct {
+	WinnerID     int64     `json:"winner_id"`
+	DesiredOrder int64     `json:"desired_order"`
+	MediaItemID  int64     `json:"media_item_id"`
+	AssetType    AssetType `json:"asset_type"`
+}
+
+// Preserve the best duplicate at the earliest position occupied by its group,
+// then close all ordering gaps. The doubled keys place the winner before an
+// unrelated row that happened to share that historical sort_order.
+func (q *Queries) StageMediaAssetsAfterDedup(ctx context.Context, arg StageMediaAssetsAfterDedupParams) error {
+	_, err := q.db.Exec(ctx, stageMediaAssetsAfterDedup,
+		arg.WinnerID,
+		arg.DesiredOrder,
+		arg.MediaItemID,
+		arg.AssetType,
+	)
 	return err
 }
 
@@ -402,6 +470,62 @@ func (q *Queries) UpdateMediaAssetLocalPath(ctx context.Context, arg UpdateMedia
 	return err
 }
 
+const updateMediaAssetMaterialization = `-- name: UpdateMediaAssetMaterialization :one
+UPDATE media_assets
+SET local_path = $1,
+    content_hash = $2,
+    visual_hash = $3,
+    width = CASE WHEN $4::integer > 0 THEN $4 ELSE width END,
+    height = CASE WHEN $5::integer > 0 THEN $5 ELSE height END,
+    file_size = CASE WHEN $6::bigint > 0 THEN $6 ELSE file_size END
+WHERE id = $7
+RETURNING id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at, content_hash, visual_hash
+`
+
+type UpdateMediaAssetMaterializationParams struct {
+	LocalPath   string `json:"local_path"`
+	ContentHash string `json:"content_hash"`
+	VisualHash  string `json:"visual_hash"`
+	Width       int32  `json:"width"`
+	Height      int32  `json:"height"`
+	FileSize    int64  `json:"file_size"`
+	ID          int64  `json:"id"`
+}
+
+func (q *Queries) UpdateMediaAssetMaterialization(ctx context.Context, arg UpdateMediaAssetMaterializationParams) (MediaAsset, error) {
+	row := q.db.QueryRow(ctx, updateMediaAssetMaterialization,
+		arg.LocalPath,
+		arg.ContentHash,
+		arg.VisualHash,
+		arg.Width,
+		arg.Height,
+		arg.FileSize,
+		arg.ID,
+	)
+	var i MediaAsset
+	err := row.Scan(
+		&i.ID,
+		&i.MediaItemID,
+		&i.AssetType,
+		&i.Source,
+		&i.LocalPath,
+		&i.RemoteUrl,
+		&i.Language,
+		&i.Label,
+		&i.SortOrder,
+		&i.Width,
+		&i.Height,
+		&i.FileSize,
+		&i.Score,
+		&i.Likes,
+		&i.Aspect,
+		&i.CreatedAt,
+		&i.ContentHash,
+		&i.VisualHash,
+	)
+	return i, err
+}
+
 const upsertPrimaryMediaAsset = `-- name: UpsertPrimaryMediaAsset :one
 INSERT INTO media_assets (media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size)
 VALUES ($1, $2, $3, $4, $5, $6, '', 0, $7, $8, $9)
@@ -425,7 +549,7 @@ WHERE media_assets.source <> 'local'
         WHERE media_items.id = media_assets.media_item_id
           AND COALESCE((libraries.settings->>'use_local_data')::boolean, true)
    )
-RETURNING id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at
+RETURNING id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at, content_hash, visual_hash
 `
 
 type UpsertPrimaryMediaAssetParams struct {
@@ -472,6 +596,8 @@ func (q *Queries) UpsertPrimaryMediaAsset(ctx context.Context, arg UpsertPrimary
 		&i.Likes,
 		&i.Aspect,
 		&i.CreatedAt,
+		&i.ContentHash,
+		&i.VisualHash,
 	)
 	return i, err
 }

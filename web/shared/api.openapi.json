@@ -10162,6 +10162,9 @@
           "asset_type": {
             "type": "string"
           },
+          "content_hash": {
+            "type": "string"
+          },
           "created_at": {
             "$ref": "#/components/schemas/Timestamptz"
           },
@@ -10207,6 +10210,9 @@
           "source": {
             "type": "string"
           },
+          "visual_hash": {
+            "type": "string"
+          },
           "width": {
             "format": "int32",
             "type": "integer"
@@ -10228,7 +10234,9 @@
           "score",
           "likes",
           "aspect",
-          "created_at"
+          "created_at",
+          "content_hash",
+          "visual_hash"
         ],
         "type": "object"
       },
@@ -34442,6 +34450,44 @@
         "summary": "Per-season watched-episode counts and IDs",
         "tags": [
           "Me"
+        ]
+      }
+    },
+    "/api/metadata/images/{id}": {
+      "get": {
+        "operationId": "metadata-image",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "Binary response — content type set per endpoint"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Wait for canonical HeyaMetadata image bytes",
+        "tags": [
+          "Images"
         ]
       }
     },

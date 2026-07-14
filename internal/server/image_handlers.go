@@ -51,6 +51,17 @@ func handlePersonImage(app *service.App) http.HandlerFunc {
 	}
 }
 
+func handleMetadataImage(app *service.App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		path, ok := app.GetMetadataImagePath(r.Context(), r.PathValue("id"))
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		app.ImageResizer().Serve(w, r, path, imageserve.ParseQuery(r.URL.Query()))
+	}
+}
+
 func handleStudioImage(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)

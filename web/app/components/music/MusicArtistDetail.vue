@@ -43,7 +43,7 @@
            stats. Phone keeps the title in the meta flow below. -->
       <div v-if="!brandInFlow" class="hero-brand">
         <h1 v-if="logoUrl && !logoFailed" class="hero-title hero-title-logo">
-          <NuxtImg
+          <LoadingImage
             :src="logoUrl"
             :alt="artist.name"
             class="hero-logo"
@@ -67,7 +67,7 @@
         <div class="hero-meta">
           <template v-if="brandInFlow">
             <h1 v-if="logoUrl && !logoFailed" class="hero-title hero-title-logo">
-              <NuxtImg
+              <LoadingImage
                 :src="logoUrl"
                 :alt="artist.name"
                 class="hero-logo"
