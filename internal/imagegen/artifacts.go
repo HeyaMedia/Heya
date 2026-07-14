@@ -70,18 +70,19 @@ func RuntimeArtifactFor(backend string) (Artifact, error) {
 }
 
 type Model struct {
-	ID             string          `json:"id"`
-	Label          string          `json:"label"`
-	Artifacts      []ModelArtifact `json:"artifacts"`
-	License        string          `json:"license"`
-	RAMHint        string          `json:"ram_hint"`
-	DefaultWidth   int             `json:"default_width"`
-	DefaultHeight  int             `json:"default_height"`
-	DefaultSteps   int             `json:"default_steps"`
-	DefaultCFG     float64         `json:"default_cfg"`
-	SamplingMethod string          `json:"sampling_method"`
-	Scheduler      string          `json:"scheduler"`
-	FlowShift      float64         `json:"flow_shift"`
+	ID                string          `json:"id"`
+	Label             string          `json:"label"`
+	Artifacts         []ModelArtifact `json:"artifacts"`
+	License           string          `json:"license"`
+	RAMHint           string          `json:"ram_hint"`
+	DefaultWidth      int             `json:"default_width"`
+	DefaultHeight     int             `json:"default_height"`
+	DefaultSteps      int             `json:"default_steps"`
+	DefaultCFG        float64         `json:"default_cfg"`
+	DefaultMemoryMode string          `json:"default_memory_mode"`
+	SamplingMethod    string          `json:"sampling_method"`
+	Scheduler         string          `json:"scheduler"`
+	FlowShift         float64         `json:"flow_shift"`
 }
 
 type ModelArtifact struct {
@@ -106,8 +107,22 @@ var Models = []Model{
 			// this Apache-licensed file, which breaks Heya's one-click fetch.
 			{Role: "vae", Artifact: Artifact{Name: "ae.safetensors", URL: "https://huggingface.co/flux-safetensors/flux-safetensors/resolve/d3705fe7b6f2ed06621efc69ce91e99257481398/ae.safetensors?download=true&heya=1", SHA256: "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38", Size: 335304388}},
 		},
-		License: "Apache 2.0", RAMHint: "16 GB recommended (CPU supported)", DefaultWidth: 768, DefaultHeight: 768, DefaultSteps: 8, DefaultCFG: 1,
+		License: "Apache 2.0", RAMHint: "16 GB system RAM recommended · 4 GB VRAM with offload", DefaultWidth: 768, DefaultHeight: 768, DefaultSteps: 8, DefaultCFG: 1, DefaultMemoryMode: MemoryModeLowVRAM,
 		SamplingMethod: "heun", Scheduler: "smoothstep", FlowShift: 2,
+	},
+	{
+		ID: "stable-diffusion-1.5-q4", Label: "Stable Diffusion 1.5 Q4 — low memory",
+		Artifacts: []ModelArtifact{
+			{Role: "model", Artifact: Artifact{
+				Name: "stable-diffusion-v1-5-pruned-emaonly-Q4_0.gguf",
+				URL:  "https://huggingface.co/second-state/stable-diffusion-v1-5-GGUF/resolve/031b5f5df991f511b3f5fa8fed6d99048ababb69/stable-diffusion-v1-5-pruned-emaonly-Q4_0.gguf",
+				// Hugging Face LFS digest and size for the immutable revision above.
+				SHA256: "b8944e9fe0b69b36ae1b5bb0185b3a7b8ef14347fe0fa9af6c64c4829022261f",
+				Size:   1566768416,
+			}},
+		},
+		License: "CreativeML Open RAIL-M", RAMHint: "4 GB VRAM · 8 GB system RAM recommended", DefaultWidth: 512, DefaultHeight: 512, DefaultSteps: 20, DefaultCFG: 7, DefaultMemoryMode: MemoryModeAuto,
+		SamplingMethod: "euler_a",
 	},
 }
 

@@ -5,17 +5,20 @@ import { generateLocalImage, imageGenerationCatalogQuery, imageGenerationStatusQ
 
 const { $heya } = useNuxtApp()
 const { flash } = useFlash()
-const statusData = useQuery(imageGenerationStatusQuery())
-const catalogData = useQuery(imageGenerationCatalogQuery())
-const status = computed(() => statusData.data.value ?? null)
-const fallbackModel = {
-  id: 'z-image-turbo-q4', label: 'Z-Image Turbo Q4 — recommended', license: 'Apache 2.0',
-  ram_hint: '16 GB recommended (CPU supported)', default_width: 768, default_height: 768,
-  default_steps: 8, default_cfg: 1, artifacts: [],
-}
-const models = computed(() => catalogData.data.value?.models?.length ? catalogData.data.value.models : [fallbackModel])
 const selectedModel = ref('z-image-turbo-q4')
 const selectedDevice = ref('auto')
+const selectedMemoryMode = ref('low_vram')
+const selectedSize = ref(0)
+const statusData = useQuery(imageGenerationStatusQuery(() => selectedModel.value))
+const catalogData = useQuery(imageGenerationCatalogQuery())
+const status = computed(() => statusData.data.value?.model === selectedModel.value ? statusData.data.value : null)
+const fallbackModel = {
+  id: 'z-image-turbo-q4', label: 'Z-Image Turbo Q4 — recommended', license: 'Apache 2.0',
+  ram_hint: '16 GB system RAM recommended · 4 GB VRAM with offload', default_width: 768, default_height: 768,
+  default_steps: 8, default_cfg: 1, default_memory_mode: 'low_vram', artifacts: [],
+}
+const models = computed(() => catalogData.data.value?.models?.length ? catalogData.data.value.models : [fallbackModel])
+const selectedModelInfo = computed(() => models.value.find(model => model.id === selectedModel.value) ?? models.value[0])
 const downloading = ref(false)
 const prompt = ref('A cinematic retro-futurist media library floating in deep space, orange and teal light, detailed digital illustration, no text')
 const generating = ref(false)
@@ -23,7 +26,7 @@ const generated = ref<{ url: string, duration_ms: number } | null>(null)
 const testError = ref('')
 const apiError = computed(() => statusData.error.value || catalogData.error.value)
 const dlActive = computed(() => status.value?.download_state === 'downloading')
-const ready = computed(() => !!status.value?.runtime_present && !!status.value?.model_present)
+const ready = computed(() => status.value?.model === selectedModel.value && !!status.value?.runtime_present && !!status.value?.model_present)
 const dlPercent = computed(() => {
   const p = status.value?.progress
   return p?.bytes_total ? Math.min(100, Math.round(p.bytes_done / p.bytes_total * 100)) : 0
@@ -54,14 +57,30 @@ async function generateTest() {
   generated.value = null
   testError.value = ''
   try {
-    generated.value = await generateLocalImage({ prompt: prompt.value, model_id: selectedModel.value, backend: 'auto', device: selectedDevice.value })
+    generated.value = await generateLocalImage({
+      prompt: prompt.value,
+      model_id: selectedModel.value,
+      backend: 'auto',
+      device: selectedDevice.value,
+      memory_mode: selectedMemoryMode.value,
+      width: selectedSize.value || undefined,
+      height: selectedSize.value || undefined,
+    })
   } catch (e: any) {
     const detail = String(e?.data?.detail ?? e?.message ?? 'Image generation failed.')
-    testError.value = /OutOfDeviceMemory|Device memory allocation .* failed/i.test(detail)
-      ? 'The selected GPU ran out of memory. Choose Automatic (best fit) or another compute device and try again.'
+    testError.value = /OutOfDeviceMemory|Device memory allocation .* failed|not enough memory|out of.*memory/i.test(detail)
+      ? 'Image generation ran out of memory. Use Low VRAM mode, select Stable Diffusion 1.5 Q4, lower the resolution, or choose the CPU device.'
       : detail
   } finally { generating.value = false }
 }
+
+watch(selectedModel, () => {
+  selectedMemoryMode.value = selectedModelInfo.value?.default_memory_mode ?? 'auto'
+  selectedSize.value = 0
+  generated.value = null
+  testError.value = ''
+  void refresh()
+})
 
 let timer: ReturnType<typeof setInterval> | null = null
 onMounted(async () => {
@@ -92,22 +111,45 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
         <span>The image-generation API could not be reached. Restart or redeploy the Heya backend so it includes the new image routes.</span>
       </div>
 
-      <SettingsField label="Model" description="The Qwen3 text encoder is reused from the local LLM installation when present." v-slot="{ fieldId }">
+      <SettingsField label="Model" description="Z-Image offers better prompt following; Stable Diffusion 1.5 is the reliable low-memory fallback." v-slot="{ fieldId }">
         <select :id="fieldId" v-model="selectedModel" class="sv2-select">
           <option v-for="model in models" :key="model.id" :value="model.id">{{ model.label }}</option>
         </select>
-        <p v-if="models[0]" class="field-note">
-          {{ models[0].license }} · {{ models[0].ram_hint }} · {{ models[0].default_steps }} steps at {{ models[0].default_width }}×{{ models[0].default_height }}
+        <p v-if="selectedModelInfo" class="field-note">
+          {{ selectedModelInfo.license }} · {{ selectedModelInfo.ram_hint }} · {{ selectedModelInfo.default_steps }} steps at {{ selectedModelInfo.default_width }}×{{ selectedModelInfo.default_height }}
         </p>
       </SettingsField>
 
       <SettingsField
-        label="Compute device"
-        description="Automatic checks free memory for every available device at generation time, places model components where they fit, and falls back to CPU when needed."
+        label="Resolution"
+        description="Lower resolutions use less compute memory. Use 512×512 when trying Z-Image on a 4–6 GB GPU."
         v-slot="{ fieldId }"
       >
-        <select :id="fieldId" v-model="selectedDevice" class="sv2-select" :disabled="!ready">
-          <option value="auto">Automatic (best fit)</option>
+        <select :id="fieldId" v-model.number="selectedSize" class="sv2-select">
+          <option :value="0">Model default ({{ selectedModelInfo?.default_width ?? 768 }}×{{ selectedModelInfo?.default_height ?? 768 }})</option>
+          <option :value="512">512×512 — low memory</option>
+          <option :value="768">768×768</option>
+        </select>
+      </SettingsField>
+
+      <SettingsField
+        label="Memory mode"
+        description="Low VRAM keeps weights in system RAM and streams segmented graphs to the compute device while reserving 1 GiB of headroom. It is recommended for Z-Image on GPUs below 8 GB."
+        v-slot="{ fieldId }"
+      >
+        <select :id="fieldId" v-model="selectedMemoryMode" class="sv2-select">
+          <option value="low_vram">Low VRAM (system RAM offload)</option>
+          <option value="auto">Automatic placement</option>
+        </select>
+      </SettingsField>
+
+      <SettingsField
+        label="Compute device"
+        description="Choose the exact sd-cli compute target. Automatic lets the selected memory mode choose the preferred placement."
+        v-slot="{ fieldId }"
+      >
+        <select :id="fieldId" v-model="selectedDevice" class="sv2-select" :disabled="!status?.runtime_present">
+          <option value="auto">Automatic (recommended)</option>
           <option v-for="device in status?.devices ?? []" :key="device.name" :value="device.name">
             {{ device.description }} ({{ device.name }})
           </option>
@@ -163,7 +205,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
         </div>
         <p v-if="!ready" class="field-note">Fetch the artifacts before generating. CPU-only generation may take several minutes.</p>
         <div v-if="generated" class="generated-preview">
-          <LoadingImage :src="generated.url" alt="Generated Z-Image test result" />
+          <LoadingImage :src="generated.url" :alt="`Generated ${selectedModelInfo?.label ?? 'image'} test result`" />
           <span>{{ (generated.duration_ms / 1000).toFixed(1) }} seconds</span>
         </div>
       </div>

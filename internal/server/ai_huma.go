@@ -76,8 +76,11 @@ func registerAIRoutes(api huma.API, app *service.App) {
 		})
 
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/ai/images/status", "get-ai-image-status", "Local image-generation status", "AI")),
-		func(_ context.Context, _ *struct{}) (*JSONOutput[service.ImageStatus], error) {
-			return noStoreJSON(app.ImageStatus(imagegen.DefaultModel, imagegen.BackendAuto)), nil
+		func(_ context.Context, in *struct {
+			Model   string `query:"model" maxLength:"128"`
+			Backend string `query:"backend" maxLength:"32"`
+		}) (*JSONOutput[service.ImageStatus], error) {
+			return noStoreJSON(app.ImageStatus(in.Model, in.Backend)), nil
 		})
 
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/ai/images/catalog", "get-ai-image-catalog", "Curated image model catalog", "AI")),

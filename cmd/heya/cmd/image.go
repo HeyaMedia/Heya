@@ -16,6 +16,7 @@ var imageCmd = &cobra.Command{Use: "image", Short: "Local image generation with 
 var imageModel = imagegen.DefaultModel
 var imageBackend = imagegen.BackendAuto
 var imageDevice = "auto"
+var imageMemoryMode string
 
 var imageModelsCmd = &cobra.Command{Use: "models", Short: "List curated image models (never downloads)", RunE: func(cmd *cobra.Command, args []string) error {
 	return withApp(func(ctx context.Context, app *service.App) error {
@@ -91,7 +92,7 @@ var imageCFG float64
 var imageSeed int64
 var imageGenerateCmd = &cobra.Command{Use: "generate <prompt...>", Short: "Generate an image from already-downloaded artifacts", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 	return withApp(func(ctx context.Context, app *service.App) error {
-		res, err := app.ImageGenerate(ctx, imagegen.Request{ModelID: imageModel, Backend: imageBackend, Device: imageDevice, Prompt: strings.Join(args, " "), NegativePrompt: imageNegative, Output: imageOutput, Width: imageWidth, Height: imageHeight, Steps: imageSteps, CFG: imageCFG, Seed: imageSeed})
+		res, err := app.ImageGenerate(ctx, imagegen.Request{ModelID: imageModel, Backend: imageBackend, Device: imageDevice, MemoryMode: imageMemoryMode, Prompt: strings.Join(args, " "), NegativePrompt: imageNegative, Output: imageOutput, Width: imageWidth, Height: imageHeight, Steps: imageSteps, CFG: imageCFG, Seed: imageSeed})
 		if err != nil {
 			return err
 		}
@@ -110,7 +111,8 @@ func init() {
 	}
 	imageGenerateCmd.Flags().StringVarP(&imageOutput, "output", "o", "", "output PNG path")
 	imageGenerateCmd.Flags().StringVar(&imageNegative, "negative", "", "negative prompt")
-	imageGenerateCmd.Flags().StringVar(&imageDevice, "device", "auto", "compute device from `heya image status` (auto uses best-fit placement)")
+	imageGenerateCmd.Flags().StringVar(&imageDevice, "device", "auto", "compute device from `heya image status` (auto uses the memory mode's preferred placement)")
+	imageGenerateCmd.Flags().StringVar(&imageMemoryMode, "memory-mode", "", "auto|low_vram (model-recommended mode when omitted)")
 	imageGenerateCmd.Flags().IntVar(&imageWidth, "width", 0, "width (model default when zero)")
 	imageGenerateCmd.Flags().IntVar(&imageHeight, "height", 0, "height (model default when zero)")
 	imageGenerateCmd.Flags().IntVar(&imageSteps, "steps", 0, "sampling steps (model default when zero)")

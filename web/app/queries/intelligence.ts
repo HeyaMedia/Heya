@@ -168,6 +168,7 @@ export type ImageModel = {
   default_height: number
   default_steps: number
   default_cfg: number
+  default_memory_mode: string
   artifacts: Array<{ role: string, name: string, size: number }>
 }
 export type ImageGenerationStatus = {
@@ -184,18 +185,21 @@ export type ImageGenerationStatus = {
   artifacts: ImageArtifactStatus[]
   download_bytes: number
 }
-export type ImageGenerateRequest = { prompt: string, negative_prompt?: string, width?: number, height?: number, steps?: number, cfg?: number, seed?: number, model_id?: string, backend?: string, device?: string }
+export type ImageGenerateRequest = { prompt: string, negative_prompt?: string, width?: number, height?: number, steps?: number, cfg?: number, seed?: number, model_id?: string, backend?: string, device?: string, memory_mode?: string }
 export type ImageGenerateResult = { url: string, model: string, seed: number, duration_ms: number }
 
-export const imageGenerationStatusQuery = defineQueryOptions(() => ({
-  key: ['admin', 'intelligence', 'images', 'status'],
-  query: async () => {
-    const { $heya } = useNuxtApp()
-    return await $heya('/api/ai/images/status') as ImageGenerationStatus
-  },
-  staleTime: 1000 * 3,
-  meta: privateRuntime,
-}))
+export const imageGenerationStatusQuery = (getModel: () => string = () => 'z-image-turbo-q4') => defineQueryOptions(() => {
+  const model = getModel()
+  return {
+    key: ['admin', 'intelligence', 'images', 'status', model],
+    query: async () => {
+      const { $heya } = useNuxtApp()
+      return await $heya('/api/ai/images/status', { query: { model, backend: 'auto' } }) as ImageGenerationStatus
+    },
+    staleTime: 1000 * 3,
+    meta: privateRuntime,
+  }
+})
 
 export const imageGenerationCatalogQuery = defineQueryOptions(() => ({
   key: ['admin', 'intelligence', 'images', 'catalog'],

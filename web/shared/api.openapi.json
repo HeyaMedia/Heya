@@ -11157,6 +11157,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "default_memory_mode": {
+            "type": "string"
+          },
           "default_steps": {
             "format": "int64",
             "type": "integer"
@@ -11198,6 +11201,7 @@
           "default_height",
           "default_steps",
           "default_cfg",
+          "default_memory_mode",
           "sampling_method",
           "scheduler",
           "flow_shift"
@@ -14932,6 +14936,14 @@
             "maximum": 2048,
             "minimum": 0,
             "type": "integer"
+          },
+          "memory_mode": {
+            "enum": [
+              "",
+              "auto",
+              "low_vram"
+            ],
+            "type": "string"
           },
           "model_id": {
             "type": "string"
@@ -21486,6 +21498,26 @@
     "/api/ai/images/status": {
       "get": {
         "operationId": "get-ai-image-status",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "backend",
+            "schema": {
+              "maxLength": 32,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {

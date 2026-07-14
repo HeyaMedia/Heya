@@ -3102,6 +3102,7 @@ export type Model = {
     artifacts: Array<ModelArtifact> | null;
     default_cfg: number;
     default_height: number;
+    default_memory_mode: string;
     default_steps: number;
     default_width: number;
     flow_shift: number;
@@ -4266,6 +4267,7 @@ export type Request = {
     cfg?: number;
     device?: string;
     height?: number;
+    memory_mode?: '' | 'auto' | 'low_vram';
     model_id?: string;
     negative_prompt?: string;
     prompt: string;
@@ -7210,6 +7212,7 @@ export type RequestWritable = {
     cfg?: number;
     device?: string;
     height?: number;
+    memory_mode?: '' | 'auto' | 'low_vram';
     model_id?: string;
     negative_prompt?: string;
     prompt: string;
@@ -8661,7 +8664,10 @@ export type PostAiImageGenerateResponse = PostAiImageGenerateResponses[keyof Pos
 export type GetAiImageStatusData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        model?: string;
+        backend?: string;
+    };
     url: '/api/ai/images/status';
 };
 

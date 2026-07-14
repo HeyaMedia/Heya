@@ -385,6 +385,7 @@ type Request struct {
 	ModelID        string  `json:"model_id,omitempty"`
 	Backend        string  `json:"backend,omitempty"`
 	Device         string  `json:"device,omitempty" maxLength:"128"`
+	MemoryMode     string  `json:"memory_mode,omitempty" enum:",auto,low_vram"`
 	Prompt         string  `json:"prompt" minLength:"1" maxLength:"4000"`
 	NegativePrompt string  `json:"negative_prompt,omitempty" maxLength:"2000"`
 	Output         string  `json:"-"`
@@ -419,7 +420,11 @@ func (r *Runtime) Generate(ctx context.Context, in Request) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	deviceArgs, err := generationDeviceArgs(in.Device, devices)
+	memoryMode := in.MemoryMode
+	if memoryMode == "" {
+		memoryMode = m.DefaultMemoryMode
+	}
+	deviceArgs, err := generationDeviceArgs(in.Device, memoryMode, devices)
 	if err != nil {
 		return Result{}, err
 	}
@@ -450,7 +455,7 @@ func (r *Runtime) Generate(ctx context.Context, in Request) (Result, error) {
 	args := []string{"-p", in.Prompt, "-o", in.Output, "-W", strconv.Itoa(in.Width), "-H", strconv.Itoa(in.Height), "--steps", strconv.Itoa(in.Steps), "--cfg-scale", strconv.FormatFloat(in.CFG, 'f', -1, 64), "--seed", strconv.FormatInt(in.Seed, 10), "--diffusion-fa", "--vae-tiling", "--vae-conv-direct"}
 	args = append(args, deviceArgs...)
 	for _, item := range m.Artifacts {
-		flag := map[string]string{"diffusion": "--diffusion-model", "llm": "--llm", "vae": "--vae"}[item.Role]
+		flag := map[string]string{"model": "--model", "diffusion": "--diffusion-model", "llm": "--llm", "vae": "--vae"}[item.Role]
 		if flag == "" {
 			return Result{}, fmt.Errorf("imagegen: unsupported artifact role %q", item.Role)
 		}
@@ -482,17 +487,41 @@ func (r *Runtime) Generate(ctx context.Context, in Request) (Result, error) {
 	return Result{Path: in.Output, Model: m.ID, Seed: in.Seed, DurationMs: time.Since(start).Milliseconds()}, nil
 }
 
-func generationDeviceArgs(requested string, devices []ComputeDevice) ([]string, error) {
+const (
+	MemoryModeAuto    = "auto"
+	MemoryModeLowVRAM = "low_vram"
+)
+
+func generationDeviceArgs(requested, memoryMode string, devices []ComputeDevice) ([]string, error) {
 	requested = strings.TrimSpace(requested)
-	if requested == "" || strings.EqualFold(requested, "auto") {
+	memoryMode = strings.TrimSpace(strings.ToLower(memoryMode))
+	if memoryMode == "" {
+		memoryMode = MemoryModeAuto
+	}
+	if memoryMode != MemoryModeAuto && memoryMode != MemoryModeLowVRAM {
+		return nil, fmt.Errorf("imagegen: unknown memory mode %q (available: auto, low_vram)", memoryMode)
+	}
+	if (requested == "" || strings.EqualFold(requested, "auto")) && memoryMode == MemoryModeAuto {
 		// The pinned runtime's auto-fit mode measures current free memory and
 		// places/splits model components accordingly, falling back to CPU when a
 		// GPU cannot safely hold a component and its compute reserve.
 		return []string{"--auto-fit"}, nil
 	}
+	args := make([]string, 0, 6)
+	if memoryMode == MemoryModeLowVRAM {
+		// Keep parameters in system RAM and stage them to the selected compute
+		// device as needed. Graph-cut streaming reserves 1 GiB of currently free
+		// VRAM and segments graphs/layers to stay within the remainder. These are
+		// stable-diffusion.cpp's native low-memory controls; they cannot be
+		// combined with --auto-fit because auto-fit replaces parameter placement.
+		args = append(args, "--offload-to-cpu", "--max-vram", "-1", "--stream-layers")
+	}
+	if requested == "" || strings.EqualFold(requested, "auto") {
+		return args, nil
+	}
 	for _, device := range devices {
 		if strings.EqualFold(requested, device.Name) {
-			return []string{"--backend", device.Name}, nil
+			return append(args, "--backend", device.Name), nil
 		}
 	}
 	available := make([]string, 0, len(devices))

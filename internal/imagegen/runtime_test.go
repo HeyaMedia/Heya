@@ -16,6 +16,14 @@ func TestCatalogDefaultsToZImage(t *testing.T) {
 	require.Equal(t, "z-image-turbo-q4", m.ID)
 	require.Len(t, m.Artifacts, 3)
 	require.Equal(t, int64(6696835812), m.DownloadSize())
+	require.Equal(t, MemoryModeLowVRAM, m.DefaultMemoryMode)
+
+	sd15, ok := ModelByID("stable-diffusion-1.5-q4")
+	require.True(t, ok)
+	require.Equal(t, int64(1566768416), sd15.DownloadSize())
+	require.Equal(t, "model", sd15.Artifacts[0].Role)
+	require.Equal(t, MemoryModeAuto, sd15.DefaultMemoryMode)
+	require.Equal(t, 512, sd15.DefaultWidth)
 }
 
 func TestAutoBackendInheritsRuntimeImageBackend(t *testing.T) {
@@ -66,16 +74,20 @@ func TestParseDevices(t *testing.T) {
 
 func TestGenerationDeviceArgs(t *testing.T) {
 	devices := []ComputeDevice{{Name: "Vulkan0", Description: "Intel Arc"}, {Name: "Vulkan1", Description: "AMD Radeon"}}
-	require.Equal(t, []string{"--auto-fit"}, mustDeviceArgs(t, "auto", devices))
-	require.Equal(t, []string{"--auto-fit"}, mustDeviceArgs(t, "", devices))
-	require.Equal(t, []string{"--backend", "Vulkan1"}, mustDeviceArgs(t, "vulkan1", devices))
-	_, err := generationDeviceArgs("Vulkan2", devices)
+	require.Equal(t, []string{"--auto-fit"}, mustDeviceArgs(t, "auto", MemoryModeAuto, devices))
+	require.Equal(t, []string{"--auto-fit"}, mustDeviceArgs(t, "", MemoryModeAuto, devices))
+	require.Equal(t, []string{"--backend", "Vulkan1"}, mustDeviceArgs(t, "vulkan1", MemoryModeAuto, devices))
+	require.Equal(t, []string{"--offload-to-cpu", "--max-vram", "-1", "--stream-layers"}, mustDeviceArgs(t, "auto", MemoryModeLowVRAM, devices))
+	require.Equal(t, []string{"--offload-to-cpu", "--max-vram", "-1", "--stream-layers", "--backend", "Vulkan1"}, mustDeviceArgs(t, "vulkan1", MemoryModeLowVRAM, devices))
+	_, err := generationDeviceArgs("Vulkan2", MemoryModeAuto, devices)
 	require.ErrorContains(t, err, `unknown compute device "Vulkan2"`)
+	_, err = generationDeviceArgs("auto", "tiny", devices)
+	require.ErrorContains(t, err, `unknown memory mode "tiny"`)
 }
 
-func mustDeviceArgs(t *testing.T, requested string, devices []ComputeDevice) []string {
+func mustDeviceArgs(t *testing.T, requested, memoryMode string, devices []ComputeDevice) []string {
 	t.Helper()
-	args, err := generationDeviceArgs(requested, devices)
+	args, err := generationDeviceArgs(requested, memoryMode, devices)
 	require.NoError(t, err)
 	return args
 }
