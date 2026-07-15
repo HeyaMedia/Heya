@@ -1,12 +1,43 @@
 <template>
-  <div class="music-home page-pad">
-    <h1 class="mh-greeting">{{ greeting }}</h1>
+  <!-- Tone vars publish on the page root (not the scroll root — the music shell
+       owns that), mirroring the artist page + the playbar's --pb-accent. Every
+       descendant inherits --tone/--tone-rgb/--tone-ink from the ambient pool's
+       sampled colour. --pad-fluid is pinned to the page gutter so the full-bleed
+       ledger's cells line up with the greeting head and the rails below. -->
+  <div class="music-home" :style="toneStyle">
 
-    <!-- 1. Mixes for You — seed-artist poster, "MIX" chip top-left. -->
+    <!-- ── Greeting head (heya2.css .lib-head): mono eyebrow · weekday period,
+         Archivo greeting, right-side library tools. ── -->
+    <header class="mh-head">
+      <div class="mh-head-text">
+        <div class="mh-eyebrow">Music <span class="sep">&middot;</span> {{ timeContext }}</div>
+        <h1 class="mh-greeting">{{ greeting }}</h1>
+      </div>
+      <div class="mh-tools">
+        <button class="mh-pill" :disabled="shuffling" @click="shuffleLibrary">
+          <Icon name="shuffle" :size="14" /> Shuffle library
+        </button>
+        <NuxtLink to="/music/stations" class="mh-pill">
+          <Icon name="radio" :size="14" /> Start station
+        </NuxtLink>
+      </div>
+    </header>
+
+    <!-- ── Music ledger — user-facing facts only, sourced entirely from queries
+         this page already runs (no totals endpoint, no ops telemetry). Cells
+         self-omit when their shelf is empty/disabled. Sits on plain themed
+         canvas (no hero seam here), so `canvas` gives it theme-aware ink. ── -->
+    <LedgerStrip v-if="ledgerCells.length" :cells="ledgerCells" canvas />
+
+    <div class="page-pad mh-body">
+
+    <!-- 1. Mixes for You — Heya 2.0 gradient .mix-card tiles. -->
     <MusicScrollRow
       v-if="mixes.length"
+      class="mh-mix-rail"
       title="Mixes for You"
-      :card-size="220"
+      title-href="/music/stations/mixes"
+      :card-size="260"
     >
       <AppContextMenu
         v-for="mix in mixes"
@@ -17,12 +48,12 @@
         :to="`/music/mix/${mix.seed_artist_slug}`"
         class="mh-card-link"
       >
-        <MusicCard
-          :src="usePosterUrl({ id: mix.seed_artist_media_item_id, public_id: mix.seed_artist_media_item_public_id })"
-          :alt="mix.name"
-          :title="mix.name"
-          :subtitle="`${mix.tracks.length} tracks`"
-          badge-tl="Mix"
+        <MusicMixCard
+          :name="mix.name"
+          :track-count="mix.tracks.length"
+          :artists="mixArtistsLine(mix)"
+          :gradient="mixGradient(mix.name)"
+          :no-play="mix.tracks.length === 0"
           @play="playMix(mix)"
         />
       </NuxtLink>
@@ -127,6 +158,7 @@
     <MusicScrollRow
       v-if="recentPlaylists.length"
       title="Your Playlists"
+      title-href="/music/playlists"
       :card-size="170"
     >
       <AppContextMenu
@@ -185,9 +217,13 @@
       </MusicScrollRow>
     </template>
 
-    <!-- 7. More in <Genre> — single column, names only. Rotates every 5min. -->
-    <div v-if="genreShelf && genreShelf.enabled && genreShelf.artists.length" class="mh-section mh-genre">
-      <h2 class="section-title-lg mh-section-title">More in <span class="mh-genre-name">{{ genreShelf.genre }}</span></h2>
+    <!-- 7. More in <Genre> — hairline-ruled name list (heya2.css .credits/.trk
+         idiom), mono album·track counts. Rotates every 5 min. -->
+    <section v-if="genreShelf && genreShelf.enabled && genreShelf.artists.length" class="mh-genre">
+      <SectionHeader>
+        <template #title>More in <span class="mh-tone">{{ genreShelf.genre }}</span></template>
+        <template #subtitle>{{ genreShelf.artists.length }} artists</template>
+      </SectionHeader>
       <div class="mh-genre-grid">
         <AppContextMenu
           v-for="a in genreShelf.artists"
@@ -203,7 +239,7 @@
         </NuxtLink>
         </AppContextMenu>
       </div>
-    </div>
+    </section>
 
     <!-- 8. Most Played in <Month> — play-count chip top-right. -->
     <MusicScrollRow
@@ -237,7 +273,7 @@
 
     <!-- 9. Haven't Played in a While — one scroll-row per lapsed artist. -->
     <template v-if="lapsedShelf && lapsedShelf.enabled && lapsedShelf.artists.length">
-      <h2 class="section-title-lg mh-section-title mh-lapsed-heading">{{ lapsedShelf.since_label }}</h2>
+      <SectionHeader class="mh-lapsed-head" :title="lapsedShelf.since_label" />
       <MusicScrollRow
         v-for="a in lapsedShelf.artists"
         :key="`lapsed-${a.artist_id}`"
@@ -305,11 +341,15 @@
     >
       No music yet — add a music library and let the scanner run.
     </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
+import type { ImageTone } from '~/composables/useImageTone'
+import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
+import type { StationTrack } from '~/components/music/StationResults.vue'
 import { useQuery } from '@pinia/colada'
 import { musicAlbumDetailQuery, musicMixesQuery, type MusicMix as Mix, type MusicMixTrack as MixTrack } from '~/queries/music'
 
@@ -326,6 +366,8 @@ interface RecentAlbumRow {
   album_type: string
   cover_path: string
   available?: boolean
+  /** pgtype.Timestamptz — feeds the "added this week" ledger cell. */
+  added_at?: unknown
 }
 
 interface RecentArtistRow {
@@ -548,11 +590,69 @@ useLiveRefresh([
   { events: ['media.added', 'media.updated'], filter: byMediaType('music'), keys: [['music', 'home', 'recently-added']] },
 ])
 
-const greeting = computed(() => {
-  const h = new Date().getHours()
-  if (h < 12) return 'Good morning'
-  if (h < 18) return 'Good afternoon'
-  return 'Good evening'
+// ── Greeting head ───────────────────────────────────────────────────────────
+const now = new Date()
+const period = computed(() => {
+  const h = now.getHours()
+  if (h < 12) return 'morning'
+  if (h < 18) return 'afternoon'
+  return 'evening'
+})
+const greeting = computed(() => `Good ${period.value}`)
+// Mono eyebrow context, e.g. "Tuesday evening". Weekday pinned to en-US so it
+// stays coherent with the hardcoded English "Good <period>" greeting (the
+// system locale otherwise yields e.g. "onsdag morning").
+const timeContext = computed(() =>
+  `${now.toLocaleDateString('en-US', { weekday: 'long' })} ${period.value}`,
+)
+
+// ── Page tone: follow the ambient music pool's sampled colour (the shell owns
+// the pool claim; we only publish the vars). Falls back to the :root accent
+// alias when ambient is off (toneStyle undefined → --tone stays var(--accent)).
+const bgTone = useBackgroundTone()
+const toneStyle = computed(() => {
+  const t: ImageTone | null = bgTone.value
+  if (!t) return undefined
+  const m = t.main.match(/\d+/g)
+  if (!m) return undefined
+  return { '--tone': t.main, '--tone-rgb': m.slice(0, 3).join(' '), '--tone-ink': t.ink }
+})
+
+// ── Music ledger (user-facing facts only) ───────────────────────────────────
+// Every cell is derived from a query this page already ran. Recency reads the
+// newest-first recently-added rail (this-week arrivals live in its first page,
+// so the count is stable as older pages load). No library totals — that
+// endpoint doesn't exist and the rule forbids inventing one.
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+function toMs(v: unknown): number {
+  if (!v) return NaN
+  const iso = typeof v === 'string' ? v : (v as { Time?: string })?.Time
+  return iso ? new Date(iso).getTime() : NaN
+}
+const addedThisWeek = computed(() => {
+  const cut = Date.now() - WEEK_MS
+  return recentAlbums.value.reduce((n, al) => {
+    const t = toMs(al.added_at)
+    return !isNaN(t) && t >= cut ? n + 1 : n
+  }, 0)
+})
+
+const ledgerCells = computed<LedgerCell[]>(() => {
+  const cells: LedgerCell[] = []
+
+  if (addedThisWeek.value) cells.push({ k: 'Added', v: String(addedThisWeek.value), unit: 'this week' })
+  if (mixes.value.length) cells.push({ k: 'Mixes', v: String(mixes.value.length), unit: 'for you' })
+  if (onThisDay.value.length) {
+    cells.push({ k: 'On this day', v: String(onThisDay.value.length), unit: onThisDay.value.length === 1 ? 'release' : 'releases' })
+  }
+  const g = genreShelf.value
+  if (g?.enabled && g.genre) cells.push({ k: 'In rotation', v: g.genre.toUpperCase() })
+  const mp = mostPlayedShelf.value
+  if (mp?.enabled && mp.albums.length) {
+    const top = mp.albums[0]!
+    cells.push({ k: 'Most played', v: top.artist_name, sub: `${top.play_count}×`, tone: true })
+  }
+  return cells
 })
 
 const hasAnyContent = computed(() => {
@@ -571,11 +671,66 @@ function formatLapsed(a: LapsedArtist) {
   return 'a while ago — back to'
 }
 
+// Deterministic gradient per mix name (never random at render — the mockup's
+// .mix-card colour idiom). Hash → hue, two analogous stops. hsl() is computed
+// (not a static literal); dark ink over it is token-clean via --shade.
+function mixGradient(name: string): string {
+  let h = 2166136261
+  for (let i = 0; i < name.length; i++) { h ^= name.charCodeAt(i); h = Math.imul(h, 16777619) }
+  const hue = (h >>> 0) % 360
+  const hue2 = (hue + 42) % 360
+  return `linear-gradient(135deg, hsl(${hue} 66% 60%), hsl(${hue2} 74% 73%))`
+}
+// Seed-artist line for a mix: distinct track artists (top 3), uppercased.
+function mixArtistsLine(mix: Mix): string {
+  const seen = new Set<string>()
+  const names: string[] = []
+  for (const t of mix.tracks) {
+    const n = t.artist_name?.trim()
+    if (!n || seen.has(n.toLowerCase())) continue
+    seen.add(n.toLowerCase())
+    names.push(n)
+    if (names.length >= 3) break
+  }
+  if (!names.length && mix.seed_artist_name) names.push(mix.seed_artist_name)
+  return names.join(' · ').toUpperCase()
+}
+
 const { play, queue, playTracks } = usePlayerBindings()
 const actions = useMusicActions()
 const playlistMenu = usePlaylistMenu()
 const { isCoarse } = useViewport()
 const { onDragStart, onDragEnd } = useMusicDragDrop()
+
+// "Shuffle library" head tool — the existing Library Radio station (random
+// tracks from across the catalog). Real endpoint; no new backend action.
+const shuffling = ref(false)
+async function shuffleLibrary() {
+  if (shuffling.value) return
+  shuffling.value = true
+  try {
+    const res = await $heya('/api/music/stations/library-radio', { query: { limit: 50 } }) as { tracks?: StationTrack[] }
+    const tracks: Track[] = (res.tracks ?? []).map(t => ({
+      id: t.track_id,
+      title: t.track_title,
+      artist: t.artist_name,
+      album: t.album_title,
+      duration: t.duration,
+      stream_url: `/api/music/tracks/${t.track_id}/stream`,
+      album_id: t.album_id,
+      artist_id: t.artist_id,
+      artist_slug: t.artist_slug,
+      album_slug: t.album_slug,
+      poster: useAlbumCoverUrl(t.artist_slug, t.album_slug) ?? undefined,
+      source: 'station',
+    }))
+    if (tracks.length) await playTracks(tracks)
+  } catch {
+    // Silent — the pill just no-ops if the library has nothing to shuffle.
+  } finally {
+    shuffling.value = false
+  }
+}
 
 function mixTrackToEntity(t: MixTrack) {
   return {
@@ -718,54 +873,136 @@ async function playPlaylist(id: number, name: string) {
 </script>
 
 <style scoped>
-/* Halos on everything painted straight over the ambient pool. */
+.music-home {
+  /* Pin the ledger's fluid gutter to the page gutter so its full-bleed cells
+     line up with the greeting head and the padded rails below (the shell's
+     content column has no hero, so nothing wants the wider --pad-fluid inset). */
+  --pad-fluid: var(--page-pad-x);
+}
+
+/* ── Greeting head (heya2.css .lib-head) ── */
+.mh-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px 24px;
+  flex-wrap: wrap;
+  padding: 28px var(--page-pad-x) 20px;
+}
+.mh-head-text { min-width: 0; }
+.mh-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  font: 600 11.5px var(--font-mono);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--tone);
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 12px var(--bg-1);
+}
+.mh-eyebrow .sep { color: rgb(var(--ink) / 0.3); }
 .mh-greeting {
-  font-size: 30px; font-weight: 700; margin-bottom: 24px; letter-spacing: -0.01em;
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 3.4vw, 3rem);
+  font-weight: 800;
+  font-variation-settings: 'wdth' 115;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--fg-0);
   text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1);
 }
-.mh-empty { color: var(--fg-3); font-size: 14px; padding: 32px 0; }
-.mh-section { margin-bottom: 36px; }
-.mh-section-title { margin-bottom: 16px; text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1); }
-.mh-lapsed-heading { margin-bottom: 12px; color: var(--fg-1); text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1); }
 
-/* Shared link wrapper around MusicCard — strips default underlines and lets
-   the card own its hover state internally. */
+/* Tone-tinted head tools (heya2.css .lib-tools .pill.mono). */
+.mh-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mh-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 15px;
+  border-radius: 999px;
+  border: 1px solid rgb(var(--tone-rgb) / 0.3);
+  background: rgb(var(--tone-rgb) / 0.08);
+  color: rgb(var(--ink) / 0.9);
+  font: 550 11px var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-decoration: none;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 0 16px rgb(var(--tone-rgb) / 0.12), 5px 8px 22px -10px rgb(var(--shade) / 0.7);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.mh-pill:hover {
+  border-color: rgb(var(--tone-rgb) / 0.55);
+  background: rgb(var(--tone-rgb) / 0.15);
+  box-shadow: 0 0 24px rgb(var(--tone-rgb) / 0.24), 6px 10px 26px -10px rgb(var(--shade) / 0.75);
+  transform: translateY(-1px);
+}
+.mh-pill:disabled { opacity: 0.5; cursor: default; transform: none; }
+
+/* ── Rails body ── */
+.page-pad.mh-body { padding-top: 40px; }
+
+.mh-empty { color: var(--fg-3); font-size: 14px; padding: 32px 0; }
+
+/* Shared link wrapper around cards — strips underlines, lets the card own its
+   hover state internally. */
 .mh-card-link {
   text-decoration: none;
   color: inherit;
   display: block;
 }
 
-/* More in Genre: name-only list, no art. */
-.mh-genre-name { color: var(--gold); }
+/* Tone accent inside a SectionHeader slot (More in <Genre>). */
+.mh-tone { color: var(--tone); }
+
+/* "Haven't played in a while" heading — a touch of top room over the rails. */
+.mh-lapsed-head { margin-top: 8px; }
+
+/* Mixes rail: the gradient cards are wider (16/10) than square covers. Keep a
+   readable width on phones instead of MusicScrollRow's 140px square default. */
+@media (max-width: 720px) {
+  .mh-mix-rail :deep(.msr-scroller) > * { width: 208px !important; }
+}
+
+/* ── More in <Genre> — hairline name list, mono counts ── */
+.mh-genre { margin-bottom: 36px; }
 .mh-genre-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 4px 24px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 2px 32px;
+  border-top: 1px solid var(--hair-strong);
 }
 .mh-genre-row {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 4px;
-  border-bottom: 1px solid var(--border-soft, rgb(var(--ink) / 0.04));
+  padding: 11px 4px;
+  border-bottom: 1px solid var(--hair);
   text-decoration: none;
   color: inherit;
   transition: background 0.15s, color 0.15s;
 }
-.mh-genre-row:hover { background: color-mix(in srgb, var(--gold) 4%, transparent); color: var(--gold); }
+.mh-genre-row:hover { background: rgb(var(--tone-rgb) / 0.05); }
 .mh-genre-name-cell {
   flex: 1;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 550;
   color: var(--fg-1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.mh-genre-row:hover .mh-genre-name-cell { color: var(--gold); }
-.mh-genre-counts { font-size: 11px; color: var(--fg-3); }
+.mh-genre-row:hover .mh-genre-name-cell { color: var(--tone); }
+.mh-genre-counts {
+  font: 500 11px var(--font-mono);
+  color: var(--fg-3);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
 
 .mono { font-family: var(--font-mono); }
 </style>

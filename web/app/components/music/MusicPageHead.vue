@@ -59,10 +59,16 @@ defineProps<{
   filter: blur(26px);
   pointer-events: none;
 }
+/* Heya 2.0 head grammar: Archivo display title (wdth 115, weight 800), so
+   every list page under the music shell inherits the same display look as the
+   home greeting + the detail heroes. Props/slots API is unchanged. */
 .mhd-title {
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-family: var(--font-display);
+  font-size: clamp(1.85rem, 2.8vw, 2.5rem);
+  font-weight: 800;
+  font-variation-settings: 'wdth' 115;
+  letter-spacing: -0.02em;
+  line-height: 1;
   color: var(--fg-0);
   text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1);
 }
