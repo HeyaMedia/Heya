@@ -19,7 +19,14 @@
 SELECT r.id, r.media_item_id, r.created_at,
        r.public_id, r.library_id, r.title, r.slug,
        (COALESCE((r.parse_result->'parsed'->'release'->'seasons'->>0)::int, -1))::int AS season_number,
-       (COALESCE(r.parse_result->'parsed'->'release'->'episodes', '[]'::jsonb))::jsonb AS episode_numbers
+       -- Some parser versions wrote a bare number instead of an array for
+       -- single-episode files; normalize so scalars survive as [n] instead of
+       -- blowing up array consumers (SQLSTATE 22023).
+       (CASE jsonb_typeof(r.parse_result->'parsed'->'release'->'episodes')
+          WHEN 'array'  THEN r.parse_result->'parsed'->'release'->'episodes'
+          WHEN 'number' THEN jsonb_build_array(r.parse_result->'parsed'->'release'->'episodes')
+          ELSE '[]'::jsonb
+        END)::jsonb AS episode_numbers
 FROM (
   SELECT lf.id, lf.media_item_id, lf.created_at, lf.parse_result,
          mi.public_id, mi.library_id, mi.title, mi.slug
@@ -45,7 +52,13 @@ SELECT lf.media_item_id,
        (MIN(lf.created_at))::timestamptz AS first_added
 FROM library_files lf
 CROSS JOIN LATERAL jsonb_array_elements_text(
-  COALESCE(lf.parse_result->'parsed'->'release'->'episodes', '[]'::jsonb)
+  -- Scalar-tolerant: a bare number becomes [n]; anything else non-array
+  -- contributes no rows (jsonb_array_elements_text raises on scalars).
+  CASE jsonb_typeof(lf.parse_result->'parsed'->'release'->'episodes')
+    WHEN 'array'  THEN lf.parse_result->'parsed'->'release'->'episodes'
+    WHEN 'number' THEN jsonb_build_array(lf.parse_result->'parsed'->'release'->'episodes')
+    ELSE '[]'::jsonb
+  END
 ) AS ep(value)
 WHERE lf.media_item_id = ANY(@media_item_ids::bigint[])
 GROUP BY lf.media_item_id, 2, 3;
