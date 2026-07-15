@@ -133,6 +133,11 @@
         </div>
       </template>
 
+      <!-- New-list dialog (replaces the old window.prompt). Renders inside both
+           the desktop aside and the phone AppSheet instances — AppDialog
+           portals to <body>, so it stacks cleanly above the sheet. -->
+      <CreateListDialog v-model="showCreateList" :media-type="listMediaType" @created="onListCreated" />
+
       <!-- TMDB Collections → a page of their own (/movies/franchises). Movie-only,
            so this row renders only when the parent passes the (≥2-film) browse
            list in; tv/books leave it unset. A specific franchise
@@ -158,6 +163,7 @@
 
 <script setup lang="ts">
 import type { Library, UserList, CollectionBrowse } from '~~/shared/types'
+import { useQueryCache } from '@pinia/colada'
 
 const props = defineProps<{
   libraries: Library[]
@@ -204,16 +210,33 @@ function selectLib(id: number | null) {
   emit('select', id)
 }
 
-async function createList() {
-  const name = prompt('List name:')
-  if (!name?.trim()) return
-  try {
-    const { $heya } = useNuxtApp()
-    await $heya('/api/me/lists', {
-      method: 'POST',
-      body: { name: name.trim() } as any,
-    })
-  } catch { /* empty */ }
+// "New List" now opens a proper dialog instead of window.prompt (native
+// prompts block the page and read as un-themed browser chrome). The dialog
+// owns the POST /api/me/lists call + validation; we just react to `created`.
+const showCreateList = ref(false)
+const queryCache = useQueryCache()
+const route = useRoute()
+
+// The section this sidebar lives in — the list POST needs a media_type.
+// Derived from the route (/movies|/tv|/books) so it stays correct in both the
+// aside and the phone sheet without threading a new prop through the pages.
+const listMediaType = computed(() => {
+  const seg = route.path.split('/')[1]
+  return seg === 'tv' ? 'tv' : seg === 'books' ? 'book' : 'movie'
+})
+
+function createList() {
+  showCreateList.value = true
+}
+
+function onListCreated(row: UserList) {
+  // Refresh the accordion: the parent pages feed `userLists` from
+  // useQuery(userListsQuery()) keyed on ['me', 'lists'] — invalidating it
+  // refetches so the new row appears without a page reload. Then jump the
+  // selection to it, mirroring the smart-list save flow.
+  queryCache.invalidateQueries({ key: ['me', 'lists'] })
+  listsExpanded.value = true
+  emit('view', `list-${row.id}`)
 }
 
 </script>

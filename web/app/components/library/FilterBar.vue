@@ -12,7 +12,7 @@
   out of reach of scoped CSS.
 -->
 <template>
-  <div class="filter-bar">
+  <div ref="barEl" class="filter-bar" :class="{ stuck }">
     <div class="filter-bar-top">
       <div class="filter-bar-left" :class="{ 'left-count-only': hideTitle }">
         <h1 v-if="!hideTitle" class="filter-bar-title">{{ title }}</h1>
@@ -312,6 +312,54 @@ const tileProxy = computed({
 const panelOpen = ref(false)
 const { isPhone } = useViewport()
 
+// ── Stuck detection ────────────────────────────────────────────────────
+// The bar is `position: sticky; top: 0`. At rest it paints transparent (just
+// its controls over a bottom hairline, breathing with the ambient); once it
+// pins under the topbar it earns the glass. We detect the pin by comparing
+// the bar's own top against the scroll container's top on scroll: when the
+// bar has ridden up to the container's top edge (± epsilon) it's stuck. The
+// scroll container is the nearest scrollable ancestor (`.library-main.scroll`,
+// not the window — these pages scroll a nested column). Fully component-local;
+// the page doesn't cooperate.
+//
+// (A sentinel + IntersectionObserver can't be used here: any sentinel nested
+// in a sticky element rides up WITH the pinned bar, so it never clears the
+// root edge and the observer reports a permanent 0-area touch.)
+const stuck = ref(false)
+const barEl = ref<HTMLElement | null>(null)
+let scrollTarget: HTMLElement | null = null
+
+function nearestScrollParent(el: HTMLElement): HTMLElement | null {
+  let node = el.parentElement
+  while (node) {
+    const oy = getComputedStyle(node).overflowY
+    if (oy === 'auto' || oy === 'scroll' || oy === 'overlay') return node
+    node = node.parentElement
+  }
+  return null
+}
+
+function updateStuck() {
+  const bar = barEl.value
+  if (!bar) return
+  const containerTop = scrollTarget ? scrollTarget.getBoundingClientRect().top : 0
+  const next = bar.getBoundingClientRect().top <= containerTop + 1
+  if (next !== stuck.value) stuck.value = next
+}
+
+onMounted(() => {
+  if (!barEl.value) return
+  scrollTarget = nearestScrollParent(barEl.value)
+  scrollTarget?.addEventListener('scroll', updateStuck, { passive: true })
+  window.addEventListener('resize', updateStuck, { passive: true })
+  updateStuck()
+})
+onBeforeUnmount(() => {
+  scrollTarget?.removeEventListener('scroll', updateStuck)
+  window.removeEventListener('resize', updateStuck)
+  scrollTarget = null
+})
+
 const VIDEO_FORMATS = [
   { value: 'dolby-vision', label: 'Dolby Vision' },
   { value: 'hdr', label: 'HDR' },
@@ -549,43 +597,51 @@ function langName(code: string) {
 </script>
 
 <style scoped>
-/* Sticky so view/sort/filter controls stay reachable mid-scroll. Safe to
-   blur here: the filter panel portals to <body>, so no descendant carries
-   its own backdrop-filter (see docs/ui.md gotcha #4). */
+/* Sticky so view/sort/filter controls stay reachable mid-scroll. TWO paint
+   states over ONE geometry (the sticky top/offset never changes):
+
+   • AT REST (top of page, not stuck) the bar is fully transparent — just its
+     controls above a bottom hairline, exactly the ledger / sec-head grammar,
+     so it breathes with the ambient backdrop instead of reading as an opaque
+     dark strip wedged between the transparent ledger and the grid.
+
+   • WHEN STUCK (pinned under the topbar mid-scroll) it earns the glass: the
+     IDENTICAL fixed-pixel --chrome→glass ramp the LibrarySidebar wears (hold
+     --chrome 14px, reach translucent glass at 110px), so the two panels share
+     one continuous surface at their vertical seam and posters scrolling under
+     the bar ghost through the lower glass. Blur comes from --glass-blur-md so
+     the minimal-appearance knob (which zeroes that token) is honored for
+     free. No drop shadow: the library shells deliberately drop the topbar's
+     own shadow at this seam (heya.css) to avoid a dark band across the join —
+     the stuck bar follows suit and separates with the hairline + blur alone.
+
+   Safe to blur here: the filter panel portals to <body>, so no descendant
+   carries its own backdrop-filter (see docs/ui.md gotcha #4). */
 .filter-bar {
   position: sticky;
   top: 0;
   z-index: 20;
   padding: 18px 32px 14px;
-  /* IDENTICAL fixed-pixel ramp to the LibrarySidebar's (hold --chrome
-     14px, reach the translucent glass at 110px): both panels start at the
-     same viewport y, so matching px stops mean matching color at every
-     shared row — a %-based ramp tied to the bar's own (variable) height
-     put the two panels at different points in their fades and drew a
-     vertical seam at their join. Posters scrolling under the bar still
-     ghost through the lower glass and melt away near the top. */
+  border-bottom: 1px solid var(--hair);
+  transition: background 0.22s ease, border-color 0.22s ease;
+}
+.filter-bar.stuck {
   background: linear-gradient(to bottom,
     var(--chrome) 0,
     var(--chrome) 14px,
     color-mix(in srgb, var(--bg-2) 55%, transparent) 110px);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  box-shadow: 0 10px 28px rgb(var(--shade) / 0.14);
-  /* The shadow may ONLY fall downward: its 28px blur otherwise bleeds past
-     the bar's left edge onto the sidebar, shading pixels at the join and
-     re-drawing the very seam the matched gradients erase. */
-  clip-path: inset(0 0 -48px 0);
+  backdrop-filter: blur(var(--glass-blur-md, 14px));
+  -webkit-backdrop-filter: blur(var(--glass-blur-md, 14px));
+  border-bottom-color: var(--hair-strong);
 }
 /* Firefox draws visible seam lines at backdrop-filter region boundaries in
    this stacked-panel arrangement (Safari/Chrome composite it cleanly) —
-   trade the blur for slightly more solid glass there. */
+   trade the blur for slightly more solid glass there. S-curve stops ease in
+   and out of the fade so there's no knee to Mach-band. MUST stay identical to
+   the sidebar's Firefox ramp. */
 @supports (-moz-appearance: none) {
-  .filter-bar {
+  .filter-bar.stuck {
     backdrop-filter: none;
-    /* S-curve stops: Firefox's weaker gradient dithering shows Mach-band
-       lines at the ramp's slope discontinuities — ease in and out of the
-       fade so there is no knee to see. MUST stay identical to the
-       sidebar's Firefox ramp. */
     background: linear-gradient(to bottom,
       var(--chrome) 0,
       var(--chrome) 14px,
@@ -616,12 +672,14 @@ function langName(code: string) {
   letter-spacing: -0.02em; margin: 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.filter-bar-count { font-family: var(--font-mono); font-size: 12px; color: var(--fg-3); white-space: nowrap; }
-/* Count standing alone (hideTitle): read it as a mono spec label. */
-.left-count-only .filter-bar-count {
-  font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
-  color: var(--fg-2);
+/* Count reads as a ledger .k label — mono, uppercase, tracked. */
+.filter-bar-count {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--fg-3); white-space: nowrap;
 }
+/* Count standing alone (hideTitle) leans a touch brighter. */
+.left-count-only .filter-bar-count { letter-spacing: 0.14em; color: var(--fg-2); }
 .filter-bar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
 /* Control pills: mono uppercase labels + a tone-lit active state (2.0 chrome). */

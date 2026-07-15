@@ -1,5 +1,5 @@
 <template>
-  <div class="lib-toolbar">
+  <div ref="barEl" class="lib-toolbar" :class="{ stuck }">
     <div class="lib-toolbar-left" :class="{ 'left-count-only': hideTitle }">
       <h1 v-if="!hideTitle" class="lib-toolbar-title">{{ title }}</h1>
       <span class="lib-toolbar-count">{{ count }} titles</span>
@@ -64,14 +64,83 @@ const sortOptions = [
 ]
 
 const sortLabel = computed(() => sortOptions.find(o => o.value === props.sort)?.label || 'Sort')
+
+// Stuck detection — mirrors FilterBar: transparent + hairline at rest, glass
+// once pinned under the topbar. Compares the bar's top against the scroll
+// container's top on scroll (the nested `.library-main.scroll` column, not the
+// window). A nested sentinel can't work — it rides up with the pinned bar.
+const stuck = ref(false)
+const barEl = ref<HTMLElement | null>(null)
+let scrollTarget: HTMLElement | null = null
+
+function nearestScrollParent(el: HTMLElement): HTMLElement | null {
+  let node = el.parentElement
+  while (node) {
+    const oy = getComputedStyle(node).overflowY
+    if (oy === 'auto' || oy === 'scroll' || oy === 'overlay') return node
+    node = node.parentElement
+  }
+  return null
+}
+
+function updateStuck() {
+  const bar = barEl.value
+  if (!bar) return
+  const containerTop = scrollTarget ? scrollTarget.getBoundingClientRect().top : 0
+  const next = bar.getBoundingClientRect().top <= containerTop + 1
+  if (next !== stuck.value) stuck.value = next
+}
+
+onMounted(() => {
+  if (!barEl.value) return
+  scrollTarget = nearestScrollParent(barEl.value)
+  scrollTarget?.addEventListener('scroll', updateStuck, { passive: true })
+  window.addEventListener('resize', updateStuck, { passive: true })
+  updateStuck()
+})
+onBeforeUnmount(() => {
+  scrollTarget?.removeEventListener('scroll', updateStuck)
+  window.removeEventListener('resize', updateStuck)
+  scrollTarget = null
+})
 </script>
 
 <style scoped>
+/* Sticky control bar with the same rest/stuck paint as FilterBar: transparent
+   over a bottom hairline at rest (breathes with the ambient), glass once it
+   pins under the topbar so grid content ghosts through. --glass-blur-md honors
+   the minimal-appearance knob for free. */
 .lib-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 8px 32px 16px;
+  border-bottom: 1px solid var(--hair);
+  transition: background 0.22s ease, border-color 0.22s ease;
+}
+.lib-toolbar.stuck {
+  background: linear-gradient(to bottom,
+    var(--chrome) 0,
+    var(--chrome) 14px,
+    color-mix(in srgb, var(--bg-2) 55%, transparent) 110px);
+  backdrop-filter: blur(var(--glass-blur-md, 14px));
+  -webkit-backdrop-filter: blur(var(--glass-blur-md, 14px));
+  border-bottom-color: var(--hair-strong);
+}
+@supports (-moz-appearance: none) {
+  .lib-toolbar.stuck {
+    backdrop-filter: none;
+    background: linear-gradient(to bottom,
+      var(--chrome) 0,
+      var(--chrome) 14px,
+      color-mix(in srgb, var(--chrome) 96%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 26px,
+      color-mix(in srgb, var(--chrome) 50%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 62px,
+      color-mix(in srgb, var(--chrome) 4%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 98px,
+      color-mix(in srgb, var(--bg-2) 84%, transparent) 110px);
+  }
 }
 .lib-toolbar-left { display: flex; align-items: baseline; gap: 12px; }
 .lib-toolbar-title {
@@ -79,11 +148,13 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === props.sort)?.
   font-size: 30px; font-weight: 800; font-variation-settings: 'wdth' 112;
   letter-spacing: -0.02em; margin: 0;
 }
-.lib-toolbar-count { font-family: var(--font-mono); font-size: 12px; color: var(--fg-3); }
-.left-count-only .lib-toolbar-count {
-  font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
-  color: var(--fg-2);
+/* Count reads as a ledger .k label. */
+.lib-toolbar-count {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--fg-3);
 }
+.left-count-only .lib-toolbar-count { letter-spacing: 0.14em; color: var(--fg-2); }
 .lib-toolbar-right { display: flex; align-items: center; gap: 8px; }
 .lib-toolbar-right :deep(.btn-ghost-sm) { text-transform: uppercase; letter-spacing: 0.08em; }
 .view-toggle { display: flex; gap: 2px; }
