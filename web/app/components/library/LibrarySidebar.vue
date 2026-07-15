@@ -245,40 +245,22 @@ function onListCreated(row: UserList) {
 .lib-sidebar {
   width: 240px;
   flex-shrink: 0;
-  /* Translucent over the ambient-backdrop layer; solid-enough for text.
-     No border-right (and deliberately no edge shadow either): the FilterBar
-     wears this exact glass, and any divider — hard line or soft smudge —
-     breaks the two back into separate panels. Below the bar, the glass-vs-
-     content contrast defines the edge on its own.
-     The TOP HOLDS the navbar's exact opaque --chrome for a beat before
-     fading into this panel's own glass — fading from the very first pixel
-     still read as a boundary; the hold makes topbar → sidebar one
-     continuous surface. */
-  background: linear-gradient(to bottom,
-    var(--chrome) 0,
-    var(--chrome) 14px,
-    color-mix(in srgb, var(--bg-2) 55%, transparent) 110px);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  /* The shared --frame-glass-column (heya.css): its flat top region holds the
+     exact --frame-glass the topbar above and the stuck FilterBar beside it
+     wear, then thins toward the bottom where this tall column stands alone
+     over the ambient backdrop. No border-right (and deliberately no edge
+     shadow either): the FilterBar consumes this identical token, and any
+     divider — hard line or soft smudge — would break the two back into
+     separate panels. The flat top makes topbar → sidebar → FilterBar one
+     continuous surface; the glass-vs-content contrast defines the lower edge
+     on its own. Blur + Firefox fallback come from the shared tokens. */
+  background: var(--frame-glass-column);
+  backdrop-filter: blur(var(--frame-glass-blur));
+  -webkit-backdrop-filter: blur(var(--frame-glass-blur));
   padding: 20px 10px;
   display: flex;
   flex-direction: column;
   height: 100%;
-}
-/* Firefox: same seam-line workaround as FilterBar — no blur, more solid
-   glass (the two MUST stay identical or the join seam returns). */
-@supports (-moz-appearance: none) {
-  .lib-sidebar {
-    backdrop-filter: none;
-    /* S-curve stops — see FilterBar's Firefox block; MUST stay identical. */
-    background: linear-gradient(to bottom,
-      var(--chrome) 0,
-      var(--chrome) 14px,
-      color-mix(in srgb, var(--chrome) 96%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 26px,
-      color-mix(in srgb, var(--chrome) 50%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 62px,
-      color-mix(in srgb, var(--chrome) 4%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 98px,
-      color-mix(in srgb, var(--bg-2) 84%, transparent) 110px);
-  }
 }
 .lib-section { display: flex; flex-direction: column; }
 /* Hairline-ruled groups (heya2.css sidebar): a divider between sections and

@@ -108,8 +108,10 @@ onBeforeUnmount(() => {
 <style scoped>
 /* Sticky control bar with the same rest/stuck paint as FilterBar: transparent
    over a bottom hairline at rest (breathes with the ambient), glass once it
-   pins under the topbar so grid content ghosts through. --glass-blur-md honors
-   the minimal-appearance knob for free. */
+   pins under the topbar so grid content ghosts through. Uses the shared
+   --frame-glass-column / --frame-glass-blur tokens (heya.css) so it matches the
+   topbar and sidebar exactly and honors the minimal-appearance knob for free;
+   Firefox's solid-glass fallback rides the same token override. */
 .lib-toolbar {
   position: sticky;
   top: 0;
@@ -122,25 +124,10 @@ onBeforeUnmount(() => {
   transition: background 0.22s ease, border-color 0.22s ease;
 }
 .lib-toolbar.stuck {
-  background: linear-gradient(to bottom,
-    var(--chrome) 0,
-    var(--chrome) 14px,
-    color-mix(in srgb, var(--bg-2) 55%, transparent) 110px);
-  backdrop-filter: blur(var(--glass-blur-md, 14px));
-  -webkit-backdrop-filter: blur(var(--glass-blur-md, 14px));
+  background: var(--frame-glass-column);
+  backdrop-filter: blur(var(--frame-glass-blur));
+  -webkit-backdrop-filter: blur(var(--frame-glass-blur));
   border-bottom-color: var(--hair-strong);
-}
-@supports (-moz-appearance: none) {
-  .lib-toolbar.stuck {
-    backdrop-filter: none;
-    background: linear-gradient(to bottom,
-      var(--chrome) 0,
-      var(--chrome) 14px,
-      color-mix(in srgb, var(--chrome) 96%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 26px,
-      color-mix(in srgb, var(--chrome) 50%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 62px,
-      color-mix(in srgb, var(--chrome) 4%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 98px,
-      color-mix(in srgb, var(--bg-2) 84%, transparent) 110px);
-  }
 }
 .lib-toolbar-left { display: flex; align-items: baseline; gap: 12px; }
 .lib-toolbar-title {

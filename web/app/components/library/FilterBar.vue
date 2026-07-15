@@ -606,14 +606,18 @@ function langName(code: string) {
      dark strip wedged between the transparent ledger and the grid.
 
    • WHEN STUCK (pinned under the topbar mid-scroll) it earns the glass: the
-     IDENTICAL fixed-pixel --chrome→glass ramp the LibrarySidebar wears (hold
-     --chrome 14px, reach translucent glass at 110px), so the two panels share
-     one continuous surface at their vertical seam and posters scrolling under
-     the bar ghost through the lower glass. Blur comes from --glass-blur-md so
-     the minimal-appearance knob (which zeroes that token) is honored for
-     free. No drop shadow: the library shells deliberately drop the topbar's
-     own shadow at this seam (heya.css) to avoid a dark band across the join —
-     the stuck bar follows suit and separates with the hairline + blur alone.
+     shared --frame-glass-column ramp worn by the topbar, the LibrarySidebar
+     and this bar alike (heya.css). The bar is short, so it lives entirely
+     inside the ramp's flat top region → it shows pure --frame-glass, the exact
+     fill the topbar above and the sidebar beside it hold, so the frame reads
+     as one continuous surface at both seams (posters scrolling under still
+     ghost through the translucent glass). Blur is --frame-glass-blur (= the
+     minimal-knob-honoring --glass-blur-md) so it crisps with the rest.
+     No drop shadow: the library shells deliberately drop the topbar's own
+     shadow at this seam (heya.css) to avoid a dark band across the join —
+     the stuck bar separates with the hairline + blur alone. Firefox's
+     no-blur solid-glass fallback is folded into the shared token override,
+     not re-declared here.
 
    Safe to blur here: the filter panel portals to <body>, so no descendant
    carries its own backdrop-filter (see docs/ui.md gotcha #4). */
@@ -626,30 +630,10 @@ function langName(code: string) {
   transition: background 0.22s ease, border-color 0.22s ease;
 }
 .filter-bar.stuck {
-  background: linear-gradient(to bottom,
-    var(--chrome) 0,
-    var(--chrome) 14px,
-    color-mix(in srgb, var(--bg-2) 55%, transparent) 110px);
-  backdrop-filter: blur(var(--glass-blur-md, 14px));
-  -webkit-backdrop-filter: blur(var(--glass-blur-md, 14px));
+  background: var(--frame-glass-column);
+  backdrop-filter: blur(var(--frame-glass-blur));
+  -webkit-backdrop-filter: blur(var(--frame-glass-blur));
   border-bottom-color: var(--hair-strong);
-}
-/* Firefox draws visible seam lines at backdrop-filter region boundaries in
-   this stacked-panel arrangement (Safari/Chrome composite it cleanly) —
-   trade the blur for slightly more solid glass there. S-curve stops ease in
-   and out of the fade so there's no knee to Mach-band. MUST stay identical to
-   the sidebar's Firefox ramp. */
-@supports (-moz-appearance: none) {
-  .filter-bar.stuck {
-    backdrop-filter: none;
-    background: linear-gradient(to bottom,
-      var(--chrome) 0,
-      var(--chrome) 14px,
-      color-mix(in srgb, var(--chrome) 96%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 26px,
-      color-mix(in srgb, var(--chrome) 50%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 62px,
-      color-mix(in srgb, var(--chrome) 4%, color-mix(in srgb, var(--bg-2) 84%, transparent)) 98px,
-      color-mix(in srgb, var(--bg-2) 84%, transparent) 110px);
-  }
 }
 .filter-bar-title { text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1); }
 

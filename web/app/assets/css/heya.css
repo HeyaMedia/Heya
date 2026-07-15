@@ -87,6 +87,33 @@
      covers dark, OLED, and light). Nothing scrolls behind the navbar, so
      it gains nothing from being glass. */
   --chrome: color-mix(in srgb, var(--bg-0) 62%, var(--bg-1));
+  /* ── Frame glass — ONE fill + ONE blur + ONE column ramp shared by the
+     whole fixed chrome frame: the topbar, the stuck FilterBar/LibraryToolbar,
+     and the Library/Music sidebars. Before this, each painted its own
+     fill/blur/opacity, so adjacent surfaces read as separate patches (worst
+     in light: navbar paper vs FilterBar band vs sidebar). Now all three share
+     these tokens, so the frame is one continuous pane of glass with no seam
+     where they meet.
+     • --frame-glass — a SINGLE flat translucent fill (chrome-derived, so it
+       flips correctly on dark / OLED / light). Flat is what makes abutting
+       surfaces indistinguishable.
+     • --frame-glass-column — the tall-column ramp: holds that exact flat fill
+       past the FilterBar's height (150px), THEN thins toward a lighter draw of
+       the SAME chrome hue (never a different --bg-2 tone) lower down, where the
+       sidebar stands alone over ambient art. Short surfaces (topbar aside, the
+       stuck bars) live entirely inside the flat top region, so they show pure
+       --frame-glass; only the tall sidebar reaches the fade tail. Sidebar and
+       FilterBar consume this identical token → their vertical seam is invisible
+       at EVERY y regardless of their differing heights.
+     • --frame-glass-blur — bound to --glass-blur-md so the `minimal` glass knob
+       (which zeroes that token) crisps the whole frame together, and the
+       sidebars stop ignoring it (they used a hardcoded 24px). */
+  --frame-glass: color-mix(in srgb, var(--chrome) 82%, transparent);
+  --frame-glass-blur: var(--glass-blur-md);
+  --frame-glass-column: linear-gradient(to bottom,
+    var(--frame-glass) 0,
+    var(--frame-glass) 150px,
+    color-mix(in srgb, var(--chrome) 45%, transparent) 100%);
   --shadow-card: 0 0 0 1px rgb(var(--ink) / 0.11), 7px 12px 24px -10px rgb(var(--shade) / 0.75), 18px 34px 68px -16px rgb(var(--shade) / 0.95);
   --shadow-card-hover: 0 0 0 1px rgb(var(--ink) / 0.18), 10px 18px 32px -10px rgb(var(--shade) / 0.8), 24px 48px 92px -18px rgb(var(--shade) / 0.95), 0 0 34px rgb(var(--tone-rgb) / 0.14);
   /* small floating elements — buttons, chips, tags, badges */
@@ -343,6 +370,22 @@
   --glass-blur-lg: 3px;
   --glass-blur-md: 0px;
   --glass-blur-sm: 0px;
+}
+
+/* Firefox draws a hairline seam at every backdrop-filter region boundary
+   (Chrome/Safari composite abutting frosted panels cleanly). Redefine the
+   frame tokens once at :root so the whole chrome frame trades its blur for
+   near-solid glass of the SAME chrome hue there — one override, inherited by
+   the topbar / stuck bars / sidebars alike, instead of a per-component fork. */
+@supports (-moz-appearance: none) {
+  :root {
+    --frame-glass: color-mix(in srgb, var(--chrome) 94%, transparent);
+    --frame-glass-blur: 0px;
+    --frame-glass-column: linear-gradient(to bottom,
+      var(--frame-glass) 0,
+      var(--frame-glass) 150px,
+      color-mix(in srgb, var(--chrome) 66%, transparent) 100%);
+  }
 }
 
 /* ── Lighting: flat — redefine the shadow tokens to near-nothing (drops the

@@ -635,11 +635,12 @@ const { tabs, isActive } = useNavTabs()
   right: 0;
   height: var(--topbar-h);
   z-index: 50;
-  background: linear-gradient(to bottom,
-    color-mix(in srgb, var(--chrome) 86%, transparent),
-    color-mix(in srgb, var(--chrome) 58%, transparent));
-  backdrop-filter: blur(var(--glass-blur-md));
-  -webkit-backdrop-filter: blur(var(--glass-blur-md));
+  /* Flat --frame-glass so the bar's whole face — and crucially its bottom edge
+     where the sidebars/stuck FilterBar begin — is the exact fill those panels
+     hold at their tops. One shared token = one continuous glass frame. */
+  background: var(--frame-glass);
+  backdrop-filter: blur(var(--frame-glass-blur));
+  -webkit-backdrop-filter: blur(var(--frame-glass-blur));
   /* No border — the split against the page below is a soft drop shadow, kept
      off the library/music shells (heya.css) where it would shade the
      sidebar/FilterBar seam. */
