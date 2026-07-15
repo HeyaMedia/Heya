@@ -1,103 +1,131 @@
 <template>
-  <div v-if="loading" class="scroll" style="height: 100%">
+  <div v-if="loading" class="scroll hero-flush" style="height: 100%">
     <div style="height: 200px; background: var(--bg-2)" />
   </div>
 
-  <div v-else-if="detail" class="scroll" style="height: 100%">
-    <!-- Condensed hero -->
-    <div class="hero-compact">
-      <div class="hero-bg">
-        <LoadingImage v-if="backdropUrl" :src="backdropUrl" :width="1920" :quality="80" class="hero-bg-img visible" @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }" />
-        <div class="hero-bg-fade" />
-      </div>
+  <!-- `hero-flush` opts this page out of the .app-main topbar offset so the
+       season art fills up under the glass topbar (the hero's own inner padding
+       keeps text clear of the bar) — mirrors the sibling episode page. See
+       heya.css .app-main. -->
+  <div v-else-if="detail" class="scroll season2 hero-flush" :style="toneStyle" style="height: 100%">
+    <!-- ── HERO: series art as sharp, hard-clipped at the ledger seam ── -->
+    <section class="season-hero">
+      <HeroCanvas :src="heroArtUrl || ''" object-position="center 18%" />
+      <div class="bignum" aria-hidden="true">{{ bignumLabel }}</div>
 
-      <div class="hero-content">
-        <NuxtLink :to="`/tv/${slug}`" class="hero-poster-link">
-          <Poster :idx="0" :src="usePosterUrl(detail.media_item)" :title="detail.media_item.title" aspect="2/3" :width="600" />
+      <div class="season-hero-inner">
+        <NuxtLink :to="`/tv/${slug}`" class="postercard" :aria-label="`Back to ${detail.media_item.title}`">
+          <LoadingImage :src="seasonPosterUrl" :width="500" :quality="80" :alt="seasonTitle" @error="hideBroken" />
         </NuxtLink>
 
-        <div class="hero-info">
-          <NuxtLink :to="`/tv/${slug}`" class="show-back">
-            <Icon name="chevleft" :size="12" />
-            {{ detail.media_item.title }}
-          </NuxtLink>
+        <div class="grow">
+          <div class="eyebrow">
+            <NuxtLink :to="`/tv/${slug}`">{{ detail.media_item.title }}</NuxtLink>
+            <span class="sep">&middot;</span>
+            <span>{{ eyebrowSeason }}</span>
+          </div>
+
           <h1 class="season-title">{{ seasonTitle }}</h1>
-          <div class="hero-meta-row">
-            <span v-if="season?.air_date">{{ formatYear(season.air_date) }}</span>
-            <span class="dot" />
-            <span>{{ episodes.length }} episode{{ episodes.length !== 1 ? 's' : '' }}</span>
-            <template v-if="watchedCount > 0">
-              <span class="dot" />
-              <span>{{ watchedCount }}/{{ episodes.length }} watched</span>
+
+          <p class="metaline">
+            <span v-if="seasonYear">{{ seasonYear }}</span>
+            <template v-if="episodes.length">
+              <span class="dot">&middot;</span><span>{{ episodes.length }} EPISODE{{ episodes.length !== 1 ? 'S' : '' }}</span>
             </template>
-          </div>
+            <template v-if="airedRange.v">
+              <span class="dot">&middot;</span><span>AIRED {{ airedRange.v }}</span>
+            </template>
+          </p>
 
-          <!-- Progress bar -->
-          <div v-if="episodes.length" class="season-progress">
-            <div class="season-progress-fill" :style="{ width: watchedPct + '%' }" />
-          </div>
-
-          <div class="hero-actions">
-            <button class="btn btn-secondary btn-sm" @click="toggleSeasonWatched">
-              <Icon name="check" :size="14" />
-              {{ allWatched ? 'Unmark season' : 'Mark season watched' }}
+          <div class="actions">
+            <button v-if="seasonUpNext" class="btn-play" @click="playSeasonUpNext">
+              <span class="tri" /> {{ seasonUpNext.resume ? 'Resume' : 'Play' }}
+              <small>{{ upNextSmall }}</small>
             </button>
+            <button v-else class="btn-play" disabled>
+              <span class="tri" /> No File
+            </button>
+
+            <button class="pill" @click="toggleSeasonWatched">
+              <Icon name="check" :size="15" /> {{ allWatched ? 'Unmark season' : 'Mark season watched' }}
+            </button>
+
             <button
-              class="btn-icon" :style="{ color: seasonFavorited ? 'var(--bad)' : 'var(--fg-2)' }"
+              class="pill icon"
+              :class="{ 'is-on': seasonFavorited }"
               :aria-label="seasonFavorited ? 'Remove season from loved' : 'Add season to loved'"
               :aria-pressed="seasonFavorited"
+              :title="seasonFavorited ? 'Remove season from loved' : 'Add season to loved'"
               @click="toggleFavorite"
             >
-              <Icon :name="seasonFavorited ? 'heartfill' : 'heart'" :size="18" />
+              <Icon :name="seasonFavorited ? 'heartfill' : 'heart'" :size="16" />
             </button>
-            <button class="btn-icon" title="Edit Metadata" @click="showMetadataEditor = true">
-              <Icon name="settings" :size="16" />
+            <button class="pill icon" title="Edit Metadata" aria-label="Edit metadata" @click="showMetadataEditor = true">
+              <Icon name="settings" :size="15" />
             </button>
           </div>
-          <p v-if="season?.overview" class="season-overview">{{ season.overview }}</p>
         </div>
       </div>
-    </div>
+    </section>
 
-    <!-- Season navigation -->
-    <div class="season-nav">
-      <NuxtLink
-        v-for="s in allSeasons"
-        :key="s.season_number"
-        :to="seasonLink(s)"
-        class="season-nav-item"
-        :class="{ active: s.season_number === currentSeasonNum, watched: isSeasonWatched(s) }"
-      >
-        <span class="season-nav-num">{{ s.season_number === currentSeasonNum ? (s.season_number === 0 ? 'Specials' : `Season ${s.season_number}`) : (s.season_number === 0 ? 'SP' : s.season_number) }}</span>
-        <span v-if="isSeasonWatched(s)" class="season-nav-check"><Icon name="check" :size="8" /></span>
-      </NuxtLink>
-    </div>
+    <!-- ── LEDGER at the hard-clip seam ── -->
+    <LedgerStrip :cells="ledgerCells" />
 
-    <!-- Episode cards -->
-    <div class="episode-grid">
-      <AppContextMenu v-for="ep in episodes" :key="ep.id" :items="episodeContextItems(ep)">
-        <NuxtLink :to="episodeLink(ep)" class="ep-card-link">
-          <EpisodeCard
-            :still-url="episodeStillUrl(ep)"
-            :code="epCode(ep)"
-            :title="ep.preferred_title || ep.title || `Episode ${ep.episode_number}`"
-            :air-date="ep.air_date"
-            :runtime-minutes="ep.runtime_minutes"
-            :rating="ep.rating"
-            :overview="ep.preferred_overview || ep.overview"
-            :watched="isWatched(ep.id)"
-            :has-file="!!episodeFileId(ep)"
-            :progress-pct="episodeProgressPct(ep.id)"
-            @play="playEpisode(ep)"
-            @toggle-watched="toggleEpisodeWatched(ep)"
-          />
-        </NuxtLink>
-      </AppContextMenu>
+    <!-- ── BODY ── -->
+    <main class="page">
+      <!-- Season switcher pills -->
+      <section class="section tabs-row">
+        <nav class="seasontabs" aria-label="Seasons">
+          <NuxtLink
+            v-for="s in allSeasons"
+            :key="s.season_number"
+            :to="seasonLink(s)"
+            class="stab"
+            :class="{ on: s.season_number === currentSeasonNum }"
+          >
+            <span>{{ s.season_number === 0 ? 'SPECIALS' : `SEASON ${s.season_number}` }}</span>
+            <Icon v-if="isSeasonWatched(s)" name="check" :size="11" class="stab-check" />
+          </NuxtLink>
+        </nav>
+      </section>
 
-      <div v-if="!episodes.length" style="grid-column: 1/-1; padding: 40px 0; text-align: center; color: var(--fg-3)">
-        No episodes found for this season.
-      </div>
-    </div>
+      <!-- Episode ledger -->
+      <section class="section">
+        <SectionHeader title="Episodes">
+          <template #subtitle>{{ episodes.length }}</template>
+        </SectionHeader>
+
+        <div v-if="episodes.length" class="eplist">
+          <AppContextMenu v-for="ep in episodes" :key="ep.id" :items="episodeContextItems(ep)">
+            <EpisodeLedgerRow
+              :to="episodeLink(ep)"
+              :still-url="episodeStillUrl(ep)"
+              :episode-number="ep.episode_number"
+              :title="ep.preferred_title || ep.title || `Episode ${ep.episode_number}`"
+              :air-date="ep.air_date"
+              :runtime-minutes="ep.runtime_minutes"
+              :rating="ep.rating"
+              :overview="ep.preferred_overview || ep.overview"
+              :watched="isWatched(ep.id)"
+              :has-file="!!episodeFileId(ep)"
+              :progress-pct="episodeProgressPct(ep.id)"
+              :remaining-minutes="remainingMin(ep.id)"
+              @play="playEpisode(ep)"
+              @toggle-watched="toggleEpisodeWatched(ep)"
+            />
+          </AppContextMenu>
+        </div>
+        <p v-else class="prose-empty">No episodes found for this season.</p>
+      </section>
+
+      <!-- About this season -->
+      <section v-if="seasonOverview" class="section">
+        <SectionHeader title="About this season" />
+        <div class="prose">
+          <p>{{ seasonOverview }}</p>
+        </div>
+      </section>
+    </main>
 
     <MetadataEditorModal
       v-if="detail && season"
@@ -111,6 +139,8 @@
 
 <script setup lang="ts">
 import type { ContextMenuItem, MediaDetail } from '~~/shared/types'
+import type { ImageTone } from '~/composables/useImageTone'
+import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
 import { useQuery } from '@pinia/colada'
 import { mediaDetailQuery } from '~/queries/media'
 
@@ -148,12 +178,15 @@ useLiveRefresh([
     keys: [['media', 'detail', slug]],
   },
 ])
+
 const watchedEpisodes = ref<Set<number>>(new Set())
 const episodeProgress = ref<Map<number, { progress: number; total: number }>>(new Map())
 const seasonFavorited = ref(false)
 const showMetadataEditor = ref(false)
 
-const backdropUrl = computed(() => detail.value ? useBackdropUrl(detail.value.media_item) : null)
+const heroArtUrl = computed(() => detail.value ? useBackdropUrl(detail.value.media_item) : null)
+const seasonPosterUrl = computed(() =>
+  detail.value ? `/api/media/${useMediaImageKey(detail.value.media_item)}/image/poster?label=season-${currentSeasonNum.value}` : '')
 
 const allSeasons = computed(() => {
   if (!detail.value?.seasons) return []
@@ -164,11 +197,12 @@ const season = computed(() => {
   return allSeasons.value.find((s: any) => s.season_number === currentSeasonNum.value) || null
 })
 
-// Only surface episodes we actually have a file for. A currently-airing season
-// carries the full metadata episode list from the provider (e.g. all 10 from
-// TMDB) even when just episode 1 has aired/downloaded — rendering the
-// unreleased rest as empty cards is misleading. `presentEpisodes` derives this
-// from the detail doc's `episode_files` map (with a full-list fallback).
+// Only surface episodes we actually hold — a currently-airing season carries
+// the full provider catalog (e.g. all 13 from TMDB) even when just a few have
+// aired/downloaded. `presentEpisodes` derives presence from the detail doc's
+// `episode_files` map (full-list fallback), the same helper the series page
+// routes every count/grid through — governs the ledger counts, the episode
+// list, and the season-tab watched checks.
 const episodes = computed(() => {
   const eps = presentEpisodes(detail.value?.episode_files as any, currentSeasonNum.value, (season.value as any)?.episodes) as any[]
   return eps.slice().sort((a: any, b: any) => a.episode_number - b.episode_number)
@@ -179,29 +213,129 @@ const seasonTitle = computed(() => {
   return (season.value as any)?.title || (season.value as any)?.name || `Season ${currentSeasonNum.value}`
 })
 
+const seasonOverview = computed(() => (season.value as any)?.overview || '')
+
+const regularSeasonCount = computed(() => allSeasons.value.filter((s: any) => s.season_number !== 0).length)
+
+const eyebrowSeason = computed(() => {
+  if (currentSeasonNum.value === 0) return 'Specials'
+  return `Season ${currentSeasonNum.value} of ${regularSeasonCount.value}`
+})
+
+const bignumLabel = computed(() => currentSeasonNum.value === 0 ? 'SP' : String(currentSeasonNum.value).padStart(2, '0'))
+
+const seasonYear = computed(() => {
+  const d = (season.value as any)?.air_date
+  return d ? String(d).slice(0, 4) : ''
+})
+
+function monShort(d?: string | null) {
+  if (!d) return ''
+  try { return new Date(`${d}T00:00:00`).toLocaleDateString('en-US', { month: 'short' }).toUpperCase() }
+  catch { return '' }
+}
+
+const airedRange = computed<{ v: string; year: string }>(() => {
+  const start = (season.value as any)?.air_date
+  const end = (season.value as any)?.end_date
+  if (!start) return { v: '', year: '' }
+  const a = monShort(start)
+  const b = monShort(end)
+  const v = b && b !== a ? `${a} – ${b}` : a
+  return { v, year: String(start).slice(0, 4) }
+})
+
 const watchedCount = computed(() => {
   let count = 0
-  for (const ep of episodes.value) {
-    if (watchedEpisodes.value.has(ep.id)) count++
-  }
+  for (const ep of episodes.value) if (watchedEpisodes.value.has(ep.id)) count++
   return count
 })
 
-const watchedPct = computed(() => {
-  if (!episodes.value.length) return 0
-  return Math.round((watchedCount.value / episodes.value.length) * 100)
-})
+const inProgressCount = computed(() =>
+  episodes.value.filter((e: any) => episodeProgress.value.has(e.id)).length)
 
 const allWatched = computed(() => episodes.value.length > 0 && watchedCount.value >= episodes.value.length)
+
+const avgRating = computed(() => {
+  const rated = episodes.value
+    .map((e: any) => parseFloat(String(e.rating ?? '')))
+    .filter((n: number) => Number.isFinite(n) && n > 0)
+  if (!rated.length) return ''
+  return (rated.reduce((s: number, n: number) => s + n, 0) / rated.length).toFixed(1)
+})
+
+const avgRuntime = computed(() => {
+  const rts = episodes.value.map((e: any) => e.runtime_minutes).filter((n: any) => n > 0)
+  if (!rts.length) return 0
+  return Math.round(rts.reduce((s: number, n: number) => s + n, 0) / rts.length)
+})
+
+// ── Ledger cells (user-facing facts only) ──────────────────────────────────
+const ledgerCells = computed<LedgerCell[]>(() => {
+  const cells: LedgerCell[] = []
+  const total = episodes.value.length
+  if (!total) return cells
+
+  cells.push({
+    k: 'Watched',
+    v: String(watchedCount.value),
+    unit: `of ${total}`,
+    tone: true,
+    sub: inProgressCount.value > 0 ? `+${inProgressCount.value} in progress` : undefined,
+  })
+  cells.push({ k: 'Episodes', v: String(total) })
+  if (avgRating.value) cells.push({ k: 'Avg rating', v: avgRating.value })
+  if (airedRange.value.v) cells.push({ k: 'Aired', v: airedRange.value.v, sub: airedRange.value.year })
+  if (avgRuntime.value) cells.push({ k: 'Runtime', v: `~${avgRuntime.value}M`, sub: 'per episode' })
+  return cells
+})
+
+// ── Season-local "up next" — the primary Play/Resume CTA. Prefers an
+// in-progress present episode, then the first unwatched with a file, then the
+// first playable episode (rewatch). Disabled when nothing has a file. ────────
+const seasonUpNext = computed<{ ep: any; resume: boolean } | null>(() => {
+  const eps = episodes.value
+  if (!eps.length) return null
+  const inProg = eps.find((e: any) => episodeProgress.value.has(e.id) && episodeFileRef(e))
+  if (inProg) return { ep: inProg, resume: true }
+  const unwatched = eps.find((e: any) => !watchedEpisodes.value.has(e.id) && episodeFileRef(e))
+  if (unwatched) return { ep: unwatched, resume: false }
+  const first = eps.find((e: any) => episodeFileRef(e))
+  return first ? { ep: first, resume: false } : null
+})
+
+const upNextSmall = computed(() => {
+  const un = seasonUpNext.value
+  if (!un) return ''
+  const code = `E${pad(un.ep.episode_number)}`
+  const rem = remainingMin(un.ep.id)
+  return un.resume && rem ? `${code} · ${rem}M LEFT` : code
+})
+
+function playSeasonUpNext() {
+  if (seasonUpNext.value) playEpisode(seasonUpNext.value.ep)
+}
 
 function isWatched(epId: number) { return watchedEpisodes.value.has(epId) }
 
 function isSeasonWatched(s: any) {
-  // Only the episodes we hold count toward "watched" — an airing season is
-  // fully watched once every present episode is, not once the unaired rest is.
+  // Only the episodes we hold count — an airing season is fully watched once
+  // every present episode is, not once the unaired rest is.
   const eps = presentEpisodes(detail.value?.episode_files as any, s.season_number, s.episodes)
   if (!eps.length) return false
   return eps.every((ep: any) => watchedEpisodes.value.has(ep.id))
+}
+
+function episodeProgressPct(epId: number): number {
+  const p = episodeProgress.value.get(epId)
+  if (!p || p.total === 0) return 0
+  return Math.min(100, Math.round((p.progress / p.total) * 100))
+}
+
+function remainingMin(epId: number): number {
+  const p = episodeProgress.value.get(epId)
+  if (!p || !p.total || p.total <= p.progress) return 0
+  return Math.max(1, Math.round((p.total - p.progress) / 60))
 }
 
 const invalidateContinueWatching = useInvalidateContinueWatching()
@@ -210,16 +344,10 @@ async function toggleEpisodeWatched(ep: any) {
   const watched = isWatched(ep.id)
   const { $heya } = useNuxtApp()
   if (watched) {
-    await $heya('/api/me/watched/episode/{id}', {
-      method: 'DELETE',
-      path: { id: ep.id },
-    })
+    await $heya('/api/me/watched/episode/{id}', { method: 'DELETE', path: { id: ep.id } })
     watchedEpisodes.value.delete(ep.id)
   } else {
-    await $heya('/api/me/watched/episode/{id}', {
-      method: 'POST',
-      path: { id: ep.id },
-    })
+    await $heya('/api/me/watched/episode/{id}', { method: 'POST', path: { id: ep.id } })
     watchedEpisodes.value.add(ep.id)
   }
   watchedEpisodes.value = new Set(watchedEpisodes.value)
@@ -250,12 +378,6 @@ async function toggleFavorite() {
   seasonFavorited.value = res.favorited
 }
 
-function episodeProgressPct(epId: number): number {
-  const p = episodeProgress.value.get(epId)
-  if (!p || p.total === 0) return 0
-  return Math.min(100, Math.round((p.progress / p.total) * 100))
-}
-
 async function loadWatchState() {
   if (!detail.value) return
   try {
@@ -282,7 +404,7 @@ function seasonLink(s: any) {
 
 function episodeStillUrl(ep: any) {
   if (!detail.value) return ''
-  const label = `s${String(currentSeasonNum.value).padStart(2, '0')}e${String(ep.episode_number).padStart(2, '0')}`
+  const label = `s${pad(currentSeasonNum.value)}e${pad(ep.episode_number)}`
   return `/api/media/${useMediaImageKey(detail.value.media_item)}/image/still?label=${label}`
 }
 
@@ -297,10 +419,6 @@ function episodeFileRef(ep: any): string | number | null {
   return entry?.file_public_id || entry?.file_id || null
 }
 
-function epCode(ep: any) {
-  return `S${String(currentSeasonNum.value).padStart(2, '0')}E${String(ep.episode_number).padStart(2, '0')}`
-}
-
 function episodeLink(ep: any) {
   const num = currentSeasonNum.value === 0 ? 'specials' : String(currentSeasonNum.value)
   return `/tv/${slug.value}/season/${num}/episode/${ep.episode_number}`
@@ -310,24 +428,12 @@ function episodeContextItems(ep: any): ContextMenuItem[] {
   const watched = isWatched(ep.id)
   const hasFile = !!episodeFileId(ep)
   return [
-    {
-      label: 'View Episode',
-      icon: 'info',
-      action: () => navigateTo(episodeLink(ep)),
-    },
+    { label: 'View Episode', icon: 'info', action: () => navigateTo(episodeLink(ep)) },
     ...(hasFile
-      ? [{
-          label: 'Play',
-          icon: 'play',
-          action: () => playEpisode(ep),
-        } as ContextMenuItem]
+      ? [{ label: 'Play', icon: 'play', action: () => playEpisode(ep) } as ContextMenuItem]
       : []),
     { label: '', separator: true },
-    {
-      label: watched ? 'Mark Unwatched' : 'Mark Watched',
-      icon: 'eye',
-      action: () => toggleEpisodeWatched(ep),
-    },
+    { label: watched ? 'Mark Unwatched' : 'Mark Watched', icon: 'eye', action: () => toggleEpisodeWatched(ep) },
   ]
 }
 
@@ -336,9 +442,11 @@ function playEpisode(ep: any) {
   if (!fileRef || !detail.value) return
   const params = new URLSearchParams({
     media_item_id: String(detail.value.media_item.id),
-    title: `${detail.value.media_item.title} - S${String(currentSeasonNum.value).padStart(2, '0')}E${String(ep.episode_number).padStart(2, '0')} - ${ep.title}`,
+    title: `${detail.value.media_item.title} - S${pad(currentSeasonNum.value)}E${pad(ep.episode_number)} - ${ep.title}`,
   })
-  // Progress must key on the episode, not the series (see episode detail play).
+  // Progress must key on the episode, not the series — otherwise it lands as
+  // ('movie', series_id) and mark-watched (keyed by episode) can't clear it
+  // from Continue Watching.
   if (ep.id) {
     params.set('entity_type', 'episode')
     params.set('entity_id', String(ep.id))
@@ -346,7 +454,31 @@ function playEpisode(ep: any) {
   navigateTo(`/watch/${fileRef}?${params}`)
 }
 
-function formatYear(d: string) { return d?.slice(0, 4) || '' }
+function pad(n: number) { return String(n).padStart(2, '0') }
+function hideBroken(e: Event | string) {
+  if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none'
+}
+
+// ── Tone follow: publish --tone/--tone-rgb/--tone-ink on the page root.
+// Primary source is the AmbientBackdrop's own sampled tone (useBackgroundTone),
+// which re-samples on every crossfade; a direct sample of the hero art is the
+// ambient-off fallback (sequence-guarded, Playbar's --pb-accent pattern). ────
+const bgTone = useBackgroundTone()
+const localTone = ref<ImageTone | null>(null)
+let toneSeq = 0
+watch(heroArtUrl, (src) => {
+  const seq = ++toneSeq
+  if (!src) { localTone.value = null; return }
+  sampleImageTone(src).then((t) => { if (seq === toneSeq) localTone.value = t })
+}, { immediate: true })
+
+const toneStyle = computed(() => {
+  const t = bgTone.value || localTone.value
+  if (!t) return undefined
+  const m = t.main.match(/\d+/g)
+  if (!m) return undefined
+  return { '--tone': t.main, '--tone-rgb': m.slice(0, 3).join(' '), '--tone-ink': t.ink }
+})
 
 // Trigger watch-state load whenever detail data arrives.
 watch(detail, async (d) => {
@@ -367,110 +499,238 @@ watch(numParam, async () => {
 </script>
 
 <style scoped>
-/* Condensed hero */
-.hero-compact { position: relative; min-height: 220px; }
-.hero-bg { position: absolute; inset: 0; overflow: hidden; }
-.hero-bg-img { position: absolute; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.5s; }
-.hero-bg-img.visible { opacity: 1; }
-.hero-bg-fade {
-  position: absolute; inset: 0;
-  background:
-    linear-gradient(to right, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 70%, transparent) 40%, color-mix(in srgb, var(--bg-1) 40%, transparent) 100%),
-    linear-gradient(to top, var(--bg-1) 0%, transparent 50%);
-}
-.hero-content { position: relative; z-index: 1; display: flex; gap: 28px; padding: 36px 48px 24px; align-items: flex-end; }
-.hero-poster-link { display: block; width: 130px; flex-shrink: 0; text-decoration: none; transition: opacity 0.15s; }
-.hero-poster-link:hover { opacity: 0.8; }
-.hero-info { flex: 1; min-width: 0; padding-bottom: 4px; }
-.show-back {
-  display: inline-flex; align-items: center; gap: 4px;
-  font-size: 12px; color: var(--fg-2); text-decoration: none;
-  font-family: var(--font-mono); margin-bottom: 4px; transition: color 0.15s;
-}
-.show-back:hover { color: var(--gold); }
-.season-title { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
-.hero-meta-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg-2); margin-top: 6px; }
-.dot { width: 3px; height: 3px; border-radius: 50%; background: var(--fg-3); }
-
-/* Progress bar */
-.season-progress {
-  width: 100%; max-width: 320px; height: 3px;
-  background: rgb(var(--ink) / 0.08); border-radius: 2px;
-  margin-top: 10px; overflow: hidden;
-}
-.season-progress-fill {
-  height: 100%; background: var(--gold); border-radius: 2px;
-  transition: width 0.4s ease;
-}
-
-.hero-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
-.btn-sm { padding: 6px 14px; font-size: 12px; }
-.season-overview { font-size: 13px; color: var(--fg-2); line-height: 1.6; max-width: 600px; margin-top: 10px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-
-/* Season nav */
-.season-nav {
-  display: flex; gap: 4px; padding: 10px 48px 14px;
-  border-bottom: 1px solid var(--border);
-  overflow-x: auto; scrollbar-width: none;
-}
-.season-nav::-webkit-scrollbar { display: none; }
-.season-nav-item {
+/* ═══ HERO ═══════════════════════════════════════════════════════════════ */
+.season-hero {
   position: relative;
-  min-width: 36px; height: 32px; padding: 0 10px;
-  display: flex; align-items: center; justify-content: center; gap: 4px;
-  border-radius: 6px; font-size: 12px; font-weight: 600;
-  font-family: var(--font-mono); color: var(--fg-3);
-  text-decoration: none; transition: all 0.15s; flex-shrink: 0;
+  min-height: 40vh;
+  display: flex;
+  align-items: flex-end;
+  /* Over-art ink: the hero text rides the literal-dark art grade, so it stays
+     light in every theme — the same rule as poster labels over a still. */
+  --oink: 233 236 242;
 }
-.season-nav-item:hover { background: rgb(var(--ink) / 0.06); color: var(--fg-0); }
-.season-nav-item.active { background: var(--gold-soft); color: var(--gold); }
-.season-nav-item.watched .season-nav-num { color: var(--fg-2); }
 
-.season-nav-check {
-  display: flex; align-items: center;
-  color: var(--good); opacity: 0.7;
+/* Ghost tabular season numeral (heya2.css .bignum) — dips just below the seam. */
+.bignum {
+  position: absolute;
+  right: var(--pad-fluid);
+  bottom: -0.14em;
+  z-index: 1;
+  font: 700 clamp(160px, 24vw, 340px)/1 var(--font-mono);
+  letter-spacing: -0.06em;
+  color: transparent;
+  -webkit-text-stroke: 1px rgb(var(--oink) / 0.2);
+  pointer-events: none;
+  user-select: none;
 }
-.season-nav-item.active .season-nav-check { opacity: 1; }
 
-/* Episode card grid */
-.episode-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 20px;
-  padding: 24px 48px 80px;
+.season-hero-inner {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  padding: 96px var(--pad-fluid) 36px;
+  display: flex;
+  align-items: flex-end;
+  gap: 44px;
 }
-.ep-card-link { text-decoration: none; color: inherit; display: flex; flex-direction: column; }
+.season-hero-inner > .grow { flex: 1; min-width: 0; }
 
-/* Tablet (folded from the previous 900px collapse point onto the ratified
-   960px convention — docs/ui.md "Responsive conventions"). The pre-existing
-   900px rule never actually stacked this hero — `align-items: flex-end` on
-   a still-row `.hero-content` just bottom-aligned a shrunk poster next to
-   the text column, which reads fine down to ~960px but crowds badly at
-   phone widths. Fixed here (the sibling episode page's 900px rule already
-   did this) since it's directly in the way of "hero stacks" for the phone
-   pass — poster now stacks above the info column like the movie/tv/person
-   heroes. */
+/* season poster record-card (heya2.css .postercard, condensed to 172px) */
+.postercard {
+  flex: 0 0 172px;
+  display: block;
+  border-radius: var(--r-md);
+}
+.postercard :deep(img) {
+  width: 100%;
+  aspect-ratio: 2/3;
+  object-fit: cover;
+  border-radius: var(--r-md);
+  background: var(--bg-2);
+  box-shadow:
+    0 0 0 1px rgb(var(--oink) / 0.16),
+    10px 18px 34px -12px rgb(0 0 0 / 0.8),
+    24px 44px 90px -20px rgb(0 0 0 / 0.95);
+  transition: transform 0.18s ease;
+}
+.postercard:hover :deep(img) { transform: translateY(-3px); }
+
+/* mono eyebrow breadcrumb */
+.eyebrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+  font: 600 11.5px var(--font-mono);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--tone);
+}
+.eyebrow a { color: rgb(var(--oink) / 0.55); transition: color 0.15s; }
+.eyebrow a:hover { color: rgb(var(--oink) / 0.9); }
+.eyebrow .sep { color: rgb(var(--oink) / 0.3); }
+
+/* Archivo display title */
+.season-title {
+  font-family: var(--font-display);
+  font-size: clamp(2.2rem, 5vw, 3.8rem);
+  font-weight: 800;
+  font-variation-settings: "wdth" 115;
+  letter-spacing: -0.022em;
+  line-height: 0.99;
+  text-wrap: balance;
+  max-width: 18ch;
+  color: rgb(var(--oink) / 0.98);
+  text-shadow: 0 2px 30px rgb(0 0 0 / 0.45);
+}
+
+.metaline {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font: 500 12.5px var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgb(var(--oink) / 0.72);
+}
+.metaline .dot { color: rgb(var(--tone-rgb) / 0.85); }
+
+/* actions */
+.actions {
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* tone-glowing primary Play (heya2.css .btn-play) */
+.btn-play {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 26px 13px 20px;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  background: var(--tone);
+  color: var(--tone-ink, #0a0c10);
+  font: 650 14px var(--font-sans);
+  letter-spacing: 0.01em;
+  box-shadow:
+    0 0 0 1px rgb(var(--tone-rgb) / 0.45),
+    0 0 24px rgb(var(--tone-rgb) / 0.4),
+    6px 10px 36px -8px rgb(var(--tone-rgb) / 0.75);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.btn-play:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px rgb(var(--tone-rgb) / 0.6),
+    0 0 40px rgb(var(--tone-rgb) / 0.6),
+    8px 14px 48px -8px rgb(var(--tone-rgb) / 0.9);
+}
+.btn-play[disabled] {
+  cursor: not-allowed;
+  opacity: 0.4;
+  box-shadow: 0 0 0 1px rgb(var(--ink) / 0.14);
+  transform: none;
+}
+.btn-play .tri {
+  width: 0; height: 0;
+  border-left: 11px solid var(--tone-ink, #0a0c10);
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+}
+.btn-play small { font: 500 11px var(--font-mono); opacity: 0.72; letter-spacing: 0.06em; }
+
+/* tone-tinted secondary pills (heya2.css .pill) */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  border: 1px solid rgb(var(--tone-rgb) / 0.3);
+  background: rgb(var(--tone-rgb) / 0.08);
+  color: rgb(var(--oink) / 0.9);
+  font: 550 13px var(--font-sans);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 0 16px rgb(var(--tone-rgb) / 0.14), 5px 8px 22px -10px rgb(0 0 0 / 0.7);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.15s, color 0.15s;
+}
+.pill:hover {
+  border-color: rgb(var(--tone-rgb) / 0.55);
+  background: rgb(var(--tone-rgb) / 0.15);
+  color: rgb(var(--oink));
+  box-shadow: 0 0 24px rgb(var(--tone-rgb) / 0.28), 6px 10px 26px -10px rgb(0 0 0 / 0.75);
+  transform: translateY(-1px);
+}
+.pill.icon { width: 42px; height: 42px; padding: 0; justify-content: center; }
+.pill.icon.is-on { border-color: rgb(var(--tone-rgb) / 0.6); background: rgb(var(--tone-rgb) / 0.2); color: var(--tone); }
+
+/* ═══ BODY ════════════════════════════════════════════════════════════════ */
+.page { padding: 0 var(--pad-fluid) 90px; }
+.section { margin-top: 52px; }
+.tabs-row { margin-top: 34px; }
+
+/* season switcher pills (heya2.css .seasontabs) */
+.seasontabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+.seasontabs::-webkit-scrollbar { display: none; }
+.stab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid rgb(var(--ink) / 0.18);
+  color: rgb(var(--ink) / 0.6);
+  font: 600 12px var(--font-mono);
+  letter-spacing: 0.1em;
+  text-decoration: none;
+  transition: border-color 0.15s, background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.stab:hover:not(.on) { border-color: rgb(var(--ink) / 0.4); color: rgb(var(--ink) / 0.9); }
+.stab.on {
+  border-color: rgb(var(--tone-rgb) / 0.55);
+  background: rgb(var(--tone-rgb) / 0.12);
+  color: var(--tone);
+  box-shadow: 0 0 16px rgb(var(--tone-rgb) / 0.2);
+}
+.stab-check { color: var(--tone); opacity: 0.85; }
+.stab:not(.on) .stab-check { color: rgb(var(--ink) / 0.5); }
+
+/* episode ledger list (heya2.css .eplist) */
+.eplist { border-top: 1px solid var(--hair-strong); }
+
+.prose { font-size: 16px; line-height: 1.75; color: rgb(var(--ink) / 0.82); max-width: 72ch; }
+.prose-empty { font-size: 14px; color: rgb(var(--ink) / 0.5); font-style: italic; }
+
+/* ═══ RESPONSIVE ══════════════════════════════════════════════════════════ */
 @media (max-width: 960px) {
-  .hero-content { flex-direction: column; align-items: flex-start; padding: 24px 20px 16px; gap: 16px; }
-  .hero-poster-link { width: 100px; }
-  .season-title { font-size: 22px; }
-  .episode-grid { padding: 16px 20px 60px; grid-template-columns: 1fr; }
-  .season-nav { padding: 8px 20px 12px; }
+  .postercard { display: none; }
+  .season-hero-inner { padding: 84px var(--pad-fluid) 30px; }
 }
 
-/* Phone: tighter padding/poster, meta row wraps, action row gets 44px touch
-   targets. Episode cards already go full-width single-column at the tablet
-   breakpoint above (EpisodeCard.vue's own aspect-ratio layout compresses the
-   still/title/meta/overview naturally — no fixed-width layout to fight). */
 @media (max-width: 720px) {
-  .hero-content { padding: 20px 16px 14px; gap: 14px; }
-  .hero-poster-link { width: 80px; }
-  .season-title { font-size: 19px; }
-  .hero-meta-row { flex-wrap: wrap; row-gap: 4px; }
-  .hero-actions { flex-wrap: wrap; row-gap: 8px; }
-  .hero-actions .btn-sm { height: 44px; padding: 0 14px; }
-  .hero-actions .btn-icon { width: 44px; height: 44px; }
-  .episode-grid { padding: 14px 16px 60px; gap: 16px; }
-  .season-nav { padding: 8px 16px 12px; }
+  .season-hero { min-height: 34vh; }
+  .season-hero-inner { padding-top: 72px; gap: 24px; }
+  .bignum { display: none; }
+  .actions { gap: 8px; }
+  .btn-play { height: 48px; padding: 0 22px 0 18px; }
+  .pill.icon { width: 48px; height: 48px; }
 }
 </style>
