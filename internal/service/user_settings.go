@@ -48,6 +48,41 @@ type AppearanceSettings struct {
 	// (the FE appearance hydrate) could never learn about the off cross-
 	// device. Always speaking true/false makes the server authoritative.
 	ShowUnavailableRecs bool `json:"show_unavailable_recs"`
+	// AccentCustom is a user-picked hex accent overriding the preset.
+	// Empty = the named preset in Accent applies.
+	AccentCustom string `json:"accent_custom,omitempty"`
+	// AccentCustomDerived caches the family derived from AccentCustom so
+	// clients replay it verbatim pre-paint instead of re-deriving.
+	AccentCustomDerived *AccentDerived `json:"accent_custom_derived,omitempty"`
+	// TypeSet is a curated font pairing ("heya", "editorial", "grotesk",
+	// "rounded", "system"). Empty = heya.
+	TypeSet string `json:"typeset,omitempty"`
+	// FontScale is "sm", "md", or "lg". Empty = md.
+	FontScale string `json:"font_scale,omitempty"`
+	// ToneFollow lets pages tint toward their artwork. A pointer so legacy
+	// records (key absent) keep the default ON — a bare bool would marshal
+	// absent as false and silently disable it cross-device.
+	ToneFollow *bool `json:"tone_follow,omitempty"`
+	// Lighting is "dramatic" or "flat". Empty = dramatic.
+	Lighting string `json:"lighting,omitempty"`
+	// Glass is "rich" or "minimal". Empty = rich.
+	Glass string `json:"glass,omitempty"`
+	// Radius is "soft" or "sharp". Empty = soft.
+	Radius string `json:"radius,omitempty"`
+	// Hero is "standard" or "short". Empty = standard.
+	Hero string `json:"hero,omitempty"`
+	// Motion is "system", "reduced", or "full". Empty = system.
+	Motion string `json:"motion,omitempty"`
+}
+
+// AccentDerived is the client-computed accent family for a custom accent —
+// stored verbatim so the boot script never re-derives colors pre-paint.
+type AccentDerived struct {
+	Accent string `json:"accent,omitempty"`
+	RGB    string `json:"rgb,omitempty"`
+	Bright string `json:"bright,omitempty"`
+	Deep   string `json:"deep,omitempty"`
+	Ink    string `json:"ink,omitempty"`
 }
 
 // HomeSettings controls the composition of the home page.

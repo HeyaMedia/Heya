@@ -198,6 +198,14 @@ export type AiStatusReport = {
     ready: boolean;
 };
 
+export type AccentDerived = {
+    accent?: string;
+    bright?: string;
+    deep?: string;
+    ink?: string;
+    rgb?: string;
+};
+
 export type AcquireItem = {
     media_type: string;
     score: number;
@@ -536,11 +544,21 @@ export type ApiTokenView = {
 
 export type AppearanceSettings = {
     accent?: string;
+    accent_custom?: string;
+    accent_custom_derived?: AccentDerived;
     ambient_intensity?: number;
     ambient_mode?: string;
     density?: string;
+    font_scale?: string;
+    glass?: string;
+    hero?: string;
+    lighting?: string;
+    motion?: string;
+    radius?: string;
     show_unavailable_recs: boolean;
     theme?: string;
+    tone_follow?: boolean;
+    typeset?: string;
 };
 
 export type ApplyAlbumIdentifyRequest = {

@@ -566,6 +566,27 @@
         ],
         "type": "object"
       },
+      "AccentDerived": {
+        "additionalProperties": false,
+        "properties": {
+          "accent": {
+            "type": "string"
+          },
+          "bright": {
+            "type": "string"
+          },
+          "deep": {
+            "type": "string"
+          },
+          "ink": {
+            "type": "string"
+          },
+          "rgb": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "AcquireItem": {
         "additionalProperties": false,
         "properties": {
@@ -1777,6 +1798,12 @@
           "accent": {
             "type": "string"
           },
+          "accent_custom": {
+            "type": "string"
+          },
+          "accent_custom_derived": {
+            "$ref": "#/components/schemas/AccentDerived"
+          },
           "ambient_intensity": {
             "format": "int64",
             "type": "integer"
@@ -1787,10 +1814,34 @@
           "density": {
             "type": "string"
           },
+          "font_scale": {
+            "type": "string"
+          },
+          "glass": {
+            "type": "string"
+          },
+          "hero": {
+            "type": "string"
+          },
+          "lighting": {
+            "type": "string"
+          },
+          "motion": {
+            "type": "string"
+          },
+          "radius": {
+            "type": "string"
+          },
           "show_unavailable_recs": {
             "type": "boolean"
           },
           "theme": {
+            "type": "string"
+          },
+          "tone_follow": {
+            "type": "boolean"
+          },
+          "typeset": {
             "type": "string"
           }
         },
