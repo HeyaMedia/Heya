@@ -896,11 +896,9 @@ watch(detail, async (d) => {
 }
 .hero-inner > .grow { flex: 1; min-width: 0; }
 
-/* The hero rides flush under the fixed glass topbar (`.hero-flush`), so the
-   global `.hero-cycle` top:18px would tuck the backdrop controls behind the
-   bar. Drop the cluster clear of it (heya.css is untouched — scoped attribute
-   raises specificity over the plain global rule). */
-.hero-cycle { top: calc(var(--topbar-h) + 14px); }
+/* .hero-cycle occlusion (topbar clearance) is now handled globally in
+   heya.css — the hero is `hero-flush`, and the global rule tucks the cluster
+   clear of the fixed glass topbar. No page-local override needed. */
 
 /* poster record-card — layered directional shadow (heya2.css .postercard) */
 .postercard {

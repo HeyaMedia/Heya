@@ -36,6 +36,7 @@
       v-if="mixes.length"
       class="mh-mix-rail"
       title="Mixes for You"
+      aside="rotates daily"
       title-href="/music/stations/mixes"
       :card-size="260"
     >
@@ -64,6 +65,7 @@
     <MusicScrollRow
       v-if="recentAlbums.length"
       title="Recently Added"
+      :aside="addedThisWeek ? `${addedThisWeek} this week` : undefined"
       title-href="/music/albums"
       :card-size="170"
     >
@@ -93,13 +95,13 @@
       </AppContextMenu>
     </MusicScrollRow>
 
-    <!-- 3. Recently Played Artists — square card with "Artist" badge,
-         so the visual style matches every other shelf. -->
+    <!-- 3. Recently Played Artists — circular portraits with the name + count
+         caption below (heya2.css .artist-card), the mockup's artist idiom. -->
     <MusicScrollRow
       v-if="recentArtists.length"
       title="Recently Played"
       title-href="/music/artists"
-      :card-size="170"
+      :card-size="150"
     >
       <AppContextMenu
         v-for="a in recentArtists"
@@ -111,12 +113,13 @@
         class="mh-card-link"
       >
         <MusicCard
+          variant="circle"
+          captioned
           :src="usePosterUrl({ id: a.media_item_id, public_id: a.media_item_public_id })"
           :alt="a.artist_name"
           :title="a.artist_name"
           :subtitle="`${a.album_count} albums · ${a.track_count} tracks`"
           :hearted="(artistRatingValues.get(a.artist_id) ?? 0) >= 9"
-          badge-tl="Artist"
           :missing="a.available === false"
           @play="playArtist(a.artist_slug, a.artist_name)"
         />
@@ -189,6 +192,7 @@
         v-for="entry in moreByArtists"
         :key="`mb-${entry.artist_id}`"
         :title="`More by ${entry.artist_name}`"
+        aside="rotates"
         :title-href="`/music/artist/${entry.artist_slug}`"
         :card-size="170"
       >

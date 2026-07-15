@@ -23,6 +23,10 @@ const props = withDefaults(defineProps<{
   /** Shows a filled heart on cards whose artist/album is in the heart rating band. */
   hearted?: boolean
   variant?: 'square' | 'circle'
+  /** Shows the title + subtitle as a centered caption BELOW the art (heya2.css
+   *  `.artist-card`) instead of painted over it. Intended for `variant="circle"`,
+   *  whose clipped round art has no room for an embedded label. */
+  captioned?: boolean
   /** Hides the hover play button (use when the tile has no meaningful "play all" action). */
   noPlay?: boolean
   /** 0..100 — renders a progress bar along the bottom edge of the art. */
@@ -40,6 +44,7 @@ const props = withDefaults(defineProps<{
   badgeTr: '',
   hearted: false,
   variant: 'square',
+  captioned: false,
   noPlay: false,
   progressPct: 0,
   missing: false,
@@ -65,7 +70,7 @@ const initials = computed(() => {
 </script>
 
 <template>
-  <div class="mc" :class="[`mc-${variant}`, { 'mc-missing': missing }]">
+  <div class="mc" :class="[`mc-${variant}`, { 'mc-missing': missing, 'mc-captioned': captioned }]">
     <MediaMissingBadge v-if="missing" />
     <div class="mc-art">
       <LoadingImage
@@ -126,6 +131,13 @@ const initials = computed(() => {
       <div v-if="progressPct > 0" class="mc-progress">
         <div class="mc-progress-fill" :style="{ width: Math.min(100, progressPct) + '%' }" />
       </div>
+    </div>
+
+    <!-- Below-art caption (heya2.css .artist-card) — opt-in via `captioned`,
+         used by circles whose round art can't host an embedded label. -->
+    <div v-if="captioned" class="mc-caption">
+      <div class="mc-caption-nm">{{ title }}</div>
+      <div v-if="subtitle" class="mc-caption-meta">{{ subtitle }}</div>
     </div>
   </div>
 </template>
@@ -303,6 +315,31 @@ const initials = computed(() => {
    readable. Circles look weird with text overlay painted on them. */
 .mc-circle .mc-gradient,
 .mc-circle .mc-info { display: none; }
+
+/* Captioned: label sits below the art (heya2.css .artist-card), so the
+   over-art gradient + embedded caption are suppressed regardless of variant. */
+.mc-captioned .mc-gradient,
+.mc-captioned .mc-info { display: none; }
+.mc-caption { text-align: center; padding-top: 10px; }
+.mc-caption-nm {
+  font-size: 13px;
+  font-weight: 620;
+  line-height: 1.3;
+  color: var(--fg-0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mc-caption-meta {
+  margin-top: 2px;
+  font: 500 10px var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .mc-progress {
   position: absolute; bottom: 0; left: 0; right: 0;

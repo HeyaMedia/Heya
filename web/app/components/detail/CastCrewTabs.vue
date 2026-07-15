@@ -31,26 +31,20 @@
     <TabsContent value="cast" style="margin-top: 16px">
       <!-- Scroll mode -->
       <div v-if="variant === 'underline' || !castExpanded" ref="castScrollEl" class="hscroll">
-        <NuxtLink v-for="c in cast" :key="c.id" :to="personUrl(c)" class="cast-card">
-          <MediaCard
-            :idx="c.id"
-            :src="c.profile_path ? `/api/person/${c.id}/image` : ''"
-            aspect="2/3"
-            :title="c.name"
-            :subtitle="c.character"
-          />
+        <NuxtLink v-for="c in cast" :key="c.id" :to="personUrl(c)" class="person">
+          <LoadingImage v-if="showImg(c)" :src="`/api/person/${c.id}/image`" :width="264" :quality="80" :alt="c.name" class="person-img" @error="failedImg.add(c.id)" />
+          <div v-else class="person-noimg">{{ personInitials(c.name) }}</div>
+          <div class="person-nm">{{ c.name }}</div>
+          <div v-if="c.character" class="person-as">as {{ c.character }}</div>
         </NuxtLink>
       </div>
       <!-- Expanded grid mode (pill variant only) -->
       <div v-else class="cast-grid">
-        <NuxtLink v-for="c in cast" :key="c.id" :to="personUrl(c)" class="cast-card">
-          <MediaCard
-            :idx="c.id"
-            :src="c.profile_path ? `/api/person/${c.id}/image` : ''"
-            aspect="2/3"
-            :title="c.name"
-            :subtitle="c.character"
-          />
+        <NuxtLink v-for="c in cast" :key="c.id" :to="personUrl(c)" class="person">
+          <LoadingImage v-if="showImg(c)" :src="`/api/person/${c.id}/image`" :width="264" :quality="80" :alt="c.name" class="person-img" @error="failedImg.add(c.id)" />
+          <div v-else class="person-noimg">{{ personInitials(c.name) }}</div>
+          <div class="person-nm">{{ c.name }}</div>
+          <div v-if="c.character" class="person-as">as {{ c.character }}</div>
         </NuxtLink>
       </div>
     </TabsContent>
@@ -59,14 +53,11 @@
       <div v-for="dept in crewByDepartment" :key="dept.name" class="crew-dept">
         <div class="crew-dept-label">{{ dept.name }}</div>
         <div class="crew-dept-grid">
-          <NuxtLink v-for="c in dept.members" :key="`${c.id}-${c.job}`" :to="personUrl(c)" class="crew-card">
-            <MediaCard
-              :idx="c.id"
-              :src="c.profile_path ? `/api/person/${c.id}/image` : ''"
-              aspect="2/3"
-              :title="c.name"
-              :subtitle="c.job"
-            />
+          <NuxtLink v-for="c in dept.members" :key="`${c.id}-${c.job}`" :to="personUrl(c)" class="person">
+            <LoadingImage v-if="showImg(c)" :src="`/api/person/${c.id}/image`" :width="264" :quality="80" :alt="c.name" class="person-img" @error="failedImg.add(c.id)" />
+            <div v-else class="person-noimg">{{ personInitials(c.name) }}</div>
+            <div class="person-nm">{{ c.name }}</div>
+            <div v-if="c.job" class="person-as">{{ c.job }}</div>
           </NuxtLink>
         </div>
       </div>
@@ -89,6 +80,21 @@ const peopleTab = ref<'cast' | 'crew'>('cast')
 const castExpanded = ref(false)
 const castScrollEl = ref<HTMLElement | null>(null)
 const castOverflows = ref(false)
+
+// Per-person portrait fallback: a person shows their profile image when it
+// exists AND hasn't 404'd; otherwise a mono-initials tile (heya2.css .noimg).
+// (Person images aren't backed by media_assets, so gating on profile_path —
+// unlike the "image URLs unconditional" rule for media items — is correct.)
+const failedImg = reactive(new Set<number>())
+function showImg(c: { id: number; profile_path?: string | null }) {
+  return !!c.profile_path && !failedImg.has(c.id)
+}
+function personInitials(name: string): string {
+  const t = (name || '').trim()
+  if (!t) return '?'
+  const words = t.split(/\s+/).filter(Boolean)
+  return (words.length >= 2 ? words[0]!.charAt(0) + words[1]!.charAt(0) : t.slice(0, 2)).toUpperCase()
+}
 
 function checkCastOverflow() {
   nextTick(() => {
@@ -133,8 +139,39 @@ const crewByDepartment = computed(() => {
 <style scoped>
 /* Shared — both variants. `.hscroll` base + `.scroll-controls`/`.scroll-ctrl-btn`
    come from heya.css globals. */
-.cast-card { flex-shrink: 0; text-decoration: none; color: inherit; display: block; }
-.crew-card { text-decoration: none; color: inherit; display: block; }
+
+/* ── Person portrait tiles (heya2.css `.person`): 132×176 rounded-rect
+   portrait, name + mono role line BELOW the art, hairline ring + top-left
+   key-light directional shadow. Used by the cast rail, the expand-to-grid
+   view, and the crew department grids. NOT the MediaCard embedded-label look. */
+.person { text-decoration: none; color: inherit; display: block; }
+.person-img,
+.person-noimg {
+  width: 100%;
+  aspect-ratio: 132 / 176;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--bg-2);
+  box-shadow: 0 0 0 1px rgb(var(--ink) / 0.1), 7px 14px 30px -12px rgb(0 0 0 / 0.8);
+  transition: transform 0.18s ease, box-shadow 0.28s ease;
+}
+.person-noimg {
+  display: flex; align-items: center; justify-content: center;
+  font: 700 26px var(--font-mono); color: rgb(var(--ink) / 0.25);
+}
+.person:hover .person-img,
+.person:hover .person-noimg {
+  transform: translateY(-4px);
+  box-shadow: 0 0 0 1px rgb(var(--ink) / 0.16), 10px 18px 34px -12px rgb(0 0 0 / 0.85), 0 0 26px rgb(var(--tone-rgb) / 0.12);
+}
+.person-nm { margin-top: 9px; font-size: 13px; font-weight: 600; line-height: 1.3; color: var(--fg-0); }
+.person-as {
+  margin-top: 2px;
+  font: 500 10.5px var(--font-mono); letter-spacing: 0.06em; color: var(--fg-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Rail tiles get a fixed basis; grid tiles fill their column (width auto). */
+.hscroll .person { flex: 0 0 132px; width: 132px; }
 
 /* ── Pill variant (movies / tv) ─────────────────────────────────────── */
 .cct-pill .section-row-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
@@ -153,14 +190,13 @@ const crewByDepartment = computed(() => {
 .cct-pill .tab-btn:hover { background: color-mix(in oklab, var(--bg-2) 88%, transparent); color: var(--fg-0); }
 .cct-pill .tab-btn[data-state="active"] { background: var(--bg-3); color: var(--fg-0); font-weight: 600; border-color: var(--border-strong); }
 .cct-pill .tab-count { font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); margin-left: 4px; }
-.cct-pill .cast-card { width: 120px; }
 .cct-pill .crew-dept { margin-bottom: 20px; }
 .cct-pill .crew-dept-label {
   font-size: 10px; font-weight: 700; font-family: var(--font-mono);
   text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-3);
   margin-bottom: 8px; padding-left: 2px;
 }
-.cct-pill .crew-dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 16px; }
+.cct-pill .crew-dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 18px; }
 
 /* ── Underline variant (MediaDetailView) ────────────────────────────── */
 /* No .section-row-head rule here: MediaDetailView relied on the heya.css
@@ -173,7 +209,6 @@ const crewByDepartment = computed(() => {
 .cct-underline .tab-btn:hover { color: var(--fg-0); }
 .cct-underline .tab-btn[data-state="active"] { color: var(--gold); border-bottom-color: var(--gold); }
 .cct-underline .tab-count { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); margin-left: 6px; }
-.cct-underline .cast-card { width: 100px; }
 .cct-underline .hscroll { gap: 14px; }
 /* Crew dept label replicates the previous `.section-title` + inline styles. */
 .cct-underline .crew-dept { margin-bottom: 24px; }
@@ -182,7 +217,7 @@ const crewByDepartment = computed(() => {
   text-transform: uppercase; color: var(--fg-2); font-family: var(--font-mono);
   margin-bottom: 10px;
 }
-.cct-underline .crew-dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 14px; }
+.cct-underline .crew-dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 16px; }
 .cct-underline .scroll-arrow {
   width: 28px; height: 28px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
@@ -191,9 +226,15 @@ const crewByDepartment = computed(() => {
 }
 .cct-underline .scroll-arrow:hover { background: rgb(var(--ink) / 0.12); color: var(--fg-0); }
 
-/* Expanded grid (pill only) — keep after the width rules so `width: auto` wins. */
-.cast-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 16px; }
-.cast-grid .cast-card { width: auto; }
+/* Expanded grid (pill only). `.person` (no `.hscroll` ancestor) fills each
+   grid cell at width auto. */
+.cast-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 18px; }
+
+/* Phone: smaller portraits (heya2.css ≤560 .person). */
+@media (max-width: 560px) {
+  .hscroll .person { flex-basis: 104px; width: 104px; }
+  .person-nm { font-size: 12.5px; }
+}
 
 /* Touch: swipe replaces the mouse-only scroll arrows. The pill variant's
    fold/expand toggle (`.expand`) stays — it's a real affordance on touch too. */

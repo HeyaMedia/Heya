@@ -904,10 +904,12 @@ a { color: inherit; text-decoration: none; }
 
 /* Backdrop cycle cluster (CycleControls) — top right of detail heroes,
    mirroring the home deck's top-right controls. Replaced the old
-   .bd-indicators bar strip. */
+   .bd-indicators bar strip. Detail heroes are `hero-flush` (art rides up
+   under the fixed glass topbar), so the cluster tucks its top clear of the
+   bar — `--topbar-h` + a 14px gap. Pages no longer need to scope this. */
 .hero-cycle {
   position: absolute;
-  top: 18px;
+  top: calc(var(--topbar-h) + 14px);
   right: 24px;
   z-index: 5;
 }

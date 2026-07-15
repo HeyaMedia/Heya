@@ -42,31 +42,36 @@ const hasExtra = useSlots().extra != null
 </template>
 
 <style scoped>
+/* heya2.css `.credits`: hairline-ruled key/value rows (no glass panel). The
+   own rows and the #extra slot's rows are both flat `.info-label`/`.info-value`
+   pairs, so a single 130px/1fr grid with per-cell bottom borders renders them
+   identically — the top border closes the first row, each cell's bottom border
+   rules the rest. `:deep()` reaches the slotted cells (they carry the consumer's
+   scope, not this component's). */
 .info-grid {
-  display: grid; grid-template-columns: auto 1fr; gap: 6px 20px;
-  font-size: 12px; margin-top: 16px; max-width: 560px;
-  padding: 12px 16px;
-  /* Theme glass — the old 3% ink wash vanished over ambient artwork and
-     left the labels unreadable in light mode. */
-  background: color-mix(in oklab, var(--bg-2) 78%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border-radius: var(--r-md);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-el);
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 0 18px;
+  margin-top: 16px;
+  border-top: 1px solid var(--hair);
 }
-.info-grid :deep(.info-label) {
-  color: var(--fg-3); font-family: var(--font-mono);
-  text-transform: uppercase; letter-spacing: 0.06em;
-  font-size: 10px; padding-top: 3px;
-}
-.info-grid :deep(.info-value) {
-  font-size: 13px; color: var(--fg-1); line-height: 1.5;
-}
+.info-grid :deep(.info-label),
 .info-label {
-  color: var(--fg-3); font-family: var(--font-mono);
-  text-transform: uppercase; letter-spacing: 0.06em;
-  font-size: 10px; padding-top: 3px;
+  font: 600 10.5px var(--font-mono);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgb(var(--ink) / 0.45);
+  padding: 11px 0;
+  border-bottom: 1px solid var(--hair);
 }
-.info-value { font-size: 13px; color: var(--fg-1); line-height: 1.5; }
+.info-grid :deep(.info-value),
+.info-value {
+  font-size: 14px;
+  color: rgb(var(--ink) / 0.88);
+  line-height: 1.5;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--hair);
+}
+.info-grid :deep(.info-value) a:hover,
+.info-value a:hover { color: var(--tone); }
 </style>

@@ -167,6 +167,18 @@ function onCreated(row: { id: number; slug: string }) {
   min-width: 0;
 }
 
+/* Hero-flush child (the artist detail page) opts the whole shell out of the
+   `.app-main` topbar offset so its art rides up under the glass bar. That would
+   also slide the MusicSidebar's first nav item under the bar, so when a flush
+   child is present we re-pad the sidebar by --topbar-h (+ its usual 16px). The
+   `.music-main` column stays flush, so only the hero rides up; non-flush music
+   pages (home/albums/…) are untouched — they keep the `.app-main` offset and the
+   sidebar's default 16px. Net: the sidebar's first item lands at the same y in
+   both worlds. */
+.music-shell:has(.hero-flush) :deep(.music-sidebar) {
+  padding-top: calc(var(--topbar-h) + 16px);
+}
+
 /* Phone-only compact header — replaces MusicSidebar's persistent presence
    with a section title (the nav opens from AppTopBar's burger). */
 .music-phone-header {

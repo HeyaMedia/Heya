@@ -6,7 +6,7 @@
        shell owns that), mirroring the movie/TV ports + the playbar's
        --pb-accent. Every descendant inherits --tone/--tone-rgb/--tone-ink. The
        Playbar keeps its own track-following --pb-accent untouched. -->
-  <div v-else class="artist2" :style="toneStyle">
+  <div v-else class="artist2" :class="{ 'hero-flush': !isPhone }" :style="toneStyle">
 
     <!-- ── HERO: full-bleed backdrop as sharp art, hard-clipped at the ledger
          seam. HeroCanvas also publishes the graded (v2) art claim to the global
@@ -438,7 +438,7 @@ function isAlbumActive(al: AlbumView) {
   const albumId = currentTrack.value?.album_id
   return albumId != null && albumId > 0 && albumId === al.id
 }
-const { isCoarse } = useViewport()
+const { isCoarse, isPhone } = useViewport()
 
 const { onDragStart, onDragEnd } = useMusicDragDrop()
 // Popular Tracks context/⋯ items — the phone rows hide the rating widget, so
@@ -999,9 +999,13 @@ if (import.meta.client) {
 .m-state { color: var(--fg-3); padding: 32px var(--pad-fluid); }
 
 /* The music shell owns the scroll root; this page just publishes tone vars and
-   lays out hero → ledger → body. NOT hero-flush: the shell's MusicSidebar rides
-   the .app-main topbar offset, so the hero starts below the glass bar (see
-   DEFERRED.md — flushing would require editing the off-limits shell). */
+   lays out hero → ledger → body. On desktop/tablet the root carries `hero-flush`
+   so the artist art rides up under the fixed glass topbar like every other
+   detail page — the shell (pages/music.vue) then re-pads its MusicSidebar so the
+   sidebar's first nav item still clears the bar. On phone the class is dropped
+   (`!isPhone`) so the compact `.music-phone-header` keeps its topbar clearance
+   from the `.app-main` offset. The hero-inner's own top padding keeps the hero
+   text clear of the bar in the flush case. */
 .artist2 { --oink: 233 236 242; padding-bottom: 40px; }
 
 /* ═══ HERO ═════════════════════════════════════════════════════════════════ */
