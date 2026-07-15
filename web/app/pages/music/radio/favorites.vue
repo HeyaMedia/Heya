@@ -70,10 +70,11 @@ const subline = computed(() => {
 .rf-head { margin-bottom: 24px; }
 .rf-back { color: var(--fg-3); font-size: 12px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
 .rf-back:hover { color: var(--gold); }
-.rf-loading { color: var(--fg-3); padding: 24px 0; font-size: 13px; }
+.rf-loading { color: var(--fg-3); padding: 24px 0; font-size: 13px; text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1); }
 .rf-empty {
   display: flex; flex-direction: column; align-items: center; gap: 8px;
   padding: 60px 0; text-align: center; color: var(--fg-2);
+  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
 }
 .rf-empty h3 { font-size: 16px; color: var(--fg-1); margin-top: 4px; }
 .rf-empty p { font-size: 13px; color: var(--fg-3); max-width: 360px; margin-bottom: 12px; }

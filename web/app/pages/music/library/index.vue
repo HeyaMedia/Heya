@@ -1,26 +1,17 @@
 <template>
-  <div class="ms-lib page-pad">
-    <MusicPageHead title="Library" subtitle="Everything in your music collection.">
-      <div class="ms-stat-row">
-        <NuxtLink to="/music/artists" class="ms-stat">
-          <div class="ms-stat-num">{{ statsLoading ? '—' : artistCount.toLocaleString() }}</div>
-          <div class="ms-stat-lbl">Artists</div>
-        </NuxtLink>
-        <NuxtLink to="/music/albums" class="ms-stat">
-          <div class="ms-stat-num">{{ statsLoading ? '—' : albumCount.toLocaleString() }}</div>
-          <div class="ms-stat-lbl">Albums</div>
-        </NuxtLink>
-        <NuxtLink to="/music/songs" class="ms-stat">
-          <div class="ms-stat-num">{{ statsLoading ? '—' : trackCount.toLocaleString() }}</div>
-          <div class="ms-stat-lbl">Songs</div>
-        </NuxtLink>
-      </div>
-    </MusicPageHead>
+  <div class="ms-lib page-pad" :style="toneStyle">
+    <MusicPageHead title="Library" subtitle="Everything in your music collection." />
+
+    <!-- Library facts — the counts endpoint returns real totals (user-facing
+         facts, not ops telemetry), so the 2.0 ledger carries them at the top.
+         Sits on plain themed canvas (no hero seam), so `canvas` gives it
+         theme-aware ink. -->
+    <LedgerStrip v-if="ledgerCells.length" class="ms-ledger" :cells="ledgerCells" canvas />
 
     <!-- Quick browse cards — visually loud entries into the sub-lists. -->
     <section class="ms-nav-row">
       <NuxtLink to="/music/artists" class="ms-nav-card">
-        <Icon name="user" :size="22" />
+        <span class="ms-nav-glyph"><Icon name="user" :size="20" /></span>
         <div class="ms-nav-card-text">
           <div class="ms-nav-card-title">Artists</div>
           <div class="ms-nav-card-sub">Browse alphabetically</div>
@@ -28,7 +19,7 @@
         <Icon name="chevright" :size="16" class="ms-nav-card-arrow" />
       </NuxtLink>
       <NuxtLink to="/music/albums" class="ms-nav-card">
-        <Icon name="music" :size="22" />
+        <span class="ms-nav-glyph"><Icon name="music" :size="20" /></span>
         <div class="ms-nav-card-text">
           <div class="ms-nav-card-title">Albums</div>
           <div class="ms-nav-card-sub">Every release, every artist</div>
@@ -36,7 +27,7 @@
         <Icon name="chevright" :size="16" class="ms-nav-card-arrow" />
       </NuxtLink>
       <NuxtLink to="/music/songs" class="ms-nav-card">
-        <Icon name="list" :size="22" />
+        <span class="ms-nav-glyph"><Icon name="list" :size="20" /></span>
         <div class="ms-nav-card-text">
           <div class="ms-nav-card-title">Songs</div>
           <div class="ms-nav-card-sub">Every track in your library</div>
@@ -113,6 +104,8 @@
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
+import type { ImageTone } from '~/composables/useImageTone'
+import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
 import { useQuery } from '@pinia/colada'
 import { musicAlbumDetailQuery } from '~/queries/music'
 
@@ -180,6 +173,30 @@ const recentAlbums = computed<RecentAlbumRow[]>(() => homeQuery.data.value?.rece
 const recentArtists = computed<RecentArtistRow[]>(() => homeQuery.data.value?.recent_artists ?? [])
 const homeLoading = computed(() => homeQuery.isLoading.value)
 
+// ── Page tone: follow the ambient music pool's sampled colour (the shell owns
+// the pool claim; we only publish the vars), mirroring MusicHome. Falls back to
+// the :root accent alias when tone-follow is off (toneStyle undefined).
+const bgTone = useBackgroundTone()
+const { toneFollowEnabled } = useAppearance()
+const toneStyle = computed(() => {
+  if (!toneFollowEnabled.value) return undefined
+  const t: ImageTone | null = bgTone.value
+  if (!t) return undefined
+  const m = t.main.match(/\d+/g)
+  if (!m) return undefined
+  return { '--tone': t.main, '--tone-rgb': m.slice(0, 3).join(' '), '--tone-ink': t.ink }
+})
+
+// ── Library ledger — real totals from /api/music/counts (user-facing facts).
+const ledgerCells = computed<LedgerCell[]>(() => {
+  if (statsLoading.value) return []
+  const cells: LedgerCell[] = []
+  if (artistCount.value) cells.push({ k: 'Artists', v: artistCount.value.toLocaleString() })
+  if (albumCount.value) cells.push({ k: 'Albums', v: albumCount.value.toLocaleString() })
+  if (trackCount.value) cells.push({ k: 'Songs', v: trackCount.value.toLocaleString(), tone: true })
+  return cells
+})
+
 // --- Play actions ---
 async function playAlbum(al: RecentAlbumRow, _i: number) {
   try {
@@ -210,75 +227,58 @@ async function playAlbum(al: RecentAlbumRow, _i: number) {
 <style scoped>
 .ms-lib { max-width: 1400px; }
 
-.ms-stat-row { display: flex; gap: 8px; }
-.ms-stat {
-  min-width: 100px;
-  padding: 12px 20px;
-  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-el);
-  border-radius: var(--r-md);
-  text-decoration: none;
-  text-align: center;
-  transition: all 0.15s;
-}
-.ms-stat:hover {
-  border-color: var(--gold-soft);
-  transform: translateY(-2px);
-}
-.ms-stat-num {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--fg-0);
-  letter-spacing: -0.01em;
-}
-.ms-stat:hover .ms-stat-num { color: var(--gold); }
-.ms-stat-lbl {
-  font-size: 10px;
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--fg-3);
-  margin-top: 4px;
-}
+/* Full-bleed ledger reaches to the page gutter (the shell content column has
+   no hero, so it wants the page pad, not the wider --pad-fluid inset). */
+.ms-ledger { --pad-fluid: 0px; margin-bottom: 28px; }
 
+/* ── Quick-browse nav cards — 2.0 hairline grammar: tone-tinted glyph well,
+   mono sub, directional card shadow, tone-kiss on hover. ── */
 .ms-nav-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px;
-  margin-bottom: 40px;
+  gap: 14px;
+  margin-bottom: 44px;
 }
 .ms-nav-card {
   display: flex; align-items: center; gap: 14px;
   padding: 18px 20px;
-  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-el);
+  background: rgb(var(--ink) / 0.03);
+  border: 1px solid var(--hair);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
   text-decoration: none; color: inherit;
-  transition: all 0.15s;
+  transition: transform 0.18s ease, box-shadow 0.28s ease, border-color 0.15s, background 0.15s;
 }
-.ms-nav-card :deep(svg) { color: var(--gold); flex-shrink: 0; }
+.ms-nav-glyph {
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  width: 44px; height: 44px;
+  border-radius: 999px;
+  color: var(--tone);
+  background: rgb(var(--tone-rgb) / 0.1);
+  box-shadow: inset 0 0 0 1px rgb(var(--tone-rgb) / 0.25);
+}
 .ms-nav-card:hover {
-  border-color: var(--gold-soft);
-  transform: translateY(-1px);
+  transform: translateY(-3px);
+  border-color: rgb(var(--tone-rgb) / 0.35);
+  background: rgb(var(--tone-rgb) / 0.05);
+  box-shadow: var(--shadow-card-hover), 0 0 30px rgb(var(--tone-rgb) / 0.12);
 }
 .ms-nav-card-text { flex: 1; min-width: 0; }
 .ms-nav-card-title {
-  font-size: 16px; font-weight: 700;
+  font-size: 15px; font-weight: 650;
   color: var(--fg-0);
+  letter-spacing: -0.01em;
 }
 .ms-nav-card-sub {
-  font-size: 12px;
+  font: 500 10.5px var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--fg-3);
-  margin-top: 2px;
+  margin-top: 4px;
 }
-.ms-nav-card-arrow { color: var(--fg-3); transition: transform 0.15s; }
-.ms-nav-card:hover .ms-nav-card-arrow { color: var(--gold); transform: translateX(2px); }
+.ms-nav-card-arrow { color: var(--fg-3); transition: transform 0.15s, color 0.15s; }
+.ms-nav-card:hover .ms-nav-card-arrow { color: var(--tone); transform: translateX(3px); }
 
 .ms-card-link { text-decoration: none; color: inherit; display: block; }
 
@@ -300,9 +300,6 @@ async function playAlbum(al: RecentAlbumRow, _i: number) {
      above this page — the sub line ("Everything in your music
      collection.") stays since it's not duplicated anywhere else. */
   :deep(.mhd-title) { display: none; }
-  .ms-stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-  .ms-stat { min-width: 0; padding: 12px 8px; }
-
   .ms-nav-row { grid-template-columns: 1fr; margin-bottom: 28px; }
 }
 </style>

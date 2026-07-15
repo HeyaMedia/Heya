@@ -186,4 +186,55 @@ async function playFrom(startIdx: number) {
 .ms-empty h3 { font-size: 16px; color: var(--fg-1); margin-bottom: 8px; font-weight: 600; }
 .ms-empty a { color: var(--gold); text-decoration: none; }
 .ms-empty a:hover { text-decoration: underline; }
+
+/* ── Heya 2.0 `.trk` ledger-row grammar over the shared TrackList — layered
+   via the documented `:deep(.tl-*)` override hook (TrackList's own baseline is
+   pixel-parity for the four legacy tables; consuming pages tune it). Consistent
+   with the artist page's Popular Tracks: hairline-separated rows, mono-numeric
+   index/year/duration, mono-uppercase album, tone active row. The glass panel
+   stays (these rows sit on the bright ambient pool, no hero grade to sit on).
+   Structure/columns/virtualization untouched. ── */
+.ms-songs :deep(.tl) {
+  background: color-mix(in oklab, var(--bg-2) 74%, transparent);
+  border: 1px solid var(--hair);
+  padding: 2px 12px 6px;
+}
+.ms-songs :deep(.tl-head) {
+  letter-spacing: 0.18em;
+  border-bottom: 1px solid var(--hair-strong);
+  color: rgb(var(--ink) / 0.5);
+}
+.ms-songs :deep(.tl-body) { gap: 0; }
+.ms-songs :deep(.tl-track) {
+  border-bottom: 1px solid var(--hair);
+  border-radius: 0;
+  min-height: 52px;
+}
+.ms-songs :deep(.tl-track:hover) { background: rgb(var(--tone-rgb) / 0.05); }
+/* Beat TrackList's own `.tl-body .tl-track.tl-active` (0,4,0): the scoped
+   `:deep` prefix lifts these to (0,5,0), so the tone tint wins. */
+.ms-songs :deep(.tl-body .tl-track.tl-active) { background: rgb(var(--tone-rgb) / 0.1); }
+.ms-songs :deep(.tl-track.tl-active .tl-title) { color: var(--tone); }
+.ms-songs :deep(.tl-track.tl-active .tl-c-index) { color: var(--tone); }
+.ms-songs :deep(.tl-c-index) {
+  color: rgb(var(--ink) / 0.4);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.ms-songs :deep(.tl-title) { font-size: 14.5px; font-weight: 600; color: rgb(var(--ink) / 0.92); }
+.ms-songs :deep(.tl-c-year),
+.ms-songs :deep(.tl-c-duration) {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+/* Album column → the `.trk .al` mono-uppercase treatment. */
+.ms-songs :deep(.tl-album-link),
+.ms-songs :deep(.tl-album-plain) {
+  font: 500 11.5px var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgb(var(--ink) / 0.5);
+}
+.ms-songs :deep(.tl-album-link:hover) { color: var(--tone); }
 </style>

@@ -15,7 +15,7 @@
           v-for="band in BANDS"
           :key="band.key"
           type="button"
-          class="ms-fav-toggle-btn steer-glass"
+          class="ms-fav-toggle-btn"
           :class="{ active: view === band.key }"
           :aria-pressed="view === band.key"
           @click="view = band.key"
@@ -196,35 +196,40 @@ async function playFrom(i: number) {
 
 .dot { opacity: 0.4; }
 
+/* 2.0 reaction-band selector — a mono-pill segmented control (no heavy glass
+   panel). Sits bare on the ambient pool; the mono labels get the halo. */
 .ms-fav-controls {
   display: flex; align-items: center; gap: 24px;
   margin-bottom: 28px;
-  padding: 10px 12px;
-  background: color-mix(in oklab, var(--bg-2) 85%, transparent);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-el);
 }
-
 .ms-fav-toggle {
-  display: flex; gap: 2px;
-  padding: 3px;
-  background: rgb(var(--ink) / 0.04);
-  border-radius: var(--r-sm);
+  display: flex; gap: 6px;
+  flex-wrap: wrap;
 }
 .ms-fav-toggle-btn {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 6px 14px;
-  border-radius: 4px;
+  padding: 8px 15px;
+  border-radius: 999px;
+  border: 1px solid var(--hair-strong);
+  background: rgb(var(--ink) / 0.03);
   color: var(--fg-2);
-  font-size: 12px;
-  font-weight: 600;
+  font: 600 11px var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   cursor: pointer;
-  transition: all 0.15s;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  text-shadow: 0 0 10px var(--bg-1);
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
 }
-.ms-fav-toggle-btn.active { background: var(--gold-soft); color: var(--gold); }
+.ms-fav-toggle-btn:hover { border-color: rgb(var(--ink) / 0.3); color: var(--fg-1); }
+.ms-fav-toggle-btn.active {
+  border-color: rgb(var(--tone-rgb) / 0.5);
+  background: rgb(var(--tone-rgb) / 0.12);
+  color: var(--tone);
+  text-shadow: none;
+  box-shadow: 0 0 16px rgb(var(--tone-rgb) / 0.18);
+}
 
 .ms-fav-loading {
   color: var(--fg-2);
@@ -232,11 +237,25 @@ async function playFrom(i: number) {
   font-size: 13px; padding: 40px 0; text-align: center;
 }
 
-/* Deltas from TrackList's songs.vue-shaped baseline — see loved.vue for the
-   same pattern. This page never had an active-row treatment (no
-   activeTrackId passed above), so no tint override is needed here. */
-:deep(.tl-body) { gap: 2px; }
+/* ── Heya 2.0 `.trk` ledger rows over the shared TrackList (see songs.vue for
+   the same override hook). Hairline-separated rows, mono art+title+duration,
+   tone hover. This page passes no activeTrackId, so no active tint is needed.
+   Structure/columns/virtualization untouched. ── */
+:deep(.tl) {
+  background: color-mix(in oklab, var(--bg-2) 74%, transparent);
+  border: 1px solid var(--hair);
+  padding: 2px 12px 6px;
+}
+:deep(.tl-body) { gap: 0; }
+:deep(.tl-track) {
+  border-bottom: 1px solid var(--hair);
+  border-radius: 0;
+  min-height: 52px;
+}
+:deep(.tl-track:last-child) { border-bottom: 0; }
+:deep(.tl-track:hover) { background: rgb(var(--tone-rgb) / 0.05); }
 :deep(.tl-c-art) { width: 44px; height: 44px; }
-:deep(.tl-c-index) { font-size: 11px; }
-:deep(.tl-c-duration) { font-size: 11px; letter-spacing: 0.04em; }
+:deep(.tl-c-index) { font-size: 12px; color: rgb(var(--ink) / 0.4); font-variant-numeric: tabular-nums; }
+:deep(.tl-c-duration) { font-size: 12px; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
+:deep(.tl-title) { font-size: 14.5px; font-weight: 600; color: rgb(var(--ink) / 0.92); }
 </style>

@@ -168,8 +168,8 @@ function categoryIcon(name: string) {
 .pc-drill-back:hover { color: var(--gold); background: color-mix(in srgb, var(--gold) 6%, transparent); }
 .pc-drill-title { margin: 0; }
 
-.pc-loading, .pc-empty { color: var(--fg-3); padding: 24px 0; font-size: 13px; max-width: 540px; }
-.pc-empty-hint { color: var(--fg-3); font-size: 12px; margin-top: 8px; }
+.pc-loading, .pc-empty { color: var(--fg-3); padding: 24px 0; font-size: 13px; max-width: 540px; text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1); }
+.pc-empty-hint { color: var(--fg-3); font-size: 12px; margin-top: 8px; text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1); }
 .pc-empty code { background: var(--bg-2); padding: 1px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 11px; }
 
 .pc-grid {

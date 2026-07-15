@@ -232,7 +232,7 @@ function onEpisodeKeydown(e: KeyboardEvent, ep: PodcastEpisode) {
 </script>
 
 <style scoped>
-.m-loading, .m-empty { color: var(--fg-3); padding: 32px 40px; font-size: 13px; }
+.m-loading, .m-empty { color: var(--fg-3); padding: 32px 40px; font-size: 13px; text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1); }
 .pd-back { color: var(--gold); text-decoration: underline; font-size: 12px; display: inline-block; margin-top: 12px; }
 
 .pd-page { padding-bottom: 80px; }

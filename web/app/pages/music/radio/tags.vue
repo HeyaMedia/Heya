@@ -179,7 +179,7 @@ function tagSize(count: number) {
 .rt-drill-title { margin: 0; text-transform: capitalize; }
 .rt-drill-count { font-size: 11px; color: var(--fg-3); }
 
-.rt-loading, .rt-empty { color: var(--fg-3); padding: 24px 0; font-size: 13px; }
+.rt-loading, .rt-empty { color: var(--fg-3); padding: 24px 0; font-size: 13px; text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1); }
 
 .rt-grid {
   display: grid;

@@ -1,5 +1,5 @@
 <template>
-  <div class="page-pad ys-page">
+  <div class="page-pad ys-page" :style="toneStyle">
     <MusicPageHead title="My Sound">
       <template #subtitle>
         <span>A picture of your listening, derived by joining every scrobble against the sonic-analysis facets.</span>
@@ -9,6 +9,10 @@
         </template>
       </template>
     </MusicPageHead>
+
+    <!-- Headline facts — the 2.0 ledger, sourced from the stats payload already
+         on the page (user-facing facts only). Plain themed canvas → `canvas`. -->
+    <LedgerStrip v-if="ledgerCells.length" class="ys-ledger" :cells="ledgerCells" canvas />
 
     <div v-if="loading" class="m-loading">Loading…</div>
 
@@ -71,6 +75,8 @@
 </template>
 
 <script setup lang="ts">
+import type { ImageTone } from '~/composables/useImageTone'
+import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
 import { useQuery } from '@pinia/colada'
 
 definePageMeta({ layout: 'default' })
@@ -91,6 +97,34 @@ const statsQuery = useQuery({
 await waitForQuery(statsQuery)
 const stats = computed<ListeningStats | null>(() => statsQuery.data.value ?? null)
 const loading = computed(() => statsQuery.isPending.value)
+
+// ── Page tone: follow the ambient music pool (mirrors the other list pages).
+const bgTone = useBackgroundTone()
+const { toneFollowEnabled } = useAppearance()
+const toneStyle = computed(() => {
+  if (!toneFollowEnabled.value) return undefined
+  const t: ImageTone | null = bgTone.value
+  if (!t) return undefined
+  const m = t.main.match(/\d+/g)
+  if (!m) return undefined
+  return { '--tone': t.main, '--tone-rgb': m.slice(0, 3).join(' '), '--tone-ink': t.ink }
+})
+
+// ── Headline-stats ledger — derived entirely from the payload on the page.
+const ledgerCells = computed<LedgerCell[]>(() => {
+  const s = stats.value
+  if (!s || s.total_plays === 0) return []
+  const cells: LedgerCell[] = [
+    { k: 'Plays', v: s.total_plays.toLocaleString() },
+  ]
+  const g = s.top_genres[0]
+  if (g) cells.push({ k: 'Top genre', v: genreLabel(g.genre_name), sub: `${g.play_count}×`, tone: true })
+  const mood = [...s.mood_avg].sort((a, b) => b.avg_score - a.avg_score)[0]
+  if (mood) cells.push({ k: 'Top mood', v: moodLabel(mood.mood_key), sub: `${(mood.avg_score * 100).toFixed(0)}` })
+  const peak = [...s.tempo_histogram].sort((a, b) => b.play_count - a.play_count)[0]
+  if (peak) cells.push({ k: 'Peak tempo', v: tempoLabel(peak.band), unit: 'bpm' })
+  return cells
+})
 
 // Pre-compute max-of-bar so each bar group scales independently.
 const topGenrePlays = computed(() => stats.value?.top_genres[0]?.play_count ?? 1)
@@ -134,6 +168,8 @@ function tempoLabel(band: string) {
   padding: 24px 0; font-size: 13px;
 }
 
+.ys-ledger { --pad-fluid: 0px; margin-bottom: 28px; }
+
 .ys-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -141,19 +177,25 @@ function tempoLabel(band: string) {
 }
 .ys-tempo { grid-column: 1 / -1; }
 
+/* 2.0 facet cards — hairline frame + directional shadow, mono sec-head title
+   with an underline hairline (matches SectionHeader grammar). */
 .ys-card {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
+  background: rgb(var(--ink) / 0.02);
+  border: 1px solid var(--hair);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
   padding: 18px 20px 22px;
 }
 .ys-card-title {
-  font-size: 13px;
+  font-size: 12.5px;
   font-family: var(--font-mono);
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--fg-2);
+  letter-spacing: 0.24em;
+  color: rgb(var(--ink) / 0.88);
+  padding-bottom: 12px;
   margin-bottom: 18px;
+  border-bottom: 1px solid var(--hair);
 }
 .ys-card-empty { color: var(--fg-3); font-size: 12px; }
 

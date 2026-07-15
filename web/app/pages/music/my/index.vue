@@ -1,5 +1,5 @@
 <template>
-  <div class="ms-my page-pad">
+  <div class="ms-my page-pad" :style="toneStyle">
     <MusicPageHead title="My Music" subtitle="Everything you've saved, loved, or built.">
       <div class="ms-stat-row">
         <NuxtLink to="/music/my/artists" class="ms-stat">
@@ -103,15 +103,15 @@
       </AppContextMenu>
     </MusicScrollRow>
 
-    <!-- Loved Songs — rated 1★+, capped at 8 so it doesn't dominate. -->
+    <!-- Loved Songs — rated 1★+, capped at 8 so it doesn't dominate. Page-owned
+         head markup (not a MusicScrollRow rail), so it takes the 2.0 mono
+         SectionHeader — same split MusicHome uses. -->
     <section v-if="lovedTracks.length" class="ms-section">
-      <div class="ms-section-head">
-        <h2 class="section-title-lg">
-          <Icon name="star" :size="18" class="ms-loved-icon" weight="fill" />
-          Loved Songs
-        </h2>
-        <NuxtLink to="/music/loved" class="ms-see-all">See all →</NuxtLink>
-      </div>
+      <SectionHeader title="Loved Songs" :subtitle="String(lovedTracksCount)">
+        <template #actions>
+          <NuxtLink to="/music/loved" class="ms-see-all">See all &rarr;</NuxtLink>
+        </template>
+      </SectionHeader>
       <ul class="ms-track-list">
         <li
           v-for="(t, i) in lovedTracks"
@@ -152,11 +152,24 @@
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
+import type { ImageTone } from '~/composables/useImageTone'
 import type { LovedAlbumRow } from '~/queries/music'
 import { useQuery } from '@pinia/colada'
 import { lovedAlbumsQuery, lovedArtistsQuery, musicAlbumDetailQuery, userPlaylistsQuery } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
+
+// ── Page tone: follow the ambient music pool (mirrors MusicHome / library).
+const bgTone = useBackgroundTone()
+const { toneFollowEnabled } = useAppearance()
+const toneStyle = computed(() => {
+  if (!toneFollowEnabled.value) return undefined
+  const t: ImageTone | null = bgTone.value
+  if (!t) return undefined
+  const m = t.main.match(/\d+/g)
+  if (!m) return undefined
+  return { '--tone': t.main, '--tone-rgb': m.slice(0, 3).join(' '), '--tone-ink': t.ink }
+})
 
 const { play, queue, playTracks } = usePlayerBindings()
 const { $heya } = useNuxtApp()
@@ -273,39 +286,41 @@ async function playLovedTracks(startIdx: number) {
 .ms-my { max-width: 1400px; }
 
 .ms-stat-row { display: flex; gap: 8px; }
+/* 2.0 stat tiles — hairline card, mono-numeric value, mono label, tone-kiss
+   on hover. Stay clickable (this page has no separate nav row). */
 .ms-stat {
-  min-width: 100px;
-  padding: 12px 20px;
-  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-el);
+  min-width: 104px;
+  padding: 12px 18px 13px;
+  background: rgb(var(--ink) / 0.03);
+  border: 1px solid var(--hair);
+  box-shadow: var(--shadow-card);
   border-radius: var(--r-md);
   text-decoration: none;
   text-align: center;
-  transition: all 0.15s;
+  transition: transform 0.18s ease, box-shadow 0.28s ease, border-color 0.15s, background 0.15s;
 }
 .ms-stat:hover {
-  border-color: var(--gold-soft);
-  transform: translateY(-2px);
+  transform: translateY(-3px);
+  border-color: rgb(var(--tone-rgb) / 0.35);
+  background: rgb(var(--tone-rgb) / 0.05);
+  box-shadow: var(--shadow-card-hover), 0 0 26px rgb(var(--tone-rgb) / 0.1);
 }
 .ms-stat-num {
-  font-size: 22px;
-  font-weight: 700;
+  font: 700 22px var(--font-mono);
   color: var(--fg-0);
   letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
   display: flex; align-items: center; justify-content: center;
   min-height: 28px;
 }
-.ms-stat:hover .ms-stat-num { color: var(--gold); }
+.ms-stat:hover .ms-stat-num { color: var(--tone); }
 .ms-stat-lbl {
   font-size: 10px;
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--fg-3);
-  margin-top: 4px;
+  margin-top: 5px;
 }
 
 .ms-card-link { text-decoration: none; color: inherit; display: block; }
@@ -322,46 +337,41 @@ async function playLovedTracks(startIdx: number) {
   text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
 }
 
-.ms-section { margin-bottom: 36px; }
-.ms-section-head {
-  display: flex; align-items: baseline; justify-content: space-between;
-  margin-bottom: 14px;
-}
-.ms-loved-icon { color: var(--gold); vertical-align: -2px; margin-right: 4px; }
+.ms-section { margin-bottom: 40px; }
 .ms-see-all {
-  font-size: 12px;
-  font-family: var(--font-mono);
+  font: 550 12px var(--font-mono);
   color: var(--fg-2);
   text-decoration: none;
-  letter-spacing: 0.04em;
-  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
-.ms-see-all:hover { color: var(--fg-0); }
+.ms-see-all:hover { color: var(--tone); }
 
-/* Glass panel behind the rows — the bare list was the one block on this
-   page without a surface, and its fg-3 subs/durations vanished over bright
-   ambient art (same recipe as the shared TrackList's backing). */
+/* ── Loved-Songs preview — 2.0 .trk ledger rows (art thumb + title/artist +
+   duration), hairline-separated, tone active on hover. Glass panel kept for
+   readability over the bright ambient pool (no hero grade to sit on here). ── */
 .ms-track-list {
-  display: flex; flex-direction: column; gap: 2px;
-  padding: 8px;
-  background: color-mix(in oklab, var(--bg-2) 80%, transparent);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  padding: 4px 10px;
+  background: color-mix(in oklab, var(--bg-2) 76%, transparent);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--hair);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-el);
 }
 .ms-track-row {
   display: grid;
   grid-template-columns: 44px 1fr auto;
-  gap: 12px;
+  gap: 14px;
   align-items: center;
-  padding: 6px 8px;
-  border-radius: var(--r-sm);
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--hair);
   cursor: pointer;
   transition: background 0.15s;
 }
-.ms-track-row:hover { background: rgb(var(--ink) / 0.04); }
+.ms-track-row:last-child { border-bottom: 0; }
+.ms-track-row:hover { background: rgb(var(--tone-rgb) / 0.06); }
 .ms-track-art {
   position: relative;
   width: 44px; height: 44px;
@@ -380,22 +390,25 @@ async function playLovedTracks(startIdx: number) {
 .ms-track-row:hover .ms-track-play { opacity: 1; }
 .ms-track-meta { min-width: 0; }
 .ms-track-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--fg-0);
+  font-size: 14.5px;
+  font-weight: 600;
+  color: rgb(var(--ink) / 0.92);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ms-track-sub {
-  font-size: 12px;
+  font: 500 11.5px var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--fg-3);
-  margin-top: 2px;
+  margin-top: 3px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ms-track-dur {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--fg-3);
   letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: 720px) {

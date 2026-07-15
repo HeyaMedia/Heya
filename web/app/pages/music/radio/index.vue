@@ -307,7 +307,8 @@ const stationCountSub = computed(() => {
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
   gap: 18px;
 }
-.ri-loading { color: var(--fg-3); padding: 20px 0; }
+/* Bare-on-ambient status text — halo so it survives the bright pool backdrop. */
+.ri-loading { color: var(--fg-3); padding: 20px 0; text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1); }
 
 .ri-tags { display: flex; flex-wrap: wrap; gap: 8px; }
 .ri-tag {

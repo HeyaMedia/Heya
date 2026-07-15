@@ -237,6 +237,9 @@ function formatProgress(ep: ContinueEpisode) {
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
   gap: 18px;
 }
+/* Bare-on-ambient status text — halo so it survives the bright pool backdrop
+   (the section headings already get the global --bg-1 halo; these did not). */
+.pp-loading, .pp-empty, .pp-empty-hint { text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1); }
 .pp-loading { color: var(--fg-3); padding: 20px 0; }
 .pp-empty { color: var(--fg-2); padding: 20px 0; font-size: 13px; max-width: 540px; }
 .pp-empty-hint { color: var(--fg-3); font-size: 12px; margin-top: 8px; }

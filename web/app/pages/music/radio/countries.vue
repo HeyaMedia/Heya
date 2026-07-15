@@ -183,7 +183,7 @@ function flag(code: string) {
 .rc-drill-back:hover { color: var(--gold); background: color-mix(in srgb, var(--gold) 6%, transparent); }
 .rc-drill-title { display: flex; align-items: center; gap: 10px; margin: 0; }
 
-.rc-loading, .rc-empty { color: var(--fg-3); padding: 24px 0; font-size: 13px; }
+.rc-loading, .rc-empty { color: var(--fg-3); padding: 24px 0; font-size: 13px; text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1); }
 
 .rc-grid {
   display: grid;
