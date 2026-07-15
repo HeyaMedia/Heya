@@ -321,11 +321,16 @@ const initials = computed(() => {
 .mc-captioned .mc-gradient,
 .mc-captioned .mc-info { display: none; }
 .mc-caption { text-align: center; padding-top: 10px; }
+/* Circle captions sit BELOW the round art, so the tile's down-right
+   directional card shadow smears under them. A --bg-1 halo keeps the
+   letterforms crisp against that shadow (additive only — the shadow itself
+   is the approved 2.0 look and stays). */
 .mc-caption-nm {
   font-size: 13px;
   font-weight: 620;
   line-height: 1.3;
   color: var(--fg-0);
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -336,6 +341,7 @@ const initials = computed(() => {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--fg-3);
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

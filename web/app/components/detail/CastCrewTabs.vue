@@ -164,10 +164,19 @@ const crewByDepartment = computed(() => {
   transform: translateY(-4px);
   box-shadow: 0 0 0 1px rgb(var(--ink) / 0.16), 10px 18px 34px -12px rgb(0 0 0 / 0.85), 0 0 26px rgb(var(--tone-rgb) / 0.12);
 }
-.person-nm { margin-top: 9px; font-size: 13px; font-weight: 600; line-height: 1.3; color: var(--fg-0); }
+/* Name + role sit BELOW the portrait, so the tile's down-right directional
+   card shadow (up to ~68px reach) smears under them. A --bg-1 halo keeps the
+   letterforms crisp against that shadow and any ambient art, without shrinking
+   the approved shadow. The role line also lifts fg-3 → fg-2 — at fg-3 the mono
+   caption muddied into the shadow the user flagged on /tv/recommendations. */
+.person-nm {
+  margin-top: 9px; font-size: 13px; font-weight: 600; line-height: 1.3; color: var(--fg-0);
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1);
+}
 .person-as {
   margin-top: 2px;
-  font: 500 10.5px var(--font-mono); letter-spacing: 0.06em; color: var(--fg-3);
+  font: 500 10.5px var(--font-mono); letter-spacing: 0.06em; color: var(--fg-2);
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 /* Rail tiles get a fixed basis; grid tiles fill their column (width auto). */
@@ -195,6 +204,7 @@ const crewByDepartment = computed(() => {
   font-size: 10px; font-weight: 700; font-family: var(--font-mono);
   text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-3);
   margin-bottom: 8px; padding-left: 2px;
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1);
 }
 .cct-pill .crew-dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 18px; }
 
@@ -216,6 +226,7 @@ const crewByDepartment = computed(() => {
   font-size: 11px; font-weight: 600; letter-spacing: 0.18em;
   text-transform: uppercase; color: var(--fg-2); font-family: var(--font-mono);
   margin-bottom: 10px;
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1);
 }
 .cct-underline .crew-dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 16px; }
 .cct-underline .scroll-arrow {

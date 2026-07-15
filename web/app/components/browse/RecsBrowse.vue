@@ -547,15 +547,17 @@ function reset() {
 .rb-tile :deep(.mediac) { position: relative; z-index: 1; height: auto; }
 .rb-reason {
   margin-top: -10px;
-  padding: 18px 12px 10px;
-  /* Solid surface, not an ink wash — the slab floats over ambient art and
-     must read as part of the card. */
+  padding: 18px 12px 11px;
+  /* Solid surface, not an ink wash — the plinth floats over ambient art and
+     must read as part of the card. A single hairline defines its side/bottom
+     edges; it carries NO elevation of its own — the poster above owns the
+     directional card shadow, and a second shadow here just muddied the seam
+     between rows (Heya 2.0 polish 2026-07-15). */
   background: var(--bg-2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--hair);
   border-top: 0;
   border-radius: 0 0 var(--r-md) var(--r-md);
   font-size: 11.5px; line-height: 1.45; color: var(--fg-2);
-  box-shadow: var(--shadow-el);
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
