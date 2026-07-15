@@ -38,32 +38,40 @@ defineProps<{
 <style scoped>
 .sv2-section {
   margin-bottom: 16px;
-  padding: 18px 20px 20px;
-  border: 1px solid var(--border);
+  padding: 16px 20px 20px;
+  border: 1px solid var(--hair);
   border-radius: var(--r-lg);
   background: linear-gradient(145deg, var(--bg-1), color-mix(in srgb, var(--bg-2) 72%, var(--bg-1)));
-  box-shadow: 0 1px 0 rgb(var(--ink) / 0.025);
+  box-shadow: var(--shadow-el);
+  transition: box-shadow 0.28s ease;
 }
+/* Hairline-ruled head separating the mono title/description from the body,
+   the Heya 2.0 .sec-head grammar. */
 .sv2-section-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid var(--hair);
 }
 .sv2-section-titles {
   min-width: 0;
   flex: 1;
 }
+/* Mono uppercase section head (Heya 2.0 sec-head) with the brand-gold icon. */
 .sv2-section-title {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   margin: 0;
-  font-size: 14px;
-  font-weight: 620;
-  letter-spacing: -0.01em;
-  color: var(--fg-0);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-1);
 }
 .sv2-section-title > :deep(svg) { color: var(--gold); }
 .sv2-section-info {
@@ -73,16 +81,18 @@ defineProps<{
 .sv2-section-lock {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   margin-left: 6px;
-  padding: 2px 6px;
+  padding: 2px 7px;
   border-radius: var(--r-xs);
+  border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent);
   background: var(--gold-soft);
-  color: var(--gold);
+  color: var(--gold-bright);
   font-family: var(--font-mono);
   font-size: 9px;
-  text-transform: none;
-  letter-spacing: 0.02em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
 }
 .sv2-section-desc {
   margin: 4px 0 0;

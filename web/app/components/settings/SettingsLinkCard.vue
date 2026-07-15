@@ -37,15 +37,17 @@ withDefaults(defineProps<{
   align-items: center;
   gap: 12px;
   padding: 13px 14px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--hair);
   border-radius: var(--r-md);
   background: var(--bg-2);
-  transition: border-color 0.14s, background 0.14s, transform 0.14s;
+  box-shadow: var(--shadow-el);
+  transition: border-color 0.14s, background 0.14s, transform 0.14s, box-shadow 0.28s ease;
 }
 .settings-link-card:hover {
   border-color: var(--border-strong);
   background: color-mix(in srgb, var(--bg-2) 82%, var(--gold-soft));
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-card);
 }
 .settings-link-card.tone-warn { border-color: color-mix(in srgb, var(--gold) 24%, var(--border)); }
 .settings-link-card.tone-bad { border-color: color-mix(in srgb, var(--bad) 28%, var(--border)); }

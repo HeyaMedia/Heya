@@ -91,29 +91,38 @@ watch(() => route.path, () => { navOpen.value = false })
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 16px 4px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--hair);
+  margin-bottom: 4px;
 }
+/* Archivo display title — matches the desktop context-hero head. */
 .sv2-phone-title {
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-family: var(--font-display);
+  font-variation-settings: "wdth" 100;
+  font-size: 22px;
+  font-weight: 720;
+  letter-spacing: -0.02em;
   color: var(--fg-0);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Mono nav pill (Heya 2.0 grammar) — same shape as SettingsPageTabs. */
 .sv2-phone-nav-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   height: 36px;
-  padding: 0 14px;
+  padding: 0 15px;
   border-radius: 999px;
-  background: rgb(var(--ink) / 0.06);
-  border: 1px solid var(--border);
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid var(--border-strong);
   color: var(--fg-1);
-  font-size: 13px;
-  font-weight: 500;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   flex-shrink: 0;
 }
 .sv2-phone-nav-btn:active { background: rgb(var(--ink) / 0.12); color: var(--fg-0); }

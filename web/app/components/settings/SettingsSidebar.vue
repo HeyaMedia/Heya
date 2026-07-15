@@ -2,7 +2,7 @@
 withDefaults(defineProps<{ variant?: 'sidebar' | 'sheet' }>(), { variant: 'sidebar' })
 
 const route = useRoute()
-const { groups, isAdmin } = useSettingsNav()
+const { groups } = useSettingsNav()
 
 function isActive(item: SettingsNavItem) {
   return route.path === item.to
@@ -17,9 +17,7 @@ function isActive(item: SettingsNavItem) {
     :class="{ 'sv2-sidebar-sheet': variant === 'sheet' }"
     aria-label="Settings navigation"
   >
-    <template v-for="(group, idx) in groups" :key="group.id">
-      <div v-if="idx === 1 && isAdmin" class="sv2-divider" />
-
+    <template v-for="group in groups" :key="group.id">
       <div class="sv2-group">
         <div class="sv2-group-label">{{ group.label }}</div>
         <ul class="sv2-list">
@@ -59,14 +57,24 @@ function isActive(item: SettingsNavItem) {
   gap: 2px;
   padding: 0 12px;
 }
+/* Hairline-ruled groups (Heya 2.0 sidebar grammar) — one hairline between
+   each group, matching the reskinned LibrarySidebar's .lib-section rule. */
+.sv2-group + .sv2-group {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hair);
+}
 
+/* Mono uppercase group label — the eyebrow grammar shared with
+   LibrarySidebar's .section-title. */
 .sv2-group-label {
+  font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: var(--fg-4);
-  padding: 12px 12px 6px;
+  color: var(--fg-3);
+  padding: 10px 12px 7px;
 }
 
 .sv2-list {
@@ -79,6 +87,7 @@ function isActive(item: SettingsNavItem) {
 }
 
 .sv2-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -88,9 +97,21 @@ function isActive(item: SettingsNavItem) {
   color: var(--fg-2);
   transition: background 0.12s, color 0.12s;
 }
-.sv2-item:hover { background: rgb(var(--ink) / 0.03); color: var(--fg-0); }
-.sv2-item.active { background: var(--gold-soft); color: var(--gold); }
+.sv2-item:hover { background: rgb(var(--ink) / 0.04); color: var(--fg-0); }
+/* Gold active state + left key-rail — the exact chrome as LibrarySidebar's
+   .lib-item.active (gold-soft wash, gold-bright label, 3px gold rail). */
+.sv2-item.active { background: var(--gold-soft); color: var(--gold-bright); }
 .sv2-item.active .sv2-item-icon { color: var(--gold); }
+.sv2-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--gold);
+}
 
 .sv2-item-label {
   min-width: 0;
@@ -105,12 +126,6 @@ function isActive(item: SettingsNavItem) {
   transition: color 0.12s;
 }
 .sv2-item:hover .sv2-item-icon { color: var(--fg-1); }
-
-.sv2-divider {
-  height: 1px;
-  background: var(--border);
-  margin: 12px;
-}
 
 .sv2-sidebar.sv2-sidebar-sheet {
   width: 100%;

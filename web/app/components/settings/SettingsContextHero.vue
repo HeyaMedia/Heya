@@ -42,6 +42,10 @@ withDefaults(defineProps<{
   background:
     radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--context-color) 9%, transparent), transparent 48%),
     linear-gradient(145deg, color-mix(in srgb, var(--bg-1) 90%, var(--bg-2)), var(--bg-2));
+  /* The one floating panel per page — the Heya 2.0 directional --shadow-card
+     lifts the hero off the canvas (softens per theme via --shade). */
+  box-shadow: var(--shadow-card);
+  transition: box-shadow 0.28s ease;
 }
 .context-hero.tone-local { --context-color: color-mix(in srgb, #7e9fe7 72%, var(--fg-0)); }
 .context-hero.tone-connected { --context-color: var(--good); }
@@ -60,19 +64,24 @@ withDefaults(defineProps<{
 .context-copy { min-width: 0; }
 .context-eyebrow {
   display: block;
-  margin-bottom: 3px;
+  margin-bottom: 4px;
   color: var(--context-color);
+  font-family: var(--font-mono);
   font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
+  font-weight: 600;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
 }
+/* Archivo display title (Heya 2.0 --font-display) — the condensed-heavy
+   face carries settings page titles the same way library heads use it. */
 .context-copy h2 {
   margin: 0;
   color: var(--fg-0);
-  font-size: 19px;
-  font-weight: 660;
-  letter-spacing: -0.025em;
+  font-family: var(--font-display);
+  font-variation-settings: "wdth" 100;
+  font-size: 21px;
+  font-weight: 720;
+  letter-spacing: -0.02em;
 }
 .context-copy p {
   max-width: 680px;

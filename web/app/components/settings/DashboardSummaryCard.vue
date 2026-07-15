@@ -44,10 +44,11 @@ withDefaults(defineProps<{
   display: flex;
   flex-direction: column;
   padding: 17px 18px 15px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--hair);
   border-radius: var(--r-lg);
   background: linear-gradient(150deg, var(--bg-1), color-mix(in srgb, var(--bg-2) 76%, var(--bg-1)));
-  box-shadow: 0 1px 0 rgb(var(--ink) / 0.025);
+  box-shadow: var(--shadow-el);
+  transition: box-shadow 0.28s ease;
 }
 .dashboard-summary.tone-good { border-color: color-mix(in srgb, var(--good) 22%, var(--border)); }
 .dashboard-summary.tone-warn { border-color: color-mix(in srgb, var(--gold) 32%, var(--border)); }
@@ -60,16 +61,20 @@ withDefaults(defineProps<{
   justify-content: space-between;
   gap: 12px;
   padding-bottom: 13px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--hair);
 }
+/* Mono uppercase head (Heya 2.0 sec-head) with the brand-gold icon tile. */
 .dashboard-summary-title {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  color: var(--fg-0);
-  font-size: 14px;
-  font-weight: 630;
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 .dashboard-summary-icon {
   width: 27px;
@@ -155,7 +160,7 @@ withDefaults(defineProps<{
 .dashboard-summary-footer {
   margin-top: auto;
   padding-top: 11px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--hair);
 }
 
 @media (max-width: 620px) {

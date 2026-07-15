@@ -22,18 +22,18 @@ const tabs = computed(() => section.value?.tabs ?? [])
 </template>
 
 <style scoped>
+/* Mono pill row (Heya 2.0 grammar) — same shape as the committed season
+   switcher (.stab / .seasontabs) and the mode pills: hairline-bordered
+   pills, gold-tinted when active. */
 .settings-tabs {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 8px;
   max-width: 100%;
   margin-bottom: 24px;
-  padding: 4px;
+  padding-bottom: 2px;
   overflow-x: auto;
   scrollbar-width: none;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: rgb(var(--ink) / 0.025);
   width: fit-content;
 }
 .settings-tabs::-webkit-scrollbar { display: none; }
@@ -44,19 +44,24 @@ const tabs = computed(() => section.value?.tabs ?? [])
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0 13px;
-  border-radius: calc(var(--r-md) - 4px);
-  color: var(--fg-3);
-  font-size: 12px;
-  font-weight: 550;
+  padding: 0 15px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   white-space: nowrap;
-  transition: color 0.12s, background 0.12s, box-shadow 0.12s;
+  transition: color 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
-.settings-tab:hover { color: var(--fg-1); background: rgb(var(--ink) / 0.035); }
+.settings-tab:hover:not(.active) { color: var(--fg-0); border-color: var(--fg-3); }
 .settings-tab.active {
-  color: var(--fg-0);
-  background: var(--bg-1);
-  box-shadow: 0 1px 4px rgb(0 0 0 / 0.12), inset 0 0 0 1px rgb(var(--ink) / 0.035);
+  color: var(--gold-bright);
+  border-color: color-mix(in srgb, var(--gold) 55%, transparent);
+  background: var(--gold-soft);
+  box-shadow: 0 0 16px var(--gold-glow);
 }
 
 @media (max-width: 720px) {
