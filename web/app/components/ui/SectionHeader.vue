@@ -76,4 +76,18 @@ defineProps<{
   gap: 10px;
   flex-shrink: 0;
 }
+
+/* Phone: title + subtitle stack on their own lines — inline they fight for
+   width and the subtitle gets ellipsized into noise (user 2026-07-15). */
+@media (max-width: 720px) {
+  .sh-text {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+  }
+  .sh-count {
+    font-size: 11px;
+    letter-spacing: 0.04em;
+  }
+}
 </style>
