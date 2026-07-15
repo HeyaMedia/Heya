@@ -381,6 +381,10 @@ a { color: inherit; text-decoration: none; }
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+  /* Kill the card hover-lift hop entirely (shadow deepen still reads).
+     The `*` rule above only zeroes the transition, not the transform. */
+  .card-tile:hover,
+  .mc:hover .mc-art { transform: none !important; }
 }
 
 /* App shell. Deliberately NO background here: body already paints
@@ -481,22 +485,36 @@ a { color: inherit; text-decoration: none; }
   overflow: hidden;
   border-radius: var(--r-md);
   isolation: isolate;
+  /* Query container so the no-art initials below scale to the tile via cqi.
+     inline-size containment is cheap and leaves aspect-ratio height intact. */
+  container-type: inline-size;
   /* Every poster/card floats a little — the hero poster's treatment,
-     app-wide (hover lift below upgrades it further). */
+     app-wide (hover lift below upgrades it further). Shadow eases over .28s
+     (Heya 2.0) so the hover elevation settles rather than snaps. */
   box-shadow: var(--shadow-card);
-  transition: box-shadow 0.18s ease;
+  transition: box-shadow 0.28s ease;
 }
-.poster .poster-gradient {
+/* No-art placeholder — Heya 2.0 tile: the elevated dark surface (.poster's
+   own --bg-3) carries a faint palette-hashed tint (decorative placeholder
+   art, so the literal palette mix is allowed) under big, faint mono initials.
+   Initials scale to the tile via container-query units. Replaces the old
+   vibrant palette gradient + centred full title. */
+.poster .poster-fallback {
   position: absolute; inset: 0;
   z-index: 0;
+  pointer-events: none;
 }
-.poster .poster-texture {
+.poster .poster-initials {
   position: absolute; inset: 0;
   z-index: 1;
-  background-image:
-    repeating-linear-gradient(45deg, rgba(0,0,0,0.0) 0 10px, rgba(0,0,0,0.05) 10px 11px),
-    radial-gradient(circle at 30% 30%, rgba(255,255,255,0.12), transparent 50%);
-  mix-blend-mode: overlay;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono);
+  font-weight: 800;
+  font-size: min(22cqi, 3rem);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: rgb(var(--ink) / 0.2);
+  user-select: none;
   pointer-events: none;
 }
 .poster .poster-label {
@@ -509,32 +527,25 @@ a { color: inherit; text-decoration: none; }
   color: rgba(255,255,255,0.55);
   z-index: 2;
 }
-.poster .poster-title {
-  position: absolute;
-  top: 14px; left: 14px; right: 14px;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.15;
-  color: rgba(255,255,255,0.92);
-  z-index: 2;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.4);
-  text-wrap: balance;
-}
 
-/* Missing-on-disk de-emphasis. Greys + dims only the artwork (image/gradient),
-   not the whole .poster, so an overlaid trash badge keeps its colour. Paired
-   with <MediaMissingBadge> across the movies/tv/music/books grids. */
+/* Missing-on-disk de-emphasis. Greys + dims only the artwork (image, or the
+   no-art fallback tile + initials), not the whole .poster, so an overlaid
+   trash badge keeps its colour. Paired with <MediaMissingBadge> across the
+   movies/tv/music/books grids. */
 .poster--missing img,
-.poster--missing .poster-gradient,
-.poster--missing .poster-texture { filter: grayscale(1); opacity: 0.5; }
+.poster--missing .poster-fallback,
+.poster--missing .poster-initials { filter: grayscale(1); opacity: 0.5; }
 
-/* Card hover lift */
+/* Card hover lift — Heya 2.0: the whole card floats up 4px while its shadow
+   deepens along the top-left key-light axis and picks up a --tone kiss. The
+   transform snaps (.18s) but the shadow settles slower (.28s) so the lift
+   reads as the card catching light, not a hard pop. */
 .card-tile {
   cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  transition: transform 0.18s ease, box-shadow 0.28s ease;
   position: relative;
 }
-.card-tile:hover { transform: translateY(-3px); }
+.card-tile:hover { transform: translateY(-4px); }
 .card-tile:hover .poster { box-shadow: var(--shadow-card-hover), 0 0 0 1px rgb(var(--ink) / 0.06); }
 
 /* Floating feel: solid small elements cast a subtle directional shadow.

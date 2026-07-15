@@ -192,11 +192,25 @@ function scrollByDir(dir: number) {
 .row-scroll {
   overflow-x: auto;
   overflow-y: hidden;
-  /* Padding/negative-margin pair: layout-neutral, but moves the clip edge
-     outward so card drop shadows (--shadow-card) aren't cut off. */
-  padding: 12px 48px 72px;
-  margin: -12px -48px -68px;
+  /* Shadow room (Heya 2.0): a layout-neutral padding/negative-margin pair pushes
+     the clip box out so the enlarged directional shadows + the -4px hover lift
+     aren't sliced by overflow. Horizontal bleed tracks the page gutter
+     (--page-pad-x) so the rail runs edge-to-edge WITHOUT ever overflowing the
+     page sideways. The virtualizer's tile geometry is pure stride arithmetic
+     (padding-agnostic — see visibleTiles), so the bigger padding only widens
+     the clip box; overscan absorbs the few px of clientWidth the padding adds. */
+  --rail-bleed: var(--page-pad-x, 40px);
+  padding: 44px var(--rail-bleed) 130px;
+  margin: -44px calc(-1 * var(--rail-bleed)) -130px;
   scrollbar-width: none;
+}
+@media (max-width: 1100px) { .row-scroll { --rail-bleed: 24px; } }
+@media (max-width: 720px) {
+  .row-scroll {
+    --rail-bleed: 12px;
+    padding-top: 30px; padding-bottom: 100px;
+    margin-top: -30px; margin-bottom: -100px;
+  }
 }
 .row-scroll::-webkit-scrollbar { display: none; }
 

@@ -50,11 +50,11 @@ withDefaults(defineProps<{
 
 <template>
   <div class="mediac" :aria-label="title">
-    <!-- Don't forward title to Poster — Poster paints it in the centre of
-         the fallback gradient when there's no src, which collides with
-         our own bottom overlay. We always show the title via .mediac-title
-         (visible regardless of image state). -->
-    <Poster :idx="idx" :src="src" :aspect="aspect" :width="width" :class="{ 'poster--missing': missing }">
+    <!-- Forward the title so Poster's no-art tile can paint big centred mono
+         INITIALS (not the full title — that would collide with our bottom
+         overlay). The initials sit behind our own always-on .mediac-title,
+         matching the 2.0 no-art card. -->
+    <Poster :idx="idx" :src="src" :title="title" :aspect="aspect" :width="width" :class="{ 'poster--missing': missing }">
       <div class="mediac-gradient" />
 
       <div v-if="badgeTl" class="mediac-badge mediac-badge-tl">{{ badgeTl }}</div>

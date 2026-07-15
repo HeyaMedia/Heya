@@ -172,13 +172,23 @@ provide('msr:cardSize', props.cardSize)
      per-breakpoint gutter (40/24/12): every consumer is a page-pad page,
      and a bleed wider than the gutter would overflow .music-main sideways. */
   --msr-bleed: var(--page-pad-x, 40px);
-  padding: 12px var(--msr-bleed) 72px;
-  margin: -12px calc(-1 * var(--msr-bleed)) -66px;
+  /* Heya 2.0 shadow room: big symmetric vertical padding/negative-margin so the
+     enlarged directional shadows + -4px hover lift aren't sliced. Horizontal
+     bleed STAYS at the page gutter (--msr-bleed) — a wider bleed would overflow
+     .music-main sideways (it doesn't clip overflow-x like the home .scroll). */
+  padding: 44px var(--msr-bleed) 130px;
+  margin: -44px calc(-1 * var(--msr-bleed)) -130px;
   scroll-padding-left: var(--msr-bleed);
   scrollbar-width: none;
 }
 @media (max-width: 1100px) { .msr-scroller { --msr-bleed: 24px; } }
-@media (max-width: 720px) { .msr-scroller { --msr-bleed: 12px; } }
+@media (max-width: 720px) {
+  .msr-scroller {
+    --msr-bleed: 12px;
+    padding-top: 30px; padding-bottom: 100px;
+    margin-top: -30px; margin-bottom: -100px;
+  }
+}
 .msr-scroller::-webkit-scrollbar { display: none; }
 /* Use :deep(*) instead of :slotted(*) so the sizing rule survives reka-ui's
    slot cloning — AppContextMenu's <Slot>-with-as-child wraps swap the slot

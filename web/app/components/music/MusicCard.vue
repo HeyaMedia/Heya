@@ -47,10 +47,21 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{ play: [] }>()
 
-// Mirrors Poster.vue: on load error fall back to the icon tile rather than a
+// Mirrors Poster.vue: on load error fall back to the no-art tile rather than a
 // broken image, and reset when the src changes.
 const imgError = ref(false)
 watch(() => props.src, () => { imgError.value = false })
+
+// No-art tile initials (Heya 2.0), from the title — first letters of the
+// first two words, else the first two characters. Falls back to a music icon
+// only when there's no usable title.
+const initials = computed(() => {
+  const t = (props.title || '').trim()
+  if (!t) return ''
+  const words = t.split(/\s+/).filter(Boolean)
+  const chars = words.length >= 2 ? words[0]!.charAt(0) + words[1]!.charAt(0) : t.slice(0, 2)
+  return chars.toUpperCase()
+})
 </script>
 
 <template>
@@ -68,7 +79,8 @@ watch(() => props.src, () => { imgError.value = false })
         @error="imgError = true"
       />
       <div v-else class="mc-fallback">
-        <Icon name="music" :size="38" />
+        <span v-if="initials" class="mc-initials">{{ initials }}</span>
+        <Icon v-else name="music" :size="38" />
       </div>
 
       <div class="mc-gradient" />
@@ -134,14 +146,16 @@ watch(() => props.src, () => { imgError.value = false })
   background: var(--bg-3);
   overflow: hidden;
   border-radius: var(--r-md);
+  /* Query container so the no-art initials scale to the tile via cqi. */
+  container-type: inline-size;
   /* Same elevation + hover lift as the app-wide .card-tile/.poster combo —
      box-shadow follows border-radius, so the circle variant gets a round
-     shadow from this same rule. */
+     shadow from this same rule. Shadow settles over .28s (Heya 2.0). */
   box-shadow: var(--shadow-card);
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  transition: transform 0.18s ease, box-shadow 0.28s ease;
 }
 .mc:hover .mc-art {
-  transform: translateY(-3px);
+  transform: translateY(-4px);
   box-shadow: var(--shadow-card-hover), 0 0 0 1px rgb(var(--ink) / 0.06);
 }
 .mc-circle .mc-art { border-radius: 50%; }
@@ -151,11 +165,22 @@ watch(() => props.src, () => { imgError.value = false })
   object-fit: cover;
   display: block;
 }
+/* No-art tile (Heya 2.0): dark surface (the .mc-art --bg-3) under big faint
+   mono initials, matching album-sm/.artist-card .noart in the mockup. */
 .mc-fallback {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
   color: var(--fg-3);
-  background: linear-gradient(135deg, color-mix(in srgb, var(--gold) 10%, transparent), color-mix(in srgb, var(--gold) 2%, transparent));
+  background: linear-gradient(150deg, color-mix(in srgb, var(--gold) 8%, transparent), transparent 62%);
+}
+.mc-initials {
+  font-family: var(--font-mono);
+  font-weight: 800;
+  font-size: min(24cqi, 3rem);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: rgb(var(--ink) / 0.2);
+  user-select: none;
 }
 
 .mc-gradient {

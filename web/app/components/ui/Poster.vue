@@ -12,10 +12,9 @@
       @error="imgError = true"
     />
     <template v-if="!src || imgError">
-      <div class="poster-gradient" :style="{ background: gradient }" />
-      <div class="poster-texture" />
+      <div class="poster-fallback" :style="{ background: fallbackTint }" />
+      <div v-if="initials" class="poster-initials">{{ initials }}</div>
     </template>
-    <div v-if="title && (!src || imgError)" class="poster-title">{{ title }}</div>
     <div v-if="label || kind" class="poster-label">{{ label || kind }}</div>
     <slot />
   </div>
@@ -59,5 +58,18 @@ const imgError = ref(false)
 watch(() => props.src, () => { imgError.value = false })
 
 const p = computed(() => palettes[(props.idx || 0) % palettes.length]!)
-const gradient = computed(() => `linear-gradient(135deg, ${p.value.bg} 0%, ${p.value.mid} 55%, ${p.value.hi} 100%)`)
+
+// No-art tile (Heya 2.0): a faint palette-hashed tint over the poster's own
+// dark --bg-3 surface (kept literal — decorative placeholder art), plus big
+// mono initials derived from the title. The palette hash is retained so
+// neighbouring blank tiles stay subtly distinct rather than identical.
+const fallbackTint = computed(() =>
+  `linear-gradient(150deg, color-mix(in srgb, ${p.value.hi} 16%, transparent) 0%, transparent 62%)`)
+const initials = computed(() => {
+  const t = (props.title || '').trim()
+  if (!t) return ''
+  const words = t.split(/\s+/).filter(Boolean)
+  const chars = words.length >= 2 ? words[0]!.charAt(0) + words[1]!.charAt(0) : t.slice(0, 2)
+  return chars.toUpperCase()
+})
 </script>

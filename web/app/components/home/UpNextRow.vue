@@ -18,7 +18,7 @@
       <div
         v-for="(item, i) in items"
         :key="item.id"
-        class="un-tile"
+        class="un-tile card-tile"
         :style="{ width: '168px' }"
         @click="$emit('play', item)"
       >
@@ -71,11 +71,23 @@ function detailUrl(item: UpNextItem): string {
   overflow-x: auto;
   overflow-y: hidden;
   scroll-snap-type: x mandatory;
-  scroll-padding-left: 48px; /* snap to the content edge, not the shadow-room padding */
-  /* Layout-neutral clip-edge expansion so card shadows aren't cut off. */
-  padding: 12px 48px 72px;
-  margin: -12px -48px -68px;
+  /* Shadow room (Heya 2.0): layout-neutral padding/negative-margin pair so the
+     enlarged directional shadows + hover lift aren't sliced by overflow.
+     Horizontal bleed tracks the page gutter (--page-pad-x) → edge-to-edge with
+     no sideways page overflow. Snap aligns to the content edge, not the pad. */
+  --rail-bleed: var(--page-pad-x, 40px);
+  scroll-padding-left: var(--rail-bleed);
+  padding: 44px var(--rail-bleed) 130px;
+  margin: -44px calc(-1 * var(--rail-bleed)) -130px;
   scrollbar-width: none;
+}
+@media (max-width: 1100px) { .row-scroll { --rail-bleed: 24px; } }
+@media (max-width: 720px) {
+  .row-scroll {
+    --rail-bleed: 12px;
+    padding-top: 30px; padding-bottom: 100px;
+    margin-top: -30px; margin-bottom: -100px;
+  }
 }
 .row-scroll::-webkit-scrollbar { display: none; }
 .row-scroll > * { scroll-snap-align: start; }
