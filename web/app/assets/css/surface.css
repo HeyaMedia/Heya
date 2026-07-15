@@ -15,8 +15,8 @@
      (album-art hero, splash images) wash out muted text. Earlier 62% looked
      ethereal but failed contrast on light backgrounds. */
   background: color-mix(in oklab, var(--bg-2) 92%, transparent);
-  backdrop-filter: blur(24px) saturate(160%) var(--surface-brighten, brightness(108%));
-  -webkit-backdrop-filter: blur(24px) saturate(160%) var(--surface-brighten, brightness(108%));
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(160%) var(--surface-brighten, brightness(108%));
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(160%) var(--surface-brighten, brightness(108%));
   border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
   box-shadow:

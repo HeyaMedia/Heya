@@ -397,7 +397,9 @@ watch(featuredBackdrop, (src) => {
   if (!src) { localTone.value = null; return }
   sampleImageTone(src).then((t) => { if (seq === toneSeq) localTone.value = t })
 }, { immediate: true })
+const { toneFollowEnabled } = useAppearance()
 const toneStyle = computed(() => {
+  if (!toneFollowEnabled.value) return undefined
   const t = bgTone.value || localTone.value
   if (!t) return undefined
   const m = t.main.match(/\d+/g)

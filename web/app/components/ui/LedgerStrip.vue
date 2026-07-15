@@ -55,8 +55,8 @@ withDefaults(
   /* Literal-equivalent dark scrim, token-clean: this strip glasses over the
      hero-art seam (CLAUDE.md allows dark over artwork; --shade is 0 0 0). */
   background: rgb(var(--shade) / 0.3);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(var(--glass-blur-md));
+  -webkit-backdrop-filter: blur(var(--glass-blur-md));
   /* Edge-to-edge rules; cells inset from the page gutter. */
   padding: 0 var(--pad-fluid);
   /* Ledger ink: this strip sits at the hero's hard-clip seam, over the dark

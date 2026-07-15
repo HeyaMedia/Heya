@@ -328,7 +328,9 @@ const ctaStyle = computed(() =>
 // Publish --tone on the hero root so the eyebrow + tone-glow CTA follow the
 // spotlight cover's own dominant color (fill + glow stay in sync). Inherits the
 // page tone until the sample lands.
+const { toneFollowEnabled } = useAppearance()
 const toneVars = computed<Record<string, string> | undefined>(() => {
+  if (!toneFollowEnabled.value) return undefined
   const t = tone.value
   if (!t) return undefined
   const m = t.main.match(/\d+/g)

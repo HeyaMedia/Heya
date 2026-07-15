@@ -636,8 +636,8 @@ const { tabs, isActive } = useNavTabs()
   background: linear-gradient(to bottom,
     color-mix(in srgb, var(--chrome) 86%, transparent),
     color-mix(in srgb, var(--chrome) 58%, transparent));
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(var(--glass-blur-md));
+  -webkit-backdrop-filter: blur(var(--glass-blur-md));
   /* No border — the split against the page below is a soft drop shadow, kept
      off the library/music shells (heya.css) where it would shade the
      sidebar/FilterBar seam. */

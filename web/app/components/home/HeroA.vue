@@ -193,7 +193,9 @@ const tone = ref<ImageTone | null>(null)
 watch(currentBg, async (url) => {
   tone.value = url ? await sampleImageTone(bgImg.thumb(url)) : null
 }, { immediate: true })
+const { toneFollowEnabled } = useAppearance()
 const toneVars = computed<Record<string, string> | undefined>(() => {
+  if (!toneFollowEnabled.value) return undefined
   const t = tone.value
   if (!t) return undefined
   const m = t.main.match(/\d+/g)

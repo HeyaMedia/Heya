@@ -227,6 +227,16 @@ export default defineNuxtConfig({
     // width axes (font-stretch 62%–125%); the default `index.css` is
     // weight-only, so it would ignore `font-variation-settings: "wdth" …`.
     "@fontsource-variable/archivo/standard.css",
+    // Optional type sets (Settings → Appearance → Type set). Registering all
+    // @font-face blocks is cheap — each woff2 only downloads when a family is
+    // actually painted (i.e. --font-display/--font-sans resolves to it via the
+    // data-typeset override in heya.css). `standard.css` for Fraunces carries
+    // the optical-size axis so `font-optical-sizing: auto` grades it at display
+    // sizes; the rest are weight-only.
+    "@fontsource-variable/fraunces/standard.css",
+    "@fontsource-variable/source-serif-4/index.css",
+    "@fontsource-variable/space-grotesk/index.css",
+    "@fontsource-variable/nunito/index.css",
     "~/assets/css/heya.css",
     "~/assets/css/main.css",
     "~/assets/css/surface.css",
@@ -286,15 +296,33 @@ export default defineNuxtConfig({
       ],
       script: [
         {
+          // Pre-paint attribute stamp from the localStorage mirror. Stays dumb:
+          // the custom-accent branch replays the CACHED derived family verbatim
+          // (never re-derives). Mirrors useAppearance.apply(); any default value
+          // leaves its attribute off. Keep tiny + defensive (try/catch).
           innerHTML:
             "(function(){try{" +
             'var s=JSON.parse(localStorage.getItem("heya-appearance")||"{}");' +
+            "var e=document.documentElement,d=e.dataset,st=e.style;" +
             'var t=s.theme||"dark";' +
             'if(t==="system"){t=window.matchMedia&&matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"}' +
-            "var d=document.documentElement.dataset;" +
             'if(t!=="dark")d.theme=t;' +
-            'if(s.accent&&s.accent!=="gold")d.accent=s.accent;' +
+            "var ac=s.accentCustomDerived;" +
+            "if(s.accentCustom&&ac&&ac.accent){" +
+            'st.setProperty("--accent",ac.accent);' +
+            'st.setProperty("--accent-rgb",ac.rgb);' +
+            'st.setProperty("--accent-bright",ac.bright);' +
+            'st.setProperty("--accent-deep",ac.deep);' +
+            'st.setProperty("--accent-ink",ac.ink);' +
+            '}else if(s.accent&&s.accent!=="gold"){d.accent=s.accent}' +
             'if(s.density&&s.density!=="comfortable")d.density=s.density;' +
+            'if(s.typeset&&s.typeset!=="heya")d.typeset=s.typeset;' +
+            'if(s.fontScale&&s.fontScale!=="md")d.fontscale=s.fontScale;' +
+            'if(s.lighting&&s.lighting!=="dramatic")d.lighting=s.lighting;' +
+            'if(s.glass&&s.glass!=="rich")d.glass=s.glass;' +
+            'if(s.radius&&s.radius!=="soft")d.radius=s.radius;' +
+            'if(s.hero&&s.hero!=="standard")d.hero=s.hero;' +
+            'if(s.motion&&s.motion!=="system")d.motion=s.motion;' +
             "}catch(e){}})()",
         },
       ],

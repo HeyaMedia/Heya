@@ -498,8 +498,8 @@ watch(() => route.fullPath, () => { if (open.value) close() })
   inset: 0;
   z-index: 450;
   background: rgb(var(--shade) / 0.62);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(var(--glass-blur-md));
+  -webkit-backdrop-filter: blur(var(--glass-blur-md));
   overflow-y: auto;
 }
 

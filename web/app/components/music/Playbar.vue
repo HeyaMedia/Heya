@@ -564,8 +564,8 @@ onScopeDispose(() => {
      the upward shadow defines the edge (mirror of FilterBar's downward
      one), keeping the bar and the content plane one continuous surface. */
   background: color-mix(in oklab, var(--bg-2) 78%, transparent);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(var(--glass-blur-md));
+  -webkit-backdrop-filter: blur(var(--glass-blur-md));
   box-shadow: 0 -10px 28px rgb(var(--shade) / 0.14);
   z-index: 40;
 }

@@ -102,8 +102,8 @@ const open = defineModel<boolean>('open')
   inset: 0;
   z-index: 399;
   background: rgb(var(--shade) / 0.62);
-  backdrop-filter: blur(6px) saturate(110%);
-  -webkit-backdrop-filter: blur(6px) saturate(110%);
+  backdrop-filter: blur(var(--glass-blur-sm)) saturate(110%);
+  -webkit-backdrop-filter: blur(var(--glass-blur-sm)) saturate(110%);
 }
 .app-sheet-overlay[data-state="open"] {
   animation: app-sheet-overlay-in 0.18s ease both;

@@ -266,7 +266,7 @@
   --surface-brighten: brightness(100%);
 }
 
-/* ── Compact density ── */
+/* ── Density trio (comfortable defaults live in :root above) ── */
 :root[data-density="compact"] {
   --tile-min: 128px;
   --tile-min-phone: 94px;
@@ -276,6 +276,116 @@
   --page-pad-t: 20px;
   --page-pad-x: 28px;
 }
+:root[data-density="spacious"] {
+  --tile-min: 194px;
+  --tile-min-phone: 128px;
+  --grid-gap-y: 30px;
+  --grid-gap-x: 24px;
+  --row-pad-y: 13px;
+  --page-pad-t: 40px;
+  --page-pad-x: 56px;
+}
+
+/* ═══ Appearance expansion — type / scale / flair knobs ══════════════════
+   Each knob is an html[data-*] attribute stamped pre-paint by the boot script
+   (nuxt.config.ts) and kept in sync by useAppearance(). A knob at its default
+   value carries NO attribute, so these blocks only ever add on top of the
+   base tokens. */
+
+/* ── Type sets — swap --font-display + --font-sans ONLY. --font-mono stays
+   JetBrains Mono in every set (the mono ledgers are the design signature).
+   Faces register in nuxt.config css[]; each woff2 only downloads once its set
+   is active. Non-Archivo display faces have no "wdth" axis, so the app's
+   `font-variation-settings: "wdth" …` on titles is silently ignored there
+   (weight still maps from font-weight) — titles degrade gracefully. */
+:root[data-typeset="editorial"] {
+  --font-display: 'Fraunces Variable', 'Iowan Old Style', Georgia, serif;
+  --font-sans: 'Source Serif 4 Variable', Georgia, 'Times New Roman', serif;
+  /* Fraunces carries an optical-size axis — grade it at display sizes. */
+  font-optical-sizing: auto;
+}
+:root[data-typeset="grotesk"] {
+  --font-display: 'Space Grotesk Variable', var(--font-sans);
+}
+:root[data-typeset="rounded"] {
+  --font-display: 'Nunito Variable', var(--font-sans);
+}
+:root[data-typeset="system"] {
+  --font-display: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* ── Font scale — rem cascade off the root. NOTE: the app is overwhelmingly
+   px-sized (≈1340 px font-sizes vs ≈86 rem), so this only visibly nudges
+   rem-based / default-sized text; see the appearance report. md = 100%. */
+:root[data-fontscale="sm"] { font-size: 93.75%; }
+:root[data-fontscale="lg"] { font-size: 106.25%; }
+
+/* ── Radius: sharp — one scale-down of the whole radii ramp. ── */
+:root[data-radius="sharp"] {
+  --r-xs: 2px;
+  --r-sm: 3px;
+  --r-md: 5px;
+  --r-lg: 7px;
+  --r-xl: 10px;
+}
+
+/* ── Glass depth tokens — consumed by the frosted chrome sites (topbar,
+   ledger, playbar, search, sheets, .surface popovers, hero chips). Defaults
+   equal the pre-token literals. `minimal` drops the blur to crisp the chrome;
+   the semi-opaque fills still separate each surface from what's behind it. */
+:root {
+  --glass-blur-lg: 24px;   /* floating panels / .surface popovers */
+  --glass-blur-md: 16px;   /* topbar / ledger / playbar / search frost */
+  --glass-blur-sm: 10px;   /* chips, steer controls, sheets, back button */
+}
+:root[data-glass="minimal"] {
+  --glass-blur-lg: 3px;
+  --glass-blur-md: 0px;
+  --glass-blur-sm: 0px;
+}
+
+/* ── Lighting: flat — redefine the shadow tokens to near-nothing (drops the
+   directional card lift + the --tone hover kiss) and neutralize the shared
+   .btn-play glow halo. The tone-glow on hero POSTERS is an artwork treatment
+   (like the playbar accent) and intentionally stays — noted in the report. */
+:root[data-lighting="flat"] {
+  --shadow-1: none;
+  --shadow-2: 0 2px 10px rgb(var(--shade) / 0.16);
+  --shadow-3: 0 6px 20px rgb(var(--shade) / 0.22);
+  --shadow-card: 0 0 0 1px rgb(var(--ink) / 0.10);
+  --shadow-card-hover: 0 0 0 1px rgb(var(--ink) / 0.16);
+  --shadow-el: none;
+}
+:root[data-lighting="flat"] .btn-play,
+:root[data-lighting="flat"] .btn-play:hover {
+  box-shadow: 0 0 0 1px rgb(var(--tone-rgb) / 0.35);
+}
+
+/* ── Hero: short — the ported pages own their hero heights in page-scoped
+   rules; these attribute-keyed globals out-specify the scoped `.x-hero`
+   rules and trim them. Non-media-query so they hold at every width. */
+:root[data-hero="short"] .movie-hero { min-height: 42vh; }
+:root[data-hero="short"] .tv-hero { min-height: 44vh; }
+:root[data-hero="short"] .ep-hero { min-height: 38vh; }
+:root[data-hero="short"] .season-hero { min-height: 26vh; }
+:root[data-hero="short"] .hero-section { min-height: 360px; }
+:root[data-hero="short"] .hero-deck { height: 360px; }
+
+/* ── Motion: reduced (forced, regardless of OS) — mirrors the @media
+   (prefers-reduced-motion) safety net under an explicit opt-in. 'full' and
+   'system' add no rule, so the OS @media block still wins for them: "Full
+   still respects your system setting" (a11y-safe). */
+:root[data-motion="reduced"] *,
+:root[data-motion="reduced"] *::before,
+:root[data-motion="reduced"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+:root[data-motion="reduced"] .card-tile:hover,
+:root[data-motion="reduced"] .mc:hover .mc-art { transform: none !important; }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; width: 100%; margin: 0; padding: 0; }
@@ -669,8 +779,8 @@ a { color: inherit; text-decoration: none; }
 .section-row-head .more { color: var(--fg-1); }
 .section-row-head .scroll-btn {
   background: color-mix(in oklab, var(--bg-2) 78%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(var(--glass-blur-sm));
+  -webkit-backdrop-filter: blur(var(--glass-blur-sm));
   border: 1px solid var(--border-strong);
   color: var(--fg-1);
   box-shadow: var(--shadow-el);
@@ -823,7 +933,7 @@ a { color: inherit; text-decoration: none; }
     color-mix(in srgb, var(--bg-0) 20%, transparent) 30%,
     var(--bg-1) 100%);
 }
-.back-btn { position: absolute; top: 24px; left: 32px; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: var(--r-md); background: rgba(0,0,0,0.6); backdrop-filter: blur(12px); color: var(--fg-0); font-size: 13px; font-weight: 500; z-index: 2; }
+.back-btn { position: absolute; top: 24px; left: 32px; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: var(--r-md); background: rgba(0,0,0,0.6); backdrop-filter: blur(var(--glass-blur-sm)); color: var(--fg-0); font-size: 13px; font-weight: 500; z-index: 2; }
 .back-btn:hover { background: rgba(0,0,0,0.8); }
 .detail-body { padding: 0 40px 80px; position: relative; margin-top: -160px; max-width: 1400px; }
 .detail-grid { display: grid; grid-template-columns: 280px 1fr; gap: 40px; margin-bottom: 56px; }
@@ -884,8 +994,8 @@ a { color: inherit; text-decoration: none; }
    text-shadows that adapt per theme (paper glow in light, dark in dark). */
 .hero-info .chip {
   background: color-mix(in oklab, var(--bg-2) 82%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(var(--glass-blur-sm));
+  -webkit-backdrop-filter: blur(var(--glass-blur-sm));
 }
 .detail-title { text-shadow: 0 2px 20px rgb(var(--shade) / 0.30), 0 0 14px var(--bg-1); }
 .detail-tagline,
@@ -946,8 +1056,8 @@ a { color: inherit; text-decoration: none; }
 .scroll-ctrl-btn {
   width: 28px; height: 28px; border-radius: var(--r-sm);
   background: color-mix(in oklab, var(--bg-2) 78%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(var(--glass-blur-sm));
+  -webkit-backdrop-filter: blur(var(--glass-blur-sm));
   border: 1px solid var(--border-strong);
   color: var(--fg-1);
   box-shadow: var(--shadow-el);
@@ -1009,8 +1119,8 @@ a { color: inherit; text-decoration: none; }
 .steer-glass,
 .app-menu-trigger.steer-glass {
   background: color-mix(in oklab, var(--bg-2) 82%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(var(--glass-blur-sm));
+  -webkit-backdrop-filter: blur(var(--glass-blur-sm));
   border: 1px solid var(--border);
   box-shadow: var(--shadow-el);
 }

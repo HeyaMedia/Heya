@@ -614,7 +614,9 @@ const timeContext = computed(() =>
 // the pool claim; we only publish the vars). Falls back to the :root accent
 // alias when ambient is off (toneStyle undefined → --tone stays var(--accent)).
 const bgTone = useBackgroundTone()
+const { toneFollowEnabled } = useAppearance()
 const toneStyle = computed(() => {
+  if (!toneFollowEnabled.value) return undefined
   const t: ImageTone | null = bgTone.value
   if (!t) return undefined
   const m = t.main.match(/\d+/g)

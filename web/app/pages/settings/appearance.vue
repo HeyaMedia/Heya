@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import type { ThemeMode } from '~/composables/useAppearance'
+import type { ThemeMode, TypeSet, AppearancePrefs } from '~/composables/useAppearance'
 
 definePageMeta({ layout: 'settings' })
 
-// Everything on this page applies live (attributes on <html> flip
-// immediately via useAppearance) and persists to /api/me/settings, with a
-// localStorage mirror for flash-free boot. No Save button — appearance is
-// the one settings page where instant feedback beats a commit step.
+// Everything on this page applies live (attributes / inline vars on <html>
+// flip immediately via useAppearance) and persists to /api/me/settings, with a
+// localStorage mirror for flash-free boot. No Save button — appearance is the
+// one settings page where instant feedback beats a commit step.
 
-const { prefs, set } = useAppearance()
+const { prefs, set, setAccentPreset, setAccentCustom } = useAppearance()
 const { sections, toggle, move, reset } = useHomeSections()
 
 type ThemeChoice = { value: ThemeMode; label: string; hint: string }
@@ -28,12 +28,84 @@ const previewVars: Record<Exclude<ThemeMode, 'system'>, Record<string, string>> 
 }
 
 const activeAccentHex = computed(
-  () => ACCENTS.find((a) => a.name === prefs.value.accent)?.hex ?? ACCENTS[0]!.hex,
+  () => prefs.value.accentCustomDerived?.accent
+    ?? ACCENTS.find((a) => a.name === prefs.value.accent)?.hex ?? ACCENTS[0]!.hex,
 )
+const isCustomAccent = computed(() => !!prefs.value.accentCustom)
 const activeThemeLabel = computed(() => themes.find(theme => theme.value === prefs.value.theme)?.label ?? 'System')
-const activeAccentLabel = computed(() => ACCENTS.find(accent => accent.name === prefs.value.accent)?.label ?? 'Heya Gold')
+const activeAccentLabel = computed(() =>
+  isCustomAccent.value ? 'Custom' : (ACCENTS.find(accent => accent.name === prefs.value.accent)?.label ?? 'Heya Gold'))
 const visibleSectionCount = computed(() => sections.value.filter(section => !section.hidden).length)
 
+// ── Custom accent picker ─────────────────────────────────────────────────
+// The native color input drives a live derive; the hex field mirrors it and
+// accepts typed values. Both feed setAccentCustom (which clamps + caches the
+// family). Selecting a preset clears the override.
+const colorValue = computed(() => prefs.value.accentCustom || activeAccentHex.value)
+const hexField = ref(prefs.value.accentCustom ?? '')
+watch(() => prefs.value.accentCustom, (v) => { hexField.value = v ?? '' })
+function onColorInput(e: Event) {
+  setAccentCustom((e.target as HTMLInputElement).value)
+}
+function commitHex() {
+  const raw = hexField.value.trim()
+  if (!raw) return
+  const ok = setAccentCustom(raw.startsWith('#') ? raw : `#${raw}`)
+  if (!ok) hexField.value = prefs.value.accentCustom ?? '' // revert a bad hex
+}
+
+// ── Type sets ─────────────────────────────────────────────────────────────
+// Each preview card renders in its OWN faces (inline family) regardless of the
+// active set, so you can compare before committing. Mono line stays JetBrains.
+const TYPESET_FACES: Record<TypeSet, { display: string; sans: string }> = {
+  heya: { display: "'Archivo Variable', sans-serif", sans: "'Inter', sans-serif" },
+  editorial: { display: "'Fraunces Variable', Georgia, serif", sans: "'Source Serif 4 Variable', Georgia, serif" },
+  grotesk: { display: "'Space Grotesk Variable', sans-serif", sans: "'Inter', sans-serif" },
+  rounded: { display: "'Nunito Variable', sans-serif", sans: "'Inter', sans-serif" },
+  system: { display: "system-ui, sans-serif", sans: "system-ui, sans-serif" },
+}
+function typesetStyle(t: TypeSet) {
+  return { '--tset-display': TYPESET_FACES[t].display, '--tset-sans': TYPESET_FACES[t].sans }
+}
+
+// ── Segmented controls ────────────────────────────────────────────────────
+const densityOptions = [
+  { v: 'compact', l: 'Compact' },
+  { v: 'comfortable', l: 'Comfortable' },
+  { v: 'spacious', l: 'Spacious' },
+] as const
+const fontScaleOptions = [
+  { v: 'sm', l: 'Small' },
+  { v: 'md', l: 'Default' },
+  { v: 'lg', l: 'Large' },
+] as const
+
+type FlairSeg = {
+  key: keyof AppearancePrefs
+  title: string
+  desc: string
+  options: readonly { v: string; l: string }[]
+}
+const flairSegs: FlairSeg[] = [
+  { key: 'lighting', title: 'Lighting', desc: 'Directional card shadows and glowing primary buttons — or a flat, shadow-light surface.',
+    options: [{ v: 'dramatic', l: 'Dramatic' }, { v: 'flat', l: 'Flat' }] },
+  { key: 'glass', title: 'Glass', desc: 'Frosted blur behind the top bar, ledgers, panels and sheets — or crisp, blur-free chrome.',
+    options: [{ v: 'rich', l: 'Rich' }, { v: 'minimal', l: 'Minimal' }] },
+  { key: 'radius', title: 'Corners', desc: 'Rounded and soft, or tight and sharp across cards, buttons and panels.',
+    options: [{ v: 'soft', l: 'Soft' }, { v: 'sharp', l: 'Sharp' }] },
+  { key: 'hero', title: 'Hero height', desc: 'How much vertical space the hero artwork claims on movie, show and album pages.',
+    options: [{ v: 'standard', l: 'Standard' }, { v: 'short', l: 'Short' }] },
+  { key: 'motion', title: 'Motion', desc: 'Reduced turns animations off everywhere. Full still respects your system reduced-motion setting.',
+    options: [{ v: 'system', l: 'System' }, { v: 'reduced', l: 'Reduced' }, { v: 'full', l: 'Full' }] },
+]
+function pickFlair(key: keyof AppearancePrefs, value: string) {
+  set(key, value as never)
+}
+
+const toneFollow = computed({
+  get: () => prefs.value.toneFollow !== false,
+  set: (v: boolean) => set('toneFollow', v),
+})
 const ambientOn = computed({
   get: () => prefs.value.ambientMode !== 'off',
   set: (v: boolean) => set('ambientMode', v ? 'on' : 'off'),
@@ -66,7 +138,7 @@ const isDefaultSections = computed(
     </SettingsContextHero>
 
     <SettingsSection title="Theme" icon="brightness"
-      description="Dark is the Heya look. OLED trades the deep greys for true black; Light is the same design on warm paper.">
+      description="Dark is the Heya look. OLED trades the deep greys for true black; Light is the same design on warm paper; System follows your OS.">
       <div class="theme-grid">
         <button
           v-for="t in themes"
@@ -111,62 +183,154 @@ const isDefaultSections = computed(
       </div>
     </SettingsSection>
 
-    <div class="appearance-grid">
     <SettingsSection title="Accent" icon="sparkle"
-      description="The color that carries selection, progress, and emphasis throughout the app.">
+      description="The color that carries selection, progress, and emphasis throughout the app. Pick a preset or dial in your own.">
       <div class="accent-grid">
         <button
           v-for="a in ACCENTS"
           :key="a.name"
           type="button"
           class="accent-cell"
-          :class="{ active: prefs.accent === a.name }"
+          :class="{ active: prefs.accent === a.name && !isCustomAccent }"
           :style="{ '--swatch': a.hex }"
           :aria-label="a.label"
-          :aria-pressed="prefs.accent === a.name"
-          @click="set('accent', a.name)"
+          :aria-pressed="prefs.accent === a.name && !isCustomAccent"
+          @click="setAccentPreset(a.name)"
         >
           <span class="accent-dot">
-            <Icon v-if="prefs.accent === a.name" name="check" :size="14" />
+            <Icon v-if="prefs.accent === a.name && !isCustomAccent" name="check" :size="14" />
           </span>
           <span class="accent-cell-name">{{ a.label }}</span>
+        </button>
+
+        <!-- Custom accent: native color input styled as the swatch. -->
+        <div class="accent-cell custom" :class="{ active: isCustomAccent }" :style="{ '--swatch': colorValue }">
+          <label class="accent-dot custom-dot">
+            <input
+              type="color"
+              class="accent-color-input"
+              :value="colorValue"
+              aria-label="Custom accent color"
+              @input="onColorInput"
+            />
+            <Icon v-if="isCustomAccent" name="check" :size="14" class="custom-check" />
+            <Icon v-else name="sparkle" :size="13" class="custom-plus" />
+          </label>
+          <span class="accent-cell-name">Custom</span>
+        </div>
+      </div>
+
+      <div class="accent-hex-row">
+        <label class="accent-hex-label" for="accent-hex">Hex</label>
+        <input
+          id="accent-hex"
+          v-model="hexField"
+          type="text"
+          class="accent-hex-input"
+          placeholder="#e84a8f"
+          spellcheck="false"
+          autocomplete="off"
+          @change="commitHex"
+          @keydown.enter="commitHex"
+        />
+        <span class="accent-hex-hint">Type a hex, or use the Custom swatch. Presets clear it.</span>
+      </div>
+    </SettingsSection>
+
+    <SettingsSection title="Type set" icon="type"
+      description="Swaps the display and body faces. Mono ledgers always stay JetBrains Mono — the design signature.">
+      <div class="typeset-grid">
+        <button
+          v-for="t in TYPESETS"
+          :key="t.value"
+          type="button"
+          class="typeset-card"
+          :class="{ active: prefs.typeset === t.value }"
+          :aria-pressed="prefs.typeset === t.value"
+          @click="set('typeset', t.value)"
+        >
+          <div class="typeset-preview" :style="typesetStyle(t.value)">
+            <div class="tset-title">Aa</div>
+            <div class="tset-sample">The quiet library hums.</div>
+            <div class="tset-mono">01:23 · FLAC · 24/96</div>
+          </div>
+          <div class="typeset-label">
+            <Icon v-if="prefs.typeset === t.value" name="check" :size="12" class="theme-check" />
+            <span>{{ t.label }}</span>
+            <span class="typeset-hint">{{ t.hint }}</span>
+          </div>
         </button>
       </div>
     </SettingsSection>
 
-    <SettingsSection title="Density" icon="grid"
-      description="Choose how much media fits on screen at once.">
-      <div class="density-grid" role="radiogroup" aria-label="Density">
-        <label class="density-card" :class="{ active: prefs.density === 'comfortable' }">
-          <input
-            type="radio" name="density" value="comfortable" :checked="prefs.density === 'comfortable'"
-            @change="set('density', 'comfortable')"
-          />
-          <div class="density-body">
-            <div class="density-title">Comfortable</div>
-            <div class="density-desc">Default — generous spacing, larger posters.</div>
-            <div class="density-preview">
-              <div class="density-row tall" /><div class="density-row tall" /><div class="density-row tall" />
+    <div class="appearance-grid">
+      <SettingsSection title="Density" icon="grid"
+        description="How much media fits on screen at once — tighter grids and rows, or roomier ones.">
+        <div class="seg" role="radiogroup" aria-label="Density">
+          <button
+            v-for="o in densityOptions"
+            :key="o.v"
+            type="button"
+            class="seg-btn"
+            role="radio"
+            :aria-checked="prefs.density === o.v"
+            :class="{ active: prefs.density === o.v }"
+            @click="set('density', o.v)"
+          >{{ o.l }}</button>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Font size" icon="type"
+        description="Nudge the base type scale up or down.">
+        <div class="seg" role="radiogroup" aria-label="Font size">
+          <button
+            v-for="o in fontScaleOptions"
+            :key="o.v"
+            type="button"
+            class="seg-btn"
+            role="radio"
+            :aria-checked="prefs.fontScale === o.v"
+            :class="{ active: prefs.fontScale === o.v }"
+            @click="set('fontScale', o.v)"
+          >{{ o.l }}</button>
+        </div>
+      </SettingsSection>
+    </div>
+
+    <SettingsSection title="Flair" icon="sparkle"
+      description="Fine-tune the depth, texture and motion of the interface.">
+      <div class="flair-list">
+        <div class="flair-row">
+          <div class="flair-text">
+            <div class="flair-title">Tone follow</div>
+            <div class="flair-desc">
+              Pages tint their accents from the artwork on screen. The music playbar always
+              follows the playing track regardless — that's playback identity, not page tint.
             </div>
           </div>
-        </label>
-        <label class="density-card" :class="{ active: prefs.density === 'compact' }">
-          <input
-            type="radio" name="density" value="compact" :checked="prefs.density === 'compact'"
-            @change="set('density', 'compact')"
-          />
-          <div class="density-body">
-            <div class="density-title">Compact</div>
-            <div class="density-desc">Tighter grids and rows — more items per screen.</div>
-            <div class="density-preview">
-              <div class="density-row" /><div class="density-row" /><div class="density-row" />
-              <div class="density-row" /><div class="density-row" />
-            </div>
+          <AppSwitch v-model="toneFollow" size="md" aria-label="Tone follow" />
+        </div>
+
+        <div v-for="seg in flairSegs" :key="seg.key" class="flair-row">
+          <div class="flair-text">
+            <div class="flair-title">{{ seg.title }}</div>
+            <div class="flair-desc">{{ seg.desc }}</div>
           </div>
-        </label>
+          <div class="seg" role="radiogroup" :aria-label="seg.title">
+            <button
+              v-for="o in seg.options"
+              :key="o.v"
+              type="button"
+              class="seg-btn"
+              role="radio"
+              :aria-checked="prefs[seg.key] === o.v"
+              :class="{ active: prefs[seg.key] === o.v }"
+              @click="pickFlair(seg.key, o.v)"
+            >{{ o.l }}</button>
+          </div>
+        </div>
       </div>
     </SettingsSection>
-    </div>
 
     <SettingsSection title="Ambient background" icon="image"
       description="Rotates artwork from your libraries behind the app — movies on Movies, artists on Music, everything on Home.">
@@ -253,7 +417,7 @@ const isDefaultSections = computed(
 <style scoped>
 .appearance-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
@@ -320,7 +484,7 @@ const isDefaultSections = computed(
 /* ── Accent swatches ── */
 .accent-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(76px, 1fr));
+  grid-template-columns: repeat(5, minmax(72px, 1fr));
   gap: 10px;
 }
 .accent-cell {
@@ -333,7 +497,7 @@ const isDefaultSections = computed(
   border-radius: var(--r-md);
   background: var(--bg-2);
   cursor: pointer;
-  min-width: 76px;
+  min-width: 72px;
   transition: border-color 0.12s, background 0.12s;
 }
 .accent-cell:hover { border-color: var(--border-strong); }
@@ -352,35 +516,163 @@ const isDefaultSections = computed(
 .accent-cell-name { font-size: 11px; color: var(--fg-2); }
 .accent-cell.active .accent-cell-name { color: var(--fg-0); }
 
-/* ── Density ── */
-.density-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
-.density-card {
+/* Custom cell: the native color input sits invisibly over the swatch dot. */
+.accent-cell.custom { position: relative; }
+.custom-dot { position: relative; overflow: hidden; cursor: pointer; }
+.accent-color-input {
+  position: absolute;
+  inset: -4px;
+  width: calc(100% + 8px);
+  height: calc(100% + 8px);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+}
+.custom-check { color: rgba(0, 0, 0, 0.72); pointer-events: none; }
+.custom-plus { color: rgba(0, 0, 0, 0.6); pointer-events: none; }
+
+.accent-hex-row {
   display: flex;
+  align-items: center;
   gap: 10px;
-  padding: 14px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.accent-hex-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.accent-hex-input {
+  width: 118px;
+  padding: 7px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-0);
+  background: rgb(var(--ink) / 0.06);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  outline: none;
+  transition: border-color 0.12s, background 0.12s;
+}
+.accent-hex-input:focus { border-color: var(--gold); background: rgb(var(--ink) / 0.08); }
+.accent-hex-hint { font-size: 11px; color: var(--fg-3); }
+
+/* ── Type set cards ── */
+.typeset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 12px;
+}
+.typeset-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--bg-2);
   cursor: pointer;
+  text-align: left;
   transition: border-color 0.12s, background 0.12s;
 }
-.density-card:hover { border-color: var(--border-strong); }
-.density-card.active { border-color: var(--gold); background: var(--gold-soft); }
-.density-card input { accent-color: var(--gold); margin-top: 3px; }
-.density-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.density-title { font-size: 13px; font-weight: 500; color: var(--fg-0); }
-.density-desc  { font-size: 11.5px; color: var(--fg-2); line-height: 1.4; }
-.density-preview {
-  margin-top: 8px;
+.typeset-card:hover { border-color: var(--border-strong); }
+.typeset-card.active { border-color: var(--gold); background: var(--gold-soft); }
+.typeset-preview {
+  padding: 14px 14px 12px;
+  border-radius: var(--r-sm);
   background: var(--bg-0);
-  border-radius: var(--r-xs);
-  padding: 4px;
+  border: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+  min-height: 104px;
 }
-.density-row { height: 6px; background: rgb(var(--ink) / 0.06); border-radius: 2px; }
-.density-row.tall { height: 10px; }
+.tset-title {
+  font-family: var(--tset-display);
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--fg-0);
+  letter-spacing: -0.01em;
+}
+.tset-sample {
+  font-family: var(--tset-sans);
+  font-size: 13px;
+  color: var(--fg-1);
+  line-height: 1.35;
+}
+.tset-mono {
+  margin-top: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--fg-3);
+}
+.typeset-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-1);
+  padding: 2px 6px;
+  min-width: 0;
+}
+.typeset-hint {
+  margin-left: auto;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Segmented control (density / font size / flair) ── */
+.seg {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.seg-btn {
+  flex: 1;
+  padding: 7px 16px;
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fg-2);
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+.seg-btn:hover { color: var(--fg-0); }
+.seg-btn.active {
+  background: var(--gold-soft);
+  color: var(--gold-bright);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 35%, transparent);
+}
+
+/* ── Flair rows ── */
+.flair-list { display: flex; flex-direction: column; }
+.flair-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.flair-row:last-child { border-bottom: 0; }
+.flair-text { flex: 1; min-width: 0; }
+.flair-title { font-size: 13px; font-weight: 500; color: var(--fg-0); }
+.flair-desc { font-size: 11.5px; color: var(--fg-2); margin-top: 2px; line-height: 1.45; max-width: 60ch; }
 
 /* ── Ambient ── */
 .ambient-controls { display: flex; flex-direction: column; gap: 4px; }
@@ -447,6 +739,8 @@ const isDefaultSections = computed(
   .theme-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .accent-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
   .accent-cell { min-width: 0; padding-inline: 6px; }
+  .seg { display: flex; }
+  .flair-row { align-items: flex-start; flex-direction: column; gap: 10px; }
   .ambient-row { align-items: flex-start; gap: 12px; }
   .ambient-slider { width: 135px; }
   .section-row { padding-inline: 10px; }
