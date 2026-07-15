@@ -2,11 +2,16 @@
   <section
     class="hero-featured"
     v-if="items.length"
-    :style="{ '--hero-tint': tint }"
+    :style="toneVars"
     @touchstart.passive="onTouchStart"
     @touchend="onTouchEnd"
   >
-    <div class="hero-bg" :class="{ 'ambient-extended': ambientEnabled }">
+    <!-- Sharp art layer, hard-clipped at the hero's bottom edge (the ledger
+         seam). The blurred site-wide underlay is the global AmbientBackdrop —
+         this hero feeds it a graded (v2) art claim when ambient is on, and
+         always shows its own crisp copy in-hero (the old .ambient-extended
+         hide-local behaviour is retired: the sharp hero is always visible). -->
+    <div class="hero-bg">
       <LoadingImage
         v-if="bgA"
         :src="bgA"
@@ -39,69 +44,69 @@
         @ended="endTrailer(true)"
         @error="endTrailer(false)"
       />
-      <div class="hero-bg-gradient" />
+      <!-- Readability grade (literal dark over raw artwork — the CLAUDE.md
+           exception) + bottom-left tone leak. Mirrors HeroCanvas / heya2.css. -->
+      <div class="hero-grade" />
+      <div class="hero-tone" />
     </div>
 
     <div class="hero-inner">
-      <NuxtLink :to="mediaUrl(current)" class="hero-poster">
-        <Poster :idx="currentIdx" :src="posterUrl" :aspect="'2/3'" />
-      </NuxtLink>
-
-      <div class="hero-info">
-        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px">
-          <Chip gold>{{ current.chip || 'Featured' }}</Chip>
-          <span v-if="movie?.rating" class="chip gold hero-rating">
-            <Icon name="star" :size="12" />
-            {{ parseFloat(String(movie.rating)).toFixed(1) }}
-          </span>
+      <div class="grow">
+        <div class="eyebrow">
+          <span>Featured</span>
+          <span class="sep">&middot;</span>
+          <span>{{ current.chip || 'New in library' }}</span>
+          <span class="sep">&middot;</span>
+          <span>{{ typeLabel }}</span>
         </div>
 
-        <NuxtLink :to="mediaUrl(current)" class="hero-title-link">
-          <LoadingImage
-            v-if="logoOk[current.id]"
-            class="hero-logo"
-            :src="logoUrl(current)"
-            :alt="current.title"
-            :width="500"
-          />
-          <h1 v-else class="hero-title">{{ current.title }}</h1>
+        <NuxtLink :to="mediaUrl(current)" class="title-link">
+          <h1 v-if="logoOk[current.id]" class="title title-art">
+            <LoadingImage
+              class="title-logo"
+              :src="logoUrl(current)"
+              :alt="current.title"
+              :width="500"
+            />
+          </h1>
+          <h1 v-else class="title">{{ current.title }}</h1>
         </NuxtLink>
 
-        <div class="hero-meta-row" v-if="current.year || movie?.runtime_minutes">
+        <p class="metaline">
           <span v-if="current.year">{{ current.year }}</span>
-          <span v-if="movie?.runtime_minutes" class="dot" />
-          <span v-if="movie?.runtime_minutes">{{ Math.floor(movie.runtime_minutes / 60) }}h {{ movie.runtime_minutes % 60 }}m</span>
-        </div>
-
-        <p class="hero-synopsis" v-if="current.description">
-          {{ current.description.slice(0, 180) }}{{ current.description.length > 180 ? '…' : '' }}
+          <template v-if="runtimeUpper"><span class="dot">&middot;</span><span>{{ runtimeUpper }}</span></template>
+          <template v-if="ratingStr"><span class="dot">&middot;</span><span>&#9733; {{ ratingStr }}</span></template>
+          <template v-if="genres.length">
+            <span class="dot">&middot;</span>
+            <NuxtLink v-for="g in genres" :key="g" :to="`/genre/${encodeURIComponent(g)}`" class="genre">{{ g }}</NuxtLink>
+          </template>
         </p>
 
-        <div class="hero-actions">
+        <div class="actions">
           <button
-            class="btn btn-primary"
-            :style="playStyle"
+            class="btn-play"
             :disabled="!canPlayCurrent"
             @click="$emit('play', current)"
           >
-            <Icon name="play" :size="16" />
+            <span class="tri" />
             <span class="hero-play-label">{{ playLabel }}</span>
           </button>
-          <NuxtLink :to="mediaUrl(current)" class="btn btn-ghost" :style="detailsStyle">
-            <Icon name="info" :size="16" />
+          <NuxtLink :to="mediaUrl(current)" class="pill">
+            <Icon name="info" :size="15" />
             Details
           </NuxtLink>
+          <span class="grow-spacer" />
+          <span v-if="items.length > 1" class="hero-count">
+            {{ pad(currentIdx + 1) }}<span class="dim"> / {{ pad(items.length) }}</span>
+          </span>
         </div>
-
       </div>
     </div>
 
     <!-- Slide controls: the shared prev/pause/next cluster, teleported into
-         HeroDeck's top-right slot beside the mode tabs (defer: the
-         #hero-deck-aux target renders in the same tick). The ring is the
-         30s rotation clock; a trailer takeover freezes it, and any manual
-         move re-keys it — a fresh full window, which is what the old
-         click-to-pin promised. -->
+         HeroDeck's top-right slot beside the mode tabs. The ring is the 30s
+         rotation clock; a trailer takeover freezes it, and any manual move
+         re-keys it — a fresh full window. -->
     <Teleport defer to="#hero-deck-aux">
       <CycleControls
         v-if="items.length > 1"
@@ -160,9 +165,9 @@ const bgA = ref<string | null>(null)
 const bgB = ref<string | null>(null)
 
 // Ambient extension: with the ambient background on, this hero's current
-// backdrop IS the page background (full-page, sticky) — the local hero
-// image hides via .ambient-extended and the AmbientBackdrop layer follows
-// the deck's rotation through this watcher.
+// backdrop is also published (graded v2) as the full-page blurred underlay via
+// the AmbientBackdrop layer, which follows the deck's rotation through this
+// watcher. The sharp local copy always stays visible in-hero.
 const { ambientEnabled } = useAppearance()
 const background = useBackground()
 const bgImg = useBackgroundImageTools()
@@ -176,34 +181,45 @@ watch(() => currentIdx.value + props.items.length, () => {
 }, { immediate: true })
 const currentBg = computed(() => (showA.value ? bgA.value : bgB.value) || null)
 watch([currentBg, ambientEnabled], ([url, on]) => {
-  if (on && url) background.set(url)
+  if (on && url) background.set(url, { grade: 'v2' })
   else background.clear()
 }, { immediate: true })
 
-// Artwork-adaptive buttons: Play carries the backdrop's dominant tone,
-// Details a soft tint of its complement. Falls back to the theme accent
-// when sampling fails (no backdrop / decode error).
+// Dominant-tone sampling → --tone. The w=64 thumb is enough for a 24×24 canvas
+// average; the whole hero (eyebrow accent, tone-glow Play, tone leak) follows
+// the current slide precisely, in every ambient mode. Falls back to the page
+// --tone (inherited) when sampling fails.
 const tone = ref<ImageTone | null>(null)
 watch(currentBg, async (url) => {
-  // Sample the w=64 thumb — a 24×24 canvas average needs kilobytes, not
-  // another copy of the full-size backdrop.
   tone.value = url ? await sampleImageTone(bgImg.thumb(url)) : null
 }, { immediate: true })
-const playStyle = computed(() =>
-  tone.value ? { background: tone.value.main, color: tone.value.ink } : undefined)
-const detailsStyle = computed(() =>
-  tone.value
-    ? {
-        background: `rgb(${tone.value.complementTriplet} / 0.16)`,
-        boxShadow: `inset 0 0 0 1px rgb(${tone.value.complementTriplet} / 0.35)`,
-      }
-    : undefined)
+const toneVars = computed<Record<string, string> | undefined>(() => {
+  const t = tone.value
+  if (!t) return undefined
+  const m = t.main.match(/\d+/g)
+  if (!m) return undefined
+  return { '--tone': t.main, '--tone-rgb': m.slice(0, 3).join(' '), '--tone-ink': t.ink }
+})
 
 // Template only renders when items.length > 0 (`v-if` on the root section),
 // so we can safely treat this as defined inside that scope.
 const current = computed(() => (props.items[currentIdx.value] ?? props.items[0])!)
 const movie = computed(() => props.movies?.[current.value.id])
-const posterUrl = computed(() => current.value ? usePosterUrl(current.value) : null)
+
+const typeLabel = computed(() => (current.value?.media_type === 'movie' ? 'Film' : 'Series'))
+const genres = computed(() => (movie.value?.genres ?? []).slice(0, 3))
+const ratingStr = computed(() => {
+  const r = movie.value?.rating
+  return r ? parseFloat(String(r)).toFixed(1) : ''
+})
+const runtimeUpper = computed(() => {
+  const mins = movie.value?.runtime_minutes
+  if (!mins) return ''
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return [h ? `${h}H` : '', m ? `${m}M` : ''].filter(Boolean).join(' ')
+})
+function pad(n: number) { return String(n).padStart(2, '0') }
 
 const currentPlay = computed<HeroPlayInfo | undefined>(() => props.playInfo?.[current.value.id])
 const canPlayCurrent = computed(() => !!currentPlay.value?.fileId)
@@ -222,8 +238,8 @@ const playLabel = computed(() => {
 })
 
 // --- Logo title art -------------------------------------------------------
-// Probe /image/logo per slide; on 404 the h1 text stays. Probing (vs a bare
-// <img @error>) avoids a broken-image flash on slides without logo art.
+// Probe /image/logo per slide; on 404 the display title stays. Probing (vs a
+// bare <img @error>) avoids a broken-image flash on slides without logo art.
 const logoOk = ref<Record<number, boolean>>({})
 function logoUrl(item: HeroItem) {
   return `/api/media/${useMediaImageKey(item)}/image/logo`
@@ -234,43 +250,6 @@ function probeLogo(item: HeroItem) {
   img.onload = () => { logoOk.value[item.id] = true }
   img.onerror = () => { logoOk.value[item.id] = false }
   img.src = logoUrl(item)
-}
-
-// --- Palette tint ---------------------------------------------------------
-// Average the saturated pixels of the slide's backdrop (same-origin, tiny
-// canvas) and let the gradient + primary button pick the color up. Falls
-// back to gold when extraction fails or the image is effectively grayscale.
-const tint = ref('230, 185, 74')
-function extractTint(item: HeroItem) {
-  const img = new Image()
-  img.onload = () => {
-    try {
-      const c = document.createElement('canvas')
-      c.width = 24
-      c.height = 14
-      const cx = c.getContext('2d')
-      if (!cx) return
-      cx.drawImage(img, 0, 0, 24, 14)
-      const d = cx.getImageData(0, 0, 24, 14).data
-      let r = 0, g = 0, b = 0, wsum = 0
-      for (let i = 0; i < d.length; i += 4) {
-        const pr = d[i]!, pg = d[i + 1]!, pb = d[i + 2]!
-        const mx = Math.max(pr, pg, pb), mn = Math.min(pr, pg, pb)
-        const sat = mx === 0 ? 0 : (mx - mn) / mx
-        const luma = (pr * 2 + pg * 3 + pb) / 6 / 255
-        // Prefer colorful mid-tones; near-black/white and gray pixels barely count.
-        const w = sat * sat * (luma > 0.15 && luma < 0.85 ? 1 : 0.1) + 0.01
-        r += pr * w; g += pg * w; b += pb * w; wsum += w
-      }
-      if (wsum < 1) return
-      r /= wsum; g /= wsum; b /= wsum
-      const mx = Math.max(r, g, b)
-      // Lift toward a consistent brightness so dark backdrops still tint.
-      if (mx > 0) { const k = 200 / mx; r = Math.min(255, r * k); g = Math.min(255, g * k); b = Math.min(255, b * k) }
-      tint.value = `${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)}`
-    } catch { /* canvas tainted or decode issue — keep previous tint */ }
-  }
-  img.src = useBackdropUrl(item) ?? ''
 }
 
 // --- Trailer takeover -----------------------------------------------------
@@ -323,9 +302,8 @@ function advanceHero() {
 // ── Ring clock (CycleControls) ──
 // The cluster's progress ring IS the 30s timer: its animationend calls
 // advance(); every slide change re-keys it via cycleKey for a fresh full
-// window — which is exactly what the old click-to-pin machinery promised,
-// with none of the timer bookkeeping. The trailer takeover freezes the
-// ring through the ring-paused prop; the sticky pause is the v-model.
+// window. The trailer takeover freezes the ring through the ring-paused prop;
+// the sticky pause is the v-model.
 const userPaused = ref(false)
 
 function advance() {
@@ -351,10 +329,6 @@ function jumpHero(idx: number) {
 }
 
 // --- Touch swipe between slides (phone) ------------------------------------
-// The dots are already tappable and auto-rotate keeps running either way, but
-// a horizontal drag is the gesture phone users reach for first. Only commits
-// to a slide change past a clear horizontal threshold so it never fights the
-// page's own vertical scroll or a plain tap on a link/button underneath.
 let touchStartX: number | null = null
 let touchStartY: number | null = null
 
@@ -388,12 +362,11 @@ function initBackdrops() {
   bgB.value = props.items.length > 1 ? getBackdropUrl(1) : null
 }
 
-// Per-slide side effects: probe the logo, retint, re-arm the trailer linger.
+// Per-slide side effects: probe the logo, re-arm the trailer linger.
 watch(() => current.value, (item) => {
   if (!item) return
   killTrailer()
   probeLogo(item)
-  extractTint(item)
   armTrailer()
 })
 
@@ -408,7 +381,6 @@ watch(
     killTrailer()
     initBackdrops()
     probeLogo(item)
-    extractTint(item)
     armTrailer()
     cycleKey.value++ // fresh rotation window for the fresh deck
   },
@@ -425,13 +397,21 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* Heya 2.0 featured hero. Text rides the literal-dark art grade, so --oink
+   keeps it light in every theme (dark/oled/light) — a themed --ink would flip
+   near-black in light mode and vanish over the artwork. --tone / --tone-rgb /
+   --tone-ink are published on the root per slide (see toneVars); when sampling
+   hasn't landed they inherit the page-root tone. */
 .hero-featured {
   position: relative;
   height: 100%;
+  --oink: 233 236 242;
 }
+
 .hero-bg {
   position: absolute;
   inset: 0;
+  overflow: hidden; /* THE hard clip at the hero's bottom edge (the ledger seam) */
 }
 .hero-bg-img {
   position: absolute;
@@ -439,6 +419,7 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center 22%;
   opacity: 0;
   transition: opacity 1.2s ease;
 }
@@ -453,163 +434,208 @@ onUnmounted(() => {
   transition: opacity 1.4s ease;
 }
 .hero-trailer.visible { opacity: 1; }
-.hero-bg-gradient {
+
+/* Readability grade — literal dark, painted directly over raw artwork
+   (CLAUDE.md exception). Matches HeroCanvas .hc-grade / heya2.css
+   .hero-art::after. */
+.hero-grade {
   position: absolute;
   inset: 0;
+  pointer-events: none;
   background:
-    linear-gradient(to right, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 60%, transparent) 50%, transparent 100%),
-    linear-gradient(to top, var(--bg-1) 0%, transparent 40%),
-    radial-gradient(ellipse at 85% 110%, rgba(var(--hero-tint), 0.16), transparent 55%);
+    linear-gradient(90deg, rgb(10 12 16 / 0.82), rgb(10 12 16 / 0.3) 38%, rgb(10 12 16 / 0.05) 68%),
+    linear-gradient(to top, rgb(10 12 16 / 0.78) 0%, rgb(10 12 16 / 0.3) 24%, rgb(10 12 16 / 0.12) 58%, rgb(10 12 16 / 0.34) 100%);
 }
-/* Ambient extension: the AmbientBackdrop layer shows this hero's current
-   image full-page (see the background watcher), so the local copy hides —
-   its different crop would seam at the hero edges — and the fade softens
-   so the artwork continues past the hero bottom instead of ending at
-   solid canvas. The trailer video still plays locally on top. */
-.hero-bg.ambient-extended .hero-bg-img { display: none; }
-/* No bottom fade in extended mode — the hero's bottom edge must match the
-   ambient scrim exactly or a hard cutoff line appears against the content
-   below. Left gradient covers the text column; tint stays. */
-.hero-bg.ambient-extended .hero-bg-gradient { display: none; }
+.hero-tone {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(90% 70% at 8% 100%, rgb(var(--tone-rgb) / 0.18), transparent 60%);
+}
+
 .hero-inner {
   position: relative;
   z-index: 2;
-  display: grid;
-  grid-template-columns: 280px 1fr;
-  gap: 56px;
+  display: flex;
+  align-items: flex-end;
   height: 100%;
-  padding: 40px 40px 48px;
-  max-width: 1200px;
+  /* Top padding clears the glass topbar + the deck's top-right tab/nav
+     cluster; content is bottom-anchored at the seam. */
+  padding: 110px var(--pad-fluid) 44px;
 }
-.hero-poster {
-  align-self: center;
-  box-shadow: 0 30px 80px rgba(0,0,0,0.7), 0 0 0 1px rgb(var(--ink) / 0.06);
-  border-radius: var(--r-md);
-  overflow: hidden;
+.hero-inner > .grow { flex: 1; min-width: 0; }
+
+/* mono content eyebrow (heya2.css .eyebrow) */
+.eyebrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+  font: 600 11.5px var(--font-mono);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--tone);
+  text-shadow: 0 0 12px rgb(0 0 0 / 0.5);
+}
+.eyebrow .sep { color: rgb(var(--oink) / 0.3); }
+
+/* Archivo display title (+ logo-as-title art) */
+.title-link { color: inherit; text-decoration: none; display: inline-block; }
+.title-link:hover .title:not(.title-art) { color: var(--tone); }
+.title {
+  font-family: var(--font-display);
+  font-size: clamp(2.3rem, 4.6vw, 3.9rem);
+  font-weight: 800;
+  font-variation-settings: "wdth" 115;
+  letter-spacing: -0.022em;
+  line-height: 0.99;
+  text-wrap: balance;
+  max-width: 18ch;
+  color: rgb(var(--oink) / 0.98);
+  text-shadow: 0 2px 30px rgb(0 0 0 / 0.45);
+  margin: 0;
+  transition: color 0.15s ease;
+}
+.title-art { line-height: 0; }
+.title-logo {
   display: block;
-  transition: transform 0.2s ease;
-}
-.hero-poster:hover { transform: translateY(-2px); }
-.hero-title-link {
-  color: inherit;
-  text-decoration: none;
-  display: inline-block;
-}
-.hero-title-link:hover .hero-title { color: var(--gold); }
-.hero-title { transition: color 0.15s ease; }
-.hero-logo {
-  display: block;
-  max-width: 420px;
-  max-height: 130px;
+  width: auto;
+  height: auto;
+  max-width: min(440px, 100%);
+  max-height: 128px;
   object-fit: contain;
   object-position: left center;
-  margin: 4px 0 12px;
-  filter: drop-shadow(0 4px 24px rgba(0, 0, 0, 0.6)); /* on artwork — stays literal */
+  filter: drop-shadow(0 6px 24px rgb(0 0 0 / 0.55)); /* on artwork — literal */
 }
-.hero-info {
+
+.metaline {
+  margin-top: 14px;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  position: relative;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font: 500 12.5px var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgb(var(--oink) / 0.72);
+  text-shadow: 0 0 12px rgb(0 0 0 / 0.55);
 }
-/* Readability patch: an oversized soft blob behind the whole text cluster.
-   Derives from --bg-1, so it's a paper wash behind dark text in light mode
-   and a dark wash behind light text in dark — halos alone can't save
-   light-mode ink over busy art. Sits behind the content but above the
-   ambient artwork (hero-inner is its own stacking context). */
-.hero-info::before {
-  content: '';
-  position: absolute;
-  inset: -110px -160px -110px -140px;
-  z-index: -1;
-  pointer-events: none;
-  /* Long, gentle falloff + heavy blur: the wash should be felt, not seen —
-     no locatable edge against the surrounding artwork. */
-  background: radial-gradient(ellipse 75% 70% at 40% 50%,
-    color-mix(in srgb, var(--bg-1) 58%, transparent) 0%,
-    color-mix(in srgb, var(--bg-1) 40%, transparent) 40%,
-    color-mix(in srgb, var(--bg-1) 18%, transparent) 68%,
-    transparent 92%);
-  filter: blur(28px);
+.metaline .dot { color: rgb(var(--tone-rgb) / 0.85); }
+.metaline .genre {
+  border-bottom: 1px solid rgb(var(--oink) / 0.25);
+  padding-bottom: 1px;
+  transition: color 0.15s, border-color 0.15s;
 }
-.hero-title {
-  font-size: 48px;
-  font-weight: 600;
-  letter-spacing: -0.025em;
-  line-height: 1.0;
-  margin: 0 0 12px;
-  text-wrap: balance;
-}
-.hero-synopsis {
-  font-size: 15px;
-  line-height: 1.65;
-  color: var(--fg-1);
-  margin: 12px 0 0;
-  max-width: 560px;
-}
-.hero-actions {
+.metaline .genre:hover { color: rgb(var(--oink) / 0.95); border-color: rgb(var(--tone-rgb) / 0.6); }
+
+/* actions */
+.actions {
+  margin-top: 26px;
   display: flex;
+  align-items: center;
   gap: 10px;
-  margin-top: 24px;
+  flex-wrap: wrap;
 }
-.hero-actions .btn-primary {
-  box-shadow: 0 0 24px rgba(var(--hero-tint), 0.25);
+.grow-spacer { flex: 1 1 auto; }
+.hero-count {
+  font: 600 11px var(--font-mono);
+  letter-spacing: 0.2em;
+  color: rgb(var(--oink) / 0.5);
 }
+.hero-count .dim { color: rgb(var(--oink) / 0.25); }
+
+/* tone-glowing primary Play + tone-tinted secondary pill (heya2.css). The
+   tone shifts blend rather than snap as the deck cycles. */
+.btn-play {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 26px 13px 20px;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  background: var(--tone);
+  color: var(--tone-ink, #0a0c10);
+  font: 650 14px var(--font-sans);
+  letter-spacing: 0.01em;
+  box-shadow:
+    0 0 0 1px rgb(var(--tone-rgb) / 0.45),
+    0 0 24px rgb(var(--tone-rgb) / 0.4),
+    6px 10px 36px -8px rgb(var(--tone-rgb) / 0.75);
+  transition:
+    transform 0.15s ease,
+    background 0.9s cubic-bezier(0.22, 1, 0.36, 1),
+    color 0.9s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.5s ease;
+}
+.btn-play:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px rgb(var(--tone-rgb) / 0.6),
+    0 0 40px rgb(var(--tone-rgb) / 0.6),
+    8px 14px 48px -8px rgb(var(--tone-rgb) / 0.9);
+}
+.btn-play[disabled] {
+  cursor: not-allowed;
+  opacity: 0.4;
+  box-shadow: 0 0 0 1px rgb(var(--oink) / 0.14);
+  transform: none;
+}
+.btn-play .tri {
+  width: 0; height: 0;
+  border-left: 11px solid var(--tone-ink, #0a0c10);
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  text-decoration: none;
+  border: 1px solid rgb(var(--tone-rgb) / 0.3);
+  background: rgb(var(--tone-rgb) / 0.08);
+  color: rgb(var(--oink) / 0.9);
+  font: 550 13px var(--font-sans);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 0 16px rgb(var(--tone-rgb) / 0.14), 5px 8px 22px -10px rgb(0 0 0 / 0.7);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.15s, color 0.15s;
+}
+.pill:hover {
+  border-color: rgb(var(--tone-rgb) / 0.55);
+  background: rgb(var(--tone-rgb) / 0.15);
+  color: rgb(var(--oink));
+  box-shadow: 0 0 24px rgb(var(--tone-rgb) / 0.28), 6px 10px 26px -10px rgb(0 0 0 / 0.75);
+  transform: translateY(-1px);
+}
+
 @media (max-width: 900px) {
-  .hero-inner { grid-template-columns: 1fr; gap: 24px; }
-  .hero-poster { display: none; }
-  .hero-title { font-size: 36px; }
-  .hero-logo { max-width: 300px; max-height: 96px; }
+  .hero-inner { padding: 96px var(--pad-fluid) 32px; }
+  .title { font-size: clamp(2rem, 7vw, 2.9rem); }
+  .title-logo { max-width: 300px; max-height: 96px; }
 }
-/* Phone (W3a): bottom-anchor the content island instead of the desktop's
-   vertical centering (that centering was the main source of the "very tall,
-   mostly empty" hero on a narrow screen — see docs/responsive-plan.md W3a).
-   Synopsis drops (title + rating + actions is the mobile-hero convention);
-   Play/Details go side-by-side and both stay fully on screen. */
+
+/* Phone: tighter hero, the primary CTA fills its row so a long
+   "Resume S03E12 - Title" label truncates instead of pushing Details off. */
 @media (max-width: 720px) {
-  .hero-inner { padding: 16px 16px 20px; }
-  .hero-info { justify-content: flex-end; }
-  .hero-bg-gradient {
-    background:
-      linear-gradient(to top, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 92%, transparent) 24%, color-mix(in srgb, var(--bg-1) 50%, transparent) 50%, transparent 78%),
-      radial-gradient(ellipse at 50% 100%, rgba(var(--hero-tint), 0.18), transparent 60%);
-  }
-  .hero-synopsis { display: none; }
-  .hero-title { font-size: 26px; line-height: 1.1; }
-  .hero-logo { max-width: 220px; max-height: 64px; margin: 2px 0 8px; }
-  .hero-meta-row { font-size: 12px; }
-  .hero-actions { margin-top: 16px; gap: 8px; }
-  /* Play grows to fill the row, Details keeps its natural width — so a long
-     "Play S03E12 - Episode Title" label truncates instead of shoving Details
-     off the right edge (the bug this package was written to fix). */
-  .hero-actions .btn-primary { flex: 1 1 auto; min-width: 0; }
-  .hero-actions .btn-ghost { flex: 0 0 auto; }
+  .hero-inner { padding: 84px var(--pad-fluid) 22px; }
+  .eyebrow { margin-bottom: 12px; gap: 8px; }
+  .title { font-size: clamp(1.8rem, 8vw, 2.5rem); }
+  .title-logo { max-width: 220px; max-height: 64px; }
+  .metaline { font-size: 11.5px; }
+  .actions { margin-top: 18px; gap: 8px; }
+  .btn-play { flex: 1 1 auto; min-width: 0; justify-content: center; height: 48px; }
+  .pill { flex: 0 0 auto; height: 48px; }
+  .hero-count { display: none; }
   .hero-play-label {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-}
-
-/* Dominant-tone shifts blend instead of snapping as the deck cycles. */
-.hero-actions .btn {
-  transition: background 0.9s cubic-bezier(0.22, 1, 0.36, 1),
-              color 0.9s cubic-bezier(0.22, 1, 0.36, 1),
-              box-shadow 0.9s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-/* ── Art-proof readability (the hero sits on raw artwork in ambient mode) ──
-   A --bg-1 halo adapts per theme: paper glow behind dark text in light,
-   dark glow behind light text in dark. */
-.hero-meta-row,
-.hero-synopsis {
-  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
-}
-.hero-title { text-shadow: 0 2px 20px rgb(var(--shade) / 0.30), 0 0 14px var(--bg-1); }
-/* The reason chip gets a real glass backing instead of an 18% tint. */
-.hero-info :deep(.chip) {
-  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
 }
 </style>

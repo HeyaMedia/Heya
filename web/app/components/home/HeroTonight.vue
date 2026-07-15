@@ -20,8 +20,8 @@
         <p class="tonight-sum">
           {{ items.length }} episode{{ items.length === 1 ? '' : 's' }} waiting<span v-if="totalMinutes"> · ≈ {{ fmtTotal }}</span>
         </p>
-        <button v-if="items[0]" class="btn btn-primary" @click="$emit('play', items[0])">
-          <Icon name="play" :size="16" />
+        <button v-if="items[0]" class="btn-play" @click="$emit('play', items[0])">
+          <span class="tri" />
           Start with {{ items[0].title }}
         </button>
       </div>
@@ -125,27 +125,67 @@ function stillUrl(it: UpNextItem) {
   align-items: center;
   gap: 48px;
   height: 100%;
-  padding: 48px 40px;
+  /* Top padding clears the glass topbar; the grid is vertically centred. */
+  padding: 84px var(--pad-fluid) 44px;
   max-width: 1240px;
 }
 .tonight-eyebrow {
   font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.18em;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: var(--gold);
-  margin-bottom: 10px;
+  color: var(--tone);
+  margin-bottom: 12px;
+  text-shadow: 0 0 12px rgb(0 0 0 / 0.5);
 }
 .tonight-title {
-  font-size: 52px;
-  font-weight: 600;
-  letter-spacing: -0.025em;
-  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-size: clamp(2.6rem, 5vw, 3.4rem);
+  font-weight: 800;
+  font-variation-settings: "wdth" 115;
+  letter-spacing: -0.022em;
+  line-height: 0.99;
+  margin: 0 0 10px;
+  text-shadow: 0 2px 30px rgb(0 0 0 / 0.45);
 }
 .tonight-sum {
   color: var(--fg-1);
-  font-size: 15px;
+  font-size: 14px;
   margin: 0 0 24px;
+}
+
+/* tone-glow primary (heya2.css .btn-play) */
+.btn-play {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 24px 13px 20px;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  background: var(--tone);
+  color: var(--tone-ink, #0a0c10);
+  font: 650 14px var(--font-sans);
+  letter-spacing: 0.01em;
+  box-shadow:
+    0 0 0 1px rgb(var(--tone-rgb) / 0.45),
+    0 0 24px rgb(var(--tone-rgb) / 0.4),
+    6px 10px 36px -8px rgb(var(--tone-rgb) / 0.75);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.btn-play:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px rgb(var(--tone-rgb) / 0.6),
+    0 0 40px rgb(var(--tone-rgb) / 0.6),
+    8px 14px 48px -8px rgb(var(--tone-rgb) / 0.9);
+}
+.btn-play .tri {
+  width: 0; height: 0;
+  border-left: 11px solid var(--tone-ink, #0a0c10);
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
 }
 .tonight-list {
   display: grid;
@@ -214,8 +254,8 @@ function stillUrl(it: UpNextItem) {
   margin-top: 3px;
 }
 @media (max-width: 900px) {
-  .tonight-inner { grid-template-columns: 1fr; gap: 20px; padding: 24px 20px; align-content: center; }
-  .tonight-title { font-size: 38px; }
+  .tonight-inner { grid-template-columns: 1fr; gap: 20px; padding: 84px var(--pad-fluid) 28px; align-content: center; }
+  .tonight-title { font-size: clamp(2rem, 8vw, 2.6rem); }
   .tonight-list { grid-template-columns: 1fr; gap: 10px; }
   .tonight-card:nth-child(n+3) { display: none; }
 }

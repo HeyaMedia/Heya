@@ -1,12 +1,17 @@
 <template>
   <section
     class="hero-newin"
+    :style="toneVars"
     @mouseenter="onHover(true)"
     @mouseleave="onHover(false)"
     @focusin="onFocus($event, true)"
     @focusout="onFocus($event, false)"
   >
-    <div class="newin-bg" :class="{ 'ambient-extended': ambientEnabled }">
+    <!-- Sharp spotlight backdrop, hard-clipped at the hero's bottom edge (the
+         ledger seam) with the literal-dark 2.0 grade + tone leak — parity with
+         the Featured hero. The blurred site-wide underlay is the global
+         AmbientBackdrop, fed a graded (v2) claim when ambient is on. -->
+    <div class="newin-bg">
       <LoadingImage
         v-if="bgUrl"
         :src="bgUrl"
@@ -16,7 +21,8 @@
         class="newin-bg-img"
         @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
       />
-      <div class="newin-bg-gradient" />
+      <div class="newin-grade" />
+      <div class="newin-tone" />
     </div>
 
     <div class="newin-inner">
@@ -339,7 +345,7 @@ const bgUrl = computed(() => spotlight.value?.backdrop ?? null)
 const { ambientEnabled } = useAppearance()
 const background = useBackground()
 watch([bgUrl, ambientEnabled], ([url, on]) => {
-  if (on && url) background.set(url)
+  if (on && url) background.set(url, { grade: 'v2' })
   else background.clear()
 }, { immediate: true })
 
@@ -350,6 +356,17 @@ watch(bgUrl, async (url) => {
 }, { immediate: true })
 const ctaStyle = computed(() =>
   tone.value ? { background: tone.value.main, color: tone.value.ink } : undefined)
+
+// Publish --tone on the hero root so the eyebrow + tone-glow CTA follow the
+// spotlight's own dominant color (fill + glow stay in sync). Inherits the page
+// tone until the sample lands.
+const toneVars = computed<Record<string, string> | undefined>(() => {
+  const t = tone.value
+  if (!t) return undefined
+  const m = t.main.match(/\d+/g)
+  if (!m) return undefined
+  return { '--tone': t.main, '--tone-rgb': m.slice(0, 3).join(' '), '--tone-ink': t.ink }
+})
 
 const summary = computed(() => {
   const parts: string[] = []
@@ -365,26 +382,35 @@ const summary = computed(() => {
 </script>
 
 <style scoped>
-.hero-newin { position: relative; height: 100%; }
-.newin-bg { position: absolute; inset: 0; overflow: hidden; }
+/* Hero text rides the literal-dark art grade, so --oink keeps it light in
+   every theme (parity with the Featured hero). */
+.hero-newin { position: relative; height: 100%; --oink: 233 236 242; }
+.newin-bg { position: absolute; inset: 0; overflow: hidden; } /* hard clip at the seam */
 .newin-bg-img {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center 22%;
   transition: opacity 0.6s ease;
 }
-.newin-bg-gradient {
+/* Literal-dark readability grade over raw artwork (CLAUDE.md exception) +
+   bottom-left tone leak — mirrors HeroCanvas / the Featured hero. */
+.newin-grade {
   position: absolute;
   inset: 0;
+  pointer-events: none;
   background:
-    linear-gradient(to right, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 72%, transparent) 45%, color-mix(in srgb, var(--bg-1) 30%, transparent) 100%),
-    linear-gradient(to top, var(--bg-1) 0%, color-mix(in srgb, var(--bg-1) 75%, transparent) 30%, transparent 60%);
+    linear-gradient(90deg, rgb(10 12 16 / 0.82), rgb(10 12 16 / 0.34) 42%, rgb(10 12 16 / 0.08) 72%),
+    linear-gradient(to top, rgb(10 12 16 / 0.8) 0%, rgb(10 12 16 / 0.34) 26%, rgb(10 12 16 / 0.12) 58%, rgb(10 12 16 / 0.34) 100%);
 }
-/* Ambient extension: the AmbientBackdrop layer owns all art + tint. */
-.newin-bg.ambient-extended .newin-bg-img { display: none; }
-.newin-bg.ambient-extended .newin-bg-gradient { display: none; }
+.newin-tone {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(90% 70% at 8% 100%, rgb(var(--tone-rgb) / 0.18), transparent 60%);
+}
 
 .newin-inner {
   position: relative;
@@ -434,40 +460,30 @@ const summary = computed(() => {
   max-width: 620px;
   align-self: center;
 }
-/* Same blended readability wash as the Featured hero. */
-.newin-spot::before {
-  content: '';
-  position: absolute;
-  inset: -90px -140px -70px -120px;
-  z-index: -1;
-  pointer-events: none;
-  background: radial-gradient(ellipse 75% 70% at 38% 50%,
-    color-mix(in srgb, var(--bg-1) 58%, transparent) 0%,
-    color-mix(in srgb, var(--bg-1) 40%, transparent) 40%,
-    color-mix(in srgb, var(--bg-1) 18%, transparent) 68%,
-    transparent 92%);
-  filter: blur(28px);
-}
 .newin-eyebrow {
   font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.18em;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: var(--gold);
-  margin-bottom: 8px;
-  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+  color: var(--tone);
+  margin-bottom: 10px;
+  text-shadow: 0 0 12px rgb(0 0 0 / 0.5);
 }
 .newin-title-link { color: inherit; text-decoration: none; }
-.newin-title-link:hover .newin-title { color: var(--gold); }
+.newin-title-link:hover .newin-title { color: var(--tone); }
 .newin-title {
-  font-size: 38px;
-  font-weight: 600;
-  letter-spacing: -0.025em;
-  line-height: 1.04;
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 3.6vw, 2.6rem);
+  font-weight: 800;
+  font-variation-settings: "wdth" 115;
+  letter-spacing: -0.022em;
+  line-height: 1.02;
   margin: 0 0 10px;
   text-wrap: balance;
   transition: color 0.15s;
-  text-shadow: 0 2px 20px rgb(var(--shade) / 0.30), 0 0 14px var(--bg-1);
+  color: rgb(var(--oink) / 0.98);
+  text-shadow: 0 2px 30px rgb(0 0 0 / 0.45);
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -479,8 +495,16 @@ const summary = computed(() => {
   gap: 10px;
   min-width: 0;
 }
+/* 2.0 mono tone-tinted pill (heya2.css-flavoured). */
 .newin-meta .chip {
-  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
+  font: 600 10px var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid rgb(var(--tone-rgb) / 0.35);
+  background: rgb(var(--tone-rgb) / 0.14);
+  color: var(--tone);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   flex-shrink: 0;
@@ -488,8 +512,8 @@ const summary = computed(() => {
 .newin-meta-sub {
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--fg-1);
-  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+  color: rgb(var(--oink) / 0.72);
+  text-shadow: 0 0 12px rgb(0 0 0 / 0.55);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -497,17 +521,17 @@ const summary = computed(() => {
 .newin-meta-time {
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--fg-2);
-  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+  color: rgb(var(--oink) / 0.55);
+  text-shadow: 0 0 12px rgb(0 0 0 / 0.55);
   flex-shrink: 0;
 }
 .newin-desc {
   font-size: 13.5px;
   line-height: 1.55;
-  color: var(--fg-1);
+  color: rgb(var(--oink) / 0.78);
   max-width: 560px;
   margin: 10px 0 0;
-  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+  text-shadow: 0 0 12px rgb(0 0 0 / 0.5);
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -515,12 +539,26 @@ const summary = computed(() => {
 }
 .newin-actions { margin-top: 16px; }
 .newin-cta {
-  height: 36px;
-  padding: 0 16px;
+  height: 40px;
+  padding: 0 20px;
   font-size: 13px;
+  font-weight: 650;
+  border-radius: 999px;
   gap: 6px;
+  box-shadow:
+    0 0 0 1px rgb(var(--tone-rgb) / 0.45),
+    0 0 24px rgb(var(--tone-rgb) / 0.4),
+    6px 10px 36px -8px rgb(var(--tone-rgb) / 0.75);
   transition: background 0.9s cubic-bezier(0.22, 1, 0.36, 1),
-              color 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+              color 0.9s cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 0.15s ease, transform 0.15s ease;
+}
+.newin-cta:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px rgb(var(--tone-rgb) / 0.6),
+    0 0 40px rgb(var(--tone-rgb) / 0.6),
+    8px 14px 48px -8px rgb(var(--tone-rgb) / 0.9);
 }
 .newin-sum {
   font-family: var(--font-mono);
@@ -530,9 +568,10 @@ const summary = computed(() => {
   text-align: right;
   flex-shrink: 0;
   align-self: flex-start;
-  /* Clear the deck-tabs cluster floating above. */
-  padding-top: 26px;
-  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+  /* Clear the deck tab/nav cluster, now dropped below the glass topbar. */
+  padding-top: 74px;
+  color: rgb(var(--oink) / 0.7);
+  text-shadow: 0 0 12px rgb(0 0 0 / 0.5);
 }
 /* Spotlight handoff crossfade. */
 .spot-enter-active { transition: opacity 0.35s ease, transform 0.35s ease; }

@@ -1,5 +1,11 @@
 <template>
-  <div class="scroll" style="height: 100%">
+  <!-- `hero-flush` opts the home page out of the .app-main topbar offset so the
+       hero deck's art rides up under the glass topbar. The tone vars
+       (--tone/--tone-rgb/--tone-ink) publish on the scroll root — the same
+       pattern as the movie/series ports + the playbar's --pb-accent — so the
+       library-pulse ledger and the rail section counts follow the featured
+       (or active-mode) hero's dominant tone. -->
+  <div class="scroll hero-flush" :style="toneStyle" style="height: 100%">
     <HeroDeck
       v-if="showSection('hero')"
       :items="heroItems"
@@ -14,6 +20,15 @@
       @play="onHeroPlay"
       @play-up-next="playUpNext"
       @pin="onPinHeroMode"
+    />
+
+    <!-- Library pulse — the signature 2.0 ledger at the hero's hard-clip seam.
+         USER-FACING facts only (session + recent arrivals), derived entirely
+         from queries the page already made; no server/ops telemetry, no new
+         endpoints (PLAN cardinal rule 2). -->
+    <LedgerStrip
+      v-if="showSection('hero') && ledgerCells.length"
+      :cells="ledgerCells"
     />
 
     <!-- Sections render in user-configured order (Settings → Appearance)
@@ -150,6 +165,8 @@
 import type { ContextMenuItem, MediaItem, MediaDetail, Movie } from '~~/shared/types'
 import type { ContinueWatchingItem } from '~/types/home'
 import type { HeroPlayInfo } from '~/components/home/HeroA.vue'
+import type { ImageTone } from '~/composables/useImageTone'
+import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
 import { useInfiniteQuery, useQuery, useQueryCache } from '@pinia/colada'
 import { meSettingsQuery, type UserSettingsBlob } from '~/queries/user'
 import { mediaUserStateQuery, movieUserStateQuery, seriesUserStateQuery, userListsQuery as userListsOptions } from '~/queries/catalog'
@@ -359,6 +376,82 @@ const heroItems = computed(() => {
 const hasContent = computed(() =>
   recentMovies.value.length + recentTVItems.value.length + recentAlbums.value.length + recentBooks.value.length > 0
 )
+
+// ── Tone follow ─────────────────────────────────────────────────────────────
+// Publish --tone/--tone-rgb/--tone-ink on the scroll root so the ledger + the
+// rail section counts pick up the hero's dominant color. Primary source is the
+// AmbientBackdrop's own sampled tone (useBackgroundTone) — in ambient mode each
+// hero claims its art, so this follows the ACTIVE mode's current slide and
+// re-samples on every crossfade. A direct sample of the featured backdrop is
+// the ambient-off fallback (sequence-guarded, the playbar's --pb-accent
+// pattern).
+const bgTone = useBackgroundTone()
+const localTone = ref<ImageTone | null>(null)
+let toneSeq = 0
+const featuredBackdrop = computed(() => {
+  const it = heroItems.value[0]
+  return it ? useBackdropUrl(it) : null
+})
+watch(featuredBackdrop, (src) => {
+  const seq = ++toneSeq
+  if (!src) { localTone.value = null; return }
+  sampleImageTone(src).then((t) => { if (seq === toneSeq) localTone.value = t })
+}, { immediate: true })
+const toneStyle = computed(() => {
+  const t = bgTone.value || localTone.value
+  if (!t) return undefined
+  const m = t.main.match(/\d+/g)
+  if (!m) return undefined
+  return { '--tone': t.main, '--tone-rgb': m.slice(0, 3).join(' '), '--tone-ink': t.ink }
+})
+
+// ── Library pulse ledger (user-facing facts only) ───────────────────────────
+// Everything here comes from queries the page already ran. Recency counts read
+// the loaded first pages of each "recently added" rail — since those rails are
+// newest-first, all this-week arrivals live in the first page, so the counts
+// stay stable as more (older) pages load. No totals: the library-count
+// endpoint doesn't exist and the rule forbids inventing one.
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+type Datedish = { added_at?: unknown; created_at?: unknown }
+function toMs(v: unknown): number {
+  if (!v) return NaN
+  const iso = typeof v === 'string' ? v : (v as { Time?: string })?.Time
+  return iso ? new Date(iso).getTime() : NaN
+}
+function addedThisWeek(items: Datedish[]): number {
+  const cut = Date.now() - WEEK_MS
+  return items.reduce((n, it) => {
+    const t = toMs(it.added_at) || toMs(it.created_at)
+    return !isNaN(t) && t >= cut ? n + 1 : n
+  }, 0)
+}
+
+const ledgerCells = computed<LedgerCell[]>(() => {
+  const cells: LedgerCell[] = []
+
+  const cw = continueWatching.value.length
+  if (cw) cells.push({ k: 'Continue', v: String(cw), unit: 'in progress', tone: true })
+
+  const up = upNextItems.value[0]
+  if (up) {
+    const s = String(up.season_number ?? 0).padStart(2, '0')
+    const e = String(up.episode_number ?? 0).padStart(2, '0')
+    const code = up.season_number ? `S${s}E${e}` : ''
+    if (code) cells.push({ k: 'Up next', v: code, sub: up.title, tone: true })
+    else cells.push({ k: 'Up next', v: String(upNextItems.value.length), unit: 'waiting', tone: true })
+  }
+
+  const films = addedThisWeek(recentMovies.value as Datedish[])
+  if (films) cells.push({ k: 'New films', v: String(films) })
+  const tv = addedThisWeek(tvEntries.value as Datedish[])
+  if (tv) cells.push({ k: 'New TV', v: String(tv) })
+  const albums = addedThisWeek(recentAlbums.value as Datedish[])
+  if (albums) cells.push({ k: 'New albums', v: String(albums) })
+  const books = addedThisWeek(recentBooks.value as Datedish[])
+  if (books) cells.push({ k: 'New books', v: String(books) })
+
+  return cells
+})
 
 // Albums route to /music/artist/{aslug}/{album_slug}. Falls back to the
 // generic mediaUrl shape so this works even if the ContentRow item is a

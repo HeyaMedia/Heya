@@ -155,8 +155,11 @@ onMounted(() => {
 }
 .deck-topright {
   position: absolute;
-  top: 18px;
-  right: 24px;
+  /* The deck rides flush under the fixed glass topbar (`.hero-flush` on the
+     page root), so top:18px would tuck the tabs + slide navigator behind the
+     bar. Drop the whole cluster clear of it. */
+  top: calc(var(--topbar-h) + 14px);
+  right: var(--pad-fluid);
   z-index: 10;
   display: flex;
   align-items: center;
@@ -172,25 +175,27 @@ onMounted(() => {
   /* Theme-aware glass (same recipe as .surface): the pill sits over
      artwork, but a literal dark glass was unreadable on the light
      theme's paper — mix from the theme's own surface color instead. */
-  background: color-mix(in oklab, var(--bg-2) 88%, transparent);
-  border: 1px solid var(--border);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: color-mix(in oklab, var(--bg-2) 84%, transparent);
+  border: 1px solid var(--hair-strong);
+  box-shadow: 0 8px 26px -14px rgb(0 0 0 / 0.7);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 .deck-tab {
   font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.1em;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--fg-2);
-  padding: 5px 11px;
+  color: rgb(var(--ink) / 0.55);
+  padding: 6px 12px;
   border-radius: 999px;
   transition: color 0.15s, background 0.15s;
 }
-.deck-tab:hover { color: var(--fg-0); }
+.deck-tab:hover { color: rgb(var(--ink) / 0.9); }
 .deck-tab.active {
   color: var(--gold);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  background: rgb(227 179 65 / 0.12);
 }
 .deck-pin {
   display: flex;
@@ -206,7 +211,8 @@ onMounted(() => {
 .deck-pin:hover { color: var(--gold-bright); }
 .deck-pin.pinned { color: var(--gold); }
 @media (max-width: 900px) {
-  .deck-topright { right: 12px; top: 12px; }
+  /* Still clear the fixed glass topbar (home is hero-flush). */
+  .deck-topright { right: 12px; top: calc(var(--topbar-h) + 10px); }
   .deck-tab { padding: 5px 8px; }
 }
 /* Phone (W3a): the desktop 480px band is already ~57vh on a 390x844 phone,
