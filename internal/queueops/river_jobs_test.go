@@ -101,6 +101,89 @@ func TestKickoffFinishingHandshake(t *testing.T) {
 	assert.Nil(t, run)
 }
 
+func TestMetadataChangeEnrichCoalescingKeepsOneTrailingRefresh(t *testing.T) {
+	pool := queueopsTestPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx)
+
+	insert := func(itemID int64, source, state string, ageSeconds int) int64 {
+		t.Helper()
+		var id int64
+		require.NoError(t, tx.QueryRow(ctx, `
+			INSERT INTO river_job (state, max_attempts, kind, queue, args, metadata, created_at)
+			VALUES ($3, 3, 'enrich_media_item', 'enrich_media_item',
+			        jsonb_build_object('item_id', $1::bigint, 'source', $2::text, 'force', true),
+			        '{}'::jsonb, now() + ($4::int * interval '1 second'))
+			RETURNING id
+		`, itemID, source, state, ageSeconds).Scan(&id))
+		return id
+	}
+
+	// Item 41 has a running refresh plus three queued refreshes. Coalescing
+	// must retain the running job and only the newest queued trailing job.
+	insert(41, "metadata_change", "available", -30)
+	insert(41, "metadata_change", "scheduled", -20)
+	insert(41, "metadata_change", "retryable", -10)
+	insert(41, "metadata_change", "running", 0)
+	// A foreground refresh for the same item is a separate priority path and
+	// must never be cancelled by metadata-change maintenance.
+	insert(41, "view", "available", 1)
+
+	// Item 42 has no running refresh, so one of its two queued rows survives.
+	insert(42, "metadata_change", "available", -20)
+	insert(42, "metadata_change", "available", -10)
+
+	cancelled, err := CoalesceMetadataChangeEnrichJobs(ctx, tx)
+	require.NoError(t, err)
+	assert.EqualValues(t, 3, cancelled)
+
+	var pending41, running41, cancelled41, foreground41 int
+	require.NoError(t, tx.QueryRow(ctx, `
+		SELECT
+			count(*) FILTER (WHERE args->>'source' = 'metadata_change' AND state IN ('available','pending','retryable','scheduled')),
+			count(*) FILTER (WHERE args->>'source' = 'metadata_change' AND state = 'running'),
+			count(*) FILTER (WHERE args->>'source' = 'metadata_change' AND state = 'cancelled'),
+			count(*) FILTER (WHERE args->>'source' = 'view' AND state = 'available')
+		FROM river_job
+		WHERE kind = 'enrich_media_item' AND NULLIF(args->>'item_id', '')::bigint = 41
+	`).Scan(&pending41, &running41, &cancelled41, &foreground41))
+	assert.Equal(t, 1, pending41)
+	assert.Equal(t, 1, running41)
+	assert.Equal(t, 2, cancelled41)
+	assert.Equal(t, 1, foreground41)
+
+	// A newer invalidation atomically replaces the retained trailing row. The
+	// currently-running metadata refresh and foreground work remain untouched.
+	cancelled, err = CancelPendingMetadataChangeEnrichJobs(ctx, tx, []int64{41})
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, cancelled)
+
+	require.NoError(t, tx.QueryRow(ctx, `
+		SELECT
+			count(*) FILTER (WHERE args->>'source' = 'metadata_change' AND state IN ('available','pending','retryable','scheduled')),
+			count(*) FILTER (WHERE args->>'source' = 'metadata_change' AND state = 'running'),
+			count(*) FILTER (WHERE args->>'source' = 'view' AND state = 'available')
+		FROM river_job
+		WHERE kind = 'enrich_media_item' AND NULLIF(args->>'item_id', '')::bigint = 41
+	`).Scan(&pending41, &running41, &foreground41))
+	assert.Zero(t, pending41)
+	assert.Equal(t, 1, running41)
+	assert.Equal(t, 1, foreground41)
+
+	var pending42 int
+	require.NoError(t, tx.QueryRow(ctx, `
+		SELECT count(*) FROM river_job
+		WHERE kind = 'enrich_media_item'
+		  AND args->>'source' = 'metadata_change'
+		  AND NULLIF(args->>'item_id', '')::bigint = 42
+		  AND state IN ('available','pending','retryable','scheduled')
+	`).Scan(&pending42))
+	assert.Equal(t, 1, pending42, "replacing item 41 must not disturb another item's trailing refresh")
+}
+
 func TestScheduledTaskExceededRuntimeIgnoresManualJobs(t *testing.T) {
 	pool := queueopsTestPool(t)
 	defer pool.Close()

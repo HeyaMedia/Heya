@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
+	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
@@ -41,6 +42,15 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 	rc := river.ClientFromContext[pgx.Tx](ctx)
 	if rc == nil {
 		return fmt.Errorf("sync metadata changes: river client unavailable")
+	}
+	// Older builds allowed every feed tick to enqueue another forced refresh
+	// for the same parent while HeyaMetadata was still publishing child changes.
+	// Repair that backlog on every tick (including an otherwise-empty feed) so
+	// deployment immediately converges to one queued trailing refresh per item.
+	if cancelled, err := queueops.CoalesceMetadataChangeEnrichJobs(ctx, w.DB); err != nil {
+		return fmt.Errorf("coalesce metadata change enrich jobs: %w", err)
+	} else if cancelled > 0 {
+		log.Info().Int64("cancelled", cancelled).Msg("coalesced redundant metadata change enrich jobs")
 	}
 
 	q := sqlc.New(w.DB)
@@ -130,6 +140,7 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 				return fmt.Errorf("resolve metadata change page targets: %w", listErr)
 			}
 			jobs := make([]river.InsertManyParams, 0, len(targets))
+			mediaRefreshIDs := make([]int64, 0, len(targets))
 			for _, target := range targets {
 				state := changesByEntity[target.EntityID]
 				change := state.change
@@ -153,7 +164,14 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 					args := EnrichMediaItemArgs{ItemID: target.TargetID, Source: "metadata_change", Force: true}
 					opts := args.InsertOpts()
 					jobs = append(jobs, river.InsertManyParams{Args: args, InsertOpts: &opts})
+					mediaRefreshIDs = append(mediaRefreshIDs, target.TargetID)
 				}
+			}
+			// Replace each item's queued metadata-change refresh with this newer
+			// trailing refresh. A running refresh is intentionally preserved; the
+			// replacement runs after it and observes the newest upstream state.
+			if _, cancelErr := queueops.CancelPendingMetadataChangeEnrichJobs(ctx, tx, mediaRefreshIDs); cancelErr != nil {
+				return fmt.Errorf("replace pending metadata change enrich jobs: %w", cancelErr)
 			}
 			if len(jobs) > 0 {
 				results, insertErr := rc.InsertManyTx(ctx, tx, jobs)

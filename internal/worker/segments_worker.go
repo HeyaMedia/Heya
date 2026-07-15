@@ -3,7 +3,9 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"path/filepath"
 	"sort"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/karbowiak/heya/internal/communitysegments"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/queueops"
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
@@ -222,8 +225,73 @@ type ScanMediaSegmentsFileWorker struct {
 	Progress *TaskProgressBroadcaster
 }
 
+type segmentFileSnapshot struct {
+	Path       string
+	Size       int64
+	MTime      time.Time
+	DurationMs int64
+}
+
+func (snapshot segmentFileSnapshot) Equal(other segmentFileSnapshot) bool {
+	return snapshot.Path == other.Path &&
+		snapshot.Size == other.Size &&
+		snapshot.MTime.Equal(other.MTime) &&
+		snapshot.DurationMs == other.DurationMs
+}
+
+// currentSegmentFileSnapshot proves that the database row still describes the
+// bytes currently at its path. Segment timings are release-cut-specific, so a
+// missing/soft-deleted file or a size/mtime mismatch is a benign stale job,
+// not permission to write results against the replacement.
+func currentSegmentFileSnapshot(file sqlc.LibraryFile) (segmentFileSnapshot, string, error) {
+	if file.DeletedAt.Valid {
+		return segmentFileSnapshot{}, "file_soft_deleted", nil
+	}
+	if !file.Mtime.Valid {
+		return segmentFileSnapshot{}, "file_mtime_unknown", nil
+	}
+
+	var mediaInfo MediaInfo
+	if len(file.MediaInfo) == 0 || json.Unmarshal(file.MediaInfo, &mediaInfo) != nil || mediaInfo.Duration <= 0 {
+		return segmentFileSnapshot{}, "file_not_probed", nil
+	}
+
+	source, err := vfs.Open(vfs.Dir(file.Path))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return segmentFileSnapshot{}, "file_missing", nil
+		}
+		return segmentFileSnapshot{}, "", err
+	}
+	defer source.Close() //nolint:errcheck // read-only stat source
+
+	info, err := fs.Stat(source.FS, vfs.Base(file.Path))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return segmentFileSnapshot{}, "file_missing", nil
+		}
+		return segmentFileSnapshot{}, "", err
+	}
+	if info.IsDir() {
+		return segmentFileSnapshot{}, "path_is_directory", nil
+	}
+
+	dbMTime := file.Mtime.Time.Truncate(time.Microsecond)
+	diskMTime := info.ModTime().Truncate(time.Microsecond)
+	if info.Size() != file.Size || !diskMTime.Equal(dbMTime) {
+		return segmentFileSnapshot{}, "file_changed_since_scan", nil
+	}
+
+	return segmentFileSnapshot{
+		Path:       file.Path,
+		Size:       file.Size,
+		MTime:      dbMTime,
+		DurationMs: int64(mediaInfo.Duration * 1000),
+	}, "", nil
+}
+
 func (w *ScanMediaSegmentsFileWorker) Work(ctx context.Context, job *river.Job[ScanMediaSegmentsFileArgs]) error {
-	if err := snoozeIfMatchingPending(ctx, w.DB); err != nil {
+	if err := snoozeIfScannerPipelinePending(ctx, w.DB); err != nil {
 		return err
 	}
 	if w.Segments == nil {
@@ -237,6 +305,18 @@ func (w *ScanMediaSegmentsFileWorker) Work(ctx context.Context, job *river.Job[S
 		return fmt.Errorf("get library_file %d: %w", job.Args.LibraryFileID, err)
 	}
 	if lf.DeletedAt.Valid {
+		return nil
+	}
+	fileSnapshot, skipReason, err := currentSegmentFileSnapshot(lf)
+	if err != nil {
+		return fmt.Errorf("validate segment file %d: %w", lf.ID, err)
+	}
+	if skipReason != "" {
+		log.Debug().
+			Int64("library_file_id", lf.ID).
+			Str("path", vfs.RedactPath(lf.Path)).
+			Str("reason", skipReason).
+			Msg("community segments: stale file job skipped")
 		return nil
 	}
 
@@ -256,13 +336,7 @@ func (w *ScanMediaSegmentsFileWorker) Work(ctx context.Context, job *river.Job[S
 	segmentIDs := communitysegments.IDsFromMap(externalIDStrings(mi.ExternalIds))
 	segmentIDs.Anime = mi.MediaType == sqlc.MediaTypeAnime
 
-	var durationMs int64
-	if len(lf.MediaInfo) > 0 {
-		var info MediaInfo
-		if err := json.Unmarshal(lf.MediaInfo, &info); err == nil {
-			durationMs = int64(info.Duration * 1000)
-		}
-	}
+	durationMs := fileSnapshot.DurationMs
 
 	w.Progress.SetCurrent(ScanMediaSegmentsFileArgs{}.Kind(), job.Args.ScheduledTaskID, filepath.Base(lf.Path))
 
@@ -270,11 +344,12 @@ func (w *ScanMediaSegmentsFileWorker) Work(ctx context.Context, job *river.Job[S
 	defer cancel()
 
 	var cands []communitysegments.Candidate
+	var season, episode int
 	switch mi.MediaType {
 	case sqlc.MediaTypeMovie:
 		cands, _, err = w.Segments.Movie(fetchCtx, segmentIDs, durationMs)
 	case sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
-		season, episode, ok := parseFirstEpisodeRef(lf.ParseResult)
+		season, episode, ok = parseFirstEpisodeRef(lf.ParseResult)
 		if !ok {
 			// Extras/specials the parser couldn't address — mark done so the
 			// pump doesn't revisit every sweep.
@@ -286,6 +361,61 @@ func (w *ScanMediaSegmentsFileWorker) Work(ctx context.Context, job *river.Job[S
 	}
 	if err != nil {
 		return fmt.Errorf("community segments fetch: %w", err)
+	}
+
+	// The provider request is intentionally independent of HeyaMetadata, but
+	// the timings are only valid for the exact local release whose duration we
+	// sent. Re-read and re-stat before writing so a concurrent scan/replacement,
+	// soft-delete, or unlink cannot attach stale timings to a different cut.
+	currentFile, err := q.GetLibraryFileByID(ctx, lf.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("revalidate library_file %d: %w", lf.ID, err)
+	}
+	currentSnapshot, skipReason, err := currentSegmentFileSnapshot(currentFile)
+	if err != nil {
+		return fmt.Errorf("revalidate segment file %d: %w", lf.ID, err)
+	}
+	if skipReason != "" || !fileSnapshot.Equal(currentSnapshot) {
+		if skipReason == "" {
+			skipReason = "file_changed_during_fetch"
+		}
+		log.Info().
+			Int64("library_file_id", lf.ID).
+			Str("path", vfs.RedactPath(lf.Path)).
+			Str("reason", skipReason).
+			Msg("community segments: file changed before write; result discarded")
+		return nil
+	}
+	currentMediaItemID, currentLinked, err := mediaItemIDForSegmentFile(ctx, q, currentFile)
+	if err != nil {
+		return err
+	}
+	if !currentLinked || currentMediaItemID != mediaItemID {
+		log.Info().Int64("library_file_id", lf.ID).Msg("community segments: media identity changed before write; result discarded")
+		return nil
+	}
+	currentMediaItem, err := q.GetMediaItemByID(ctx, currentMediaItemID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("revalidate media_item %d: %w", currentMediaItemID, err)
+	}
+	currentSegmentIDs := communitysegments.IDsFromMap(externalIDStrings(currentMediaItem.ExternalIds))
+	currentSegmentIDs.Anime = currentMediaItem.MediaType == sqlc.MediaTypeAnime
+	if currentMediaItem.MediaType != mi.MediaType || currentSegmentIDs != segmentIDs {
+		log.Info().Int64("library_file_id", lf.ID).Msg("community segments: provider identity changed before write; result discarded")
+		return nil
+	}
+	if mi.MediaType == sqlc.MediaTypeTv || mi.MediaType == sqlc.MediaTypeAnime {
+		currentSeason, currentEpisode, currentAddressable := parseFirstEpisodeRef(currentFile.ParseResult)
+		if !currentAddressable || currentSeason != season || currentEpisode != episode {
+			log.Info().Int64("library_file_id", lf.ID).Msg("community segments: episode coordinates changed before write; result discarded")
+			return nil
+		}
 	}
 
 	picked := pickSegments(cands, durationMs)

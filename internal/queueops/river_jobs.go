@@ -54,6 +54,11 @@ const KickoffSourceManual = "manual"
 // which at most one kickoff per (kind, args) can exist.
 const kickoffActiveStates = `('available', 'pending', 'running', 'retryable', 'scheduled')`
 
+// pendingJobStates are jobs River has not started yet. Directly finalizing a
+// running row would race River's worker bookkeeping, so replacement/coalescing
+// helpers must only touch these states.
+const pendingJobStates = `('available', 'pending', 'retryable', 'scheduled')`
+
 // ActiveKickoffSource returns the metadata source ("manual" or "") of the
 // task's active kickoff job, plus whether one exists at all. Uniqueness
 // guarantees at most one active kickoff per task, but ORDER BY id DESC
@@ -258,6 +263,63 @@ func CountActiveByKinds(ctx context.Context, db DB, kinds []string) (int64, erro
 		  AND kind = ANY($1::text[])
 	`, kinds).Scan(&count)
 	return count, err
+}
+
+// CoalesceMetadataChangeEnrichJobs collapses a historical metadata-change
+// backlog to at most one not-yet-running refresh per media item. A currently
+// running refresh is deliberately left alone; the one retained queued job is
+// its trailing refresh and will observe any changes that landed mid-fetch.
+//
+// This is run by every change-feed tick so deploying the coalescing behavior
+// also repairs rows created by older builds without requiring a manual SQL
+// cleanup in production.
+func CoalesceMetadataChangeEnrichJobs(ctx context.Context, db DB) (int64, error) {
+	tag, err := db.Exec(ctx, `
+		WITH ranked AS (
+			SELECT id,
+			       row_number() OVER (
+				   PARTITION BY NULLIF(args->>'item_id', '')::bigint
+				   ORDER BY created_at DESC, id DESC
+			       ) AS position
+			FROM river_job
+			WHERE kind = 'enrich_media_item'
+			  AND state IN `+pendingJobStates+`
+			  AND args->>'source' = 'metadata_change'
+			  AND NULLIF(args->>'item_id', '') IS NOT NULL
+		)
+		UPDATE river_job job
+		   SET state = 'cancelled', finalized_at = now()
+		  FROM ranked
+		 WHERE job.id = ranked.id
+		   AND ranked.position > 1
+	`)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// CancelPendingMetadataChangeEnrichJobs removes the queued trailing refresh
+// for each item before the change consumer inserts a newer one. Running jobs
+// and foreground/manual enriches are not touched. The caller performs this in
+// the same transaction as the replacement inserts and cursor advancement, so
+// a crash can neither lose the latest invalidation nor stack replacements.
+func CancelPendingMetadataChangeEnrichJobs(ctx context.Context, db DB, itemIDs []int64) (int64, error) {
+	if len(itemIDs) == 0 {
+		return 0, nil
+	}
+	tag, err := db.Exec(ctx, `
+		UPDATE river_job
+		   SET state = 'cancelled', finalized_at = now()
+		 WHERE kind = 'enrich_media_item'
+		   AND state IN `+pendingJobStates+`
+		   AND args->>'source' = 'metadata_change'
+		   AND NULLIF(args->>'item_id', '')::bigint = ANY($1::bigint[])
+	`, itemIDs)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }
 
 func CountActive(ctx context.Context, db DB) (RuntimeCounts, error) {

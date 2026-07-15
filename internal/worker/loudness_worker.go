@@ -288,18 +288,30 @@ func (w *ScanAlbumLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanA
 // queue boundaries here — these run in parallel queues but all compete for the
 // same CPU/disk/heya.media bandwidth as loudness scanning.
 func snoozeIfMatchingPending(ctx context.Context, db *pgxpool.Pool) error {
-	n, err := queueops.CountActiveByKinds(ctx, db, []string{"kickoff_library_scan", "process_scan", "fetch_metadata", "apply_metadata", "enrich_media_item"})
+	return snoozeIfKindsPending(ctx, db, []string{"kickoff_library_scan", "process_scan", "fetch_metadata", "apply_metadata", "enrich_media_item"})
+}
+
+// snoozeIfScannerPipelinePending is the lighter readiness gate for work that
+// depends on a stable file identity but not on full upstream enrichment.
+// Community segment lookup only needs the already-applied provider identity
+// and the file's current probed duration, so an unrelated enrich backlog must
+// not hold it hostage.
+func snoozeIfScannerPipelinePending(ctx context.Context, db *pgxpool.Pool) error {
+	return snoozeIfKindsPending(ctx, db, []string{"kickoff_library_scan", "process_scan", "fetch_metadata", "apply_metadata"})
+}
+
+func snoozeIfKindsPending(ctx context.Context, db *pgxpool.Pool, kinds []string) error {
+	n, err := queueops.CountActiveByKinds(ctx, db, kinds)
 	if err != nil {
-		// Don't block loudness work on a transient DB hiccup — better to
-		// run loudness than to wedge the queue entirely.
+		// Don't block background work on a transient DB hiccup — better to
+		// continue than to wedge the queue entirely.
 		return nil
 	}
 	if n == 0 {
 		return nil
 	}
-	// 60s feels like the right tradeoff: long enough that we don't waste
-	// loudness's MaxWorkers=1 slot bouncing back and forth, short enough
-	// that we resume promptly when matching settles down.
+	// Long enough to avoid bouncing queue slots while the scanner is busy,
+	// short enough to resume promptly once matching settles down.
 	return river.JobSnooze(60 * time.Second)
 }
 
