@@ -428,7 +428,7 @@ if (import.meta.client) {
                     :title="`Play ${t.title}`"
                     @click.stop="playFrom(t)"
                   >
-                    <Icon name="play" :size="11" />
+                    <Icon name="play" :size="13" />
                   </button>
                 </div>
 
@@ -774,9 +774,10 @@ if (import.meta.client) {
 }
 .trk {
   display: grid;
-  /* Last 40px column hosts the touch-only ⋯; collapsed on fine pointers so
-     desktop rows don't end in a dead gap (coarse override below). */
-  grid-template-columns: 44px minmax(0, 1fr) auto 66px 0px;
+  /* Wider first column gives the centered hover-play breathing room and
+     shifts the title block right. Last 40px column hosts the touch-only ⋯;
+     collapsed on fine pointers (coarse override below). */
+  grid-template-columns: 56px minmax(0, 1fr) auto 66px 0px;
   gap: 18px;
   align-items: center;
   padding: 9px 8px;
@@ -797,12 +798,15 @@ if (import.meta.client) {
 .trk-active:hover { background: rgb(var(--tone-rgb) / 0.12); }
 .trk-active .trk-t { color: var(--tone); }
 
+/* Number cell: everything (number / VU / hover-play) CENTERED in the column,
+   and the hover-play overlays the number in place instead of hugging the
+   title's edge (user 2026-07-15). */
 .trk-n {
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  height: 22px;
+  justify-content: center;
+  height: 32px;
 }
 .trk-num {
   font: 600 13px var(--font-mono);
@@ -810,15 +814,14 @@ if (import.meta.client) {
   font-variant-numeric: tabular-nums;
   transition: opacity 0.12s;
 }
-.trk-vu { margin-left: auto; }
 .trk-missing-icon { color: var(--bad); }
 .trk-hover-play {
   position: absolute;
-  right: 0;
+  left: 50%;
   top: 50%;
-  transform: translateY(-50%);
-  width: 24px;
-  height: 24px;
+  transform: translate(-50%, -50%);
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   border: 0;
   background: var(--tone);
@@ -828,6 +831,7 @@ if (import.meta.client) {
   justify-content: center;
   cursor: pointer;
   opacity: 0;
+  box-shadow: 0 0 0 1px rgb(var(--tone-rgb) / 0.4), 0 0 14px rgb(var(--tone-rgb) / 0.4);
   transition: opacity 0.12s, filter 0.12s;
 }
 .trk-hover-play:hover { filter: brightness(1.1); }

@@ -41,7 +41,7 @@ function pick(reaction: Exclude<Reaction, null>) {
   emit('update:modelValue', reaction === 'heart' ? REACTION_HEART : reaction === 'up' ? REACTION_UP : REACTION_DOWN)
 }
 
-const iconSize = computed(() => (props.size === 'sm' ? 14 : 17))
+const iconSize = computed(() => (props.size === 'sm' ? 16 : 19))
 </script>
 
 <template>
@@ -80,19 +80,22 @@ const iconSize = computed(() => (props.size === 'sm' ? 14 : 17))
 </template>
 
 <style scoped>
-.reaction { display: inline-flex; align-items: center; gap: 2px; }
+.reaction { display: inline-flex; align-items: center; gap: 3px; }
+/* Roomier targets site-wide (user 2026-07-15: the tiny reaction cluster is a
+   recurring squint across track rows and hero pills) — md lands ~35px hit
+   areas, sm ~28px, without changing the cluster's visual weight much. */
 .reaction-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  padding: 5px; border-radius: 999px;
+  padding: 8px; border-radius: 999px;
   color: var(--fg-3); cursor: pointer;
   transition: color 0.12s ease, background 0.12s ease, transform 0.1s ease;
 }
-.reaction--sm .reaction-btn { padding: 3px; }
-.reaction-btn:hover { color: var(--fg-0); background: rgba(255, 255, 255, 0.06); }
+.reaction--sm .reaction-btn { padding: 6px; }
+.reaction-btn:hover { color: var(--fg-0); background: rgb(var(--ink) / 0.08); }
 .reaction-btn:active { transform: scale(0.9); }
 /* Hollow by default (outline glyphs); active = filled. Thumbs light up
    bright, the heart goes red. */
 .reaction-down.active { color: var(--fg-0); }
 .reaction-up.active { color: var(--fg-0); }
-.reaction-heart.active { color: #e5484d; }
+.reaction-heart.active { color: var(--bad); }
 </style>
