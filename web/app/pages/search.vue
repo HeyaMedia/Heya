@@ -18,6 +18,7 @@
     <!-- Has query: show results -->
     <template v-if="query">
       <header class="search-head">
+        <div class="search-eyebrow">Search</div>
         <h1 class="search-title">
           Results for <span class="search-q">"{{ query }}"</span>
         </h1>
@@ -45,12 +46,13 @@
       <!-- "All" view -->
       <div v-if="activeType === '' && !loading">
         <section v-for="s in sectionsForTabs" :key="s.key" class="search-section-block">
-          <header class="search-block-head">
-            <h2>{{ s.label }}</h2>
-            <button v-if="s.bucket.total > s.bucket.items.length" class="search-block-more" @click="setType(s.key)">
-              View all {{ s.bucket.total.toLocaleString() }} <Icon name="arrow-right" :size="12" />
-            </button>
-          </header>
+          <SectionHeader :title="s.label" :subtitle="s.bucket.total.toLocaleString()">
+            <template v-if="s.bucket.total > s.bucket.items.length" #actions>
+              <button class="search-block-more" @click="setType(s.key)">
+                View all <Icon name="arrow-right" :size="12" />
+              </button>
+            </template>
+          </SectionHeader>
           <ResultGrid :section-key="s.key" :items="s.bucket.items" />
         </section>
       </div>
@@ -250,38 +252,59 @@ function setType(t: string) {
 }
 .search-clear:hover { background: rgb(var(--ink) / 0.06); color: var(--fg-0); }
 
-/* Results header */
-.search-head { margin-bottom: 20px; }
-.search-title { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 4px; }
-.search-q { color: var(--gold); }
-.search-meta { font-size: 12px; font-family: var(--font-mono); color: var(--fg-3); }
+/* Results header — lib-head look: mono eyebrow + condensed Archivo display. */
+.search-head { margin-bottom: 24px; }
+.search-eyebrow {
+  font: 600 10px var(--font-mono);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--tone);
+  margin-bottom: 10px;
+}
+.search-title {
+  font-family: var(--font-display);
+  font-size: clamp(1.9rem, 3.2vw, 2.6rem);
+  font-weight: 800;
+  font-variation-settings: "wdth" 115;
+  letter-spacing: -0.02em;
+  margin: 0 0 8px;
+}
+.search-q { color: var(--tone); }
+.search-meta { font-size: 12px; font-family: var(--font-mono); color: var(--fg-3); letter-spacing: 0.04em; }
 
-/* Tabs */
-.search-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 28px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+/* Tabs — mono pills. */
+.search-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 30px; padding-bottom: 16px; border-bottom: 1px solid var(--hair); }
 .search-tab {
-  display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px;
-  border-radius: var(--r-md); background: transparent; border: 1px solid transparent;
-  color: var(--fg-2); font-size: 12px; font-weight: 500; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 13px;
+  border-radius: 100px; background: transparent; border: 1px solid var(--hair);
+  color: var(--fg-2); font: 600 10.5px var(--font-mono); letter-spacing: 0.1em;
+  text-transform: uppercase; cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 .search-tab:hover { background: rgb(var(--ink) / 0.04); color: var(--fg-0); }
-.search-tab.active { background: var(--gold-soft); color: var(--gold); border-color: var(--gold-soft); }
+.search-tab.active { background: var(--gold-soft); color: var(--gold); border-color: transparent; }
 .search-tab-count { font-size: 10px; font-family: var(--font-mono); color: var(--fg-4); }
 .search-tab.active .search-tab-count { color: var(--gold); }
 
-/* Section blocks */
-.search-section-block { margin-bottom: 40px; }
-.search-block-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; }
-.search-block-head h2 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+/* Section blocks — heads render via <SectionHeader>. */
+.search-section-block { margin-bottom: 44px; }
 .search-block-more {
-  background: transparent; border: 0; color: var(--fg-3); font-size: 11px; font-family: var(--font-mono);
-  cursor: pointer; display: inline-flex; align-items: center; gap: 4px; transition: color 0.12s;
+  background: transparent; border: 0; color: var(--fg-3);
+  font: 550 12px var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase;
+  cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: color 0.12s;
 }
-.search-block-more:hover { color: var(--gold); }
+.search-block-more:hover { color: var(--tone); }
 
 /* Browse sections */
-.browse-section { margin-bottom: 40px; }
-.browse-title { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 16px; }
+.browse-section { margin-bottom: 44px; }
+.browse-title {
+  font-family: var(--font-display);
+  font-size: clamp(1.4rem, 2.4vw, 1.9rem);
+  font-weight: 800;
+  font-variation-settings: "wdth" 112;
+  letter-spacing: -0.015em;
+  margin: 0 0 18px;
+}
 
 .genre-cloud { display: flex; flex-wrap: wrap; gap: 8px; }
 .genre-pill {

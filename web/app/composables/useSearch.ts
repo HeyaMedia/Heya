@@ -134,6 +134,16 @@ export async function fetchSearch<T = any>(
   }) as unknown as Promise<SearchBucket<T> | T[]>
 }
 
+// Platform-aware label for the spotlight-search hotkey chip shown on the
+// topbar trigger. macOS uses ⌘; everything else Ctrl. Client-only (navigator
+// is undefined on the server) — call sites guard against a hydration mismatch
+// by only rendering the chip after mount.
+export function searchShortcutLabel(): string {
+  if (import.meta.server || typeof navigator === 'undefined') return 'Ctrl K'
+  const mac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent)
+  return mac ? '⌘K' : 'Ctrl K'
+}
+
 export function personImageUrl(personId: number) {
   return `/api/person/${personId}/image`
 }
