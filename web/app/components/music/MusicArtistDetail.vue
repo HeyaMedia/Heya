@@ -1,434 +1,394 @@
 <template>
-  <div v-if="loading" class="m-loading page-pad">Loading…</div>
-  <div v-else-if="!artist" class="m-empty page-pad">Artist not found.</div>
-  <div v-else class="artist-page">
-    <!-- Hero (Plexify style): full-bleed backdrop with a circular poster
-         on the left, bio + tags inline beside the name, and a stats line
-         with rating below. Floating round actions on the right. -->
-    <section class="hero" :class="{ 'ambient-extended': ambientEnabled }">
-      <div class="hero-backdrop" :style="backdropStyle" />
-      <div class="hero-fade" />
-      <!-- "Around the web" dropdown — ONE instance serving both layouts:
-           desktop pins it to the hero's top-right (absolute), phone leaves
-           it in flow, where the hero's column layout renders it as a
-           full-width bar across the top. -->
-      <div v-if="linkGroups.length" class="hero-atw">
-        <AppMenu :width="320" trigger-class="atw-trigger" trigger-title="Around the web">
-          <template #trigger>
-            <Icon name="link" :size="12" />
-            <span>Around the web</span>
-            <span class="atw-count">{{ linkTotal }}</span>
-            <Icon name="chevdown" :size="10" />
-          </template>
-          <div class="atw-scroll">
-            <template v-for="group in linkGroups" :key="group.label">
-              <div class="surface-section-label">{{ group.label }}</div>
-              <DropdownMenuItem
-                v-for="(l, i) in group.links"
-                :key="`${group.label}-${i}`"
-                class="surface-item atw-item"
-                as-child
-              >
-                <a :href="l.url" target="_blank" rel="noopener">
-                  <span class="atw-host">{{ l.label }}</span>
-                  <span v-if="l.sub" class="atw-type">{{ l.sub }}</span>
-                </a>
-              </DropdownMenuItem>
+  <div v-if="loading" class="m-state">Loading…</div>
+  <div v-else-if="!artist" class="m-state">Artist not found.</div>
+
+  <!-- Tone vars are published on the page root (not a scroll root — the music
+       shell owns that), mirroring the movie/TV ports + the playbar's
+       --pb-accent. Every descendant inherits --tone/--tone-rgb/--tone-ink. The
+       Playbar keeps its own track-following --pb-accent untouched. -->
+  <div v-else class="artist2" :style="toneStyle">
+
+    <!-- ── HERO: full-bleed backdrop as sharp art, hard-clipped at the ledger
+         seam. HeroCanvas also publishes the graded (v2) art claim to the global
+         AmbientBackdrop, so the blurred underlay mirrors this artist's backdrop
+         and pops back to the music pool on unmount. ── -->
+    <section class="hero-section artist-hero">
+      <HeroCanvas :src="backdropUrl || ''" object-position="center 22%" />
+
+      <div class="hero-inner">
+        <div class="grow">
+          <div class="eyebrow">
+            <span>Artist</span>
+            <template v-if="artistTypeLabel">
+              <span class="sep">&middot;</span><span>{{ artistTypeLabel }}</span>
+            </template>
+            <template v-if="originLabel">
+              <span class="sep">&middot;</span><span>{{ originLabel }}</span>
             </template>
           </div>
-        </AppMenu>
-      </div>
-      <!-- Desktop identity block: the logotype (or name) + aliases float
-           on the hero's right flank, clearing the left column for bio and
-           stats. Phone keeps the title in the meta flow below. -->
-      <div v-if="!brandInFlow" class="hero-brand">
-        <h1 v-if="logoUrl && !logoFailed" class="hero-title hero-title-logo">
-          <LoadingImage
-            :src="logoUrl"
-            :alt="artist.name"
-            class="hero-logo"
-            :width="640"
-            @error="logoFailed = true"
-          />
-        </h1>
-        <h1 v-else class="hero-title">{{ artist.name }}</h1>
-        <div
-          v-if="heroAliases"
-          class="hero-aka"
-          :title="`Also known as: ${artist.aliases!.join(', ')}`"
-        >
-          <span class="hero-aka-label">a.k.a.</span> {{ heroAliases }}
-        </div>
-      </div>
-      <div class="hero-content">
-        <div class="hero-left">
-          <Poster :idx="artist.id" :src="artistPosterUrl" aspect="1/1" class="hero-poster" :width="320" />
-        </div>
-        <div class="hero-meta">
-          <template v-if="brandInFlow">
-            <h1 v-if="logoUrl && !logoFailed" class="hero-title hero-title-logo">
-              <LoadingImage
-                :src="logoUrl"
-                :alt="artist.name"
-                class="hero-logo"
-                :width="640"
-                @error="logoFailed = true"
-              />
-            </h1>
-            <h1 v-else class="hero-title">{{ artist.name }}</h1>
-            <div
-              v-if="heroAliases"
-              class="hero-aka"
-              :title="`Also known as: ${artist.aliases!.join(', ')}`"
-            >
-              <span class="hero-aka-label">a.k.a.</span> {{ heroAliases }}
-            </div>
-          </template>
-          <div v-if="(artist.tags?.length ?? 0) > 0" class="tag-row">
-            <NuxtLink
-              v-for="tag in (artist.tags ?? []).slice(0, 8)"
-              :key="tag"
-              :to="`/music/browse/genre/${encodeURIComponent(tag)}`"
-              class="tag-chip"
-            >{{ tag }}</NuxtLink>
+
+          <h1 v-if="logoUrl && !logoFailed" class="title artist title-logo-wrap">
+            <LoadingImage :src="logoUrl" :alt="artist.name" class="title-logo" :width="640" @error="logoFailed = true" />
+          </h1>
+          <h1 v-else class="title artist">{{ artist.name }}</h1>
+
+          <div
+            v-if="heroAliases"
+            class="hero-aka"
+            :title="`Also known as: ${artist.aliases!.join(', ')}`"
+          >
+            <span class="hero-aka-label">a.k.a.</span> {{ heroAliases }}
           </div>
-          <p v-if="artist.biography" class="hero-bio" :class="{ collapsed: !bioOpen && artist.biography.length > 320 }">
-            {{ artist.biography }}
+
+          <p class="metaline">
+            <span v-if="lifecycleLabel">{{ lifecycleLabel }}</span>
+            <template v-if="statusLabel">
+              <span class="dot">&middot;</span><span class="status">{{ statusLabel }}</span>
+            </template>
+            <template v-if="(artist.tags?.length ?? 0) > 0">
+              <span class="dot">&middot;</span>
+              <NuxtLink
+                v-for="tag in (artist.tags ?? []).slice(0, 5)"
+                :key="tag"
+                :to="`/music/browse/genre/${encodeURIComponent(tag)}`"
+                class="genre"
+              >{{ tag }}</NuxtLink>
+            </template>
           </p>
-          <button v-if="artist.biography && artist.biography.length > 320" class="hero-bio-toggle" @click="bioOpen = !bioOpen">
-            {{ bioOpen ? 'Less' : 'More' }}
-          </button>
-          <div class="hero-stats">
-            <div class="hero-stats-stars" @click.stop>
+
+          <div class="actions">
+            <span v-if="!artistPlayable" class="missing"><Icon name="trash" :size="13" /> Missing on disk</span>
+
+            <button class="btn-play" :disabled="!artistPlayable" @click="playAll(false)">
+              <span class="tri" /> Play
+              <small v-if="playableTrackCount">{{ playableTrackCount }} TRACKS</small>
+            </button>
+            <button class="pill" :disabled="!artistPlayable" @click="playAll(true)">
+              <Icon name="shuffle" :size="15" /> Shuffle
+            </button>
+            <button class="pill" :disabled="!artistPlayable" @click="addAllToQueue">
+              <Icon name="plus" :size="15" /> Add to queue
+            </button>
+            <button class="pill" :disabled="radio.starting.value || !artistPlayable" @click="startArtistRadio">
+              <Icon name="radio" :size="15" /> Station
+            </button>
+
+            <div class="hero-rating" @click.stop>
               <ReactionControl
                 :model-value="artistRatings.get(artist.id) ?? 0"
                 size="sm"
                 @update:model-value="(v) => onRateArtist(artist!.id, v)"
               />
             </div>
-            <template v-if="(artist.listeners ?? 0) > 0">
-              <span class="stat-dot">·</span>
-              <span class="stat">{{ formatBigInt(artist.listeners!) }} listeners</span>
-            </template>
-            <template v-if="(artist.playcount ?? 0) > 0">
-              <span class="stat-dot">·</span>
-              <span class="stat">{{ formatBigInt(artist.playcount!) }} plays</span>
-            </template>
-            <template v-if="lifecycleLabel">
-              <span class="stat-dot">·</span>
-              <span class="stat">{{ artist.artist_type === 'Group' ? 'Active' : 'Born' }} {{ lifecycleLabel }}</span>
-            </template>
-            <template v-if="originLabel">
-              <span class="stat-dot">·</span>
-              <span class="stat">{{ originLabel }}</span>
-            </template>
-            <template v-if="totalAlbums > 0">
-              <span class="stat-dot">·</span>
-              <span class="stat">{{ totalAlbums }} {{ totalAlbums === 1 ? 'release' : 'releases' }} · {{ totalTracks }} tracks</span>
-            </template>
-          </div>
-          <ExternalLinks
-            kind="artist"
-            :external-ids="detail?.media_item?.external_ids ?? {}"
-            class="hero-ext"
-          />
-        </div>
-      </div>
-      <!-- Floating round actions -->
-      <div class="hero-floating-actions">
-        <span v-if="!artistPlayable" class="hero-missing"><Icon name="trash" :size="13" /> Missing on disk</span>
-        <button class="hero-round hero-round-primary" :style="heroToneStyle" :disabled="!artistPlayable" @click="playAll(false)" title="Play">
-          <Icon name="play" :size="22" />
-        </button>
-        <button class="hero-round" :disabled="!artistPlayable" @click="playAll(true)" title="Shuffle">
-          <Icon name="shuffle" :size="18" />
-        </button>
-        <button class="hero-round" :disabled="!artistPlayable" @click="addAllToQueue" title="Add to queue">
-          <Icon name="plus" :size="18" />
-        </button>
-        <button
-          class="hero-round"
-          @click="startArtistRadio"
-          :disabled="radio.starting.value || !artistPlayable"
-          title="Start radio from this artist"
-        >
-          <Icon name="radio" :size="18" />
-        </button>
-        <button v-if="isAdmin" class="hero-round hero-edit" title="Edit Metadata" @click="showMetadataEditor = true">
-          <Icon name="pencil" :size="17" />
-        </button>
-      </div>
-    </section>
 
-    <!-- Popular Tracks: Plexify-style numbered list with star + duration -->
-    <section v-if="topTracks.length" class="top-tracks artist-section">
-      <div class="section-row-head tt-head">
-        <h2 class="section-title-lg">Popular Tracks</h2>
-        <button class="pill-btn" :style="heroToneStyle" @click="playTopAll(false)" :disabled="!hasPlayableTopTracks">
-          <Icon name="play" :size="13" /><span>Play</span>
-        </button>
-        <button class="pill-btn pill-btn-ghost" @click="playTopAll(true)" :disabled="!hasPlayableTopTracks">
-          <Icon name="shuffle" :size="13" /><span>Shuffle</span>
-        </button>
-      </div>
-      <ol class="tt-list">
-        <!-- AppContextMenu is as-child (no wrapper element), so the <li>s
-             stay direct children of the <ol>. Right-click on desktop,
-             long-press on touch — and on phone the row also gets a visible
-             ⋯ (ActionSheet) since the star widget is hidden there and the
-             menu is the rating/queue path. -->
-        <AppContextMenu
-          v-for="(t, idx) in topTracks.slice(0, ttExpanded ? topTracks.length : 8)"
-          :key="`tt-${t.local_track_id}-${idx}`"
-          :items="ttMenuItems(t)"
-        >
-        <!-- role="button": reka wrappers pointer-capture taps on plain
-             elements and retarget the click away from the row (same gotcha
-             as the drawer rows — see LibrarySidebar) — button/a/[role=button]
-             targets are exempt. Also honest a11y: the row IS a play button. -->
-        <li
-          class="tt-row"
-          role="button"
-          :class="{ 'tt-row-missing': !isTopTrackPlayable(t), 'tt-row-active': isTopTrackActive(t) }"
-          :draggable="!isCoarse && !!t.local_track_id"
-          @click="onTtRowTap(t)"
-          @dragstart="t.local_track_id && onDragStart($event, { kind: 'track', track: { id: t.local_track_id, title: t.title } })"
-          @dragend="onDragEnd"
-        >
-          <div class="tt-leader">
-            <!-- Currently-playing row: equalizer bars stand in for the rank
-                 (and suppress the hover-play, which would overlap them). -->
-            <VuMeter v-if="isTopTrackActive(t)" :playing="playing" class="tt-vu" />
-            <span v-else-if="isTopTrackPlayable(t)" class="tt-rank">{{ idx + 1 }}</span>
-            <Icon v-else name="trash" :size="12" class="tt-missing-icon" :title="`${t.title} — missing on disk`" />
-            <!-- .stop: on touch this button is opacity-0 but still hit-
-                 testable; without it a tap here fires both this handler and
-                 the row-tap handler (playTopTrack twice, racing). -->
-            <button
-              v-if="isTopTrackPlayable(t) && !isTopTrackActive(t)"
-              class="tt-hover-play"
-              type="button"
-              @click.stop="playTopTrack(t)"
-              :title="`Play ${t.title}`"
-            >
-              <Icon name="play" :size="12" />
+            <button v-if="isAdmin" class="pill icon hero-edit" title="Edit Metadata" aria-label="Edit metadata" @click="showMetadataEditor = true">
+              <Icon name="pencil" :size="15" />
             </button>
           </div>
-          <div class="tt-meta">
-            <!-- Row = play, words = navigate: both the song title and the
-                 album name link to the album page (.stop so the row's own
-                 play handler doesn't also fire). Titles without a local
-                 album stay plain text. -->
-            <NuxtLink
-              v-if="t.local_album_slug"
-              :to="`/music/artist/${route.params.slug}/${t.local_album_slug}`"
-              class="tt-title tt-title-link"
-              @click.stop
-            >{{ t.title }}</NuxtLink>
-            <span v-else class="tt-title">{{ t.title }}</span>
-            <template v-if="t.local_album_title">
-              <span class="tt-album-sep">·</span>
-              <NuxtLink
-                :to="`/music/artist/${route.params.slug}/${t.local_album_slug}`"
-                class="tt-album"
-                @click.stop
-              >{{ t.local_album_title }}</NuxtLink>
-            </template>
-          </div>
-          <div class="tt-stars" @click.stop>
-            <ReactionControl
-              :model-value="trackRatings.get(t.local_track_id!) ?? 0"
-              size="sm"
-              @update:model-value="(v) => onRateTrack(t.local_track_id!, v)"
-            />
-          </div>
-          <div v-if="t.local_duration" class="tt-duration">{{ formatTime(t.local_duration) }}</div>
-          <div v-else class="tt-duration" />
-          <button
-            type="button"
-            class="tt-phone-more"
-            aria-label="More actions"
-            @click.stop="openTtSheet(t)"
+        </div>
+      </div>
+    </section>
+
+    <!-- ── LEDGER at the hard-clip seam — user-facing facts only. ── -->
+    <LedgerStrip :cells="ledgerCells" />
+
+    <!-- ── BODY ── -->
+    <main class="page">
+
+      <!-- Popular Tracks: .trk ledger rows, every current row feature kept. -->
+      <section v-if="topTracks.length" class="section">
+        <SectionHeader title="Popular Tracks" subtitle="by plays">
+          <template #actions>
+            <button class="mini-pill" :disabled="!hasPlayableTopTracks" @click="playTopAll(false)">
+              <Icon name="play" :size="12" /><span>Play</span>
+            </button>
+            <button class="mini-pill mini-pill-ghost" :disabled="!hasPlayableTopTracks" @click="playTopAll(true)">
+              <Icon name="shuffle" :size="12" /><span>Shuffle</span>
+            </button>
+          </template>
+        </SectionHeader>
+
+        <div class="trklist">
+          <!-- AppContextMenu is as-child (no wrapper element). Right-click on
+               desktop, long-press on touch; phone also gets a visible ⋯
+               ActionSheet since the rating widget is hidden there. -->
+          <AppContextMenu
+            v-for="(t, idx) in topTracks.slice(0, ttExpanded ? topTracks.length : 8)"
+            :key="`tt-${t.local_track_id}-${idx}`"
+            :items="ttMenuItems(t)"
           >
-            <Icon name="more" :size="18" />
-          </button>
-        </li>
-        </AppContextMenu>
-      </ol>
-      <button v-if="topTracks.length > 8" class="tt-more" @click="ttExpanded = !ttExpanded">
-        {{ ttExpanded ? 'Show fewer' : `See all ${topTracks.length}` }}
-      </button>
-    </section>
-
-    <!-- Band lifecycle: members of this group / groups this person plays
-         in. Chips link to the member's own page (with portrait) when they
-         are themselves a library artist — matched server-side by MBID or
-         name (matchArtistMembersLocal). -->
-    <section v-if="(artist.members?.length ?? 0) > 0" class="members artist-section">
-      <div class="section-row-head">
-        <h2 class="section-title-lg">Members</h2>
-        <span class="more">{{ artist.members!.length }}</span>
-      </div>
-      <div class="member-grid">
-        <component
-          :is="m.local_slug ? 'NuxtLink' : 'div'"
-          v-for="m in artist.members"
-          :key="`mem-${m.name}`"
-          :to="m.local_slug ? `/music/artist/${m.local_slug}` : undefined"
-          class="member-chip"
-          :class="{ 'member-linked': !!m.local_slug }"
-        >
-          <Poster v-if="m.local_slug" :idx="0" :src="`/api/media/${m.local_slug}/image/poster`" aspect="1/1" :width="80" class="member-avatar" />
-          <div class="member-text">
-            <div class="member-name">{{ m.name }}</div>
-            <div v-if="m.begin_year || m.end_year" class="member-years">
-              {{ m.begin_year || '?' }}–{{ m.end_year || 'present' }}
-            </div>
-          </div>
-        </component>
-      </div>
-    </section>
-
-    <section v-if="(artist.groups?.length ?? 0) > 0" class="members artist-section">
-      <div class="section-row-head">
-        <h2 class="section-title-lg">Member of</h2>
-        <span class="more">{{ artist.groups!.length }}</span>
-      </div>
-      <div class="member-grid">
-        <component
-          :is="g.local_slug ? 'NuxtLink' : 'div'"
-          v-for="g in artist.groups"
-          :key="`grp-${g.name}`"
-          :to="g.local_slug ? `/music/artist/${g.local_slug}` : undefined"
-          class="member-chip"
-          :class="{ 'member-linked': !!g.local_slug }"
-        >
-          <Poster v-if="g.local_slug" :idx="0" :src="`/api/media/${g.local_slug}/image/poster`" aspect="1/1" :width="80" class="member-avatar" />
-          <div class="member-text">
-            <div class="member-name">{{ g.name }}</div>
-            <div v-if="g.begin_year || g.end_year" class="member-years">
-              {{ g.begin_year || '?' }}–{{ g.end_year || 'present' }}
-            </div>
-          </div>
-        </component>
-      </div>
-    </section>
-
-    <!-- Discography by release kind -->
-    <section
-      v-for="group in groupedDiscography"
-      :key="group.kind"
-      class="discog artist-section"
-    >
-      <div class="section-row-head">
-        <h2 class="section-title-lg">{{ group.label }}</h2>
-        <span class="more">{{ group.albums.length }}</span>
-      </div>
-      <div class="discog-grid">
-        <AppContextMenu
-          v-for="album in group.albums"
-          :key="album.id"
-          :items="discogMenuItems(album)"
-        >
-          <NuxtLink
-            :to="`/music/artist/${route.params.slug}/${album.slug}`"
-            class="discog-tile card-tile"
-            :class="{ 'discog-missing': !albumPlayable(album), 'discog-active': isAlbumActive(album) }"
-            :draggable="!isCoarse"
-            @dragstart="onDragStart($event, discogDragPayload(album))"
+          <!-- role="button": reka wrappers pointer-capture taps on plain
+               elements and retarget the click away from the row — button/a/
+               [role=button] targets are exempt. Also honest a11y: the row IS a
+               play button. -->
+          <div
+            class="trk"
+            role="button"
+            :class="{ 'trk-missing': !isTopTrackPlayable(t), 'trk-active': isTopTrackActive(t) }"
+            :draggable="!isCoarse && !!t.local_track_id"
+            @click="onTtRowTap(t)"
+            @dragstart="t.local_track_id && onDragStart($event, { kind: 'track', track: { id: t.local_track_id, title: t.title } })"
             @dragend="onDragEnd"
           >
-            <div class="discog-art-wrap">
-              <Poster :idx="album.id" :src="useAlbumCoverUrl(route.params.slug as string, album.slug)" aspect="1/1" class="discog-art" />
-              <MediaMissingBadge v-if="!albumPlayable(album)" />
-              <!-- Now-playing badge: this album has the currently-playing track. -->
-              <div v-if="isAlbumActive(album)" class="discog-nowplaying"><VuMeter :playing="playing" /></div>
-              <!-- span, not <button>: this tile is a NuxtLink (below), and a
-                   real button nested inside an anchor is invalid
-                   interactive-in-interactive HTML — see MusicCard.vue's
-                   .mc-play for the same fix + reasoning. -->
-              <span
-                v-if="albumPlayable(album)"
-                role="button"
-                tabindex="0"
-                class="discog-play"
-                :style="discogPlayStyle(album)"
-                aria-label="Play album"
-                title="Play album"
-                @click.stop.prevent="playAlbum(album, false)"
-                @keydown.enter.stop.prevent="playAlbum(album, false)"
-                @keydown.space.stop.prevent="playAlbum(album, false)"
+            <div class="trk-n">
+              <VuMeter v-if="isTopTrackActive(t)" :playing="playing" class="trk-vu" />
+              <span v-else-if="isTopTrackPlayable(t)" class="trk-rank">{{ idx + 1 }}</span>
+              <Icon v-else name="trash" :size="12" class="trk-missing-icon" :title="`${t.title} — missing on disk`" />
+              <!-- .stop: on touch this button is opacity-0 but still hit-
+                   testable; without it a tap fires both handlers (double play). -->
+              <button
+                v-if="isTopTrackPlayable(t) && !isTopTrackActive(t)"
+                class="trk-hover-play"
+                type="button"
+                :title="`Play ${t.title}`"
+                @click.stop="playTopTrack(t)"
               >
-                <Icon name="play" :size="14" />
-              </span>
+                <Icon name="play" :size="11" />
+              </button>
             </div>
-            <div class="discog-meta">
-              <div class="discog-title">{{ album.title }}</div>
-              <div class="discog-sub">
-                {{ album.year || '—' }}
-                <span v-if="album.tracks.length" class="dot">·</span>
-                <span v-if="album.tracks.length">{{ album.tracks.length }} tracks</span>
+
+            <div class="trk-meta">
+              <NuxtLink
+                v-if="t.local_album_slug"
+                :to="`/music/artist/${route.params.slug}/${t.local_album_slug}`"
+                class="trk-t trk-t-link"
+                @click.stop
+              >{{ t.title }}</NuxtLink>
+              <span v-else class="trk-t">{{ t.title }}</span>
+            </div>
+
+            <NuxtLink
+              v-if="t.local_album_title && t.local_album_slug"
+              :to="`/music/artist/${route.params.slug}/${t.local_album_slug}`"
+              class="trk-al"
+              @click.stop
+            >{{ t.local_album_title }}</NuxtLink>
+            <span v-else class="trk-al" />
+
+            <div class="trk-stars" @click.stop>
+              <ReactionControl
+                :model-value="trackRatings.get(t.local_track_id!) ?? 0"
+                size="sm"
+                @update:model-value="(v) => onRateTrack(t.local_track_id!, v)"
+              />
+            </div>
+
+            <div class="trk-d">{{ t.local_duration ? formatTime(t.local_duration) : '' }}</div>
+
+            <button
+              type="button"
+              class="trk-more"
+              aria-label="More actions"
+              @click.stop="openTtSheet(t)"
+            >
+              <Icon name="more" :size="18" />
+            </button>
+          </div>
+          </AppContextMenu>
+        </div>
+
+        <button v-if="topTracks.length > 8" class="see-all" @click="ttExpanded = !ttExpanded">
+          {{ ttExpanded ? 'Show fewer' : `See all ${topTracks.length}` }}
+        </button>
+      </section>
+
+      <!-- Discography, grouped by release kind (newest-first within group). -->
+      <section
+        v-for="group in groupedDiscography"
+        :key="group.kind"
+        class="section"
+      >
+        <SectionHeader :title="group.label" :subtitle="String(group.albums.length)" />
+        <div class="album-grid">
+          <AppContextMenu
+            v-for="album in group.albums"
+            :key="album.id"
+            :items="discogMenuItems(album)"
+          >
+            <NuxtLink
+              :to="`/music/artist/${route.params.slug}/${album.slug}`"
+              class="album-card"
+              :class="{ 'album-missing': !albumPlayable(album), 'album-active': isAlbumActive(album) }"
+              :draggable="!isCoarse"
+              @dragstart="onDragStart($event, discogDragPayload(album))"
+              @dragend="onDragEnd"
+            >
+              <div class="album-art-wrap">
+                <Poster :idx="album.id" :src="useAlbumCoverUrl(route.params.slug as string, album.slug)" aspect="1/1" class="album-art" :width="416" />
+                <span v-if="albumTypeFlag(group.kind)" class="album-flag">{{ albumTypeFlag(group.kind) }}</span>
+                <MediaMissingBadge v-if="!albumPlayable(album)" />
+                <div v-if="isAlbumActive(album)" class="album-nowplaying"><VuMeter :playing="playing" /></div>
+                <!-- span, not <button>: this tile is a NuxtLink, and a real
+                     button nested inside an anchor is invalid
+                     interactive-in-interactive HTML (see MusicCard.vue). -->
+                <span
+                  v-if="albumPlayable(album)"
+                  role="button"
+                  tabindex="0"
+                  class="album-play"
+                  :style="discogPlayStyle(album)"
+                  aria-label="Play album"
+                  title="Play album"
+                  @click.stop.prevent="playAlbum(album, false)"
+                  @keydown.enter.stop.prevent="playAlbum(album, false)"
+                  @keydown.space.stop.prevent="playAlbum(album, false)"
+                >
+                  <Icon name="play" :size="14" />
+                </span>
               </div>
+              <div class="album-nm">{{ album.title }}</div>
+              <div class="album-meta">
+                {{ album.year || '—' }}
+                <template v-if="album.tracks.length">
+                  <span class="dot">&middot;</span>{{ album.tracks.length }} tracks
+                </template>
+              </div>
+            </NuxtLink>
+          </AppContextMenu>
+        </div>
+      </section>
+
+      <!-- About + band lifecycle — two-column (mockup .cols). -->
+      <section class="section cols">
+        <div class="col-about">
+          <SectionHeader title="About" />
+          <div v-if="cleanBio" class="prose">
+            <p :class="{ collapsed: !bioOpen && cleanBio.length > 360 }">{{ cleanBio }}</p>
+            <button v-if="cleanBio.length > 360" class="see-all bio-toggle" @click="bioOpen = !bioOpen">
+              {{ bioOpen ? 'Less' : 'More' }}
+            </button>
+          </div>
+          <p v-else class="prose-empty">No biography available.</p>
+
+          <dl class="detail-grid">
+            <div v-if="linkGroups.length || hasExternalIds">
+              <dt>Around the web</dt>
+              <dd>
+                <AppMenu v-if="linkGroups.length" :width="320" trigger-class="atw-trigger" trigger-title="Around the web">
+                  <template #trigger>
+                    <Icon name="link" :size="12" />
+                    <span>All links</span>
+                    <span class="atw-count">{{ linkTotal }}</span>
+                    <Icon name="chevdown" :size="10" />
+                  </template>
+                  <div class="atw-scroll">
+                    <template v-for="grp in linkGroups" :key="grp.label">
+                      <div class="surface-section-label">{{ grp.label }}</div>
+                      <DropdownMenuItem
+                        v-for="(l, i) in grp.links"
+                        :key="`${grp.label}-${i}`"
+                        class="surface-item atw-item"
+                        as-child
+                      >
+                        <a :href="l.url" target="_blank" rel="noopener">
+                          <span class="atw-host">{{ l.label }}</span>
+                          <span v-if="l.sub" class="atw-type">{{ l.sub }}</span>
+                        </a>
+                      </DropdownMenuItem>
+                    </template>
+                  </div>
+                </AppMenu>
+                <ExternalLinks kind="artist" :external-ids="detail?.media_item?.external_ids ?? {}" class="atw-ext" />
+              </dd>
             </div>
+            <div v-if="artist.musicbrainz_id">
+              <dt>Library</dt>
+              <dd>Music &middot; matched by MusicBrainz ID<br><span class="mbid">{{ artist.musicbrainz_id }}</span></dd>
+            </div>
+          </dl>
+        </div>
+
+        <div v-if="displayMembers.length > 0 || displayGroups.length > 0" class="col-side">
+          <template v-if="displayMembers.length > 0">
+            <SectionHeader title="Members" :subtitle="String(displayMembers.length)" />
+            <div class="member-list">
+              <component
+                :is="m.local_slug ? 'NuxtLink' : 'div'"
+                v-for="m in displayMembers"
+                :key="`mem-${m.name}`"
+                :to="m.local_slug ? `/music/artist/${m.local_slug}` : undefined"
+                class="member"
+                :class="{ 'member-linked': !!m.local_slug }"
+              >
+                <Poster v-if="m.local_slug" :idx="0" :src="`/api/media/${m.local_slug}/image/poster`" aspect="1/1" :width="104" class="member-av" />
+                <div v-else class="member-av member-av-initials">{{ initials(m.name) }}</div>
+                <div class="member-body">
+                  <div class="member-nm">{{ m.name }}</div>
+                  <div v-if="m.begin_year || m.end_year" class="member-yrs">{{ m.begin_year || '?' }}–{{ m.end_year || 'present' }}</div>
+                </div>
+              </component>
+            </div>
+          </template>
+
+          <template v-if="displayGroups.length > 0">
+            <SectionHeader title="Member of" :subtitle="String(displayGroups.length)" :class="{ 'mt-gap': displayMembers.length > 0 }" />
+            <div class="member-list">
+              <component
+                :is="g.local_slug ? 'NuxtLink' : 'div'"
+                v-for="g in displayGroups"
+                :key="`grp-${g.name}`"
+                :to="g.local_slug ? `/music/artist/${g.local_slug}` : undefined"
+                class="member"
+                :class="{ 'member-linked': !!g.local_slug }"
+              >
+                <Poster v-if="g.local_slug" :idx="0" :src="`/api/media/${g.local_slug}/image/poster`" aspect="1/1" :width="104" class="member-av" />
+                <div v-else class="member-av member-av-initials">{{ initials(g.name) }}</div>
+                <div class="member-body">
+                  <div class="member-nm">{{ g.name }}</div>
+                  <div v-if="g.begin_year || g.end_year" class="member-yrs">{{ g.begin_year || '?' }}–{{ g.end_year || 'present' }}</div>
+                </div>
+              </component>
+            </div>
+          </template>
+        </div>
+      </section>
+
+      <!-- Sonic similar — local pgvector centroids, circular avatars. -->
+      <section v-if="sonicSimilar.length" class="section">
+        <SectionHeader title="Sounds Like" :subtitle="String(sonicSimilar.length)" />
+        <div class="avatar-row">
+          <NuxtLink
+            v-for="row in sonicSimilar"
+            :key="row.id"
+            :to="`/music/artist/${row.media_slug}`"
+            class="avatar-tile"
+            :title="`${row.name} — cosine distance ${row.distance.toFixed(3)}`"
+          >
+            <Poster :idx="row.id" :src="usePosterUrl({ id: row.media_item_id, public_id: row.media_item_public_id })" aspect="1/1" :width="160" class="avatar-img" />
+            <div class="avatar-nm">{{ row.name }}</div>
+            <div class="avatar-src">sonic match</div>
           </NuxtLink>
-        </AppContextMenu>
-      </div>
-    </section>
+        </div>
+      </section>
 
-    <!-- Sonic similar — local pgvector centroids -->
-    <section v-if="sonicSimilar.length" class="similar artist-section">
-      <div class="section-row-head">
-        <h2 class="section-title-lg">Sounds Like</h2>
-        <span class="more">{{ sonicSimilar.length }}</span>
-      </div>
-      <div class="similar-row">
-        <NuxtLink
-          v-for="row in sonicSimilar"
-          :key="row.id"
-          :to="`/music/artist/${row.media_slug}`"
-          class="similar-tile card-tile"
-          :title="`${row.name} — cosine distance ${row.distance.toFixed(3)}`"
-        >
-          <Poster :idx="row.id" :src="usePosterUrl({ id: row.media_item_id, public_id: row.media_item_public_id })" aspect="1/1" :width="200" style="border-radius: 50%" />
-          <div class="similar-tile-name">{{ row.name }}</div>
-          <div class="similar-tile-source">sonic match</div>
-        </NuxtLink>
-      </div>
-    </section>
-
-    <!-- Similar artists — Last.fm + ListenBrainz via heya.media. Gated by
-         the same Appearance switch as movie/TV recommendations: with
-         "show unavailable" off, only artists we can reliably link (in the
-         library) render. Local rows use the library portrait — the
-         upstream image URLs are mostly dead (Last.fm stopped shipping
-         them), which left a row of placeholder stars. -->
-    <section v-if="visibleSimilar.length" class="similar artist-section">
-      <div class="section-row-head">
-        <h2 class="section-title-lg">Similar Artists</h2>
-        <span class="more">{{ visibleSimilar.length }}</span>
-      </div>
-      <div class="similar-row">
-        <component
-          :is="row.local_slug ? 'NuxtLink' : 'div'"
-          v-for="(row, i) in visibleSimilar"
-          :key="row.name + i"
-          :to="row.local_slug ? `/music/artist/${row.local_slug}` : undefined"
-          class="similar-tile card-tile"
-          :class="{ 'similar-external': !row.local_slug }"
-          :title="row.local_slug ? `Open ${row.name}` : `${row.name} (not in library)`"
-        >
-          <Poster
-            :idx="i"
-            :src="row.local_slug ? `/api/media/${row.local_slug}/image/poster` : row.image"
-            aspect="1/1"
-            :width="200"
-            style="border-radius: 50%"
-          />
-          <div class="similar-tile-name">{{ row.name }}</div>
-          <div class="similar-tile-source">{{ row.source }}</div>
-        </component>
-      </div>
-    </section>
+      <!-- Similar artists — Last.fm + ListenBrainz via heya.media. Gated by the
+           same Appearance switch as movie/TV recs; local rows use the library
+           portrait (upstream Last.fm images are mostly dead). -->
+      <section v-if="visibleSimilar.length" class="section">
+        <SectionHeader title="Similar Artists" :subtitle="String(visibleSimilar.length)" />
+        <div class="avatar-row">
+          <component
+            :is="row.local_slug ? 'NuxtLink' : 'div'"
+            v-for="(row, i) in visibleSimilar"
+            :key="row.name + i"
+            :to="row.local_slug ? `/music/artist/${row.local_slug}` : undefined"
+            class="avatar-tile"
+            :class="{ 'avatar-external': !row.local_slug }"
+            :title="row.local_slug ? `Open ${row.name}` : `${row.name} (not in library)`"
+          >
+            <Poster
+              :idx="i"
+              :src="row.local_slug ? `/api/media/${row.local_slug}/image/poster` : row.image"
+              aspect="1/1"
+              :width="160"
+              class="avatar-img"
+            />
+            <div class="avatar-nm">{{ row.name }}</div>
+            <div class="avatar-src">{{ row.source }}</div>
+          </component>
+        </div>
+      </section>
+    </main>
 
     <MetadataEditorModal
       v-if="detail"
@@ -450,6 +410,8 @@
 import type { AlbumView, Artist, ArtistTopTrackRow, MediaDetail, TrackView } from '~~/shared/types'
 import type { Track } from '~/composables/usePlayer'
 import type { DragAlbumPayload } from '~/composables/useMusicDragDrop'
+import type { ImageTone } from '~/composables/useImageTone'
+import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
 import { DropdownMenuItem } from 'reka-ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { mediaDetailQuery } from '~/queries/media'
@@ -476,14 +438,10 @@ function isAlbumActive(al: AlbumView) {
   const albumId = currentTrack.value?.album_id
   return albumId != null && albumId > 0 && albumId === al.id
 }
-const { isPhone, isCompact, isCoarse } = useViewport()
+const { isCoarse } = useViewport()
 
-// The right-flank identity block is a WIDE-desktop composition: on the
-// compact band (721-1200px) a long bio would run underneath the absolute
-// overlay, so tablets keep the in-flow title like phones do.
-const brandInFlow = computed(() => isPhone.value || isCompact.value)
 const { onDragStart, onDragEnd } = useMusicDragDrop()
-// Popular Tracks context/⋯ items — the phone rows hide the star widget, so
+// Popular Tracks context/⋯ items — the phone rows hide the rating widget, so
 // this menu (Rate lives in it) is the rating path there.
 const trackMenuActions = useMusicActions()
 
@@ -590,7 +548,7 @@ watch(artist, (a) => {
 }, { immediate: true })
 
 // Prime the per-track rating cache once the top-tracks list lands so the
-// star widgets paint at correct values rather than starting at 0.
+// rating widgets paint at correct values rather than starting at 0.
 watch(topTracks, (rows) => {
   const ids = rows.filter((r) => r.local_track_id).map((r) => r.local_track_id!) as number[]
   if (ids.length) trackRatings.primeBulk(ids).catch(() => 0)
@@ -609,6 +567,7 @@ const playableTrackIds = computed(() => {
   for (const al of albums.value) for (const t of al.tracks) if (isTrackPlayable(t)) s.add(t.id)
   return s
 })
+const playableTrackCount = computed(() => playableTrackIds.value.size)
 function isTopTrackPlayable(t: ArtistTopTrackRow) {
   return !!t.local_track_id && playableTrackIds.value.has(t.local_track_id)
 }
@@ -626,12 +585,8 @@ function discogDragPayload(album: AlbumView): DragAlbumPayload {
   }
 }
 
-const artistPosterUrl = computed(() => {
-  if (!detail.value?.media_item) return null
-  return `/api/media/${useMediaImageKey(detail.value.media_item)}/image/poster`
-})
-// Logotype instead of the name when the artist has a logo asset — the
-// assets list in the detail payload says so up front (no probing).
+// Logotype instead of the name when the artist has a logo asset — the assets
+// list in the detail payload says so up front (no probing).
 const logoFailed = ref(false)
 const logoUrl = computed(() => {
   if (!detail.value?.media_item) return null
@@ -639,18 +594,40 @@ const logoUrl = computed(() => {
   return `/api/media/${useMediaImageKey(detail.value.media_item)}/image/logo`
 })
 watch(logoUrl, () => { logoFailed.value = false })
+
+const artistPosterUrl = computed(() => {
+  if (!detail.value?.media_item) return null
+  return `/api/media/${useMediaImageKey(detail.value.media_item)}/image/poster`
+})
 const backdropUrl = computed(() => {
   if (!detail.value?.media_item) return null
   return `/api/media/${useMediaImageKey(detail.value.media_item)}/image/backdrop`
 })
-const backdropStyle = computed(() => (backdropUrl.value ? { backgroundImage: `url(${backdropUrl.value})` } : {}))
 
-// Ambient extension: with the ambient background on, this artist's backdrop
-// becomes the full-page layer (the hero image "extends" down the whole
-// page) — the local `.hero-backdrop` hides via .ambient-extended and only
-// the softened fade stays for text legibility. Off = classic scoped hero,
-// untouched.
-const { ambientEnabled, prefs } = useAppearance()
+const { prefs } = useAppearance()
+
+// ── Tone follow: publish --tone/--tone-rgb/--tone-ink on the page root.
+// Primary source is the AmbientBackdrop's own sampled tone (useBackgroundTone),
+// which re-samples on every crossfade; a direct sample of the current backdrop
+// (poster fallback) is the ambient-off fallback, sequence-guarded against a
+// slow sample landing after the route already changed artists — same pattern
+// as the movie/TV heroes + the playbar's --pb-accent.
+const bgTone = useBackgroundTone()
+const localTone = ref<ImageTone | null>(null)
+let toneSeq = 0
+watch(() => backdropUrl.value || artistPosterUrl.value, (src) => {
+  const seq = ++toneSeq
+  if (!src) { localTone.value = null; return }
+  sampleImageTone(src).then((t) => { if (seq === toneSeq) localTone.value = t })
+}, { immediate: true })
+
+const toneStyle = computed(() => {
+  const t = bgTone.value || localTone.value
+  if (!t) return undefined
+  const m = t.main.match(/\d+/g)
+  if (!m) return undefined
+  return { '--tone': t.main, '--tone-rgb': m.slice(0, 3).join(' '), '--tone-ink': t.ink }
+})
 
 // Similar Artists honors the same Appearance switch as the movie/TV
 // recommendation rails: off = only artists we can link into the library.
@@ -668,26 +645,6 @@ const visibleSimilar = computed(() => {
     return true
   })
 })
-const background = useBackground()
-watch([backdropUrl, ambientEnabled], ([url, on]) => {
-  if (on && url) background.set(url)
-  else background.clear()
-}, { immediate: true })
-
-// Tone-adaptive primary actions — sample the hero art (backdrop first,
-// poster fallback) and paint the Play buttons in the artist's palette,
-// same pattern as the movie/TV detail heroes. Sequence-guarded against a
-// slow sample landing after the route already changed artists.
-const heroToneStyle = ref<Record<string, string> | undefined>()
-let heroToneSeq = 0
-watch(() => backdropUrl.value || artistPosterUrl.value, (src) => {
-  const seq = ++heroToneSeq
-  if (!src) { heroToneStyle.value = undefined; return }
-  sampleImageTone(src).then((t) => {
-    if (seq !== heroToneSeq) return
-    heroToneStyle.value = t ? { background: t.main, color: t.ink } : undefined
-  })
-}, { immediate: true })
 
 const totalAlbums = computed(() => albums.value.length)
 const totalTracks = computed(() => albums.value.reduce((sum, al) => sum + al.tracks.length, 0))
@@ -703,6 +660,29 @@ const heroAliases = computed(() => {
   return list.length > 3 ? `${shown} +${list.length - 3}` : shown
 })
 
+// artist_type comes through lower-cased in prod ('group'/'person'); compare
+// case-insensitively so group-only treatments (status, lifecycle, ledger label)
+// don't silently miss.
+const isGroup = computed(() => (artist.value?.artist_type ?? '').toLowerCase() === 'group')
+// Band lifecycle — drop the empty-name junk records prod ships (MusicBrainz
+// leaves placeholder rows); the original rendered them as blank chips.
+const displayMembers = computed(() => (artist.value?.members ?? []).filter((m) => m.name?.trim()))
+const displayGroups = computed(() => (artist.value?.groups ?? []).filter((g) => g.name?.trim()))
+
+// Strip MusicBrainz annotation link markup from the bio ([a=Name], [artist=
+// Name|Display], [l=Label]…) → the plain display text. The raw prose shipped
+// these bracket tokens; they read as noise in the About prose.
+const cleanBio = computed(() => {
+  const b = artist.value?.biography
+  if (!b) return ''
+  return b.replace(/\[(?:a|artist|b|band|l|label|r|release|rg|t|track|e|event|w|work|u|url)=([^\]|]+)(?:\|[^\]]*)?\]/gi, '$1')
+})
+
+const artistTypeLabel = computed(() => {
+  const t = artist.value?.artist_type
+  if (!t || t.toLowerCase() === 'person') return ''
+  return t.charAt(0).toUpperCase() + t.slice(1)
+})
 
 const KIND_ORDER = ['album', 'ep', 'single', 'compilation', 'live', 'soundtrack', 'remix', 'demo', 'other']
 const KIND_LABEL: Record<string, string> = {
@@ -716,6 +696,13 @@ const KIND_LABEL: Record<string, string> = {
   demo: 'Demos',
   other: 'Other',
 }
+// Per-tile corner flag — only for the non-album kinds (the "Albums" grid needs
+// no flag; the mockup flags Singles/EP/etc.).
+const KIND_FLAG: Record<string, string> = {
+  ep: 'EP', single: 'Single', compilation: 'Comp', live: 'Live',
+  soundtrack: 'OST', remix: 'Remix', demo: 'Demo', other: '',
+}
+function albumTypeFlag(kind: string): string { return KIND_FLAG[kind] ?? '' }
 
 const groupedDiscography = computed(() => {
   const byKind = new Map<string, AlbumView[]>()
@@ -739,7 +726,7 @@ const groupedDiscography = computed(() => {
 
 // Per-album cover tone: the always-visible discography Play button wears each
 // record's own sampled palette (semi-transparent glass over the art — see
-// .discog-play). Cheap: sampleImageTone() memoizes per URL and the covers are
+// .album-play). Cheap: sampleImageTone() memoizes per URL and the covers are
 // already HTTP-cached by the Poster render, so a whole grid samples once.
 // Declared AFTER groupedDiscography — the immediate watch reads it at setup.
 const albumTones = reactive<Record<number, { main: string; ink: string }>>({})
@@ -773,20 +760,49 @@ const lifecycleLabel = computed(() => {
   const start = a.begin_year ? String(a.begin_year) : (a.begin_date || '')
   const end = a.deathday || a.end_date || (a.ended ? '?' : '')
   if (!start && !end) return ''
-  if (a.artist_type === 'Group') {
-    if (start && end) return `${start}–${end}`
-    if (start) return `since ${start}`
+  if (isGroup.value) {
+    if (start && end) return `${start} – ${end}`
+    if (start) return `Since ${start}`
     return end
   }
   if (start && a.deathday) return `${start} – ${a.deathday}`
   return start
 })
 
+// Minimal status chip — only disbanded groups get one (the mockup's
+// "DISBANDED"). Living/active acts + people carry their years in lifecycleLabel.
+const statusLabel = computed(() => {
+  const a = artist.value
+  if (!a) return ''
+  if (isGroup.value && a.ended) return 'DISBANDED'
+  return ''
+})
+
+// ── Ledger (user-facing facts only, PLAN cardinal rule 2) ────────────────────
+const ledgerCells = computed<LedgerCell[]>(() => {
+  const a = artist.value
+  const cells: LedgerCell[] = []
+  if (!a) return cells
+  if ((a.listeners ?? 0) > 0) cells.push({ k: 'Listeners', v: formatBigInt(a.listeners!), sub: 'last.fm' })
+  if ((a.playcount ?? 0) > 0) cells.push({ k: 'Global plays', v: formatBigInt(a.playcount!) })
+  if (totalAlbums.value > 0) {
+    cells.push({
+      k: 'In library',
+      v: String(totalAlbums.value),
+      unit: totalAlbums.value === 1 ? 'release' : 'releases',
+      sub: `${totalTracks.value} tracks`,
+    })
+  }
+  if (lifecycleLabel.value) cells.push({ k: isGroup.value ? 'Active' : 'Life', v: lifecycleLabel.value })
+  if (originLabel.value) cells.push({ k: 'From', v: originLabel.value })
+  return cells
+})
+
 // ── "Around the web" dropdown ───────────────────────────────────────────
 // The MusicBrainz url-rel list is a long tail (60+ links, half of them
 // labeled "other databases" / "purchase for download"). Grouped into a
-// hero dropdown: rows are labeled by SITE (hostname), with the rel type
-// as a muted suffix only where it adds meaning.
+// dropdown: rows are labeled by SITE (hostname), with the rel type as a
+// muted suffix only where it adds meaning.
 
 interface AtwLink { label: string; sub?: string; url: string }
 
@@ -845,6 +861,11 @@ const linkGroups = computed(() => {
 })
 
 const linkTotal = computed(() => linkGroups.value.reduce((n, g) => n + g.links.length, 0))
+const hasExternalIds = computed(() => Object.keys(detail.value?.media_item?.external_ids ?? {}).length > 0)
+
+function initials(name: string): string {
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('')
+}
 
 function formatBigInt(n: number): string {
   if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1).replace(/\.0$/, '')}B`
@@ -939,9 +960,9 @@ function openTtSheet(t: ArtistTopTrackRow) {
   ttSheetOpen.value = true
 }
 
-// Row click = play, everywhere. The interactive children (title/album
-// links, stars, hover-play, the phone ⋯) all @click.stop, so a click that
-// reaches the row really did land on empty row space.
+// Row click = play, everywhere. The interactive children (title/album links,
+// stars, hover-play, the phone ⋯) all @click.stop, so a click that reaches the
+// row really did land on empty row space.
 function onTtRowTap(t: ArtistTopTrackRow) {
   if (isTopTrackPlayable(t)) void playTopTrack(t)
 }
@@ -975,712 +996,83 @@ if (import.meta.client) {
 </script>
 
 <style scoped>
-.artist-page { padding-bottom: 80px; }
-.m-loading, .m-empty { color: var(--fg-3); padding: 32px 40px; }
+.m-state { color: var(--fg-3); padding: 32px var(--pad-fluid); }
 
-/* Inner sections use side padding from `.page-pad` but skip the 80px bottom
-   gap so the rails stack tight on this page. The page-level breathing room
-   comes from `.artist-page { padding-bottom: 80px }`. */
-.artist-section {
-  padding: 18px 40px 0;
-}
-@media (max-width: 1100px) {
-  .artist-section { padding: 16px 24px 0; }
-}
+/* The music shell owns the scroll root; this page just publishes tone vars and
+   lays out hero → ledger → body. NOT hero-flush: the shell's MusicSidebar rides
+   the .app-main topbar offset, so the hero starts below the glass bar (see
+   DEFERRED.md — flushing would require editing the off-limits shell). */
+.artist2 { --oink: 233 236 242; padding-bottom: 40px; }
 
-/* Hero ============================================================ */
-.hero {
+/* ═══ HERO ═════════════════════════════════════════════════════════════════ */
+.artist-hero {
   position: relative;
-  min-height: 460px;
+  min-height: 54vh;
   display: flex;
   align-items: flex-end;
   overflow: hidden;
-  border-radius: 0 0 var(--r-md) var(--r-md);
 }
-.hero-backdrop {
-  position: absolute;
-  inset: 0;
-  background-size: cover;
-  background-position: center 25%;
-  z-index: 0;
-  filter: saturate(1.05);
-}
-.hero-fade {
-  position: absolute;
-  inset: 0;
-  /* scrim over the backdrop photo — stays literal black; already fades to
-     the theme-aware var(--bg-0) where it meets the page canvas */
-  background:
-    linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.55) 55%, var(--bg-0) 100%),
-    linear-gradient(90deg, rgba(0,0,0,0.45) 0%, transparent 60%);
-  z-index: 1;
-}
-/* Ambient extension: the AmbientBackdrop layer shows this artist's backdrop
-   full-page (see the background watcher), so the local copy hides — its
-   different crop would seam at the hero edges — and the fade softens its
-   transition into the page canvas so the artwork continues past the hero
-   bottom instead of ending at solid var(--bg-0). The literal black scrim
-   (legibility over the photo) stays put. */
-.hero.ambient-extended .hero-backdrop { display: none; }
-.hero.ambient-extended .hero-fade { display: none; }
-/* Without a local hero image, the 460px band is mostly empty air pushing
-   the content down — the ambient layer carries the art full-page anyway,
-   so let the content start higher. Hero mode (ambient off) keeps the full
-   stage for its backdrop. */
-.hero.ambient-extended { min-height: 340px; }
-/* Ambient desktop: top-align the whole stage on one line — the left
-   column (pills/bio/stats) and the right identity block (logo/name) both
-   start at 56px, just under the corner dropdown. Hero mode keeps the
-   classic bottom-anchored-over-photo composition. */
-@media (min-width: 720.02px) {
-  /* flex-start on .hero itself too — its base align-items: flex-end would
-     otherwise keep bottom-anchoring the content block and the two columns
-     would top out ~30px apart. */
-  .hero.ambient-extended { align-items: flex-start; }
-  .hero.ambient-extended .hero-content {
-    align-items: flex-start;
-    padding-top: 56px;
-  }
-  .hero.ambient-extended .hero-left { align-self: flex-start; }
-  .hero.ambient-extended .hero-brand { top: 56px; bottom: auto; }
-}
-.hero-content {
+
+.hero-inner {
   position: relative;
   z-index: 2;
-  display: flex;
-  align-items: flex-end;
-  gap: 28px;
-  padding: 26px 40px 28px;
   width: 100%;
+  padding: 88px var(--pad-fluid) 40px;
 }
-.hero-left { flex-shrink: 0; align-self: flex-end; }
-.hero-poster {
-  width: 200px;
-  height: 200px;
-  border-radius: 50%;
-  box-shadow: 0 22px 48px rgb(var(--shade) / 0.7), 0 0 0 1px rgb(var(--ink) / 0.06);
+.hero-inner > .grow { min-width: 0; }
+
+/* mono eyebrow — tone-colored, over the dark art grade (--oink stays light) */
+.eyebrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+  font: 600 11.5px var(--font-mono);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--tone);
 }
-.hero-meta { flex: 1; min-width: 0; }
-.hero-title {
-  font-size: clamp(44px, 6.6vw, 76px);
+.eyebrow .sep { color: rgb(var(--oink) / 0.3); }
+
+/* Archivo display title — UPPERCASE, wdth 125 (heya2.css .title.artist). */
+.title {
+  font-family: var(--font-display);
+  font-size: clamp(2.5rem, 6vw, 4.6rem);
   font-weight: 800;
-  color: var(--fg-0);
   line-height: 0.96;
-  margin-bottom: 10px;
-  letter-spacing: -0.025em;
-  text-shadow: 0 2px 24px rgba(0,0,0,0.55); /* legibility shadow over hero photo — stays literal */
+  color: rgb(var(--oink) / 0.98);
+  text-shadow: 0 2px 30px rgb(0 0 0 / 0.45);
+  margin: 0;
 }
-/* Logotype variant — the image IS the title. Height-capped so wide logos
-   don't dwarf the meta column; drop-shadow stands in for the text halo
-   (logos are transparent PNGs over arbitrary art). */
-.hero-title-logo { text-shadow: none; }
-.hero-logo {
+.title.artist {
+  text-transform: uppercase;
+  font-variation-settings: "wdth" 125;
+  letter-spacing: 0;
+}
+.title-logo-wrap { line-height: 0; }
+.title-logo {
   display: block;
-  max-height: 120px;
-  max-width: min(520px, 90%);
   width: auto;
   height: auto;
+  max-width: min(520px, 100%);
+  max-height: 128px;
   object-fit: contain;
-  filter: drop-shadow(0 2px 12px rgb(var(--shade) / 0.6));
-}
-.tag-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-.tag-chip {
-  display: inline-flex;
-  padding: 3px 10px;
-  border-radius: 999px;
-  /* badge painted over the hero photo — stays literal glass */
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.10);
-  font-size: 11px;
-  color: var(--fg-0);
-  text-decoration: none;
-  text-transform: lowercase;
-  transition: all 0.12s;
-  backdrop-filter: blur(6px);
-}
-.tag-chip:hover {
-  background: var(--gold-soft);
-  color: var(--gold);
-  border-color: var(--gold-soft);
-}
-.hero-bio {
-  color: var(--fg-1);
-  line-height: 1.5;
-  font-size: 13px;
-  max-width: 72ch;
-  margin: 0;
-  text-shadow: 0 1px 8px rgba(0,0,0,0.5); /* legibility shadow over hero photo — stays literal */
-}
-.hero-bio.collapsed {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.hero-bio-toggle {
-  display: inline-flex;
-  align-items: center;
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--gold);
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-}
-.hero-bio-toggle:hover { color: var(--gold-bright); }
-.hero-bio-toggle::before { content: '▾ '; margin-right: 4px; opacity: 0.7; }
-
-.hero-stats {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
-  font-size: 12px;
-  color: var(--fg-1);
-  font-family: var(--font-mono);
-  letter-spacing: 0.02em;
-  text-shadow: 0 1px 8px rgba(0,0,0,0.5); /* legibility shadow over hero photo — stays literal */
-}
-.hero-stats-stars {
-  display: inline-flex;
-  margin-right: 4px;
-  /* Glass pill — the reactions sit over the hero backdrop art; bare outline
-     glyphs at fg-3 disappear into it. */
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-el);
-}
-.hero-stats-stars :deep(.reaction-btn) { color: var(--fg-1); }
-.hero-stats-stars :deep(.reaction-btn:hover) { color: var(--fg-0); }
-.stat-dot { color: var(--fg-3); }
-.stat { color: var(--fg-1); }
-.hero-ext { margin-top: 10px; }
-
-/* "Around the web" dropdown anchor — desktop: hero top-right corner.
-   Phone flips it to an in-flow full-width bar (media block below). */
-.hero-atw {
-  position: absolute;
-  top: 18px;
-  right: 24px;
-  z-index: 4;
+  object-position: left center;
+  filter: drop-shadow(0 6px 24px rgb(0 0 0 / 0.55));
 }
 
-/* Desktop identity block — logotype/name on the hero's right flank,
-   holding clear of the floating action cluster at the bottom-right.
-   Right-aligned so it reads as a brand mark, not a second column. */
-.hero-brand {
-  position: absolute;
-  right: 32px;
-  bottom: 110px;
-  z-index: 3;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  text-align: right;
-  max-width: min(460px, 38%);
-}
-.hero-brand .hero-title { margin-bottom: 4px; }
-.hero-brand .hero-aka { margin: 0; max-width: 100%; }
-
-.hero-floating-actions {
-  position: absolute;
-  bottom: 28px;
-  right: 32px;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.hero-round {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  /* floating buttons painted over the hero photo — stays literal */
-  border: 1px solid rgba(255,255,255,0.12);
-  background: rgba(0,0,0,0.4);
-  color: var(--fg-0);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  backdrop-filter: blur(8px);
-  transition: background 0.15s, transform 0.1s, color 0.15s;
-}
-.hero-round:hover { background: rgba(0,0,0,0.55); transform: scale(1.05); }
-.hero-round:active { transform: scale(0.95); }
-.hero-round-primary {
-  width: 58px;
-  height: 58px;
-  /* Tone-follow: the inline heroToneStyle paints the artist's sampled
-     palette over this gold fallback; the 0.9s glide covers the swap. */
-  background: var(--gold);
-  color: var(--bg-0);
-  border-color: transparent;
-  box-shadow: 0 10px 24px var(--gold-glow);
-  transition: transform 0.1s, filter 0.15s,
-    background 0.9s cubic-bezier(0.22, 1, 0.36, 1),
-    color 0.9s cubic-bezier(0.22, 1, 0.36, 1);
-}
-/* Brightness pop for hover (works on any sampled tone — the inline tone
-   style outranks hover rules). The background re-assert is for the
-   UN-toned fallback: without it, .hero-round:hover's dark wash (higher
-   specificity than .hero-round-primary) would swallow the gold. */
-.hero-round-primary:hover { background: var(--gold); filter: brightness(1.12); }
-.hero-round:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
-
-/* Ambient-extended: the hero text sits on the theme's ambient wash, not on
-   the raw photo — swap the literal-black legibility shadows for theme-aware
-   halos, and re-coat chips/buttons in theme glass so light mode stops
-   rendering them as dark smudges (they were locked-dark rgba). */
-.hero.ambient-extended .hero-title { text-shadow: 0 2px 20px rgb(var(--shade) / 0.30), 0 0 14px var(--bg-1); }
-.hero.ambient-extended .hero-bio,
-.hero.ambient-extended .hero-stats,
-.hero.ambient-extended .hero-kind { text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1); }
-.hero.ambient-extended .tag-chip {
-  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
-  border-color: var(--border);
-  box-shadow: var(--shadow-el);
-}
-.hero.ambient-extended .tag-chip:hover {
-  background: var(--gold-soft);
-  color: var(--gold);
-  border-color: var(--gold-soft);
-}
-.hero.ambient-extended .hero-round:not(.hero-round-primary) {
-  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
-  border-color: var(--border);
-  color: var(--fg-1);
-  box-shadow: var(--shadow-el);
-}
-.hero.ambient-extended .hero-round:not(.hero-round-primary):hover {
-  background: var(--bg-3);
-  color: var(--fg-0);
-}
-.hero-missing {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11px; font-family: var(--font-mono);
-  text-transform: uppercase; letter-spacing: 0.08em;
-  color: var(--bad); margin-right: 6px;
-}
-
-/* `.hero-floating-actions` is position:absolute, so it and `.hero-meta`'s
-   text never negotiate width with each other — on a long-enough stats line
-   (or a narrow-enough hero) the text runs right under the button cluster
-   and gets visually clipped by it (bug: gold Play circle sitting on top of
-   "136.4K plays", "Born 1991" partially hidden). `.hero-stats` already
-   flex-wraps; reserving the button cluster's footprint as padding-right
-   makes it wrap *before* reaching that zone instead of running under it.
-   The offset is the actions cluster's rendered width (5 round buttons +
-   4 gaps ≈ 274px) minus the 8px delta between `.hero-content`'s
-   padding-right (40) and the actions' `right` inset (32), plus a small
-   visual gap — same reservation on `.hero-ext` since external-link chips
-   can land in the same bottom-right band when the stats line is short.
-   Desktop-only (>1200px): both phone (<=720px) and the foldable/compact band
-   (720.02-1200px) stack the actions row below the meta text as static flow
-   (see the two media blocks below), so there's nothing to collide with there
-   and no reservation is needed. Above 1200px the actions stay absolute
-   bottom-right and this reservation keeps the stats/links clear of them; it's
-   inert at very wide widths where the text never reaches the cluster anyway. */
-@media (min-width: 1201px) {
-  .hero-stats,
-  .hero-ext {
-    padding-right: 290px;
-  }
-}
-
-/* Stars onto their own line for phone AND the foldable/compact band
-   (<=1200px). The star widget and the dot-separated stats used to share one
-   wrapping flex row and shuffle unpredictably as the width changed ("punking
-   each other around"); pinning the widget to a full row break makes the
-   ratings a clean first line with the stats flowing beneath. The separator dot
-   that immediately follows the widget would otherwise lead the stats line, so
-   it's dropped. Desktop (>1200px) keeps stars + stats inline, untouched. */
-@media (max-width: 1200px) {
-  .hero-stats-stars { flex-basis: 100%; margin-right: 0; }
-  .hero-stats-stars + .stat-dot { display: none; }
-}
-
-/* Foldable / compact band (720.02-1200px): the hero keeps poster-beside-meta,
-   but the floating actions drop out of their absolute bottom-right anchor into
-   a static full-width row of their own below the meta — same "buttons on their
-   own line" treatment as phone, so play/shuffle/queue/radio/edit stop
-   colliding with the stats. `.hero` flips to a column so the (still absolute)
-   backdrop/fade stay put while content + actions stack in flow. */
-@media (min-width: 720.02px) and (max-width: 1200px) {
-  .hero { flex-direction: column; min-height: 0; }
-  .hero-floating-actions {
-    position: static;
-    align-self: stretch;
-    justify-content: flex-start;
-    flex-wrap: wrap;
-    gap: 12px;
-    margin-top: 6px;
-    padding: 0 40px 26px;
-  }
-}
-
-/* Popular Tracks ================================================== */
-.top-tracks {}
-/* Home-rail header shape: title leads, count and actions huddle up next
-   to it (flex-start beats heya.css's global space-between, which spread
-   Play mid-page, Shuffle far-right, and left the count orphaned at the
-   edge). */
-.section-row-head {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-/* Section titles sit over the ambient-extended wash — home's title
-   treatment: 700 weight + the triple halo, readable on any art. */
-.artist-section :deep(.section-title-lg),
-.artist-section .section-title-lg {
-  font-weight: 700;
-  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1);
-}
-/* Inline count chip beside the title (was pushed to the far edge by the
-   global space-between — read as a stray number). */
-.artist-section .section-row-head .more {
-  margin-left: 0;
-  font-size: 11px;
-  color: var(--fg-1);
-  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
-}
-.section-row-head .more {
-  font-size: 11px;
-  color: var(--fg-3);
-  font-family: var(--font-mono);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  margin-left: auto;
-}
-.tt-head { margin-bottom: 8px; }
-
-.pill-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 14px;
-  border-radius: 999px;
-  border: 0;
-  background: var(--gold);
-  color: var(--bg-0);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: filter 0.12s,
-    background 0.9s cubic-bezier(0.22, 1, 0.36, 1),
-    color 0.9s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.pill-btn:hover { filter: brightness(1.1); }
-.pill-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: none; }
-.pill-btn-ghost {
-  background: rgb(var(--ink) / 0.06);
-  color: var(--fg-1);
-}
-.pill-btn-ghost:hover { background: rgb(var(--ink) / 0.10); }
-
-.tt-list {
-  list-style: none;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  /* Glass panel — same surface TrackList wears, so the numbered rows stay
-     readable over the ambient-extended artwork. */
-  background: color-mix(in oklab, var(--bg-2) 76%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-el);
-  padding: 6px 8px;
-}
-.tt-row {
-  display: grid;
-  grid-template-columns: 36px 1fr auto 50px;
-  align-items: center;
-  gap: 14px;
-  padding: 5px 10px;
-  border-radius: var(--r-sm);
-  transition: background 0.12s;
-  cursor: pointer; /* whole row plays (onTtRowTap) */
-  min-height: 32px;
-}
-.tt-row:hover { background: rgb(var(--ink) / 0.04); }
-.tt-row:hover .tt-rank { opacity: 0; }
-.tt-row:hover .tt-hover-play { opacity: 1; }
-.tt-row-missing { opacity: 0.55; }
-/* Currently-playing row — gold wash + gold title, matching TrackList's
-   .tl-active treatment. The VuMeter in the leader already animates. */
-.tt-row-active { background: var(--gold-soft); }
-.tt-row-active:hover { background: var(--gold-soft); }
-.tt-row-active .tt-title { color: var(--gold); }
-.tt-vu { margin-left: auto; }
-.tt-missing-icon { color: var(--bad); }
-.tt-leader {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  height: 22px;
-}
-.tt-rank {
-  font-family: var(--font-mono);
-  color: var(--fg-3);
-  font-size: 12px;
-  transition: opacity 0.12s;
-}
-.tt-hover-play {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  border: 0;
-  background: var(--gold);
-  color: var(--bg-0);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s, filter 0.12s;
-}
-.tt-hover-play:hover { filter: brightness(1.1); }
-.tt-hover-play.tt-hover-play-disabled {
-  background: rgb(var(--ink) / 0.06);
-  color: var(--fg-3);
-  cursor: default;
-}
-.tt-external .tt-title { color: var(--fg-2); }
-.tt-external .tt-album { color: var(--fg-3); }
-.tt-meta {
-  min-width: 0;
-  overflow: hidden;
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.tt-title {
-  font-size: 13px;
-  color: var(--fg-0);
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.tt-title-link { text-decoration: none; }
-.tt-title-link:hover { color: var(--gold); text-decoration: underline; }
-.tt-album-sep { color: var(--fg-3); font-size: 11px; }
-.tt-album {
-  font-size: 12px;
-  color: var(--fg-2);
-  text-decoration: none;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.tt-album:hover { color: var(--gold); }
-.tt-album-missing { font-style: italic; color: var(--fg-3); opacity: 0.7; }
-.tt-stars { display: inline-flex; }
-/* Phone-only ⋯ (see the media query below) — desktop keeps stars + hover
-   play and doesn't render an extra affordance. */
-.tt-phone-more { display: none; }
-.tt-duration {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--fg-3);
-  text-align: right;
-}
-.tt-more {
-  margin-top: 6px;
-  background: none;
-  border: none;
-  color: var(--gold);
-  cursor: pointer;
-  font-size: 12px;
-  padding: 4px 10px;
-}
-.tt-more:hover { color: var(--gold-bright); }
-
-/* Members / Groups ================================================ */
-.member-grid { display: flex; flex-wrap: wrap; gap: 8px; }
-.member-chip {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 12px;
-  border-radius: var(--r-sm);
-  /* Glass, not ink-tint — the chips sit over the ambient art. */
-  background: color-mix(in oklab, var(--bg-2) 78%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-el);
-  min-width: 140px;
-  text-decoration: none;
-  color: inherit;
-}
-.member-linked { transition: background 0.15s, border-color 0.15s; }
-.member-linked:hover { background: var(--bg-3); border-color: var(--border-strong); }
-.member-linked:hover .member-name { color: var(--gold); }
-.member-avatar {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.member-text { min-width: 0; }
-.member-name { font-size: 13px; color: var(--fg-0); font-weight: 600; transition: color 0.15s; }
-.member-years {
-  font-size: 10px;
-  font-family: var(--font-mono);
-  color: var(--fg-3);
-  margin-top: 1px;
-  letter-spacing: 0.03em;
-}
-
-/* Discography ===================================================== */
-.discog-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 14px;
-}
-.discog-tile { text-decoration: none; color: inherit; display: block; }
-.discog-art-wrap { position: relative; }
-.discog-art { border-radius: var(--r-md); box-shadow: 0 8px 18px rgb(var(--shade) / 0.45); }
-.discog-missing .discog-art { filter: grayscale(1); opacity: 0.55; }
-.discog-play {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  border: 0;
-  /* Always visible — was hover-reveal (opacity 0), which on touch needed a
-     throwaway first tap to "hover" the button in before the real tap
-     registered, so opening an album took two taps. Now it's a permanent
-     affordance: a semi-transparent glass disc tinted with the album's own
-     sampled cover colour (--btn-tone, set inline; --gold until the sample
-     lands), so the artwork still reads through and each record wears its
-     palette. Tap the disc = play; tap anywhere else on the tile = open. */
-  background: color-mix(in srgb, var(--btn-tone, var(--gold)) 52%, transparent);
-  color: var(--bg-0);
-  -webkit-backdrop-filter: blur(8px) saturate(140%);
-  backdrop-filter: blur(8px) saturate(140%);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 1;
-  transform: none;
-  transition: background 0.18s, transform 0.15s, box-shadow 0.18s;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.38); /* over artwork — literal */
-}
-/* Pointer/keyboard affordance: solidify the tint and lift on hover/focus. */
-.discog-tile:hover .discog-play,
-.discog-play:focus-visible {
-  background: color-mix(in srgb, var(--btn-tone, var(--gold)) 94%, transparent);
-  transform: scale(1.08);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
-}
-/* Now-playing album — gold ring on the art + gold title, with an animated
-   VuMeter badge pinned top-left of the cover. */
-.discog-active .discog-art { box-shadow: 0 8px 18px rgb(var(--shade) / 0.45), 0 0 0 2px var(--gold); }
-.discog-active .discog-title { color: var(--gold); }
-.discog-nowplaying {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px 6px;
-  border-radius: var(--r-xs);
-  background: rgba(0,0,0,0.6); /* badge painted over the album cover — stays literal */
-  backdrop-filter: blur(6px);
-}
-.discog-meta { margin-top: 8px; padding: 0 2px; }
-.discog-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--fg-0);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.discog-sub {
-  font-size: 11px;
-  color: var(--fg-2);
-  font-family: var(--font-mono);
-  margin-top: 2px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.dot { color: var(--fg-3); }
-
-/* Similar rails =================================================== */
-.similar-row {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 130px;
-  gap: 16px;
-  overflow-x: auto;
-  padding-bottom: 8px;
-  scroll-snap-type: x proximity;
-}
-.similar-tile {
-  text-align: center;
-  text-decoration: none;
-  color: inherit;
-  scroll-snap-align: start;
-}
-.similar-tile.similar-external { cursor: default; opacity: 0.7; }
-.similar-tile.similar-external:hover { opacity: 1; }
-.similar-tile-name {
-  margin-top: 8px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--fg-1);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.similar-tile-source {
-  margin-top: 2px;
-  font-size: 9px;
-  font-family: var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--fg-3);
-}
-
-/* Aliases — hero aside, hanging slightly off the title's left edge like
-   a signature line. */
+/* aka signature line, hanging off the title's left edge */
 .hero-aka {
-  margin: -4px 0 10px 3ch;
-  font-size: 12px;
+  margin: 6px 0 0 2px;
+  font-size: 12.5px;
   font-style: italic;
-  color: var(--fg-1);
-  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
+  color: rgb(var(--oink) / 0.72);
+  text-shadow: 0 1px 8px rgb(0 0 0 / 0.5);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 60ch;
 }
 .hero-aka-label {
   font-family: var(--font-mono);
@@ -1688,60 +1080,494 @@ if (import.meta.client) {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--fg-2);
+  color: rgb(var(--oink) / 0.55);
   margin-right: 4px;
 }
 
-/* Responsive: stack hero poster + meta on narrow screens. Aligned to the
-   720px phone convention (docs/ui.md "Responsive conventions") — was 700px.
-   Centering + the `.hero` min-height reset are the only additions beyond
-   that rename; desktop and the rest of this component are untouched. */
+.metaline {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font: 500 12.5px var(--font-mono);
+  letter-spacing: 0.04em;
+  color: rgb(var(--oink) / 0.72);
+}
+.metaline .dot { color: rgb(var(--tone-rgb) / 0.85); }
+.metaline .status { letter-spacing: 0.1em; color: rgb(var(--oink) / 0.85); }
+.metaline .genre {
+  border-bottom: 1px solid rgb(var(--oink) / 0.25);
+  padding-bottom: 1px;
+  text-transform: lowercase;
+  transition: color 0.15s, border-color 0.15s;
+}
+.metaline .genre:hover { color: rgb(var(--oink) / 0.95); border-color: rgb(var(--tone-rgb) / 0.6); }
+
+/* actions */
+.actions {
+  margin-top: 26px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.missing {
+  display: inline-flex; align-items: center; gap: 5px;
+  font: 600 11px var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--bad); width: 100%;
+}
+
+/* tone-glowing primary Play (heya2.css .btn-play) */
+.btn-play {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 26px 13px 20px;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  background: var(--tone);
+  color: var(--tone-ink, #0a0c10);
+  font: 650 14px var(--font-sans);
+  letter-spacing: 0.01em;
+  box-shadow:
+    0 0 0 1px rgb(var(--tone-rgb) / 0.45),
+    0 0 24px rgb(var(--tone-rgb) / 0.4),
+    6px 10px 36px -8px rgb(var(--tone-rgb) / 0.75);
+  transition: transform 0.15s ease, box-shadow 0.15s ease,
+    background 0.9s cubic-bezier(0.22, 1, 0.36, 1), color 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.btn-play:hover:not([disabled]) {
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px rgb(var(--tone-rgb) / 0.6),
+    0 0 40px rgb(var(--tone-rgb) / 0.6),
+    8px 14px 48px -8px rgb(var(--tone-rgb) / 0.9);
+}
+.btn-play[disabled] { cursor: not-allowed; opacity: 0.4; box-shadow: 0 0 0 1px rgb(var(--oink) / 0.14); transform: none; }
+.btn-play .tri {
+  width: 0; height: 0;
+  border-left: 11px solid var(--tone-ink, #0a0c10);
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+}
+.btn-play small { font: 500 11px var(--font-mono); opacity: 0.72; letter-spacing: 0.06em; }
+
+/* tone-tinted secondary pills (heya2.css .pill) */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  border: 1px solid rgb(var(--tone-rgb) / 0.3);
+  background: rgb(var(--tone-rgb) / 0.08);
+  color: rgb(var(--oink) / 0.9);
+  font: 550 13px var(--font-sans);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 0 16px rgb(var(--tone-rgb) / 0.14), 5px 8px 22px -10px rgb(0 0 0 / 0.7);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.15s, color 0.15s;
+}
+.pill:hover:not([disabled]) {
+  border-color: rgb(var(--tone-rgb) / 0.55);
+  background: rgb(var(--tone-rgb) / 0.15);
+  color: rgb(var(--oink));
+  box-shadow: 0 0 24px rgb(var(--tone-rgb) / 0.28), 6px 10px 26px -10px rgb(0 0 0 / 0.75);
+  transform: translateY(-1px);
+}
+.pill[disabled] { cursor: not-allowed; opacity: 0.4; }
+.pill.icon { width: 42px; height: 42px; padding: 0; justify-content: center; }
+
+/* artist rating — glass pill over the hero art */
+.hero-rating {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgb(var(--shade) / 0.4);
+  border: 1px solid rgb(var(--oink) / 0.12);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.hero-rating :deep(.reaction-btn) { color: rgb(var(--oink) / 0.7); }
+.hero-rating :deep(.reaction-btn:hover) { color: rgb(var(--oink) / 0.95); }
+
+/* ═══ BODY ═════════════════════════════════════════════════════════════════ */
+.page { padding: 0 var(--pad-fluid) 80px; }
+.section { margin-top: 52px; }
+.section:first-of-type { margin-top: 44px; }
+
+.see-all {
+  margin-top: 10px;
+  background: none;
+  border: none;
+  color: var(--tone);
+  cursor: pointer;
+  font: 550 12px var(--font-mono);
+  letter-spacing: 0.06em;
+  padding: 4px 2px;
+}
+.see-all:hover { filter: brightness(1.15); }
+
+/* SectionHeader #actions mini pills */
+.mini-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 13px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--tone);
+  color: var(--tone-ink, #0a0c10);
+  font: 700 11.5px var(--font-sans);
+  cursor: pointer;
+  transition: filter 0.12s, background 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.mini-pill:hover:not([disabled]) { filter: brightness(1.1); }
+.mini-pill[disabled] { opacity: 0.4; cursor: not-allowed; }
+.mini-pill-ghost { background: rgb(var(--ink) / 0.07); color: rgb(var(--ink) / 0.82); }
+.mini-pill-ghost:hover:not([disabled]) { background: rgb(var(--ink) / 0.12); filter: none; }
+
+/* ── Popular Tracks — .trk ledger rows (heya2.css .trk / .trklist) ── */
+.trklist { border-top: 1px solid var(--hair-strong); }
+.trk {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1.5fr) minmax(0, 1fr) auto 66px 40px;
+  gap: 18px;
+  align-items: center;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--hair);
+  border-radius: var(--r-sm);
+  cursor: pointer; /* whole row plays (onTtRowTap) */
+  transition: background 0.12s;
+  min-height: 44px;
+}
+.trk:hover { background: rgb(var(--ink) / 0.03); }
+.trk:hover .trk-rank { opacity: 0; }
+.trk:hover .trk-hover-play { opacity: 1; }
+.trk-missing { opacity: 0.5; }
+.trk-active { background: rgb(var(--tone-rgb) / 0.1); }
+.trk-active:hover { background: rgb(var(--tone-rgb) / 0.12); }
+.trk-active .trk-t { color: var(--tone); }
+
+.trk-n {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 22px;
+}
+.trk-rank {
+  font: 600 13px var(--font-mono);
+  color: rgb(var(--ink) / 0.35);
+  font-variant-numeric: tabular-nums;
+  transition: opacity 0.12s;
+}
+.trk-vu { margin-left: auto; }
+.trk-missing-icon { color: var(--bad); }
+.trk-hover-play {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--tone);
+  color: var(--tone-ink, #0a0c10);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, filter 0.12s;
+}
+.trk-hover-play:hover { filter: brightness(1.1); }
+
+.trk-meta { min-width: 0; overflow: hidden; }
+.trk-t {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: rgb(var(--ink) / 0.92);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+.trk-t-link { text-decoration: none; }
+.trk-t-link:hover { color: var(--tone); }
+.trk-al {
+  font: 500 11.5px var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgb(var(--ink) / 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-decoration: none;
+}
+a.trk-al:hover { color: var(--tone); }
+.trk-stars { display: inline-flex; justify-content: flex-end; }
+.trk-d {
+  font: 500 12px var(--font-mono);
+  color: rgb(var(--ink) / 0.55);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+/* phone-only ⋯ (see the media query below) */
+.trk-more { display: none; }
+
+/* ── Discography — album cards (heya2.css .album-card + embedded flag) ── */
+.album-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
+  gap: 22px 18px;
+}
+.album-card {
+  position: relative;
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+.album-art-wrap { position: relative; }
+.album-art {
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
+  transition: transform 0.18s ease, box-shadow 0.28s ease;
+}
+.album-card:hover .album-art { transform: translateY(-4px); box-shadow: var(--shadow-card-hover); }
+.album-missing .album-art { filter: grayscale(1); opacity: 0.5; }
+.album-flag {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  font: 650 9px var(--font-mono);
+  letter-spacing: 0.14em;
+  padding: 4px 8px;
+  border-radius: 5px;
+  background: rgb(6 7 10 / 0.78); /* over artwork — literal */
+  backdrop-filter: blur(6px);
+  color: rgb(255 255 255 / 0.78);
+  text-transform: uppercase;
+}
+.album-play {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 0;
+  /* Always visible: a semi-transparent glass disc tinted with the album's own
+     sampled cover colour (--btn-tone, --tone until the sample lands), so the
+     artwork reads through and each record wears its palette. Tap = play. */
+  background: color-mix(in srgb, var(--btn-tone, var(--tone)) 52%, transparent);
+  color: var(--tone-ink, #0a0c10);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  backdrop-filter: blur(8px) saturate(140%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.18s, transform 0.15s, box-shadow 0.18s;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.38); /* over artwork — literal */
+}
+.album-card:hover .album-play,
+.album-play:focus-visible {
+  background: color-mix(in srgb, var(--btn-tone, var(--tone)) 94%, transparent);
+  transform: scale(1.08);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.album-active .album-art { box-shadow: var(--shadow-card), 0 0 0 2px var(--tone); }
+.album-active .album-nm { color: var(--tone); }
+.album-nowplaying {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  border-radius: var(--r-xs);
+  background: rgb(0 0 0 / 0.6); /* over artwork — literal */
+  backdrop-filter: blur(6px);
+}
+.album-nm {
+  margin-top: 10px;
+  font-size: 14px;
+  font-weight: 650;
+  color: rgb(var(--ink) / 0.92);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.album-meta {
+  margin-top: 3px;
+  font: 500 10.5px var(--font-mono);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgb(var(--ink) / 0.5);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.album-meta .dot { color: rgb(var(--ink) / 0.3); }
+
+/* ── About + Members two-column (heya2.css .cols) ── */
+.cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 56px;
+  align-items: start;
+}
+.prose { font-size: 15.5px; line-height: 1.75; color: rgb(var(--ink) / 0.82); max-width: 64ch; }
+.prose p.collapsed {
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.bio-toggle::before { content: '▾ '; opacity: 0.7; }
+.prose-empty { font-size: 14px; color: rgb(var(--ink) / 0.5); font-style: italic; }
+
+.detail-grid { display: grid; grid-template-columns: 1fr; gap: 26px; margin-top: 30px; }
+.detail-grid dt {
+  font: 600 10.5px var(--font-mono);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgb(var(--ink) / 0.45);
+  margin-bottom: 10px;
+}
+.detail-grid dd { font-size: 13.5px; line-height: 1.8; color: rgb(var(--ink) / 0.75); }
+.detail-grid dd .mbid { font-family: var(--font-mono); font-size: 11px; color: rgb(var(--ink) / 0.5); }
+.atw-ext { margin-top: 12px; }
+
+/* members (heya2.css .member) */
+.member-list { display: flex; flex-direction: column; }
+.member {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--hair);
+  text-decoration: none;
+  color: inherit;
+}
+.member:first-child { border-top: 1px solid var(--hair-strong); }
+.member-linked { transition: background 0.15s; border-radius: var(--r-sm); }
+.member-linked:hover { background: rgb(var(--ink) / 0.04); }
+.member-linked:hover .member-nm { color: var(--tone); }
+.member-av {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.member-av-initials {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-2);
+  box-shadow: 0 0 0 1px rgb(var(--ink) / 0.12);
+  font: 700 15px var(--font-mono);
+  color: rgb(var(--ink) / 0.35);
+}
+.member-body { min-width: 0; }
+.member-nm { font-size: 14.5px; font-weight: 650; color: rgb(var(--ink) / 0.9); transition: color 0.15s; }
+.member-yrs { font: 500 11px var(--font-mono); color: rgb(var(--ink) / 0.5); margin-top: 3px; }
+.mt-gap { margin-top: 36px; }
+
+/* ── Sounds Like / Similar — circular avatar rails ── */
+.avatar-row {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 132px;
+  gap: 18px;
+  overflow-x: auto;
+  padding: 6px 44px 12px;
+  margin: -6px -44px 0;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+}
+.avatar-row::-webkit-scrollbar { display: none; }
+.avatar-tile {
+  text-align: center;
+  text-decoration: none;
+  color: inherit;
+  scroll-snap-align: start;
+}
+.avatar-img {
+  border-radius: 50%;
+  box-shadow: var(--shadow-card);
+  transition: transform 0.18s ease, box-shadow 0.28s ease;
+}
+.avatar-tile:hover .avatar-img { transform: translateY(-4px); box-shadow: var(--shadow-card-hover); }
+.avatar-external { opacity: 0.7; cursor: default; }
+.avatar-external:hover { opacity: 1; }
+.avatar-external:hover .avatar-img { transform: none; box-shadow: var(--shadow-card); }
+.avatar-nm {
+  margin-top: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgb(var(--ink) / 0.85);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.avatar-src {
+  margin-top: 2px;
+  font: 500 9px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgb(var(--ink) / 0.4);
+}
+
+/* ═══ RESPONSIVE ═══════════════════════════════════════════════════════════ */
+@media (max-width: 1100px) {
+  .cols { grid-template-columns: 1fr; gap: 40px; }
+}
+
 @media (max-width: 720px) {
-  /* `.hero-floating-actions` is a flex sibling of `.hero-content` (both
-     direct children of `.hero`), not nested inside it — `.hero` itself
-     needs to switch to a column too, or the actions float beside the
-     content instead of wrapping below it. */
-  .hero { min-height: 0; flex-direction: column; }
-  /* Dropdown becomes an in-flow bar across the top of the hero. */
-  .hero-atw {
-    position: static;
-    width: 100%;
-    padding: 14px 20px 0;
-    display: flex;
-  }
-  .hero-content { flex-direction: column; align-items: center; text-align: center; gap: 14px; padding: 20px 20px 22px; }
-  .hero-left { align-self: center; }
-  .hero-poster { width: 120px; height: 120px; }
-  /* Centered phone hero: the aka signature indent reads as misalignment. */
-  .hero-aka { margin-left: 0; }
-  .hero-logo { margin: 0 auto; }
-  .hero-meta { width: 100%; }
-  .tag-row { justify-content: center; }
-  .hero-stats { justify-content: center; }
-  /* Stars sit on their own full-width line (shared <=1200px rule) — centre the
-     widget within it to match the rest of the centred phone hero. */
-  .hero-stats-stars { justify-content: center; }
-  .hero-ext :deep(.ext-links) { justify-content: center; }
-  .hero-floating-actions { position: static; justify-content: center; flex-wrap: wrap; margin-top: 4px; }
-  .hero-floating-actions .hero-round { width: 44px; height: 44px; }
-  .hero-floating-actions .hero-round-primary { width: 56px; height: 56px; }
-  /* Desktop `.hero` bottom-aligns its row children (align-items: flex-end);
-     after the column flip above that axis becomes horizontal, shoving this
-     shelf-sized row against the right edge (the edit button rendered half
-     off-screen). Center it on its own axis instead. */
-  .hero-floating-actions { align-self: center; gap: 14px; }
-  /* The metadata editor is a desktop-sized surface — no entry point on
-     phones (same call as the album page). */
+  .artist-hero { min-height: 48vh; }
+  .hero-inner { padding: 64px var(--pad-fluid) 28px; }
+  .title { font-size: clamp(2rem, 9vw, 3rem); }
+  .title-logo { max-height: 92px; }
+  .actions { gap: 8px; row-gap: 10px; }
+  .btn-play { flex: 1 1 100%; justify-content: center; height: 48px; }
+  .pill:not(.icon) { flex: 1 1 auto; justify-content: center; height: 46px; }
+  .pill.icon { width: 46px; height: 46px; }
+  /* Metadata editor is a desktop-sized surface — no phone entry point. */
   .hero-edit { display: none; }
 
-  /* Popular Tracks: the 5-star widget ate the title column (titles
-     truncated to a few characters at 390px). Ratings are hidden on phone —
-     the ⋯ ActionSheet / long-press menu carries Rate (plus play/queue) —
-     and the freed column plus taller rows give the text room to breathe.
-     Row tap plays (no hover-play on touch). */
-  .tt-stars { display: none; }
-  .tt-row { grid-template-columns: 32px 1fr max-content 44px; gap: 8px; padding: 8px 4px; min-height: 52px; }
-  .tt-phone-more {
+  /* Popular Tracks: the rating widget ate the title column at 390px — hide it
+     (the ⋯ ActionSheet carries Rate + play/queue) and give the text room; the
+     album drops onto its own line under the title. Row tap plays. */
+  .trk {
+    grid-template-columns: 34px minmax(0, 1fr) max-content 44px;
+    gap: 10px;
+    padding: 8px 4px;
+    min-height: 54px;
+    align-items: center;
+  }
+  .trk-stars { display: none; }
+  .trk-meta { grid-row: 1; }
+  .trk-al {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: start;
+    margin-top: -2px;
+  }
+  .trk-d { grid-column: 3; grid-row: 1 / span 2; }
+  .trk-more {
+    grid-column: 4;
+    grid-row: 1 / span 2;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1749,102 +1575,46 @@ if (import.meta.client) {
     height: 44px;
     background: transparent;
     border: 0;
-    color: var(--fg-2);
+    color: rgb(var(--ink) / 0.55);
     cursor: pointer;
   }
-  .tt-phone-more:active { color: var(--gold); }
+  .trk-more:active { color: var(--tone); }
 
-  /* Two-line rows: title on its own line, album underneath (in place of the
-     desktop "Title · Album" single line) — more breathing room and the
-     album no longer competes with the title for the same line width. The
-     markup order (title → sep → album) is unchanged; only the phone-only
-     layout of `.tt-meta` and its children changes here. */
-  .tt-meta {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 3px;
-    white-space: normal;
-  }
-  .tt-title { white-space: nowrap; }
-  .tt-album-sep { display: none; }
-  .tt-album {
-    display: block;
-    width: 100%;
-    font-size: 12px;
-    color: var(--fg-2);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* Discography: one desktop column (170px min) stretched full-width on a
-     390px phone — drop to the same dense-grid convention as `.grid-posters`
-     (docs/ui.md / heya.css) so multiple album tiles fit per row. */
-  .discog-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
+  .album-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 18px 12px; }
+  .avatar-row { padding-left: var(--pad-fluid); padding-right: var(--pad-fluid); margin-left: calc(-1 * var(--pad-fluid)); margin-right: calc(-1 * var(--pad-fluid)); }
 }
 </style>
 
-<!-- "Around the web" dropdown — the AppMenu content is portaled to <body>
-     and the trigger renders inside the AppMenu child component, so none of
-     these rules can live in the scoped block (docs/ui.md gotcha #2). -->
+<!-- "Around the web" dropdown — the AppMenu content is portaled to <body> and
+     the trigger renders inside the AppMenu child component, so none of these
+     rules can live in the scoped block (docs/ui.md gotcha #2). -->
 <style>
 .atw-trigger {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 11px;
+  padding: 6px 12px;
   border-radius: 999px;
-  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-el);
-  font-size: 11px;
-  font-family: var(--font-mono);
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid var(--hair);
+  font: 550 11px var(--font-mono);
   letter-spacing: 0.04em;
-  color: var(--fg-1);
+  color: rgb(var(--ink) / 0.8);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .atw-trigger:hover,
-.atw-trigger[data-state="open"] { background: var(--bg-3); color: var(--fg-0); }
-.atw-count {
-  font-size: 10px;
-  color: var(--fg-2);
-}
+.atw-trigger[data-state="open"] { background: rgb(var(--ink) / 0.09); color: rgb(var(--ink) / 0.95); border-color: var(--hair-strong); }
+.atw-count { font-size: 10px; color: rgb(var(--ink) / 0.5); }
 
 /* Long list — scroll inside the surface. */
-.atw-scroll {
-  max-height: min(55vh, 480px);
-  overflow-y: auto;
-}
-.atw-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.atw-host {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.atw-scroll { max-height: min(55vh, 480px); overflow-y: auto; }
+.atw-item { display: flex; align-items: center; gap: 10px; }
+.atw-host { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .atw-type {
   flex-shrink: 0;
-  font-size: 10px;
-  font-family: var(--font-mono);
-  color: var(--fg-3);
+  font: 500 10px var(--font-mono);
+  color: rgb(var(--ink) / 0.4);
   letter-spacing: 0.04em;
-}
-
-/* Phone: the hero-atw wrapper is a full-width in-flow bar — stretch the
-   trigger across it. (Unscoped like the rest: the trigger element is
-   rendered by AppMenu, out of scoped-CSS reach.) */
-@media (max-width: 720px) {
-  .hero-atw .atw-trigger {
-    width: 100%;
-    justify-content: center;
-  }
 }
 </style>
