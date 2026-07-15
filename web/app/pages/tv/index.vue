@@ -640,8 +640,15 @@ async function onFiltersChange(f: FilterState) {
 }
 
 
+const { promptText } = usePrompt()
+
 async function saveSmartList() {
-  const name = prompt('Smart list name:')
+  const name = await promptText({
+    title: 'Save as smart list',
+    label: 'Smart list name',
+    placeholder: 'Currently airing',
+    confirmLabel: 'Save list',
+  })
   if (!name?.trim()) return
   const { toast } = useToast()
   try {
@@ -650,6 +657,7 @@ async function saveSmartList() {
       method: 'POST',
       body: {
         name: name.trim(),
+        description: '',
         list_type: 'smart',
         filter_json: filters.value,
         media_type: 'tv',

@@ -11,6 +11,8 @@ export function usePlaylistMenu() {
   const actions = useMusicActions()
   const playlistsApi = usePlaylists()
   const { toast } = useToast()
+  const { promptText } = usePrompt()
+  const { confirm } = useConfirm()
 
   // `surface` keeps the two pin scopes from bleeding into each other: the
   // sidebar's menu shows a single "Pin" that only touches sidebar_pinned,
@@ -52,7 +54,12 @@ export function usePlaylistMenu() {
         label: 'Rename…',
         icon: 'pencil',
         action: async () => {
-          const next = prompt('Playlist name', name)?.trim()
+          const next = await promptText({
+            title: 'Rename playlist',
+            label: 'Playlist name',
+            initial: name,
+            confirmLabel: 'Rename',
+          })
           if (!next || next === name) return
           try {
             await playlistsApi.update(p.id, { name: next })
@@ -66,7 +73,14 @@ export function usePlaylistMenu() {
         label: 'Edit tags…',
         icon: 'bookmark',
         action: async () => {
-          const raw = prompt('Tags (comma separated)', (row?.tags ?? []).join(', '))
+          const raw = await promptText({
+            title: 'Edit tags',
+            label: 'Tags (comma separated)',
+            initial: (row?.tags ?? []).join(', '),
+            placeholder: 'chill, focus, workout',
+            allowEmpty: true,
+            confirmLabel: 'Save tags',
+          })
           if (raw === null) return
           const tags = raw.split(',').map(t => t.trim()).filter(Boolean)
           try {
@@ -83,9 +97,15 @@ export function usePlaylistMenu() {
         icon: 'trash',
         action: async () => {
           const syncNote = row?.sync_services?.length
-            ? `\n\nThis playlist syncs with ${row.sync_services.join(', ')} — deleting it stops the sync (the copy on the service stays).`
-            : ''
-          if (!confirm(`Delete “${name}”?${syncNote}`)) return
+            ? `This playlist syncs with ${row.sync_services.join(', ')} — deleting it stops the sync (the copy on the service stays).`
+            : 'This can’t be undone.'
+          const ok = await confirm({
+            title: `Delete “${name}”?`,
+            message: syncNote,
+            confirmLabel: 'Delete',
+            destructive: true,
+          })
+          if (!ok) return
           try {
             await playlistsApi.remove(p.id)
             toast.ok('Playlist deleted')

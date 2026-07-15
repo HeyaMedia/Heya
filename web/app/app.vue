@@ -8,6 +8,9 @@
   <!-- Global "Track information" dialog — driven by the useTrackInfo()
        singleton so the central track context menu opens it from anywhere. -->
   <TrackInfoDialog />
+  <!-- Global text-prompt dialog — driven by the usePrompt() singleton so any
+       surface (incl. render-less composables) can replace window.prompt(). -->
+  <TextPromptDialog />
   <OfflineIndicator />
   <!-- Global touch affordances (left-edge swipe → sidebar, pull-to-refresh).
        Client-only; renders only a transient pull indicator on touch devices. -->

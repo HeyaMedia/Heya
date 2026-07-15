@@ -33,6 +33,7 @@ const emit = defineEmits<{ reroll: [] }>()
 
 const { play, queue, playTracks } = usePlayerBindings()
 const playlistsApi = usePlaylists()
+const { promptText } = usePrompt()
 const saveError = ref<string | null>(null)
 
 function trackToPlayable(t: StationTrack): Track {
@@ -66,7 +67,12 @@ async function playFrom(i: number) {
 async function onSaveAsPlaylist() {
   if (!props.tracks.length) return
   const suggested = `${props.saveLabel || 'Mix'} — ${props.label}`
-  const name = prompt('Playlist name', suggested)
+  const name = await promptText({
+    title: 'Save as playlist',
+    label: 'Playlist name',
+    initial: suggested,
+    confirmLabel: 'Save',
+  })
   if (!name) return
   try {
     const created = await playlistsApi.create(name, '')

@@ -416,6 +416,7 @@ import { DropdownMenuItem, DropdownMenuSeparator } from 'reka-ui'
 const trackRatings = useTrackRatings()
 const ratings = trackRatings.ratings
 const playlistsApi = usePlaylists()
+const { promptText } = usePrompt()
 if (import.meta.client) playlistsApi.ensureLoaded()
 
 async function addCurrentToPlaylist(playlistId: number) {
@@ -427,7 +428,12 @@ async function addCurrentToPlaylist(playlistId: number) {
 async function createPlaylistFromCurrent() {
   const t = currentTrack.value
   if (!t || t.id <= 0) return
-  const name = prompt('New playlist name', t.title)
+  const name = await promptText({
+    title: 'New playlist',
+    label: 'Playlist name',
+    initial: t.title,
+    confirmLabel: 'Create',
+  })
   if (!name) return
   try {
     const created = await playlistsApi.create(name, '')

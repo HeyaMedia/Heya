@@ -245,6 +245,7 @@ definePageMeta({ layout: 'default' })
 const { play, queue, playTracks } = usePlayerBindings()
 const { $heya } = useNuxtApp()
 const playlistsApi = usePlaylists()
+const { promptText } = usePrompt()
 
 const aiReadyQuery = useQuery({
   key: ['ai-ready'],
@@ -549,7 +550,12 @@ async function onSaveAsPlaylist() {
   if (!builtTracks.value.length) return
   const summary = seeds.value.map((s) => s.label).slice(0, 3).join(' + ')
   const defaultName = lastBuildMode.value === 'ai' ? mixTitle.value : `Mix — ${summary || 'untitled'}`
-  const name = prompt('Playlist name', defaultName)
+  const name = await promptText({
+    title: 'Save as playlist',
+    label: 'Playlist name',
+    initial: defaultName,
+    confirmLabel: 'Save',
+  })
   if (!name) return
   try {
     const desc = lastBuildMode.value === 'ai'

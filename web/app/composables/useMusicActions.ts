@@ -63,6 +63,7 @@ export function useMusicActions() {
   const albumRatings = useRatings('album')
   const artistRatings = useRatings('artist')
   const loadQuery = useQueryLoader()
+  const { promptText } = usePrompt()
   // Shared "Track information" dialog channel — the globally-mounted
   // <TrackInfoDialog> (app.vue) fetches /api/music/tracks/{id} on open, so a
   // bare id is enough from every menu. Pages holding richer rows prime extras.
@@ -108,7 +109,12 @@ export function useMusicActions() {
       label: 'New playlist…',
       icon: 'plus',
       action: async () => {
-        const name = prompt('New playlist name')
+        const name = await promptText({
+          title: 'New playlist',
+          label: 'Playlist name',
+          placeholder: 'My playlist',
+          confirmLabel: 'Create',
+        })
         if (!name) return
         const created = await playlists.create(name, '')
         await onPick(created.id)
@@ -375,7 +381,12 @@ export function useMusicActions() {
         label: 'Save as Playlist',
         icon: 'list',
         action: async () => {
-          const name = prompt('Playlist name', mix.name)
+          const name = await promptText({
+            title: 'Save mix as playlist',
+            label: 'Playlist name',
+            initial: mix.name,
+            confirmLabel: 'Save',
+          })
           if (!name) return
           try {
             const created = await playlists.create(name, `Built from mix: ${mix.name}`)
