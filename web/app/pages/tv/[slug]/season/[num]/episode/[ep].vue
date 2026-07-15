@@ -1,9 +1,12 @@
 <template>
-  <div v-if="loading" class="scroll" style="height: 100%">
+  <div v-if="loading" class="scroll hero-flush" style="height: 100%">
     <div style="height: 200px; background: var(--bg-2)" />
   </div>
 
-  <div v-else-if="detail && episode" class="scroll ep2" :style="toneStyle" style="height: 100%">
+  <!-- `hero-flush` opts this page out of the .app-main topbar offset so the
+       episode still fills up under the glass topbar (the hero's own inner
+       padding keeps text clear of the bar). See heya.css .app-main. -->
+  <div v-else-if="detail && episode" class="scroll ep2 hero-flush" :style="toneStyle" style="height: 100%">
     <!-- ── HERO: episode still as sharp art, hard-clipped at the ledger seam ── -->
     <section class="ep-hero">
       <HeroCanvas :src="stillUrl" object-position="center 25%" />

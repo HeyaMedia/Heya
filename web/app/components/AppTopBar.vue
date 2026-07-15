@@ -907,17 +907,30 @@ watch(() => route.fullPath, () => { closeDropdown() })
   align-items: center;
   gap: 24px;
   padding: 0 24px;
-  /* Opaque (--chrome): nothing scrolls behind the navbar, and a known
-     solid target lets the library sidebar/FilterBar tops match it EXACTLY
-     instead of approximating glass-over-backdrop. Hard border stays
-     swapped for a soft drop so the split against the page is a shadow,
-     not a line. */
-  background: var(--chrome);
-  border-bottom: 0;
-  box-shadow: 0 1px 18px rgb(var(--shade) / 0.22);
+  /* Glass overlay (Heya 2.0): the topbar is lifted OUT of the .app grid flow
+     and fixed over the content, so hero art and page content scroll UNDER it.
+     The fill is a translucent gradient derived from --chrome (the topbar's
+     brand tone) via color-mix, so it themes correctly on dark / OLED / light
+     — over hero artwork on detail pages and over the ambient canvas on list
+     pages alike. backdrop-filter frosts whatever scrolls behind. Nothing
+     nested here carries its own backdrop-filter (the search dropdown and the
+     activity/user menus all teleport to <body>), so gotcha #4 doesn't bite. */
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
   height: var(--topbar-h);
   z-index: 50;
-  position: relative;
+  background: linear-gradient(to bottom,
+    color-mix(in srgb, var(--chrome) 86%, transparent),
+    color-mix(in srgb, var(--chrome) 58%, transparent));
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  /* No border — the split against the page below is a soft drop shadow, kept
+     off the library/music shells (heya.css) where it would shade the
+     sidebar/FilterBar seam. */
+  border-bottom: 0;
+  box-shadow: 0 1px 18px rgb(var(--shade) / 0.22);
 }
 /* `.topbar-left` is the actual grid item (column 1) — `.topbar-brand` used
    to hold `justify-self: start` directly, back when it was the grid item

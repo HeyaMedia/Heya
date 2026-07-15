@@ -389,21 +389,26 @@ a { color: inherit; text-decoration: none; }
    stacking context, so a background on it would paint OVER the layer. */
 .app {
   display: grid;
-  grid-template-rows: var(--topbar-h) 1fr;
+  /* Topbar is NO LONGER a grid row — it's lifted out of flow into a fixed
+     glass overlay (see AppTopBar.vue `.topbar`) so hero art and page content
+     scroll UNDER it. The main region therefore spans the full viewport
+     height; .app-main pads its own top by --topbar-h to keep non-hero
+     content clear of the bar (hero pages opt out via `.hero-flush`). */
+  grid-template-rows: 1fr;
   height: 100vh; /* fallback for browsers without dvh support */
   height: 100dvh;
   width: 100vw;
   position: relative;
 }
 
-/* DesktopPlayerHost is an in-flow third row. It only renders on desktop when
+/* DesktopPlayerHost is an in-flow second row. It only renders on desktop when
    a track exists (and always on /music), so ordinary pages keep their full
    height until the persistent playbar is actually needed. */
 .app:has(.global-playbar-host) {
-  grid-template-rows: var(--topbar-h) minmax(0, 1fr) var(--playbar-h);
+  grid-template-rows: minmax(0, 1fr) var(--playbar-h);
 }
 
-.app.music-mode { grid-template-rows: var(--topbar-h) 1fr; }
+.app.music-mode { grid-template-rows: 1fr; }
 
 /* Ambient reveal (AmbientControls' eye button): everything except the
    backdrop layer and the corner controls fades away so the artwork can be
@@ -431,7 +436,14 @@ a { color: inherit; text-decoration: none; }
 .app-main {
   position: relative;
   overflow: hidden;
+  /* The fixed glass topbar overlays the top --topbar-h of the viewport; this
+     border-box padding starts ordinary (non-hero) page content just below it
+     so nothing hides under the bar. Hero pages tag their scroll root with
+     `.hero-flush` to reclaim those pixels — their artwork then rides up under
+     the glass while the hero's own inner padding keeps text clear of it. */
+  padding-top: var(--topbar-h);
 }
+.app-main:has(.hero-flush) { padding-top: 0; }
 
 /* Phone: BottomNav is fixed-position and floats over whatever sits at the
    bottom of the viewport. .app-main is border-box sized by the `.app` grid
