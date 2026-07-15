@@ -2,15 +2,70 @@ package matcher
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
+
+func TestStoreRichMetadataConcurrentSharedPeople(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	q := sqlc.New(pool)
+	library, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name: "concurrent-credit-projections", MediaType: sqlc.MediaTypeMovie,
+		Paths: []string{"/tmp/concurrent-credit-projections"}, CreatedBy: testutil.TestUserID(t, pool),
+		ScanInterval: pgtype.Interval{Microseconds: int64(time.Hour / time.Microsecond), Valid: true},
+		Settings:     []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, library.ID) })
+
+	const peopleCount = 300
+	detail := &metadata.MediaDetail{}
+	for i := 0; i < peopleCount; i++ {
+		identity := fmt.Sprintf("concurrent-person-%d", i)
+		detail.Cast = append(detail.Cast, metadata.CastMember{
+			CanonicalID: uuid.NewSHA1(uuid.NameSpaceOID, []byte(identity)).String(),
+			ExternalIDs: map[string]string{"tmdb": identity}, Name: identity,
+			Character: fmt.Sprintf("Role %d", i), Order: i, Source: "heya",
+		})
+	}
+
+	const titleCount = 6
+	itemIDs := make([]int64, 0, titleCount)
+	for i := 0; i < titleCount; i++ {
+		item, createErr := q.CreateMediaItem(ctx, sqlc.CreateMediaItemParams{
+			LibraryID: library.ID, MediaType: sqlc.MediaTypeMovie,
+			Title: fmt.Sprintf("Concurrent title %d", i), SortTitle: fmt.Sprintf("concurrent title %d", i),
+			ProviderKind: "heya", ExternalIds: []byte("{}"),
+		})
+		require.NoError(t, createErr)
+		itemIDs = append(itemIDs, item.ID)
+	}
+
+	m := New(pool, MatchOptions{}, nil, nil)
+	require.NoError(t, m.StoreRichMetadata(ctx, itemIDs[0], detail), "seed canonical people")
+	errs := make(chan error, titleCount)
+	for _, itemID := range itemIDs {
+		go func() { errs <- m.StoreRichMetadata(ctx, itemID, detail) }()
+	}
+	for range itemIDs {
+		require.NoError(t, <-errs)
+	}
+	for _, itemID := range itemIDs {
+		cast, listErr := q.ListMediaCastSlim(ctx, itemID)
+		require.NoError(t, listErr)
+		require.Len(t, cast, peopleCount)
+	}
+}
 
 func TestStoreRichMetadataReplacesStaleCastAndCrew(t *testing.T) {
 	pool := testutil.SetupDB(t)

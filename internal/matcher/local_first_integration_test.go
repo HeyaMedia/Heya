@@ -166,10 +166,19 @@ func TestLocalFirstUpserts(t *testing.T) {
 		id, _, err := m.createOrLinkMediaItem(ctx, &metadata.MediaDetail{Title: "Show", Year: "2004", ExternalIDs: map[string]string{"tmdb": "222"}}, metadata.KindTV, lib, "")
 		require.NoError(t, err)
 
-		_ = m.StoreEntityMetadata(ctx, id, metadata.KindTV, &metadata.MediaDetail{
-			Status:  "Returning",
-			Seasons: []metadata.SeasonDetail{{Number: 1, Title: "Season 1", Episodes: []metadata.EpisodeDetail{{Number: 1, Title: "Pilot"}}}},
-		})
+		seasonCanonicalID := "90e7442f-a34a-47eb-9134-6d8686bfe951"
+		episodeCanonicalID := "7401e29c-27d5-451b-b1bc-9ea0d3d11b64"
+		require.NoError(t, m.StoreEntityMetadata(ctx, id, metadata.KindTV, &metadata.MediaDetail{
+			SchemaVersion: 1, ProjectionVersion: 7, Status: "Returning",
+			Seasons: []metadata.SeasonDetail{{
+				CanonicalID: seasonCanonicalID, Number: 1, Title: "Season 1",
+				Episodes: []metadata.EpisodeDetail{{
+					CanonicalID: episodeCanonicalID, Number: 1, Title: "Pilot",
+					Titles:    []metadata.TitleEntry{{Title: "Pilot", Language: "en", Source: "heya"}},
+					Overviews: map[string]string{"en": "First episode"},
+				}},
+			}},
+		}))
 		series, err := qtx.GetTVSeriesByMediaItemID(ctx, id)
 		require.NoError(t, err)
 		seasons, err := qtx.ListTVSeasonsBySeries(ctx, series.ID)
@@ -179,6 +188,20 @@ func TestLocalFirstUpserts(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, eps, 1)
 		require.Equal(t, "Pilot", eps[0].Title)
+		seasonBinding, err := qtx.GetMetadataEntityBinding(ctx, sqlc.GetMetadataEntityBindingParams{LocalKind: "tv_season", LocalID: seasons[0].ID})
+		require.NoError(t, err)
+		require.Equal(t, seasonCanonicalID, seasonBinding.EntityID.String())
+		episodeBinding, err := qtx.GetMetadataEntityBinding(ctx, sqlc.GetMetadataEntityBindingParams{LocalKind: "tv_episode", LocalID: eps[0].ID})
+		require.NoError(t, err)
+		require.Equal(t, episodeCanonicalID, episodeBinding.EntityID.String())
+		episodeTitles, err := qtx.ListEpisodeTitles(ctx, eps[0].ID)
+		require.NoError(t, err)
+		require.Len(t, episodeTitles, 1)
+		require.Equal(t, "Pilot", episodeTitles[0].Title)
+		episodeOverviews, err := qtx.ListEpisodeOverviews(ctx, eps[0].ID)
+		require.NoError(t, err)
+		require.Len(t, episodeOverviews, 1)
+		require.Equal(t, "First episode", episodeOverviews[0].Overview)
 
 		// User edits the episode title.
 		_, err = qtx.UpdateTVEpisode(ctx, sqlc.UpdateTVEpisodeParams{
@@ -193,12 +216,12 @@ func TestLocalFirstUpserts(t *testing.T) {
 		// re-enrich is gated out at the worker) fills the existing series and adds
 		// the new E2 under the existing season, while the edited E1 is preserved
 		// (CreateTVEpisode is insert-or-skip).
-		_ = m.StoreEntityMetadata(ctx, id, metadata.KindTV, &metadata.MediaDetail{
+		require.NoError(t, m.StoreEntityMetadata(ctx, id, metadata.KindTV, &metadata.MediaDetail{
 			Status: "Returning",
 			Seasons: []metadata.SeasonDetail{{Number: 1, Title: "Season 1", Episodes: []metadata.EpisodeDetail{
 				{Number: 1, Title: "Pilot"}, {Number: 2, Title: "Second"},
 			}}},
-		})
+		}))
 		eps2, err := qtx.ListTVEpisodesBySeason(ctx, seasons[0].ID)
 		require.NoError(t, err)
 		require.Len(t, eps2, 2, "re-enrich adds the new episode under the existing season")

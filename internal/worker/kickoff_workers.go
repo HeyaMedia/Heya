@@ -459,6 +459,7 @@ type FetchLibraryMetadataWorker struct {
 }
 
 func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[FetchLibraryMetadataArgs]) error {
+	started := time.Now()
 	q := sqlc.New(w.DB)
 	rc := river.ClientFromContext[pgx.Tx](ctx)
 	source := scheduledJobSource(job.Metadata)
@@ -534,6 +535,7 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 		Int("fetched", result.New).
 		Int64("fetch_scan_run_id", fetchScanRunID).
 		Int64("metadata_artifact_id", metadataArtifactID).
+		Dur("duration", time.Since(started)).
 		Msg("fetch_metadata: library done")
 	return nil
 }
@@ -561,6 +563,7 @@ type ApplyRichMetadataWorker struct {
 }
 
 func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyLibraryScanArgs]) error {
+	started := time.Now()
 	q := sqlc.New(w.DB)
 	rc := river.ClientFromContext[pgx.Tx](ctx)
 	source := scheduledJobSource(job.Metadata)
@@ -629,6 +632,7 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 		Int("rich_metadata", richQueued).
 		Int("rich_metadata_failed", richFailed).
 		Int("fanout_failed", fanout.Failed).
+		Dur("duration", time.Since(started)).
 		Msg("apply_metadata: library done")
 
 	emit(w.Hub, eventhub.EventScanCompleted, eventhub.ScanPayload{
@@ -734,6 +738,7 @@ func stringSliceContains(items []string, needle string) bool {
 }
 
 func (w *ApplyRichMetadataWorker) Work(ctx context.Context, job *river.Job[ApplyRichMetadataArgs]) error {
+	started := time.Now()
 	q := sqlc.New(w.DB)
 	lib, err := q.GetLibraryByID(ctx, job.Args.LibraryID)
 	if err != nil {
@@ -816,6 +821,7 @@ func (w *ApplyRichMetadataWorker) Work(ctx context.Context, job *river.Job[Apply
 		Int("crew", len(detail.Crew)).
 		Int("keywords", len(detail.Keywords)).
 		Int("videos", len(detail.Videos)).
+		Dur("duration", time.Since(started)).
 		Msg("apply_rich_metadata: complete")
 	compactAppliedScannerArtifacts(ctx, w.DB, job.Args.ScannerEntityID, job.ID)
 	return nil

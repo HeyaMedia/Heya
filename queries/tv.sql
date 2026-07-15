@@ -153,3 +153,179 @@ FROM tv_episodes e
 JOIN tv_seasons s ON s.id = e.season_id
 JOIN tv_series ts ON ts.id = s.series_id
 WHERE ts.media_item_id = ANY(sqlc.arg(media_item_ids)::bigint[]);
+
+-- name: PersistTVStructure :one
+-- Persist an entire canonical season/episode projection in one PostgreSQL
+-- statement. Existing season and episode rows are intentionally preserved so
+-- local/user edits keep winning; localized titles and overviews remain
+-- replaceable projections. The RETURNING unions make newly inserted rows
+-- available to later CTEs without thousands of client/server round trips.
+WITH season_input AS MATERIALIZED (
+    SELECT DISTINCT ON ((value->>'season_number')::integer)
+           (value->>'season_number')::integer AS season_number,
+           COALESCE(value->>'title', '') AS title,
+           COALESCE(value->>'overview', '') AS overview,
+           COALESCE(value->>'poster_path', '') AS poster_path,
+           COALESCE(value->>'air_date', '') AS air_date,
+           COALESCE(value->>'end_date', '') AS end_date,
+           COALESCE(value->>'status', '') AS status,
+           COALESCE((value->>'aired_episodes')::integer, 0) AS aired_episodes,
+           COALESCE(value->'external_ids', '{}'::jsonb) AS external_ids,
+           COALESCE(value->>'canonical_id', '') AS canonical_id
+    FROM jsonb_array_elements(sqlc.arg(seasons)::jsonb) AS value
+), inserted_seasons AS (
+    INSERT INTO tv_seasons (
+        series_id, season_number, title, overview, poster_path, air_date,
+        end_date, status, aired_episodes, external_ids
+    )
+    SELECT sqlc.arg(series_id), season_number, title, overview, poster_path,
+           NULLIF(air_date, '')::date, NULLIF(end_date, '')::date, status,
+           aired_episodes, COALESCE(external_ids, '{}'::jsonb)
+    FROM season_input
+    ON CONFLICT (series_id, season_number) DO NOTHING
+    RETURNING id, season_number
+), all_seasons AS MATERIALIZED (
+    SELECT id, season_number FROM inserted_seasons
+    UNION ALL
+    SELECT season.id, season.season_number
+    FROM tv_seasons season
+    JOIN season_input input USING (season_number)
+    WHERE season.series_id = sqlc.arg(series_id)
+      AND NOT EXISTS (
+          SELECT 1 FROM inserted_seasons inserted WHERE inserted.season_number = season.season_number
+      )
+), season_bindings AS (
+    INSERT INTO metadata_entity_bindings (
+        local_kind, local_id, entity_id, entity_kind, schema_version, projection_version
+    )
+    SELECT 'tv_season', season.id, input.canonical_id::uuid, 'season',
+           sqlc.arg(schema_version), sqlc.arg(projection_version)
+    FROM all_seasons season
+    JOIN season_input input USING (season_number)
+    WHERE NULLIF(input.canonical_id, '') IS NOT NULL
+    ON CONFLICT (local_kind, local_id) DO UPDATE SET
+        entity_id = EXCLUDED.entity_id,
+        entity_kind = EXCLUDED.entity_kind,
+        schema_version = EXCLUDED.schema_version,
+        projection_version = CASE
+            WHEN metadata_entity_bindings.entity_id = EXCLUDED.entity_id
+              THEN GREATEST(metadata_entity_bindings.projection_version, EXCLUDED.projection_version)
+            ELSE EXCLUDED.projection_version
+        END,
+        updated_at = now()
+    RETURNING 1
+), episode_input AS MATERIALIZED (
+    SELECT DISTINCT ON (
+               (value->>'season_number')::integer,
+               (value->>'episode_number')::integer
+           )
+           (value->>'season_number')::integer AS season_number,
+           (value->>'episode_number')::integer AS episode_number,
+           COALESCE(value->>'title', '') AS title,
+           COALESCE(value->>'overview', '') AS overview,
+           COALESCE(value->>'still_path', '') AS still_path,
+           COALESCE((value->>'runtime_minutes')::integer, 0) AS runtime_minutes,
+           COALESCE(value->>'air_date', '') AS air_date,
+           COALESCE((value->>'rating')::double precision, 0) AS rating,
+           COALESCE((value->>'absolute_number')::integer, 0) AS absolute_number,
+           COALESCE((value->>'is_special')::boolean, false) AS is_special,
+           COALESCE((value->>'episode_type')::integer, 0) AS episode_type,
+           COALESCE(value->'external_ids', '{}'::jsonb) AS external_ids,
+           COALESCE(value->>'source', '') AS source,
+           COALESCE(value->>'canonical_id', '') AS canonical_id
+    FROM jsonb_array_elements(sqlc.arg(episodes)::jsonb) AS value
+), inserted_episodes AS (
+    INSERT INTO tv_episodes (
+        season_id, episode_number, title, overview, still_path,
+        runtime_minutes, air_date, rating, absolute_number, is_special,
+        episode_type, external_ids, source
+    )
+    SELECT season.id, input.episode_number, input.title, input.overview,
+           input.still_path, input.runtime_minutes, NULLIF(input.air_date, '')::date,
+           input.rating, input.absolute_number, input.is_special,
+           input.episode_type, COALESCE(input.external_ids, '{}'::jsonb), input.source
+    FROM episode_input input
+    JOIN all_seasons season USING (season_number)
+    ON CONFLICT (season_id, episode_number) DO NOTHING
+    RETURNING id, season_id, episode_number
+), all_episodes AS MATERIALIZED (
+    SELECT inserted.id, season.season_number, inserted.episode_number
+    FROM inserted_episodes inserted
+    JOIN all_seasons season ON season.id = inserted.season_id
+    UNION ALL
+    SELECT episode.id, season.season_number, episode.episode_number
+    FROM tv_episodes episode
+    JOIN all_seasons season ON season.id = episode.season_id
+    JOIN episode_input input
+      ON input.season_number = season.season_number
+     AND input.episode_number = episode.episode_number
+    WHERE NOT EXISTS (
+        SELECT 1 FROM inserted_episodes inserted WHERE inserted.id = episode.id
+    )
+), episode_bindings AS (
+    INSERT INTO metadata_entity_bindings (
+        local_kind, local_id, entity_id, entity_kind, schema_version, projection_version
+    )
+    SELECT 'tv_episode', episode.id, input.canonical_id::uuid, 'episode',
+           sqlc.arg(schema_version), sqlc.arg(projection_version)
+    FROM all_episodes episode
+    JOIN episode_input input USING (season_number, episode_number)
+    WHERE NULLIF(input.canonical_id, '') IS NOT NULL
+    ON CONFLICT (local_kind, local_id) DO UPDATE SET
+        entity_id = EXCLUDED.entity_id,
+        entity_kind = EXCLUDED.entity_kind,
+        schema_version = EXCLUDED.schema_version,
+        projection_version = CASE
+            WHEN metadata_entity_bindings.entity_id = EXCLUDED.entity_id
+              THEN GREATEST(metadata_entity_bindings.projection_version, EXCLUDED.projection_version)
+            ELSE EXCLUDED.projection_version
+        END,
+        updated_at = now()
+    RETURNING 1
+), title_input AS MATERIALIZED (
+    SELECT DISTINCT ON (
+               (value->>'season_number')::integer,
+               (value->>'episode_number')::integer,
+               COALESCE(value->>'language', '')
+           )
+           (value->>'season_number')::integer AS season_number,
+           (value->>'episode_number')::integer AS episode_number,
+           COALESCE(value->>'title', '') AS title,
+           COALESCE(value->>'language', '') AS language,
+           COALESCE(value->>'source', '') AS source
+    FROM jsonb_array_elements(sqlc.arg(titles)::jsonb) AS value
+), written_titles AS (
+    INSERT INTO episode_titles (episode_id, title, language, source)
+    SELECT episode.id, input.title, input.language, input.source
+    FROM title_input input
+    JOIN all_episodes episode USING (season_number, episode_number)
+    ON CONFLICT (episode_id, language) DO UPDATE SET
+        title = EXCLUDED.title,
+        source = EXCLUDED.source
+    RETURNING 1
+), overview_input AS MATERIALIZED (
+    SELECT DISTINCT ON (
+               (value->>'season_number')::integer,
+               (value->>'episode_number')::integer,
+               COALESCE(value->>'language', '')
+           )
+           (value->>'season_number')::integer AS season_number,
+           (value->>'episode_number')::integer AS episode_number,
+           COALESCE(value->>'language', '') AS language,
+           COALESCE(value->>'overview', '') AS overview
+    FROM jsonb_array_elements(sqlc.arg(overviews)::jsonb) AS value
+), written_overviews AS (
+    INSERT INTO episode_overviews (episode_id, language, overview)
+    SELECT episode.id, input.language, input.overview
+    FROM overview_input input
+    JOIN all_episodes episode USING (season_number, episode_number)
+    ON CONFLICT (episode_id, language) DO UPDATE SET overview = EXCLUDED.overview
+    RETURNING 1
+)
+SELECT
+    (SELECT count(*) FROM all_seasons)::bigint AS seasons,
+    (SELECT count(*) FROM all_episodes)::bigint AS episodes,
+    (SELECT count(*) FROM season_bindings)::bigint AS season_bindings,
+    (SELECT count(*) FROM episode_bindings)::bigint AS episode_bindings,
+    (SELECT count(*) FROM written_titles)::bigint AS titles,
+    (SELECT count(*) FROM written_overviews)::bigint AS overviews;

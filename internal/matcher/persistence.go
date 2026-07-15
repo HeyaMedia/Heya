@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -304,6 +305,42 @@ type richPersonWrite struct {
 	profiles     map[string]richPersonProfile
 }
 
+type mediaPersonCreditProjection struct {
+	PersonID     int64  `json:"person_id"`
+	IsCast       bool   `json:"is_cast"`
+	Character    string `json:"character"`
+	DisplayOrder int    `json:"display_order"`
+	Gender       int    `json:"gender"`
+	Source       string `json:"source"`
+	Job          string `json:"job"`
+	Department   string `json:"department"`
+}
+
+type metadataEntityBindingProjection struct {
+	LocalKind         string `json:"local_kind"`
+	LocalID           int64  `json:"local_id"`
+	EntityID          string `json:"entity_id"`
+	EntityKind        string `json:"entity_kind"`
+	SchemaVersion     int    `json:"schema_version"`
+	ProjectionVersion int64  `json:"projection_version"`
+}
+
+type personIdentifierProbe struct {
+	IdentityKey string `json:"identity_key"`
+	Priority    int    `json:"priority"`
+	Provider    string `json:"provider"`
+	ProviderID  string `json:"provider_id"`
+}
+
+type personCreateProjection struct {
+	IdentityKey string            `json:"identity_key"`
+	ExternalIDs map[string]string `json:"external_ids"`
+	Name        string            `json:"name"`
+	Gender      int               `json:"gender"`
+	ProfilePath string            `json:"profile_path"`
+	Popularity  float64           `json:"popularity"`
+}
+
 func collectRichPersonCredits(d *metadata.MediaDetail) []richPersonCredit {
 	credits := make([]richPersonCredit, 0, len(d.Cast)+len(d.Crew))
 	seenCast := map[string]bool{}
@@ -345,6 +382,15 @@ func collectRichPersonCredits(d *metadata.MediaDetail) []richPersonCredit {
 }
 
 func richPersonCreditKey(c richPersonCredit) string {
+	identity := richPersonIdentityKey(c)
+	role := "crew|" + c.department + "|" + c.job
+	if c.isCast {
+		role = "cast|" + c.character
+	}
+	return identity + "|" + role + "|" + c.name
+}
+
+func richPersonIdentityKey(c richPersonCredit) string {
 	identity := strings.ToLower(strings.TrimSpace(c.canonicalID))
 	if identity == "" {
 		parts := make([]string, 0, len(c.externalIDs))
@@ -356,11 +402,7 @@ func richPersonCreditKey(c richPersonCredit) string {
 	if identity == "" {
 		identity = strings.ToLower(strings.TrimSpace(c.name))
 	}
-	role := "crew|" + c.department + "|" + c.job
-	if c.isCast {
-		role = "cast|" + c.character
-	}
-	return identity + "|" + role + "|" + c.name
+	return identity
 }
 
 func sortedNonEmptyExternalIDKeys(ids map[string]string) []string {
@@ -411,38 +453,20 @@ func (m *Matcher) replaceMediaPersonCredits(ctx context.Context, mediaItemID int
 			}
 		}
 
-		if err := q.DeleteMediaCastByItem(ctx, mediaItemID); err != nil {
-			return fmt.Errorf("clear prior cast: %w", err)
-		}
-		if err := q.DeleteMediaCrewByItem(ctx, mediaItemID); err != nil {
-			return fmt.Errorf("clear prior crew: %w", err)
-		}
-
+		credits := make([]mediaPersonCreditProjection, 0, len(resolved))
 		for _, item := range resolved {
 			credit, person := item.credit, item.person
-			if credit.isCast {
-				if err := q.CreateMediaCast(ctx, sqlc.CreateMediaCastParams{
-					MediaItemID:  mediaItemID,
-					PersonID:     person.ID,
-					Character:    credit.character,
-					DisplayOrder: int32(credit.order),
-					Gender:       int32(credit.gender),
-					Source:       credit.source,
-				}); err != nil {
-					return fmt.Errorf("cast %q: %w", credit.name, err)
-				}
-				continue
-			}
-			if err := q.CreateMediaCrew(ctx, sqlc.CreateMediaCrewParams{
-				MediaItemID: mediaItemID,
-				PersonID:    person.ID,
-				Job:         credit.job,
-				Department:  credit.department,
-				Gender:      int32(credit.gender),
-				Source:      credit.source,
-			}); err != nil {
-				return fmt.Errorf("crew %q: %w", credit.name, err)
-			}
+			credits = append(credits, mediaPersonCreditProjection{
+				PersonID: person.ID, IsCast: credit.isCast, Character: credit.character,
+				DisplayOrder: credit.order, Gender: credit.gender, Source: credit.source,
+				Job: credit.job, Department: credit.department,
+			})
+		}
+		if _, err := q.ReplaceMediaPersonCredits(ctx, sqlc.ReplaceMediaPersonCreditsParams{
+			TargetMediaItemID: mediaItemID,
+			Credits:           mustJSON(credits),
+		}); err != nil {
+			return fmt.Errorf("write cast and crew projection: %w", err)
 		}
 		return nil
 	}
@@ -469,31 +493,118 @@ func (m *Matcher) replaceMediaPersonCredits(ctx context.Context, mediaItemID int
 }
 
 func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *metadata.MediaDetail) error {
+	started := time.Now()
+	identityStarted := time.Now()
 	var re richErrs
 	credits := collectRichPersonCredits(d)
+	canonicalIDs := make([]uuid.UUID, 0, len(credits))
+	seenCanonicalIDs := make(map[uuid.UUID]struct{}, len(credits))
+	for _, credit := range credits {
+		if credit.canonicalID == "" {
+			continue
+		}
+		canonicalID, err := uuid.Parse(credit.canonicalID)
+		if err != nil {
+			re.add(fmt.Errorf("person %q has invalid canonical ID %q: %w", credit.name, credit.canonicalID, err))
+			continue
+		}
+		if _, exists := seenCanonicalIDs[canonicalID]; exists {
+			continue
+		}
+		seenCanonicalIDs[canonicalID] = struct{}{}
+		canonicalIDs = append(canonicalIDs, canonicalID)
+	}
+	peopleByCanonicalID := make(map[uuid.UUID]sqlc.Person, len(canonicalIDs))
+	if len(canonicalIDs) > 0 {
+		people, err := m.q.ListPeopleByCanonicalEntityIDs(ctx, canonicalIDs)
+		if err != nil {
+			return fmt.Errorf("resolve canonical people: %w", err)
+		}
+		for _, person := range people {
+			peopleByCanonicalID[person.EntityID] = sqlc.Person{ID: person.ID, Name: person.Name}
+		}
+	}
+
+	peopleByIdentity := make(map[string]sqlc.Person, len(credits))
+	representatives := make(map[string]richPersonCredit, len(credits))
+	identityKeys := make([]string, 0, len(credits))
+	for _, credit := range credits {
+		identityKey := richPersonIdentityKey(credit)
+		if _, exists := representatives[identityKey]; !exists {
+			representatives[identityKey] = credit
+			identityKeys = append(identityKeys, identityKey)
+		}
+		if canonicalID, err := uuid.Parse(credit.canonicalID); err == nil {
+			if person := peopleByCanonicalID[canonicalID]; person.ID != 0 {
+				peopleByIdentity[identityKey] = person
+			}
+		}
+	}
+	sort.Strings(identityKeys)
+
+	probes := make([]personIdentifierProbe, 0)
+	for _, identityKey := range identityKeys {
+		if peopleByIdentity[identityKey].ID != 0 {
+			continue
+		}
+		for priority, provider := range sortedNonEmptyExternalIDKeys(representatives[identityKey].externalIDs) {
+			probes = append(probes, personIdentifierProbe{
+				IdentityKey: identityKey, Priority: priority, Provider: provider,
+				ProviderID: representatives[identityKey].externalIDs[provider],
+			})
+		}
+	}
+	if len(probes) > 0 {
+		people, err := m.q.ListPeopleByExternalIdentifierProbes(ctx, mustJSON(probes))
+		if err != nil {
+			return fmt.Errorf("resolve people by provider identifiers: %w", err)
+		}
+		for _, person := range people {
+			peopleByIdentity[person.IdentityKey] = sqlc.Person{ID: person.ID, Name: person.Name}
+		}
+	}
+
+	creates := make([]personCreateProjection, 0)
+	for _, identityKey := range identityKeys {
+		if peopleByIdentity[identityKey].ID != 0 {
+			continue
+		}
+		credit := representatives[identityKey]
+		creates = append(creates, personCreateProjection{
+			IdentityKey: identityKey, ExternalIDs: credit.externalIDs,
+			Name: credit.name, Gender: credit.gender, ProfilePath: credit.profilePath,
+			Popularity: credit.popularity,
+		})
+	}
+	if len(creates) > 0 {
+		people, err := m.q.CreatePeopleBulk(ctx, mustJSON(creates))
+		if err != nil {
+			return fmt.Errorf("create canonical people: %w", err)
+		}
+		for _, person := range people {
+			peopleByIdentity[person.IdentityKey] = sqlc.Person{ID: person.ID, Name: person.Name}
+		}
+	}
+
 	resolved := make([]resolvedPersonCredit, 0, len(credits))
 	for _, credit := range credits {
 		if re.stopIfDone(ctx) {
 			return re.result()
 		}
-		person, err := m.findOrCreatePerson(ctx, credit.name, credit.externalIDs, credit.gender, credit.profilePath, credit.popularity)
-		if err != nil {
-			if m.richFailure(&re, fmt.Errorf("resolve person %q: %w", credit.name, err)) {
-				return re.result()
-			}
-			continue
-		}
+		person := peopleByIdentity[richPersonIdentityKey(credit)]
 		if person.ID == 0 {
 			re.misses++
 			continue
 		}
 		resolved = append(resolved, resolvedPersonCredit{credit: credit, person: person})
 	}
+	identityDuration := time.Since(identityStarted)
 
 	// Resolve first, then acquire every shared person/profile/binding row in
 	// ascending local person ID order. Local IDs are the actual PostgreSQL lock
 	// keys, making this robust even when two payloads describe the same person
 	// with different roles or identifier subsets.
+	personProjectionStarted := time.Now()
 	sortResolvedPersonCredits(resolved)
 	writes := make([]*richPersonWrite, 0, len(resolved))
 	for _, item := range resolved {
@@ -507,7 +618,7 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 		} else {
 			write = writes[len(writes)-1]
 		}
-		if item.credit.canonicalID != "" {
+		if _, err := uuid.Parse(item.credit.canonicalID); err == nil {
 			write.canonicalIDs[item.credit.canonicalID] = struct{}{}
 		}
 		for index, profile := range item.credit.profiles {
@@ -520,6 +631,7 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 		}
 	}
 
+	bindings := make([]metadataEntityBindingProjection, 0, len(writes))
 	for _, write := range writes {
 		profileURLs := make([]string, 0, len(write.profiles))
 		for url := range write.profiles {
@@ -545,23 +657,36 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 			canonicalIDs = append(canonicalIDs, id)
 		}
 		sort.Strings(canonicalIDs)
-		for _, canonicalID := range canonicalIDs {
-			if err := m.bindCanonical(ctx, "person", write.person.ID, canonicalID, "person", 1, 0); err != nil {
-				if m.richFailure(&re, fmt.Errorf("bind person %q: %w", write.person.Name, err)) {
-					return re.result()
-				}
+		if len(canonicalIDs) > 0 {
+			// A local person has one canonical identity. Sorting above preserves
+			// the legacy deterministic winner if malformed input supplies more.
+			bindings = append(bindings, metadataEntityBindingProjection{
+				LocalKind: "person", LocalID: write.person.ID,
+				EntityID: canonicalIDs[len(canonicalIDs)-1], EntityKind: "person",
+				SchemaVersion: 1,
+			})
+		}
+	}
+	if len(bindings) > 0 {
+		if err := m.q.UpsertMetadataEntityBindings(ctx, mustJSON(bindings)); err != nil {
+			if m.richFailure(&re, fmt.Errorf("bind canonical people: %w", err)) {
+				return re.result()
 			}
 		}
 	}
+	personProjectionDuration := time.Since(personProjectionStarted)
 
 	// Do not destroy the prior complete projection when even one current person
 	// failed to resolve, profile, or bind. The caller will retry this component.
 	if err := re.result(); err != nil {
 		return err
 	}
+	creditStarted := time.Now()
 	if err := m.replaceMediaPersonCredits(ctx, mediaItemID, resolved); err != nil {
 		return fmt.Errorf("replace cast and crew: %w", err)
 	}
+	creditDuration := time.Since(creditStarted)
+	extrasStarted := time.Now()
 
 	seenKeywords := map[string]bool{}
 	for _, k := range d.Keywords {
@@ -768,37 +893,14 @@ func (m *Matcher) storeRichMetadata(ctx context.Context, mediaItemID int64, d *m
 		Int("recs", len(d.Recommendations)).
 		Int("titles", len(d.Titles)).
 		Int("overviews", len(d.Overviews)).
+		Dur("identity_duration", identityDuration).
+		Dur("person_projection_duration", personProjectionDuration).
+		Dur("credit_duration", creditDuration).
+		Dur("extras_duration", time.Since(extrasStarted)).
+		Dur("duration", time.Since(started)).
 		Msg("stored rich metadata")
 
 	return re.result()
-}
-
-func (m *Matcher) findOrCreatePerson(ctx context.Context, name string, externalIDs map[string]string, gender int, profilePath string, popularity float64) (sqlc.Person, error) {
-	for _, key := range sortedNonEmptyExternalIDKeys(externalIDs) {
-		probe := mustJSON(map[string]string{key: externalIDs[key]})
-		existing, err := m.q.FindPersonByExternalID(ctx, probe)
-		switch {
-		case err == nil:
-			return existing, nil
-		case errors.Is(err, pgx.ErrNoRows):
-			continue
-		default:
-			return sqlc.Person{}, err
-		}
-	}
-
-	created, err := m.q.CreatePerson(ctx, sqlc.CreatePersonParams{
-		ExternalIds: mustJSON(externalIDs),
-		Name:        name,
-		AlsoKnownAs: []string{},
-		Gender:      int32(gender),
-		ProfilePath: profilePath,
-		Popularity:  numericFromFloat(popularity),
-	})
-	if err != nil {
-		return sqlc.Person{}, err
-	}
-	return created, nil
 }
 
 func sortResolvedPersonCredits(resolved []resolvedPersonCredit) {
@@ -931,6 +1033,52 @@ func (m *Matcher) createTVSeries(ctx context.Context, mediaItemID int64, d *meta
 	}
 	m.linkCreators(ctx, series.ID, d.CreatedBy)
 
+	type seasonProjection struct {
+		SeasonNumber  int               `json:"season_number"`
+		Title         string            `json:"title"`
+		Overview      string            `json:"overview"`
+		PosterPath    string            `json:"poster_path"`
+		AirDate       string            `json:"air_date"`
+		EndDate       string            `json:"end_date"`
+		Status        string            `json:"status"`
+		AiredEpisodes int               `json:"aired_episodes"`
+		ExternalIDs   map[string]string `json:"external_ids"`
+		CanonicalID   string            `json:"canonical_id"`
+	}
+	type episodeProjection struct {
+		SeasonNumber   int               `json:"season_number"`
+		EpisodeNumber  int               `json:"episode_number"`
+		Title          string            `json:"title"`
+		Overview       string            `json:"overview"`
+		StillPath      string            `json:"still_path"`
+		RuntimeMinutes int               `json:"runtime_minutes"`
+		AirDate        string            `json:"air_date"`
+		Rating         float64           `json:"rating"`
+		AbsoluteNumber int               `json:"absolute_number"`
+		IsSpecial      bool              `json:"is_special"`
+		EpisodeType    int               `json:"episode_type"`
+		ExternalIDs    map[string]string `json:"external_ids"`
+		Source         string            `json:"source"`
+		CanonicalID    string            `json:"canonical_id"`
+	}
+	type episodeTitleProjection struct {
+		SeasonNumber  int    `json:"season_number"`
+		EpisodeNumber int    `json:"episode_number"`
+		Title         string `json:"title"`
+		Language      string `json:"language"`
+		Source        string `json:"source"`
+	}
+	type episodeOverviewProjection struct {
+		SeasonNumber  int    `json:"season_number"`
+		EpisodeNumber int    `json:"episode_number"`
+		Language      string `json:"language"`
+		Overview      string `json:"overview"`
+	}
+
+	seasons := make([]seasonProjection, 0, len(d.Seasons))
+	episodes := make([]episodeProjection, 0, d.NumberOfEpisodes)
+	titles := make([]episodeTitleProjection, 0)
+	overviews := make([]episodeOverviewProjection, 0)
 	for _, sd := range d.Seasons {
 		seasonExtIDs := map[string]string{}
 		if sd.TmdbSeasonID != 0 {
@@ -942,31 +1090,12 @@ func (m *Matcher) createTVSeries(ctx context.Context, mediaItemID int64, d *meta
 		if sd.AnidbID != 0 {
 			seasonExtIDs["anidb"] = fmt.Sprintf("%d", sd.AnidbID)
 		}
-
-		season, err := m.q.CreateTVSeason(ctx, sqlc.CreateTVSeasonParams{
-			SeriesID:      series.ID,
-			SeasonNumber:  int32(sd.Number),
-			Title:         sd.Title,
-			Overview:      sd.Overview,
-			PosterPath:    sd.PosterURL,
-			AirDate:       pgDateFromString(sd.AirDate),
-			EndDate:       pgDateFromString(sd.EndDate),
-			Status:        sd.Status,
-			AiredEpisodes: int32(sd.AiredEpisodes),
-			ExternalIds:   mustJSON(seasonExtIDs),
+		seasons = append(seasons, seasonProjection{
+			SeasonNumber: sd.Number, Title: sd.Title, Overview: sd.Overview,
+			PosterPath: sd.PosterURL, AirDate: sd.AirDate, EndDate: sd.EndDate,
+			Status: sd.Status, AiredEpisodes: sd.AiredEpisodes,
+			ExternalIDs: seasonExtIDs, CanonicalID: sd.CanonicalID,
 		})
-		// DO NOTHING → no row when the season already exists; recover its id so
-		// new episodes can still be attached under it.
-		if errors.Is(err, pgx.ErrNoRows) {
-			season, err = m.q.GetTVSeason(ctx, sqlc.GetTVSeasonParams{SeriesID: series.ID, SeasonNumber: int32(sd.Number)})
-		}
-		if err != nil {
-			log.Warn().Err(err).Int("season", sd.Number).Msg("error creating season")
-			continue
-		}
-		if err := m.bindCanonical(ctx, "tv_season", season.ID, sd.CanonicalID, "season", d.SchemaVersion, d.ProjectionVersion); err != nil {
-			log.Warn().Err(err).Int64("season_id", season.ID).Msg("bind canonical TV season")
-		}
 
 		for _, ep := range sd.Episodes {
 			epExtIDs := map[string]string{}
@@ -976,50 +1105,34 @@ func (m *Matcher) createTVSeries(ctx context.Context, mediaItemID int64, d *meta
 			if ep.TvdbID != 0 {
 				epExtIDs["tvdb"] = fmt.Sprintf("%d", ep.TvdbID)
 			}
-
-			tvEp, err := m.q.CreateTVEpisode(ctx, sqlc.CreateTVEpisodeParams{
-				SeasonID:       season.ID,
-				EpisodeNumber:  int32(ep.Number),
-				Title:          ep.Title,
-				Overview:       ep.Overview,
-				StillPath:      ep.StillURL,
-				RuntimeMinutes: int32(ep.RuntimeMinutes),
-				AirDate:        pgDateFromString(ep.AirDate),
-				Rating:         numericFromFloat(ep.Rating),
-				AbsoluteNumber: int32(ep.AbsoluteNumber),
-				IsSpecial:      ep.IsSpecial,
-				EpisodeType:    int32(ep.EpisodeType),
-				ExternalIds:    mustJSON(epExtIDs),
-				Source:         ep.Source,
+			episodes = append(episodes, episodeProjection{
+				SeasonNumber: sd.Number, EpisodeNumber: ep.Number, Title: ep.Title,
+				Overview: ep.Overview, StillPath: ep.StillURL,
+				RuntimeMinutes: ep.RuntimeMinutes, AirDate: ep.AirDate, Rating: ep.Rating,
+				AbsoluteNumber: ep.AbsoluteNumber, IsSpecial: ep.IsSpecial,
+				EpisodeType: ep.EpisodeType, ExternalIDs: epExtIDs, Source: ep.Source,
+				CanonicalID: ep.CanonicalID,
 			})
-			// DO NOTHING → episode already exists; preserve it (incl. user edits)
-			// and skip its title/overview re-insert below.
-			if errors.Is(err, pgx.ErrNoRows) {
-				tvEp, err = m.q.GetTVEpisode(ctx, sqlc.GetTVEpisodeParams{SeasonID: season.ID, EpisodeNumber: int32(ep.Number)})
-			}
-			if err != nil {
-				log.Warn().Err(err).Int("episode", ep.Number).Msg("error creating episode")
-				continue
-			}
-			if err := m.bindCanonical(ctx, "tv_episode", tvEp.ID, ep.CanonicalID, "episode", d.SchemaVersion, d.ProjectionVersion); err != nil {
-				log.Warn().Err(err).Int64("episode_id", tvEp.ID).Msg("bind canonical TV episode")
-			}
 			for _, t := range ep.Titles {
-				m.q.CreateEpisodeTitle(ctx, sqlc.CreateEpisodeTitleParams{
-					EpisodeID: tvEp.ID,
-					Title:     t.Title,
-					Language:  t.Language,
-					Source:    t.Source,
+				titles = append(titles, episodeTitleProjection{
+					SeasonNumber: sd.Number, EpisodeNumber: ep.Number,
+					Title: t.Title, Language: t.Language, Source: t.Source,
 				})
 			}
 			for lang, text := range ep.Overviews {
-				m.q.CreateEpisodeOverview(ctx, sqlc.CreateEpisodeOverviewParams{
-					EpisodeID: tvEp.ID,
-					Language:  lang,
-					Overview:  text,
+				overviews = append(overviews, episodeOverviewProjection{
+					SeasonNumber: sd.Number, EpisodeNumber: ep.Number,
+					Language: lang, Overview: text,
 				})
 			}
 		}
+	}
+	if _, err := m.q.PersistTVStructure(ctx, sqlc.PersistTVStructureParams{
+		SeriesID: series.ID, SchemaVersion: int32(d.SchemaVersion),
+		ProjectionVersion: d.ProjectionVersion, Seasons: mustJSON(seasons),
+		Episodes: mustJSON(episodes), Titles: mustJSON(titles), Overviews: mustJSON(overviews),
+	}); err != nil {
+		return fmt.Errorf("persist TV structure: %w", err)
 	}
 
 	return nil

@@ -66,6 +66,115 @@ WHERE id = ANY(@person_ids::bigint[])
 ORDER BY id
 FOR UPDATE;
 
+-- name: ListPeopleByCanonicalEntityIDs :many
+-- Canonical Heya IDs are the strongest identity available. Resolve every
+-- person in one round trip before falling back to provider-ID probes. Old
+-- databases may contain duplicate canonical person bindings, so choose the
+-- oldest local row deterministically until the merge/backfill has folded them.
+SELECT DISTINCT ON (binding.entity_id)
+       binding.entity_id, person.id, person.name
+FROM metadata_entity_bindings binding
+JOIN people person
+  ON binding.local_kind = 'person' AND person.id = binding.local_id
+WHERE binding.entity_id = ANY(sqlc.arg(entity_ids)::uuid[])
+ORDER BY binding.entity_id, person.id;
+
+-- name: ListPeopleByExternalIdentifierProbes :many
+-- Resolve all fallback provider identifiers in one indexed query. Priority is
+-- the stable provider-key order used by the legacy resolver, so ambiguous old
+-- rows retain deterministic behaviour while avoiding one round trip per ID.
+WITH input AS MATERIALIZED (
+    SELECT COALESCE(value->>'identity_key', '') AS identity_key,
+           COALESCE((value->>'priority')::integer, 0) AS priority,
+           COALESCE(value->>'provider', '') AS provider,
+           COALESCE(value->>'provider_id', '') AS provider_id
+    FROM jsonb_array_elements(sqlc.arg(probes)::jsonb) AS value
+)
+SELECT DISTINCT ON (input.identity_key)
+       input.identity_key::text AS identity_key, person.id, person.name
+FROM input
+JOIN people person
+  ON person.external_ids @> jsonb_build_object(input.provider, input.provider_id)
+WHERE input.provider <> '' AND input.provider_id <> ''
+ORDER BY input.identity_key, input.priority, person.id;
+
+-- name: CreatePeopleBulk :many
+-- Reserve generated identity values in the materialized input so RETURNING can
+-- be joined back to the caller's opaque identity key. This keeps first-time
+-- ingestion set-based even when a large title introduces thousands of people.
+WITH input AS MATERIALIZED (
+    SELECT COALESCE(value->>'identity_key', '') AS identity_key,
+           nextval(pg_get_serial_sequence('people', 'id'))::bigint AS id,
+           CASE
+             WHEN jsonb_typeof(value->'external_ids') = 'object' THEN value->'external_ids'
+             ELSE '{}'::jsonb
+           END AS external_ids,
+           COALESCE(value->>'name', '') AS name,
+           COALESCE((value->>'gender')::integer, 0) AS gender,
+           COALESCE(value->>'profile_path', '') AS profile_path,
+           COALESCE((value->>'popularity')::numeric, 0) AS popularity
+    FROM jsonb_array_elements(sqlc.arg(people)::jsonb) AS value
+), inserted AS (
+    INSERT INTO people (
+        id, external_ids, name, also_known_as, gender, profile_path, popularity
+    ) OVERRIDING SYSTEM VALUE
+    SELECT id, external_ids, name, '{}'::text[], gender, profile_path, popularity
+    FROM input
+    RETURNING id, name
+)
+SELECT input.identity_key::text AS identity_key, inserted.id, inserted.name
+FROM inserted
+JOIN input USING (id)
+ORDER BY input.identity_key;
+
+-- name: ReplaceMediaPersonCredits :one
+-- Replace the complete cast/crew projection with two set-based inserts. The
+-- deletions and inserts share one statement and are ordered through the
+-- deletion_counts dependency, avoiding both partial projections and one SQL
+-- round trip per credit.
+WITH input AS MATERIALIZED (
+    SELECT (value->>'person_id')::bigint AS person_id,
+           COALESCE((value->>'is_cast')::boolean, false) AS is_cast,
+           COALESCE(value->>'character', '') AS character,
+           COALESCE((value->>'display_order')::integer, 0) AS display_order,
+           COALESCE((value->>'gender')::integer, 0) AS gender,
+           COALESCE(value->>'source', '') AS source,
+           COALESCE(value->>'job', '') AS job,
+           COALESCE(value->>'department', '') AS department
+    FROM jsonb_array_elements(sqlc.arg(credits)::jsonb) AS value
+), deleted_cast AS (
+    DELETE FROM media_cast WHERE media_cast.media_item_id = sqlc.arg(target_media_item_id)
+    RETURNING 1
+), deleted_crew AS (
+    DELETE FROM media_crew WHERE media_crew.media_item_id = sqlc.arg(target_media_item_id)
+    RETURNING 1
+), deletion_counts AS MATERIALIZED (
+    SELECT (SELECT count(*) FROM deleted_cast) AS cast_count,
+           (SELECT count(*) FROM deleted_crew) AS crew_count
+), inserted_cast AS (
+    INSERT INTO media_cast (
+        media_item_id, person_id, character, display_order, gender, source
+    )
+    SELECT sqlc.arg(target_media_item_id), input.person_id, input.character,
+           input.display_order, input.gender, input.source
+    FROM input CROSS JOIN deletion_counts
+    WHERE input.is_cast
+    ON CONFLICT (media_item_id, person_id, character) DO NOTHING
+    RETURNING 1
+), inserted_crew AS (
+    INSERT INTO media_crew (
+        media_item_id, person_id, job, department, gender, source
+    )
+    SELECT sqlc.arg(target_media_item_id), input.person_id, input.job,
+           input.department, input.gender, input.source
+    FROM input CROSS JOIN deletion_counts
+    WHERE NOT input.is_cast
+    ON CONFLICT (media_item_id, person_id, job) DO NOTHING
+    RETURNING 1
+)
+SELECT (SELECT count(*) FROM inserted_cast)::bigint AS cast_count,
+       (SELECT count(*) FROM inserted_crew)::bigint AS crew_count;
+
 -- name: GetPersonBySlug :one
 SELECT * FROM people WHERE slug = $1;
 

@@ -19,7 +19,7 @@ var (
 	testUserOnce sync.Once
 )
 
-func DatabaseURL(t *testing.T) string {
+func DatabaseURL(t testing.TB) string {
 	t.Helper()
 	url := os.Getenv("DATABASE_URL")
 	if url == "" {
@@ -28,7 +28,7 @@ func DatabaseURL(t *testing.T) string {
 	return url
 }
 
-func SetupDB(t *testing.T) *pgxpool.Pool {
+func SetupDB(t testing.TB) *pgxpool.Pool {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
@@ -61,7 +61,7 @@ func SetupDB(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-func TestUserID(t *testing.T, pool *pgxpool.Pool) int64 {
+func TestUserID(t testing.TB, pool *pgxpool.Pool) int64 {
 	t.Helper()
 	testUserOnce.Do(func() {
 		ctx := context.Background()
@@ -78,7 +78,7 @@ func TestUserID(t *testing.T, pool *pgxpool.Pool) int64 {
 	return testUserID
 }
 
-func CleanupLibrary(t *testing.T, pool *pgxpool.Pool, libraryID int64) {
+func CleanupLibrary(t testing.TB, pool *pgxpool.Pool, libraryID int64) {
 	t.Helper()
 	ctx := context.Background()
 	pool.Exec(ctx, "DELETE FROM library_files WHERE library_id = $1", libraryID)

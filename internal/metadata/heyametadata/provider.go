@@ -773,14 +773,57 @@ func (p *HeyaProvider) getDetailByEntity(ctx context.Context, entityID string, o
 	if err != nil {
 		return nil, err
 	}
+
+	// Entity detail determines the canonical kind; the remaining resources are
+	// independent read projections. Fetch them concurrently so a large credit
+	// list does not sit serially in front of image selection (or an issued
+	// release) on every scan.
+	sideCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type imagesResult struct {
+		value *gen.EntityImagesOutputBody
+		err   error
+	}
+	imagesCh := make(chan imagesResult, 1)
+	go func() {
+		value, fetchErr := p.client.Images(sideCtx, detail.CanonicalID, language, country, p.credentials)
+		imagesCh <- imagesResult{value: value, err: fetchErr}
+	}()
+
+	type creditsResult struct {
+		value []credit
+		err   error
+	}
+	var creditsCh chan creditsResult
+	if detail.CanonicalKind == "movie" || detail.CanonicalKind == "tv_show" || detail.CanonicalKind == "anime" {
+		creditsCh = make(chan creditsResult, 1)
+		go func() {
+			value, fetchErr := p.client.Credits(sideCtx, detail.CanonicalID, p.credentials)
+			creditsCh <- creditsResult{value: value, err: fetchErr}
+		}()
+	}
+
+	type editionResult struct {
+		value *releaseDocument
+		err   error
+	}
+	var editionCh chan editionResult
 	if detail.CanonicalKind == "release_group" && len(detail.Albums) > 0 {
-		edition, editionErr := p.firstIssuedRelease(ctx, detail.CanonicalID)
-		if editionErr != nil {
-			return nil, editionErr
+		editionCh = make(chan editionResult, 1)
+		go func() {
+			value, fetchErr := p.firstIssuedRelease(sideCtx, detail.CanonicalID)
+			editionCh <- editionResult{value: value, err: fetchErr}
+		}()
+	}
+
+	if editionCh != nil {
+		edition := <-editionCh
+		if edition.err != nil {
+			return nil, edition.err
 		}
-		if edition != nil {
+		if edition.value != nil {
 			album := detail.Albums[0]
-			mergeIssuedRelease(&album, *edition)
+			mergeIssuedRelease(&album, *edition.value)
 			detail.Albums[0] = album
 			detail.Tracks = album.Tracks
 			detail.TotalDiscs = musicAlbumDiscCount(album.Tracks)
@@ -790,18 +833,18 @@ func (p *HeyaProvider) getDetailByEntity(ctx context.Context, entityID string, o
 			detail.CoverURL = firstNonEmpty(album.CoverURL, detail.CoverURL)
 		}
 	}
-	if detail.CanonicalKind == "movie" || detail.CanonicalKind == "tv_show" || detail.CanonicalKind == "anime" {
-		credits, creditsErr := p.client.Credits(ctx, detail.CanonicalID, p.credentials)
-		if creditsErr != nil {
-			return nil, creditsErr
+	if creditsCh != nil {
+		credits := <-creditsCh
+		if credits.err != nil {
+			return nil, credits.err
 		}
-		detail.Cast, detail.Crew = p.mapCredits(credits)
+		detail.Cast, detail.Crew = p.mapCredits(credits.value)
 	}
-	images, imagesErr := p.client.Images(ctx, detail.CanonicalID, language, country, p.credentials)
-	if imagesErr != nil {
-		return nil, imagesErr
+	images := <-imagesCh
+	if images.err != nil {
+		return nil, images.err
 	}
-	p.applyCanonicalImages(detail, images)
+	p.applyCanonicalImages(detail, images.value)
 	return detail, nil
 }
 

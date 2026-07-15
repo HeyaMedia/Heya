@@ -84,7 +84,22 @@ type Change struct {
 
 type ChangePage struct {
 	Entries    []Change
+	StreamID   string
+	HeadCursor int64
 	NextCursor int64
+}
+
+// ChangeStreamConflict tells a durable consumer that its saved cursor cannot
+// safely continue against the current HeyaMetadata database. The caller must
+// adopt StreamID, reset to cursor zero, and replay idempotently.
+type ChangeStreamConflict struct {
+	Code       string
+	StreamID   string
+	HeadCursor int64
+}
+
+func (e *ChangeStreamConflict) Error() string {
+	return fmt.Sprintf("heyametadata change stream conflict %s (stream %s, head %d)", e.Code, e.StreamID, e.HeadCursor)
 }
 
 // RecordingLyrics is the provider-transparent lyric evidence Heya needs for
@@ -97,20 +112,45 @@ type RecordingLyrics struct {
 	Instrumental bool
 }
 
-func (c *Client) Changes(ctx context.Context, after, limit int64) (ChangePage, error) {
-	response, err := c.gen.PublicChangesWithResponse(ctx, &gen.PublicChangesParams{After: &after, Limit: &limit})
+func (c *Client) Changes(ctx context.Context, after, limit int64, streamID string) (ChangePage, error) {
+	params := &gen.PublicChangesParams{After: &after, Limit: &limit}
+	if strings.TrimSpace(streamID) != "" {
+		id, err := uuid.Parse(streamID)
+		if err != nil {
+			return ChangePage{}, fmt.Errorf("read metadata changes: invalid stream ID %q: %w", streamID, err)
+		}
+		params.StreamId = &id
+	}
+	response, err := c.gen.PublicChangesWithResponse(ctx, params)
 	if err != nil {
 		return ChangePage{}, fmt.Errorf("read metadata changes after %d: %w", after, err)
+	}
+	if response.StatusCode() == http.StatusConflict && response.ApplicationproblemJSON409 != nil {
+		problem := response.ApplicationproblemJSON409
+		code := ""
+		if problem.Code != nil {
+			code = *problem.Code
+		}
+		if code == "change_cursor_ahead" || code == "change_stream_changed" {
+			conflict := &ChangeStreamConflict{Code: code}
+			if problem.StreamId != nil {
+				conflict.StreamID = problem.StreamId.String()
+			}
+			if problem.HeadCursor != nil {
+				conflict.HeadCursor = *problem.HeadCursor
+			}
+			return ChangePage{}, conflict
+		}
 	}
 	if response.StatusCode() != http.StatusOK || response.JSON200 == nil {
 		return ChangePage{}, responseError("read metadata changes", response.StatusCode(), response.Body)
 	}
-	page := ChangePage{NextCursor: response.JSON200.NextCursor}
-	if response.JSON200.Entries == nil {
-		return page, nil
+	page := ChangePage{
+		StreamID: response.JSON200.StreamId.String(), HeadCursor: response.JSON200.HeadCursor,
+		NextCursor: response.JSON200.NextCursor,
 	}
-	page.Entries = make([]Change, 0, len(*response.JSON200.Entries))
-	for _, entry := range *response.JSON200.Entries {
+	page.Entries = make([]Change, 0, len(response.JSON200.Entries))
+	for _, entry := range response.JSON200.Entries {
 		var scopes []string
 		if entry.ChangedScopes != nil {
 			scopes = append(scopes, (*entry.ChangedScopes)...)
@@ -187,7 +227,7 @@ func (c *Client) Credits(ctx context.Context, entityID string, credentials Provi
 	if err != nil {
 		return nil, fmt.Errorf("heyametadata credits: invalid UUID %q: %w", entityID, err)
 	}
-	const pageSize = int64(250)
+	const pageSize = int64(5000)
 	var result []credit
 	for offset := int64(0); ; {
 		limit := pageSize

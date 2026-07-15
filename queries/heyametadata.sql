@@ -14,6 +14,35 @@ ON CONFLICT (local_kind, local_id) DO UPDATE SET
   updated_at = now()
 RETURNING *;
 
+-- name: UpsertMetadataEntityBindings :exec
+-- Batch canonical bindings created while materializing rich metadata. One
+-- local row can only bind to one canonical entity; a changed entity resets the
+-- projection version while a refresh of the same entity advances it.
+WITH input AS MATERIALIZED (
+  SELECT COALESCE(value->>'local_kind', '') AS local_kind,
+         (value->>'local_id')::bigint AS local_id,
+         (value->>'entity_id')::uuid AS entity_id,
+         COALESCE(value->>'entity_kind', '') AS entity_kind,
+         COALESCE((value->>'schema_version')::integer, 1) AS schema_version,
+         COALESCE((value->>'projection_version')::bigint, 0) AS projection_version
+  FROM jsonb_array_elements(sqlc.arg(bindings)::jsonb) AS value
+)
+INSERT INTO metadata_entity_bindings (
+  local_kind, local_id, entity_id, entity_kind, schema_version, projection_version
+)
+SELECT local_kind, local_id, entity_id, entity_kind, schema_version, projection_version
+FROM input
+ON CONFLICT (local_kind, local_id) DO UPDATE SET
+  entity_id = EXCLUDED.entity_id,
+  entity_kind = EXCLUDED.entity_kind,
+  schema_version = EXCLUDED.schema_version,
+  projection_version = CASE
+    WHEN metadata_entity_bindings.entity_id = EXCLUDED.entity_id
+      THEN GREATEST(metadata_entity_bindings.projection_version, EXCLUDED.projection_version)
+    ELSE EXCLUDED.projection_version
+  END,
+  updated_at = now();
+
 -- name: GetMetadataEntityBinding :one
 SELECT *
 FROM metadata_entity_bindings
@@ -36,6 +65,53 @@ SELECT *
 FROM metadata_entity_bindings
 WHERE entity_id = $1
 ORDER BY local_kind, local_id;
+
+-- name: ListMetadataChangeTargetsByEntities :many
+-- Resolve a complete change-feed page to refresh targets in one round trip.
+-- One canonical author may own multiple local books, hence UNION ALL rather
+-- than a scalar CASE. The worker deduplicates final target IDs across pages.
+WITH bindings AS (
+  SELECT entity_id, local_kind, local_id, projection_version
+  FROM metadata_entity_bindings
+  WHERE entity_id = ANY(sqlc.arg(entity_ids)::uuid[])
+)
+SELECT entity_id, projection_version, 'person'::text AS target_kind, local_id AS target_id
+FROM bindings
+WHERE local_kind = 'person'
+UNION ALL
+SELECT entity_id, projection_version, 'media_item', local_id
+FROM bindings
+WHERE local_kind = 'media_item'
+UNION ALL
+SELECT binding.entity_id, binding.projection_version, 'media_item', artist.media_item_id
+FROM bindings binding JOIN artists artist ON binding.local_kind = 'artist' AND artist.id = binding.local_id
+UNION ALL
+SELECT binding.entity_id, binding.projection_version, 'media_item', artist.media_item_id
+FROM bindings binding
+JOIN albums album ON binding.local_kind = 'album' AND album.id = binding.local_id
+JOIN artists artist ON artist.id = album.artist_id
+UNION ALL
+SELECT binding.entity_id, binding.projection_version, 'media_item', artist.media_item_id
+FROM bindings binding
+JOIN tracks track ON binding.local_kind = 'track' AND track.id = binding.local_id
+JOIN albums album ON album.id = track.album_id
+JOIN artists artist ON artist.id = album.artist_id
+UNION ALL
+SELECT binding.entity_id, binding.projection_version, 'media_item', series.media_item_id
+FROM bindings binding
+JOIN tv_seasons season ON binding.local_kind = 'tv_season' AND season.id = binding.local_id
+JOIN tv_series series ON series.id = season.series_id
+UNION ALL
+SELECT binding.entity_id, binding.projection_version, 'media_item', series.media_item_id
+FROM bindings binding
+JOIN tv_episodes episode ON binding.local_kind = 'tv_episode' AND episode.id = binding.local_id
+JOIN tv_seasons season ON season.id = episode.season_id
+JOIN tv_series series ON series.id = season.series_id
+UNION ALL
+SELECT binding.entity_id, binding.projection_version, 'media_item', book.media_item_id
+FROM bindings binding
+JOIN books book ON binding.local_kind = 'author' AND book.author_id = binding.local_id
+ORDER BY entity_id, target_kind, target_id;
 
 -- name: ListMetadataBindingsByLocalIDs :many
 SELECT *
@@ -106,13 +182,26 @@ WHERE request_key = $1
 RETURNING *;
 
 -- name: GetMetadataChangeCursor :one
-SELECT next_cursor
+SELECT next_cursor, stream_id
 FROM metadata_change_consumers
 WHERE consumer = $1;
 
 -- name: CommitMetadataChangeCursor :exec
-INSERT INTO metadata_change_consumers (consumer, next_cursor)
-VALUES ($1, $2)
+INSERT INTO metadata_change_consumers (consumer, next_cursor, stream_id)
+VALUES ($1, $2, $3)
 ON CONFLICT (consumer) DO UPDATE SET
-  next_cursor = GREATEST(metadata_change_consumers.next_cursor, EXCLUDED.next_cursor),
+  next_cursor = CASE
+    WHEN metadata_change_consumers.stream_id IS NOT DISTINCT FROM EXCLUDED.stream_id
+      THEN GREATEST(metadata_change_consumers.next_cursor, EXCLUDED.next_cursor)
+    ELSE EXCLUDED.next_cursor
+  END,
+  stream_id = EXCLUDED.stream_id,
+  updated_at = now();
+
+-- name: ResetMetadataChangeCursor :exec
+INSERT INTO metadata_change_consumers (consumer, next_cursor, stream_id)
+VALUES ($1, 0, $2)
+ON CONFLICT (consumer) DO UPDATE SET
+  next_cursor = 0,
+  stream_id = EXCLUDED.stream_id,
   updated_at = now();

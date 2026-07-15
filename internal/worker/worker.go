@@ -188,7 +188,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			"process_scan":         {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},         // local analysis + search; scoped for watcher-triggered folders
 			"fetch_metadata":       {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},       // remote metadata fetch from persisted search artifact
 			"apply_metadata":       {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},       // materialize + apply from persisted fetch artifact
-			"apply_rich_metadata":  {MaxWorkers: queueWorkers(cfg, "apply_rich_metadata", 1)},  // slow rich side-data from persisted fetch artifact; keep off the critical apply path
+			"apply_rich_metadata":  {MaxWorkers: queueWorkers(cfg, "apply_rich_metadata", 4)},  // local set-based projection writes; shared people are locked canonically and concurrency-tested
 			"ffprobe":              {MaxWorkers: queueWorkers(cfg, "ffprobe", 1)},
 			"detect_local_assets":  {MaxWorkers: queueWorkers(cfg, "detect_local_assets", 1)},
 

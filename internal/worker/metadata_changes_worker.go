@@ -2,10 +2,12 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
@@ -19,7 +21,7 @@ const (
 )
 
 type metadataChangeSource interface {
-	Changes(context.Context, int64, int64) (heyametadata.ChangePage, error)
+	Changes(context.Context, int64, int64, string) (heyametadata.ChangePage, error)
 }
 
 // SyncMetadataChangesWorker consumes HeyaMetadata's gap-free sequence and
@@ -42,9 +44,15 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 	}
 
 	q := sqlc.New(w.DB)
-	cursor, err := q.GetMetadataChangeCursor(ctx, metadataChangeConsumer)
+	consumer, err := q.GetMetadataChangeCursor(ctx, metadataChangeConsumer)
 	if err != nil {
 		return fmt.Errorf("read metadata change cursor: %w", err)
+	}
+	cursor := consumer.NextCursor
+	streamID := metadataChangeStreamString(consumer.StreamID)
+	if streamID == "" && cursor != 0 {
+		log.Warn().Int64("old_cursor", cursor).Msg("heyametadata legacy cursor has no stream identity; replaying from zero")
+		cursor = 0
 	}
 	seenMedia := make(map[int64]struct{})
 	seenPeople := make(map[int64]struct{})
@@ -52,9 +60,39 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 	backfillChecked := false
 
 	for {
-		page, err := w.Source.Changes(ctx, cursor, metadataChangePageSize)
+		page, err := w.Source.Changes(ctx, cursor, metadataChangePageSize, streamID)
+		if err != nil {
+			var conflict *heyametadata.ChangeStreamConflict
+			if errors.As(err, &conflict) {
+				stream, parseErr := metadataChangeStreamUUID(conflict.StreamID)
+				if parseErr != nil {
+					return fmt.Errorf("reset metadata change cursor: %w", parseErr)
+				}
+				if resetErr := q.ResetMetadataChangeCursor(ctx, sqlc.ResetMetadataChangeCursorParams{
+					Consumer: metadataChangeConsumer, StreamID: stream,
+				}); resetErr != nil {
+					return fmt.Errorf("reset metadata change cursor: %w", resetErr)
+				}
+				log.Warn().
+					Str("reason", conflict.Code).
+					Str("stream_id", conflict.StreamID).
+					Int64("old_cursor", cursor).
+					Int64("head_cursor", conflict.HeadCursor).
+					Msg("heyametadata change stream reset; replaying from zero")
+				cursor, streamID = 0, conflict.StreamID
+				continue
+			}
+			return err
+		}
+		if page.StreamID == "" {
+			return fmt.Errorf("metadata changes response has no stream ID")
+		}
+		pageStream, err := metadataChangeStreamUUID(page.StreamID)
 		if err != nil {
 			return err
+		}
+		if page.NextCursor > page.HeadCursor {
+			return fmt.Errorf("metadata changes cursor %d exceeds reported head %d", page.NextCursor, page.HeadCursor)
 		}
 		if page.NextCursor < cursor {
 			return fmt.Errorf("metadata changes cursor regressed from %d to %d", cursor, page.NextCursor)
@@ -67,46 +105,63 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 		pageErr := func() error {
 			defer func() { _ = tx.Rollback(ctx) }()
 			qtx := sqlc.New(tx)
+			type pageChange struct {
+				change heyametadata.Change
+				force  bool
+			}
+			changesByEntity := make(map[uuid.UUID]pageChange, len(page.Entries))
+			entityIDs := make([]uuid.UUID, 0, len(page.Entries))
 			for _, change := range page.Entries {
 				entityID, parseErr := uuid.Parse(change.EntityID)
 				if parseErr != nil {
 					return fmt.Errorf("change %d has invalid entity ID %q: %w", change.Sequence, change.EntityID, parseErr)
 				}
-				bindings, listErr := qtx.ListMetadataBindingsByEntity(ctx, entityID)
-				if listErr != nil {
-					return fmt.Errorf("list bindings for metadata change %d: %w", change.Sequence, listErr)
+				state, exists := changesByEntity[entityID]
+				if !exists {
+					entityIDs = append(entityIDs, entityID)
 				}
-				for _, binding := range bindings {
-					if change.ProjectionVersion > 0 && binding.ProjectionVersion >= change.ProjectionVersion && change.ChangeType != "redirected" {
+				state.change = change
+				state.force = state.force || change.ChangeType == "redirected"
+				changesByEntity[entityID] = state
+			}
+
+			targets, listErr := qtx.ListMetadataChangeTargetsByEntities(ctx, entityIDs)
+			if listErr != nil {
+				return fmt.Errorf("resolve metadata change page targets: %w", listErr)
+			}
+			jobs := make([]river.InsertManyParams, 0, len(targets))
+			for _, target := range targets {
+				state := changesByEntity[target.EntityID]
+				change := state.change
+				if change.ProjectionVersion > 0 && target.ProjectionVersion >= change.ProjectionVersion && !state.force {
+					continue
+				}
+				switch target.TargetKind {
+				case "person":
+					if _, exists := seenPeople[target.TargetID]; exists {
 						continue
 					}
-					if binding.LocalKind == "person" {
-						if _, exists := seenPeople[binding.LocalID]; exists {
-							continue
-						}
-						seenPeople[binding.LocalID] = struct{}{}
-						args := PersonFetchArgs{PersonID: binding.LocalID, EntityID: change.EntityID, Force: true}
-						opts := args.InsertOpts()
-						if _, insertErr := rc.InsertTx(ctx, tx, args, &opts); insertErr != nil {
-							return fmt.Errorf("enqueue person %d for metadata change: %w", binding.LocalID, insertErr)
-						}
-						enqueued++
+					seenPeople[target.TargetID] = struct{}{}
+					args := PersonFetchArgs{PersonID: target.TargetID, EntityID: target.EntityID.String(), Force: true}
+					opts := args.InsertOpts()
+					jobs = append(jobs, river.InsertManyParams{Args: args, InsertOpts: &opts})
+				case "media_item":
+					if _, exists := seenMedia[target.TargetID]; exists {
 						continue
 					}
-					mediaIDs, resolveErr := localMediaItemIDs(ctx, tx, binding.LocalKind, binding.LocalID)
-					if resolveErr != nil {
-						return fmt.Errorf("resolve %s %d for metadata change: %w", binding.LocalKind, binding.LocalID, resolveErr)
-					}
-					for _, mediaID := range mediaIDs {
-						if _, exists := seenMedia[mediaID]; exists {
-							continue
-						}
-						seenMedia[mediaID] = struct{}{}
-						args := EnrichMediaItemArgs{ItemID: mediaID, Source: "metadata_change", Force: true}
-						opts := args.InsertOpts()
-						if _, insertErr := rc.InsertTx(ctx, tx, args, &opts); insertErr != nil {
-							return fmt.Errorf("enqueue media item %d for metadata change: %w", mediaID, insertErr)
-						}
+					seenMedia[target.TargetID] = struct{}{}
+					args := EnrichMediaItemArgs{ItemID: target.TargetID, Source: "metadata_change", Force: true}
+					opts := args.InsertOpts()
+					jobs = append(jobs, river.InsertManyParams{Args: args, InsertOpts: &opts})
+				}
+			}
+			if len(jobs) > 0 {
+				results, insertErr := rc.InsertManyTx(ctx, tx, jobs)
+				if insertErr != nil {
+					return fmt.Errorf("enqueue metadata change page: %w", insertErr)
+				}
+				for _, result := range results {
+					if !result.UniqueSkippedAsDuplicate {
 						enqueued++
 					}
 				}
@@ -123,6 +178,7 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 			}
 			if err := qtx.CommitMetadataChangeCursor(ctx, sqlc.CommitMetadataChangeCursorParams{
 				Consumer: metadataChangeConsumer, NextCursor: page.NextCursor,
+				StreamID: pageStream,
 			}); err != nil {
 				return fmt.Errorf("commit metadata change cursor: %w", err)
 			}
@@ -137,6 +193,7 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 
 		pages++
 		changes += len(page.Entries)
+		streamID = page.StreamID
 		if len(page.Entries) < int(metadataChangePageSize) || page.NextCursor == cursor {
 			break
 		}
@@ -147,6 +204,21 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 		log.Info().Int("pages", pages).Int("changes", changes).Int("enqueued", enqueued).Msg("heyametadata change feed synchronized")
 	}
 	return nil
+}
+
+func metadataChangeStreamString(value pgtype.UUID) string {
+	if !value.Valid {
+		return ""
+	}
+	return uuid.UUID(value.Bytes).String()
+}
+
+func metadataChangeStreamUUID(value string) (pgtype.UUID, error) {
+	id, err := uuid.Parse(value)
+	if err != nil {
+		return pgtype.UUID{}, fmt.Errorf("invalid metadata change stream ID %q: %w", value, err)
+	}
+	return pgtype.UUID{Bytes: [16]byte(id), Valid: true}, nil
 }
 
 // enqueueOneMetadataBindingBackfill steadily upgrades pre-V2 libraries
@@ -185,47 +257,4 @@ func enqueueOneMetadataBindingBackfill(ctx context.Context, tx pgx.Tx, rc *river
 		return false, fmt.Errorf("enqueue metadata binding backfill for %d: %w", mediaID, err)
 	}
 	return true, nil
-}
-
-func localMediaItemIDs(ctx context.Context, tx pgx.Tx, localKind string, localID int64) ([]int64, error) {
-	query := ""
-	switch localKind {
-	case "media_item":
-		return []int64{localID}, nil
-	case "artist":
-		query = `SELECT media_item_id FROM artists WHERE id = $1`
-	case "album":
-		query = `SELECT artist.media_item_id FROM albums album JOIN artists artist ON artist.id = album.artist_id WHERE album.id = $1`
-	case "track":
-		query = `SELECT artist.media_item_id FROM tracks track JOIN albums album ON album.id = track.album_id JOIN artists artist ON artist.id = album.artist_id WHERE track.id = $1`
-	case "tv_season":
-		query = `SELECT series.media_item_id FROM tv_seasons season JOIN tv_series series ON series.id = season.series_id WHERE season.id = $1`
-	case "tv_episode":
-		query = `SELECT series.media_item_id FROM tv_episodes episode JOIN tv_seasons season ON season.id = episode.season_id JOIN tv_series series ON series.id = season.series_id WHERE episode.id = $1`
-	case "author":
-		rows, err := tx.Query(ctx, `SELECT media_item_id FROM books WHERE author_id = $1 ORDER BY media_item_id`, localID)
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
-		var result []int64
-		for rows.Next() {
-			var id int64
-			if err := rows.Scan(&id); err != nil {
-				return nil, err
-			}
-			result = append(result, id)
-		}
-		return result, rows.Err()
-	default:
-		return nil, nil
-	}
-	var mediaID int64
-	if err := tx.QueryRow(ctx, query, localID).Scan(&mediaID); err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return []int64{mediaID}, nil
 }

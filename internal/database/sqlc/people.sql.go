@@ -66,6 +66,62 @@ func (q *Queries) CreateMediaCrew(ctx context.Context, arg CreateMediaCrewParams
 	return err
 }
 
+const createPeopleBulk = `-- name: CreatePeopleBulk :many
+WITH input AS MATERIALIZED (
+    SELECT COALESCE(value->>'identity_key', '') AS identity_key,
+           nextval(pg_get_serial_sequence('people', 'id'))::bigint AS id,
+           CASE
+             WHEN jsonb_typeof(value->'external_ids') = 'object' THEN value->'external_ids'
+             ELSE '{}'::jsonb
+           END AS external_ids,
+           COALESCE(value->>'name', '') AS name,
+           COALESCE((value->>'gender')::integer, 0) AS gender,
+           COALESCE(value->>'profile_path', '') AS profile_path,
+           COALESCE((value->>'popularity')::numeric, 0) AS popularity
+    FROM jsonb_array_elements($1::jsonb) AS value
+), inserted AS (
+    INSERT INTO people (
+        id, external_ids, name, also_known_as, gender, profile_path, popularity
+    ) OVERRIDING SYSTEM VALUE
+    SELECT id, external_ids, name, '{}'::text[], gender, profile_path, popularity
+    FROM input
+    RETURNING id, name
+)
+SELECT input.identity_key::text AS identity_key, inserted.id, inserted.name
+FROM inserted
+JOIN input USING (id)
+ORDER BY input.identity_key
+`
+
+type CreatePeopleBulkRow struct {
+	IdentityKey string `json:"identity_key"`
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+}
+
+// Reserve generated identity values in the materialized input so RETURNING can
+// be joined back to the caller's opaque identity key. This keeps first-time
+// ingestion set-based even when a large title introduces thousands of people.
+func (q *Queries) CreatePeopleBulk(ctx context.Context, people []byte) ([]CreatePeopleBulkRow, error) {
+	rows, err := q.db.Query(ctx, createPeopleBulk, people)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CreatePeopleBulkRow{}
+	for rows.Next() {
+		var i CreatePeopleBulkRow
+		if err := rows.Scan(&i.IdentityKey, &i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createPerson = `-- name: CreatePerson :one
 INSERT INTO people (external_ids, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, popularity, sort_name, known_for_department, birth_year, heya_slug)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
@@ -678,6 +734,92 @@ func (q *Queries) ListMediaCrewSlim(ctx context.Context, mediaItemID int64) ([]L
 	return items, nil
 }
 
+const listPeopleByCanonicalEntityIDs = `-- name: ListPeopleByCanonicalEntityIDs :many
+SELECT DISTINCT ON (binding.entity_id)
+       binding.entity_id, person.id, person.name
+FROM metadata_entity_bindings binding
+JOIN people person
+  ON binding.local_kind = 'person' AND person.id = binding.local_id
+WHERE binding.entity_id = ANY($1::uuid[])
+ORDER BY binding.entity_id, person.id
+`
+
+type ListPeopleByCanonicalEntityIDsRow struct {
+	EntityID uuid.UUID `json:"entity_id"`
+	ID       int64     `json:"id"`
+	Name     string    `json:"name"`
+}
+
+// Canonical Heya IDs are the strongest identity available. Resolve every
+// person in one round trip before falling back to provider-ID probes. Old
+// databases may contain duplicate canonical person bindings, so choose the
+// oldest local row deterministically until the merge/backfill has folded them.
+func (q *Queries) ListPeopleByCanonicalEntityIDs(ctx context.Context, entityIds []uuid.UUID) ([]ListPeopleByCanonicalEntityIDsRow, error) {
+	rows, err := q.db.Query(ctx, listPeopleByCanonicalEntityIDs, entityIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPeopleByCanonicalEntityIDsRow{}
+	for rows.Next() {
+		var i ListPeopleByCanonicalEntityIDsRow
+		if err := rows.Scan(&i.EntityID, &i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPeopleByExternalIdentifierProbes = `-- name: ListPeopleByExternalIdentifierProbes :many
+WITH input AS MATERIALIZED (
+    SELECT COALESCE(value->>'identity_key', '') AS identity_key,
+           COALESCE((value->>'priority')::integer, 0) AS priority,
+           COALESCE(value->>'provider', '') AS provider,
+           COALESCE(value->>'provider_id', '') AS provider_id
+    FROM jsonb_array_elements($1::jsonb) AS value
+)
+SELECT DISTINCT ON (input.identity_key)
+       input.identity_key::text AS identity_key, person.id, person.name
+FROM input
+JOIN people person
+  ON person.external_ids @> jsonb_build_object(input.provider, input.provider_id)
+WHERE input.provider <> '' AND input.provider_id <> ''
+ORDER BY input.identity_key, input.priority, person.id
+`
+
+type ListPeopleByExternalIdentifierProbesRow struct {
+	IdentityKey string `json:"identity_key"`
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+}
+
+// Resolve all fallback provider identifiers in one indexed query. Priority is
+// the stable provider-key order used by the legacy resolver, so ambiguous old
+// rows retain deterministic behaviour while avoiding one round trip per ID.
+func (q *Queries) ListPeopleByExternalIdentifierProbes(ctx context.Context, probes []byte) ([]ListPeopleByExternalIdentifierProbesRow, error) {
+	rows, err := q.db.Query(ctx, listPeopleByExternalIdentifierProbes, probes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPeopleByExternalIdentifierProbesRow{}
+	for rows.Next() {
+		var i ListPeopleByExternalIdentifierProbesRow
+		if err := rows.Scan(&i.IdentityKey, &i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPersonCastCredits = `-- name: ListPersonCastCredits :many
 SELECT mc.character, mc.display_order, mi.id as media_item_id, mi.public_id AS media_item_public_id, mi.title, mi.year, mi.media_type, mi.poster_path
 FROM media_cast mc
@@ -887,6 +1029,72 @@ type ReparentPersonCrewParams struct {
 func (q *Queries) ReparentPersonCrew(ctx context.Context, arg ReparentPersonCrewParams) error {
 	_, err := q.db.Exec(ctx, reparentPersonCrew, arg.DstID, arg.SrcID)
 	return err
+}
+
+const replaceMediaPersonCredits = `-- name: ReplaceMediaPersonCredits :one
+WITH input AS MATERIALIZED (
+    SELECT (value->>'person_id')::bigint AS person_id,
+           COALESCE((value->>'is_cast')::boolean, false) AS is_cast,
+           COALESCE(value->>'character', '') AS character,
+           COALESCE((value->>'display_order')::integer, 0) AS display_order,
+           COALESCE((value->>'gender')::integer, 0) AS gender,
+           COALESCE(value->>'source', '') AS source,
+           COALESCE(value->>'job', '') AS job,
+           COALESCE(value->>'department', '') AS department
+    FROM jsonb_array_elements($1::jsonb) AS value
+), deleted_cast AS (
+    DELETE FROM media_cast WHERE media_cast.media_item_id = $2
+    RETURNING 1
+), deleted_crew AS (
+    DELETE FROM media_crew WHERE media_crew.media_item_id = $2
+    RETURNING 1
+), deletion_counts AS MATERIALIZED (
+    SELECT (SELECT count(*) FROM deleted_cast) AS cast_count,
+           (SELECT count(*) FROM deleted_crew) AS crew_count
+), inserted_cast AS (
+    INSERT INTO media_cast (
+        media_item_id, person_id, character, display_order, gender, source
+    )
+    SELECT $2, input.person_id, input.character,
+           input.display_order, input.gender, input.source
+    FROM input CROSS JOIN deletion_counts
+    WHERE input.is_cast
+    ON CONFLICT (media_item_id, person_id, character) DO NOTHING
+    RETURNING 1
+), inserted_crew AS (
+    INSERT INTO media_crew (
+        media_item_id, person_id, job, department, gender, source
+    )
+    SELECT $2, input.person_id, input.job,
+           input.department, input.gender, input.source
+    FROM input CROSS JOIN deletion_counts
+    WHERE NOT input.is_cast
+    ON CONFLICT (media_item_id, person_id, job) DO NOTHING
+    RETURNING 1
+)
+SELECT (SELECT count(*) FROM inserted_cast)::bigint AS cast_count,
+       (SELECT count(*) FROM inserted_crew)::bigint AS crew_count
+`
+
+type ReplaceMediaPersonCreditsParams struct {
+	Credits           []byte `json:"credits"`
+	TargetMediaItemID int64  `json:"target_media_item_id"`
+}
+
+type ReplaceMediaPersonCreditsRow struct {
+	CastCount int64 `json:"cast_count"`
+	CrewCount int64 `json:"crew_count"`
+}
+
+// Replace the complete cast/crew projection with two set-based inserts. The
+// deletions and inserts share one statement and are ordered through the
+// deletion_counts dependency, avoiding both partial projections and one SQL
+// round trip per credit.
+func (q *Queries) ReplaceMediaPersonCredits(ctx context.Context, arg ReplaceMediaPersonCreditsParams) (ReplaceMediaPersonCreditsRow, error) {
+	row := q.db.QueryRow(ctx, replaceMediaPersonCredits, arg.Credits, arg.TargetMediaItemID)
+	var i ReplaceMediaPersonCreditsRow
+	err := row.Scan(&i.CastCount, &i.CrewCount)
+	return i, err
 }
 
 const searchPeopleByName = `-- name: SearchPeopleByName :many

@@ -77,6 +77,7 @@ func (w *EnrichMediaItemWorker) Work(ctx context.Context, job *river.Job[EnrichM
 // NFO downstream jobs.
 func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItemCard, job *river.Job[EnrichMediaItemArgs]) error {
 	start := time.Now()
+	var fetchDuration, baseDuration, richDuration time.Duration
 	kind := matcher.MediaTypeToKind(item.MediaType)
 
 	var externalIDs map[string]string
@@ -121,7 +122,9 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 		log.Debug().Int64("item_id", item.ID).Str("language", settings.PreferredLanguage).Str("country", settings.PreferredCountry).Msg("enrich: using library language/country preference")
 	}
 
+	fetchStarted := time.Now()
 	detail, usedID, err := w.Heya.GetDetailFallback(ctx, providerIDs, fetchOpts)
+	fetchDuration = time.Since(fetchStarted)
 	if err != nil {
 		// Transient upstream failure (429/5xx, timeout, connection blip) — let
 		// River retry the whole job rather than stamping the item failed on
@@ -144,6 +147,7 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 	// re-walk the season tree. The *_enriched_at stamps exist precisely to resume
 	// without redoing successful components (migration 00017); Force refreshes all.
 	if job.Args.Force || !item.BaseEnrichedAt.Valid {
+		baseStarted := time.Now()
 		// If the type-specific row can't be written the item would be invisible
 		// (library grid INNER JOINs movies/tv_series/books) — so mark it failed
 		// (the refresh-stale sweep re-drives 'failed') instead of stamping it
@@ -151,6 +155,7 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 		if err := w.Matcher.StoreEntityMetadata(ctx, item.ID, kind, detail); err != nil {
 			return w.markFailed(ctx, q, item.ID, fmt.Sprintf("store base metadata: %v", err))
 		}
+		baseDuration = time.Since(baseStarted)
 		_ = q.MarkEnrichBaseDone(ctx, item.ID)
 		if kind == metadata.KindTV {
 			_ = q.MarkEnrichStructureDone(ctx, item.ID)
@@ -191,12 +196,14 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 	// even though one call does the work, so the UI can surface them independently
 	// if we ever split.
 	if job.Args.Force || !item.PeopleEnrichedAt.Valid {
+		richStarted := time.Now()
 		// A partial rich write must not be stamped done — mark the item failed so
 		// the refresh-stale sweep re-drives it. The credit replacement is atomic
 		// and the remaining fan-out is conflict-idempotent, so retry is safe.
 		if err := w.Matcher.StoreRichMetadata(ctx, item.ID, detail); err != nil {
 			return w.markFailed(ctx, q, item.ID, fmt.Sprintf("store rich metadata: %v", err))
 		}
+		richDuration = time.Since(richStarted)
 		_ = q.MarkEnrichPeopleDone(ctx, item.ID)
 		_ = q.MarkEnrichExtrasDone(ctx, item.ID)
 		log.Debug().Int64("item_id", item.ID).Int("cast", len(detail.Cast)).Int("crew", len(detail.Crew)).Int("keywords", len(detail.Keywords)).Msg("enrich: people/extras component stored")
@@ -272,6 +279,10 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 		Int("cast", len(detail.Cast)).
 		Int("crew", len(detail.Crew)).
 		Int("keywords", len(detail.Keywords)).
+		Dur("fetch_duration", fetchDuration).
+		Dur("base_duration", baseDuration).
+		Dur("rich_duration", richDuration).
+		Dur("duration", time.Since(start)).
 		Msg("enrich complete")
 
 	return nil

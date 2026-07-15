@@ -732,6 +732,7 @@ type MetadataChangeConsumer struct {
 	Consumer   string             `json:"consumer"`
 	NextCursor int64              `json:"next_cursor"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	StreamID   pgtype.UUID        `json:"stream_id"`
 }
 
 type MetadataEntityBinding struct {
