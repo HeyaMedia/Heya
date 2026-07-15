@@ -50,7 +50,7 @@
       <div class="newin-main">
       <div class="newin-top">
         <Transition name="spot" mode="out-in">
-          <div v-if="spotlight" :key="spotlight.key" class="newin-spot">
+          <div v-if="spotlight" :key="spotlight.key" class="newin-spot hero-ink">
             <div class="newin-eyebrow">New in your library</div>
             <NuxtLink :to="spotlight.to" class="newin-title-link">
               <h1 class="newin-title">{{ spotlight.title }}</h1>

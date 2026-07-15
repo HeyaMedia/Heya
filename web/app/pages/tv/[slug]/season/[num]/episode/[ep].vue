@@ -13,7 +13,7 @@
       <div class="bignum" aria-hidden="true">E{{ epNumPadded }}</div>
 
       <div class="ep-hero-inner">
-        <div class="grow">
+        <div class="grow hero-ink">
           <div class="eyebrow">
             <NuxtLink :to="`/tv/${slug}`">{{ detail.media_item.title }}</NuxtLink>
             <span class="sep">&middot;</span>

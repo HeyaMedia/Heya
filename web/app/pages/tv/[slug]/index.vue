@@ -35,7 +35,7 @@
           <button class="zoom-btn" aria-label="Expand poster" @click="openPosterLightbox"><Icon name="expand" :size="13" /></button>
         </div>
 
-        <div class="grow">
+        <div class="grow hero-ink">
           <div class="eyebrow">
             <span>{{ kindLabel }}</span>
             <template v-if="presentSeasonCount">

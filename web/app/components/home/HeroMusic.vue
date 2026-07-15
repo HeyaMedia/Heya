@@ -59,7 +59,7 @@
       <div class="music-main">
         <div class="music-top">
           <Transition name="spot" mode="out-in">
-            <div v-if="spotlight" :key="spotlight.key" class="music-spot">
+            <div v-if="spotlight" :key="spotlight.key" class="music-spot hero-ink">
               <div class="music-eyebrow">New in music</div>
               <NuxtLink :to="spotlight.to" class="music-title-link">
                 <h1 class="music-title">{{ spotlight.title }}</h1>

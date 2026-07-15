@@ -51,7 +51,7 @@
     </div>
 
     <div class="hero-inner">
-      <div class="grow">
+      <div class="grow hero-ink">
         <div class="eyebrow">
           <span>Featured</span>
           <span class="sep">&middot;</span>

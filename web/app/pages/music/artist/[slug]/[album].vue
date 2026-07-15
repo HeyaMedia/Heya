@@ -338,7 +338,7 @@ if (import.meta.client) {
           <div v-if="!albumPlayable" class="postercard-missing"><MediaMissingBadge /></div>
         </div>
 
-        <div class="grow">
+        <div class="grow hero-ink">
           <div class="eyebrow">
             <span class="eb-kind">{{ albumTypeLabel }}</span>
             <span class="sep">&rsaquo;</span>

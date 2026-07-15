@@ -16,7 +16,7 @@
       <HeroCanvas :src="backdropUrl || ''" object-position="center 22%" />
 
       <div class="hero-inner">
-        <div class="grow">
+        <div class="grow hero-ink">
           <div class="eyebrow">
             <span>Artist</span>
             <template v-if="artistTypeLabel">

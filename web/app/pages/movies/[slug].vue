@@ -45,7 +45,7 @@
           <button class="zoom-btn" aria-label="Expand poster" @click="openPosterLightbox"><Icon name="expand" :size="14" /></button>
         </div>
 
-        <div class="grow">
+        <div class="grow hero-ink">
           <div class="eyebrow">
             <span>Movie</span>
             <template v-if="detail.collection">

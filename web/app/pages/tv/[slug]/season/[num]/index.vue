@@ -18,7 +18,7 @@
           <LoadingImage :src="seasonPosterUrl" :width="500" :quality="80" :alt="seasonTitle" @error="hideBroken" />
         </NuxtLink>
 
-        <div class="grow">
+        <div class="grow hero-ink">
           <div class="eyebrow">
             <NuxtLink :to="`/tv/${slug}`">{{ detail.media_item.title }}</NuxtLink>
             <span class="sep">&middot;</span>

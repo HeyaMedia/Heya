@@ -1082,6 +1082,79 @@ a { color: inherit; text-decoration: none; }
               box-shadow 0.9s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* ── Hero identity readability — the shared `.hero-ink` underlayer ──────
+   The eyebrow / title / tagline / metaline of every big Heya 2.0 hero rides
+   DIRECTLY on raw artwork: HeroCanvas's ::after grade only feathers the frame,
+   so on bright/hot art (orange posters like xXx, bright anime) the mono
+   eyebrow (tone-colored → low contrast) and the metaline wash out. Tagging the
+   hero's identity COLUMN with `.hero-ink` layers three things on top of that
+   grade — all literal-dark, the CLAUDE.md exception for scrims painted over
+   artwork:
+     1. A feathered local scrim PLATE (::before): a radial literal-dark wash
+        anchored on the text block, invisible over dark art but rescuing bright
+        art. NOT a boxy panel — the fade dies well beyond the glyphs, so there's
+        no visible edge.
+     2. A multi-layer literal-dark HALO on each identity line (--hero-halo).
+     3. A faint dark STROKE on the tone-colored eyebrow (the worst offender on
+        bright art): sharpens the glyph edge WITHOUT touching the tone color.
+   Play-row buttons/pills keep their own fills (targeted per line, never
+   blanket). Selectors are element-qualified (`.hero-ink h1.title`) so they
+   out-specify each page's scoped single-class rule (0,2,1 > 0,2,0) without
+   !important. */
+.hero-ink {
+  position: relative;
+  --hero-halo:
+    0 1px 2px rgb(0 0 0 / 0.62),
+    0 0 11px rgb(0 0 0 / 0.5),
+    0 0 30px rgb(0 0 0 / 0.36);
+}
+.hero-ink::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  /* feather well past the text box so the wash dies before its own edge —
+     no boxy darkening, just a soft rescue behind the glyphs */
+  inset: -34px -120px -48px -76px;
+  background: radial-gradient(125% 125% at 17% 46%,
+    rgb(0 0 0 / 0.42) 0%,
+    rgb(0 0 0 / 0.26) 37%,
+    rgb(0 0 0 / 0.1) 61%,
+    transparent 80%);
+}
+
+/* Targeted halos — every identity line across the ported detail heroes
+   (movie / series / season / episode / artist / album) and the home carousels
+   (HeroA / HeroNewIn / HeroMusic). Element-qualified for specificity so the
+   stronger halo wins over each page's scoped single-class text-shadow. */
+.hero-ink h1.title,
+.hero-ink h1.season-title,
+.hero-ink h1.ep-title,
+.hero-ink h1.newin-title,
+.hero-ink h1.music-title,
+.hero-ink div.eyebrow,
+.hero-ink div.newin-eyebrow,
+.hero-ink div.music-eyebrow,
+.hero-ink p.tagline,
+.hero-ink p.metaline,
+.hero-ink div.hero-aka,
+.hero-ink p.newin-desc,
+.hero-ink span.newin-meta-sub,
+.hero-ink span.newin-meta-time,
+.hero-ink span.music-meta-sub {
+  text-shadow: var(--hero-halo);
+}
+
+/* Tone eyebrow special-case — a thin dark stroke painted BEHIND the fill
+   (paint-order) defines the glyph edge on bright art without altering the
+   tone color itself. */
+.hero-ink div.eyebrow,
+.hero-ink div.newin-eyebrow,
+.hero-ink div.music-eyebrow {
+  paint-order: stroke fill;
+  -webkit-text-stroke: 0.4px rgb(0 0 0 / 0.34);
+}
+
 /* Backdrop cycle cluster (CycleControls) — top right of detail heroes,
    mirroring the home deck's top-right controls. Replaced the old
    .bd-indicators bar strip. Detail heroes are `hero-flush` (art rides up
