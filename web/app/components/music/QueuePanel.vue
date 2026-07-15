@@ -9,7 +9,7 @@
 
     <!-- Queue tab — Played / Now Playing / Up Next, three discrete buckets so
          the user can see what's already happened and what's coming. -->
-    <div v-if="tab === 'queue'" class="qp-body">
+    <div v-if="tab === 'queue'" v-overlay-scrollbar class="qp-body">
       <!-- Played (faded, clickable to jump back) -->
       <template v-if="playedTracks.length">
         <div class="qp-section-label">

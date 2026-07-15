@@ -34,6 +34,7 @@ export type Glass = 'rich' | 'minimal'
 export type RadiusMode = 'soft' | 'sharp'
 export type HeroMode = 'standard' | 'short'
 export type MotionMode = 'system' | 'reduced' | 'full'
+export type ScrollbarMode = 'overlay' | 'classic'
 
 /** The derived --accent family cached for a custom hex (see header). */
 export interface AccentDerived {
@@ -61,6 +62,9 @@ export interface AppearancePrefs {
   radius: RadiusMode
   hero: HeroMode
   motion: MotionMode
+  /** Scrollbar style: 'overlay' (default, floating auto-hiding thumb) or
+   *  'classic' (native OS bar returns). */
+  scrollbar: ScrollbarMode
   ambientMode: 'on' | 'off'
   ambientIntensity: number // scrim-relative backdrop visibility, 5–60 (%)
   /** "More Like This" on detail pages: also show titles NOT in the library
@@ -105,6 +109,7 @@ const DEFAULTS: AppearancePrefs = {
   radius: 'soft',
   hero: 'standard',
   motion: 'system',
+  scrollbar: 'overlay',
   ambientMode: 'on',
   ambientIntensity: AMBIENT_INTENSITY_DEFAULT,
   showUnavailableRecs: false,
@@ -272,6 +277,7 @@ export function useAppearance() {
     setAttr(d, 'radius', prefs.value.radius, 'soft')
     setAttr(d, 'hero', prefs.value.hero, 'standard')
     setAttr(d, 'motion', prefs.value.motion, 'system')
+    setAttr(d, 'scrollbar', prefs.value.scrollbar, 'overlay')
 
     document
       .querySelector('meta[name="theme-color"]')
@@ -330,6 +336,7 @@ export function useAppearance() {
           radius: prefs.value.radius,
           hero: prefs.value.hero,
           motion: prefs.value.motion,
+          scrollbar: prefs.value.scrollbar,
           ambient_mode: prefs.value.ambientMode,
           ambient_intensity: prefs.value.ambientIntensity,
           show_unavailable_recs: prefs.value.showUnavailableRecs,
@@ -375,7 +382,7 @@ export function useAppearance() {
       accent_custom?: string | null; accent_custom_derived?: AccentDerived | null
       density?: string; typeset?: string; font_scale?: string
       tone_follow?: boolean; lighting?: string; glass?: string
-      radius?: string; hero?: string; motion?: string
+      radius?: string; hero?: string; motion?: string; scrollbar?: string
       ambient_mode?: string; ambient_intensity?: number; show_unavailable_recs?: boolean
     }
     if (s.theme) next.theme = s.theme as ThemeMode
@@ -395,6 +402,7 @@ export function useAppearance() {
     if (s.radius) next.radius = s.radius as RadiusMode
     if (s.hero) next.hero = s.hero as HeroMode
     if (s.motion) next.motion = s.motion as MotionMode
+    if (s.scrollbar === 'overlay' || s.scrollbar === 'classic') next.scrollbar = s.scrollbar
     if (s.ambient_mode === 'on' || s.ambient_mode === 'off') next.ambientMode = s.ambient_mode
     if (s.ambient_intensity) next.ambientIntensity = s.ambient_intensity
     if (typeof s.show_unavailable_recs === 'boolean') next.showUnavailableRecs = s.show_unavailable_recs

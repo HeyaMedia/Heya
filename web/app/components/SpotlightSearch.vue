@@ -81,8 +81,10 @@
             </button>
           </div>
 
-          <!-- Body -->
-          <div id="spotlight-listbox" class="search-body" role="listbox" aria-label="Search results">
+          <!-- Body — the results list is the panel's scroll region. It isn't
+               tagged `.scroll` (it's a listbox with its own max-height), so it
+               opts into the overlay scrollbar explicitly via the directive. -->
+          <div v-overlay-scrollbar id="spotlight-listbox" class="search-body" role="listbox" aria-label="Search results">
             <div v-if="!search.query.value.trim()" class="si-state">
               <Icon name="search" :size="24" />
               <p>Search your library</p>

@@ -582,11 +582,81 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* === Scrollbars === */
+/* Overlay mode (default): the native bar is HIDDEN on every scroll region and a
+   custom floating thumb (useOverlayScrollbar.ts + overlay-scrollbar.client.ts)
+   is painted above the content, so pages lay out edge-to-edge with no reserved
+   gutter and the bar fades when idle. Both hiding mechanisms are emitted
+   TOGETHER so every engine is covered: Firefox via `scrollbar-width` (the
+   canonical FF mechanism — FF can't style ::-webkit-scrollbar), Chromium and
+   Safari<18.2 via `::-webkit-scrollbar{display:none}`. `.hos-managed` is added
+   by the JS controller to any directive-attached scroller that isn't `.scroll`.
+   The Flair → Scrollbar → Classic knob stamps html[data-scrollbar="classic"],
+   which un-gates these rules and brings the styled native bar back. */
 .scroll { overflow-y: auto; overflow-x: hidden; }
-.scroll::-webkit-scrollbar { width: 10px; }
-.scroll::-webkit-scrollbar-track { background: transparent; }
-.scroll::-webkit-scrollbar-thumb { background: rgb(var(--ink) / 0.08); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
-.scroll::-webkit-scrollbar-thumb:hover { background: rgb(var(--ink) / 0.18); border: 2px solid transparent; background-clip: padding-box; }
+
+:root:not([data-scrollbar="classic"]) .scroll,
+:root:not([data-scrollbar="classic"]) .hos-managed { scrollbar-width: none; }
+:root:not([data-scrollbar="classic"]) .scroll::-webkit-scrollbar,
+:root:not([data-scrollbar="classic"]) .hos-managed::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+/* Classic mode — the original styled native bar (Chromium/WebKit; Firefox
+   falls back to its default `scrollbar-width: auto`). */
+:root[data-scrollbar="classic"] .scroll::-webkit-scrollbar { width: 10px; }
+:root[data-scrollbar="classic"] .scroll::-webkit-scrollbar-track { background: transparent; }
+:root[data-scrollbar="classic"] .scroll::-webkit-scrollbar-thumb { background: rgb(var(--ink) / 0.08); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+:root[data-scrollbar="classic"] .scroll::-webkit-scrollbar-thumb:hover { background: rgb(var(--ink) / 0.18); border: 2px solid transparent; background-clip: padding-box; }
+
+/* ── Custom overlay thumb ─────────────────────────────────────────────────
+   The rail is an absolutely-positioned child of the scroll element; the JS
+   sets its height + a per-frame translateY to keep it glued to the viewport
+   top, and drives the thumb geometry. No visible track — that's the whole
+   point (content runs under it). Thumb tone is --ink-based so it self-adapts
+   across dark / light / OLED. The rail only captures pointer events once it's
+   revealed on a fine pointer, so idle edges (and all touch) click straight
+   through to the content beneath. */
+.hos-rail {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 14px;
+  height: 0;
+  z-index: 30;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  will-change: transform;
+}
+.hos-rail.is-visible { opacity: 1; }
+.hos-thumb {
+  position: absolute;
+  top: 0;
+  right: 3px;
+  width: 6px;
+  height: 32px;
+  border-radius: 999px;
+  background: rgb(var(--ink) / 0.28);
+  pointer-events: none;
+  transition: width 0.14s ease, background 0.14s ease;
+}
+/* The rail + thumb only become hittable on a fine pointer AND only while the
+   bar is revealed. Consequences: on touch (coarse) the bar is purely visual —
+   taps always fall through to the content, even where the thumb rides. On
+   desktop the extreme-right sliver stays click-through until the bar fades in
+   (macOS-style), so content laid out under it is never dead. */
+@media (hover: hover) and (pointer: fine) {
+  .hos-rail.is-visible { pointer-events: auto; }
+  .hos-rail.is-visible .hos-thumb { pointer-events: auto; cursor: default; }
+  .hos-rail.is-visible .hos-thumb:hover,
+  .hos-rail.is-dragging .hos-thumb {
+    width: 10px;
+    background: rgb(var(--ink) / 0.45);
+  }
+}
+:root[data-motion="reduced"] .hos-rail,
+:root[data-motion="reduced"] .hos-thumb { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .hos-rail, .hos-thumb { transition: none; }
+}
 
 /* === Poster placeholder === */
 .poster {

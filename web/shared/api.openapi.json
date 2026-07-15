@@ -1832,6 +1832,9 @@
           "radius": {
             "type": "string"
           },
+          "scrollbar": {
+            "type": "string"
+          },
           "show_unavailable_recs": {
             "type": "boolean"
           },

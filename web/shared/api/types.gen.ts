@@ -555,6 +555,7 @@ export type AppearanceSettings = {
     lighting?: string;
     motion?: string;
     radius?: string;
+    scrollbar?: string;
     show_unavailable_recs: boolean;
     theme?: string;
     tone_follow?: boolean;

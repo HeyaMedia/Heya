@@ -323,6 +323,7 @@ export default defineNuxtConfig({
             'if(s.radius&&s.radius!=="soft")d.radius=s.radius;' +
             'if(s.hero&&s.hero!=="standard")d.hero=s.hero;' +
             'if(s.motion&&s.motion!=="system")d.motion=s.motion;' +
+            'if(s.scrollbar&&s.scrollbar!=="overlay")d.scrollbar=s.scrollbar;' +
             "}catch(e){}})()",
         },
       ],

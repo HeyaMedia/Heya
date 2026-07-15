@@ -54,7 +54,11 @@
             {{ title || 'Dialog' }}
           </DialogDescription>
 
-          <div class="app-dialog-body">
+          <!-- Shared dialog scroll body: portaled out (so `.scroll` auto-attach
+               would still reach it, but it isn't tagged `.scroll`), so it opts
+               into the overlay scrollbar explicitly. Covers every modal built
+               on AppDialog. -->
+          <div v-overlay-scrollbar class="app-dialog-body">
             <slot />
           </div>
 

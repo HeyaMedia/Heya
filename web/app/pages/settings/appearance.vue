@@ -97,6 +97,8 @@ const flairSegs: FlairSeg[] = [
     options: [{ v: 'standard', l: 'Standard' }, { v: 'short', l: 'Short' }] },
   { key: 'motion', title: 'Motion', desc: 'Reduced turns animations off everywhere. Full still respects your system reduced-motion setting.',
     options: [{ v: 'system', l: 'System' }, { v: 'reduced', l: 'Reduced' }, { v: 'full', l: 'Full' }] },
+  { key: 'scrollbar', title: 'Scrollbar', desc: 'Overlay floats a thin auto-hiding thumb over the content so pages run edge-to-edge. Classic brings back your browser’s native scrollbar.',
+    options: [{ v: 'overlay', l: 'Overlay' }, { v: 'classic', l: 'Classic' }] },
 ]
 function pickFlair(key: keyof AppearancePrefs, value: string) {
   set(key, value as never)

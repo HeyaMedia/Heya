@@ -73,6 +73,9 @@ type AppearanceSettings struct {
 	Hero string `json:"hero,omitempty"`
 	// Motion is "system", "reduced", or "full". Empty = system.
 	Motion string `json:"motion,omitempty"`
+	// Scrollbar is "overlay" or "classic". Empty = overlay (the floating
+	// auto-hiding thumb; classic restores the native OS scrollbar).
+	Scrollbar string `json:"scrollbar,omitempty"`
 }
 
 // AccentDerived is the client-computed accent family for a custom accent —
