@@ -5,7 +5,7 @@
          only once the page hands us the facts — the catalog loads in the
          background, so the rails paint immediately and the ledger fills in. -->
     <LibHead v-if="libTitle" :title="libTitle" :crumbs="libCrumbs" />
-    <LedgerStrip v-if="ledgerCells.length" :cells="ledgerCells" />
+    <LedgerStrip v-if="ledgerCells.length" :cells="ledgerCells" canvas />
     <div class="rec-pad">
       <!-- Activity rows (bespoke tiles) come first, composed here from their
            own endpoints; the server-ranked discovery rails follow. -->

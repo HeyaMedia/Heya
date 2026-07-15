@@ -54,7 +54,7 @@
     <div v-else ref="mainEl" class="library-main scroll" :class="{ 'has-alpha-rail': showAlphaRail }" @scroll.passive="onMainScroll">
       <!-- Library head + ledger scroll away above the sticky control bar. -->
       <LibHead :title="libTitle" :crumbs="libCrumbs" />
-      <LedgerStrip v-if="ledgerCells.length" :cells="ledgerCells" />
+      <LedgerStrip v-if="ledgerCells.length" :cells="ledgerCells" canvas />
 
       <!-- A–Z rail dock: sticky anchor kept adjacent to the FilterBar so both
            pin together; the rail measures the bar and hangs below it. -->

@@ -17,11 +17,22 @@ export interface LedgerCell {
   tone?: boolean
 }
 
-withDefaults(defineProps<{ cells?: LedgerCell[] }>(), { cells: () => [] })
+withDefaults(
+  defineProps<{
+    cells?: LedgerCell[]
+    /**
+     * The strip sits on plain themed canvas (browse landings, music home)
+     * rather than glassing over a hero-art seam: use theme ink so the light
+     * theme keeps contrast, and drop the dark scrim + blur.
+     */
+    canvas?: boolean
+  }>(),
+  { cells: () => [], canvas: false },
+)
 </script>
 
 <template>
-  <div class="ledger-strip">
+  <div class="ledger-strip" :class="{ 'ls-canvas': canvas }">
     <slot>
       <div v-for="(c, i) in cells" :key="i" class="ls-cell">
         <span class="ls-k">{{ c.k }}</span>
@@ -52,6 +63,15 @@ withDefaults(defineProps<{ cells?: LedgerCell[] }>(), { cells: () => [] })
      art grade, so its labels/values stay light in every theme — themed --ink
      would flip near-black in the light theme and disappear against the seam. */
   --lk: 233 236 242;
+}
+
+/* On-canvas variant: themed ink (flips with the light theme), faint themed
+   wash instead of the over-art scrim, no blur needed. */
+.ledger-strip.ls-canvas {
+  --lk: var(--ink);
+  background: rgb(var(--ink) / 0.03);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .ls-cell {

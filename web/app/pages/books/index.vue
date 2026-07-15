@@ -26,7 +26,7 @@
     </AppSheet>
     <div class="library-main scroll">
       <LibHead :title="libTitle" :crumbs="libCrumbs" />
-      <LedgerStrip v-if="ledgerCells.length" :cells="ledgerCells" />
+      <LedgerStrip v-if="ledgerCells.length" :cells="ledgerCells" canvas />
       <LibraryToolbar
         title="Books"
         hide-title

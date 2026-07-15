@@ -62,7 +62,7 @@
     <div v-else ref="mainEl" class="library-main scroll" :class="{ 'has-alpha-rail': showAlphaRail }" @scroll.passive="onMainScroll">
       <!-- Library head + ledger scroll away above the sticky control bar. -->
       <LibHead :title="libTitle" :crumbs="libCrumbs" />
-      <LedgerStrip v-if="ledgerCells.length" :cells="ledgerCells" />
+      <LedgerStrip v-if="ledgerCells.length" :cells="ledgerCells" canvas />
 
       <!-- Franchises overview — a page of its own (/movies/franchises). Reuses
            the FilterBar (sort + grid/detail/list toggle, no movie filters) and
