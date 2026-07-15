@@ -1,8 +1,13 @@
 <template>
-  <div class="roulette-view scroll">
+  <div class="roulette-view scroll" :style="toneVars">
     <div class="rv-stage">
       <div class="rv-lead">
-        <div class="rv-eyebrow">Roulette</div>
+        <!-- Mono breadcrumb eyebrow — the head for this moment page. -->
+        <div class="rv-eyebrow">
+          <NuxtLink to="/movies" class="rv-crumb">Movies</NuxtLink>
+          <span class="sep">·</span>
+          <span>Roulette</span>
+        </div>
 
         <Transition name="pick" mode="out-in">
           <div v-if="pick && settled" :key="pick.id" class="rv-spot">
@@ -28,36 +33,54 @@
             </div>
           </div>
           <div v-else key="idle" class="rv-spot">
-            <h1 class="rv-title muted">{{ spinning ? 'Spinning…' : "Can't decide?" }}</h1>
+            <div class="rv-title-wrap">
+              <span v-if="spinning" class="rv-ghostmark" aria-hidden="true">?</span>
+              <h1 class="rv-title muted" :class="{ spinning }">{{ spinning ? 'Spinning…' : "Can't decide?" }}</h1>
+            </div>
             <p class="rv-hint" v-if="!spinning">{{ poolLine }}</p>
           </div>
         </Transition>
 
         <div class="rv-actions">
-          <button class="btn btn-primary rv-spin" :class="{ spinning }" :style="spinStyle" :disabled="spinning || !pool.length" @click="spin">
+          <!-- Primary CTA: Play the revealed pick (tone-glow) or, when there's no
+               playable file, deep-link to its details. Idle/spinning has no CTA
+               here — Spin carries the glow instead. -->
+          <button v-if="pick && settled && pickFileId" class="rv-cta" @click="playPick">
+            <span class="tri" />
+            Play
+          </button>
+          <NuxtLink v-else-if="pick && settled" :to="mediaUrl(pick)" class="rv-ghost">
+            <Icon name="info" :size="15" />
+            Details
+          </NuxtLink>
+
+          <!-- Spin — tone-glow primary while it's the only action, a tone-tinted
+               pill once a pick owns the spotlight. -->
+          <button
+            class="rv-spin"
+            :class="{ spinning, cta: !(pick && settled), pill: pick && settled }"
+            :disabled="spinning || !pool.length"
+            @click="spin"
+          >
             <Icon name="shuffle" :size="16" />
             {{ settled ? 'Spin again' : 'Spin' }}
           </button>
-          <button v-if="pick && settled && pickFileId" class="btn btn-ghost" @click="playPick">
-            <Icon name="play" :size="16" />
-            Play
-          </button>
-          <NuxtLink v-else-if="pick && settled" :to="mediaUrl(pick)" class="btn btn-ghost">
-            <Icon name="info" :size="16" />
-            Details
-          </NuxtLink>
         </div>
 
         <div class="rv-filters">
           <!-- Pool source: the personalized engine (rank-weighted) vs the
                whole library. Only offered once the engine has signal. -->
-          <div v-if="canForYou" class="rv-seg">
-            <button :class="{ active: effectiveSource === 'foryou' }" :aria-pressed="effectiveSource === 'foryou'" @click="source = 'foryou'">
-              <Icon name="sparkle" :size="11" /> For you
-            </button>
-            <button :class="{ active: effectiveSource === 'all' }" :aria-pressed="effectiveSource === 'all'" @click="source = 'all'">Anything</button>
-          </div>
-          <span v-if="canForYou" class="rv-filter-sep" />
+          <template v-if="canForYou">
+            <span class="rv-filter-label">Pool</span>
+            <div class="rv-seg">
+              <button :class="{ active: effectiveSource === 'foryou' }" :aria-pressed="effectiveSource === 'foryou'" @click="source = 'foryou'">
+                <Icon name="sparkle" :size="11" /> For you
+              </button>
+              <button :class="{ active: effectiveSource === 'all' }" :aria-pressed="effectiveSource === 'all'" @click="source = 'all'">Anything</button>
+            </div>
+            <span class="rv-filter-sep" />
+          </template>
+          <span class="rv-filter-label">Genre</span>
           <button
             v-for="g in topGenres"
             :key="g"
@@ -67,6 +90,7 @@
             @click="toggleGenre(g)"
           >{{ g }}</button>
           <span class="rv-filter-sep" />
+          <span class="rv-filter-label">Runtime</span>
           <button
             v-for="rt in RUNTIMES"
             :key="rt.label"
@@ -82,7 +106,7 @@
         <div ref="wheelFrame" class="wheel-frame" :class="{ spinning, settled }">
           <!-- Slot reel: a vertical strip of posters translated with a long
                ease-out; the pick sits at the end of the strip. Motion-blurred
-               while moving, snaps crisp with a gold flash on arrival. -->
+               while moving, snaps crisp with a tone flash on arrival. -->
           <div
             v-if="reel.length"
             class="wheel-reel"
@@ -116,8 +140,13 @@
 // "Anything" is the whole library. Filters narrow either. A slot reel of
 // your own posters decelerates onto the pick; its backdrop takes over the
 // page background on settle.
+//
+// Heya 2.0 dress (2026-07-15): mono breadcrumb + Archivo display title, the
+// revealed pick framed as a mini detail-hero (record-card reel + tone-glow
+// Play + ghost Details), controls as mono/tone pills. The whole moment tone-
+// follows the ambient (--tone/--tone-rgb on the root) — the pool before a
+// spin, the settled pick's backdrop after.
 import { useQuery } from '@pinia/colada'
-import type { ImageTone } from '~/composables/useImageTone'
 
 interface EnrichedMovie {
   id: number
@@ -246,22 +275,30 @@ let landedGuard: ReturnType<typeof setTimeout> | null = null
 let settleSeq = 0
 
 // Background: pre-settle the movie pool rides behind the view (content
-// veil); the settled pick's backdrop takes the whole page over. One owner
-// handle swaps between the two claims.
+// veil); the settled pick's backdrop takes the whole page over with the 2.0
+// grade. One owner handle swaps between the two claims.
 const background = useBackground()
 const currentBg = computed(() => (pick.value && settled.value ? useBackdropUrl(pick.value) : null) || null)
 watch(currentBg, (url) => {
-  if (url) background.set(url)
+  if (url) background.set(url, { grade: 'v2' })
   else background.pool('movie')
 }, { immediate: true })
 
-// Spin button wears the settled backdrop's tone (theme accent until then).
-const heroTone = ref<ImageTone | null>(null)
-watch(currentBg, async (url) => {
-  heroTone.value = url ? await sampleImageTone(url) : null
-}, { immediate: true })
-const spinStyle = computed(() =>
-  heroTone.value ? { background: heroTone.value.main, color: heroTone.value.ink } : undefined)
+// Tone-follow: read the single app-wide ambient tone (pool before a spin, the
+// settled pick after) and publish --tone/--tone-rgb on the root, so the
+// eyebrow, meta dots, reason pill, Spin/Play glow and the reel's landing ring
+// all glide together. Falls back to the theme accent when ambient/tone-follow
+// is off (:root defaults --tone to the accent).
+const bgTone = useBackgroundTone()
+const { toneFollowEnabled } = useAppearance()
+const toneVars = computed<Record<string, string> | undefined>(() => {
+  if (!toneFollowEnabled.value) return undefined
+  const t = bgTone.value
+  if (!t) return undefined
+  const m = t.main.match(/\d+/g)
+  if (!m) return undefined
+  return { '--tone': t.main, '--tone-rgb': m.slice(0, 3).join(' '), '--tone-ink': t.ink }
+})
 
 function spin() {
   const p = pool.value
@@ -375,71 +412,166 @@ onUnmounted(() => {
     transparent 92%);
   filter: blur(28px);
 }
+/* Mono breadcrumb eyebrow (MOVIES · ROULETTE) — the head for this page. */
 .rv-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
   font-family: var(--font-mono);
   font-size: 11px;
-  letter-spacing: 0.18em;
+  font-weight: 600;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: var(--gold);
-  margin-bottom: 10px;
+  color: var(--tone);
+  margin-bottom: 16px;
   text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1);
+  transition: color 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.rv-eyebrow .sep { color: rgb(var(--ink) / 0.3); }
+.rv-crumb { color: var(--fg-2); transition: color 0.12s ease; }
+.rv-crumb:hover { color: var(--fg-0); }
+
+.rv-title-wrap { position: relative; display: inline-block; }
+/* Giant ghost "?" scaled behind the Spinning… word — drama within the grammar
+   (heya2 .bignum stroke-outline numeral). */
+.rv-ghostmark {
+  position: absolute;
+  left: -0.32em;
+  top: 50%;
+  transform: translateY(-54%);
+  z-index: -1;
+  font: 700 clamp(150px, 20vw, 260px)/1 var(--font-mono);
+  letter-spacing: -0.06em;
+  color: transparent;
+  -webkit-text-stroke: 2px rgb(var(--tone-rgb) / 0.4);
+  pointer-events: none;
+  user-select: none;
+  animation: rv-ghost-pulse 1.6s ease-in-out infinite;
+}
+@keyframes rv-ghost-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.7; }
 }
 .rv-title-link { color: inherit; text-decoration: none; }
-.rv-title-link:hover .rv-title { color: var(--gold); }
+.rv-title-link:hover .rv-title { color: var(--tone); }
+/* Archivo condensed display title (heya2 .title). */
 .rv-title {
-  font-size: 52px;
-  font-weight: 600;
-  letter-spacing: -0.025em;
-  line-height: 1.05;
-  margin: 0 0 10px;
+  font-family: var(--font-display);
+  font-size: clamp(2.6rem, 5vw, 4rem);
+  font-weight: 800;
+  font-variation-settings: 'wdth' 112;
+  letter-spacing: -0.022em;
+  line-height: 0.99;
+  margin: 0 0 12px;
   text-wrap: balance;
+  max-width: 18ch;
   transition: color 0.15s;
   text-shadow:
     0 1px 2px var(--bg-1),
     0 0 10px var(--bg-1),
     0 0 24px var(--bg-1);
 }
-.rv-title.muted { color: var(--fg-1); }
+.rv-title.muted { color: rgb(var(--ink) / 0.9); }
+.rv-title.spinning { color: var(--tone); transition: color 0.9s cubic-bezier(0.22, 1, 0.36, 1); }
 .rv-hint {
-  font-size: 14px; color: var(--fg-1); margin: 0;
+  font: 500 13px var(--font-mono); letter-spacing: 0.03em;
+  color: var(--fg-1); margin: 0;
   text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
 }
+/* Mono metaline (heya2 .metaline). */
 .rv-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  color: var(--fg-1);
+  flex-wrap: wrap;
+  gap: 6px 9px;
+  font: 500 12.5px var(--font-mono);
+  letter-spacing: 0.04em;
+  color: rgb(var(--ink) / 0.72);
   text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1);
 }
 .rv-meta .dot {
   width: 3px;
   height: 3px;
   border-radius: 50%;
-  background: var(--fg-3);
+  background: rgb(var(--tone-rgb) / 0.8);
 }
-.rv-genres { color: var(--fg-1); }
-/* The engine's "why this fits you" line. */
+.rv-genres { color: rgb(var(--ink) / 0.6); }
+/* The engine's "why this fits you" line — tone-tinted pill. */
 .rv-reason {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  margin-top: 12px;
-  padding: 5px 12px;
+  margin-top: 14px;
+  padding: 6px 13px;
   border-radius: 999px;
   font-size: 12px;
-  color: var(--gold);
-  background: color-mix(in srgb, var(--gold) 10%, var(--bg-2));
-  border: 1px solid color-mix(in srgb, var(--gold) 35%, transparent);
-  box-shadow: var(--shadow-el);
+  color: var(--tone);
+  background: rgb(var(--tone-rgb) / 0.1);
+  border: 1px solid rgb(var(--tone-rgb) / 0.35);
+  box-shadow: 0 0 18px rgb(var(--tone-rgb) / 0.12), var(--shadow-el);
 }
-.rv-actions { display: flex; gap: 10px; margin-top: 22px; }
-.rv-spin {
-  box-shadow: var(--shadow-el);
-  transition: filter 0.15s ease,
-              background 0.9s cubic-bezier(0.22, 1, 0.36, 1),
-              color 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+.rv-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+
+/* Tone-glow primary (heya2 .btn-play) — Play, and Spin while it's the only CTA. */
+.rv-cta,
+.rv-spin.cta {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 12px 22px; border: 0; border-radius: 999px; cursor: pointer;
+  background: var(--tone); color: var(--tone-ink, var(--accent-ink));
+  font: 650 14px var(--font-sans); letter-spacing: 0.01em;
+  box-shadow:
+    0 0 0 1px rgb(var(--tone-rgb) / 0.45),
+    0 0 24px rgb(var(--tone-rgb) / 0.4),
+    6px 10px 36px -8px rgb(var(--tone-rgb) / 0.75);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease,
+              background 0.9s cubic-bezier(0.22, 1, 0.36, 1), color 0.9s cubic-bezier(0.22, 1, 0.36, 1);
 }
+.rv-cta:hover,
+.rv-spin.cta:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px rgb(var(--tone-rgb) / 0.6),
+    0 0 40px rgb(var(--tone-rgb) / 0.6),
+    8px 14px 48px -8px rgb(var(--tone-rgb) / 0.9);
+}
+.rv-cta .tri {
+  width: 0; height: 0;
+  border-left: 11px solid var(--tone-ink, var(--accent-ink));
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+}
+.rv-spin:disabled { opacity: 0.45; cursor: default; filter: saturate(0.5); }
+
+/* Tone-tinted secondary pill (heya2 .pill) — Spin once a pick is revealed. */
+.rv-spin.pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 11px 18px; border-radius: 999px; cursor: pointer;
+  border: 1px solid rgb(var(--tone-rgb) / 0.3);
+  background: rgb(var(--tone-rgb) / 0.08);
+  color: rgb(var(--ink) / 0.9); font: 550 13px var(--font-sans);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 0 16px rgb(var(--tone-rgb) / 0.14), var(--shadow-el);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.rv-spin.pill:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgb(var(--tone-rgb) / 0.55);
+  background: rgb(var(--tone-rgb) / 0.15);
+  box-shadow: 0 0 24px rgb(var(--tone-rgb) / 0.26), var(--shadow-el);
+}
+
+/* Ghost pill (Details) — hairline, transparent. */
+.rv-ghost {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 11px 18px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border-strong);
+  background: color-mix(in oklab, var(--bg-2) 55%, transparent);
+  color: var(--fg-1); font: 550 13px var(--font-sans);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.rv-ghost:hover { color: var(--fg-0); border-color: rgb(var(--ink) / 0.35); }
+
 /* Anticipation shimmer while the reel runs. */
 .rv-spin.spinning { animation: rv-spin-pulse 1s ease-in-out infinite; }
 @keyframes rv-spin-pulse {
@@ -457,8 +589,16 @@ onUnmounted(() => {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  margin-top: 22px;
+  gap: 7px;
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--hair);
+}
+.rv-filter-label {
+  font: 600 9.5px var(--font-mono); letter-spacing: 0.2em; text-transform: uppercase;
+  color: rgb(var(--ink) / 0.42);
+  text-shadow: 0 0 10px var(--bg-1), 0 1px 2px var(--bg-1);
+  margin-right: 2px;
 }
 /* Source segment — glass, like every steer control over ambient art. */
 .rv-seg {
@@ -476,43 +616,50 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 4px 12px;
+  padding: 5px 13px;
   border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 500;
+  font: 600 11px var(--font-mono);
+  letter-spacing: 0.04em;
   color: var(--fg-2);
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
 }
 .rv-seg button:hover { color: var(--fg-0); }
-.rv-seg button.active { background: var(--gold-soft); color: var(--gold-bright); }
+.rv-seg button.active {
+  background: rgb(var(--tone-rgb) / 0.14);
+  color: var(--tone);
+  box-shadow: 0 0 14px rgb(var(--tone-rgb) / 0.14);
+}
 .rv-chip {
   font-family: var(--font-mono);
   font-size: 10.5px;
   letter-spacing: 0.05em;
   color: var(--fg-1);
-  padding: 4px 10px;
+  padding: 5px 11px;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: color-mix(in oklab, var(--bg-2) 72%, transparent);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   box-shadow: var(--shadow-el);
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  transition: color 0.15s, border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
 .rv-chip:hover { color: var(--fg-0); border-color: var(--border-strong); }
 .rv-chip.on {
-  color: var(--gold);
-  border-color: color-mix(in srgb, var(--gold) 45%, transparent);
-  background: color-mix(in srgb, var(--gold) 10%, var(--bg-2));
+  color: var(--tone);
+  border-color: rgb(var(--tone-rgb) / 0.5);
+  background: rgb(var(--tone-rgb) / 0.12);
+  box-shadow: 0 0 16px rgb(var(--tone-rgb) / 0.16);
 }
 .rv-filter-sep {
   width: 1px;
   height: 14px;
   background: var(--border-strong);
-  margin: 0 4px;
+  margin: 0 5px;
 }
 .rv-wheel { justify-self: end; }
+/* Poster record-card frame (heya2 .postercard) — directional key-light shadow,
+   a --tone ring bloom on settle. */
 .wheel-frame {
   position: relative;
   width: 280px;
@@ -520,21 +667,28 @@ onUnmounted(() => {
   border-radius: var(--r-md);
   overflow: hidden;
   background: var(--bg-2);
-  box-shadow: 0 30px 80px rgb(var(--shade) / 0.55), 0 0 0 1px rgb(var(--ink) / 0.06);
+  box-shadow:
+    0 0 0 1px rgb(var(--ink) / 0.16),
+    10px 18px 34px -12px rgb(var(--shade) / 0.8),
+    24px 44px 90px -20px rgb(var(--shade) / 0.95);
   transition: box-shadow 0.3s;
 }
 .wheel-frame.spinning {
-  box-shadow: 0 30px 80px rgb(var(--shade) / 0.55), 0 0 48px color-mix(in srgb, var(--gold) 35%, transparent), 0 0 0 1px color-mix(in srgb, var(--gold) 40%, transparent);
+  box-shadow:
+    0 0 0 1px rgb(var(--tone-rgb) / 0.4),
+    10px 18px 34px -12px rgb(var(--shade) / 0.8),
+    24px 44px 90px -20px rgb(var(--shade) / 0.95),
+    0 0 48px rgb(var(--tone-rgb) / 0.35);
 }
 .wheel-frame.settled { animation: wheel-pop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1); }
-/* Landing flash: a gold ring that blooms and fades as the reel snaps. */
+/* Landing flash: a tone ring that blooms and fades as the reel snaps. */
 .wheel-frame.settled::after {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  box-shadow: inset 0 0 0 2px var(--gold), 0 0 42px color-mix(in srgb, var(--gold) 55%, transparent);
+  box-shadow: inset 0 0 0 2px var(--tone), 0 0 42px rgb(var(--tone-rgb) / 0.55);
   opacity: 0;
   animation: rv-flash 0.9s ease-out;
 }
@@ -569,15 +723,28 @@ onUnmounted(() => {
   pointer-events: none;
   background: linear-gradient(to bottom, rgba(7,7,10,0.55), transparent 30%, transparent 70%, rgba(7,7,10,0.55)); /* on artwork — stays literal */
 }
+/* Ghost-numeral empty state (heya2 .bignum stroke). */
 .wheel-empty {
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: var(--font-mono);
-  font-size: 64px;
-  color: var(--fg-4);
+  font: 700 96px var(--font-mono);
+  letter-spacing: -0.05em;
+  color: transparent;
+  -webkit-text-stroke: 1.5px rgb(var(--ink) / 0.16);
 }
+
+/* Reduced motion: the reel skip is handled in JS (spin() short-circuits), but
+   the decorative flourishes must also stand down. */
+@media (prefers-reduced-motion: reduce) {
+  .rv-spin.spinning,
+  .wheel-frame.settled,
+  .wheel-frame.settled::after,
+  .rv-ghostmark { animation: none; }
+  .wheel-reel { transition: none; }
+}
+
 /* Narrow: the wheel stacks ABOVE the lead and stays visible. */
 @media (max-width: 900px) {
   .rv-stage {
@@ -590,7 +757,8 @@ onUnmounted(() => {
   .rv-wheel { order: -1; justify-self: center; }
   .wheel-frame { width: min(200px, 48vw); }
   .rv-lead { text-align: center; width: 100%; }
-  .rv-title { font-size: 32px; }
-  .rv-meta, .rv-actions, .rv-filters { justify-content: center; }
+  .rv-title { max-width: none; }
+  .rv-eyebrow, .rv-meta, .rv-actions, .rv-filters { justify-content: center; }
+  .rv-title-wrap { display: block; }
 }
 </style>

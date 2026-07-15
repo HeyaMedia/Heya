@@ -5,152 +5,173 @@
   the engine re-ranks by your taste within that constraint (the "horror binge").
   Each tile shows why it was picked. Non-ML today; the embedding engine plugs in
   behind a config flag without changing this surface.
+
+  Heya 2.0 dress (2026-07-15): LibHead + on-canvas LedgerStrip head, a spotlight-
+  style borderless NL search over a hairline, the steer controls reorganized into
+  the 2.0 control grammar (mono group labels + hairline rule + tone-tinted facet
+  chips), tone-glow AI cluster, and the results sectioned under a SectionHeader.
+  The whole surface tone-follows the ambient pool (--tone / --tone-rgb published on
+  the root, exactly the --pb-accent precedent).
 -->
 <template>
-  <div class="scroll page-pad" style="height: 100%">
-    <header class="rb-head">
-      <div class="rb-eyebrow">For You</div>
-      <h1 class="rb-title">Recommendations</h1>
-      <div class="rb-meta">{{ steerSummary }}</div>
-    </header>
+  <div class="rb-view scroll" :style="toneVars">
+    <LibHead :title="title" :crumbs="crumbs" />
+    <LedgerStrip v-if="ledgerCells.length" :cells="ledgerCells" canvas />
 
-    <div class="rb-search">
-      <div class="rb-search-box">
-        <Icon name="sparkle" :size="15" class="rb-search-icon" />
+    <div class="rb-pad">
+      <!-- Spotlight-style natural-language search: a borderless input riding a
+           hairline, sparkle glyph, and a tone-glow Ask AI pill on the right. -->
+      <div class="rb-search" :class="{ focused: searchFocused }">
+        <Icon name="sparkle" :size="16" class="rb-search-icon" />
         <input
           v-model="nlQuery"
           type="text"
           class="rb-search-input"
           aria-label="Describe what you're in the mood for"
           :placeholder="searchPlaceholder"
+          @focus="searchFocused = true"
+          @blur="searchFocused = false"
           @keydown.enter="askAI"
         >
         <button v-if="nlQuery" class="rb-search-clear" @click="clearSearch">Clear</button>
-      </div>
-      <button
-        v-if="aiReady"
-        class="rb-ai-btn"
-        :style="bgToneStyle"
-        :disabled="nlQuery.trim().length < 2 || aiPending"
-        @click="askAI"
-      >
-        <Icon name="sparkle" :size="12" />
-        {{ aiPending ? 'Curating…' : 'Ask AI' }}
-      </button>
-    </div>
-
-    <div v-if="!searching" class="rb-controls">
-      <AppMenu trigger-class="btn-ghost-sm steer-glass" :width="240" align="start">
-        <template #trigger>
-          {{ genre || 'Any genre' }}
-          <Icon name="chevdown" :size="10" class="rb-caret" />
-        </template>
-        <DropdownMenuItem class="surface-item rb-item" :class="{ active: genre === '' }" @select="genre = ''">
-          Any genre
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          v-for="g in genreOptions"
-          :key="g"
-          class="surface-item rb-item"
-          :class="{ active: genre === g }"
-          @select="genre = g"
-        >
-          {{ g }}
-          <Icon v-if="genre === g" name="check" :size="12" class="rb-check" />
-        </DropdownMenuItem>
-      </AppMenu>
-
-      <div class="rb-seg">
         <button
-          v-for="opt in ratingOptions"
-          :key="opt.value"
-          :class="{ active: minRating === opt.value }"
-          :aria-pressed="minRating === opt.value"
-          @click="minRating = opt.value"
+          v-if="aiReady"
+          class="rb-ai-btn"
+          :disabled="nlQuery.trim().length < 2 || aiPending"
+          @click="askAI"
         >
-          {{ opt.label }}
+          <Icon name="sparkle" :size="13" />
+          {{ aiPending ? 'Curating…' : 'Ask AI' }}
         </button>
       </div>
 
-      <div class="rb-spacer" />
-      <button v-if="genre || minRating" class="btn-ghost-sm steer-glass" @click="reset">Clear</button>
-    </div>
-
-    <div v-if="aiPending" class="rb-note rb-ai-note">
-      Curating picks for “{{ aiQ }}” — the AI is searching the library and choosing what fits…
-    </div>
-    <div v-else-if="aiActive && aiFailed" class="rb-note">
-      AI curation failed ({{ aiErrorMsg }}) — showing plain semantic matches instead.
-    </div>
-    <div v-else-if="searching && !mlReady" class="rb-note">
-      Natural-language search needs the embedding engine — enable it (and let the
-      model finish downloading) in
-      <NuxtLink to="/settings/recommendations" class="rb-link">Settings → Recommendations</NuxtLink>.
-    </div>
-    <div v-else-if="!searching && !loading && !hasSignal" class="rb-note">
-      Heart or watch a few titles and this personalizes to your taste — for now, showing the highest-rated picks.
-    </div>
-
-    <div v-if="aiShowing" class="rb-ai-summary">
-      <div class="rb-ai-summary-head">
-        <div class="rb-ai-kicker">
-          <Icon name="sparkle" :size="12" />
-          <span>AI curation</span>
-          <span class="rb-ai-count">{{ aiItemCount }} {{ aiItemCount === 1 ? 'match' : 'matches' }}</span>
+      <!-- Steer panel — 2.0 control grammar: mono group labels, a hairline top
+           rule, tone-tinted facet chips (single-select genre) + segmented rating
+           floor. Hidden while a semantic/AI search owns the grid. -->
+      <div v-if="!searching" class="rb-steer">
+        <div class="rb-steer-row">
+          <span class="rb-steer-label">Genre</span>
+          <div class="rb-chips">
+            <button class="rb-chip" :class="{ on: genre === '' }" :aria-pressed="genre === ''" @click="genre = ''">Any</button>
+            <button
+              v-for="g in genreOptions"
+              :key="g"
+              class="rb-chip"
+              :class="{ on: genre === g }"
+              :aria-pressed="genre === g"
+              @click="genre = genre === g ? '' : g"
+            >{{ g }}</button>
+          </div>
         </div>
-        <button class="rb-ai-reroll" :disabled="aiPending" @click="rerollAI">
-          <Icon name="refresh" :size="12" />
-          {{ aiPending ? 'Curating…' : 'Re-roll' }}
-        </button>
+
+        <div class="rb-steer-row rb-steer-rating">
+          <span class="rb-steer-label">Min rating</span>
+          <div class="rb-seg">
+            <button
+              v-for="opt in ratingOptions"
+              :key="opt.value"
+              :class="{ active: minRating === opt.value }"
+              :aria-pressed="minRating === opt.value"
+              @click="minRating = opt.value"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
+          <button v-if="genre || minRating" class="rb-clear" @click="reset">
+            <Icon name="undo" :size="12" />
+            Reset
+          </button>
+        </div>
       </div>
-      <p v-if="aiNote" class="rb-ai-summary-note">{{ aiNote }}</p>
-      <div class="rb-ai-meta" :title="aiProbesTitle">AI-curated · {{ aiMeta }}</div>
-    </div>
 
-    <div v-if="displayLoading" class="grid-posters">
-      <div v-for="i in 12" :key="i" class="grid-tile">
-        <div class="poster" style="aspect-ratio: 2/3; background: var(--bg-3); animation: pulse 1.5s infinite" />
+      <div v-if="aiPending" class="rb-note rb-ai-note">
+        Curating picks for “{{ aiQ }}” — the AI is searching the library and choosing what fits…
       </div>
-    </div>
+      <div v-else-if="aiActive && aiFailed" class="rb-note">
+        AI curation failed ({{ aiErrorMsg }}) — showing plain semantic matches instead.
+      </div>
+      <div v-else-if="searching && !mlReady" class="rb-note">
+        Natural-language search needs the embedding engine — enable it (and let the
+        model finish downloading) in
+        <NuxtLink to="/settings/recommendations" class="rb-link">Settings → Recommendations</NuxtLink>.
+      </div>
+      <div v-else-if="!searching && !loading && !hasSignal" class="rb-note">
+        Heart or watch a few titles and this personalizes to your taste — for now, showing the highest-rated picks.
+      </div>
 
-    <div v-else-if="displayItems.length" class="grid-posters" :class="{ 'rb-ai-grid': aiShowing }">
-      <AppContextMenu v-for="(item, i) in displayItems" :key="item.id" :items="contextItemsFor(item)">
-        <NuxtLink :to="mediaUrl(item as any)" class="grid-tile card-tile rb-tile">
-          <MediaCard
-            :idx="i"
-            :src="usePosterUrl(item)"
-            aspect="2/3"
-            :title="item.title"
-            :subtitle="item.year"
-          />
-          <div v-if="item.reason" class="rb-reason" :title="item.reason">{{ item.reason }}</div>
-        </NuxtLink>
-      </AppContextMenu>
-    </div>
+      <!-- AI curation cluster — its own header for the AI grid (tone-lit). -->
+      <div v-if="aiShowing" class="rb-ai-summary">
+        <div class="rb-ai-summary-head">
+          <div class="rb-ai-kicker">
+            <Icon name="sparkle" :size="12" />
+            <span>AI curation</span>
+            <span class="rb-ai-count">{{ aiItemCount }} {{ aiItemCount === 1 ? 'match' : 'matches' }}</span>
+          </div>
+          <button class="rb-ai-reroll" :disabled="aiPending" @click="rerollAI">
+            <Icon name="refresh" :size="12" />
+            {{ aiPending ? 'Curating…' : 'Re-roll' }}
+          </button>
+        </div>
+        <p v-if="aiNote" class="rb-ai-summary-note">{{ aiNote }}</p>
+        <div class="rb-ai-meta" :title="aiProbesTitle">AI-curated · {{ aiMeta }}</div>
+      </div>
 
-    <!-- Endless steer grid: crossing this sentinel appends the next page of
-         picks until the engine's pool runs dry. Hidden for semantic/AI
-         results, which are one-shot lists. -->
-    <div
-      v-if="!searching && !aiShowing && recsQuery.hasNextPage.value"
-      ref="recsSentinel"
-      class="rb-sentinel"
-      aria-hidden="true"
-    >
-      <span class="rb-sentinel-spin" />
-    </div>
+      <!-- Non-AI results ride under a mono sec-head with a tone count. -->
+      <SectionHeader
+        v-if="!aiShowing && (displayItems.length || displayLoading)"
+        :title="resultsHeading.title"
+        :subtitle="resultsHeading.count"
+      />
 
-    <div v-else-if="!(searching && !mlReady)" class="rb-empty">
-      {{ aiShowing ? 'The AI found nothing in the library that fits — try rewording the ask.'
-        : searching ? 'No matches for that description.'
-          : 'Nothing matches this steer — try another genre or lower the rating floor.' }}
+      <div v-if="displayLoading" class="grid-posters">
+        <div v-for="i in 12" :key="i" class="grid-tile">
+          <div class="poster" style="aspect-ratio: 2/3; background: var(--bg-3); animation: pulse 1.5s infinite" />
+        </div>
+      </div>
+
+      <div v-else-if="displayItems.length" class="grid-posters" :class="{ 'rb-ai-grid': aiShowing }">
+        <AppContextMenu v-for="(item, i) in displayItems" :key="item.id" :items="contextItemsFor(item)">
+          <NuxtLink :to="mediaUrl(item as any)" class="grid-tile card-tile rb-tile">
+            <MediaCard
+              :idx="i"
+              :src="usePosterUrl(item)"
+              aspect="2/3"
+              :title="item.title"
+              :subtitle="item.year"
+            />
+            <div v-if="item.reason" class="rb-reason" :title="item.reason">
+              <Icon name="sparkle" :size="10" class="rb-reason-mark" />
+              <span>{{ item.reason }}</span>
+            </div>
+          </NuxtLink>
+        </AppContextMenu>
+      </div>
+
+      <!-- Endless steer grid: crossing this sentinel appends the next page of
+           picks until the engine's pool runs dry. Hidden for semantic/AI
+           results, which are one-shot lists. -->
+      <div
+        v-if="!searching && !aiShowing && recsQuery.hasNextPage.value"
+        ref="recsSentinel"
+        class="rb-sentinel"
+        aria-hidden="true"
+      >
+        <span class="rb-sentinel-spin" />
+      </div>
+
+      <div v-else-if="!(searching && !mlReady)" class="rb-empty">
+        {{ aiShowing ? 'The AI found nothing in the library that fits — try rewording the ask.'
+          : searching ? 'No matches for that description.'
+            : 'Nothing matches this steer — try another genre or lower the rating floor.' }}
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { MediaItem } from '~~/shared/types'
-import { DropdownMenuItem } from 'reka-ui'
+import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
+import type { Crumb } from '~/components/library/LibHead.vue'
 import { useInfiniteQuery, useQuery, useQueryCache } from '@pinia/colada'
 import { movieUserStateQuery, seriesUserStateQuery, userListsQuery as userListsOptions } from '~/queries/catalog'
 import { forYouInfinite } from '~/queries/rails'
@@ -167,10 +188,32 @@ type RecItem = { id: number; title: string; slug: string; year?: string; media_t
 
 const genre = ref('')
 const minRating = ref(0)
+const searchFocused = ref(false)
 
-// Ask AI wears the ambient backdrop's dominant tone (same trick as the hero
-// CTAs); undefined when ambient is off → the gold-soft CSS coat below.
-const bgToneStyle = useBackgroundToneStyle()
+// ── Heya 2.0 head + tone plumbing ───────────────────────────────────────
+// Archivo LibHead + mono breadcrumb (MOVIES · RECOMMENDATIONS).
+const title = 'Recommendations'
+const crumbs = computed<Crumb[]>(() => [
+  props.section === 'movie'
+    ? { label: 'Movies', to: '/movies' }
+    : { label: 'TV', to: '/tv' },
+  { label: 'Recommendations' },
+])
+
+// The whole surface tone-follows the ambient pool (the --pb-accent precedent):
+// eyebrow, ledger tone cells, section count, active chips and the AI pills all
+// glide with the backdrop. Falls back to the theme accent when ambient/tone-
+// follow is off (--tone/--tone-rgb default to the accent in :root).
+const bgTone = useBackgroundTone()
+const { toneFollowEnabled } = useAppearance()
+const toneVars = computed<Record<string, string> | undefined>(() => {
+  if (!toneFollowEnabled.value) return undefined
+  const t = bgTone.value
+  if (!t) return undefined
+  const m = t.main.match(/\d+/g)
+  if (!m) return undefined
+  return { '--tone': t.main, '--tone-rgb': m.slice(0, 3).join(' '), '--tone-ink': t.ink }
+})
 
 const ratingOptions = [
   { label: 'Any', value: 0 },
@@ -179,7 +222,7 @@ const ratingOptions = [
   { label: '8+', value: 8 },
 ]
 
-// Available genres for the steer dropdown, most-common first.
+// Available genres for the steer chips, most-common first.
 const genresQuery = useQuery({
   key: ['genres-all'],
   query: async () => (await $heya('/api/genres')) as { genre: string; count: number }[],
@@ -308,6 +351,32 @@ const displayLoading = computed(() => {
   return searching.value ? semanticQuery.isPending.value : loading.value
 })
 
+// Section header for the non-AI grid — title by mode, tone count.
+const resultsHeading = computed(() => {
+  if (searching.value) {
+    const n = displayItems.value.length
+    return { title: 'Semantic search', count: `${n} ${n === 1 ? 'match' : 'matches'}` }
+  }
+  const n = items.value.length
+  const more = recsQuery.hasNextPage.value ? '+' : ''
+  return { title: 'For you', count: `${n}${more} ${n === 1 ? 'title' : 'titles'}` }
+})
+
+// Signature ledger — user-facing facts only (PLAN cardinal rule 2): whether the
+// ranking is personalized, how many genres you can steer by, and whether the AI
+// curator is available. No pool count (infinite/unknowable) and no ops
+// telemetry. Fades in once the recs engine has answered.
+const ledgerCells = computed<LedgerCell[]>(() => {
+  if (loading.value) return []
+  const cells: LedgerCell[] = [
+    { k: 'Ranking', v: hasSignal.value ? 'Your taste' : 'Top rated', tone: hasSignal.value },
+  ]
+  const gc = genreOptions.value.length
+  if (gc) cells.push({ k: 'Genres', v: String(gc), sub: 'to steer' })
+  cells.push({ k: 'AI curator', v: aiReady.value ? 'Ready' : 'Off', tone: aiReady.value })
+  return cells
+})
+
 const userListsQuery = useQuery(userListsOptions())
 const moviesStateQuery = useQuery(() => ({ ...movieUserStateQuery(), enabled: props.section === 'movie' }))
 const seriesStateQuery = useQuery(() => ({ ...seriesUserStateQuery(), enabled: props.section === 'tv' }))
@@ -372,14 +441,6 @@ function contextItemsFor(item: RecItem) {
   })
 }
 
-const steerSummary = computed(() => {
-  const bits: string[] = []
-  if (genre.value) bits.push(genre.value)
-  if (minRating.value) bits.push(`${minRating.value}+ rating`)
-  const scope = props.section === 'movie' ? 'films' : 'shows'
-  return bits.length ? `${bits.join(' · ')} — ranked for you` : `${scope[0]!.toUpperCase()}${scope.slice(1)}, ranked for you`
-})
-
 function reset() {
   genre.value = ''
   minRating.value = 0
@@ -387,123 +448,160 @@ function reset() {
 </script>
 
 <style scoped>
-/* Art-proof header — same recipe as SectionHeader: a blended --bg-1 wash
-   behind the text block (no locatable edge) plus triple-halo text shadows,
-   so the title holds up over whatever the ambient pool is showing. */
-.rb-head {
-  position: relative;
-  isolation: isolate;
+.rb-view { height: 100%; }
+/* Content gutter mirrors BrowseView's .rec-pad so the Browse and Recommendations
+   landings share the exact left edge under the shared LibHead + LedgerStrip. */
+.rb-pad { padding: 22px 32px 80px; }
+
+/* ── Spotlight NL search — a borderless input riding a hairline (not a boxed
+   field), sparkle glyph, tone-glow Ask AI pill. The hairline warms to --tone on
+   focus so the whole row lifts with the ambient. ──────────────────────────── */
+.rb-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 2px 14px;
   margin-bottom: 20px;
+  border-bottom: 1px solid var(--hair-strong);
+  transition: border-color 0.2s ease;
 }
-.rb-head::before {
-  content: '';
-  position: absolute;
-  top: -44px;
-  bottom: -36px;
-  left: -70px;
-  width: min(56%, 560px);
-  z-index: -1;
-  pointer-events: none;
-  background: radial-gradient(ellipse 90% 75% at 30% 50%,
-    color-mix(in srgb, var(--bg-1) 55%, transparent) 0%,
-    color-mix(in srgb, var(--bg-1) 38%, transparent) 40%,
-    color-mix(in srgb, var(--bg-1) 16%, transparent) 68%,
-    transparent 92%);
-  filter: blur(24px);
+.rb-search.focused { border-bottom-color: rgb(var(--tone-rgb) / 0.55); }
+.rb-search-icon { color: var(--tone); flex-shrink: 0; transition: color 0.9s cubic-bezier(0.22, 1, 0.36, 1); }
+.rb-search-input {
+  flex: 1; min-width: 0;
+  background: transparent; border: 0; outline: none;
+  color: var(--fg-0); font-size: 17px; font-weight: 500;
+  text-shadow: 0 1px 2px var(--bg-1);
 }
-.rb-eyebrow {
-  font-size: 10px; font-family: var(--font-mono); font-weight: 700;
-  letter-spacing: 0.18em; text-transform: uppercase; color: var(--gold); margin-bottom: 8px;
-  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1);
+.rb-search-input::placeholder { color: var(--fg-3); font-weight: 400; }
+.rb-search-clear {
+  flex-shrink: 0;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--fg-3); padding: 5px 8px; cursor: pointer;
+  transition: color 0.12s;
 }
-.rb-title {
-  font-family: var(--font-display);
-  font-size: 40px; font-weight: 800; font-variation-settings: 'wdth' 112;
-  letter-spacing: -0.02em; margin: 0 0 6px;
-  text-shadow:
-    0 1px 2px var(--bg-1),
-    0 0 10px var(--bg-1),
-    0 0 24px var(--bg-1);
+.rb-search-clear:hover { color: var(--fg-0); }
+
+/* Ask AI — tone-glow filled pill (heya2 .btn-play recipe): the fill + glow ride
+   --tone so they glide as the ambient rotates. */
+.rb-ai-btn {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 9px 17px; border: 0; border-radius: 999px; cursor: pointer;
+  background: var(--tone); color: var(--tone-ink, var(--accent-ink));
+  font: 650 13px var(--font-sans); letter-spacing: 0.01em; white-space: nowrap;
+  box-shadow:
+    0 0 0 1px rgb(var(--tone-rgb) / 0.45),
+    0 0 22px rgb(var(--tone-rgb) / 0.38),
+    5px 9px 30px -8px rgb(var(--tone-rgb) / 0.7);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.12s ease, filter 0.12s ease,
+              background 0.9s cubic-bezier(0.22, 1, 0.36, 1), color 0.9s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.rb-meta {
-  font-size: 12px; font-family: var(--font-mono);
-  /* fg-1, not the muted tiers — those wash out over bright art. */
+.rb-ai-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px rgb(var(--tone-rgb) / 0.6),
+    0 0 36px rgb(var(--tone-rgb) / 0.55),
+    7px 12px 40px -8px rgb(var(--tone-rgb) / 0.85);
+}
+.rb-ai-btn:disabled { opacity: 0.5; filter: saturate(0.5); cursor: default; box-shadow: 0 0 0 1px rgb(var(--tone-rgb) / 0.28); }
+
+/* ── Steer panel — 2.0 control grammar ──────────────────────────────────── */
+.rb-steer {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+.rb-steer-row { display: flex; align-items: flex-start; gap: 16px; }
+.rb-steer-rating { align-items: center; }
+.rb-steer-label {
+  flex: 0 0 78px;
+  padding-top: 5px;
+  font: 600 10px var(--font-mono); letter-spacing: 0.2em; text-transform: uppercase;
+  color: rgb(var(--ink) / 0.45);
+  text-shadow: 0 0 10px var(--bg-1), 0 1px 2px var(--bg-1);
+}
+.rb-steer-rating .rb-steer-label { padding-top: 0; }
+.rb-chips { display: flex; flex-wrap: wrap; gap: 7px; min-width: 0; }
+
+/* Facet chip — mono, hairline, glass so it reads over ambient art; the active
+   one wears the --tone tint (heya2 .seasontabs.on recipe). */
+.rb-chip {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em;
   color: var(--fg-1);
-  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1);
+  padding: 6px 13px; border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg-2) 72%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.rb-chip:hover { color: var(--fg-0); border-color: var(--border-strong); }
+.rb-chip.on {
+  color: var(--tone);
+  border-color: rgb(var(--tone-rgb) / 0.55);
+  background: rgb(var(--tone-rgb) / 0.12);
+  box-shadow: 0 0 16px rgb(var(--tone-rgb) / 0.16);
 }
 
-.rb-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
-.rb-spacer { flex: 1; }
-.rb-caret { opacity: 0.45; margin-left: 4px; }
-
-/* Rating segmented control — glassed so it reads over ambient art (the
-   ink-wash recipe it mirrored from FilterBar vanishes against artwork). */
+/* Rating segmented — glassed so it holds over ambient art, tone-tinted active. */
 .rb-seg {
   display: inline-flex; gap: 2px; padding: 2px;
   background: color-mix(in oklab, var(--bg-2) 82%, transparent);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--border);
-  border-radius: var(--r-sm);
+  border-radius: 999px;
   box-shadow: var(--shadow-el);
 }
 .rb-seg button {
-  padding: 5px 12px; border-radius: 4px; font-size: 12px; font-weight: 500;
+  padding: 5px 13px; border-radius: 999px;
+  font: 600 11px var(--font-mono); letter-spacing: 0.06em;
   color: var(--fg-2); cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
 }
 .rb-seg button:hover { color: var(--fg-0); }
-.rb-seg button.active { background: var(--gold-soft); color: var(--gold-bright); }
+.rb-seg button.active {
+  background: rgb(var(--tone-rgb) / 0.14);
+  color: var(--tone);
+  box-shadow: 0 0 14px rgb(var(--tone-rgb) / 0.14);
+}
 
+.rb-clear {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 999px;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--fg-2); border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg-2) 72%, transparent);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  cursor: pointer; transition: color 0.15s, border-color 0.15s;
+}
+.rb-clear:hover { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+
+/* ── Notes ──────────────────────────────────────────────────────────────── */
 .rb-note {
   font-size: 13px; color: var(--fg-2);
   background: color-mix(in oklab, var(--bg-2) 82%, transparent);
-  border: 1px solid var(--border); border-radius: var(--r-sm);
-  padding: 10px 14px; margin-bottom: 20px;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--hair); border-radius: var(--r-md);
+  padding: 11px 15px; margin-bottom: 20px;
   box-shadow: var(--shadow-el);
 }
+.rb-ai-note { color: var(--tone); border-color: rgb(var(--tone-rgb) / 0.35); }
 .rb-empty { padding: 60px 0; text-align: center; color: var(--fg-3); font-size: 14px; }
 
-.rb-search { display: flex; align-items: stretch; gap: 10px; margin-bottom: 14px; }
-.rb-search-box { position: relative; flex: 1; display: flex; align-items: center; }
-.rb-search-icon { position: absolute; left: 14px; color: var(--gold); pointer-events: none; }
-.rb-search-input {
-  width: 100%; padding: 12px 16px 12px 40px;
-  background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-md);
-  color: var(--fg-0); font-size: 14px; outline: none; transition: border-color 0.15s;
-  box-shadow: var(--shadow-el);
-}
-.rb-search-input:focus { border-color: var(--gold); }
-.rb-search-input::placeholder { color: var(--fg-4); }
-.rb-search-clear { position: absolute; right: 10px; background: transparent; border: 0; color: var(--fg-3); font-size: 12px; cursor: pointer; padding: 4px 8px; }
-.rb-search-clear:hover { color: var(--fg-0); }
-
-.rb-ai-btn {
-  display: inline-flex; align-items: center; gap: 6px; padding: 0 16px;
-  background: var(--gold-soft); color: var(--gold-bright);
-  border: 1px solid transparent; border-radius: var(--r-md);
-  font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer;
-  box-shadow: var(--shadow-el);
-  /* Slow color glide: the inline tone style (useBackgroundToneStyle)
-     changes as the ambient backdrop rotates. */
-  transition: filter 0.12s ease, opacity 0.12s ease,
-              background 0.9s cubic-bezier(0.22, 1, 0.36, 1),
-              color 0.9s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.rb-ai-btn:hover:not(:disabled) { filter: brightness(1.15); }
-/* Dim without dissolving: at 0.45 the tone fill mixed into the artwork
-   behind it and the label lost its contrast guarantee. */
-.rb-ai-btn:disabled { opacity: 0.6; filter: saturate(0.55); cursor: default; }
-
-.rb-ai-note { color: var(--gold-bright); border-color: var(--gold-soft); }
-
-/* The model's overall "I looked for… these fit because…" explanation. */
+/* ── AI curation cluster — tone-lit summary card (heya2 .upnext-ish). ──────── */
 .rb-ai-summary {
-  background: linear-gradient(110deg, color-mix(in srgb, var(--gold) 5.5%, transparent), rgb(var(--ink) / 0.018) 55%);
-  border: 1px solid var(--gold-soft);
+  background: linear-gradient(110deg, rgb(var(--tone-rgb) / 0.06), rgb(var(--ink) / 0.018) 55%);
+  border: 1px solid rgb(var(--tone-rgb) / 0.28);
   border-radius: var(--r-md);
   padding: 14px 16px;
-  margin-bottom: 20px;
+  margin-bottom: 22px;
+  box-shadow: 0 0 22px rgb(var(--tone-rgb) / 0.08), var(--shadow-el);
 }
 .rb-ai-summary-head {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
@@ -511,20 +609,27 @@ function reset() {
 }
 .rb-ai-kicker {
   display: flex; align-items: center; gap: 7px;
-  color: var(--gold-bright); font-family: var(--font-mono); font-size: 10px;
-  font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--tone); font-family: var(--font-mono); font-size: 10px;
+  font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase;
 }
 .rb-ai-count {
-  color: var(--fg-3); font-weight: 500; letter-spacing: 0;
+  color: var(--fg-3); font-weight: 500; letter-spacing: 0.04em;
   text-transform: none;
 }
+/* Re-roll — tone-tinted ghost pill (heya2 .pill). */
 .rb-ai-reroll {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 5px 9px; border: 1px solid var(--border); border-radius: var(--r-sm);
-  color: var(--fg-2); background: rgb(var(--ink) / 0.025);
-  font-size: 11px; cursor: pointer;
+  padding: 6px 11px; border-radius: 999px;
+  border: 1px solid rgb(var(--tone-rgb) / 0.3);
+  color: rgb(var(--ink) / 0.9); background: rgb(var(--tone-rgb) / 0.08);
+  font: 550 11px var(--font-mono); letter-spacing: 0.04em; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
-.rb-ai-reroll:hover:not(:disabled) { color: var(--fg-0); border-color: var(--border-hover); }
+.rb-ai-reroll:hover:not(:disabled) {
+  border-color: rgb(var(--tone-rgb) / 0.55);
+  background: rgb(var(--tone-rgb) / 0.15);
+  box-shadow: 0 0 18px rgb(var(--tone-rgb) / 0.18);
+}
 .rb-ai-reroll:disabled { opacity: 0.5; cursor: default; }
 .rb-ai-grid {
   grid-template-columns: repeat(auto-fill, minmax(160px, 190px));
@@ -539,31 +644,31 @@ function reset() {
   cursor: default;
 }
 
-/* Reason underlay — a slab tucked under the poster so the "why" reads as
-   part of the card instead of an ellipsized line painted on the art. The
-   poster keeps its own radius and sits above (z-index), the slab peeks out
-   below with matching bottom corners. */
+/* ── Reason plinth — a slab tucked under the poster so the "why" reads as part
+   of the card. Hairline + solid --bg-2 foot (no elevation of its own; the
+   poster owns the directional card shadow). A small tone sparkle marks it as
+   the engine's voice. ─────────────────────────────────────────────────────── */
 .rb-tile { display: flex; flex-direction: column; }
 .rb-tile :deep(.mediac) { position: relative; z-index: 1; height: auto; }
 .rb-reason {
   margin-top: -10px;
   padding: 18px 12px 11px;
-  /* Solid surface, not an ink wash — the plinth floats over ambient art and
-     must read as part of the card. A single hairline defines its side/bottom
-     edges; it carries NO elevation of its own — the poster above owns the
-     directional card shadow, and a second shadow here just muddied the seam
-     between rows (Heya 2.0 polish 2026-07-15). */
   background: var(--bg-2);
   border: 1px solid var(--hair);
   border-top: 0;
   border-radius: 0 0 var(--r-md) var(--r-md);
   font-size: 11.5px; line-height: 1.45; color: var(--fg-2);
+  display: flex;
+  gap: 6px;
+}
+.rb-reason > span {
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.rb-link { color: var(--gold); text-decoration: none; }
+.rb-reason-mark { color: var(--tone); flex-shrink: 0; margin-top: 2px; }
+.rb-link { color: var(--tone); text-decoration: none; }
 .rb-link:hover { text-decoration: underline; }
 
 .rb-sentinel {
@@ -576,7 +681,7 @@ function reset() {
   height: 22px;
   border-radius: 50%;
   border: 2px solid rgb(var(--ink) / 0.15);
-  border-top-color: var(--gold);
+  border-top-color: var(--tone);
   animation: rb-spin 0.8s linear infinite;
 }
 @keyframes rb-spin {
@@ -584,16 +689,10 @@ function reset() {
 }
 
 @media (max-width: 720px) {
-  .page-pad { padding: 20px 16px 60px; }
-  .rb-title { font-size: 26px; }
-  .rb-controls { flex-wrap: wrap; }
+  .rb-pad { padding: 16px 16px 60px; }
+  .rb-search-input { font-size: 16px; }
+  .rb-steer-row { flex-direction: column; gap: 8px; }
+  .rb-steer-label { flex-basis: auto; padding-top: 0; }
   .rb-ai-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
 }
-</style>
-
-<style>
-/* AppMenu portals items out of scoped reach (docs/ui.md). */
-.rb-item { justify-content: space-between; }
-.rb-item.active { color: var(--gold); }
-.rb-check { color: var(--gold); }
 </style>
