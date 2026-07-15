@@ -63,6 +63,10 @@ export function useMusicActions() {
   const albumRatings = useRatings('album')
   const artistRatings = useRatings('artist')
   const loadQuery = useQueryLoader()
+  // Shared "Track information" dialog channel — the globally-mounted
+  // <TrackInfoDialog> (app.vue) fetches /api/music/tracks/{id} on open, so a
+  // bare id is enough from every menu. Pages holding richer rows prime extras.
+  const trackInfo = useTrackInfo()
 
   if (import.meta.client) playlists.ensureLoaded()
 
@@ -176,6 +180,11 @@ export function useMusicActions() {
         submenu: ratingSubmenu(trackRatings.get(track.id), async (v) => { await trackRatings.set(track.id, v) }),
       },
       { label: '', separator: true },
+      {
+        label: 'Track info',
+        icon: 'info',
+        action: () => trackInfo.open(track.id),
+      },
     )
     if (track.artist_slug) {
       items.push({

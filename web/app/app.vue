@@ -5,6 +5,9 @@
   </NuxtLayout>
   <Lightbox />
   <AppToastHost />
+  <!-- Global "Track information" dialog — driven by the useTrackInfo()
+       singleton so the central track context menu opens it from anywhere. -->
+  <TrackInfoDialog />
   <OfflineIndicator />
   <!-- Global touch affordances (left-edge swipe → sidebar, pull-to-refresh).
        Client-only; renders only a transient pull indicator on touch devices. -->
