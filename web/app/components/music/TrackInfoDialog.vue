@@ -39,6 +39,10 @@ interface MusicTrackDetailResp {
   artist_slug: string
   lyrics_available: boolean
   lyrics_path: string
+  recording_mbid: string
+  isrc: string
+  explicit: boolean
+  file_path: string
   files: TrackFile[]
 }
 
@@ -92,6 +96,14 @@ const prefetch = computed(() => state.value.prefetch)
 // Prefer the richer prefetch files (album TrackView) when present, else the
 // fetched detail's — identical shape either way.
 const files = computed<TrackFile[]>(() => prefetch.value?.files ?? detail.value?.files ?? [])
+
+// Path/MBID/ISRC/explicit now come straight from MusicTrackDetail (server
+// exposes them since the track-info follow-up); the page prefetch remains a
+// fallback for rows rendered before the fetch resolves.
+const filePath = computed(() => detail.value?.file_path || prefetch.value?.file_path || '')
+const recordingMbid = computed(() => detail.value?.recording_mbid || prefetch.value?.recording_mbid || '')
+const isrc = computed(() => detail.value?.isrc || prefetch.value?.isrc || '')
+const isExplicit = computed(() => detail.value?.explicit ?? prefetch.value?.explicit ?? false)
 
 const coverUrl = computed(() => {
   const d = detail.value
@@ -170,9 +182,9 @@ const hasSonic = computed(() => {
             <div class="tid-row"><dt>Track</dt><dd>{{ detail.track_number || '—' }}</dd></div>
             <div class="tid-row"><dt>Disc</dt><dd>{{ detail.disc_number || '—' }}</dd></div>
             <div class="tid-row"><dt>Duration</dt><dd>{{ formatTime(detail.duration) }}</dd></div>
-            <div v-if="prefetch?.explicit" class="tid-row"><dt>Advisory</dt><dd><span class="tid-tag">Explicit</span></dd></div>
-            <div v-if="prefetch?.isrc" class="tid-row"><dt>ISRC</dt><dd class="tid-mono">{{ prefetch.isrc }}</dd></div>
-            <div v-if="prefetch?.recording_mbid" class="tid-row"><dt>Recording MBID</dt><dd class="tid-mono">{{ prefetch.recording_mbid }}</dd></div>
+            <div v-if="isExplicit" class="tid-row"><dt>Advisory</dt><dd><span class="tid-tag">Explicit</span></dd></div>
+            <div v-if="isrc" class="tid-row"><dt>ISRC</dt><dd class="tid-mono">{{ isrc }}</dd></div>
+            <div v-if="recordingMbid" class="tid-row"><dt>Recording MBID</dt><dd class="tid-mono">{{ recordingMbid }}</dd></div>
             <div class="tid-row"><dt>Lyrics</dt><dd>{{ detail.lyrics_available ? 'Available' : 'None' }}</dd></div>
           </dl>
         </section>
@@ -199,13 +211,13 @@ const hasSonic = computed(() => {
           </div>
         </section>
 
-        <!-- Filesystem path — only when a payload carried it (album page).
-             MusicTrackDetail does not expose it; see report/DEFERRED. Shown to
-             all users, mono + wrapping (matches the un-gated technical info the
-             video stream-info panel surfaces). -->
-        <section v-if="prefetch?.file_path" class="tid-sec">
+        <!-- Filesystem path — primary (best-quality) file, straight from
+             MusicTrackDetail with page-prefetch fallback. Shown to all users,
+             mono + wrapping (matches the un-gated technical info the video
+             stream-info panel surfaces). -->
+        <section v-if="filePath" class="tid-sec">
           <h4 class="tid-h">Location</h4>
-          <div class="tid-path">{{ prefetch.file_path }}</div>
+          <div class="tid-path">{{ filePath }}</div>
         </section>
 
         <!-- Sonic analysis (facets) -->

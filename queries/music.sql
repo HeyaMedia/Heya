@@ -498,6 +498,19 @@ SELECT t.id,
        t.duration,
        t.lyrics_path,
        t.lyrics_available,
+       t.recording_mbid,
+       t.isrc,
+       t.explicit,
+       -- Primary (best-quality) file's on-disk path for the track-info
+       -- dialog; ordering mirrors ListTrackFilesByTrack's [0] pick.
+       COALESCE((
+         SELECT lf.path
+         FROM track_files tf
+         JOIN library_files lf ON lf.id = tf.library_file_id
+         WHERE tf.track_id = t.id AND lf.deleted_at IS NULL
+         ORDER BY tf.quality_score DESC, tf.id ASC
+         LIMIT 1
+       ), '')::text AS file_path,
        al.title          AS album_title,
        al.slug           AS album_slug,
        al.year           AS album_year,

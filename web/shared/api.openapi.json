@@ -12360,6 +12360,12 @@
             "format": "int32",
             "type": "integer"
           },
+          "explicit": {
+            "type": "boolean"
+          },
+          "file_path": {
+            "type": "string"
+          },
           "files": {
             "items": {
               "$ref": "#/components/schemas/TrackFile"
@@ -12373,10 +12379,16 @@
             "format": "int64",
             "type": "integer"
           },
+          "isrc": {
+            "type": "string"
+          },
           "lyrics_available": {
             "type": "boolean"
           },
           "lyrics_path": {
+            "type": "string"
+          },
+          "recording_mbid": {
             "type": "string"
           },
           "title": {
@@ -12397,6 +12409,10 @@
           "duration",
           "lyrics_path",
           "lyrics_available",
+          "recording_mbid",
+          "isrc",
+          "explicit",
+          "file_path",
           "album_title",
           "album_slug",
           "album_year",

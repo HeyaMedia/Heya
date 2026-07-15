@@ -1474,6 +1474,19 @@ SELECT t.id,
        t.duration,
        t.lyrics_path,
        t.lyrics_available,
+       t.recording_mbid,
+       t.isrc,
+       t.explicit,
+       -- Primary (best-quality) file's on-disk path for the track-info
+       -- dialog; ordering mirrors ListTrackFilesByTrack's [0] pick.
+       COALESCE((
+         SELECT lf.path
+         FROM track_files tf
+         JOIN library_files lf ON lf.id = tf.library_file_id
+         WHERE tf.track_id = t.id AND lf.deleted_at IS NULL
+         ORDER BY tf.quality_score DESC, tf.id ASC
+         LIMIT 1
+       ), '')::text AS file_path,
        al.title          AS album_title,
        al.slug           AS album_slug,
        al.year           AS album_year,
@@ -1500,6 +1513,10 @@ type GetTrackDetailByIDRow struct {
 	Duration            int32          `json:"duration"`
 	LyricsPath          string         `json:"lyrics_path"`
 	LyricsAvailable     bool           `json:"lyrics_available"`
+	RecordingMbid       string         `json:"recording_mbid"`
+	Isrc                string         `json:"isrc"`
+	Explicit            bool           `json:"explicit"`
+	FilePath            string         `json:"file_path"`
 	AlbumTitle          string         `json:"album_title"`
 	AlbumSlug           string         `json:"album_slug"`
 	AlbumYear           string         `json:"album_year"`
@@ -1525,6 +1542,10 @@ func (q *Queries) GetTrackDetailByID(ctx context.Context, id int64) (GetTrackDet
 		&i.Duration,
 		&i.LyricsPath,
 		&i.LyricsAvailable,
+		&i.RecordingMbid,
+		&i.Isrc,
+		&i.Explicit,
+		&i.FilePath,
 		&i.AlbumTitle,
 		&i.AlbumSlug,
 		&i.AlbumYear,
