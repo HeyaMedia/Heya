@@ -357,14 +357,16 @@ const spotlightOpen = ref(false)
 const { isPhone, isCompact } = useViewport()
 
 // Platform-aware ⌘K / Ctrl+K hint chip. Rendered only after mount so the
-// client-only navigator probe can't trigger a hydration mismatch.
+// client-only navigator probe can't trigger a hydration mismatch. Whether it's
+// actually VISIBLE is decided in CSS by keyboard-capability (hover + fine
+// pointer) rather than viewport width — a touch tablet has no ⌘K to press.
 const mounted = ref(false)
 const shortcutLabel = ref('⌘K')
 onMounted(() => {
   mounted.value = true
   shortcutLabel.value = searchShortcutLabel()
 })
-const showKbdHint = computed(() => mounted.value && !isPhone.value)
+const showKbdHint = computed(() => mounted.value)
 
 // App-wide open hotkeys. Additive — does NOT touch useGlobalHotkeys (the music
 // transport keys), which already bails on modifier combos so ⌘K is free and
@@ -703,6 +705,7 @@ const { tabs, isActive } = useNavTabs()
 }
 .search-kbd {
   flex-shrink: 0;
+  display: none;
   font: 600 10px var(--font-mono);
   letter-spacing: 0.04em;
   line-height: 1;
@@ -712,6 +715,9 @@ const { tabs, isActive } = useNavTabs()
   border-radius: 5px;
   padding: 3px 6px;
 }
+/* Only surface the shortcut chip where there's a physical keyboard to press
+   it — a touch tablet (coarse pointer) shows a bare pill. */
+@media (hover: hover) and (pointer: fine) { .search-kbd { display: inline-block; } }
 /* Activity button — uses the global .btn-icon class for size/hover/active so it
    visually matches the Cast button. The .activity-btn marker only exists to
    pin the spinning ring to the button (see unscoped block below — the button

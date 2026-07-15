@@ -4,6 +4,36 @@ import type { QuickSearchResponse, SearchBucket, SearchType } from '~/composable
 export interface GenreRow { genre: string; count: number }
 export interface CollectionRow { id: number; name: string; poster_path: string; movie_count: number }
 
+/** A single card in the spotlight empty-state "For You" strip. Mirrors the
+ *  ForYouItem the /api/me/recommendations endpoint returns — only the fields the
+ *  strip renders + navigates with. */
+export interface SpotlightRecItem {
+  id: number
+  public_id?: string
+  title: string
+  slug: string
+  year?: string
+  media_type: string
+  available: boolean
+}
+
+/** Compact, availability-filtered recommendation strip for the spotlight empty
+ *  state. Reuses the same /api/me/recommendations engine the home "For You"
+ *  rail pages, just capped tiny — only locally-available items so every card
+ *  has a real in-app route. */
+export const spotlightForYouQuery = defineQueryOptions(() => ({
+  key: ['spotlight', 'for-you'],
+  query: async (): Promise<SpotlightRecItem[]> => {
+    const { $heya } = useNuxtApp()
+    const res = await $heya('/api/me/recommendations', {
+      query: { limit: 12 },
+    }) as { items?: SpotlightRecItem[] | null }
+    return (res.items ?? []).filter(it => it.available).slice(0, 6)
+  },
+  staleTime: 1000 * 60 * 5,
+  meta: { prefetch: 'none', persistence: 'device', sensitivity: 'private' },
+}))
+
 export const searchBrowseQuery = defineQueryOptions(() => ({
   key: ['search', 'browse'],
   query: async () => {
