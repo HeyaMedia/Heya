@@ -774,7 +774,9 @@ if (import.meta.client) {
 }
 .trk {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto 66px 40px;
+  /* Last 40px column hosts the touch-only ⋯; collapsed on fine pointers so
+     desktop rows don't end in a dead gap (coarse override below). */
+  grid-template-columns: 44px minmax(0, 1fr) auto 66px 0px;
   gap: 18px;
   align-items: center;
   padding: 9px 8px;
@@ -783,6 +785,9 @@ if (import.meta.client) {
   cursor: pointer;
   transition: background 0.12s;
   min-height: 46px;
+}
+@media (pointer: coarse) {
+  .trk { grid-template-columns: 44px minmax(0, 1fr) auto 66px 40px; }
 }
 .trk:hover { background: rgb(var(--ink) / 0.03); }
 .trk:hover .trk-num { opacity: 0; }
@@ -845,10 +850,12 @@ if (import.meta.client) {
   font-variant-numeric: tabular-nums;
 }
 
-/* ⋯ — hover-visible on desktop, always on touch. Opens the shared ActionSheet
-   (which includes Track info via the central builder). */
+/* ⋯ — touch-only affordance opening the shared ActionSheet (which includes
+   Track info via the central builder). Desktop machines get the same menu via
+   right-click (AppContextMenu), so the dot is omitted there entirely — the
+   sheet reads as a mobile control on a fine-pointer device (user 2026-07-15). */
 .trk-more {
-  display: inline-flex;
+  display: none;
   align-items: center;
   justify-content: center;
   width: 32px;
@@ -858,10 +865,11 @@ if (import.meta.client) {
   color: rgb(var(--ink) / 0.5);
   cursor: pointer;
   border-radius: var(--r-sm);
-  opacity: 0;
-  transition: opacity 0.12s, color 0.12s, background 0.12s;
+  transition: color 0.12s, background 0.12s;
 }
-.trk:hover .trk-more { opacity: 1; }
+@media (pointer: coarse) {
+  .trk-more { display: inline-flex; }
+}
 .trk-more:hover { color: rgb(var(--ink) / 0.9); background: rgb(var(--ink) / 0.06); }
 
 /* ── Card rails (Sounds Like / More by) — shadow room so the directional
