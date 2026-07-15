@@ -1,5 +1,11 @@
 <template>
   <div class="rec-view scroll">
+    <!-- Library head + signature ledger sit edge-to-edge above the rails
+         (LedgerStrip needs no side gutter; LibHead carries its own). Rendered
+         only once the page hands us the facts — the catalog loads in the
+         background, so the rails paint immediately and the ledger fills in. -->
+    <LibHead v-if="libTitle" :title="libTitle" :crumbs="libCrumbs" />
+    <LedgerStrip v-if="ledgerCells.length" :cells="ledgerCells" />
     <div class="rec-pad">
       <!-- Activity rows (bespoke tiles) come first, composed here from their
            own endpoints; the server-ranked discovery rails follow. -->
@@ -76,6 +82,8 @@
 <script setup lang="ts">
 import type { MediaItem } from '~~/shared/types'
 import type { ContinueWatchingItem } from '~/types/home'
+import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
+import type { Crumb } from '~/components/library/LibHead.vue'
 import { useInfiniteQuery, useQuery, useQueryCache } from '@pinia/colada'
 import { movieUserStateQuery, seriesUserStateQuery, userListsQuery as userListsOptions } from '~/queries/catalog'
 import { continueWatchingQuery } from '~/queries/activity'
@@ -91,7 +99,19 @@ import {
   type RecentTVEntry,
 } from '~/queries/rails'
 
-const props = defineProps<{ section: 'movie' | 'tv' }>()
+const props = withDefaults(defineProps<{
+  section: 'movie' | 'tv'
+  /** Archivo library title shown in the LibHead (omit to hide the head). */
+  libTitle?: string
+  /** Mono breadcrumb segments above the title. */
+  libCrumbs?: Crumb[]
+  /** Signature ledger facts (empty until the page's catalog resolves). */
+  ledgerCells?: LedgerCell[]
+}>(), {
+  libTitle: '',
+  libCrumbs: () => [],
+  ledgerCells: () => [],
+})
 
 const { $heya } = useNuxtApp()
 const queryClient = useQueryCache()

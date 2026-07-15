@@ -25,8 +25,11 @@
       />
     </AppSheet>
     <div class="library-main scroll">
+      <LibHead :title="libTitle" :crumbs="libCrumbs" />
+      <LedgerStrip v-if="ledgerCells.length" :cells="ledgerCells" />
       <LibraryToolbar
         title="Books"
+        hide-title
         :count="sorted.length"
         :sort="sort"
         :view="view"
@@ -162,6 +165,8 @@
 
 <script setup lang="ts">
 import type { MediaItem, Library, UserList } from '~~/shared/types'
+import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
+import type { Crumb } from '~/components/library/LibHead.vue'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { booksCatalogQuery, librariesQuery, mediaUserStateQuery, userListsQuery } from '~/queries/catalog'
 
@@ -227,6 +232,25 @@ const sorted = computed(() => {
 })
 
 const { cols: gridCols, rowHeight, rows: gridRows } = usePosterGrid(gridWrap, sorted)
+
+// ── Library head + ledger (Heya 2.0) ────────────────────────────────────
+const libTitle = computed(() =>
+  (activeLib.value ? libraries.value.find(l => l.id === activeLib.value)?.name : null) || 'Books')
+const libCrumbs = computed<Crumb[]>(() => [{ label: 'Library' }, { label: 'Reading' }])
+const ledgerCells = computed<LedgerCell[]>(() => {
+  const list = scopedItems.value
+  const total = list.length
+  if (!total) return []
+  const audio = list.filter(i => bookKind(i) === 'audiobook').length
+  const authors = new Set(list.map(i => i.book_author).filter(Boolean)).size
+  const years = list.map(i => parseInt(i.year || '', 10)).filter(y => !Number.isNaN(y))
+  const cells: LedgerCell[] = [{ k: 'Books', v: String(total) }]
+  if (audio > 0) cells.push({ k: 'Audiobooks', v: String(audio), tone: true })
+  cells.push({ k: 'Loved', v: String(favoritedSet.value.size) })
+  if (authors > 0) cells.push({ k: 'Authors', v: String(authors) })
+  if (years.length) cells.push({ k: 'Span', v: `${Math.min(...years)}–${Math.max(...years)}` })
+  return cells
+})
 
 function bookKind(item: MediaItem): BookKind {
   return item.book_format === 'audiobook' ? 'audiobook' : 'book'

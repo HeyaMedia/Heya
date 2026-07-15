@@ -258,6 +258,19 @@ async function createList() {
   }
 }
 .lib-section { display: flex; flex-direction: column; }
+/* Hairline-ruled groups (heya2.css sidebar): a divider between sections and
+   tighter, dimmer mono group labels. The gold-tone active-item chrome comes
+   from the global .lib-item.active (kept). */
+.lib-section + .lib-section {
+  border-top: 1px solid var(--hair);
+  padding-top: 16px;
+}
+.section-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  color: var(--fg-3);
+}
 .lists-toggle { cursor: pointer; }
 .expand-icon { margin-left: auto; opacity: 0.4; }
 .lib-item-nested { padding-left: 38px; }

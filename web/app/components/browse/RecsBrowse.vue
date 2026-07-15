@@ -417,7 +417,9 @@ function reset() {
   text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1);
 }
 .rb-title {
-  font-size: 36px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 6px;
+  font-family: var(--font-display);
+  font-size: 40px; font-weight: 800; font-variation-settings: 'wdth' 112;
+  letter-spacing: -0.02em; margin: 0 0 6px;
   text-shadow:
     0 1px 2px var(--bg-1),
     0 0 10px var(--bg-1),

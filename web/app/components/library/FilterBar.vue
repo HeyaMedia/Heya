@@ -14,8 +14,8 @@
 <template>
   <div class="filter-bar">
     <div class="filter-bar-top">
-      <div class="filter-bar-left">
-        <h1 class="filter-bar-title">{{ title }}</h1>
+      <div class="filter-bar-left" :class="{ 'left-count-only': hideTitle }">
+        <h1 v-if="!hideTitle" class="filter-bar-title">{{ title }}</h1>
         <span class="filter-bar-count">{{ count }} {{ countLabel ?? 'titles' }}</span>
       </div>
       <div class="filter-bar-right">
@@ -289,6 +289,9 @@ const props = defineProps<{
   countLabel?: string
   /** Grid poster size (px). Providing it renders the size slider. */
   tileSize?: number
+  /** Hide the big title (a LibHead above the bar already carries it) — the bar
+   *  collapses to a mono count + the control row. */
+  hideTitle?: boolean
 }>()
 
 const emits = defineEmits<{
@@ -605,14 +608,25 @@ function langName(code: string) {
 .fb-size-icon { color: var(--fg-3); flex-shrink: 0; }
 .filter-bar-top { display: flex; align-items: center; justify-content: space-between; }
 .filter-bar-left { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+/* Heya 2.0 lib-head shares the Archivo display face; when the LibHead above
+   the bar carries the title, the bar shows only a mono count. */
 .filter-bar-title {
-  font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 0;
+  font-family: var(--font-display);
+  font-size: 26px; font-weight: 800; font-variation-settings: 'wdth' 112;
+  letter-spacing: -0.02em; margin: 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .filter-bar-count { font-family: var(--font-mono); font-size: 12px; color: var(--fg-3); white-space: nowrap; }
+/* Count standing alone (hideTitle): read it as a mono spec label. */
+.left-count-only .filter-bar-count {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--fg-2);
+}
 .filter-bar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
-.btn-ghost-sm.active { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 35%, transparent); }
+/* Control pills: mono uppercase labels + a tone-lit active state (2.0 chrome). */
+.filter-bar-right :deep(.btn-ghost-sm) { text-transform: uppercase; letter-spacing: 0.08em; }
+.btn-ghost-sm.active { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 35%, transparent); background: var(--gold-soft); }
 
 .fb-reset { color: var(--fg-2); }
 .fb-reset:hover { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }

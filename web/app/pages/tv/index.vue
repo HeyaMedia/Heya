@@ -42,18 +42,29 @@
     </AppSheet>
     <!-- Recommended landing (bare /tv). Its own scroll container; the grid
          lives in the sibling main below. -->
-    <BrowseView v-if="activeView === 'browse'" section="tv" class="library-main" />
+    <BrowseView
+      v-if="activeView === 'browse'"
+      section="tv"
+      class="library-main"
+      :lib-title="libTitle"
+      :lib-crumbs="libCrumbs"
+      :ledger-cells="ledgerCells"
+    />
     <RecsBrowse v-else-if="activeView === 'recommendations'" section="tv" class="library-main" />
     <div v-else ref="mainEl" class="library-main scroll" :class="{ 'has-alpha-rail': showAlphaRail }" @scroll.passive="onMainScroll">
-      <!-- A–Z rail dock: FIRST child so its sticky anchor is the container's
-           very top in every scroll state; the rail itself measures the
-           FilterBar and hangs below it (see AlphabetRail). -->
+      <!-- Library head + ledger scroll away above the sticky control bar. -->
+      <LibHead :title="libTitle" :crumbs="libCrumbs" />
+      <LedgerStrip v-if="ledgerCells.length" :cells="ledgerCells" />
+
+      <!-- A–Z rail dock: sticky anchor kept adjacent to the FilterBar so both
+           pin together; the rail measures the bar and hangs below it. -->
       <div v-if="showAlphaRail" class="alpha-dock">
         <AlphabetRail :available="alphaAvailable" @jump="jumpToLetter" />
       </div>
 
       <FilterBar
         :title="viewTitle"
+        hide-title
         :count="sorted.length"
         :sort="sort"
         :view="view"
@@ -284,6 +295,8 @@
 
 <script setup lang="ts">
 import type { EnrichedMediaItem, Library, UserList, FilterState } from '~~/shared/types'
+import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
+import type { Crumb } from '~/components/library/LibHead.vue'
 import { useCardContextItems } from '~/composables/useContextMenu'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { enrichedCatalogQuery, librariesQuery, seriesUserStateQuery, userListsQuery } from '~/queries/catalog'
@@ -452,6 +465,45 @@ const viewTitle = computed(() => {
     return list?.name || 'List'
   }
   return 'TV Shows'
+})
+
+// ── Library head (Heya 2.0 lib-head) ────────────────────────────────────
+const libTitle = computed(() => {
+  if (activeView.value === 'browse') return 'TV Shows'
+  if (activeLib.value) return libraries.value.find(l => l.id === activeLib.value)?.name || 'TV Shows'
+  if (activeView.value === null) return 'All Shows'
+  return viewTitle.value
+})
+const libCrumbs = computed<Crumb[]>(() => {
+  if (activeView.value === 'browse') return [{ label: 'Library' }, { label: 'Television' }]
+  const c: Crumb[] = [{ label: 'TV', to: '/tv' }]
+  if (activeLib.value) c.push({ label: 'Library' })
+  else if (activeView.value === 'loved') c.push({ label: 'Loved' })
+  else if (activeView.value?.startsWith('list-')) c.push({ label: 'My List' })
+  else c.push({ label: 'All shows' })
+  return c
+})
+
+// Signature ledger — user-facing facts from the loaded catalog + watch state.
+const ledgerCells = computed<LedgerCell[]>(() => {
+  if (!itemsLoaded.value) return []
+  const list = items.value
+  const total = list.length
+  if (!total) return []
+  const fullyWatched = list.filter(i => fullyWatchedSet.value.has(i.id)).length
+  const episodes = list.reduce((s, i) => s + (i.number_of_episodes || 0), 0)
+  const years = list.map(i => parseInt(i.year || '', 10)).filter(y => !Number.isNaN(y))
+  const weekAgo = Date.now() - 7 * 24 * 3600 * 1000
+  const addedWeek = list.filter(i => i.created_at && new Date(i.created_at).getTime() > weekAgo).length
+  const cells: LedgerCell[] = [
+    { k: 'Shows', v: String(total) },
+    { k: 'Unwatched', v: String(total - fullyWatched), tone: true },
+    { k: 'Loved', v: String(favoritedSet.value.size) },
+  ]
+  if (episodes > 0) cells.push({ k: 'Episodes', v: String(episodes) })
+  if (years.length) cells.push({ k: 'Span', v: `${Math.min(...years)}–${Math.max(...years)}` })
+  if (addedWeek > 0) cells.push({ k: 'Added', v: String(addedWeek), sub: 'this week', tone: true })
+  return cells
 })
 
 const availableGenres = computed(() => extractAvailableGenres(items.value))
@@ -629,8 +681,12 @@ useLiveRefresh([
 ])
 
 onMounted(async () => {
-  // Grid needs the full item list; the Recommended landing doesn't.
-  if (activeView.value !== 'browse' && activeView.value !== 'recommendations') await ensureItems()
+  // Grid blocks on the full item list; the Browse/Recommendations landings
+  // render their own rails. On the Browse landing we still kick off the catalog
+  // fetch (unawaited) so the lib-head ledger + sidebar counts fill in.
+  const needsItems = activeView.value !== 'browse' && activeView.value !== 'recommendations'
+  if (needsItems) await ensureItems()
+  else if (activeView.value === 'browse') void ensureItems()
   loading.value = false
 
   // Re-validate the persisted sidebar selection against fresh data — a

@@ -49,10 +49,21 @@
     </AppSheet>
     <!-- Recommended landing (bare /movies). Its own scroll container; the flat
          grid + franchises live in the sibling main below. -->
-    <BrowseView v-if="activeView === 'browse'" section="movie" class="library-main" />
+    <BrowseView
+      v-if="activeView === 'browse'"
+      section="movie"
+      class="library-main"
+      :lib-title="libTitle"
+      :lib-crumbs="libCrumbs"
+      :ledger-cells="ledgerCells"
+    />
     <RecsBrowse v-else-if="activeView === 'recommendations'" section="movie" class="library-main" />
     <RouletteView v-else-if="activeView === 'roulette'" class="library-main" />
     <div v-else ref="mainEl" class="library-main scroll" :class="{ 'has-alpha-rail': showAlphaRail }" @scroll.passive="onMainScroll">
+      <!-- Library head + ledger scroll away above the sticky control bar. -->
+      <LibHead :title="libTitle" :crumbs="libCrumbs" />
+      <LedgerStrip v-if="ledgerCells.length" :cells="ledgerCells" />
+
       <!-- Franchises overview — a page of its own (/movies/franchises). Reuses
            the FilterBar (sort + grid/detail/list toggle, no movie filters) and
            the same view chrome as the library; cards/rows deep-link into the
@@ -60,6 +71,7 @@
       <template v-if="activeView === 'franchises'">
         <FilterBar
           title="Franchises"
+          hide-title
           count-label="franchises"
           :count="sortedFranchises.length"
           :sort="franchiseSort"
@@ -155,6 +167,7 @@
 
       <FilterBar
         :title="viewTitle"
+        hide-title
         :count="sorted.length"
         :sort="sort"
         :view="view"
@@ -386,6 +399,8 @@
 
 <script setup lang="ts">
 import type { EnrichedMediaItem, Library, UserList, FilterState, CollectionBrowse } from '~~/shared/types'
+import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
+import type { Crumb } from '~/components/library/LibHead.vue'
 import { useCardContextItems } from '~/composables/useContextMenu'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
@@ -593,6 +608,55 @@ const viewTitle = computed(() => {
   return 'Movies'
 })
 
+// ── Library head (Heya 2.0 lib-head) ────────────────────────────────────
+// Archivo title + mono breadcrumb. The bare Browse landing keeps the "Movies"
+// wordmark; every grid view names itself (All / Loved / a library / a list).
+const libTitle = computed(() => {
+  if (activeView.value === 'browse') return 'Movies'
+  if (activeLib.value) return libraries.value.find(l => l.id === activeLib.value)?.name || 'Movies'
+  if (activeView.value === null) return 'All Movies'
+  return viewTitle.value
+})
+const libCrumbs = computed<Crumb[]>(() => {
+  if (activeView.value === 'browse') return [{ label: 'Library' }, { label: 'Film' }]
+  const c: Crumb[] = [{ label: 'Movies', to: '/movies' }]
+  if (activeLib.value) c.push({ label: 'Library' })
+  else if (activeView.value === 'loved') c.push({ label: 'Loved' })
+  else if (activeView.value === 'franchises') c.push({ label: 'Franchises' })
+  else if (activeView.value?.startsWith('list-')) c.push({ label: 'My List' })
+  else c.push({ label: 'All movies' })
+  return c
+})
+
+// Signature ledger — user-facing facts derived from the loaded catalog +
+// watch/favorite state (never ops telemetry). Empty until the catalog resolves,
+// so the strip fades in rather than flashing zeros.
+const ledgerCells = computed<LedgerCell[]>(() => {
+  if (!itemsLoaded.value) return []
+  const list = items.value
+  const total = list.length
+  if (!total) return []
+  const watched = list.filter(i => watchedSet.value.has(i.id)).length
+  const runtime = list.reduce((s, i) => s + (i.runtime_minutes || 0), 0)
+  const years = list.map(i => parseInt(i.year || '', 10)).filter(y => !Number.isNaN(y))
+  const weekAgo = Date.now() - 7 * 24 * 3600 * 1000
+  const addedWeek = list.filter(i => i.created_at && new Date(i.created_at).getTime() > weekAgo).length
+  const cells: LedgerCell[] = [
+    { k: 'Films', v: String(total) },
+    { k: 'Unwatched', v: String(total - watched), tone: true },
+    { k: 'Loved', v: String(favoritedSet.value.size) },
+  ]
+  if (runtime > 0) cells.push({ k: 'Runtime', v: fmtHoursTotal(runtime), sub: 'total' })
+  if (years.length) cells.push({ k: 'Span', v: `${Math.min(...years)}–${Math.max(...years)}` })
+  if (addedWeek > 0) cells.push({ k: 'Added', v: String(addedWeek), sub: 'this week', tone: true })
+  return cells
+})
+
+function fmtHoursTotal(mins: number): string {
+  const h = Math.round(mins / 60)
+  return h >= 1 ? `${h}h` : `${mins}m`
+}
+
 const availableGenres = computed(() => extractAvailableGenres(items.value))
 const availableLanguages = computed(() => extractLanguages(items.value))
 
@@ -772,8 +836,13 @@ useLiveRefresh([
 ])
 
 onMounted(async () => {
-  // Grid/franchises need the full item list; the Recommended landing doesn't.
-  if (activeView.value !== 'browse' && activeView.value !== 'recommendations' && activeView.value !== 'roulette') await ensureItems()
+  // Grid/franchises block on the full item list; the Browse/Recommendations/
+  // Roulette landings render their own rails immediately. On the Browse landing
+  // we still kick off the catalog fetch (unawaited) so the lib-head ledger +
+  // sidebar counts fill in — the rails never wait on it.
+  const needsItems = activeView.value !== 'browse' && activeView.value !== 'recommendations' && activeView.value !== 'roulette'
+  if (needsItems) await ensureItems()
+  else if (activeView.value === 'browse') void ensureItems()
   loading.value = false
 
   // Re-validate the persisted sidebar selection against fresh data — a
