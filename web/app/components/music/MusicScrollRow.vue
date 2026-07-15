@@ -10,6 +10,7 @@
         {{ title }}
         <Icon v-if="titleHref" name="chevright" :size="14" class="msr-chev" />
       </component>
+      <span v-if="aside" class="msr-aside">{{ aside }}</span>
       <button v-if="onPlayAll" class="msr-action" @click="onPlayAll" title="Play all" :aria-label="`Play all ${title}`">
         <Icon name="play" :size="13" />
       </button>
@@ -59,6 +60,8 @@
 <script setup lang="ts">
 const props = withDefaults(defineProps<{
   title: string
+  /** Mono dim aside after the title (e.g. "refreshed daily", a count). */
+  aside?: string
   memoryKey?: string
   titleHref?: string
   cardSize?: number
@@ -102,19 +105,29 @@ provide('msr:cardSize', props.cardSize)
 .msr-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--hair);
 }
 .msr-title {
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
   gap: 6px;
-  font-size: 22px;
-  font-weight: 700;
+  /* Heya 2.0 sec-head grammar — mono uppercase, matching SectionHeader. */
+  font: 600 12.5px var(--font-mono);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
   color: var(--fg-0);
   text-decoration: none;
   /* Section-title halo — rails sit over the ambient art pool. */
   text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1);
+}
+.msr-aside {
+  font: 600 12px var(--font-mono);
+  letter-spacing: 0.06em;
+  color: var(--tone, var(--gold));
+  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1);
 }
 .msr-title.link:hover { color: var(--gold); }
 .msr-title.link:hover .msr-chev { color: var(--gold); }
