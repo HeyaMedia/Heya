@@ -1,10 +1,10 @@
 <template>
-  <div class="section-row-head">
+  <div class="section-row-head sec-head">
     <div class="sh-text">
-      <h2 class="section-title-lg sh-title"><slot name="title">{{ title }}</slot></h2>
-      <div v-if="subtitle || $slots.subtitle" class="sh-sub">
+      <h2 class="sh-title"><slot name="title">{{ title }}</slot></h2>
+      <span v-if="subtitle || $slots.subtitle" class="sh-count">
         <slot name="subtitle">{{ subtitle }}</slot>
-      </div>
+      </span>
     </div>
     <div v-if="$slots.actions" class="sh-actions">
       <slot name="actions" />
@@ -13,11 +13,13 @@
 </template>
 
 <script setup lang="ts">
-// Shared header for horizontal rows (and any artwork-backed section):
-// title + optional subtitle with an art-proof treatment that holds up in
-// both themes over any backdrop, plus an actions slot (See-all link,
-// scroll buttons). Root keeps the `.section-row-head` class so the global
-// layout/actions chrome in heya.css applies unchanged.
+// Shared header for horizontal rows (and any artwork-backed section). Heya 2.0
+// "sec-head" look: a hairline-ruled row with an uppercase letterspaced mono
+// title, a tone-colored count/subtitle riding its baseline, and a right-
+// aligned actions area (See-all link, scroll buttons). Root keeps the
+// `.section-row-head` class so the global layout/actions chrome in heya.css
+// applies unchanged. API preserved: title/subtitle props + title/subtitle/
+// actions slots.
 defineProps<{
   title?: string
   subtitle?: string
@@ -25,77 +27,50 @@ defineProps<{
 </script>
 
 <style scoped>
-/* Blended readability washes — same recipe as the hero: --bg-1-derived
-   (paper in light, dark in dark), long falloff, heavy blur, no locatable
-   edge. BOTH washes live on the header root at z:-1 inside one isolated
-   stacking context: as child pseudos they'd be sibling contexts, and the
-   later (actions) wash would paint OVER the title text wherever the two
-   overlap on narrow screens. Scoped, so legacy .section-row-head markup
-   elsewhere is untouched. */
-.section-row-head {
-  position: relative;
-  isolation: isolate;
-}
-.section-row-head::before {
-  content: '';
-  position: absolute;
-  top: -48px;
-  bottom: -52px;
-  left: -70px;
-  width: min(56%, 520px);
-  z-index: -1;
-  pointer-events: none;
-  background: radial-gradient(ellipse 90% 75% at 32% 50%,
-    color-mix(in srgb, var(--bg-1) 55%, transparent) 0%,
-    color-mix(in srgb, var(--bg-1) 38%, transparent) 40%,
-    color-mix(in srgb, var(--bg-1) 16%, transparent) 68%,
-    transparent 92%);
-  filter: blur(24px);
-}
-.section-row-head::after {
-  content: '';
-  position: absolute;
-  top: -44px;
-  bottom: -48px;
-  right: -70px;
-  width: min(40%, 380px);
-  z-index: -1;
-  pointer-events: none;
-  background: radial-gradient(ellipse 85% 75% at 66% 50%,
-    color-mix(in srgb, var(--bg-1) 55%, transparent) 0%,
-    color-mix(in srgb, var(--bg-1) 38%, transparent) 40%,
-    color-mix(in srgb, var(--bg-1) 16%, transparent) 68%,
-    transparent 92%);
-  filter: blur(24px);
+/* Hairline-ruled mono header (heya2.css .sec-head). Scoped attribute lifts
+   specificity over the global .section-row-head base, so the margin/border
+   here win while legacy .section-row-head markup elsewhere is untouched. */
+.sec-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 22px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--hair);
 }
 
-.sh-text { min-width: 0; }
-/* Triple-layer --bg-1 halo: a tight contact shadow plus two glow radii.
-   Adapts per theme (paper glow in light, dark glow in dark) and keeps
-   text readable over near-white or near-black artwork alike. */
-.sh-title {
-  text-shadow:
-    0 1px 2px var(--bg-1),
-    0 0 10px var(--bg-1),
-    0 0 24px var(--bg-1);
+.sh-text {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  min-width: 0;
 }
-.sh-sub {
-  font-size: 12px;
-  font-family: var(--font-mono);
-  letter-spacing: 0.04em;
-  margin-top: 2px;
-  /* One tier below the title — NOT the muted fg-2/3 tiers, which wash out
-     over bright art no matter the halo. */
-  color: var(--fg-1);
-  text-shadow:
-    0 1px 2px var(--bg-1),
-    0 0 10px var(--bg-1),
-    0 0 24px var(--bg-1);
+
+/* Uppercase letterspaced mono title. A faint --bg-1 halo keeps it legible
+   where a section still rides bright pool artwork (home/browse), without the
+   heavy blur washes the old art-proof header used. */
+.sh-title {
+  font: 600 12.5px var(--font-mono);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgb(var(--ink) / 0.88);
+  text-shadow: 0 0 10px var(--bg-1), 0 1px 2px var(--bg-1);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
+
+.sh-count {
+  font: 600 12.5px var(--font-mono);
+  color: var(--tone);
+  text-shadow: 0 0 10px var(--bg-1), 0 1px 2px var(--bg-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .sh-actions {
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 10px;

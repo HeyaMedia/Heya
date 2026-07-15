@@ -28,7 +28,10 @@ import { storeToRefs } from 'pinia'
 import { useBackgroundStore } from '~/stores/background'
 
 export type BackgroundClaim =
-  | { kind: 'art'; url: string }
+  // `grade` marks a Heya 2.0 art owner: AmbientBackdrop paints it with the
+  // redesign's soft grade (blur 72 / brightness .4 / saturate 1.2, opacity 1)
+  // instead of the legacy pool coat. Absent → unchanged legacy behaviour.
+  | { kind: 'art'; url: string; grade?: 'v2' }
   | { kind: 'pool'; types: string[] }
 
 export function useBackgroundStack() {
@@ -139,10 +142,11 @@ export function useBackground() {
       : [...cur, next]
   }
 
-  function set(url: string | null | undefined) {
+  function set(url: string | null | undefined, opts?: { grade?: 'v2' }) {
     if (!url) return clear()
-    if (mine?.kind === 'art' && mine.url === url) return
-    place({ kind: 'art', url })
+    const grade = opts?.grade
+    if (mine?.kind === 'art' && mine.url === url && mine.grade === grade) return
+    place({ kind: 'art', url, grade })
   }
 
   function pool(...types: string[]) {

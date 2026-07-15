@@ -2,7 +2,7 @@
   <div
     v-if="active"
     class="ambient-backdrop"
-    :class="{ 'override-mode': !!overrideUrl, 'veil-content': !!claimedPool && !overrideUrl, reveal: ctl.reveal }"
+    :class="{ 'override-mode': !!overrideUrl, 'override-v2': !!overrideUrl && overrideGrade === 'v2', 'veil-content': !!claimedPool && !overrideUrl, reveal: ctl.reveal }"
     :style="{ '--ambient-opacity': intensity / 100 }"
     aria-hidden="true"
   >
@@ -66,6 +66,9 @@ const { isAuthenticated } = useAuth()
 const bgImg = useBackgroundImageTools()
 const claim = useBackgroundClaim()
 const overrideUrl = computed(() => (claim.value?.kind === 'art' ? claim.value.url : null))
+// Heya 2.0 art owners tag their claim with grade:'v2' — the layer then paints
+// the redesign's soft grade instead of the legacy pool coat (see override-v2).
+const overrideGrade = computed(() => (claim.value?.kind === 'art' ? claim.value.grade : undefined))
 const claimedPool = computed(() => (claim.value?.kind === 'pool' ? claim.value.types : null))
 // Corner-cluster channel: the layer reports mode/rotating/cycle, the
 // AmbientControls buttons request pause/shuffle/reveal.
@@ -367,6 +370,22 @@ onBeforeUnmount(() => {
 /* Owner-driven artwork switches with its hero — snappier fade only. */
 .override-mode .ambient-img {
   transition: opacity 1.2s ease;
+}
+
+/* Heya 2.0 art owners (grade:'v2') — the redesign's soft underlay grade:
+   heavier blur, dimmer, richer, and pushed to full opacity so below-hero
+   content reads on a deliberate dark wash rather than the legacy ~0.5
+   presence coat. Non-v2 art claims and every pool page are untouched. Kept
+   ABOVE the .reveal rules so a reveal still clears the blur cleanly. */
+.override-v2 .ambient-img {
+  filter: blur(72px) brightness(0.4) saturate(1.2);
+  transform: scale(1.08);
+  /* Match HeroCanvas's fade so the blur underlay and the sharp hero art
+     arrive together instead of the blur trailing a beat behind. */
+  transition: opacity 0.6s ease;
+}
+.override-v2 .ambient-img.visible {
+  opacity: 1;
 }
 
 /* Slow push-in so pool artwork never reads as a static wallpaper. */
