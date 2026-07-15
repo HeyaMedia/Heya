@@ -46,6 +46,26 @@ UPDATE people SET profile_path = $2, updated_at = now() WHERE id = $1;
 -- name: GetPersonByID :one
 SELECT * FROM people WHERE id = $1;
 
+-- name: LockPeopleForCreditWrite :many
+-- Keep resolved people alive while an authoritative cast/crew relationship set
+-- is replaced. Compatible across concurrent title applies, but conflicts with
+-- the exclusive merge lock that can delete a duplicate person.
+SELECT id
+FROM people
+WHERE id = ANY(@person_ids::bigint[])
+ORDER BY id
+FOR KEY SHARE;
+
+-- name: LockPeopleForMerge :many
+-- Person merges acquire the same IDs in the same order before touching credit
+-- rows, preventing a merge and title apply from locking people/credits in the
+-- opposite order.
+SELECT id
+FROM people
+WHERE id = ANY(@person_ids::bigint[])
+ORDER BY id
+FOR UPDATE;
+
 -- name: GetPersonBySlug :one
 SELECT * FROM people WHERE slug = $1;
 

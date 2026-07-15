@@ -58,6 +58,22 @@ func TestSortResolvedPersonCreditsUsesDatabaseLockKey(t *testing.T) {
 	}
 }
 
+func TestResolvedPersonIDsAreUniqueAndSorted(t *testing.T) {
+	t.Parallel()
+
+	resolved := []resolvedPersonCredit{
+		{person: sqlc.Person{ID: 42}},
+		{person: sqlc.Person{ID: 7}},
+		{person: sqlc.Person{ID: 42}},
+		{person: sqlc.Person{}},
+	}
+	got := resolvedPersonIDs(resolved)
+	want := []int64{7, 42}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolved person IDs = %v, want %v", got, want)
+	}
+}
+
 func TestRichFailureStopsTransactionFanout(t *testing.T) {
 	t.Parallel()
 

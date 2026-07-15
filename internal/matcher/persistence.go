@@ -374,6 +374,23 @@ func sortedNonEmptyExternalIDKeys(ids map[string]string) []string {
 	return keys
 }
 
+func resolvedPersonIDs(resolved []resolvedPersonCredit) []int64 {
+	ids := make([]int64, 0, len(resolved))
+	seen := make(map[int64]struct{}, len(resolved))
+	for _, item := range resolved {
+		if item.person.ID == 0 {
+			continue
+		}
+		if _, ok := seen[item.person.ID]; ok {
+			continue
+		}
+		seen[item.person.ID] = struct{}{}
+		ids = append(ids, item.person.ID)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
+}
+
 // replaceMediaPersonCredits treats one MediaDetail as the authoritative current
 // cast and crew projection. Older provider-shaped person rows may legitimately
 // remain in people, but their stale links to this title must not survive a
@@ -383,6 +400,17 @@ func sortedNonEmptyExternalIDKeys(ids map[string]string) []string {
 // reuse it so the replacement stays part of the enclosing scanner apply.
 func (m *Matcher) replaceMediaPersonCredits(ctx context.Context, mediaItemID int64, resolved []resolvedPersonCredit) error {
 	replace := func(q *sqlc.Queries) error {
+		personIDs := resolvedPersonIDs(resolved)
+		if len(personIDs) > 0 {
+			locked, err := q.LockPeopleForCreditWrite(ctx, personIDs)
+			if err != nil {
+				return fmt.Errorf("lock resolved people: %w", err)
+			}
+			if len(locked) != len(personIDs) {
+				return fmt.Errorf("lock resolved people: %d of %d people still exist; retry metadata apply", len(locked), len(personIDs))
+			}
+		}
+
 		if err := q.DeleteMediaCastByItem(ctx, mediaItemID); err != nil {
 			return fmt.Errorf("clear prior cast: %w", err)
 		}

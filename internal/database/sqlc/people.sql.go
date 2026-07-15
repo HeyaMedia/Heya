@@ -774,6 +774,68 @@ func (q *Queries) ListPersonCrewCredits(ctx context.Context, personID int64) ([]
 	return items, nil
 }
 
+const lockPeopleForCreditWrite = `-- name: LockPeopleForCreditWrite :many
+SELECT id
+FROM people
+WHERE id = ANY($1::bigint[])
+ORDER BY id
+FOR KEY SHARE
+`
+
+// Keep resolved people alive while an authoritative cast/crew relationship set
+// is replaced. Compatible across concurrent title applies, but conflicts with
+// the exclusive merge lock that can delete a duplicate person.
+func (q *Queries) LockPeopleForCreditWrite(ctx context.Context, personIds []int64) ([]int64, error) {
+	rows, err := q.db.Query(ctx, lockPeopleForCreditWrite, personIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockPeopleForMerge = `-- name: LockPeopleForMerge :many
+SELECT id
+FROM people
+WHERE id = ANY($1::bigint[])
+ORDER BY id
+FOR UPDATE
+`
+
+// Person merges acquire the same IDs in the same order before touching credit
+// rows, preventing a merge and title apply from locking people/credits in the
+// opposite order.
+func (q *Queries) LockPeopleForMerge(ctx context.Context, personIds []int64) ([]int64, error) {
+	rows, err := q.db.Query(ctx, lockPeopleForMerge, personIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markPersonEnriched = `-- name: MarkPersonEnriched :exec
 UPDATE people SET heya_enriched_at = now() WHERE id = $1
 `

@@ -38,6 +38,17 @@ func mergePersonInto(ctx context.Context, db *pgxpool.Pool, q *sqlc.Queries, dst
 // transaction. Split out from mergePersonInto so tests can drive it inside a
 // rollback tx without committing to the database.
 func mergePersonIntoTx(ctx context.Context, qtx *sqlc.Queries, dstID, srcID int64) error {
+	if dstID == srcID {
+		return nil
+	}
+	locked, err := qtx.LockPeopleForMerge(ctx, []int64{dstID, srcID})
+	if err != nil {
+		return fmt.Errorf("lock people: %w", err)
+	}
+	if len(locked) != 2 {
+		return fmt.Errorf("lock people: %d of 2 people still exist", len(locked))
+	}
+
 	// Cast links: drop src rows that would collide with dst on
 	// (media_item_id, character), then move the survivors.
 	if err := qtx.DeleteCollidingPersonCast(ctx, sqlc.DeleteCollidingPersonCastParams{DstID: dstID, SrcID: srcID}); err != nil {

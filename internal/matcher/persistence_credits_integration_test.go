@@ -60,15 +60,33 @@ func TestStoreRichMetadataReplacesStaleCastAndCrew(t *testing.T) {
 	}))
 
 	matcher := New(pool, MatchOptions{}, nil, nil).WithTx(tx)
+	vanished, err := q.CreatePerson(ctx, sqlc.CreatePersonParams{
+		ExternalIds: []byte(`{"tmdb":"deleted-before-credit-write"}`), Name: "Merged Elsewhere",
+		AlsoKnownAs: []string{}, Popularity: numericFromFloat(1),
+	})
+	require.NoError(t, err)
+	require.NoError(t, q.DeletePerson(ctx, vanished.ID))
+	err = matcher.replaceMediaPersonCredits(ctx, item.ID, []resolvedPersonCredit{{
+		person: vanished,
+		credit: richPersonCredit{isCast: true, name: vanished.Name, character: "Lead"},
+	}})
+	require.ErrorContains(t, err, "people still exist")
+	cast, err := q.ListMediaCastSlim(ctx, item.ID)
+	require.NoError(t, err)
+	require.Len(t, cast, 2, "a person merged before locking must preserve the prior cast")
+	crew, err := q.ListMediaCrewSlim(ctx, item.ID)
+	require.NoError(t, err)
+	require.Len(t, crew, 1, "a person merged before locking must preserve the prior crew")
+
 	invalid := &metadata.MediaDetail{Cast: []metadata.CastMember{{
 		CanonicalID: "not-a-uuid", ExternalIDs: map[string]string{"tmdb": "81113"},
 		Name: "Jeremy Clarkson", Character: "Self - Host", Source: "heya",
 	}}}
 	require.Error(t, matcher.StoreRichMetadata(ctx, item.ID, invalid))
-	cast, err := q.ListMediaCastSlim(ctx, item.ID)
+	cast, err = q.ListMediaCastSlim(ctx, item.ID)
 	require.NoError(t, err)
 	require.Len(t, cast, 2, "an invalid current projection must preserve the prior cast")
-	crew, err := q.ListMediaCrewSlim(ctx, item.ID)
+	crew, err = q.ListMediaCrewSlim(ctx, item.ID)
 	require.NoError(t, err)
 	require.Len(t, crew, 1, "an invalid current projection must preserve the prior crew")
 
