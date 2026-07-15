@@ -105,6 +105,7 @@ func BuildAPI(mux *http.ServeMux, app *service.App, cfg *config.Config, opts ...
 		registerClientDeviceRoutes(api, o.hub)
 	}
 	registerStreamRoutes(api, app)
+	registerNativePlaybackRoutes(api, app)
 	registerBinaryRoutes(api, app)
 	registerDocsRoutes(api)
 	if o.hub != nil {

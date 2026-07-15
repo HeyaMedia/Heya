@@ -135,15 +135,16 @@
             <button class="np-icon" aria-label="Queue" @click="toggleQueue" title="Queue">
               <Icon name="queue" :size="18" />
             </button>
-            <div class="np-volume" @wheel.prevent="onVolumeWheel">
-              <button class="np-icon" :aria-pressed="muted" :aria-label="muted ? 'Unmute' : 'Mute'" @click="toggleMute">
+            <div class="np-volume" :class="{ 'np-volume-fixed': bitPerfectActive }" @wheel.prevent="onVolumeWheel">
+              <button class="np-icon" :disabled="bitPerfectActive" :aria-pressed="muted" :aria-label="bitPerfectActive ? 'Volume is fixed in bit-perfect mode' : (muted ? 'Unmute' : 'Mute')" @click="toggleMute">
                 <Icon :name="muted || volume === 0 ? 'volmute' : 'vol'" :size="18" />
               </button>
               <div
                 class="rail"
                 style="width: 110px"
                 role="slider"
-                tabindex="0"
+                :tabindex="bitPerfectActive ? -1 : 0"
+                :aria-disabled="bitPerfectActive"
                 aria-label="Volume"
                 aria-valuemin="0"
                 aria-valuemax="100"
@@ -170,11 +171,12 @@ const props = defineProps<{ open: boolean }>()
 defineEmits<{ close: [] }>()
 
 const {
-  playing, currentTrack, position, duration, volume, muted,
+  playing, currentTrack, position, duration, volume, muted, playbackBackend, nativeAudioState,
   shuffled, repeatMode,
   togglePlay, seek, setVolume, toggleMute, toggleShuffle, cycleRepeat,
   nextTrack, prevTrack, formatTime, toggleQueue,
 } = usePlayerBindings()
+const bitPerfectActive = computed(() => playbackBackend.value === 'native' && nativeAudioState.value?.bitPerfectActive === true)
 
 const trackRatings = useTrackRatings()
 const ratings = trackRatings.ratings
@@ -233,6 +235,7 @@ function onSeek(e: MouseEvent) {
   seek((e.clientX - rect.left) / rect.width)
 }
 function onVolume(e: MouseEvent) {
+  if (bitPerfectActive.value) return
   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
   setVolume(Math.round(((e.clientX - rect.left) / rect.width) * 100))
 }
@@ -257,6 +260,7 @@ function onScrubKeydown(e: KeyboardEvent) {
   seek(Math.max(0, Math.min(100, nextPct)) / 100)
 }
 function onVolumeKeydown(e: KeyboardEvent) {
+  if (bitPerfectActive.value) return
   let next = muted.value ? 0 : volume.value
   switch (e.key) {
     case 'ArrowRight':
@@ -277,6 +281,7 @@ function onVolumeKeydown(e: KeyboardEvent) {
 // the real stored level (not the muted-display 0) so scrolling while muted
 // adjusts/restores the remembered volume instead of losing it.
 function onVolumeWheel(e: WheelEvent) {
+  if (bitPerfectActive.value) return
   const next = Math.max(0, Math.min(100, volume.value + (e.deltaY < 0 ? 5 : -5)))
   if (muted.value && next > 0) toggleMute()
   setVolume(next)
@@ -547,6 +552,7 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   grid-column: 3;
 }
 .np-volume { display: flex; align-items: center; gap: 6px; }
+.np-volume-fixed { opacity: 0.48; }
 
 .np-icon {
   width: 36px;

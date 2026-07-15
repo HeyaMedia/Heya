@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { StreamInfoResponse, TranscodeReasonTag } from '~~/shared/types'
-import type { HeyaPlayerState } from '~/composables/useHeyaPlayer'
+import type { VideoPlaybackBackendKind, VideoPlaybackDiagnostics, VideoPlaybackState } from '~/types/video-playback'
 import type { TranscodeStatus } from '~/composables/useTranscodeStatus'
 
 const props = defineProps<{
@@ -8,7 +8,9 @@ const props = defineProps<{
   fileId: string | number
   activeQuality?: string
   usingHLS?: boolean
-  playerState?: HeyaPlayerState
+  playbackBackend: VideoPlaybackBackendKind
+  playerState?: VideoPlaybackState
+  playerDiagnostics?: VideoPlaybackDiagnostics | null
   transcodeStatus?: TranscodeStatus | null
   mode?: 'compact' | 'detailed'
 }>()
@@ -74,10 +76,27 @@ const bufferAhead = computed(() => {
   return Math.max(0, s.buffered - s.currentTime)
 })
 
+const healthDiagnostics = computed(() => props.playerDiagnostics?.health)
+const transportDiagnostics = computed(() => props.playerDiagnostics?.transport)
+const playbackBackendLabel = computed(() => {
+  switch (props.playbackBackend) {
+    case 'mpv': return 'Native MPV'
+    case 'cast': return 'Chromecast'
+    case 'browser': return props.usingHLS ? 'Browser · HLS.js' : 'Browser · HTML media'
+  }
+})
+
 const droppedRatio = computed(() => {
-  const s = props.playerState
-  if (!s || !s.decodedFrames) return 0
-  return s.droppedFrames / s.decodedFrames
+  const health = healthDiagnostics.value
+  if (!health?.decodedFrames || health.droppedFrames == null) return null
+  return health.droppedFrames / health.decodedFrames
+})
+
+const hasHealthDiagnostics = computed(() => {
+  const health = healthDiagnostics.value
+  if (!health) return false
+  if (props.playerDiagnostics?.backend === 'browser') return (health.decodedFrames ?? 0) > 0
+  return Object.values(health).some(value => value != null)
 })
 
 // Transcoder pacing — how many seconds of video ahead of the player has
@@ -207,6 +226,9 @@ function stateLabel(state: string): string {
     <!-- Playback (always visible) -->
     <section v-if="playerState" class="sip-section">
       <div class="sip-label">Playback</div>
+      <div class="sip-kv sip-playback-backend">
+        <div><span class="k">Backend</span><span class="v">{{ playbackBackendLabel }}</span></div>
+      </div>
       <div class="sip-pb-bar">
         <div class="sip-pb-buf" :style="{ width: (playerState.duration > 0 ? (playerState.buffered / playerState.duration) * 100 : 0) + '%' }" />
         <div class="sip-pb-fill" :style="{ width: (playerState.duration > 0 ? (playerState.currentTime / playerState.duration) * 100 : 0) + '%' }" />
@@ -219,15 +241,17 @@ function stateLabel(state: string): string {
     </section>
 
     <!-- Network (always visible — shows even in compact for quick triage) -->
-    <section v-if="playerState && usingHLS" class="sip-section">
+    <section v-if="playerDiagnostics && (usingHLS || playerDiagnostics.backend === 'mpv')" class="sip-section">
       <div class="sip-label">Network</div>
       <div class="sip-kv">
-        <div><span class="k">Download</span><span class="v mono">{{ fmtBps(playerState.downloadBps) }}</span></div>
-        <div><span class="k">Frags loaded</span><span class="v mono">{{ playerState.fragsLoaded }}</span></div>
-        <div v-if="playerState.currentLevel >= 0"><span class="k">HLS variant</span><span class="v mono">#{{ playerState.currentLevel }}</span></div>
-        <div v-if="playerState.lastFragBytes">
+        <div><span class="k">Download</span><span class="v mono">{{ fmtBps(transportDiagnostics?.inputBytesPerSecond ?? 0) }}</span></div>
+        <div v-if="playerDiagnostics.backend === 'mpv' && transportDiagnostics?.bufferedSeconds != null"><span class="k">Demux buffer</span><span class="v mono">{{ transportDiagnostics.bufferedSeconds.toFixed(1) }}s</span></div>
+        <div v-if="playerDiagnostics.backend === 'mpv' && transportDiagnostics?.bufferedBytes != null"><span class="k">Buffered bytes</span><span class="v mono">{{ fmtSize(transportDiagnostics.bufferedBytes) }}</span></div>
+        <div v-if="playerDiagnostics.backend === 'browser'"><span class="k">Frags loaded</span><span class="v mono">{{ transportDiagnostics?.segmentsLoaded ?? 0 }}</span></div>
+        <div v-if="(transportDiagnostics?.activeVariantIndex ?? -1) >= 0"><span class="k">HLS variant</span><span class="v mono">#{{ transportDiagnostics?.activeVariantIndex }}</span></div>
+        <div v-if="transportDiagnostics?.lastSegmentBytes">
           <span class="k">Last frag</span>
-          <span class="v mono">{{ fmtSize(playerState.lastFragBytes) }} in {{ playerState.lastFragMs }} ms</span>
+          <span class="v mono">{{ fmtSize(transportDiagnostics.lastSegmentBytes) }} in {{ transportDiagnostics.lastSegmentMilliseconds }} ms</span>
         </div>
       </div>
     </section>
@@ -288,12 +312,30 @@ function stateLabel(state: string): string {
         </div>
       </section>
 
-      <!-- Quality metrics -->
-      <section v-if="playerState && playerState.decodedFrames > 0" class="sip-section">
-        <div class="sip-label">Decode</div>
+      <!-- Renderer output — optional and backend supplied. Server-owned source
+           facts above remain authoritative and are never replaced by this. -->
+      <section v-if="playerDiagnostics?.video || playerDiagnostics?.audio" class="sip-section">
+        <div class="sip-label">{{ playerDiagnostics.backend === 'mpv' ? 'MPV Playback' : 'Playback Output' }}</div>
         <div class="sip-kv">
-          <div><span class="k">Decoded frames</span><span class="v mono">{{ fmtNum(playerState.decodedFrames) }}</span></div>
-          <div><span class="k">Dropped frames</span><span class="v mono" :class="{ warn: droppedRatio > 0.005 }">{{ fmtNum(playerState.droppedFrames) }} ({{ fmtPct(droppedRatio) }})</span></div>
+          <div v-if="playerDiagnostics.video?.source?.codec"><span class="k">Video codec</span><span class="v">{{ playerDiagnostics.video.source.codec.toUpperCase() }}<span v-if="playerDiagnostics.video.source.profile" class="sip-dim"> · {{ playerDiagnostics.video.source.profile }}</span></span></div>
+          <div v-if="playerDiagnostics.video?.output?.width && playerDiagnostics.video.output.height"><span class="k">Output</span><span class="v mono">{{ playerDiagnostics.video.output.width }}×{{ playerDiagnostics.video.output.height }}<span v-if="playerDiagnostics.video.output.pixelFormat" class="sip-dim"> · {{ playerDiagnostics.video.output.pixelFormat }}</span></span></div>
+          <div v-if="playerDiagnostics.video?.decoded?.hardwareDecoder"><span class="k">Hardware decode</span><span class="v mono">{{ playerDiagnostics.video.decoded.hardwareDecoder }}<span v-if="playerDiagnostics.video.decoded.hardwareInterop" class="sip-dim"> · {{ playerDiagnostics.video.decoded.hardwareInterop }}</span></span></div>
+          <div v-if="playerDiagnostics.video?.decoded?.measuredFramesPerSecond"><span class="k">Measured FPS</span><span class="v mono">{{ playerDiagnostics.video.decoded.measuredFramesPerSecond.toFixed(2) }}</span></div>
+          <div v-if="playerDiagnostics.audio?.source?.codec"><span class="k">Audio codec</span><span class="v">{{ playerDiagnostics.audio.source.codec.toUpperCase() }}<span v-if="playerDiagnostics.audio.source.profile" class="sip-dim"> · {{ playerDiagnostics.audio.source.profile }}</span></span></div>
+          <div v-if="playerDiagnostics.audio?.output?.sampleRate"><span class="k">Audio output</span><span class="v mono">{{ playerDiagnostics.audio.output.sampleRate }} Hz<span v-if="playerDiagnostics.audio.output.channels" class="sip-dim"> · {{ playerDiagnostics.audio.output.channels }}</span><span v-if="playerDiagnostics.audio.output.sampleFormat" class="sip-dim"> · {{ playerDiagnostics.audio.output.sampleFormat }}</span></span></div>
+          <div v-if="playerDiagnostics.audio?.output?.device"><span class="k">Audio device</span><span class="v">{{ playerDiagnostics.audio.output.device }}</span></div>
+        </div>
+      </section>
+
+      <!-- Quality metrics -->
+      <section v-if="healthDiagnostics && hasHealthDiagnostics" class="sip-section">
+        <div class="sip-label">Decode · {{ playerDiagnostics?.backend }}</div>
+        <div class="sip-kv">
+          <div v-if="healthDiagnostics.decodedFrames != null"><span class="k">Decoded frames</span><span class="v mono">{{ fmtNum(healthDiagnostics.decodedFrames) }}</span></div>
+          <div v-if="healthDiagnostics.droppedFrames != null"><span class="k">Dropped frames</span><span class="v mono" :class="{ warn: droppedRatio != null && droppedRatio > 0.005 }">{{ fmtNum(healthDiagnostics.droppedFrames) }}<template v-if="droppedRatio != null"> ({{ fmtPct(droppedRatio) }})</template></span></div>
+          <div v-if="healthDiagnostics.decoderDroppedFrames != null"><span class="k">Decoder drops</span><span class="v mono">{{ fmtNum(healthDiagnostics.decoderDroppedFrames) }}</span></div>
+          <div v-if="healthDiagnostics.mistimedFrames != null"><span class="k">Mistimed frames</span><span class="v mono">{{ fmtNum(healthDiagnostics.mistimedFrames) }}</span></div>
+          <div v-if="healthDiagnostics.avSyncMilliseconds != null"><span class="k">A/V sync</span><span class="v mono" :class="{ warn: Math.abs(healthDiagnostics.avSyncMilliseconds) > 100 }">{{ healthDiagnostics.avSyncMilliseconds.toFixed(1) }} ms</span></div>
         </div>
       </section>
 
@@ -385,6 +427,7 @@ function stateLabel(state: string): string {
 .sip-kv .v { color: rgba(255,255,255,0.85); text-align: right; min-width: 0; }
 .sip-kv .v.mono { font-variant-numeric: tabular-nums; }
 .sip-kv .v.warn { color: #ff9d6b; }
+.sip-playback-backend { margin-bottom: 6px; }
 
 .sip-track {
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;

@@ -34,6 +34,7 @@ export function useAuth() {
     const data = await $fetch<AuthResponse>('/api/auth/login', {
       method: 'POST',
       body: { username, password },
+      headers: withClientSurfaceHeaders('/api/auth/login'),
     })
     token.value = data.token
     user.value = data.user
@@ -45,6 +46,7 @@ export function useAuth() {
     const data = await $fetch<AuthResponse>('/api/auth/register', {
       method: 'POST',
       body: { username, email, password },
+      headers: withClientSurfaceHeaders('/api/auth/register'),
     })
     token.value = data.token
     user.value = data.user
@@ -62,7 +64,7 @@ export function useAuth() {
       // be silently swallowed below. login() and register() take the same
       // shortcut for the same reason.
       const current = await $fetch<User>('/api/auth/me', {
-        headers: { Authorization: `Bearer ${token.value}` },
+        headers: withClientSurfaceHeaders('/api/auth/me', { Authorization: `Bearer ${token.value}` }),
       })
       user.value = current
       localStorage.setItem(USER_ID_KEY, String(current.id))

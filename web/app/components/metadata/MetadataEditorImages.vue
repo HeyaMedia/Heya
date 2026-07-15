@@ -370,7 +370,10 @@ async function uploadFile(e: Event) {
     await $fetch(`/api/media/${props.mediaId}/assets/upload`, {
       method: 'POST',
       body: form,
-      headers: token.value ? { Authorization: `Bearer ${token.value}` } : {},
+      headers: withClientSurfaceHeaders(
+        `/api/media/${props.mediaId}/assets/upload`,
+        token.value ? { Authorization: `Bearer ${token.value}` } : undefined,
+      ),
     })
     emit('ready', { assetType: uploadType.value, url: '' })
     emit('refresh')

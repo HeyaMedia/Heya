@@ -59,7 +59,11 @@ async function materialize(source: string, current: number) {
   let attempt = 0
   while (current === generation) {
     try {
-      const response = await fetch(source, { cache: 'no-store', signal: controller?.signal })
+      const response = await fetch(source, {
+        cache: 'no-store',
+        signal: controller?.signal,
+        headers: withClientSurfaceHeaders(source),
+      })
       if (response.ok && response.status === 200 && response.headers.get('content-type')?.toLowerCase().startsWith('image/')) {
         const blob = await response.blob()
         if (current !== generation) return

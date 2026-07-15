@@ -3,6 +3,7 @@ import AkariSub from 'akarisub'
 import { DropdownMenuItem, DropdownMenuSeparator } from 'reka-ui'
 import type { StreamAudio, StreamSubtitle, QualityOption } from '~~/shared/types'
 import type { CastStateEvent } from '~/composables/useCast'
+import type { NativeVideoPlaybackBackend } from '~/composables/useNativeVideoPlaybackBackend'
 import { useQuery } from '@pinia/colada'
 import { playbackPreferenceQuery } from '~/queries/playback'
 import { continueWatchingQuery } from '~/queries/activity'
@@ -29,7 +30,28 @@ const continueQuery = useQuery(continueWatchingQuery())
 const { token } = useAuth()
 const { toast } = useToast()
 const videoEl = ref<HTMLVideoElement>()
-const { state: localState, controls: localControls, loadSource, destroyHLS } = useHeyaPlayer(videoEl)
+const localBackend = useBrowserVideoPlaybackBackend(videoEl)
+const localState = localBackend.state
+const localDiagnostics = localBackend.diagnostics
+const localControls = localBackend.controls
+const { isTauriClient } = useClientSurface()
+const nativeBackend = shallowRef<NativeVideoPlaybackBackend | null>(null)
+const nativePlaybackMode = computed(() => !!nativeBackend.value)
+const nativeSurfaceSelected = computed(() => nativeBackend.value?.activeVideoSurface.value === 'native-surface')
+// Keep WebKit visually opaque until libmpv has actually swapped a real frame.
+// A load response only proves that the native surface was attached; making the
+// page transparent at that point exposes the desktop during decoder startup.
+const nativeSurfaceActive = computed(() => nativeSurfaceSelected.value && nativeBackend.value?.nativeState.videoSurfaceReady)
+const VIDEO_OUTPUT_PREFERENCE_KEY = 'heya.video.playback-output'
+function storedVideoOutputPreference(): 'native' | 'browser' {
+  if (!import.meta.client) return 'native'
+  try {
+    return localStorage.getItem(VIDEO_OUTPUT_PREFERENCE_KEY) === 'browser' ? 'browser' : 'native'
+  } catch {
+    return 'native'
+  }
+}
+const videoOutputPreference = ref<'native' | 'browser'>(storedVideoOutputPreference())
 const cast = useCastStore()
 const musicPlayer = usePlayerStore()
 const videoRenderer = useVideoRenderer()
@@ -40,10 +62,11 @@ const videoCastSessionID = ref<string | null>(null)
 const videoCastStopping = ref(false)
 const remoteEnded = ref(false)
 const lastRemotePosition = ref(0)
-const remoteSeekTick = ref(0)
+const remoteSeekRevision = ref(0)
 const castClockTick = ref(0)
 const deliberatelyStoppedCastSessions = new Set<string>()
 let preserveRemoteSessionOnUnmount = false
+let resumeNativeAfterCast = false
 
 const castDevices = computed(() => cast.devices.filter(d => d.capabilities?.includes('video')))
 const selectedVideoOutput = computed(() => cast.devices.find(device =>
@@ -66,22 +89,25 @@ const castConnecting = computed(() => videoCastPending.value || cast.connecting 
 // transport come from Chromecast.
 const state = new Proxy(localState, {
   get(target, key, receiver) {
-    if (!videoCastMode.value) return Reflect.get(target, key, receiver)
-    const session = videoCastSession.value
-    switch (key) {
-      case 'playing': return !!session && session.state === 'playing'
-      case 'paused': return remoteEnded.value || session?.state === 'paused'
-      case 'ended': return remoteEnded.value
-      case 'loading': return false
-      case 'buffering': return castConnecting.value
-      case 'currentTime': castClockTick.value; return remoteEnded.value ? (session?.duration_sec ?? localState.duration) : (session ? cast.livePositionSec() : lastRemotePosition.value)
-      case 'duration': return session?.duration_sec ?? localState.duration
-      case 'buffered': return session ? cast.livePositionSec() : lastRemotePosition.value
-      case 'volume': return (session?.volume ?? Math.round(localState.volume * 100)) / 100
-      case 'muted': return (session?.volume ?? 1) === 0
-      case 'seekTick': return remoteSeekTick.value
-      default: return Reflect.get(target, key, receiver)
+    if (videoCastMode.value) {
+      const session = videoCastSession.value
+      switch (key) {
+        case 'playing': return !!session && session.state === 'playing'
+        case 'paused': return remoteEnded.value || session?.state === 'paused'
+        case 'ended': return remoteEnded.value
+        case 'loading': return false
+        case 'buffering': return castConnecting.value
+        case 'currentTime': castClockTick.value; return remoteEnded.value ? (session?.duration_sec ?? localState.duration) : (session ? cast.livePositionSec() : lastRemotePosition.value)
+        case 'duration': return session?.duration_sec ?? localState.duration
+        case 'buffered': return session ? cast.livePositionSec() : lastRemotePosition.value
+        case 'volume': return (session?.volume ?? Math.round(localState.volume * 100)) / 100
+        case 'muted': return (session?.volume ?? 1) === 0
+        case 'seekRevision': return remoteSeekRevision.value
+        default: return Reflect.get(target, key, receiver)
+      }
     }
+    const native = nativeBackend.value
+    return native ? Reflect.get(native.state, key, native.state) : Reflect.get(target, key, receiver)
   },
 }) as typeof localState
 
@@ -89,10 +115,12 @@ let remoteVolumeBeforeMute = 30
 const controls = {
   play() {
     if (videoCastActive.value) { void cast.resume().catch(() => {}); return }
+    if (nativeBackend.value) { void nativeBackend.value.controls.play(); return }
     localControls.play()
   },
   pause() {
     if (videoCastActive.value) { void cast.pause().catch(() => {}); return }
+    if (nativeBackend.value) { void nativeBackend.value.controls.pause(); return }
     localControls.pause()
   },
   togglePlay() {
@@ -101,20 +129,22 @@ const controls = {
       else void cast.pause().catch(() => {})
       return
     }
-    localControls.togglePlay()
+    if (state.paused) controls.play()
+    else controls.pause()
   },
   seek(time: number) {
     if (videoCastActive.value) {
       lastRemotePosition.value = time
-      remoteSeekTick.value++
+      remoteSeekRevision.value++
       void cast.seekTo(time).catch(() => {})
       return
     }
+    if (nativeBackend.value) { void nativeBackend.value.controls.seek(time); return }
     localControls.seek(time)
   },
   skip(seconds: number) {
     if (videoCastActive.value) { controls.seek(state.currentTime + seconds); return }
-    localControls.skip(seconds)
+    controls.seek(state.currentTime + seconds)
   },
   setVolume(value: number) {
     if (videoCastActive.value) {
@@ -123,6 +153,7 @@ const controls = {
       cast.setVolume(level)
       return
     }
+    if (nativeBackend.value) { void nativeBackend.value.controls.setVolume(value); return }
     localControls.setVolume(value)
   },
   toggleMute() {
@@ -132,9 +163,29 @@ const controls = {
       else cast.setVolume(remoteVolumeBeforeMute)
       return
     }
-    localControls.toggleMute()
+    if (nativeBackend.value) { void nativeBackend.value.controls.setMuted(!state.muted); return }
+    localControls.setMuted(!localState.muted)
   },
-  toggleFullscreen: localControls.toggleFullscreen,
+  setFullscreen(fullscreen: boolean) {
+    if (nativeBackend.value) { void nativeBackend.value.controls.setFullscreen(fullscreen); return }
+    localControls.setFullscreen(fullscreen)
+  },
+  toggleFullscreen() {
+    controls.setFullscreen(!state.fullscreen)
+  },
+}
+
+const playbackDiagnostics = computed(() => {
+  if (videoCastMode.value) return null
+  return nativeBackend.value?.diagnostics ?? localDiagnostics
+})
+const playbackBackend = computed(() => {
+  if (videoCastMode.value) return 'cast' as const
+  return nativeBackend.value?.kind ?? localBackend.kind
+})
+
+function loadBrowserSource(url: string, bearerToken?: string) {
+  return localBackend.load({ url, bearerToken })
 }
 // Touch devices: rotate to landscape → immersive fullscreen, back to portrait
 // → exit. No-op on desktop / where the browser blocks it (see composable).
@@ -193,9 +244,11 @@ const activeQuality = ref('auto')
 // True while focus sits on any control inside .ctrl — keeps the bar visible
 // past the normal 3s auto-hide so a keyboard user's focus never disappears.
 const controlsFocused = ref(false)
+const anyControlMenuOpen = computed(() => showAudioMenu.value || showSubMenu.value || showQualityMenu.value || showCastMenu.value)
+const controlsPinned = computed(() => state.paused || state.buffering || controlsFocused.value || anyControlMenuOpen.value || showInfoPanel.value)
 // Single source of truth for "is the control bar showing" — drives both the
 // .ctrl visible class and the VTT overlay's nudge-up so subs clear the bar.
-const ctrlShown = computed(() => controlsVisible.value || state.paused || state.buffering || controlsFocused.value)
+const ctrlShown = computed(() => controlsVisible.value || controlsPinned.value)
 const resumeCardRef = ref<HTMLElement>()
 let assRenderer: AkariSub | null = null
 // VTT path state — non-ASS tracks are served as WebVTT by the backend and
@@ -261,6 +314,149 @@ function buildHLSUrl() {
   return `/api/stream/${props.fileId}/hls/master.m3u8?${params}`
 }
 
+interface NativePlaybackGrantResponse {
+  media_path: string
+  playback_grant: string
+  expires_at_unix_millis: number
+  header_name: string
+}
+
+const NATIVE_PLAYBACK_GRANT_HEADER = 'X-Heya-Playback-Grant'
+
+async function enableNativePlayback(timeoutMilliseconds = 1200): Promise<boolean> {
+  if (nativeBackend.value) return true
+  // The surface flag only avoids delaying ordinary browsers. It grants no
+  // authority; HeyaClient's origin-validated bridge handshake is the gate.
+  if (!isTauriClient.value || videoOutputPreference.value === 'browser') return false
+  const handshake = await waitForNativePlaybackBridge(timeoutMilliseconds)
+  if (!handshake?.capabilities.available || handshake.capabilities.backend !== 'mpv') return false
+  nativeBackend.value = useNativeVideoPlaybackBackend(handshake.bridge, handshake.capabilities)
+  return true
+}
+
+function rememberVideoOutput(preference: 'native' | 'browser') {
+  videoOutputPreference.value = preference
+  try {
+    localStorage.setItem(VIDEO_OUTPUT_PREFERENCE_KEY, preference)
+  } catch {
+    // The choice still applies for this SPA lifetime when storage is blocked.
+  }
+}
+
+async function disposeNativePlayback() {
+  const backend = nativeBackend.value
+  nativeBackend.value = null
+  if (backend) await backend.dispose()
+}
+
+async function loadNativeSource(startPositionSeconds: number, mode: 'direct' | 'hls' = 'direct') {
+  const backend = nativeBackend.value
+  if (!backend) throw new Error('Native playback is unavailable')
+  const { $heya } = useNuxtApp()
+  const grant = await $heya<NativePlaybackGrantResponse>('/api/playback/native/grants', {
+    method: 'POST',
+    body: {
+      file_id: String(props.fileId),
+      mode,
+      audio_track: activeAudioIdx.value,
+      quality: activeQuality.value,
+    },
+  })
+  if (!grant.media_path || !grant.playback_grant || grant.header_name !== NATIVE_PLAYBACK_GRANT_HEADER) {
+    throw new Error('HeyaClient and the server disagree on the native playback protocol')
+  }
+
+  await backend.load({
+    mediaUrl: new URL(grant.media_path, window.location.origin).href,
+    playbackGrant: grant.playback_grant,
+    ...(startPositionSeconds > 0 ? { startPositionSeconds } : {}),
+  })
+  localBackend.dispose()
+  destroySubtitles()
+  usingHLS.value = mode === 'hls'
+}
+
+function loadBrowserPlayback(startPositionSeconds: number, autoplay = true) {
+  const action = streamState.streamInfo?.playback?.action
+  const needsNonDefaultAudio = activeAudioIdx.value > 0
+  if (action === 'direct_play' && !needsNonDefaultAudio) {
+    usingHLS.value = false
+    loadBrowserSource(`/api/stream/${props.fileId}?token=${token.value}`, token.value!)
+  } else {
+    usingHLS.value = true
+    loadBrowserSource(buildHLSUrl(), token.value!)
+  }
+
+  const v = videoEl.value
+  if (!v || (startPositionSeconds <= 0 && autoplay)) return
+  const onReady = () => {
+    if (startPositionSeconds > 0) v.currentTime = startPositionSeconds
+    if (!autoplay) v.pause()
+    v.removeEventListener('canplay', onReady)
+  }
+  v.addEventListener('canplay', onReady)
+}
+
+async function switchToNativePlayback() {
+  showCastMenu.value = false
+  if (nativePlaybackMode.value) return
+  const position = state.currentTime
+  const wasPlaying = state.playing
+  localControls.pause()
+  rememberVideoOutput('native')
+  if (!await enableNativePlayback()) {
+    toast.err('The native MPV backend is unavailable in this HeyaClient build')
+    if (wasPlaying) localControls.play()
+    return
+  }
+  try {
+    await loadNativeSource(position)
+    if (!wasPlaying) controls.pause()
+  } catch (error) {
+    await disposeNativePlayback()
+    toast.err(error instanceof Error ? error.message : 'Could not start native playback')
+    if (wasPlaying) localControls.play()
+  }
+}
+
+async function switchToBrowserPlayback(forcePlay = false) {
+  showCastMenu.value = false
+  if (videoCastActive.value) return
+  rememberVideoOutput('browser')
+  if (!nativePlaybackMode.value) return
+  const position = state.currentTime
+  const wasPlaying = forcePlay || state.playing
+  controls.pause()
+  await disposeNativePlayback()
+  loadBrowserPlayback(position, wasPlaying)
+  if (activeSubIdx.value >= 0) awaitVideoReady().then(() => initSubtitles())
+}
+
+let lastNativeAudioSelection = ''
+let lastNativeSubtitleSelection = ''
+watchEffect(() => {
+  const backend = nativeBackend.value
+  const rendererSessionId = backend?.rendererSessionId.value
+  if (!backend || !rendererSessionId) return
+
+  const audio = backend.nativeState.audioTracks[activeAudioIdx.value]
+  const audioKey = `${rendererSessionId}:${audio?.id ?? 'missing'}`
+  if (audio && audio.id !== backend.nativeState.selectedAudioTrackId && audioKey !== lastNativeAudioSelection) {
+    lastNativeAudioSelection = audioKey
+    void backend.selectAudioTrack(audio.id)
+  }
+
+  const subtitle = activeSubIdx.value >= 0
+    ? backend.nativeState.subtitleTracks[activeSubIdx.value]
+    : null
+  const subtitleId = subtitle?.id ?? null
+  const subtitleKey = `${rendererSessionId}:${subtitleId ?? 'off'}`
+  if (subtitleId !== (backend.nativeState.selectedSubtitleTrackId ?? null) && subtitleKey !== lastNativeSubtitleSelection) {
+    lastNativeSubtitleSelection = subtitleKey
+    void backend.selectSubtitleTrack(subtitleId)
+  }
+})
+
 function castDeviceSub(device: { manufacturer?: string, model?: string, provider: string }) {
   const model = [device.manufacturer, device.model].filter(Boolean).join(' ')
   return model ? `${device.provider} · ${model}` : device.provider
@@ -278,13 +474,14 @@ async function pickVideoCastDevice(deviceID: string, startPosition = state.curre
   }
   const position = startPosition
   const wasPlaying = state.playing
+  const handedFromNative = nativePlaybackMode.value
   try {
     if (cast.session) await cast.stopSession()
     cast.engagedDeviceId = deviceID
     videoCastPending.value = true
     remoteEnded.value = false
     lastRemotePosition.value = position
-    localControls.pause()
+    controls.pause()
     // A music session may have owned this Cast store immediately before the
     // video handoff. Keep its global playbar from presenting stale playback.
     musicPlayer.playing = false
@@ -297,17 +494,21 @@ async function pickVideoCastDevice(deviceID: string, startPosition = state.curre
       audioTrack: activeAudioIdx.value,
       subtitleTrack: activeSubIdx.value >= 0 ? activeSubIdx.value : undefined,
       quality: activeQuality.value,
-      fallbackVolume: localState.volume * 100,
+      fallbackVolume: state.volume * 100,
       startSeconds: position,
     })
     videoCastSessionID.value = snap.id
     lastRemotePosition.value = snap.position_sec
+    if (handedFromNative) {
+      resumeNativeAfterCast = true
+      await disposeNativePlayback()
+    }
     if (isPhone.value) handoffToMobileRemote()
     return true
   } catch (error) {
     cast.engagedDeviceId = null
     videoCastSessionID.value = null
-    if (wasPlaying) localControls.play()
+    if (wasPlaying) controls.play()
     toast.err(error instanceof Error ? error.message : 'Could not cast this video')
     return false
   } finally {
@@ -318,7 +519,7 @@ async function pickVideoCastDevice(deviceID: string, startPosition = state.curre
 function handoffToMobileRemote() {
   preserveRemoteSessionOnUnmount = true
   cast.videoRemoteOpen = true
-  localControls.pause()
+  controls.pause()
   emit('close')
 }
 
@@ -365,6 +566,15 @@ async function stopVideoCast(resumeLocal: boolean) {
     videoCastPending.value = false
     remoteEnded.value = false
     videoCastStopping.value = false
+    if (resumeLocal && resumeNativeAfterCast) {
+      resumeNativeAfterCast = false
+      pendingSeekTo.value = position
+      await enableNativePlayback()
+      await startPlayback(position)
+      if (!wasPlaying) controls.pause()
+      return
+    }
+    resumeNativeAfterCast = false
     const video = videoEl.value
     if (video && Number.isFinite(position)) {
       video.currentTime = Math.max(0, Math.min(knownDuration.value || position, position))
@@ -497,8 +707,11 @@ async function init() {
   const entityPrefPromise = props.mediaItemId
     ? waitForQuery(entityPreferenceQuery).then(() => entityPreferenceQuery.data.value ?? null).catch(() => null)
     : Promise.resolve(null)
+  const nativePlaybackPromise = isTauriClient.value
+    ? enableNativePlayback()
+    : Promise.resolve(false)
 
-  await Promise.all([loadStreamInfo(), loadSettings(), entityPrefPromise])
+  await Promise.all([loadStreamInfo(), loadSettings(), entityPrefPromise, nativePlaybackPromise])
   const entityPref = await entityPrefPromise
 
   const libId = streamState.streamInfo?.library_id
@@ -524,7 +737,10 @@ async function init() {
     // Warm the subtitle endpoint for whatever we auto-selected — the server
     // extracts ASS / converts everything else to WebVTT on first hit, so
     // this prefetch means the renderer isn't blocked on that work later.
-    if (sub) fetch(subtitleUrl(sub.index)).catch(() => {})
+    if (sub) {
+      const url = subtitleUrl(sub.index)
+      fetch(url, { headers: withClientSurfaceHeaders(url) }).catch(() => {})
+    }
   }
 
   // Before loading the source (which auto-plays on canplay), check whether
@@ -542,39 +758,31 @@ async function init() {
     if (handedOff) return
   }
 
-  startPlayback()
+  await startPlayback()
 }
 
 // Kicks off the actual source load + autoplay. Called after the resume
 // decision is finalized (either no resume needed, or the user picked).
-function startPlayback() {
+async function startPlayback(startPositionSeconds = pendingSeekTo.value) {
   const { $heya } = useNuxtApp()
-  const action = streamState.streamInfo?.playback?.action
-  const needsNonDefaultAudio = activeAudioIdx.value > 0
-  if (action === 'direct_play' && !needsNonDefaultAudio) {
-    usingHLS.value = false
-    loadSource(`/api/stream/${props.fileId}?token=${token.value}`, token.value!)
-  } else {
-    usingHLS.value = true
-    loadSource(buildHLSUrl(), token.value!)
-  }
-
-  // Seek to whatever startTime is set — that's either the URL ?t= override
-  // OR the resume position the user picked OR 0 (start over / no resume).
-  // Listener is one-shot; install AFTER loadSource so canplay is fresh.
-  const target = pendingSeekTo.value
-  if (target > 0) {
-    const v = videoEl.value
-    if (v) {
-      const onReady = () => {
-        v.currentTime = target
-        v.removeEventListener('canplay', onReady)
-      }
-      v.addEventListener('canplay', onReady)
+  let nativeStarted = false
+  if (nativeBackend.value) {
+    try {
+      await loadNativeSource(startPositionSeconds)
+      nativeStarted = true
+    } catch (error) {
+      await disposeNativePlayback()
+      toast.info(error instanceof Error
+        ? `Native playback unavailable: ${error.message}. Using browser playback.`
+        : 'Native playback unavailable. Using browser playback.')
     }
   }
 
-  if (activeSubIdx.value >= 0) awaitVideoReady().then(() => initSubtitles())
+  if (!nativeStarted) {
+    loadBrowserPlayback(startPositionSeconds)
+
+    if (activeSubIdx.value >= 0) awaitVideoReady().then(() => initSubtitles())
+  }
 
   loadTrickplay(token.value!).catch(() => {})
   dismissedSegments.value = new Set()
@@ -624,6 +832,7 @@ function destroySubtitles() {
 function initSubtitles() {
   destroySubtitles()
   if (import.meta.server) return
+  if (nativePlaybackMode.value) return
   if (activeSubIdx.value < 0 || !videoEl.value) return
   const sub = subtitleTracks.value[activeSubIdx.value]
   if (!sub) return
@@ -731,6 +940,7 @@ function selectSub(idx: number) {
     void restartVideoCast()
     return
   }
+  if (nativeBackend.value) return
   awaitVideoReady().then(() => initSubtitles())
 }
 function disableSubs() {
@@ -738,6 +948,10 @@ function disableSubs() {
   showSubMenu.value = false
   if (videoCastActive.value) {
     void restartVideoCast()
+    return
+  }
+  if (nativeBackend.value) {
+    destroySubtitles()
     return
   }
   destroySubtitles()
@@ -752,12 +966,20 @@ function selectAudio(idx: number) {
     void restartVideoCast()
     return
   }
+  if (nativeBackend.value) {
+    if (usingHLS.value) {
+      void loadNativeSource(currentTime, 'hls').catch((error) => {
+        toast.err(error instanceof Error ? error.message : 'Could not change native audio track')
+      })
+    }
+    return
+  }
   const canDirectPlay = streamState.streamInfo?.playback?.action === 'direct_play' && idx === 0
   const url = canDirectPlay
     ? `/api/stream/${props.fileId}?token=${token.value}`
     : buildHLSUrl()
   usingHLS.value = !canDirectPlay
-  loadSource(url, token.value!)
+  loadBrowserSource(url, token.value!)
   const v = videoEl.value
   if (v) {
     const onReady = () => { v.currentTime = currentTime; v.removeEventListener('canplay', onReady) }
@@ -774,8 +996,14 @@ function selectQuality(quality: string) {
     void restartVideoCast()
     return
   }
+  if (nativeBackend.value) {
+    void loadNativeSource(currentTime, quality === 'auto' ? 'direct' : 'hls').catch((error) => {
+      toast.err(error instanceof Error ? error.message : 'Could not change native playback quality')
+    })
+    return
+  }
   usingHLS.value = true
-  loadSource(buildHLSUrl(), token.value!)
+  loadBrowserSource(buildHLSUrl(), token.value!)
   const v = videoEl.value
   if (v) {
     const onReady = () => { v.currentTime = currentTime; v.removeEventListener('canplay', onReady) }
@@ -848,7 +1076,7 @@ function playNextEpisode() {
   const fileRef = upNext.value?.file_public_id || upNext.value?.file_id
   if (!fileRef || !upNext.value?.media_item_id) return
   cancelUpNext()
-  destroyHLS(); destroySubtitles()
+  localBackend.dispose(); void disposeNativePlayback(); destroySubtitles()
   const label = `S${String(upNext.value.season_number).padStart(2, '0')}E${String(upNext.value.episode_number).padStart(2, '0')}`
   const params = new URLSearchParams({
     media_item_id: String(upNext.value.media_item_id),
@@ -892,7 +1120,7 @@ watch(() => state.ended, (ended) => {
 // --- Watch progress reporting ---
 // Runs only while the video is actively playing (5s cadence). On pause the
 // interval clears AND we emit once to capture the pause position. On seek
-// (state.seekTick increments) we emit immediately so the resume point is
+// (state.seekRevision increments) we emit immediately so the resume point is
 // accurate even mid-seek-spree.
 const PROGRESS_INTERVAL_MS = 5000
 let progressTimer: ReturnType<typeof setInterval> | null = null
@@ -915,7 +1143,7 @@ watch(() => state.playing, (playing) => {
 
 // Seek emits an immediate update — the user's saved resume position should
 // reflect where they actually are, not where the next 5s tick lands.
-watch(() => state.seekTick, () => { fireProgress() })
+watch(() => state.seekRevision, () => { fireProgress() })
 
 // --- Now-Playing presence ---
 // Heartbeats the session every 10s so the activity panel can show what
@@ -1011,7 +1239,7 @@ onUnmounted(() => { offSessionCmd?.(); offCastState?.() })
 // this item. If so AND no `?t=` query forces a specific seek, show an
 // in-player dialog asking Resume vs Start over. checkResume() returns a
 // Promise that resolves once the user has picked — init() awaits it
-// before kicking off loadSource so no frame plays under the modal.
+// before kicking off the backend load so no frame plays under the modal.
 const resumeOpen = ref(false)
 const resumePosition = ref(0)
 // pendingSeekTo carries the target offset into startPlayback. Set to
@@ -1090,13 +1318,19 @@ onUnmounted(() => {
 function handleClose() {
   if (videoCastSession.value) void stopVideoCast(false)
   cancelUpNext()
-  destroyHLS()
+  localBackend.dispose()
+  void disposeNativePlayback()
   destroySubtitles()
   if (document.fullscreenElement) document.exitFullscreen()
   emit('close')
 }
 
-// Register local browser playback as a HeyaConnect video renderer. Other
+watchEffect(() => {
+  if (!import.meta.client) return
+  document.body.classList.toggle('heya-native-video-active', nativeSurfaceActive.value)
+})
+
+// Register local browser/native playback as a HeyaConnect video renderer. Other
 // clients receive this normalized snapshot through device.state and send the
 // same transport/track commands used by the Chromecast remote. A player that
 // is itself only proxying Chromecast stays out of the device inventory — the
@@ -1111,7 +1345,7 @@ onMounted(() => {
         media_kind: 'video',
         // Keep an ended episode attachable during the local 10-second Up Next
         // countdown; unmounting the player removes the renderer altogether.
-        state: localState.loading ? 'starting' : localState.playing ? 'playing' : 'paused',
+        state: state.loading ? 'starting' : state.playing ? 'playing' : 'paused',
         file_id: String(props.fileId),
         media_item_id: props.mediaItemId ?? undefined,
         entity_type: props.entityType === 'episode' ? 'episode' : 'movie',
@@ -1120,9 +1354,9 @@ onMounted(() => {
         audio_track: activeAudioIdx.value,
         subtitle_track: activeSubIdx.value >= 0 ? activeSubIdx.value : undefined,
         quality: activeQuality.value,
-        position_sec: localState.currentTime,
+        position_sec: state.currentTime,
         duration_sec: knownDuration.value,
-        volume: Math.round(localState.volume * 100),
+        volume: Math.round(state.volume * 100),
       }
     },
     pause: () => controls.pause(),
@@ -1137,33 +1371,66 @@ onMounted(() => {
   })
 })
 onUnmounted(() => {
+  document.body.classList.remove('heya-native-video-active')
   detachVideoRenderer?.()
   detachVideoRenderer = null
 })
 
+function clearHideTimer() {
+  if (!hideTimer) return
+  clearTimeout(hideTimer)
+  hideTimer = null
+}
+
 function showCtrl() {
   controlsVisible.value = true
-  if (hideTimer) clearTimeout(hideTimer)
+  clearHideTimer()
   // Never auto-hide while a control inside .ctrl holds keyboard focus — the
-  // focusin/focusout handlers below keep controlsFocused in sync.
-  hideTimer = setTimeout(() => { if (state.playing && !controlsFocused.value) controlsVisible.value = false }, 3000)
+  // focusin/focusout handlers below keep controlsFocused in sync. Open
+  // portalled menus and the info panel pin the chrome for the same reason.
+  if (state.playing && !controlsPinned.value) {
+    hideTimer = setTimeout(() => {
+      hideTimer = null
+      if (state.playing && !controlsPinned.value) controlsVisible.value = false
+    }, 2600)
+  }
 }
 
 function onControlsFocusIn() { controlsFocused.value = true; showCtrl() }
 function onControlsFocusOut() { controlsFocused.value = false; showCtrl() }
 
-let lastTap = 0, lastTapX = 0
+function onPlayerPointerEnter() { showCtrl() }
+function onPlayerPointerLeave() {
+  seekHover.value = null
+  clearHideTimer()
+  if (!state.playing || controlsPinned.value) return
+  hideTimer = setTimeout(() => {
+    hideTimer = null
+    if (state.playing && !controlsPinned.value) controlsVisible.value = false
+  }, 300)
+}
+
+let videoClickTimer: ReturnType<typeof setTimeout> | null = null
+function clearVideoClickTimer() {
+  if (!videoClickTimer) return
+  clearTimeout(videoClickTimer)
+  videoClickTimer = null
+}
 function onVideoClick(e: MouseEvent) {
-  const now = Date.now(), x = e.clientX
-  if (now - lastTap < 350 && Math.abs(x - lastTapX) < 100) {
-    const w = window.innerWidth
-    if (x < w * 0.3) controls.skip(-10)
-    else if (x > w * 0.7) controls.skip(10)
-    else controls.toggleFullscreen()
-    lastTap = 0; return
-  }
-  lastTap = now; lastTapX = x
-  setTimeout(() => { if (Date.now() - lastTap >= 300) { controls.togglePlay(); showCtrl() } }, 320)
+  // The second click of a double-click arrives before `dblclick`; cancel the
+  // pending single-click action so fullscreen never also toggles playback.
+  if (e.detail > 1) { clearVideoClickTimer(); return }
+  clearVideoClickTimer()
+  videoClickTimer = setTimeout(() => {
+    videoClickTimer = null
+    controls.togglePlay()
+    showCtrl()
+  }, 300)
+}
+function onVideoDoubleClick() {
+  clearVideoClickTimer()
+  controls.toggleFullscreen()
+  showCtrl()
 }
 
 function handleKeydown(e: KeyboardEvent) {
@@ -1171,27 +1438,39 @@ function handleKeydown(e: KeyboardEvent) {
   // typing elsewhere, and arrow keys must not fight an open track menu's
   // own keyboard navigation.
   const target = e.target as HTMLElement | null
-  if (target?.matches?.('input,textarea,[contenteditable]')) return
+  if (target?.closest?.('input,textarea,select,[contenteditable="true"]')) return
   if (showAudioMenu.value || showSubMenu.value || showQualityMenu.value || showCastMenu.value) return
   if (resumeOpen.value && e.key === 'Escape') { onResumePick(false); e.preventDefault(); return }
   if (upNextCountdown.value > 0 && e.key === 'Escape') { cancelUpNext(); e.preventDefault(); return }
   if (upNextCountdown.value > 0 && (e.key === 'Enter' || e.key === 'n')) { playNextEpisode(); e.preventDefault(); return }
   if (showInfoPanel.value && e.key === 'Escape') { showInfoPanel.value = false; e.preventDefault(); return }
+  const isSpace = e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar'
+  if (isSpace) {
+    // Buttons and menu items already implement Space natively. Handling the
+    // same key at window level would click the button and toggle twice.
+    if (target?.closest?.('button,a,[role="menuitem"]')) return
+    e.preventDefault()
+    if (!e.repeat) controls.togglePlay()
+    showCtrl()
+    return
+  }
   switch (e.key) {
     case 'Escape':
       // Back out of fullscreen first — closing the whole player on the same
       // keystroke that a fullscreen user expects to just un-immerse them is
       // surprising (and doubles up with the browser's own Escape-exits-
       // fullscreen behavior).
-      if (document.fullscreenElement) { document.exitFullscreen() } else { handleClose() }
+      if (state.fullscreen) controls.setFullscreen(false)
+      else if (document.fullscreenElement) document.exitFullscreen()
+      else handleClose()
       break
-    case ' ': case 'k': controls.togglePlay(); break
+    case 'k': if (!e.repeat) controls.togglePlay(); break
     case 'f': controls.toggleFullscreen(); break
     case 'm': controls.toggleMute(); break
     case 'ArrowLeft': case 'j': controls.skip(-10); break
     case 'ArrowRight': case 'l': controls.skip(10); break
-    case 'ArrowUp': controls.setVolume(state.volume + 0.1); break
-    case 'ArrowDown': controls.setVolume(state.volume - 0.1); break
+    case 'ArrowUp': controls.setVolume(Math.min(1, state.volume + 0.1)); break
+    case 'ArrowDown': controls.setVolume(Math.max(0, state.volume - 0.1)); break
     case 'i': if (!e.ctrlKey && !e.metaKey) showInfoPanel.value = !showInfoPanel.value; break
     default: return
   }
@@ -1206,6 +1485,10 @@ function volIcon() {
 }
 
 useEventListener(window, 'keydown', handleKeydown)
+watch(controlsPinned, (pinned) => {
+  if (pinned) { controlsVisible.value = true; clearHideTimer() }
+  else showCtrl()
+})
 onMounted(init)
 let castClockTimer: ReturnType<typeof setInterval> | null = null
 onMounted(() => {
@@ -1221,12 +1504,21 @@ onUnmounted(() => {
   if (castClockTimer) clearInterval(castClockTimer)
   destroySubtitles()
   cancelUpNext()
-  if (hideTimer) clearTimeout(hideTimer)
+  clearHideTimer()
+  clearVideoClickTimer()
+  void disposeNativePlayback()
 })
 </script>
 
 <template>
-  <div class="p" @mousemove="showCtrl" @click="closeMenus">
+  <div
+    class="p"
+    :class="{ 'native-surface-active': nativeSurfaceActive, 'controls-shown': ctrlShown }"
+    @pointerenter.capture="onPlayerPointerEnter"
+    @pointermove.capture="showCtrl"
+    @pointerleave.capture="onPlayerPointerLeave"
+    @click="closeMenus"
+  >
     <!-- Loading / Error -->
     <div v-if="streamState.loading" class="p-center">
       <div class="spinner" aria-hidden="true" />
@@ -1235,11 +1527,14 @@ onUnmounted(() => {
     <div v-else-if="state.error || streamState.error" class="p-center" role="alert">
       <Icon name="warning" :size="28" />
       <div style="margin-top: 12px">{{ state.error || streamState.error }}</div>
-      <button class="btn btn-secondary" style="margin-top: 16px" @click="handleClose">Go Back</button>
+      <div style="display: flex; gap: 10px; margin-top: 16px">
+        <button v-if="nativePlaybackMode" class="btn btn-primary" @click="switchToBrowserPlayback(true)">Use Browser Playback</button>
+        <button class="btn btn-secondary" @click="handleClose">Go Back</button>
+      </div>
     </div>
 
     <template v-else>
-      <video ref="videoEl" :inert="resumeOpen" @click="onVideoClick" />
+      <video ref="videoEl" :inert="resumeOpen" @click="onVideoClick" @dblclick.stop.prevent="onVideoDoubleClick" />
 
       <div v-if="videoCastMode" class="cast-remote-overlay" aria-live="polite">
         <Icon :name="castConnecting ? 'loading' : 'cast'" :size="34" :class="{ 'cast-remote-spin': castConnecting }" />
@@ -1247,11 +1542,17 @@ onUnmounted(() => {
         <div class="cast-remote-sub">{{ props.title || 'Video' }}</div>
       </div>
 
+      <div v-else-if="nativePlaybackMode && !nativeSurfaceActive" class="cast-remote-overlay" aria-live="polite">
+        <Icon :name="state.loading || state.buffering ? 'loading' : 'play'" :size="34" :class="{ 'cast-remote-spin': state.loading || state.buffering }" />
+        <div class="cast-remote-title">{{ state.ended ? 'Playback finished' : nativeSurfaceSelected ? 'Starting native playback' : 'Playing in the native player' }}</div>
+        <div class="cast-remote-sub">{{ props.title || 'Video' }}</div>
+      </div>
+
       <!-- VTT subtitle overlay — custom rendering of the hidden TextTrack's
            active cues (see initVTT). Nudges up while the control bar is
            shown so cues never hide behind it. ASS/SSA tracks paint on the
            AkariSub canvas instead and never populate vttCueLines. -->
-      <div v-if="vttCueLines.length" class="vtt-layer" :class="{ 'ctrl-up': ctrlShown }">
+      <div v-if="!nativePlaybackMode && vttCueLines.length" class="vtt-layer" :class="{ 'ctrl-up': ctrlShown }">
         <div class="vtt-cue">
           <span v-for="(line, i) in vttCueLines" :key="i" class="vtt-line">{{ line }}</span>
         </div>
@@ -1306,7 +1607,7 @@ onUnmounted(() => {
         <!-- Center play. The buffering ring is concentric with the button
              (same flex center) so it wraps the glyph cleanly instead of
              peeking out from a separately-centered spinner. -->
-        <div class="ctrl-center" @click.stop="controls.togglePlay()">
+        <div class="ctrl-center" @click.stop="onVideoClick" @dblclick.stop.prevent="onVideoDoubleClick">
           <div class="center-play">
             <div v-if="state.buffering" class="center-ring" aria-hidden="true" />
             <button class="center-btn" :class="{ 'is-play': state.paused }" :aria-label="state.paused ? 'Play' : 'Pause'" :aria-pressed="!state.paused">
@@ -1354,6 +1655,10 @@ onUnmounted(() => {
             <button class="c-btn" aria-label="Rewind 10 seconds" @click="controls.skip(-10)"><Icon name="skipback" :size="18" /></button>
             <button class="c-btn" aria-label="Forward 10 seconds" @click="controls.skip(10)"><Icon name="skipforward" :size="18" /></button>
 
+            <div class="time">{{ formatTime(state.currentTime) }} <span class="time-sep">/</span> {{ formatTime(knownDuration) }}</div>
+            <div style="flex: 1" />
+
+            <!-- Output and track configuration lives together on the right. -->
             <div class="vol-group">
               <button class="c-btn" :aria-label="state.muted ? 'Unmute' : 'Mute'" :aria-pressed="state.muted" @click="controls.toggleMute()"><Icon :name="volIcon()" :size="18" /></button>
               <div
@@ -1369,9 +1674,6 @@ onUnmounted(() => {
                 @keydown="onVolumeKeydown"
               ><div class="vol-fill" :style="{ width: (state.muted ? 0 : state.volume * 100) + '%' }" /></div>
             </div>
-
-            <div class="time">{{ formatTime(state.currentTime) }} <span class="time-sep">/</span> {{ formatTime(knownDuration) }}</div>
-            <div style="flex: 1" />
 
             <!-- Audio -->
             <AppMenu
@@ -1479,19 +1781,33 @@ onUnmounted(() => {
                  receiver capability comes from the Cast `ca` advertisement,
                  not from provider/model-name guesses. -->
             <AppMenu
-              v-if="castDevices.length || videoCastActive"
+              v-if="isTauriClient || castDevices.length || videoCastActive"
               v-model="showCastMenu"
               :width="280"
               align="end"
               :side-offset="10"
-              :trigger-class="{ 'vp-trigger': true, active: videoCastActive }"
+              :trigger-class="{ 'vp-trigger': true, active: videoCastActive || nativePlaybackMode }"
               content-class="vp-menu-surface"
-              :trigger-title="videoCastActive ? `Playing on ${cast.deviceName}` : 'Cast video'"
+              :trigger-title="videoCastActive ? `Playing on ${cast.deviceName}` : nativePlaybackMode ? 'Playing in native MPV' : 'Playback output'"
             >
               <template #trigger>
                 <Icon :name="castConnecting ? 'loading' : 'cast'" :size="18" :class="{ 'cast-remote-spin': castConnecting }" />
               </template>
-              <div class="surface-section-label vp-menu-title">Video capable</div>
+              <template v-if="isTauriClient">
+                <div class="surface-section-label vp-menu-title">This device</div>
+                <DropdownMenuItem class="surface-item vp-item" :disabled="videoCastActive" @select="switchToNativePlayback()">
+                  <Icon name="television-simple" :size="15" class="surface-item-icon" />
+                  <span>Native MPV</span>
+                  <Icon v-if="nativePlaybackMode" name="check" :size="13" class="vp-item-check" />
+                </DropdownMenuItem>
+                <DropdownMenuItem class="surface-item vp-item" :disabled="videoCastActive" @select="switchToBrowserPlayback()">
+                  <Icon name="globe" :size="15" class="surface-item-icon" />
+                  <span>Browser playback</span>
+                  <Icon v-if="!nativePlaybackMode && !videoCastActive" name="check" :size="13" class="vp-item-check" />
+                </DropdownMenuItem>
+                <DropdownMenuSeparator v-if="castDevices.length" class="surface-divider" />
+              </template>
+              <div v-if="castDevices.length" class="surface-section-label vp-menu-title">Video capable</div>
               <DropdownMenuItem
                 v-for="device in castDevices"
                 :key="device.id"
@@ -1530,7 +1846,9 @@ onUnmounted(() => {
             :fileId="fileId"
             :activeQuality="activeQuality"
             :usingHLS="usingHLS"
+            :playbackBackend="playbackBackend"
             :playerState="state"
+            :playerDiagnostics="playbackDiagnostics"
             :transcodeStatus="transcodeStatus"
             v-model:mode="panelMode"
           />
@@ -1580,8 +1898,16 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.p { position: fixed; inset: 0; z-index: 9999; background: #000; }
-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; cursor: pointer; }
+.p { position: fixed; inset: 0; z-index: 9999; background: #000; cursor: none; }
+.p.controls-shown { cursor: default; }
+.p.native-surface-active { background: transparent; }
+:global(html:has(body.heya-native-video-active)),
+:global(body.heya-native-video-active),
+:global(body.heya-native-video-active #__nuxt) {
+  background: transparent !important;
+  transition: none !important;
+}
+video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; cursor: inherit; }
 .cast-remote-overlay {
   position: absolute;
   inset: 0;

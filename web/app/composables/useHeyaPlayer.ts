@@ -1,40 +1,10 @@
 import Hls from 'hls.js'
-
-export interface HeyaPlayerState {
-  playing: boolean
-  paused: boolean
-  ended: boolean
-  loading: boolean
-  buffering: boolean
-  currentTime: number
-  duration: number
-  buffered: number
-  volume: number
-  muted: boolean
-  fullscreen: boolean
-  error: string | null
-
-  // Monotonic counter that increments on every `seeked` event. Consumers can
-  // watch this to react to seeks without subscribing to DOM events directly.
-  // (Watching state.currentTime fires on every timeupdate, which is too noisy
-  // — seekTick fires only when the user actually jumps.)
-  seekTick: number
-
-  // Diagnostics — updated as HLS fragments load and as the video element
-  // reports playback quality. Zero until the first sample arrives.
-  downloadBps: number       // EWMA of bytes/sec across recent fragment loads
-  lastFragBytes: number
-  lastFragMs: number
-  fragsLoaded: number
-  currentLevel: number      // hls.js variant index (-1 when not HLS)
-  droppedFrames: number
-  decodedFrames: number
-}
+import type { VideoPlaybackDiagnostics, VideoPlaybackState } from '~/types/video-playback'
 
 export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
   let hls: Hls | null = null
 
-  const state = reactive<HeyaPlayerState>({
+  const state = reactive<VideoPlaybackState>({
     playing: false,
     paused: true,
     ended: false,
@@ -47,14 +17,22 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
     muted: false,
     fullscreen: false,
     error: null,
-    seekTick: 0,
-    downloadBps: 0,
-    lastFragBytes: 0,
-    lastFragMs: 0,
-    fragsLoaded: 0,
-    currentLevel: -1,
-    droppedFrames: 0,
-    decodedFrames: 0,
+    seekRevision: 0,
+  })
+
+  const diagnostics = reactive<VideoPlaybackDiagnostics>({
+    backend: 'browser',
+    transport: {
+      inputBytesPerSecond: 0,
+      segmentsLoaded: 0,
+      activeVariantIndex: -1,
+      lastSegmentBytes: 0,
+      lastSegmentMilliseconds: 0,
+    },
+    health: {
+      droppedFrames: 0,
+      decodedFrames: 0,
+    },
   })
 
   // Sample video element quality stats. Called from the metrics interval —
@@ -63,8 +41,9 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
     const v = videoRef.value
     if (!v || typeof v.getVideoPlaybackQuality !== 'function') return
     const q = v.getVideoPlaybackQuality()
-    state.droppedFrames = q.droppedVideoFrames
-    state.decodedFrames = q.totalVideoFrames
+    diagnostics.health!.droppedFrames = q.droppedVideoFrames
+    diagnostics.health!.decodedFrames = q.totalVideoFrames
+    diagnostics.sampledAtMilliseconds = Date.now()
   }
 
   let metricsInterval: ReturnType<typeof setInterval> | null = null
@@ -94,7 +73,7 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
   useEventListener(videoRef, 'canplay', () => { state.buffering = false; state.loading = false })
   useEventListener(videoRef, 'playing', () => { state.buffering = false; state.loading = false; state.playing = true; state.paused = false })
   useEventListener(videoRef, 'progress', syncState)
-  useEventListener(videoRef, 'seeked', () => { state.seekTick += 1; syncState() })
+  useEventListener(videoRef, 'seeked', () => { state.seekRevision += 1; syncState() })
   useEventListener(videoRef, 'error', () => {
     const v = videoRef.value
     const e = v?.error
@@ -112,13 +91,18 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
     state.loading = true
     state.ended = false
     // Reset diagnostics — new source, new measurements.
-    state.downloadBps = 0
-    state.lastFragBytes = 0
-    state.lastFragMs = 0
-    state.fragsLoaded = 0
-    state.currentLevel = -1
-    state.droppedFrames = 0
-    state.decodedFrames = 0
+    diagnostics.sampledAtMilliseconds = undefined
+    diagnostics.transport = {
+      inputBytesPerSecond: 0,
+      segmentsLoaded: 0,
+      activeVariantIndex: -1,
+      lastSegmentBytes: 0,
+      lastSegmentMilliseconds: 0,
+    }
+    diagnostics.health = {
+      droppedFrames: 0,
+      decodedFrames: 0,
+    }
 
     const isHLS = src.includes('.m3u8')
 
@@ -132,11 +116,10 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
         levelLoadingMaxRetry: 6,
         levelLoadingRetryDelay: 1000,
         startPosition: 0,
-        ...(token ? {
-          xhrSetup(xhr: XMLHttpRequest) {
-            xhr.setRequestHeader('Authorization', `Bearer ${token}`)
-          },
-        } : {}),
+        xhrSetup(xhr: XMLHttpRequest, url: string) {
+          if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+          withClientSurfaceHeaders(url).forEach((value, name) => xhr.setRequestHeader(name, value))
+        },
       })
       hls.loadSource(src)
       hls.attachMedia(v)
@@ -161,13 +144,17 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
         if (!bytes || !ms) return
         const bps = (bytes / ms) * 1000
         // EWMA with alpha=0.3 — responsive without flickering.
-        state.downloadBps = state.downloadBps === 0 ? bps : state.downloadBps * 0.7 + bps * 0.3
-        state.lastFragBytes = bytes
-        state.lastFragMs = ms
-        state.fragsLoaded += 1
+        const transport = diagnostics.transport!
+        const previous = transport.inputBytesPerSecond ?? 0
+        transport.inputBytesPerSecond = previous === 0 ? bps : previous * 0.7 + bps * 0.3
+        transport.lastSegmentBytes = bytes
+        transport.lastSegmentMilliseconds = ms
+        transport.segmentsLoaded = (transport.segmentsLoaded ?? 0) + 1
+        diagnostics.sampledAtMilliseconds = Date.now()
       })
       hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
-        state.currentLevel = data.level
+        diagnostics.transport!.activeVariantIndex = data.level
+        diagnostics.sampledAtMilliseconds = Date.now()
       })
     } else if (isHLS && v.canPlayType('application/vnd.apple.mpegurl')) {
       v.src = src
@@ -209,7 +196,7 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
     if (metricsInterval) { clearInterval(metricsInterval); metricsInterval = null }
   })
 
-  return { state, controls, loadSource, destroyHLS }
+  return { state, diagnostics, controls, loadSource, destroyHLS }
 }
 
 export function formatTime(s: number): string {

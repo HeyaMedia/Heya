@@ -23,8 +23,9 @@ export function useMediaSegments(fileId: Ref<string | number>) {
     segments.value = []
     try {
       const token = useAuth().token.value
-      const res = await $fetch<{ segments?: MediaSegment[] }>(`/api/stream/${fileId.value}/segments`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      const url = `/api/stream/${fileId.value}/segments`
+      const res = await $fetch<{ segments?: MediaSegment[] }>(url, {
+        headers: withClientSurfaceHeaders(url, token ? { Authorization: `Bearer ${token}` } : undefined),
       })
       segments.value = (res?.segments ?? []) as MediaSegment[]
       loaded.value = true

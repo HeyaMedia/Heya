@@ -30,6 +30,10 @@
         <VisualizerStarfield v-else-if="mode === 'starfield'" />
         <VisualizerSpectrum v-else :variant="specVariant" :active="playing" />
 
+        <div v-if="nativeMilkdropFallback" class="viz-native-note">
+          Spectrum is shown because Milkdrop requires WebAudio.
+        </div>
+
         <!-- Floating close (top-right) -->
         <button class="viz-close" title="Close (Esc)" @click="close"><Icon name="close" :size="18" /></button>
 
@@ -251,9 +255,11 @@ interface MilkdropApi {
 }
 
 const vis = useVisualizer()
-const { playing, currentTrack, position, duration, togglePlay, nextTrack, prevTrack, seek, formatTime } = usePlayerBindings()
+const { playing, currentTrack, position, duration, playbackBackend, togglePlay, nextTrack, prevTrack, seek, formatTime } = usePlayerBindings()
 
-const mode = vis.mode
+const requestedMode = vis.mode
+const nativeMilkdropFallback = computed(() => playbackBackend.value === 'native' && requestedMode.value === 'milkdrop')
+const mode = computed<VisMode>(() => nativeMilkdropFallback.value ? 'bars' : requestedMode.value)
 const mkRef = ref<MilkdropApi | null>(null)
 const rootRef = ref<HTMLElement | null>(null)
 const presetKeys = ref<string[]>([])
@@ -451,6 +457,21 @@ onUnmounted(() => { stopKeyPoll(); if (hideTimer) clearTimeout(hideTimer) })
   transition: background 0.15s, color 0.15s, opacity 0.3s ease;
 }
 .viz-close:hover { background: rgba(255,255,255,0.16); color: #fff; }
+.viz-native-note {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  z-index: 2;
+  transform: translateX(-50%);
+  padding: 7px 12px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 999px;
+  background: rgba(0,0,0,0.48);
+  color: rgba(255,255,255,0.72);
+  font-size: 11px;
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
 
 /* Bottom command bar */
 .viz-bar {

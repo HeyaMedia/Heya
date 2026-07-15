@@ -320,7 +320,7 @@ export function useAppearance() {
       saveTimer = null
       try {
         const token = localStorage.getItem('heya_token')
-        const headers = { Authorization: `Bearer ${token}` }
+        const headers = withClientSurfaceHeaders('/api/me/settings', { Authorization: `Bearer ${token}` })
         const settings = await $fetch<Record<string, unknown>>('/api/me/settings', { headers })
         settings.appearance = {
           theme: prefs.value.theme,

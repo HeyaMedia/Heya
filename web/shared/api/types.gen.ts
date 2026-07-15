@@ -1004,6 +1004,20 @@ export type CreateApiTokenRequest = {
     name: string;
 };
 
+export type CreateNativePlaybackGrantRequest = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    audio_track?: number;
+    file_id: string;
+    /**
+     * direct or hls; defaults to direct
+     */
+    mode?: string;
+    quality?: string;
+};
+
 export type CreateUserListRequest = {
     /**
      * A URL to the JSON Schema for this object.
@@ -3447,6 +3461,17 @@ export type MusicTrackDetail = {
     recording_mbid: string;
     title: string;
     track_number: number;
+};
+
+export type NativePlaybackGrantBody = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    expires_at_unix_millis: number;
+    header_name: string;
+    media_path: string;
+    playback_grant: string;
 };
 
 export type Numeric = {
@@ -6254,6 +6279,16 @@ export type CreateApiTokenRequestWritable = {
     name: string;
 };
 
+export type CreateNativePlaybackGrantRequestWritable = {
+    audio_track?: number;
+    file_id: string;
+    /**
+     * direct or hls; defaults to direct
+     */
+    mode?: string;
+    quality?: string;
+};
+
 export type CreateUserListRequestWritable = {
     description: string;
     /**
@@ -6866,6 +6901,13 @@ export type MusicTrackDetailWritable = {
     recording_mbid: string;
     title: string;
     track_number: number;
+};
+
+export type NativePlaybackGrantBodyWritable = {
+    expires_at_unix_millis: number;
+    header_name: string;
+    media_path: string;
+    playback_grant: string;
 };
 
 export type OkBodyWritable = {
@@ -16918,6 +16960,183 @@ export type PersonImageResponses = {
 };
 
 export type PersonImageResponse = PersonImageResponses[keyof PersonImageResponses];
+
+export type CreateNativePlaybackGrantData = {
+    body: CreateNativePlaybackGrantRequestWritable;
+    path?: never;
+    query?: never;
+    url: '/api/playback/native/grants';
+};
+
+export type CreateNativePlaybackGrantErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type CreateNativePlaybackGrantError = CreateNativePlaybackGrantErrors[keyof CreateNativePlaybackGrantErrors];
+
+export type CreateNativePlaybackGrantResponses = {
+    /**
+     * OK
+     */
+    200: NativePlaybackGrantBody;
+};
+
+export type CreateNativePlaybackGrantResponse = CreateNativePlaybackGrantResponses[keyof CreateNativePlaybackGrantResponses];
+
+export type NativePlaybackStreamVideoData = {
+    body?: never;
+    headers?: {
+        'X-Heya-Playback-Grant'?: string;
+    };
+    path: {
+        file_id: string;
+    };
+    query?: never;
+    url: '/api/playback/native/media/{file_id}';
+};
+
+export type NativePlaybackStreamVideoErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type NativePlaybackStreamVideoError = NativePlaybackStreamVideoErrors[keyof NativePlaybackStreamVideoErrors];
+
+export type NativePlaybackStreamVideoResponses = {
+    /**
+     * Binary response — content type set per endpoint
+     */
+    200: Blob | File;
+};
+
+export type NativePlaybackStreamVideoResponse = NativePlaybackStreamVideoResponses[keyof NativePlaybackStreamVideoResponses];
+
+export type NativePlaybackStreamHlsIndexData = {
+    body?: never;
+    headers?: {
+        'X-Heya-Playback-Grant'?: string;
+    };
+    path: {
+        file_id: string;
+    };
+    query?: never;
+    url: '/api/playback/native/media/{file_id}/hls/index.m3u8';
+};
+
+export type NativePlaybackStreamHlsIndexErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type NativePlaybackStreamHlsIndexError = NativePlaybackStreamHlsIndexErrors[keyof NativePlaybackStreamHlsIndexErrors];
+
+export type NativePlaybackStreamHlsIndexResponses = {
+    /**
+     * Binary response — content type set per endpoint
+     */
+    200: Blob | File;
+};
+
+export type NativePlaybackStreamHlsIndexResponse = NativePlaybackStreamHlsIndexResponses[keyof NativePlaybackStreamHlsIndexResponses];
+
+export type NativePlaybackStreamHlsMasterData = {
+    body?: never;
+    headers?: {
+        'X-Heya-Playback-Grant'?: string;
+    };
+    path: {
+        file_id: string;
+    };
+    query?: never;
+    url: '/api/playback/native/media/{file_id}/hls/master.m3u8';
+};
+
+export type NativePlaybackStreamHlsMasterErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type NativePlaybackStreamHlsMasterError = NativePlaybackStreamHlsMasterErrors[keyof NativePlaybackStreamHlsMasterErrors];
+
+export type NativePlaybackStreamHlsMasterResponses = {
+    /**
+     * Binary response — content type set per endpoint
+     */
+    200: Blob | File;
+};
+
+export type NativePlaybackStreamHlsMasterResponse = NativePlaybackStreamHlsMasterResponses[keyof NativePlaybackStreamHlsMasterResponses];
+
+export type NativePlaybackStreamHlsSegmentData = {
+    body?: never;
+    headers?: {
+        'X-Heya-Playback-Grant'?: string;
+    };
+    path: {
+        file_id: string;
+        segment: string;
+    };
+    query?: never;
+    url: '/api/playback/native/media/{file_id}/hls/{segment}';
+};
+
+export type NativePlaybackStreamHlsSegmentErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type NativePlaybackStreamHlsSegmentError = NativePlaybackStreamHlsSegmentErrors[keyof NativePlaybackStreamHlsSegmentErrors];
+
+export type NativePlaybackStreamHlsSegmentResponses = {
+    /**
+     * Binary response — content type set per endpoint
+     */
+    200: Blob | File;
+};
+
+export type NativePlaybackStreamHlsSegmentResponse = NativePlaybackStreamHlsSegmentResponses[keyof NativePlaybackStreamHlsSegmentResponses];
+
+export type NativePlaybackStreamSubtitleData = {
+    body?: never;
+    headers?: {
+        'X-Heya-Playback-Grant'?: string;
+    };
+    path: {
+        file_id: string;
+        index: number;
+    };
+    query?: never;
+    url: '/api/playback/native/media/{file_id}/subtitles/{index}';
+};
+
+export type NativePlaybackStreamSubtitleErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type NativePlaybackStreamSubtitleError = NativePlaybackStreamSubtitleErrors[keyof NativePlaybackStreamSubtitleErrors];
+
+export type NativePlaybackStreamSubtitleResponses = {
+    /**
+     * Binary response — content type set per endpoint
+     */
+    200: Blob | File;
+};
+
+export type NativePlaybackStreamSubtitleResponse = NativePlaybackStreamSubtitleResponses[keyof NativePlaybackStreamSubtitleResponses];
 
 export type PodcastsCategoriesData = {
     body?: never;

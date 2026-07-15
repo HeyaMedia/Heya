@@ -81,7 +81,7 @@ async function sampleBytes(url: string): Promise<ImageTone | null> {
 
 async function sampleBytesOnce(url: string, cache: RequestCache): Promise<ImageTone | null> {
   try {
-    const res = await fetch(url, { cache })
+    const res = await fetch(url, { cache, headers: withClientSurfaceHeaders(url) })
     if (!res.ok) return null
     const bitmap = await createImageBitmap(await res.blob())
     try {

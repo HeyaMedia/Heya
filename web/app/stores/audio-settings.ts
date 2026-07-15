@@ -212,7 +212,9 @@ export const useAudioSettingsStore = defineStore('audio-settings', () => {
     }
   }
   function registerEngineBridge(fn: () => void) {
-    if (applyToEngineFn) return
+    // The active playback backend owns this single bridge. Switching between
+    // browser WebAudio and HeyaClient's native Rust engine replaces it so
+    // settings never update an inactive renderer.
     applyToEngineFn = fn
     fn()
   }

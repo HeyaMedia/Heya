@@ -157,8 +157,9 @@ export const useCastStore = defineStore('cast', () => {
     const request = ++videoInfoRequest
     videoStreamInfoLoading.value = true
     try {
-      const info = await $fetch<StreamInfoResponse>(`/api/stream/${encodeURIComponent(fileID)}/info`, {
-        headers: token.value ? { Authorization: `Bearer ${token.value}` } : {},
+      const url = `/api/stream/${encodeURIComponent(fileID)}/info`
+      const info = await $fetch<StreamInfoResponse>(url, {
+        headers: withClientSurfaceHeaders(url, token.value ? { Authorization: `Bearer ${token.value}` } : undefined),
       })
       if (request !== videoInfoRequest) return null
       videoStreamInfo.value = info

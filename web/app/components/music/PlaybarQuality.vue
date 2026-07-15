@@ -65,10 +65,17 @@
         <div class="pbq-sec">
           <div class="pbq-sec-label">Engine</div>
           <div class="pbq-rows">
-            <div class="pbq-row"><span>Output</span><span class="pbq-v">{{ outRate ? fmtHz(outRate) : '—' }}</span></div>
-            <div class="pbq-row"><span>EQ</span><span class="pbq-v">{{ eq.enabled ? `on (${eq.presetName || 'custom'})` : 'off' }}</span></div>
-            <div class="pbq-row"><span>Crossfade</span><span class="pbq-v">{{ crossfadeLabel }}</span></div>
-            <div class="pbq-row"><span>Crossfeed</span><span class="pbq-v">{{ crossfeed.enabled ? crossfeed.preset : 'off' }}</span></div>
+            <div class="pbq-row"><span>Backend</span><span class="pbq-v">{{ backendLabel }}</span></div>
+            <div v-if="nativeState" class="pbq-row"><span>Mode</span><span class="pbq-v" :class="{ gold: nativeState.bitPerfectActive }">{{ nativePathLabel }}</span></div>
+            <div v-if="nativeState" class="pbq-row"><span>Source</span><span class="pbq-v">{{ nativeSourceLabel }}</span></div>
+            <div class="pbq-row"><span>Output</span><span class="pbq-v">{{ outputLabel }}</span></div>
+            <div v-if="nativeState" class="pbq-row"><span>Resampler</span><span class="pbq-v">{{ nativeState.resamplerActive ? 'active' : 'bypassed' }}</span></div>
+            <div v-if="nativeState" class="pbq-row"><span>DSP path</span><span class="pbq-v">{{ nativeDspLabel }}</span></div>
+            <div class="pbq-row"><span>EQ</span><span class="pbq-v">{{ eqLabel }}</span></div>
+            <div class="pbq-row"><span>Replay gain</span><span class="pbq-v">{{ replayGainLabel }}</span></div>
+            <div class="pbq-row"><span>Crossfade</span><span class="pbq-v">{{ effectiveCrossfadeLabel }}</span></div>
+            <div class="pbq-row"><span>Crossfeed</span><span class="pbq-v">{{ effectiveCrossfeedLabel }}</span></div>
+            <div v-if="nativeState" class="pbq-row"><span>Analyzer</span><span class="pbq-v">{{ nativeAnalyzerLabel }}</span></div>
           </div>
         </div>
 
@@ -133,6 +140,52 @@ const player = usePlayerBindings()
 const settings = useAudioSettingsStore()
 const { eq, crossfade, crossfeed, replayGain: rg } = storeToRefs(settings)
 const { sampleRate: outRate } = useAudioContextState()
+const outputRate = computed(() => player.playbackBackend.value === 'native'
+  ? (player.nativeAudioState.value?.outputSampleRateHz ?? 0)
+  : outRate.value)
+const nativeState = computed(() => player.playbackBackend.value === 'native'
+  ? player.nativeAudioState.value
+  : null)
+const backendLabel = computed(() => ({
+  browser: 'WebAudio',
+  native: 'Heya Rust Audio',
+  cast: 'Remote / Cast',
+})[player.playbackBackend.value])
+const nativePathLabel = computed(() => {
+  const state = nativeState.value
+  if (!state) return 'processed'
+  if (state.bitPerfectActive) return 'bit-perfect · exclusive'
+  return state.resamplerActive ? 'processed · resampled' : 'processed · source rate'
+})
+const nativeSourceLabel = computed(() => {
+  const state = nativeState.value
+  if (!state?.sourceSampleRateHz) return '—'
+  return `${fmtHz(state.sourceSampleRateHz)} · ${chLabel(state.sourceChannels ?? 0)}`
+})
+const outputLabel = computed(() => {
+  if (!outputRate.value) return '—'
+  const channels = nativeState.value?.outputChannels
+  return channels ? `${fmtHz(outputRate.value)} · ${chLabel(channels)}` : fmtHz(outputRate.value)
+})
+const nativeDspLabel = computed(() => {
+  const state = nativeState.value
+  if (!state) return '—'
+  if (state.bitPerfectActive) return 'bypassed (bit-perfect)'
+  return state.dspActive ? 'active' : 'bypassed'
+})
+const eqLabel = computed(() => nativeState.value?.bitPerfectActive
+  ? 'bypassed'
+  : (eq.value.enabled ? `on (${eq.value.presetName || 'custom'})` : 'off'))
+const replayGainLabel = computed(() => nativeState.value?.bitPerfectActive ? 'bypassed' : rg.value.mode)
+const effectiveCrossfadeLabel = computed(() => nativeState.value?.bitPerfectActive ? 'gapless (bit-perfect)' : crossfadeLabel.value)
+const effectiveCrossfeedLabel = computed(() => {
+  if (nativeState.value?.bitPerfectActive) return 'bypassed'
+  return crossfeed.value.enabled ? crossfeed.value.preset : 'off'
+})
+const nativeAnalyzerLabel = computed(() => {
+  if (nativeState.value?.bitPerfectActive) return 'off (bit-perfect)'
+  return player.nativeAudioVisualizer.value ? 'PCM + FFT active' : 'waiting for frames'
+})
 
 function toNum(v: unknown): number | null {
   if (v == null) return null

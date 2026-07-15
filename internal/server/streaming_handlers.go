@@ -353,6 +353,9 @@ func hlsBasePath(r *http.Request, fileRef string) string {
 	if strings.HasPrefix(r.URL.Path, "/api/cast/media/video/") {
 		return "/api/cast/media/video/" + fileRef + "/hls"
 	}
+	if strings.HasPrefix(r.URL.Path, "/api/playback/native/media/") {
+		return "/api/playback/native/media/" + fileRef + "/hls"
+	}
 	return "/api/stream/" + fileRef + "/hls"
 }
 

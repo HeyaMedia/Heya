@@ -14,11 +14,9 @@
 </template>
 
 <script setup lang="ts">
-import type { AnalyserBridge } from '~/engine/analysis/analyserBridge'
-
-// The graph engine (client, off-iOS) carries the analyser; the SSR stub and the
-// direct-element engine (iOS) omit it — guard at use, stars just drift then.
-const engine = useAudioEngine() as ReturnType<typeof useAudioEngine> & { analyserBridge?: AnalyserBridge }
+// Browser playback reads WebAudio; native processed playback reads the bounded
+// PCM snapshots published by HeyaClient. With neither, stars simply drift.
+const analyser = usePlaybackAnalyser()
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const pageVisibility = useDocumentVisibility()
 // Speed + reactivity are user settings (persisted in useVisualizer), read live
@@ -102,9 +100,9 @@ function draw(ctx: CanvasRenderingContext2D, W: number, H: number) {
   // bass is a cheap proxy: mean-abs of the first 64 samples.
   let rms = 0
   let bass = 0
-  const bridge = engine.analyserBridge
-  if (bridge) {
-    const pcm = bridge.getTimeDomainData()
+  if (analyser.available.value) {
+    const pcm = analyser.getTimeDomainData()
+    if (!pcm.length) return
     let sum = 0
     for (let i = 0; i < pcm.length; i++) sum += pcm[i]! * pcm[i]!
     rms = Math.sqrt(sum / pcm.length)

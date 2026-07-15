@@ -50,8 +50,9 @@ export function useTranscodeStatus(
     const id = fileId.value
     if (!id || !token.value) return
     try {
-      const res = await fetch(`/api/stream/${id}/transcode-status`, {
-        headers: { Authorization: `Bearer ${token.value}` },
+      const url = `/api/stream/${id}/transcode-status`
+      const res = await fetch(url, {
+        headers: withClientSurfaceHeaders(url, { Authorization: `Bearer ${token.value}` }),
       })
       if (!res.ok) {
         error.value = `HTTP ${res.status}`

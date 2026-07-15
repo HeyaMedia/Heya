@@ -54,10 +54,11 @@ export function useVideoPlayer(
       // /api/stream/{file_id}/info — keep raw $fetch: capsToQueryString already
       // builds the full query string and the response shape isn't pinned in the
       // OpenAPI spec yet.
-      state.streamInfo = await $fetch<StreamInfoResponse>(
-        `/api/stream/${fileId.value}/info${capsQuery ? `?${capsQuery}` : ''}`,
-        { headers: useAuth().token.value ? { Authorization: `Bearer ${useAuth().token.value}` } : {} },
-      )
+      const url = `/api/stream/${fileId.value}/info${capsQuery ? `?${capsQuery}` : ''}`
+      const token = useAuth().token.value
+      state.streamInfo = await $fetch<StreamInfoResponse>(url, {
+        headers: withClientSurfaceHeaders(url, token ? { Authorization: `Bearer ${token}` } : undefined),
+      })
     } catch {
       state.error = 'Failed to load stream info'
     }

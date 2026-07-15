@@ -22,6 +22,7 @@ import (
 	"github.com/karbowiak/heya/internal/llm"
 	"github.com/karbowiak/heya/internal/matcher"
 	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
+	"github.com/karbowiak/heya/internal/playbackgrant"
 	"github.com/karbowiak/heya/internal/podcastindex"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/radiobrowser"
@@ -62,22 +63,23 @@ type App struct {
 	// Optional embedding recommendation engine (HEYA_RECOMMENDATIONS_ML_ENABLED).
 	// recEmbedder is lazy-loaded on first use when enabled; recModelsDir holds the
 	// BGE model files the recFetcher downloads.
-	recFetcher    *sonicanalysis.ModelFetcher
-	recEmbedder   *textembed.Embedder
-	recEmbedderMu sync.Mutex
-	recModelsDir  string
-	imageResizer  *imageserve.Resizer
-	imageFetch    singleflight.Group // coalesces concurrent on-demand image fetches by cache key
-	keyframeScan  singleflight.Group // coalesces asynchronous playback-triggered keyframe analysis
-	waveformScan  singleflight.Group // coalesces playback/UI-triggered waveform generation
-	envLibraries  map[int64]EnvManagedLibrary
-	radioBrowser  *radiobrowser.Client
-	podcastIndex  *podcastindex.Client
-	sessions      *sessions.Store
-	llmLocal      *llm.LocalRuntime
-	imageRuntime  *imagegen.Runtime
-	castMgr       *cast.Manager
-	castAccessMu  sync.RWMutex
+	recFetcher     *sonicanalysis.ModelFetcher
+	recEmbedder    *textembed.Embedder
+	recEmbedderMu  sync.Mutex
+	recModelsDir   string
+	imageResizer   *imageserve.Resizer
+	imageFetch     singleflight.Group // coalesces concurrent on-demand image fetches by cache key
+	keyframeScan   singleflight.Group // coalesces asynchronous playback-triggered keyframe analysis
+	waveformScan   singleflight.Group // coalesces playback/UI-triggered waveform generation
+	envLibraries   map[int64]EnvManagedLibrary
+	radioBrowser   *radiobrowser.Client
+	podcastIndex   *podcastindex.Client
+	sessions       *sessions.Store
+	llmLocal       *llm.LocalRuntime
+	imageRuntime   *imagegen.Runtime
+	castMgr        *cast.Manager
+	playbackGrants *playbackgrant.Manager
+	castAccessMu   sync.RWMutex
 	// castAllowedUsers is the explicit non-admin allowlist loaded from
 	// system_settings. Admins are always allowed and are intentionally not
 	// required to appear here, so an edit cannot lock every admin out of the
@@ -361,6 +363,7 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 		llmLocal:         llmLocal,
 		imageRuntime:     imageRuntime,
 		castMgr:          castMgr,
+		playbackGrants:   playbackgrant.New(),
 		castAllowedUsers: make(map[int64]struct{}),
 		lifetimeCtx:      lifetimeCtx,
 		lifetimeCancel:   lifetimeCancel,

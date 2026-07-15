@@ -18,7 +18,7 @@
   <!-- Pinia Colada's query inspector is dev-only and tree-shaken from the
        production bundle. It exposes cache entries, status and fetch timing. -->
   <component :is="ColadaDevtools" v-if="ColadaDevtools" />
-  <component :is="DataMetrics" v-if="DataMetrics" />
+  <component :is="DataMetrics" v-if="DataMetrics && !route.path.startsWith('/watch/')" />
 </template>
 
 <script setup lang="ts">

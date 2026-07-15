@@ -431,7 +431,7 @@ async function loadStreamInfo() {
     const url = `/api/stream/${fileRef.value}/info${capsQuery ? `?${capsQuery}` : ''}`
     const token = useAuth().token.value
     streamInfo.value = await $fetch<StreamInfoResponse>(url, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      headers: withClientSurfaceHeaders(url, token ? { Authorization: `Bearer ${token}` } : undefined),
     })
   } catch { /* empty */ }
 }

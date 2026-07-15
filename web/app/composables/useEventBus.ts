@@ -282,10 +282,17 @@ export function useEventBus() {
     const { token } = useAuth()
     if (!token.value) return
 
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const url = `${proto}//${location.host}/api/ws?token=${token.value}&subscriptions=1`
+    const url = new URL('/api/ws', location.origin)
+    url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+    url.searchParams.set('token', token.value)
+    url.searchParams.set('subscriptions', '1')
+    // Spoofable transport metadata only; WebSocket authentication continues
+    // to rely exclusively on the bearer token above.
+    if (getClientSurface() === 'tauri') {
+      url.searchParams.set(CLIENT_SURFACE_WS_PARAM, 'tauri')
+    }
 
-    ws = new WebSocket(url)
+    ws = new WebSocket(url.toString())
 
     ws.onopen = () => {
       connected.value = true

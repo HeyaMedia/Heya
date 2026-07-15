@@ -150,7 +150,10 @@ export function usePlaylists() {
     await $fetch(`/api/me/playlists/${id}/cover`, {
       method: 'POST',
       body: form,
-      headers: token.value ? { Authorization: `Bearer ${token.value}` } : {},
+      headers: withClientSurfaceHeaders(
+        `/api/me/playlists/${id}/cover`,
+        token.value ? { Authorization: `Bearer ${token.value}` } : undefined,
+      ),
     })
     updateList(rows => rows.map(p => (p.id === id ? { ...p, has_cover: true } : p)))
     invalidatePlaylistCaches(id)

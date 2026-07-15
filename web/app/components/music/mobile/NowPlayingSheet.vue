@@ -191,7 +191,7 @@ import { trackLyricsQuery } from '~/queries/music'
 const open = defineModel<boolean>('open', { default: false })
 
 const {
-  currentTrack, playing, position, duration,
+  currentTrack, playing, position, duration, playbackBackend,
   shuffled, repeatMode, volume, muted,
   togglePlay, seek, stop, setVolume, toggleMute,
   toggleShuffle, cycleRepeat, nextTrack, prevTrack, formatTime,
@@ -307,7 +307,13 @@ const visualMode = useLocalStorage<VisualMode>('heya_np_visual_v1', 'art')
 // prior desktop session persisted, without clobbering that preference (it
 // applies again once this device is back on the graph engine).
 const engine = useAudioEngine()
-const effectiveVisualMode = computed<VisualMode>(() => engine.directMode ? 'art' : visualMode.value)
+const effectiveVisualMode = computed<VisualMode>(() => {
+  if (engine.directMode) return 'art'
+  // Butterchurn can only connect to a real WebAudio AnalyserNode. Native PCM
+  // still drives the spectrum/scope/VU/starfield modes through Heya's adapter.
+  if (playbackBackend.value === 'native' && visualMode.value === 'milkdrop') return 'bars'
+  return visualMode.value
+})
 const spectrumVariant = computed<'bars' | 'scope' | 'vu'>(() =>
   effectiveVisualMode.value === 'scope' || effectiveVisualMode.value === 'vu' ? effectiveVisualMode.value : 'bars')
 const visualModeLabel = computed(() => VISUAL_LABELS[effectiveVisualMode.value])

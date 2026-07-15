@@ -3221,6 +3221,43 @@
         ],
         "type": "object"
       },
+      "Create-native-playback-grantRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Create-native-playback-grantRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "audio_track": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "file_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "mode": {
+            "description": "direct or hls; defaults to direct",
+            "maxLength": 16,
+            "type": "string"
+          },
+          "quality": {
+            "maxLength": 32,
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_id"
+        ],
+        "type": "object"
+      },
       "Create-user-listRequest": {
         "additionalProperties": false,
         "properties": {
@@ -12422,6 +12459,40 @@
           "artist_id",
           "artist_name",
           "artist_slug"
+        ],
+        "type": "object"
+      },
+      "NativePlaybackGrantBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/NativePlaybackGrantBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "expires_at_unix_millis": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "header_name": {
+            "type": "string"
+          },
+          "media_path": {
+            "type": "string"
+          },
+          "playback_grant": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "media_path",
+          "playback_grant",
+          "expires_at_unix_millis",
+          "header_name"
         ],
         "type": "object"
       },
@@ -38726,6 +38797,308 @@
         "summary": "Person photo bytes",
         "tags": [
           "Images"
+        ]
+      }
+    },
+    "/api/playback/native/grants": {
+      "post": {
+        "operationId": "create-native-playback-grant",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Create-native-playback-grantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativePlaybackGrantBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Create a session-bound native playback grant",
+        "tags": [
+          "Streaming"
+        ]
+      }
+    },
+    "/api/playback/native/media/{file_id}": {
+      "get": {
+        "operationId": "native-playback-stream-video",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Heya-Playback-Grant",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "Binary response — content type set per endpoint"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Scoped direct video stream for a native renderer",
+        "tags": [
+          "Streaming"
+        ]
+      }
+    },
+    "/api/playback/native/media/{file_id}/hls/index.m3u8": {
+      "get": {
+        "operationId": "native-playback-stream-hls-index",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Heya-Playback-Grant",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "Binary response — content type set per endpoint"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Scoped HLS variant playlist for a native renderer",
+        "tags": [
+          "Streaming"
+        ]
+      }
+    },
+    "/api/playback/native/media/{file_id}/hls/master.m3u8": {
+      "get": {
+        "operationId": "native-playback-stream-hls-master",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Heya-Playback-Grant",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "Binary response — content type set per endpoint"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Scoped HLS master playlist for a native renderer",
+        "tags": [
+          "Streaming"
+        ]
+      }
+    },
+    "/api/playback/native/media/{file_id}/hls/{segment}": {
+      "get": {
+        "operationId": "native-playback-stream-hls-segment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "segment",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Heya-Playback-Grant",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "Binary response — content type set per endpoint"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Scoped HLS segment for a native renderer",
+        "tags": [
+          "Streaming"
+        ]
+      }
+    },
+    "/api/playback/native/media/{file_id}/subtitles/{index}": {
+      "get": {
+        "operationId": "native-playback-stream-subtitle",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Heya-Playback-Grant",
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "Binary response — content type set per endpoint"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Scoped subtitle stream for a native renderer",
+        "tags": [
+          "Streaming"
         ]
       }
     },

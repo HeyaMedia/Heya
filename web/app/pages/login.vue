@@ -12,6 +12,13 @@
       <p class="login-sub">Sign in to your media server</p>
 
       <form @submit.prevent="submit">
+        <div v-if="isTauriClient" class="server-field">
+          <div class="server-label">Server</div>
+          <div class="server-row">
+            <span class="server-origin" :title="serverOrigin">{{ serverOrigin }}</span>
+            <a class="change-server" :href="TAURI_SWITCH_SERVER_URI">Change</a>
+          </div>
+        </div>
         <div v-if="isRegister" class="field">
           <label for="login-email">Email</label>
           <input id="login-email" v-model="email" type="email" placeholder="you@example.com" autocomplete="email" required />
@@ -43,6 +50,7 @@
 definePageMeta({ layout: 'auth' })
 
 const { login, register, isAuthenticated } = useAuth()
+const { isTauriClient } = useClientSurface()
 
 const username = ref('')
 const email = ref('')
@@ -50,6 +58,7 @@ const password = ref('')
 const error = ref('')
 const loading = ref(false)
 const isRegister = ref(false)
+const serverOrigin = import.meta.client ? window.location.origin : ''
 
 async function submit() {
   error.value = ''
@@ -96,8 +105,8 @@ async function submit() {
 }
 .brand-name { font-size: 20px; font-weight: 600; }
 .login-sub { font-size: 13px; color: var(--fg-2); margin: 0 0 28px; }
-.field { margin-bottom: 16px; }
-.field label {
+.field, .server-field { margin-bottom: 16px; }
+.field label, .server-label {
   display: block;
   font-size: 11px;
   font-weight: 600;
@@ -107,6 +116,34 @@ async function submit() {
   letter-spacing: 0.08em;
   margin-bottom: 6px;
 }
+.server-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  height: 40px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 0 12px 0 14px;
+  font-size: 13px;
+}
+.server-origin {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.change-server {
+  flex: none;
+  color: var(--fg-2);
+  font-size: 12px;
+  text-decoration: none;
+}
+.change-server:hover, .change-server:focus-visible { color: var(--gold); }
 .field input {
   width: 100%;
   height: 40px;

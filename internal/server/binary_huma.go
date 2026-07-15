@@ -117,6 +117,20 @@ func registerBinaryRoutes(api huma.API, app *service.App) {
 	huma.Register(api, binaryOp(http.MethodGet, "/api/cast/media/video/{file_id}/subtitles/{index}", "cast-stream-video-subtitle", "Scoped WebVTT subtitle for a cast receiver", "Cast"),
 		wrapStreamAs[castVideoSubtitleInput](handleCastVideoSubtitle(app)))
 
+	// Native desktop playback uses one fixed header containing an opaque grant
+	// tied to the current Heya auth session and this one file subtree. These
+	// routes never accept the user's normal bearer token.
+	huma.Register(api, binaryOp(http.MethodGet, "/api/playback/native/media/{file_id}", "native-playback-stream-video", "Scoped direct video stream for a native renderer", "Streaming"),
+		wrapStreamAs[nativePlaybackStreamInput](handleNativePlaybackStream(app, handleDirectStream(app))))
+	huma.Register(api, binaryOp(http.MethodGet, "/api/playback/native/media/{file_id}/hls/master.m3u8", "native-playback-stream-hls-master", "Scoped HLS master playlist for a native renderer", "Streaming"),
+		wrapStreamAs[nativePlaybackStreamInput](handleNativePlaybackStream(app, handleHLSMaster(app))))
+	huma.Register(api, binaryOp(http.MethodGet, "/api/playback/native/media/{file_id}/hls/index.m3u8", "native-playback-stream-hls-index", "Scoped HLS variant playlist for a native renderer", "Streaming"),
+		wrapStreamAs[nativePlaybackStreamInput](handleNativePlaybackStream(app, handleHLSPlaylist(app))))
+	huma.Register(api, binaryOp(http.MethodGet, "/api/playback/native/media/{file_id}/hls/{segment}", "native-playback-stream-hls-segment", "Scoped HLS segment for a native renderer", "Streaming"),
+		wrapStreamAs[nativePlaybackSegmentInput](handleNativePlaybackStream(app, handleHLSSegment(app))))
+	huma.Register(api, binaryOp(http.MethodGet, "/api/playback/native/media/{file_id}/subtitles/{index}", "native-playback-stream-subtitle", "Scoped subtitle stream for a native renderer", "Streaming"),
+		wrapStreamAs[nativePlaybackSubtitleInput](handleNativePlaybackStream(app, handleGetSubtitleAs(app, true))))
+
 	huma.Register(api, securedBinary(http.MethodGet, "/api/music/tracks/{id}/stream", "stream-track", "Best-quality playable audio for a track", "Music"),
 		wrapStreamAs[musicTrackStreamInput](handleStreamTrack(app)))
 
@@ -282,6 +296,23 @@ type castVideoSubtitleInput struct {
 	FileID    string `path:"file_id" maxLength:"64"`
 	Index     int    `path:"index" minimum:"0"`
 	CastToken string `query:"cast_token" required:"false" maxLength:"2048"`
+}
+
+type nativePlaybackStreamInput struct {
+	FileID        string `path:"file_id" maxLength:"64"`
+	PlaybackGrant string `header:"X-Heya-Playback-Grant" required:"false" maxLength:"64"`
+}
+
+type nativePlaybackSegmentInput struct {
+	FileID        string `path:"file_id" maxLength:"64"`
+	Segment       string `path:"segment" maxLength:"128"`
+	PlaybackGrant string `header:"X-Heya-Playback-Grant" required:"false" maxLength:"64"`
+}
+
+type nativePlaybackSubtitleInput struct {
+	FileID        string `path:"file_id" maxLength:"64"`
+	Index         int    `path:"index" minimum:"0"`
+	PlaybackGrant string `header:"X-Heya-Playback-Grant" required:"false" maxLength:"64"`
 }
 
 type musicTrackFileInput struct {

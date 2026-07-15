@@ -22,6 +22,7 @@ import type { AnalyserBridge } from '~/engine/analysis/analyserBridge'
 import { getAudioContext } from '~/engine/context'
 
 const vis = useVisualizer()
+const player = usePlayerBindings()
 // useAudioEngine() returns a union with an SSR stub that omits the analyser;
 // the real engine (client) always has it. Narrow via cast, guard at use.
 const engine = useAudioEngine() as ReturnType<typeof useAudioEngine> & { analyserBridge?: AnalyserBridge }
@@ -152,6 +153,11 @@ function render() {
 onMounted(async () => {
   const canvas = canvasRef.value
   if (!canvas) return
+
+  if (player.playbackBackend.value === 'native') {
+    error.value = 'Milkdrop requires WebAudio. Spectrum, scope, VU, and starfield support native playback.'
+    return
+  }
 
   const audioCtx = getAudioContext()
   const analyser = engine.analyserBridge?.analyserNode

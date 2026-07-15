@@ -20,7 +20,7 @@ export default defineNuxtPlugin(() => {
   if (!token.value) return
   // Fire-and-forget: a failure just means we ride the localStorage mirror.
   $fetch<{ appearance?: Record<string, unknown> }>('/api/me/settings', {
-    headers: { Authorization: `Bearer ${token.value}` },
+    headers: withClientSurfaceHeaders('/api/me/settings', { Authorization: `Bearer ${token.value}` }),
   })
     .then((s) => hydrateFromServer(s.appearance))
     .catch(() => {})

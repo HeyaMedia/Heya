@@ -14,7 +14,11 @@ export function useTrickplay(fileId: Ref<string | number>) {
 
   async function load(token: string) {
     try {
-      const text = await $fetch<string>(`/api/stream/${fileId.value}/trickplay/index.vtt?token=${token}`, { responseType: 'text' })
+      const url = `/api/stream/${fileId.value}/trickplay/index.vtt?token=${token}`
+      const text = await $fetch<string>(url, {
+        responseType: 'text',
+        headers: withClientSurfaceHeaders(url),
+      })
       entries.value = parseWebVTT(text, fileId.value, token)
       loaded.value = entries.value.length > 0
     } catch {

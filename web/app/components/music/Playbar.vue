@@ -164,9 +164,9 @@
         </button>
       </AppTooltip>
       <SleepTimer />
-      <div class="pb-volume" @wheel.prevent="onVolumeWheel">
-        <AppTooltip :label="muted ? 'Unmute' : 'Mute'">
-          <button class="btn-icon" :aria-pressed="muted" @click="toggleMute">
+      <div class="pb-volume" :class="{ 'pb-volume-fixed': bitPerfectActive }" @wheel.prevent="onVolumeWheel">
+        <AppTooltip :label="bitPerfectActive ? 'Volume is fixed in bit-perfect mode' : (muted ? 'Unmute' : 'Mute')">
+          <button class="btn-icon" :disabled="bitPerfectActive" :aria-pressed="muted" @click="toggleMute">
             <Icon :name="muted || volume === 0 ? 'volmute' : 'vol'" :size="16" />
           </button>
         </AppTooltip>
@@ -175,6 +175,7 @@
           :min="0"
           :max="100"
           :step="1"
+          :disabled="bitPerfectActive"
           aria-label="Volume"
           class="pb-volume-slider"
           @update:model-value="onVolumeChange"
@@ -263,8 +264,8 @@
              it the same way the nested sleep-timer popover did (drag/focus
              reads as an outside interaction). A styled native input sidesteps
              reka entirely. -->
-        <div class="pb-more-row pb-more-volume-row" @click.stop @wheel.prevent="onVolumeWheel">
-          <button class="btn-icon" :class="{ active: muted }" :aria-pressed="muted" @click="toggleMute">
+        <div class="pb-more-row pb-more-volume-row" :class="{ 'pb-volume-fixed': bitPerfectActive }" @click.stop @wheel.prevent="onVolumeWheel">
+          <button class="btn-icon" :disabled="bitPerfectActive" :class="{ active: muted }" :aria-pressed="muted" @click="toggleMute">
             <Icon :name="muted || volume === 0 ? 'volmute' : 'vol'" :size="16" />
           </button>
           <input
@@ -272,6 +273,7 @@
             min="0"
             max="100"
             step="1"
+            :disabled="bitPerfectActive"
             :value="muted ? 0 : volume"
             :style="{ '--pb-vol': muted ? 0 : volume }"
             aria-label="Volume"
@@ -293,12 +295,13 @@
 
 <script setup lang="ts">
 const {
-  playing, currentTrack, position, duration, volume, muted,
+  playing, currentTrack, position, duration, volume, muted, playbackBackend, nativeAudioState,
   shuffled, repeatMode, queueOpen, sideTab,
   togglePlay, seek, setVolume, toggleMute, toggleShuffle,
   cycleRepeat, nextTrack, prevTrack, stop, pause,
   toggleQueue, toggleLyrics, formatTime,
 } = usePlayerBindings()
+const bitPerfectActive = computed(() => playbackBackend.value === 'native' && nativeAudioState.value?.bitPerfectActive === true)
 
 // The cast picker lives in the topbar (<CastButton/>); the playbar only
 // needs to know whether the output is remote to hide the quality readout.
@@ -483,6 +486,7 @@ function onWaveformSeek(pct: number) {
 // player. If the user drags from 0 while muted, also unmute — same
 // behaviour as the old rail (clicking on it implicitly unmuted).
 function onVolumeChange(v: number) {
+  if (bitPerfectActive.value) return
   if (muted.value && v > 0) toggleMute()
   setVolume(v)
 }
@@ -493,6 +497,7 @@ function onVolumeChange(v: number) {
 // scroll while muted adjusts from — and restores — the remembered volume
 // rather than snapping to ±5 and losing it.
 function onVolumeWheel(e: WheelEvent) {
+  if (bitPerfectActive.value) return
   const next = Math.max(0, Math.min(100, volume.value + (e.deltaY < 0 ? 5 : -5)))
   onVolumeChange(next)
 }
@@ -724,6 +729,7 @@ onScopeDispose(() => {
 .pb-time { font-size: 10px; font-family: var(--font-mono); color: var(--fg-3); min-width: 32px; text-align: center; }
 .pb-right { display: flex; align-items: center; gap: 4px; justify-content: flex-end; }
 .pb-volume { display: flex; align-items: center; gap: 4px; }
+.pb-volume-fixed { opacity: 0.48; }
 /* Compact volume slider — 80px wide, matches the old custom rail width. */
 .pb-volume-slider { width: 80px; }
 .repeat-badge {

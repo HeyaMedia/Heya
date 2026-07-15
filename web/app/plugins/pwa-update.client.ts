@@ -86,7 +86,7 @@ async function serverVersion(): Promise<string | null> {
   try {
     const response = await fetch(`/api/health?client-check=${Date.now()}`, {
       cache: 'no-store',
-      headers: { 'cache-control': 'no-cache' },
+      headers: withClientSurfaceHeaders('/api/health', { 'cache-control': 'no-cache' }),
     })
     if (!response.ok) return null
     return ((await response.json()) as { version?: string }).version ?? null

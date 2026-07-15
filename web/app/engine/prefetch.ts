@@ -156,7 +156,7 @@ async function runSync(upcoming: PrefetchTrack[], current: PrefetchTrack | null,
       if (!prefetchAllowedByNetwork()) continue // wifi-only gate — retried on the next sync().
 
       try {
-        const res = await fetch(url)
+        const res = await fetch(url, { headers: withClientSurfaceHeaders(url) })
         if (mySeq !== syncSeq) return
         if (res.ok) {
           await cache.put(key, res)

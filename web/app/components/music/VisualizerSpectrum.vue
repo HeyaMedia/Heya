@@ -24,10 +24,7 @@ const props = withDefaults(defineProps<{
   active: true,
 })
 
-import type { AnalyserBridge } from '~/engine/analysis/analyserBridge'
-// The graph engine (client, off-iOS) always carries the analyser; the SSR
-// stub and the direct-element engine (iOS compatibility mode) both omit it.
-const engine = useAudioEngine() as ReturnType<typeof useAudioEngine> & { analyserBridge?: AnalyserBridge }
+const analyser = usePlaybackAnalyser()
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const pageVisibility = useDocumentVisibility()
 // `prefers-reduced-motion` — the global CSS reset (heya.css) doesn't reach a
@@ -138,14 +135,14 @@ function buildBands(n: number, fftSize: number, sampleRate: number) {
 // normalized. Same absolute path for the fullscreen bars and the mini meter, so
 // the mini stays level-accurate too.
 function drawBars(ctx: CanvasRenderingContext2D, w: number, h: number) {
-  const bridge = engine.analyserBridge
-  if (!bridge) return
-  const data = bridge.getFrequencyData() // Float32 dBFS, length = fftSize/2
+  const data = analyser.getFrequencyData() // Float32 dBFS
+  if (data.length < 2) return
   const bins = data.length
   const n = barCount.value
-  const node = bridge.analyserNode
-  if (!bandLo || bandN !== n || bandFft !== node.fftSize || bandSr !== node.context.sampleRate) {
-    buildBands(n, node.fftSize, node.context.sampleRate)
+  const fftSize = analyser.fftSize()
+  const sampleRate = analyser.sampleRate()
+  if (!bandLo || bandN !== n || bandFft !== fftSize || bandSr !== sampleRate) {
+    buildBands(n, fftSize, sampleRate)
   }
   if (!barSmooth || barSmooth.length !== n) barSmooth = new Float32Array(n)
   const s = barSmooth
@@ -196,9 +193,8 @@ function drawBars(ctx: CanvasRenderingContext2D, w: number, h: number) {
 }
 
 function drawScope(ctx: CanvasRenderingContext2D, w: number, h: number) {
-  const bridge = engine.analyserBridge
-  if (!bridge) return
-  const data = bridge.getTimeDomainData()
+  const data = analyser.getTimeDomainData()
+  if (data.length < 2) return
   const n = data.length
   ctx.lineWidth = Math.max(1.5, h / 240)
   ctx.strokeStyle = gold
@@ -241,9 +237,8 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
 // so we split even/odd samples for a lively pseudo-stereo read rather than a
 // true L/R measurement — it's a visual, not a calibration tool.
 function drawVU(ctx: CanvasRenderingContext2D, w: number, h: number) {
-  const bridge = engine.analyserBridge
-  if (!bridge) return
-  const data = bridge.getTimeDomainData()
+  const data = analyser.getTimeDomainData()
+  if (data.length < 2) return
   let sumL = 0, sumR = 0, n = 0
   for (let i = 0; i + 1 < data.length; i += 2) {
     sumL += data[i]! * data[i]!
@@ -320,7 +315,7 @@ function drawFrame() {
       // engine/directEngine.ts) has no AnalyserNode at all — draw the same
       // flat "present but silent" baseline as the inactive state instead of
       // leaving the canvas blank while audio is actually playing.
-      if (!props.active || !engine.analyserBridge) {
+      if (!props.active || !analyser.available.value) {
         ctx.fillStyle = dim
         ctx.fillRect(0, h - Math.max(1, h * 0.02), w, Math.max(1, h * 0.02))
       } else if (props.variant === 'scope') {
