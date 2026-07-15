@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/parser"
 )
 
 func TestTVFixtureProducesLocalPlans(t *testing.T) {
@@ -140,6 +141,29 @@ func TestRunLibrarySupportsTVReport(t *testing.T) {
 		if !strings.Contains(report, want) {
 			t.Fatalf("runner report missing %q:\n%s", want, report)
 		}
+	}
+}
+
+func TestTVYearNumberedSeasonIdentity(t *testing.T) {
+	relPath := "MythBusters (2003)/Season 2014/MythBusters (2003) - S2014E01 [WEBDL-1080p][AAC 2.0][EN][8bit][h264][EN]-NTb.mkv"
+	parsed := parser.ParseStoragePath(relPath)
+	if parsed.Release == nil {
+		t.Fatal("expected MythBusters release to parse")
+	}
+	if !parsed.Release.IsTv {
+		t.Fatalf("release should be TV: %#v", parsed.Release)
+	}
+
+	season, episodes, absolute := tvEpisodeIdentity(relPath, parsed.Release)
+	if season != 2014 || len(episodes) != 1 || episodes[0] != 1 || len(absolute) != 0 {
+		t.Fatalf("episode identity: season=%d episodes=%v absolute=%v", season, episodes, absolute)
+	}
+	if showDir := tvShowDir(relPath, nil, nil); showDir != "MythBusters (2003)" {
+		t.Fatalf("show directory = %q, want MythBusters (2003)", showDir)
+	}
+	show := parseTVShowFolder("MythBusters (2003)")
+	if show.title != "MythBusters" || show.year != "2003" {
+		t.Fatalf("show identity = %#v", show)
 	}
 }
 

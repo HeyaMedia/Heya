@@ -796,10 +796,10 @@ type tvFolderIdentity struct {
 }
 
 var (
-	seasonDirRE      = regexp.MustCompile(`(?i)^(?:Season|Series|S)[ ._-]*(\d{1,2}|specials?)$`)
-	seasonEpisodeRE  = regexp.MustCompile(`(?i)S(\d{1,2})E\d{1,3}(?:(?:E|-)\d{1,3})*`)
+	seasonDirRE      = regexp.MustCompile(`(?i)^(?:Season|Series|S)[ ._-]*(\d{1,4}|specials?)$`)
+	seasonEpisodeRE  = regexp.MustCompile(`(?i)S(\d{1,4})E\d{1,3}(?:(?:E|-)\d{1,3})*`)
 	tvShowFolderRE   = regexp.MustCompile(`^(.+?)\s*\((\d{4})\)(?:\s*\{.*\})?$`)
-	tvReleaseTokenRE = regexp.MustCompile(`(?i)\bS\d{1,2}E\d{1,3}\b`)
+	tvReleaseTokenRE = regexp.MustCompile(`(?i)\bS\d{1,4}E\d{1,3}\b`)
 )
 
 func tvShowDir(relPath string, nfos map[string]tvNFOEntry, plexmatches map[string]tvPlexmatchEntry) string {

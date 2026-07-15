@@ -309,5 +309,27 @@
         ]
       }
     }
+  },
+  {
+    "label": "parses an explicitly year-numbered TVDB season",
+    "kind": "storage-path",
+    "input": "MythBusters (2003)/Season 2014/MythBusters (2003) - S2014E01 [WEBDL-1080p][AAC 2.0][EN][8bit][h264][EN]-NTb.mkv",
+    "expected": {
+      "media": "video",
+      "entryType": "file",
+      "extension": ".mkv",
+      "release": {
+        "exists": true,
+        "media": "video",
+        "title": "MythBusters",
+        "year": "2003",
+        "seasons": [
+          2014
+        ],
+        "episodes": [
+          1
+        ]
+      }
+    }
   }
 ]

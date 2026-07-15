@@ -89,8 +89,8 @@ var skippedSegmentPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)^disc \d+$`),
 }
 
-var videoMarkerRE = regexp.MustCompile(`(?i)\b(?:S\d{1,2}E\d{1,3}|E\d{2,3}|(?:19|20)\d{2}|\d{3,4}p|WEB[-.]?DL|WEBRIP|BLURAY|BDRIP|HDRIP|DVDRIP|UHD|AMZN|DSNP|NF|H[ .]?26[45]|X26[45])\b`)
-var tvMarkerRE = regexp.MustCompile(`(?i)\b(?:S\d{1,2}(?:E\d{1,3})?|E\d{2,3}|\d{1,2}x\d{1,3}|Season[ ._\-]?\d+)\b`)
+var videoMarkerRE = regexp.MustCompile(`(?i)\b(?:S\d{1,4}E\d{1,3}|E\d{2,3}|(?:19|20)\d{2}|\d{3,4}p|WEB[-.]?DL|WEBRIP|BLURAY|BDRIP|HDRIP|DVDRIP|UHD|AMZN|DSNP|NF|H[ .]?26[45]|X26[45])\b`)
+var tvMarkerRE = regexp.MustCompile(`(?i)\b(?:S(?:\d{1,4}E\d{1,3}|\d{1,2})|E\d{2,3}|\d{1,4}x\d{1,3}|Season[ ._\-]?\d+)\b`)
 var counterMatchRE = regexp.MustCompile(`(?:\w)\.(\d{1,2})$`)
 
 func PrepareSegment(segment string) PreparedSegment {
@@ -118,8 +118,8 @@ func PrepareSegment(segment string) PreparedSegment {
 	if idx := strings.Index(cleanedName, "  "); idx > 0 {
 		left := cleanedName[:idx]
 		right := strings.TrimSpace(cleanedName[idx:])
-		hasSeasonRight := regexp.MustCompile(`(?i)S\d{1,2}E\d{1,3}`).MatchString(right)
-		hasSeasonLeft := regexp.MustCompile(`(?i)S\d{1,2}E\d{1,3}`).MatchString(left)
+		hasSeasonRight := regexp.MustCompile(`(?i)S\d{1,4}E\d{1,3}`).MatchString(right)
+		hasSeasonLeft := regexp.MustCompile(`(?i)S\d{1,4}E\d{1,3}`).MatchString(left)
 		if hasSeasonRight && !hasSeasonLeft {
 			cleanedName = right
 		}
