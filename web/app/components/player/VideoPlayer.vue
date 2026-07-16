@@ -249,6 +249,8 @@ const controlsPinned = computed(() => state.paused || state.buffering || control
 // Single source of truth for "is the control bar showing" — drives both the
 // .ctrl visible class and the VTT overlay's nudge-up so subs clear the bar.
 const ctrlShown = computed(() => controlsVisible.value || controlsPinned.value)
+const nativeWindowChrome = useNativeWindowChrome()
+let stopWindowChromeReveal: (() => void) | null = null
 const resumeCardRef = ref<HTMLElement>()
 let assRenderer: AkariSub | null = null
 // VTT path state — non-ASS tracks are served as WebVTT by the backend and
@@ -1489,6 +1491,11 @@ watch(controlsPinned, (pinned) => {
   if (pinned) { controlsVisible.value = true; clearHideTimer() }
   else showCtrl()
 })
+watch(ctrlShown, visible => nativeWindowChrome.updateVideoControls(visible))
+onMounted(() => {
+  nativeWindowChrome.enterVideo(ctrlShown.value)
+  stopWindowChromeReveal = nativeWindowChrome.onRevealVideoControls(showCtrl)
+})
 onMounted(init)
 let castClockTimer: ReturnType<typeof setInterval> | null = null
 onMounted(() => {
@@ -1500,6 +1507,9 @@ onMounted(() => {
   void cast.refreshDevices()
 })
 onUnmounted(() => {
+  stopWindowChromeReveal?.()
+  stopWindowChromeReveal = null
+  nativeWindowChrome.leaveVideo()
   if (!preserveRemoteSessionOnUnmount && videoCastSession.value && !videoCastStopping.value) void stopVideoCast(false)
   if (castClockTimer) clearInterval(castClockTimer)
   destroySubtitles()

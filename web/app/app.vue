@@ -1,5 +1,6 @@
 <template>
   <NuxtLoadingIndicator color="var(--gold)" :height="3" :throttle="120" />
+  <NativeWindowChrome />
   <NuxtLayout>
     <NuxtPage v-if="ready" />
   </NuxtLayout>
