@@ -5,11 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -181,9 +181,15 @@ func EnsureTrackBoundaries(ctx context.Context, db *pgxpool.Pool, trackFileID in
 
 // ScanAlbumLoudnessWorker runs ebur128 over the *concatenation* of every
 // track in an album. Averaging per-track LUFS is mathematically wrong (LUFS
-// is logarithmic), so we lean on ffmpeg's concat demuxer to virtually stitch
-// the files end-to-end and measure the union — same approach as loudgain /
-// r128gain.
+// is logarithmic), so we stitch the files end-to-end with ffmpeg's concat
+// *filter* and measure the union — same numbers as loudgain / r128gain.
+//
+// The concat filter (not the concat demuxer) is load-bearing: the demuxer
+// requires every file to share codec/parameters, which a mixed FLAC+MP3
+// compilation violates (exit 69 mid-stream). The filter decodes each input
+// independently; per-input aresample+aformat normalize rate and layout so
+// heterogeneous albums concatenate cleanly. Forcing stereo also matches the
+// ReplayGain 2.0 convention of measuring mono as dual-mono.
 type ScanAlbumLoudnessWorker struct {
 	river.WorkerDefaults[ScanAlbumLoudnessArgs]
 	DB       *pgxpool.Pool
@@ -221,25 +227,9 @@ func (w *ScanAlbumLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanA
 		}
 	}
 
-	// Write a temporary concat manifest. ffmpeg's "concat" demuxer reads
-	// lines like `file '/abs/path/to/track.flac'`. Single-quoting handles
-	// spaces; we escape any single quote inside the path the ffmpeg way
-	// (close, escape, reopen).
-	dir, err := os.MkdirTemp("", "heya-loudness-*")
-	if err != nil {
-		return fmt.Errorf("temp dir: %w", err)
-	}
-	defer func() { _ = os.RemoveAll(dir) }()
-
-	manifestPath := filepath.Join(dir, "concat.txt")
-	var manifest bytes.Buffer
-	for _, r := range rows {
-		manifest.WriteString("file '")
-		manifest.WriteString(ffmpegConcatEscape(r.Path))
-		manifest.WriteString("'\n")
-	}
-	if err := os.WriteFile(manifestPath, manifest.Bytes(), 0o600); err != nil {
-		return fmt.Errorf("write manifest: %w", err)
+	paths := make([]string, len(rows))
+	for i, r := range rows {
+		paths[i] = r.Path
 	}
 
 	// Album measurement can take meaningfully longer than per-track —
@@ -247,15 +237,8 @@ func (w *ScanAlbumLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanA
 	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(probeCtx, //nolint:gosec // manifestPath is a tempdir we just created, ffmpeg binary is fixed
-		"ffmpeg",
-		"-nostdin", "-nostats", "-hide_banner",
-		"-f", "concat", "-safe", "0",
-		"-i", manifestPath,
-		"-vn", "-sn", "-dn", "-map", "0:a:0",
-		"-af", "ebur128=peak=true",
-		"-f", "null", "-",
-	)
+	cmd := exec.CommandContext(probeCtx, //nolint:gosec // paths come from library_files we control, ffmpeg binary is fixed
+		"ffmpeg", albumEBUR128Args(paths)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -401,18 +384,24 @@ func pgInt4(v int) pgtype.Int4 {
 	return pgtype.Int4{Int32: int32(v), Valid: true}
 }
 
-// ffmpegConcatEscape escapes a path for use inside single-quoted concat
-// manifest entries. Single quotes inside the path become `'\”`.
-func ffmpegConcatEscape(path string) string {
-	out := make([]byte, 0, len(path))
-	for _, r := range path {
-		if r == '\'' {
-			out = append(out, []byte(`'\''`)...)
-			continue
-		}
-		out = append(out, byte(r))
+// albumEBUR128Args builds the full ffmpeg argv for a whole-album loudness
+// measurement: one -i per file, each normalized to 48kHz float stereo, then
+// concat filter → ebur128. Paths ride in argv, so no quoting/escaping layer
+// exists to corrupt them (the previous concat-demuxer manifest mangled
+// non-ASCII paths and choked on mixed-codec albums).
+func albumEBUR128Args(paths []string) []string {
+	args := make([]string, 0, 3*len(paths)+8)
+	args = append(args, "-nostdin", "-nostats", "-hide_banner")
+	var fc strings.Builder
+	for i, p := range paths {
+		args = append(args, "-i", p)
+		fmt.Fprintf(&fc, "[%d:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a%d];", i, i)
 	}
-	return string(out)
+	for i := range paths {
+		fmt.Fprintf(&fc, "[a%d]", i)
+	}
+	fmt.Fprintf(&fc, "concat=n=%d:v=0:a=1,ebur128=peak=true", len(paths))
+	return append(args, "-filter_complex", fc.String(), "-f", "null", "-")
 }
 
 func truncate(s string, n int) string {
