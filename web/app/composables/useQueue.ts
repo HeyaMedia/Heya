@@ -245,9 +245,10 @@ export const useQueueStore = defineStore('playQueue', () => {
 
   // Fire-and-forget renderer heartbeat. A 409 means another output took
   // over while we were playing — the caller's WS mirror handles the stop.
-  function heartbeat(posSeconds: number, isPlaying: boolean) {
+  function heartbeat(posSeconds: number, isPlaying: boolean, keepalive = false) {
     void queueAPI('/api/me/queue/heartbeat', {
       method: 'POST',
+      keepalive,
       body: { output: outputID, position_seconds: Math.max(0, posSeconds), playing: isPlaying },
     }).catch(() => { /* not the active output (or offline) — mirror handles it */ })
   }

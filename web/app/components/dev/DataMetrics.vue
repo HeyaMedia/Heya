@@ -1,5 +1,8 @@
 <template>
-  <details class="dm-panel" :class="{ 'dm-panel-music': onMusicRoute }">
+  <details
+    class="dm-panel"
+    :style="{ bottom: playbarVisible ? 'calc(var(--playbar-h, 88px) + 14px)' : '14px' }"
+  >
     <summary>Data · {{ metrics.cacheEntries }} cached</summary>
     <div class="dm-grid">
       <span>Last navigation</span><b>{{ metrics.lastNavigationMs }} ms</b>
@@ -21,7 +24,13 @@ import { useQueryCache } from '@pinia/colada'
 const metrics = useDataMetricsStore()
 const queryCache = useQueryCache()
 const route = useRoute()
-const onMusicRoute = computed(() => route.path === '/music' || route.path.startsWith('/music/'))
+const { isPhone } = useViewport()
+const { currentTrack } = usePlayerBindings()
+
+// Mirror DesktopPlayerHost's visibility condition. Keeping this in Vue avoids
+// relying on WebKit's :has() handling for positioning a global dev overlay.
+const isMusic = computed(() => route.path === '/music' || route.path.startsWith('/music/'))
+const playbarVisible = computed(() => !isPhone.value && (!!currentTrack.value || isMusic.value))
 
 function sampleCache() {
   const entries = queryCache.getEntries()
@@ -55,7 +64,6 @@ function formatBytes(bytes: number) {
   backdrop-filter: blur(14px);
   transition: bottom 180ms ease;
 }
-.dm-panel-music { bottom: calc(var(--playbar-h) + 14px); }
 .dm-panel summary { cursor: pointer; color: var(--gold, #d6b56d); user-select: none; }
 .dm-grid { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; margin-top: 9px; }
 .dm-grid span { color: #999; }

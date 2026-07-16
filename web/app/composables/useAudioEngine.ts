@@ -90,7 +90,7 @@ function createEngine() {
   // but long enough to ramp cleanly through the discontinuity.
   const SWITCH_FADE_SECONDS = 0.06
 
-  async function play(url: string) {
+  async function play(url: string, startPositionSeconds = 0) {
     alog('engine', 'play (cold load on active deck)', shortUrl(url))
     await resumeContext()
     // Jellyfin-style: fade the currently-playing track to silence before the
@@ -98,7 +98,7 @@ function createEngine() {
     if (isPlaying.value && !deckManager.active.paused) {
       await deckManager.active.fadeOut(SWITCH_FADE_SECONDS)
     }
-    await deckManager.loadAndPlay(url)
+    await deckManager.loadAndPlay(url, startPositionSeconds)
     deckManager.active.fadeIn(volume.value, SWITCH_FADE_SECONDS)
     isPlaying.value = true
     scheduler.reset()
@@ -192,7 +192,7 @@ type EngineStub = {
   currentTime: Ref<number>
   duration: Ref<number>
   volume: Ref<number>
-  play: (url: string) => Promise<void>
+  play: (url: string, startPositionSeconds?: number) => Promise<void>
   pause: () => void
   stop: () => void
   resume: () => Promise<void>

@@ -73,6 +73,18 @@ export interface NativeAudioCapabilities {
   unavailableReason?: NativePlaybackErrorCode
 }
 
+export interface NativeAudioOutputDevice {
+  deviceId: string
+  label: string
+  isDefault: boolean
+}
+
+export interface NativeAudioOutputDevices {
+  devices: NativeAudioOutputDevice[]
+  activeDeviceId: string | null
+  followsSystemDefault: boolean
+}
+
 export interface NativeAudioState {
   playing: boolean
   paused: boolean
@@ -92,6 +104,8 @@ export interface NativeAudioState {
   sourceChannels: number | null
   outputSampleRateHz: number | null
   outputChannels: number | null
+  outputDeviceId: string | null
+  outputDeviceName: string | null
   resamplerActive: boolean
   dspActive: boolean
   error?: { code: NativePlaybackErrorCode, message: string }
@@ -139,6 +153,8 @@ export interface HeyaNativeAudioBridge {
   readonly protocolVersion: 1
   getAudioCapabilities(): Promise<NativeAudioCapabilities>
   setAudioOutputMode(mode: NativeAudioOutputMode): Promise<NativeAudioCapabilities>
+  getAudioOutputDevices(): Promise<NativeAudioOutputDevices>
+  setAudioOutputDevice(deviceId: string | null): Promise<NativeAudioOutputDevices>
   loadAudio(request: NativeAudioLoadRequest): Promise<{
     rendererSessionId: string
     activeMode: NativeAudioOutputMode

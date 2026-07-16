@@ -40,8 +40,9 @@ export class DeckManager {
 
   getActiveOutput(): AudioNode { return this.activeDeck.getOutputNode() }
 
-  async loadAndPlay(url: string): Promise<void> {
+  async loadAndPlay(url: string, startPositionSeconds = 0): Promise<void> {
     await this.activeDeck.load(url)
+    if (startPositionSeconds > 0) this.activeDeck.seek(startPositionSeconds)
     await this.activeDeck.play()
   }
 

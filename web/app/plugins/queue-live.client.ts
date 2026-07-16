@@ -111,4 +111,15 @@ export default defineNuxtPlugin((nuxtApp) => {
       if (!player.localMode && qs.isActiveOutput) qs.heartbeat(player.position, false)
     }
   })
+
+  // A regular heartbeat is deliberately coarse. Flush the precise local
+  // position while a tab is closing or reloading so the next page can resume
+  // from where the listener actually stopped rather than the previous 15s
+  // checkpoint. `keepalive` lets the authenticated request finish after the
+  // document begins unloading.
+  window.addEventListener('pagehide', () => {
+    if (!player.localMode && qs.isActiveOutput && player.currentTrack) {
+      qs.heartbeat(player.position, player.playing, true)
+    }
+  })
 })

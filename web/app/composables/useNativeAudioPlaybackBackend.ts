@@ -3,6 +3,7 @@ import type {
   NativeAudioCapabilities,
   NativeAudioCommand,
   NativeAudioLoadRequest,
+  NativeAudioOutputDevice,
   NativeAudioProcessingSettings,
   NativeAudioState,
   NativeAudioStateEvent,
@@ -36,6 +37,8 @@ function initialState(): NativeAudioState {
     sourceChannels: null,
     outputSampleRateHz: null,
     outputChannels: null,
+    outputDeviceId: null,
+    outputDeviceName: null,
     resamplerActive: false,
     dspActive: false,
   }
@@ -52,8 +55,13 @@ export interface NativeAudioPlaybackBackend {
   readonly state: NativeAudioState
   readonly visualizer: Readonly<Ref<NativeAudioVisualizerEvent | null>>
   readonly rendererSessionId: Readonly<Ref<string | null>>
+  readonly outputDevices: Readonly<Ref<readonly NativeAudioOutputDevice[]>>
+  readonly activeOutputDeviceId: Readonly<Ref<string | null>>
+  readonly followsSystemDefault: Readonly<Ref<boolean>>
   load(request: NativeAudioLoadRequest): Promise<void>
   setOutputMode(mode: 'processed' | 'bit_perfect'): Promise<void>
+  refreshOutputDevices(): Promise<void>
+  setOutputDevice(deviceId: string | null): Promise<void>
   preload(track: NativeAudioTrackRequest): Promise<void>
   play(): Promise<void>
   pause(): Promise<void>
@@ -72,6 +80,9 @@ export function useNativeAudioPlaybackBackend(
   const state = reactive<NativeAudioState>(initialState())
   const visualizer = shallowRef<NativeAudioVisualizerEvent | null>(null)
   const rendererSessionId = ref<string | null>(null)
+  const outputDevices = ref<NativeAudioOutputDevice[]>([])
+  const activeOutputDeviceId = ref<string | null>(null)
+  const followsSystemDefault = ref(true)
   const pendingStates = new Map<string, NativeAudioStateEvent>()
   let stateRevision = 0
   let visualizerRevision = 0
@@ -103,7 +114,7 @@ export function useNativeAudioPlaybackBackend(
 
   async function send(command: CommandPayload) {
     const sessionId = rendererSessionId.value
-    if (!sessionId) return
+    if (!sessionId) throw new Error('Native audio has no active renderer session')
     const result = await bridge.sendAudioCommand({
       ...command,
       rendererSessionId: sessionId,
@@ -117,6 +128,9 @@ export function useNativeAudioPlaybackBackend(
     state,
     visualizer: readonly(visualizer),
     rendererSessionId: readonly(rendererSessionId),
+    outputDevices: readonly(outputDevices),
+    activeOutputDeviceId: readonly(activeOutputDeviceId),
+    followsSystemDefault: readonly(followsSystemDefault),
     async load(request) {
       const generation = ++loadGeneration
       rendererSessionId.value = null
@@ -137,6 +151,18 @@ export function useNativeAudioPlaybackBackend(
     async setOutputMode(mode) {
       const updated = await bridge.setAudioOutputMode(mode)
       Object.assign(capabilities, updated)
+    },
+    async refreshOutputDevices() {
+      const snapshot = await bridge.getAudioOutputDevices()
+      outputDevices.value = snapshot.devices
+      activeOutputDeviceId.value = snapshot.activeDeviceId
+      followsSystemDefault.value = snapshot.followsSystemDefault
+    },
+    async setOutputDevice(deviceId) {
+      const snapshot = await bridge.setAudioOutputDevice(deviceId)
+      outputDevices.value = snapshot.devices
+      activeOutputDeviceId.value = snapshot.activeDeviceId
+      followsSystemDefault.value = snapshot.followsSystemDefault
     },
     async preload(track) {
       const sessionId = rendererSessionId.value

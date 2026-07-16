@@ -136,7 +136,7 @@ export function createDirectEngine() {
   }
   wireActiveEvents()
 
-  async function play(url: string) {
+  async function play(url: string, startPositionSeconds = 0) {
     alog('engine', 'play (direct, cold load on active element)', shortUrl(url))
     const audio = active.audio
     if (!audio.paused) audio.pause()
@@ -145,6 +145,9 @@ export function createDirectEngine() {
     audio.load()
     applyActiveVolume()
     await waitCanPlayThrough(audio)
+    if (startPositionSeconds > 0) {
+      audio.currentTime = Math.max(0, Math.min(startPositionSeconds, audio.duration || 0))
+    }
     await audio.play()
     isPlaying.value = true
   }

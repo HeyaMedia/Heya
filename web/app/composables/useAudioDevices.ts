@@ -2,27 +2,12 @@ import type { AudioOutputDevice } from '~~/shared/types/audio'
 import { audioSinkSupported, setAudioSinkId } from '~/engine/context'
 import type { AudioProfile } from '~/stores/audio-settings'
 
-// Per-output-device EQ profiles.
-//
-// Different transducers (open-backs, IEMs, laptop speakers, a soundbar) want
-// wildly different EQ + crossfeed. This composable enumerates the system's
-// audio outputs, routes the AudioContext to a chosen one via setSinkId, and
-// remembers a saved AudioProfile per device — re-applying it automatically
-// whenever that device becomes active (on selection or a hot-plug event).
-//
-// Design choices vs. hibiki's port:
-//  - Profiles are OPT-IN. Switching to a device with no saved profile leaves
-//    the current EQ untouched (hibiki reset to flat, which surprises). A device
-//    only steers the EQ once you've explicitly "Saved to this device".
-//  - Labels stay hidden until requested. We do NOT call getUserMedia on init
-//    (that pops a mic-permission prompt). `revealLabels()` unlocks names on
-//    demand when the user opts in from the Output tab.
+// Per-output-device EQ profiles. Native playback uses CPAL's stable device
+// identifiers; browser playback uses MediaDeviceInfo.deviceId. Profiles are
+// deliberately kept in Heya because they describe the user's EQ preferences,
+// while HeyaClient owns the selected physical output and native stream.
 
 const STORAGE_KEY = 'heya_device_profiles_v1'
-
-// The default output reports a deviceId of 'default' (or '') that maps to
-// different hardware over time, so it's a poor profile key. Fall back to the
-// label, then this sentinel, so "default" profiles at least follow the name.
 const DEFAULT_KEY = '__default__'
 
 type StoredProfile = AudioProfile & { label: string }
@@ -41,22 +26,20 @@ function loadProfiles(): ProfileMap {
 const availableDevices = ref<AudioOutputDevice[]>([])
 const activeDeviceId = ref<string>(DEFAULT_KEY)
 const labelsAvailable = ref(false)
+const followsSystemDefault = ref(true)
 const profiles = ref<ProfileMap>(loadProfiles())
-// Reflects AudioContext.setSinkId support (the routing capability), not mere
-// device enumeration — Safari/Firefox enumerate fine but can't route.
-const supported = ref(import.meta.client ? audioSinkSupported() : true)
+const supported = ref(import.meta.client ? audioSinkSupported() : false)
 
 let deviceChangeTimer: ReturnType<typeof setTimeout> | null = null
 let listenerBound = false
+let devicesInitialized = false
+let profileDeviceKey: string | null = null
 
 function persist() {
   if (import.meta.server) return
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles.value)) } catch {}
 }
 
-// The stable key a profile is stored under. Real devices key on deviceId; the
-// system default keys on its human label (or the sentinel) so it survives the
-// deviceId churn the "default" slot exhibits.
 function resolveKey(device: AudioOutputDevice): string {
   if (device.deviceId === 'default' || device.deviceId === '') {
     return device.label || DEFAULT_KEY
@@ -65,7 +48,7 @@ function resolveKey(device: AudioOutputDevice): string {
 }
 
 function activeDevice(): AudioOutputDevice | undefined {
-  return availableDevices.value.find((d) => d.deviceId === activeDeviceId.value)
+  return availableDevices.value.find(device => device.deviceId === activeDeviceId.value)
 }
 
 function activeKey(): string {
@@ -73,89 +56,144 @@ function activeKey(): string {
   return active ? resolveKey(active) : (activeDeviceId.value || DEFAULT_KEY)
 }
 
-async function enumerate(): Promise<AudioOutputDevice[]> {
+async function enumerateBrowserDevices(): Promise<AudioOutputDevice[]> {
   if (import.meta.server || !navigator.mediaDevices?.enumerateDevices) return []
   const all = await navigator.mediaDevices.enumerateDevices()
-  const outputs = all.filter((d) => d.kind === 'audiooutput')
-  labelsAvailable.value = outputs.some((d) => d.label.length > 0)
-  return outputs.map((d) => ({
-    deviceId: d.deviceId,
-    label: d.label || `Output ${d.deviceId.slice(0, 6) || 'default'}`,
-    isDefault: d.deviceId === 'default' || d.deviceId === '',
+  const outputs = all.filter(device => device.kind === 'audiooutput')
+  labelsAvailable.value = outputs.some(device => device.label.length > 0)
+  return outputs.map(device => ({
+    deviceId: device.deviceId,
+    label: device.label || `Output ${device.deviceId.slice(0, 6) || 'default'}`,
+    isDefault: device.deviceId === 'default' || device.deviceId === '',
   }))
 }
 
 export function useAudioDevices() {
   const settings = useAudioSettingsStore()
+  const player = usePlayerBindings()
+  const { isTauriClient } = useClientSurface()
 
-  // Apply the saved profile for a device key, if one exists. No profile → leave
-  // the current EQ/crossfeed as-is (opt-in behavior).
   function applyProfileFor(key: string) {
-    const p = profiles.value[key]
-    if (p) settings.applyAudioProfile(p)
+    if (profileDeviceKey === key) return
+    const profile = profiles.value[key]
+    if (profile) settings.applyAudioProfile(profile)
+    else settings.resetAudioProfile()
+    profileDeviceKey = key
+  }
+
+  function syncNativeSnapshot() {
+    availableDevices.value = player.nativeAudioOutputDevices.value.map(device => ({
+      deviceId: device.deviceId,
+      label: device.label,
+      isDefault: device.isDefault,
+    }))
+    activeDeviceId.value = player.nativeAudioOutputDeviceId.value
+      ?? availableDevices.value.find(device => device.isDefault)?.deviceId
+      ?? availableDevices.value[0]?.deviceId
+      ?? DEFAULT_KEY
+    followsSystemDefault.value = player.nativeAudioFollowsSystemDefault.value
+    labelsAvailable.value = true
+  }
+
+  async function refreshNative(): Promise<boolean> {
+    const ready = await player.refreshNativeAudioOutputs()
+    if (!ready) return false
+    syncNativeSnapshot()
+    return true
   }
 
   async function refresh() {
-    const prevKey = activeKey()
-    availableDevices.value = await enumerate()
-    // Keep the active id if it still exists; otherwise fall to the default.
-    if (!activeDevice()) {
-      const def = availableDevices.value.find((d) => d.isDefault) ?? availableDevices.value[0]
-      if (def) activeDeviceId.value = def.deviceId
+    const previousKey = activeKey()
+    if (isTauriClient.value) {
+      supported.value = await refreshNative()
+    } else {
+      availableDevices.value = await enumerateBrowserDevices()
+      supported.value = audioSinkSupported()
+      followsSystemDefault.value = activeDeviceId.value === DEFAULT_KEY
+      if (!activeDevice()) {
+        const fallback = availableDevices.value.find(device => device.isDefault)
+          ?? availableDevices.value[0]
+        if (fallback) activeDeviceId.value = fallback.deviceId
+      }
     }
-    const newKey = activeKey()
-    if (newKey !== prevKey) applyProfileFor(newKey)
+    const nextKey = activeKey()
+    if (nextKey !== previousKey) applyProfileFor(nextKey)
   }
 
   function onDeviceChange() {
-    // Debounce: OS hot-plug events fire in bursts (a USB DAC re-enumerates a
-    // handful of times as it settles).
     if (deviceChangeTimer) clearTimeout(deviceChangeTimer)
     deviceChangeTimer = setTimeout(() => { void refresh() }, 500)
   }
 
   async function init() {
     if (import.meta.server) return
-    availableDevices.value = await enumerate()
-    if (availableDevices.value.length > 0 && !activeDevice()) {
-      const def = availableDevices.value.find((d) => d.isDefault) ?? availableDevices.value[0]
-      if (def) activeDeviceId.value = def.deviceId
+    if (isTauriClient.value) {
+      const backend = await player.probeNativeAudio()
+      supported.value = !!backend?.capabilities.outputDeviceSelection && await refreshNative()
+    } else {
+      availableDevices.value = await enumerateBrowserDevices()
+      supported.value = audioSinkSupported()
+      if (availableDevices.value.length > 0 && !activeDevice()) {
+        const fallback = availableDevices.value.find(device => device.isDefault)
+          ?? availableDevices.value[0]
+        if (fallback) activeDeviceId.value = fallback.deviceId
+      }
+      if (!listenerBound && navigator.mediaDevices) {
+        navigator.mediaDevices.addEventListener('devicechange', onDeviceChange)
+        listenerBound = true
+      }
     }
-    applyProfileFor(activeKey())
-    if (!listenerBound && navigator.mediaDevices) {
-      navigator.mediaDevices.addEventListener('devicechange', onDeviceChange)
-      listenerBound = true
+    if (availableDevices.value.length > 0) applyProfileFor(activeKey())
+    devicesInitialized = true
+  }
+
+  async function ensureInitialized() {
+    // Following the OS default can resolve to different physical hardware
+    // between tracks, so re-resolve that lightweight snapshot before load.
+    if (!devicesInitialized || (isTauriClient.value && followsSystemDefault.value)) {
+      await init()
     }
   }
 
-  // Unlock device labels by requesting (then immediately releasing) mic access.
-  // Chromium hides audiooutput labels until the page has been granted device
-  // permission at least once.
   async function revealLabels(): Promise<boolean> {
+    if (isTauriClient.value) return true
     if (import.meta.server || !navigator.mediaDevices?.getUserMedia) return false
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       for (const track of stream.getTracks()) track.stop()
-      availableDevices.value = await enumerate()
+      availableDevices.value = await enumerateBrowserDevices()
       return labelsAvailable.value
     } catch {
       return false
     }
   }
 
-  // Route audio to a device and load its profile. Returns false when the
-  // browser rejects setSinkId (Safari/Firefox lack it) — the active id is only
-  // advanced on success so the UI reflects the real routing.
   async function selectDevice(deviceId: string): Promise<boolean> {
-    const ok = await setAudioSinkId(deviceId)
-    if (ok) {
+    const changed = isTauriClient.value
+      ? await player.setNativeAudioOutputDevice(deviceId)
+      : await setAudioSinkId(deviceId)
+    if (!changed) return false
+    if (isTauriClient.value) syncNativeSnapshot()
+    else {
       activeDeviceId.value = deviceId
-      applyProfileFor(activeKey())
+      followsSystemDefault.value = deviceId === 'default' || deviceId === ''
     }
-    return ok
+    applyProfileFor(activeKey())
+    return true
   }
 
-  // Snapshot the live EQ + crossfeed as this device's profile.
+  async function useSystemDefault(): Promise<boolean> {
+    if (!isTauriClient.value) {
+      const fallback = availableDevices.value.find(device => device.isDefault)
+      return fallback ? selectDevice(fallback.deviceId) : false
+    }
+    const changed = await player.setNativeAudioOutputDevice(null)
+    if (!changed) return false
+    syncNativeSnapshot()
+    applyProfileFor(activeKey())
+    return true
+  }
+
   function saveActiveProfile() {
     const key = activeKey()
     const label = activeDevice()?.label ?? key
@@ -172,11 +210,16 @@ export function useAudioDevices() {
     delete copy[key]
     profiles.value = copy
     persist()
+    if (key === activeKey()) {
+      settings.resetAudioProfile()
+      profileDeviceKey = key
+    }
   }
 
   function activeHasProfile(): boolean {
     return activeKey() in profiles.value
   }
+
   function hasProfile(device: AudioOutputDevice): boolean {
     return resolveKey(device) in profiles.value
   }
@@ -185,9 +228,10 @@ export function useAudioDevices() {
     availableDevices: readonly(availableDevices),
     activeDeviceId: readonly(activeDeviceId),
     labelsAvailable: readonly(labelsAvailable),
+    followsSystemDefault: readonly(followsSystemDefault),
     profiles: readonly(profiles),
     supported: readonly(supported),
-    init, refresh, revealLabels, selectDevice,
+    init, ensureInitialized, refresh, revealLabels, selectDevice, useSystemDefault,
     saveActiveProfile, deleteProfile,
     activeKey, activeHasProfile, hasProfile,
   }

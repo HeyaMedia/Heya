@@ -198,6 +198,9 @@ export const usePlayerStore = defineStore('player', () => {
   const nativeAudioState = computed(() => nativeAudioBackend.value?.state ?? null)
   const nativeAudioCapabilities = computed(() => nativeAudioBackend.value?.capabilities ?? null)
   const nativeAudioVisualizer = computed(() => nativeAudioBackend.value?.visualizer.value ?? null)
+  const nativeAudioOutputDevices = computed(() => nativeAudioBackend.value?.outputDevices.value ?? [])
+  const nativeAudioOutputDeviceId = computed(() => nativeAudioBackend.value?.activeOutputDeviceId.value ?? null)
+  const nativeAudioFollowsSystemDefault = computed(() => nativeAudioBackend.value?.followsSystemDefault.value ?? true)
   const scrobbledTrackId = ref<number | null>(null)
   const sleepAtTrackEnd = ref(false)
   const sleepDeadline = ref<number | null>(null)
@@ -350,13 +353,14 @@ export const usePlayerStore = defineStore('player', () => {
     // play. Re-applying every ensureEngine call is cheap and keeps them in sync.
     if (import.meta.client) e.setVolume(muted.value ? 0 : volume.value / 100)
     // Register the settings→engine bridge. Deliberately OUTSIDE the engineWired
-    // guard and idempotent: a hot reload of useAudioSettings resets its
-    // module-level applyToEngineFn to null while engineWired (a useState)
+    // guard and idempotent per backend owner: a hot reload of useAudioSettings
+    // resets its module-level bridge while engineWired (a useState)
     // survives, so gating this on engineWired would permanently strand the
     // bridge after any HMR edit — EQ/crossfeed/replay-gain toggles would then
-    // silently no-op. registerEngineBridge only (re)wires when the fn is missing.
+    // silently no-op. Changing owner rewires it; re-registering the same owner
+    // is a no-op so transition preparation cannot recurse through ensureEngine.
     if (import.meta.client) {
-      settings.registerEngineBridge(() => {
+      settings.registerEngineBridge(e, () => {
         applyAudioSettingsToEngine(e, settings)
         applyActiveNorm(e, currentTrack.value)
         prepareTransition()
@@ -526,12 +530,23 @@ export const usePlayerStore = defineStore('player', () => {
 
   async function ensureNativeAudioBackend(): Promise<NativeAudioPlaybackBackend | null> {
     if (nativeAudioBackend.value) return nativeAudioBackend.value
-    if (!import.meta.client || !useClientSurface().isTauriClient.value) return null
+    if (!import.meta.client) return null
+    if (!useClientSurface().isTauriClient.value) {
+      alog('player', 'native audio skipped — client surface is browser')
+      return null
+    }
     if (!nativeAudioProbe) {
       nativeAudioProbe = waitForNativeAudioBridge()
         .then((handshake) => {
-          if (!handshake?.capabilities.available
-            || handshake.capabilities.backend !== 'heya-rust-audio') return null
+          if (!handshake) {
+            alog('player', 'native audio unavailable — bridge handshake timed out')
+            return null
+          }
+          if (!handshake.capabilities.available
+            || handshake.capabilities.backend !== 'heya-rust-audio') {
+            alog('player', 'native audio unavailable — capability handshake declined', handshake.capabilities)
+            return null
+          }
           const backend = useNativeAudioPlaybackBackend(handshake.bridge, handshake.capabilities)
           nativeAudioBackend.value = backend
 
@@ -583,6 +598,10 @@ export const usePlayerStore = defineStore('player', () => {
     const backend = await ensureNativeAudioBackend()
     if (!backend) return false
     try {
+      // Resolve the physical output and its Heya-owned EQ profile before the
+      // load request snapshots processing settings. This also handles app
+      // launches where the Audio panel has never been opened.
+      await useAudioDevices().ensureInitialized()
       const request = await buildNativeTrackRequest(track, startPositionSeconds)
       if (!request) return false
       // A native load owns audio authoritatively. Stop the browser engine
@@ -608,7 +627,7 @@ export const usePlayerStore = defineStore('player', () => {
         await backend.setVolume(volume.value / 100)
         await backend.setMuted(muted.value)
       }
-      settings.registerEngineBridge(() => {
+      settings.registerEngineBridge(backend, () => {
         if (playbackBackend.value === 'native'
           && backend.state.outputMode === 'processed') {
           void backend.updateProcessing(nativeProcessingSettings()).catch(() => {})
@@ -661,6 +680,48 @@ export const usePlayerStore = defineStore('player', () => {
       return true
     } catch (error) {
       alog('player', 'could not change native audio output mode', error)
+      return false
+    }
+  }
+
+  async function refreshNativeAudioOutputs(): Promise<boolean> {
+    const backend = await ensureNativeAudioBackend()
+    if (!backend?.capabilities.outputDeviceSelection) return false
+    try {
+      await backend.refreshOutputDevices()
+      return true
+    } catch (error) {
+      alog('player', 'could not enumerate native audio outputs', error)
+      return false
+    }
+  }
+
+  async function setNativeAudioOutputDevice(deviceId: string | null): Promise<boolean> {
+    const backend = await ensureNativeAudioBackend()
+    if (!backend?.capabilities.outputDeviceSelection
+      || backend.capabilities.preferredOutputMode === 'bit_perfect') return false
+
+    const track = currentTrack.value
+    const ownsPlayback = playbackBackend.value === 'native' && !!track
+    const resumeAt = position.value
+    const wasPlaying = playing.value
+    try {
+      await backend.setOutputDevice(deviceId)
+      // Apply the new device's profile before a replacement renderer snapshots
+      // nativeProcessingSettings(). The outer Output-tab action will observe
+      // the same key and remain idempotent.
+      await useAudioDevices().refresh()
+      // A CPAL stream is bound to its device when opened. Replace the current
+      // renderer at the same position so the persisted choice takes effect
+      // immediately; idle selection needs no renderer lifecycle work.
+      if (ownsPlayback && track) {
+        if (!await playNativeTrack(track, resumeAt)) return false
+        if (!wasPlaying) await backend.pause().catch(() => {})
+        prepareTransition()
+      }
+      return true
+    } catch (error) {
+      alog('player', 'could not change native audio output', error)
       return false
     }
   }
@@ -1067,7 +1128,10 @@ export const usePlayerStore = defineStore('player', () => {
     }
   }
 
-  async function play(track?: Track, opts?: { skipQueueSync?: boolean }) {
+  async function play(track?: Track, opts?: {
+    skipQueueSync?: boolean
+    startPositionSeconds?: number
+  }) {
     // Remote output: the queue/track state stays client-side (Phase 2),
     // but the audio path is an API call — never touch the local engine.
     if (import.meta.client && useCastStore().engaged) {
@@ -1086,10 +1150,14 @@ export const usePlayerStore = defineStore('player', () => {
       prefetchedTrackId = null
       currentTrack.value = track
       const gen = ++playGeneration
-      position.value = 0
+      const startPositionSeconds = Math.max(0, Math.min(
+        opts?.startPositionSeconds ?? 0,
+        track.duration > 0 ? track.duration : Number.POSITIVE_INFINITY,
+      ))
+      position.value = startPositionSeconds
       scrobbledTrackId.value = null
       listenedSeconds = 0
-      lastTickTime = 0
+      lastTickTime = startPositionSeconds
       if (track.duration && Number.isFinite(track.duration)) duration.value = track.duration
       alog('player', `play "${track.title}" #${track.id}${track.isStream ? ' (stream)' : ''}`)
       // Resume the AudioContext synchronously on the user gesture, BEFORE the
@@ -1104,7 +1172,7 @@ export const usePlayerStore = defineStore('player', () => {
       // A newer play() superseded us during the fetch — bail rather than load a
       // stale track onto the active deck.
       if (gen !== playGeneration) return
-      if (!track.isStream && await playNativeTrack(track)) {
+      if (!track.isStream && await playNativeTrack(track, startPositionSeconds)) {
         if (gen !== playGeneration) return
         prepareTransition()
         return
@@ -1121,7 +1189,7 @@ export const usePlayerStore = defineStore('player', () => {
       const playUrl = track.isStream ? networkUrl : await prefetchManager.resolvePlayable(track)
       if (gen !== playGeneration) return
       try {
-        await e.play(playUrl || networkUrl)
+        await e.play(playUrl || networkUrl, startPositionSeconds)
       } catch {
         if (gen === playGeneration) playing.value = false
       }
@@ -1130,7 +1198,18 @@ export const usePlayerStore = defineStore('player', () => {
       prepareTransition()
       return
     }
-    // No track passed — resume current
+    // No track passed — resume current. Queue restore normally mirrors the
+    // server pointer into currentTrack, but play() must also be safe when the
+    // user clicks before that plugin has finished its handoff.
+    if (!currentTrack.value && !localMode.value) {
+      const idx = qs.currentWindowIndex
+      const restored = idx >= 0 ? queue.value[idx] : undefined
+      if (restored) {
+        currentTrack.value = restored
+        position.value = qs.positionSeconds
+        if (restored.duration) duration.value = restored.duration
+      }
+    }
     if (!currentTrack.value) return
     if (playbackBackend.value === 'native' && nativeAudioBackend.value) {
       try {
@@ -1140,7 +1219,17 @@ export const usePlayerStore = defineStore('player', () => {
       }
       return
     }
-    const e = ensureEngine()
+    // A page reload preserves the server queue/output identity but destroys
+    // the browser/native renderer. Treat the first resume in the fresh page
+    // as a cold handoff even when this tab still owns the output; resuming a
+    // newly-created WebAudio engine otherwise succeeds while playing nothing.
+    const needsColdLoad = !engineWired.value
+    if (needsColdLoad) {
+      localHandoff = {
+        trackId: currentTrack.value.id,
+        position: localMode.value ? position.value : qs.positionSeconds,
+      }
+    }
     // Mirror tab pressing play = "play here": claim the output and pick
     // up from the server's position via the same cold-load handoff the
     // cast-disconnect path uses.
@@ -1155,18 +1244,12 @@ export const usePlayerStore = defineStore('player', () => {
       const h = localHandoff
       localHandoff = null
       const t = currentTrack.value
-      await play(t)
-      if (h.position > 0) {
-        if (playbackBackend.value === 'native' && nativeAudioBackend.value) {
-          await nativeAudioBackend.value.seek(h.position).catch(() => {})
-        } else if (engineWired.value) {
-          ensureEngine().seek(h.position)
-        }
-        position.value = h.position
-        lastTickTime = h.position
-      }
+      // The server pointer is already authoritative. Skipping queue sync is
+      // also important for queues containing the same track more than once.
+      await play(t, { skipQueueSync: true, startPositionSeconds: h.position })
       return
     }
+    const e = ensureEngine()
     try {
       await e.resume()
     } catch {
@@ -1245,12 +1328,15 @@ export const usePlayerStore = defineStore('player', () => {
   // seek takes a 0-1 fraction (legacy API the UI uses).
   function seek(pct: number) {
     const target = Math.max(0, Math.min(1, pct)) * (duration.value || 0)
+    alog('player', `seek ${target.toFixed(2)}s via ${playbackBackend.value}`)
     if (import.meta.client && useCastStore().engaged) {
       // While paused between tracks (no session) this still moves the
       // frozen position — the next re-cast starts from it.
       void useCastStore().seekTo(target).catch(() => { /* WS restores truth */ })
     } else if (playbackBackend.value === 'native' && nativeAudioBackend.value) {
-      void nativeAudioBackend.value.seek(target).catch(() => {})
+      void nativeAudioBackend.value.seek(target).catch((error) => {
+        alog('player', 'native audio seek was rejected', error)
+      })
     } else if (engineWired.value) {
       ensureEngine().seek(target)
     }
@@ -1761,6 +1847,7 @@ export const usePlayerStore = defineStore('player', () => {
     playing, currentTrack, position, duration, volume, muted,
     shuffled, repeatMode, queue, originalOrder, queueOpen, sideTab, localMode,
     engineWired, playbackBackend, nativeAudioState, nativeAudioCapabilities, nativeAudioVisualizer,
+    nativeAudioOutputDevices, nativeAudioOutputDeviceId, nativeAudioFollowsSystemDefault,
     scrobbledTrackId, sleepAtTrackEnd, sleepDeadline, sleepNowTick,
     currentIndex, playedTracks, upcomingTracks, upcomingCount,
     nextUp, progress, hasPrevious, hasNext,
@@ -1770,7 +1857,7 @@ export const usePlayerStore = defineStore('player', () => {
     toggleLoved, toggleQueue, toggleLyrics, formatTime,
     jumpTo, removeFromQueue, moveInQueue, clearUpcoming,
     addToQueue, playNext,
-    probeNativeAudio, setBitPerfectAudio,
+    probeNativeAudio, setBitPerfectAudio, refreshNativeAudioOutputs, setNativeAudioOutputDevice,
     startCastTo, stopCasting, castTrackEnded,
   }
 })
@@ -1810,6 +1897,8 @@ export function usePlayerBindings() {
     playNext: store.playNext,
     probeNativeAudio: store.probeNativeAudio,
     setBitPerfectAudio: store.setBitPerfectAudio,
+    refreshNativeAudioOutputs: store.refreshNativeAudioOutputs,
+    setNativeAudioOutputDevice: store.setNativeAudioOutputDevice,
     startCastTo: store.startCastTo,
     stopCasting: store.stopCasting,
     castTrackEnded: store.castTrackEnded,

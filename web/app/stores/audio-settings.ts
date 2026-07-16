@@ -63,6 +63,7 @@ const DEFAULTS: StoredAudioSettings = {
 
 const DSP_BLOCKS: DspBlockId[] = ['equalizer', 'crossfeed']
 let applyToEngineFn: (() => void) | null = null
+let applyToEngineOwner: object | null = null
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
@@ -211,10 +212,23 @@ export const useAudioSettingsStore = defineStore('audio-settings', () => {
       crossfeedPreset: settings.value.crossfeed.preset,
     }
   }
-  function registerEngineBridge(fn: () => void) {
+  function resetAudioProfile() {
+    // Output-bound profiles own only transducer-specific processing. Playback
+    // behavior (ReplayGain, crossfade, limiter/order) remains global.
+    commit({
+      ...settings.value,
+      eq: { ...DEFAULTS.eq, bands: [...DEFAULTS.eq.bands] },
+      crossfeed: { ...DEFAULTS.crossfeed },
+    })
+  }
+  function registerEngineBridge(owner: object, fn: () => void) {
     // The active playback backend owns this single bridge. Switching between
     // browser WebAudio and HeyaClient's native Rust engine replaces it so
-    // settings never update an inactive renderer.
+    // settings never update an inactive renderer. Re-registering the current
+    // owner is intentionally a no-op: the initial application can prepare a
+    // transition, which re-enters ensureEngine() and would otherwise recurse.
+    if (applyToEngineOwner === owner && applyToEngineFn) return
+    applyToEngineOwner = owner
     applyToEngineFn = fn
     fn()
   }
@@ -226,7 +240,7 @@ export const useAudioSettingsStore = defineStore('audio-settings', () => {
     setCrossfadeMode, setCrossfadeDuration, setCrossfadeAlbumAware,
     setReplayGainMode, setCrossfeedEnabled, setCrossfeedPreset,
     setLimiterEnabled, moveDspBlock,
-    applyAudioProfile, currentAudioProfile, registerEngineBridge,
+    applyAudioProfile, currentAudioProfile, resetAudioProfile, registerEngineBridge,
   }
 })
 
