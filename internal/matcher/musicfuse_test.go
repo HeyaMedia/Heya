@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/karbowiak/heya/internal/mediaprobe"
+	"github.com/karbowiak/heya/internal/musicconsensus"
 )
 
 func TestExtractMusicTags(t *testing.T) {
@@ -41,6 +42,44 @@ func TestExtractMusicTags(t *testing.T) {
 
 	if empty := extractMusicTags(nil); empty != (musicTags{}) {
 		t.Errorf("nil tags must yield zero musicTags, got %+v", empty)
+	}
+}
+
+func TestApplyMatcherMusicConsensusQuarantinesLeadOutlierIDs(t *testing.T) {
+	const (
+		asacoMBID  = "bb4297af-90c2-4bb2-bd50-67951921c9c3"
+		djPaulMBID = "43906e48-a7c0-4b80-a5dd-37d1fe6ccdb9"
+		wrongAlbum = "97470000-0000-4000-8000-000000000000"
+	)
+	outlier := musicTags{
+		Artist:          "DJ Paul",
+		AlbumArtist:     "DJ Paul",
+		Album:           "To Kill Again...The Mixtape",
+		Year:            "2010",
+		ArtistMBID:      djPaulMBID,
+		AlbumArtistMBID: djPaulMBID,
+		AlbumMBID:       wrongAlbum,
+	}
+	all := []musicTags{outlier}
+	evidence := []musicconsensus.Evidence{matcherMusicConsensusEvidence(outlier)}
+	for i := 0; i < 9; i++ {
+		tags := musicTags{Artist: "Asaco", AlbumArtist: "Asaco", Album: "Nomake Story", Year: "2020"}
+		if i == 0 {
+			tags.AlbumArtistMBID = asacoMBID
+		}
+		all = append(all, tags)
+		evidence = append(evidence, matcherMusicConsensusEvidence(tags))
+	}
+
+	got := applyMatcherMusicConsensus(outlier, all, musicconsensus.Build(evidence))
+	if got.AlbumArtist != "Asaco" || got.Album != "Nomake Story" || got.Year != "2020" {
+		t.Fatalf("consensus lead tags = %#v", got)
+	}
+	if got.AlbumArtistMBID != asacoMBID {
+		t.Fatalf("majority artist MBID = %q, want %q", got.AlbumArtistMBID, asacoMBID)
+	}
+	if got.ArtistMBID == djPaulMBID || got.AlbumMBID == wrongAlbum {
+		t.Fatalf("outlier IDs survived: %#v", got)
 	}
 }
 

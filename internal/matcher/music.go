@@ -16,6 +16,7 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/musicconsensus"
 	"github.com/karbowiak/heya/internal/nfo"
 	"github.com/karbowiak/heya/internal/slug"
 	"github.com/karbowiak/heya/internal/titlematch"
@@ -168,16 +169,52 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 
 	leadParsed, _ := parseFileResult(tracks[0].ParseResult)
 
-	// Embedded-tag view of the release, read from the lead track. Probing on
-	// demand here (when the async FFProbeWorker hasn't run yet) is what lets a
-	// scene-garbage folder still resolve: its path yields no artist/album, but
-	// its ID3/Vorbis tags do. leadTags is empty — and every fusion below falls
-	// back to path/NFO exactly as before — when there's no prober or no tags.
-	// The result is cached so the per-track loop reuses it instead of re-probing.
+	// Probe every sibling once and resolve release identity from their combined
+	// evidence. A single lead track is not representative enough: one badly
+	// tagged file can otherwise attach the whole folder to another artist. The
+	// cache keeps the later per-track pass free and also preserves the existing
+	// one-time timeout bound for a failed probe.
 	probeCache := map[int64]*mediaprobe.MediaInfo{}
-	leadInfo := m.musicFileProbe(ctx, tracks[0])
-	probeCache[tracks[0].ID] = leadInfo
-	leadTags := extractMusicTags(collectAudioTags(leadInfo))
+	tagCache := map[int64]musicTags{}
+	evidence := make([]musicconsensus.Evidence, 0, len(tracks))
+	allTags := make([]musicTags, 0, len(tracks))
+	for _, track := range tracks {
+		info := m.musicFileProbe(ctx, track)
+		probeCache[track.ID] = info
+		tags := extractMusicTags(collectAudioTags(info))
+		tagCache[track.ID] = tags
+		allTags = append(allTags, tags)
+		evidence = append(evidence, matcherMusicConsensusEvidence(tags))
+	}
+	releaseConsensus := musicconsensus.Build(evidence)
+	leadTags := applyMatcherMusicConsensus(tagCache[tracks[0].ID], allTags, releaseConsensus)
+	if releaseConsensus.Artist.Strong || releaseConsensus.Album.Strong || releaseConsensus.Year.Strong {
+		log.Debug().
+			Str("dir", vfs.RedactPath(releaseDir)).
+			Str("artist", releaseConsensus.Artist.Value).
+			Int("artist_support", releaseConsensus.Artist.Support).
+			Str("album", releaseConsensus.Album.Value).
+			Int("album_support", releaseConsensus.Album.Support).
+			Str("year", releaseConsensus.Year.Value).
+			Int("tracks", len(tracks)).
+			Msg("music release folder consensus established")
+	}
+
+	// Generated sidecars are normally authoritative, but not when they
+	// contradict a strong current-folder consensus. Trusting such an NFO would
+	// make a previous bad match self-reinforcing on every subsequent scan.
+	if artistNFO != nil && releaseConsensus.Artist.Strong && artistNFO.Title != "" && !releaseConsensus.Artist.Matches(artistNFO.Title) {
+		log.Warn().Str("dir", vfs.RedactPath(artistDir)).Str("nfo_artist", artistNFO.Title).Str("consensus_artist", releaseConsensus.Artist.Value).Msg("ignoring artist NFO that contradicts sibling tag consensus")
+		artistNFO = nil
+	}
+	if albumNFO != nil {
+		artistConflict := releaseConsensus.Artist.Strong && albumNFO.AlbumArtist != "" && !releaseConsensus.Artist.Matches(albumNFO.AlbumArtist)
+		albumConflict := releaseConsensus.Album.Strong && albumNFO.Title != "" && !releaseConsensus.Album.Matches(albumNFO.Title)
+		if artistConflict || albumConflict {
+			log.Warn().Str("dir", vfs.RedactPath(releaseDir)).Str("nfo_artist", albumNFO.AlbumArtist).Str("nfo_album", albumNFO.Title).Str("consensus_artist", releaseConsensus.Artist.Value).Str("consensus_album", releaseConsensus.Album.Value).Msg("ignoring album NFO that contradicts sibling tag consensus")
+			albumNFO = nil
+		}
+	}
 	leadRawSegment := filepath.Base(releaseDir)
 	if leadParsed.Release != nil && leadParsed.Release.RawName != "" {
 		leadRawSegment = leadParsed.Release.RawName
@@ -185,6 +222,18 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 		leadRawSegment = leadParsed.ReleaseSegment
 	}
 	pTrust := pathTrust(leadRawSegment)
+	artistTagTrust := tagTrust(firstNonEmptyMusicTag(leadTags.AlbumArtist, leadTags.Artist))
+	if releaseConsensus.Artist.Strong {
+		artistTagTrust = 0.95
+	}
+	albumTagTrust := tagTrust(leadTags.Album)
+	if releaseConsensus.Album.Strong {
+		albumTagTrust = 0.95
+	}
+	yearTagTrust := tagTrust(leadTags.Year)
+	if releaseConsensus.Year.Strong {
+		yearTagTrust = 0.95
+	}
 
 	artistName := ""
 	artistDisambig := ""
@@ -215,7 +264,7 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 		if tagArtist == "" {
 			tagArtist = leadTags.Artist
 		}
-		fused := fuseText(pathArtist, tagArtist, pTrust, tagTrust(tagArtist))
+		fused := fuseText(pathArtist, tagArtist, pTrust, artistTagTrust)
 		artistName = fused.Value
 		if fused.Source == sourcePath || fused.Source == sourceBoth {
 			artistExplicit = true
@@ -317,14 +366,14 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 		}
 	}
 	if albumTitle == "" {
-		fused := fuseText(pathAlbum, leadTags.Album, pTrust, tagTrust(leadTags.Album))
+		fused := fuseText(pathAlbum, leadTags.Album, pTrust, albumTagTrust)
 		albumTitle = fused.Value
 		if fused.Source == sourceTag || fused.Source == sourceBoth {
 			log.Debug().Str("album", albumTitle).Str("source", fused.Source.String()).Float64("confidence", fused.Confidence).Msg("music album resolved via tag fusion")
 		}
 	}
 	if albumYear == "" {
-		albumYear = fuseText(pathAlbumYear, leadTags.Year, pTrust, tagTrust(leadTags.Year)).Value
+		albumYear = fuseText(pathAlbumYear, leadTags.Year, pTrust, yearTagTrust).Value
 	}
 	if albumMBID == "" && sameRelease(leadTags.Album, albumTitle) {
 		// Only adopt the tag's RELEASE MBID when the tag names the exact same
@@ -403,27 +452,14 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 			pathTrackTitle = trackParsed.Release.TrackTitle
 		}
 
-		// Only spend an on-demand ffprobe when we actually need embedded tags:
-		// the filename already carries both a track number and a title on a
-		// well-named (curated) library, so those tracks stay path-only and match
-		// exactly as fast as before. Always reuse the cached lead probe or any
-		// media_info the FFProbeWorker already wrote (free), so quality still
-		// lands when it's available.
-		pathTrackComplete := pathTrackNum > 0 && pathTrackTitle != ""
-		// Two-value lookup, not `== nil`: the lead track is seeded into the cache
-		// even when its probe returned nil (failed/timed-out), and a plain nil
-		// check would re-probe it — doubling the worst-case probe time on a
-		// stalled mount, the very thing the probe timeout bounds.
+		// Every sibling was cached during consensus collection, including failed
+		// probes stored as nil, so no file is probed twice.
 		info, seen := probeCache[trackFile.ID]
 		if !seen {
-			if existing := parseMediaInfoBytes(trackFile.MediaInfo); existing != nil {
-				info = existing
-			} else if !pathTrackComplete {
-				info = m.musicFileProbe(ctx, trackFile)
-			}
+			info = m.musicFileProbe(ctx, trackFile)
 			probeCache[trackFile.ID] = info
 		}
-		tags := extractMusicTags(collectAudioTags(info))
+		tags := tagCache[trackFile.ID]
 
 		// Disc number: parsed filename / "Disc N" subdir take precedence, then
 		// the embedded tag, defaulting to 1.

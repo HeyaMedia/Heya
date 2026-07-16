@@ -734,14 +734,14 @@ FROM (
     FROM (
         SELECT k.id
         FROM albums k
-        ORDER BY k.sort_artist ASC, k.year ASC, lower(k.title) ASC, k.id ASC
+        ORDER BY k.sort_artist ASC, k.year ASC, k.sort_title ASC, k.id ASC
         LIMIT $1 OFFSET $2
     ) keys
     JOIN albums al ON al.id = keys.id
     JOIN artists     a  ON a.id  = al.artist_id
     JOIN media_item_cards mi ON mi.id = a.media_item_id
 ) sub
-ORDER BY sub.sort_artist ASC, sub.year ASC, lower(sub.title) ASC, sub.id ASC;
+ORDER BY sub.sort_artist ASC, sub.year ASC, sub.sort_title ASC, sub.id ASC;
 
 -- name: CountMusicAlbums :one
 -- Bare count: albums exist only under music libraries (created solely by the

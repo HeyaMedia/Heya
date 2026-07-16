@@ -4,10 +4,12 @@ import (
 	"context"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/saver"
+	"github.com/karbowiak/heya/internal/titlematch"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
@@ -50,9 +52,6 @@ func (w *SaveMusicNFOWorker) Work(ctx context.Context, job *river.Job[SaveMusicN
 	}
 
 	albumTitles := make([]string, 0, len(albums))
-	for _, al := range albums {
-		albumTitles = append(albumTitles, al.Title)
-	}
 
 	// Use any track's path to derive artist directory (skipping Disc N).
 	var artistDir string
@@ -75,8 +74,18 @@ func (w *SaveMusicNFOWorker) Work(ctx context.Context, job *river.Job[SaveMusicN
 			continue
 		}
 		releaseDir := releaseDirOf(samplePath)
+		candidateArtistDir := filepath.Dir(releaseDir)
+		if !musicArtistDirMatches(candidateArtistDir, artist) {
+			log.Warn().
+				Int64("artist_id", artist.ID).
+				Str("artist", artist.Name).
+				Str("album", al.Title).
+				Str("dir", candidateArtistDir).
+				Msg("refusing to write music NFO outside matching artist directory")
+			continue
+		}
 		if artistDir == "" {
-			artistDir = filepath.Dir(releaseDir)
+			artistDir = candidateArtistDir
 		}
 
 		if err := saver.WriteAlbumNFO(releaseDir, artist, al, tracks); err != nil {
@@ -84,6 +93,7 @@ func (w *SaveMusicNFOWorker) Work(ctx context.Context, job *river.Job[SaveMusicN
 			continue
 		}
 		wroteAlbums++
+		albumTitles = append(albumTitles, al.Title)
 	}
 
 	if artistDir != "" {
@@ -100,4 +110,25 @@ func (w *SaveMusicNFOWorker) Work(ctx context.Context, job *river.Job[SaveMusicN
 		Msg("SaveMusicNFO complete")
 
 	return nil
+}
+
+// musicArtistDirMatches is the final write-time circuit breaker against a bad
+// match becoming authoritative. SaveMusicNFO derives its destination from the
+// track path, so the directory itself must plausibly name the artist whose DB
+// row is about to be serialized there. Aliases and sort names are accepted;
+// parenthetical folder disambiguation is handled by titlematch.FuzzyEqual.
+func musicArtistDirMatches(artistDir string, artist sqlc.Artist) bool {
+	folder := strings.TrimSpace(filepath.Base(filepath.Clean(artistDir)))
+	if folder == "" || folder == "." || folder == string(filepath.Separator) {
+		return false
+	}
+	candidates := make([]string, 0, len(artist.Aliases)+2)
+	candidates = append(candidates, artist.Name, artist.SortName)
+	candidates = append(candidates, artist.Aliases...)
+	for _, candidate := range candidates {
+		if titlematch.FuzzyEqual(folder, strings.TrimSpace(candidate)) {
+			return true
+		}
+	}
+	return false
 }

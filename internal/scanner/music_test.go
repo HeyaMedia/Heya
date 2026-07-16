@@ -14,6 +14,8 @@ import (
 	"github.com/karbowiak/heya/internal/audiotags"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/musicconsensus"
+	"github.com/karbowiak/heya/internal/nfo"
 	"github.com/karbowiak/heya/internal/titlematch"
 )
 
@@ -393,6 +395,76 @@ func TestMusicTagTitleRejectsSyntheticProbeTitles(t *testing.T) {
 	}
 	if !shouldUseMusicTagTitle("Track 1", "Actual Song", 1, "Track 1") {
 		t.Fatalf("real tag title should replace placeholder path title")
+	}
+}
+
+func TestApplyMusicReleaseConsensusRejectsAsacoOutlierAndPoisonedNFO(t *testing.T) {
+	evidence := make([]musicconsensus.Evidence, 0, 10)
+	for range 9 {
+		evidence = append(evidence, musicconsensus.Evidence{Artist: "Asaco", Album: "Nomake Story", Year: "2020"})
+	}
+	evidence = append(evidence, musicconsensus.Evidence{Artist: "DJ Paul", Album: "To Kill Again...The Mixtape", Year: "2010"})
+	consensus := musicconsensus.Build(evidence)
+	inherited := inheritMusicReleaseConsensus(audiotags.Tags{Title: "Untagged Track"}, consensus)
+	if inherited.AlbumArtist != "Asaco" || inherited.Album != "Nomake Story" || inherited.Year != "2020" {
+		t.Fatalf("missing release tags were not inherited: %#v", inherited)
+	}
+	badNFO := musicNFOEntry{nfo: &nfo.ParsedNFO{
+		Kind:             "album",
+		Title:            "Nomake Story",
+		AlbumArtist:      "DJ Paul",
+		Year:             "2010",
+		MBAlbumID:        "97470000-0000-4000-8000-000000000000",
+		MBAlbumArtistID:  "43906e48-a7c0-4b80-a5dd-37d1fe6ccdb9",
+		MBReleaseGroupID: "fd292250-2220-490c-a277-0885bb5ca64d",
+	}}
+	outlierTags := audiotags.Tags{
+		Artist:           "DJ Paul",
+		AlbumArtist:      "DJ Paul",
+		Album:            "To Kill Again...The Mixtape",
+		Year:             "2010",
+		ArtistMBID:       "43906e48-a7c0-4b80-a5dd-37d1fe6ccdb9",
+		AlbumArtistMBID:  "43906e48-a7c0-4b80-a5dd-37d1fe6ccdb9",
+		AlbumMBID:        "97470000-0000-4000-8000-000000000000",
+		ReleaseGroupMBID: "fd292250-2220-490c-a277-0885bb5ca64d",
+	}
+	plan := MusicTrackPlan{
+		Artist:      "DJ Paul",
+		Album:       "Nomake Story",
+		Year:        "2010",
+		TrackTitle:  "Outro",
+		RelPath:     "Asaco/Asaco - Nomake Story/06 - Outro.flac",
+		Source:      "nfo",
+		Confidence:  0.96,
+		NFO:         "Asaco/Asaco - Nomake Story/album.nfo",
+		ExternalIDs: musicExternalIDsFromNFO(badNFO.nfo),
+	}
+
+	got := applyMusicReleaseConsensus(plan, outlierTags, badNFO, consensus)
+	if got.Artist != "Asaco" || got.Album != "Nomake Story" || got.Year != "2020" {
+		t.Fatalf("consensus identity = %q / %q / %q", got.Artist, got.Album, got.Year)
+	}
+	if len(got.ExternalIDs) != 0 {
+		t.Fatalf("outlier hard identifiers survived: %#v", got.ExternalIDs)
+	}
+	if got.NFO != "" || !contains(got.Issues, "nfo_rejected_by_folder_consensus") {
+		t.Fatalf("poisoned NFO remained trusted: nfo=%q issues=%#v", got.NFO, got.Issues)
+	}
+	if !contains(got.Issues, "tag_outlier_rejected_by_folder_consensus") {
+		t.Fatalf("outlier was not marked: %#v", got.Issues)
+	}
+}
+
+func TestMusicReleaseDirScopesConsensusToAlbumFolder(t *testing.T) {
+	cases := map[string]string{
+		"Asaco/Asaco - Nomake Story/01.flac":        "Asaco/Asaco - Nomake Story",
+		"Asaco/Asaco - Nomake Story/Disc 2/01.flac": "Asaco/Asaco - Nomake Story",
+		"DJ Paul/Other Album/01.flac":               "DJ Paul/Other Album",
+	}
+	for path, want := range cases {
+		if got := musicReleaseDir(path); got != want {
+			t.Errorf("musicReleaseDir(%q) = %q, want %q", path, got, want)
+		}
 	}
 }
 

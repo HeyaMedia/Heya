@@ -196,6 +196,7 @@ type Album struct {
 	ArtistCredits      []byte             `json:"artist_credits"`
 	FieldProvenance    []byte             `json:"field_provenance"`
 	SortArtist         string             `json:"sort_artist"`
+	SortTitle          string             `json:"sort_title"`
 }
 
 type AlbumCentroid struct {

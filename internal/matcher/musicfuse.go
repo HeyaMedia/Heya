@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/karbowiak/heya/internal/mediaprobe"
+	"github.com/karbowiak/heya/internal/musicconsensus"
 	"github.com/karbowiak/heya/internal/titlematch"
 )
 
@@ -85,6 +86,87 @@ type musicTags struct {
 	ArtistMBID      string // track performer (musicbrainz_artistid)
 	AlbumArtistMBID string // release artist (musicbrainz_albumartistid) — matches AlbumArtist
 	AlbumMBID       string // per-edition RELEASE MBID only (never the release-group id)
+}
+
+func firstNonEmptyMusicTag(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func matcherMusicConsensusEvidence(tags musicTags) musicconsensus.Evidence {
+	artist := firstNonEmptyMusicTag(tags.AlbumArtist, tags.Artist)
+	if !isUsableArtist(artist) {
+		artist = ""
+	}
+	album := strings.TrimSpace(tags.Album)
+	if isPlaceholderValue(album) {
+		album = ""
+	}
+	return musicconsensus.Evidence{Artist: artist, Album: album, Year: strings.TrimSpace(tags.Year)}
+}
+
+// applyMatcherMusicConsensus turns the release-level winners back into the
+// lead-tag shape consumed by the existing fusion pipeline. Hard identifiers
+// are selected only from tracks that support the winning names; a dissenting
+// track can therefore never smuggle its artist/release MBID into the winner.
+func applyMatcherMusicConsensus(lead musicTags, all []musicTags, consensus musicconsensus.Release) musicTags {
+	out := lead
+	// Start from a track that actually supports the winning release identity.
+	// This prevents non-consensus fields (notably YEAR) from leaking out of a
+	// poisoned lead file when only artist or album reached the threshold.
+	if consensus.Artist.Strong {
+		for _, tags := range all {
+			if consensus.Artist.Matches(firstNonEmptyMusicTag(tags.AlbumArtist, tags.Artist)) {
+				out = tags
+				break
+			}
+		}
+	} else if consensus.Album.Strong {
+		for _, tags := range all {
+			if consensus.Album.Matches(tags.Album) {
+				out = tags
+				break
+			}
+		}
+	}
+	if consensus.Artist.Strong {
+		out.Artist = consensus.Artist.Value
+		out.AlbumArtist = consensus.Artist.Value
+		out.ArtistMBID = ""
+		out.AlbumArtistMBID = ""
+		for _, tags := range all {
+			switch {
+			case tags.AlbumArtist != "" && consensus.Artist.Matches(tags.AlbumArtist) && looksLikeMBID(tags.AlbumArtistMBID):
+				out.AlbumArtistMBID = tags.AlbumArtistMBID
+			case tags.Artist != "" && consensus.Artist.Matches(tags.Artist) && looksLikeMBID(tags.ArtistMBID):
+				out.AlbumArtistMBID = tags.ArtistMBID
+			}
+			if out.AlbumArtistMBID != "" {
+				out.ArtistMBID = out.AlbumArtistMBID
+				break
+			}
+		}
+	}
+	if consensus.Album.Strong {
+		out.Album = consensus.Album.Value
+		out.AlbumMBID = ""
+		for _, tags := range all {
+			artist := firstNonEmptyMusicTag(tags.AlbumArtist, tags.Artist)
+			artistSafe := !consensus.Artist.Strong || consensus.Artist.Matches(artist)
+			if artistSafe && consensus.Album.Matches(tags.Album) && looksLikeMBID(tags.AlbumMBID) {
+				out.AlbumMBID = tags.AlbumMBID
+				break
+			}
+		}
+	}
+	if consensus.Year.Strong {
+		out.Year = consensus.Year.Value
+	}
+	return out
 }
 
 // collectAudioTags merges the primary audio stream's tags with the container

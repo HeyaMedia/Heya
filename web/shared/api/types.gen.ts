@@ -498,6 +498,7 @@ export type Album = {
     secondary_types: Array<string> | null;
     slug: string;
     sort_artist: string;
+    sort_title: string;
     styles: Array<string> | null;
     tags: Array<string> | null;
     title: string;
@@ -2086,6 +2087,7 @@ export type ListAlbumsByArtistIdForShelfRow = {
     secondary_types: Array<string> | null;
     slug: string;
     sort_artist: string;
+    sort_title: string;
     styles: Array<string> | null;
     tags: Array<string> | null;
     title: string;
@@ -2130,6 +2132,7 @@ export type ListAlbumsByArtistSlugRow = {
     secondary_types: Array<string> | null;
     slug: string;
     sort_artist: string;
+    sort_title: string;
     styles: Array<string> | null;
     tags: Array<string> | null;
     title: string;
@@ -2254,6 +2257,7 @@ export type ListMusicAlbumsRow = {
     secondary_types: Array<string> | null;
     slug: string;
     sort_artist: string;
+    sort_title: string;
     styles: Array<string> | null;
     tags: Array<string> | null;
     title: string;
@@ -2352,6 +2356,7 @@ export type ListOnThisDayAlbumsRow = {
     secondary_types: Array<string> | null;
     slug: string;
     sort_artist: string;
+    sort_title: string;
     styles: Array<string> | null;
     tags: Array<string> | null;
     title: string;
@@ -2450,6 +2455,7 @@ export type ListRecentlyAddedAlbumsRow = {
     secondary_types: Array<string> | null;
     slug: string;
     sort_artist: string;
+    sort_title: string;
     styles: Array<string> | null;
     tags: Array<string> | null;
     title: string;
@@ -2618,6 +2624,7 @@ export type ListUserLovedAlbumsRow = {
     secondary_types: Array<string> | null;
     slug: string;
     sort_artist: string;
+    sort_title: string;
     styles: Array<string> | null;
     tags: Array<string> | null;
     title: string;
@@ -2737,6 +2744,7 @@ export type ListUserRatedAlbumsRow = {
     secondary_types: Array<string> | null;
     slug: string;
     sort_artist: string;
+    sort_title: string;
     styles: Array<string> | null;
     tags: Array<string> | null;
     title: string;
@@ -6096,6 +6104,7 @@ export type AlbumWritable = {
     secondary_types: Array<string> | null;
     slug: string;
     sort_artist: string;
+    sort_title: string;
     styles: Array<string> | null;
     tags: Array<string> | null;
     title: string;

@@ -1599,6 +1599,9 @@
           "sort_artist": {
             "type": "string"
           },
+          "sort_title": {
+            "type": "string"
+          },
           "styles": {
             "items": {
               "type": "string"
@@ -1672,7 +1675,8 @@
           "external_ids",
           "artist_credits",
           "field_provenance",
-          "sort_artist"
+          "sort_artist",
+          "sort_title"
         ],
         "type": "object"
       },
@@ -6867,6 +6871,9 @@
           "sort_artist": {
             "type": "string"
           },
+          "sort_title": {
+            "type": "string"
+          },
           "styles": {
             "items": {
               "type": "string"
@@ -6945,6 +6952,7 @@
           "artist_credits",
           "field_provenance",
           "sort_artist",
+          "sort_title",
           "artist_name",
           "artist_slug",
           "track_count"
@@ -7078,6 +7086,9 @@
           "sort_artist": {
             "type": "string"
           },
+          "sort_title": {
+            "type": "string"
+          },
           "styles": {
             "items": {
               "type": "string"
@@ -7156,6 +7167,7 @@
           "artist_credits",
           "field_provenance",
           "sort_artist",
+          "sort_title",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -7604,6 +7616,9 @@
           "sort_artist": {
             "type": "string"
           },
+          "sort_title": {
+            "type": "string"
+          },
           "styles": {
             "items": {
               "type": "string"
@@ -7682,6 +7697,7 @@
           "artist_credits",
           "field_provenance",
           "sort_artist",
+          "sort_title",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -8054,6 +8070,9 @@
           "sort_artist": {
             "type": "string"
           },
+          "sort_title": {
+            "type": "string"
+          },
           "styles": {
             "items": {
               "type": "string"
@@ -8132,6 +8151,7 @@
           "artist_credits",
           "field_provenance",
           "sort_artist",
+          "sort_title",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -8473,6 +8493,9 @@
           "sort_artist": {
             "type": "string"
           },
+          "sort_title": {
+            "type": "string"
+          },
           "styles": {
             "items": {
               "type": "string"
@@ -8551,6 +8574,7 @@
           "artist_credits",
           "field_provenance",
           "sort_artist",
+          "sort_title",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -9195,6 +9219,9 @@
           "sort_artist": {
             "type": "string"
           },
+          "sort_title": {
+            "type": "string"
+          },
           "styles": {
             "items": {
               "type": "string"
@@ -9273,6 +9300,7 @@
           "artist_credits",
           "field_provenance",
           "sort_artist",
+          "sort_title",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -9728,6 +9756,9 @@
           "sort_artist": {
             "type": "string"
           },
+          "sort_title": {
+            "type": "string"
+          },
           "styles": {
             "items": {
               "type": "string"
@@ -9802,6 +9833,7 @@
           "artist_credits",
           "field_provenance",
           "sort_artist",
+          "sort_title",
           "artist_name",
           "artist_slug",
           "rating_2",

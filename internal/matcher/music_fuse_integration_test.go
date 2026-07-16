@@ -3,6 +3,9 @@ package matcher
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 
@@ -143,6 +146,78 @@ func TestMusicTagFusion(t *testing.T) {
 		lf1, err := qtx.GetLibraryFileByID(ctx, f1.ID)
 		require.NoError(t, err)
 		require.Equal(t, sqlc.FileStatusMatched, lf1.Status)
+	})
+
+	t.Run("folder consensus rejects a poisoned NFO and lead-track outlier", func(t *testing.T) {
+		const (
+			asacoMBID  = "bb4297af-90c2-4bb2-bd50-67951921c9c4"
+			djPaulMBID = "43906e48-a7c0-4b80-a5dd-37d1fe6ccdb9"
+			wrongAlbum = "97470000-0000-4000-8000-000000000000"
+		)
+		artistName := fmt.Sprintf("Asaco Consensus %d", libID)
+		artistDir := filepath.Join(t.TempDir(), artistName)
+		releaseDir := filepath.Join(artistDir, artistName+" - Nomake Story")
+		require.NoError(t, os.MkdirAll(releaseDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(artistDir, "artist.nfo"), []byte(fmt.Sprintf(`
+<artist>
+  <name>DJ Paul</name>
+  <musicbrainzartistid>%s</musicbrainzartistid>
+</artist>`, djPaulMBID)), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(releaseDir, "album.nfo"), []byte(fmt.Sprintf(`
+<album>
+  <title>Nomake Story</title>
+  <albumartist>DJ Paul</albumartist>
+  <year>2010</year>
+  <musicbrainzalbumid>%s</musicbrainzalbumid>
+  <musicbrainzalbumartistid>%s</musicbrainzalbumartistid>
+</album>`, wrongAlbum, djPaulMBID)), 0o644))
+
+		group := make([]sqlc.LibraryFile, 0, 10)
+		for i := 1; i <= 10; i++ {
+			path := filepath.Join(releaseDir, fmt.Sprintf("%02d - Track %02d.flac", i, i))
+			parsed, err := json.Marshal(parser.ParseStoragePath(path))
+			require.NoError(t, err)
+			file, err := qtx.UpsertLibraryFile(ctx, sqlc.UpsertLibraryFileParams{
+				LibraryID: libID, Path: path, ParseResult: parsed, Status: sqlc.FileStatusPending,
+			})
+			require.NoError(t, err)
+			group = append(group, file)
+			if i == 1 {
+				// Put the poisoned file first to prove scan order cannot make it
+				// representative of the entire release.
+				infoByPath[path] = rawTagInfo(map[string]string{
+					"ALBUMARTIST":               "DJ Paul",
+					"MUSICBRAINZ_ALBUMARTISTID": djPaulMBID,
+					"ALBUM":                     "To Kill Again...The Mixtape",
+					"MUSICBRAINZ_ALBUMID":       wrongAlbum,
+					"DATE":                      "2010",
+					"TITLE":                     fmt.Sprintf("Track %02d", i),
+					"TRACK":                     strconv.Itoa(i),
+				})
+				continue
+			}
+			infoByPath[path] = rawTagInfo(map[string]string{
+				"ALBUMARTIST":               artistName,
+				"MUSICBRAINZ_ALBUMARTISTID": asacoMBID,
+				"ALBUM":                     "Nomake Story",
+				"DATE":                      "2020",
+				"TITLE":                     fmt.Sprintf("Track %02d", i),
+				"TRACK":                     strconv.Itoa(i),
+			})
+		}
+
+		matched, unmatched, errored, artistID := m.matchMusicGroup(ctx, libID, group)
+		require.Equal(t, 10, matched)
+		require.Zero(t, unmatched)
+		require.Zero(t, errored)
+
+		var gotName, gotMBID string
+		require.NoError(t, tx.QueryRow(ctx, `SELECT name, musicbrainz_id FROM artists WHERE id=$1`, artistID).Scan(&gotName, &gotMBID))
+		require.Equal(t, artistName, gotName)
+		require.Equal(t, asacoMBID, gotMBID)
+		album, err := qtx.GetAlbumByArtistTitleYear(ctx, sqlc.GetAlbumByArtistTitleYearParams{ArtistID: artistID, Lower: "Nomake Story", Year: "2020"})
+		require.NoError(t, err)
+		require.NotEqual(t, wrongAlbum, album.MusicbrainzID, "outlier/NFO release MBID must be quarantined")
 	})
 
 	t.Run("collapse guard: untagged, unnumbered files stay distinct", func(t *testing.T) {

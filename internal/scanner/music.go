@@ -13,6 +13,7 @@ import (
 	"github.com/karbowiak/heya/internal/audiotags"
 	"github.com/karbowiak/heya/internal/mediafile"
 	"github.com/karbowiak/heya/internal/mediaprobe"
+	"github.com/karbowiak/heya/internal/musicconsensus"
 	"github.com/karbowiak/heya/internal/nfo"
 	"github.com/karbowiak/heya/internal/parser"
 	"github.com/karbowiak/heya/internal/slug"
@@ -120,6 +121,12 @@ func AnalyzeMusicWithOptions(ctx context.Context, inv Inventory, emit Emitter, o
 	var tracks []MusicTrackPlan
 	for _, root := range inv.Roots {
 		nfos := parseMusicNFOs(root, emit)
+		type probedFile struct {
+			file InventoryFile
+			tags audiotags.Tags
+		}
+		byReleaseDir := map[string][]probedFile{}
+		var releaseDirs []string
 		for _, file := range root.Files {
 			if err := ctx.Err(); err != nil {
 				return tracks, nil, nil, err
@@ -128,28 +135,74 @@ func AnalyzeMusicWithOptions(ctx context.Context, inv Inventory, emit Emitter, o
 				continue
 			}
 			tags := probeMusicTags(ctx, file, opts, emit)
-			plan, ok := planMusicTrack(file, nfos, tags)
-			if !ok {
-				emit.Emit(Event{
-					Event:   "music.file.unplanned",
-					RelPath: file.RelPath,
-					Reason:  "no_music_identity",
-					Message: "audio file could not be assigned to an artist and album",
-				})
-				continue
+			dir := musicReleaseDir(file.RelPath)
+			if _, seen := byReleaseDir[dir]; !seen {
+				releaseDirs = append(releaseDirs, dir)
 			}
-			tracks = append(tracks, plan)
-			emit.Emit(Event{
-				Event:   "music.track.planned",
-				RelPath: file.RelPath,
-				Data: map[string]any{
-					"album":      plan.Album,
-					"artist":     plan.Artist,
-					"confidence": plan.Confidence,
-					"disc":       plan.DiscNumber,
-					"track":      plan.TrackNumber,
-				},
-			})
+			byReleaseDir[dir] = append(byReleaseDir[dir], probedFile{file: file, tags: tags})
+		}
+		for _, dir := range releaseDirs {
+			probed := byReleaseDir[dir]
+			evidence := make([]musicconsensus.Evidence, 0, len(probed))
+			for _, item := range probed {
+				evidence = append(evidence, musicConsensusEvidence(item.tags))
+			}
+			consensus := musicconsensus.Build(evidence)
+			if consensus.Artist.Strong || consensus.Album.Strong || consensus.Year.Strong {
+				emit.Emit(Event{
+					Event: "music.release.consensus",
+					Data: map[string]any{
+						"directory":      dir,
+						"artist":         consensus.Artist.Value,
+						"artist_support": consensus.Artist.Support,
+						"album":          consensus.Album.Value,
+						"album_support":  consensus.Album.Support,
+						"tracks":         len(probed),
+						"year":           consensus.Year.Value,
+						"year_support":   consensus.Year.Support,
+					},
+				})
+			}
+			planningNFOs := nfos
+			if !musicNFOTrustedByConsensus(nfos[dir], consensus) {
+				planningNFOs = make(map[string]musicNFOEntry, len(nfos)-1)
+				for nfoDir, entry := range nfos {
+					if nfoDir != dir {
+						planningNFOs[nfoDir] = entry
+					}
+				}
+			}
+			for _, item := range probed {
+				// Feed inherited release fields into planning so a sibling with
+				// missing ARTIST/ALBUM tags can still be planned even when its path
+				// is weak. The original tags are retained for outlier/ID auditing.
+				effectiveTags := inheritMusicReleaseConsensus(item.tags, consensus)
+				plan, ok := planMusicTrack(item.file, planningNFOs, effectiveTags)
+				if ok {
+					plan = applyMusicReleaseConsensus(plan, item.tags, nfos[dir], consensus)
+				}
+				if !ok {
+					emit.Emit(Event{
+						Event:   "music.file.unplanned",
+						RelPath: item.file.RelPath,
+						Reason:  "no_music_identity",
+						Message: "audio file could not be assigned to an artist and album",
+					})
+					continue
+				}
+				tracks = append(tracks, plan)
+				emit.Emit(Event{
+					Event:   "music.track.planned",
+					RelPath: item.file.RelPath,
+					Data: map[string]any{
+						"album":      plan.Album,
+						"artist":     plan.Artist,
+						"confidence": plan.Confidence,
+						"disc":       plan.DiscNumber,
+						"track":      plan.TrackNumber,
+					},
+				})
+			}
 		}
 	}
 	sortMusicTracks(tracks)
@@ -179,6 +232,163 @@ func AnalyzeMusicWithOptions(ctx context.Context, inv Inventory, emit Emitter, o
 		})
 	}
 	return tracks, albums, artists, nil
+}
+
+func musicReleaseDir(path string) string {
+	dir := filepath.Dir(filepath.ToSlash(path))
+	if musicDiscFolderRE.MatchString(filepath.Base(dir)) {
+		dir = filepath.Dir(dir)
+	}
+	if dir == "." {
+		return ""
+	}
+	return filepath.ToSlash(dir)
+}
+
+func musicConsensusEvidence(tags audiotags.Tags) musicconsensus.Evidence {
+	artist := strings.TrimSpace(firstNonEmpty(tags.AlbumArtist, tags.Artist))
+	if audiotags.IsPlaceholderName(artist) {
+		artist = ""
+	}
+	album := strings.TrimSpace(tags.Album)
+	if audiotags.IsPlaceholderValue(album) {
+		album = ""
+	}
+	return musicconsensus.Evidence{
+		Artist: artist,
+		Album:  album,
+		Year:   normalizeMusicYear(strings.TrimSpace(tags.Year)),
+	}
+}
+
+func inheritMusicReleaseConsensus(tags audiotags.Tags, consensus musicconsensus.Release) audiotags.Tags {
+	if consensus.Artist.Strong {
+		tagArtist := firstNonEmpty(tags.AlbumArtist, tags.Artist)
+		if !consensus.Artist.Matches(tagArtist) {
+			tags.Artist = ""
+			tags.AlbumArtist = consensus.Artist.Value
+			tags.ArtistMBID = ""
+			tags.AlbumArtistMBID = ""
+		} else if strings.TrimSpace(tags.AlbumArtist) == "" {
+			tags.AlbumArtist = consensus.Artist.Value
+		}
+	}
+	if consensus.Album.Strong {
+		if !consensus.Album.Matches(tags.Album) {
+			tags.Album = consensus.Album.Value
+			tags.AlbumMBID = ""
+			tags.ReleaseGroupMBID = ""
+		}
+	}
+	if consensus.Year.Strong {
+		tags.Year = consensus.Year.Value
+	}
+	return tags
+}
+
+// applyMusicReleaseConsensus is intentionally a post-fusion step. A strong
+// sibling consensus must be able to overrule a poisoned generated NFO as well
+// as one contradictory embedded tag; otherwise the bad NFO wins the next scan
+// and turns a single outlier into the identity of the whole folder.
+func applyMusicReleaseConsensus(plan MusicTrackPlan, tags audiotags.Tags, entry musicNFOEntry, consensus musicconsensus.Release) MusicTrackPlan {
+	tagArtist := strings.TrimSpace(firstNonEmpty(tags.AlbumArtist, tags.Artist))
+	tagAlbum := strings.TrimSpace(tags.Album)
+	nfoTrusted := musicNFOTrustedByConsensus(entry, consensus)
+
+	if consensus.Artist.Strong {
+		if !consensus.Artist.Matches(plan.Artist) {
+			plan.Issues = appendMusicIssue(plan.Issues, "artist_overridden_by_folder_consensus")
+			plan.ArtistDisambiguation = ""
+		}
+		plan.Artist = consensus.Artist.Value
+	}
+	if consensus.Album.Strong {
+		if !consensus.Album.Matches(plan.Album) {
+			plan.Issues = appendMusicIssue(plan.Issues, "album_overridden_by_folder_consensus")
+		}
+		plan.Album = consensus.Album.Value
+	}
+	if consensus.Year.Strong {
+		if plan.Year != "" && !strings.EqualFold(strings.TrimSpace(plan.Year), consensus.Year.Value) {
+			plan.Issues = appendMusicIssue(plan.Issues, "year_overridden_by_folder_consensus")
+		}
+		plan.Year = consensus.Year.Value
+	}
+
+	tagArtistContradicts := consensus.Artist.Strong && tagArtist != "" && !consensus.Artist.Matches(tagArtist)
+	tagAlbumContradicts := consensus.Album.Strong && tagAlbum != "" && !consensus.Album.Matches(tagAlbum)
+	if !nfoTrusted || tagArtistContradicts || tagAlbumContradicts {
+		ids := map[string]string{}
+		if nfoTrusted {
+			for key, value := range musicExternalIDsFromNFO(entry.nfo) {
+				ids[key] = value
+			}
+		}
+		for key, value := range consensusSafeMusicTagIDs(tags, consensus) {
+			ids[key] = value
+		}
+		plan.ExternalIDs = nonEmptyStringMap(ids)
+	}
+	if !nfoTrusted {
+		plan.NFO = ""
+		plan.Issues = appendMusicIssue(plan.Issues, "nfo_rejected_by_folder_consensus")
+	}
+	if tagArtistContradicts || tagAlbumContradicts {
+		plan.Issues = appendMusicIssue(plan.Issues, "tag_outlier_rejected_by_folder_consensus")
+	}
+	if consensus.Artist.Strong || consensus.Album.Strong || consensus.Year.Strong {
+		if plan.Source == "" {
+			plan.Source = "folder_consensus"
+		} else if !strings.Contains(plan.Source, "folder_consensus") {
+			plan.Source += "+folder_consensus"
+		}
+		plan.Confidence = maxFloat(plan.Confidence, 0.92)
+	}
+	plan.IdentityKeys = musicAlbumIdentityKeys(plan)
+	plan.Key = plan.IdentityKeys[0]
+	return plan
+}
+
+func musicNFOTrustedByConsensus(entry musicNFOEntry, consensus musicconsensus.Release) bool {
+	if entry.nfo == nil {
+		return true
+	}
+	if consensus.Artist.Strong && entry.nfo.AlbumArtist != "" && !consensus.Artist.Matches(entry.nfo.AlbumArtist) {
+		return false
+	}
+	if consensus.Album.Strong && entry.nfo.Title != "" && !consensus.Album.Matches(entry.nfo.Title) {
+		return false
+	}
+	return true
+}
+
+func consensusSafeMusicTagIDs(tags audiotags.Tags, consensus musicconsensus.Release) map[string]string {
+	ids := map[string]string{}
+	tagArtist := strings.TrimSpace(firstNonEmpty(tags.AlbumArtist, tags.Artist))
+	artistSafe := !consensus.Artist.Strong || consensus.Artist.Matches(tagArtist)
+	albumSafe := !consensus.Album.Strong || consensus.Album.Matches(tags.Album)
+	if tags.AlbumArtistMBID != "" && (!consensus.Artist.Strong || consensus.Artist.Matches(tags.AlbumArtist)) {
+		ids["musicbrainz_album_artist"] = tags.AlbumArtistMBID
+	}
+	if tags.ArtistMBID != "" && (!consensus.Artist.Strong || consensus.Artist.Matches(tags.Artist)) {
+		ids["musicbrainz_artist"] = tags.ArtistMBID
+	}
+	if artistSafe && albumSafe {
+		if tags.AlbumMBID != "" {
+			ids["musicbrainz_album"] = tags.AlbumMBID
+		}
+		if tags.ReleaseGroupMBID != "" {
+			ids["musicbrainz_release_group"] = tags.ReleaseGroupMBID
+		}
+	}
+	return nonEmptyStringMap(ids)
+}
+
+func appendMusicIssue(issues []string, issue string) []string {
+	if !contains(issues, issue) {
+		return append(issues, issue)
+	}
+	return issues
 }
 
 func probeMusicTags(ctx context.Context, file InventoryFile, opts MusicAnalysisOptions, emit Emitter) audiotags.Tags {
