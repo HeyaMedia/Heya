@@ -2,7 +2,7 @@
   <section v-if="items.length" class="content-row">
     <SectionHeader title="Up Next" subtitle="Pick up where you left off">
       <template #actions>
-        <button class="scroll-btn" aria-label="Scroll left" @click="rail?.scrollByDir(-1)"><Icon name="chevleft" :size="16" /></button>
+        <AppHoldButton class="scroll-btn" aria-label="Scroll left" title="Hold to jump to start" @click="rail?.scrollByDir(-1)" @hold="rail?.scrollToStart()"><Icon name="chevleft" :size="16" /></AppHoldButton>
         <button class="scroll-btn" aria-label="Scroll right" @click="rail?.scrollByDir(1)"><Icon name="chevright" :size="16" /></button>
       </template>
     </SectionHeader>
@@ -57,7 +57,7 @@ defineEmits<{ play: [item: UpNextItem] }>()
 
 // AppRail is generic, so InstanceType<> can't name it — type the exposed
 // surface directly (same pattern as ContentRow).
-const rail = ref<{ scrollByDir: (dir: number, step?: number) => void; overflows: boolean } | null>(null)
+const rail = ref<{ scrollByDir: (dir: number, step?: number) => void; scrollToStart: () => void; overflows: boolean } | null>(null)
 
 // Up Next is always the next TV episode, so the title links to the series
 // detail page. The tile itself still plays; this is the escape hatch to the

@@ -149,11 +149,17 @@ function scrollToIndex(i: number, behavior: ScrollBehavior = 'auto') {
   scrollEl.value.scrollTo({ left, behavior })
 }
 
+/** Jump back to the rail's start (the hold-to-rewind affordance on left
+ *  arrows). */
+function scrollToStart() {
+  scrollEl.value?.scrollTo({ left: 0, behavior: 'smooth' })
+}
+
 // Whether the rail actually overflows its viewport — consumers gate their
 // scroll-arrow / expand chrome on this.
 const overflows = computed(() => trackWidth.value > viewportW.value + 1)
 
-defineExpose({ scrollByDir, scrollToIndex, overflows })
+defineExpose({ scrollByDir, scrollToIndex, scrollToStart, overflows })
 </script>
 
 <style scoped>

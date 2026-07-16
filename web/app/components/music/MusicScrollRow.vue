@@ -19,9 +19,9 @@
       </button>
       <div class="msr-grow" />
       <template v-if="!expanded && overflows">
-        <button class="msr-nav msr-nav-scroll" @click="rail?.scrollByDir(-1, 440)" title="Scroll left" aria-label="Scroll left">
+        <AppHoldButton class="msr-nav msr-nav-scroll" title="Hold to jump to start" aria-label="Scroll left" @click="rail?.scrollByDir(-1, 440)" @hold="rail?.scrollToStart()">
           <Icon name="chevleft" :size="16" />
-        </button>
+        </AppHoldButton>
         <button class="msr-nav msr-nav-scroll" @click="rail?.scrollByDir(1, 440)" title="Scroll right" aria-label="Scroll right">
           <Icon name="chevright" :size="16" />
         </button>
@@ -98,7 +98,7 @@ const props = withDefaults(defineProps<{
 
 defineEmits<{ 'load-more': [] }>()
 
-const rail = ref<{ scrollByDir: (dir: number, step?: number) => void; overflows: boolean } | null>(null)
+const rail = ref<{ scrollByDir: (dir: number, step?: number) => void; scrollToStart: () => void; overflows: boolean } | null>(null)
 const expanded = ref(false)
 // AppRail knows whether its track exceeds the viewport; while expanded the
 // rail is unmounted, so remember the last rail-mode answer for the collapse

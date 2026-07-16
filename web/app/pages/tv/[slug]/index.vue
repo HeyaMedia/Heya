@@ -136,7 +136,7 @@
           <template #subtitle>{{ displaySeasons.length }}</template>
           <template v-if="seasonsOverflows || seasonsExpanded" #actions>
             <div class="scroll-controls">
-              <button v-if="!seasonsExpanded" class="scroll-ctrl-btn" aria-label="Scroll left" @click="seasonsRail?.scrollByDir(-1)"><Icon name="chevleft" :size="14" /></button>
+              <AppHoldButton v-if="!seasonsExpanded" class="scroll-ctrl-btn" aria-label="Scroll left" title="Hold to jump to start" @click="seasonsRail?.scrollByDir(-1)" @hold="seasonsRail?.scrollToStart()"><Icon name="chevleft" :size="14" /></AppHoldButton>
               <button v-if="!seasonsExpanded" class="scroll-ctrl-btn" aria-label="Scroll right" @click="seasonsRail?.scrollByDir(1)"><Icon name="chevright" :size="14" /></button>
               <button class="scroll-ctrl-btn expand" aria-label="Toggle expanded view" :aria-expanded="seasonsExpanded" @click="seasonsExpanded = !seasonsExpanded">
                 <Icon name="chevdown" :size="14" :style="{ transform: seasonsExpanded ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }" />
@@ -298,7 +298,7 @@
         <SectionHeader title="More Like This">
           <template v-if="recsOverflows || recsExpanded" #actions>
             <div class="scroll-controls">
-              <button v-if="!recsExpanded" class="scroll-ctrl-btn" aria-label="Scroll left" @click="recsRail?.scrollByDir(-1)"><Icon name="chevleft" :size="14" /></button>
+              <AppHoldButton v-if="!recsExpanded" class="scroll-ctrl-btn" aria-label="Scroll left" title="Hold to jump to start" @click="recsRail?.scrollByDir(-1)" @hold="recsRail?.scrollToStart()"><Icon name="chevleft" :size="14" /></AppHoldButton>
               <button v-if="!recsExpanded" class="scroll-ctrl-btn" aria-label="Scroll right" @click="recsRail?.scrollByDir(1)"><Icon name="chevright" :size="14" /></button>
               <button class="scroll-ctrl-btn expand" aria-label="Toggle expanded view" :aria-expanded="recsExpanded" @click="recsExpanded = !recsExpanded">
                 <Icon name="chevdown" :size="14" :style="{ transform: recsExpanded ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }" />
@@ -436,12 +436,12 @@ useLiveRefresh([
 // `recsExpanded`, so `overflows` going stale/undefined while the rail is
 // unmounted (expanded → grid mode) can't hide the collapse toggle.
 const recsExpanded = ref(false)
-const recsRail = ref<{ scrollByDir: (dir: number, step?: number) => void; overflows: boolean } | null>(null)
+const recsRail = ref<{ scrollByDir: (dir: number, step?: number) => void; scrollToStart: () => void; overflows: boolean } | null>(null)
 const recsOverflows = computed(() => recsRail.value?.overflows ?? false)
 
 // ── Seasons rail state ──────────────────────────────────────────────────────
 const seasonsExpanded = ref(false)
-const seasonsRail = ref<{ scrollByDir: (dir: number, step?: number) => void; overflows: boolean } | null>(null)
+const seasonsRail = ref<{ scrollByDir: (dir: number, step?: number) => void; scrollToStart: () => void; overflows: boolean } | null>(null)
 const seasonsOverflows = computed(() => seasonsRail.value?.overflows ?? false)
 
 function recPosterUrl(r: any): string {

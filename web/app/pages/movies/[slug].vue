@@ -183,7 +183,7 @@
             <div class="extras-group-label">{{ formatExtraType(group.type) }} <span class="tab-count">{{ group.items.length }}</span></div>
             <div class="scroll-controls">
               <template v-if="!extrasExpanded[group.type]">
-                <button class="scroll-ctrl-btn" aria-label="Scroll left" @click="scrollExtras(group.type, 'left')"><Icon name="chevleft" :size="14" /></button>
+                <AppHoldButton class="scroll-ctrl-btn" aria-label="Scroll left" title="Hold to jump to start" @click="scrollExtras(group.type, 'left')" @hold="extrasRailRefs[group.type]?.scrollToStart()"><Icon name="chevleft" :size="14" /></AppHoldButton>
                 <button class="scroll-ctrl-btn" aria-label="Scroll right" @click="scrollExtras(group.type, 'right')"><Icon name="chevright" :size="14" /></button>
               </template>
               <button
@@ -297,7 +297,7 @@
         <SectionHeader title="More Like This">
           <template #actions>
             <div v-if="recsOverflows" class="scroll-controls">
-              <button class="scroll-ctrl-btn" aria-label="Scroll left" @click="recsRail?.scrollByDir(-1)"><Icon name="chevleft" :size="14" /></button>
+              <AppHoldButton class="scroll-ctrl-btn" aria-label="Scroll left" title="Hold to jump to start" @click="recsRail?.scrollByDir(-1)" @hold="recsRail?.scrollToStart()"><Icon name="chevleft" :size="14" /></AppHoldButton>
               <button class="scroll-ctrl-btn" aria-label="Scroll right" @click="recsRail?.scrollByDir(1)"><Icon name="chevright" :size="14" /></button>
               <button class="scroll-ctrl-btn expand" aria-label="Toggle expanded view" :aria-expanded="recsExpanded" @click="recsExpanded = !recsExpanded">
                 <Icon name="chevdown" :size="14" :style="{ transform: recsExpanded ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }" />
@@ -447,12 +447,12 @@ const streamInfo = ref<StreamInfoResponse | null>(null)
 const videoModal = ref<{ key: string; title: string } | null>(null)
 const showMetadataEditor = ref(false)
 const extrasExpanded = reactive<Record<string, boolean>>({})
-const extrasRailRefs: Record<string, { scrollByDir: (dir: number, step?: number) => void } | null> = {}
+const extrasRailRefs: Record<string, { scrollByDir: (dir: number, step?: number) => void; scrollToStart: () => void } | null> = {}
 
 const recsExpanded = ref(false)
 // AppRail is generic, so InstanceType<> can't name it — type the exposed
 // surface directly (ContentRow/MusicScrollRow pattern).
-const recsRail = ref<{ scrollByDir: (dir: number, step?: number) => void; overflows: boolean } | null>(null)
+const recsRail = ref<{ scrollByDir: (dir: number, step?: number) => void; scrollToStart: () => void; overflows: boolean } | null>(null)
 // AppRail unmounts (v-if) while expanded, so remember the last known overflow
 // answer — otherwise the chevron/expand cluster (itself gated on this flag)
 // would vanish the moment the user expands, trapping them in the grid.

@@ -11,7 +11,7 @@
       </TabsList>
       <!-- Pill variant (movies/tv): overflow-gated scroll controls + expand toggle. -->
       <div v-if="variant !== 'underline' && peopleTab === 'cast' && castOverflows" class="scroll-controls">
-        <button class="scroll-ctrl-btn" aria-label="Scroll left" @click="scrollCast('left')"><Icon name="chevleft" :size="14" /></button>
+        <AppHoldButton class="scroll-ctrl-btn" aria-label="Scroll left" title="Hold to jump to start" @click="scrollCast('left')" @hold="castRail?.scrollToStart()"><Icon name="chevleft" :size="14" /></AppHoldButton>
         <button class="scroll-ctrl-btn" aria-label="Scroll right" @click="scrollCast('right')"><Icon name="chevright" :size="14" /></button>
         <button
           v-if="cast && cast.length > 8" class="scroll-ctrl-btn expand" aria-label="Toggle expanded view"
@@ -23,7 +23,7 @@
       </div>
       <!-- Underline variant (MediaDetailView): always-visible round arrows. -->
       <div v-else-if="variant === 'underline' && peopleTab === 'cast'" style="display: flex; gap: 8px">
-        <button class="scroll-arrow" aria-label="Scroll left" @click="scrollCast('left')"><Icon name="chevleft" :size="16" /></button>
+        <AppHoldButton class="scroll-arrow" aria-label="Scroll left" title="Hold to jump to start" @click="scrollCast('left')" @hold="castRail?.scrollToStart()"><Icon name="chevleft" :size="16" /></AppHoldButton>
         <button class="scroll-arrow" aria-label="Scroll right" @click="scrollCast('right')"><Icon name="chevright" :size="16" /></button>
       </div>
     </div>
@@ -96,7 +96,7 @@ const castExpanded = ref(false)
 // AppRail is generic, so InstanceType<> can't name it — type the exposed
 // surface directly (same pattern as ContentRow). Only mounted in scroll mode,
 // so this — and the overflows it exposes — goes null while expanded to grid.
-const castRail = ref<{ scrollByDir: (dir: number, step?: number) => void; overflows: boolean } | null>(null)
+const castRail = ref<{ scrollByDir: (dir: number, step?: number) => void; scrollToStart: () => void; overflows: boolean } | null>(null)
 const castOverflows = computed(() => castRail.value?.overflows ?? false)
 
 // Per-person portrait fallback: a person shows their profile image when it
