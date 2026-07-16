@@ -16,10 +16,30 @@ declare module 'butterchurn' {
   // Milkdrop WebGL renderer. Only the handful of methods we drive are typed;
   // presets are opaque objects passed straight back into loadPreset.
   export interface Visualizer {
+    // Internal AudioProcessor (see AudioProcessor in butterchurn's source):
+    // allocated at construction time regardless of whether connectAudio() is
+    // ever called, sized to its own fftSize. Read .length off these rather
+    // than hardcoding when feeding render({ audioLevels }) — see
+    // VisualizerMilkdrop.vue's native-backend branch.
+    readonly audio: {
+      readonly timeByteArray: Uint8Array
+      readonly timeByteArrayL: Uint8Array
+      readonly timeByteArrayR: Uint8Array
+    }
     connectAudio(node: AudioNode): void
     disconnectAudio(node: AudioNode): void
     loadPreset(preset: object, blendTimeSeconds: number): void
-    render(): void
+    // `audioLevels`, when passed, is copied straight into the internal
+    // AudioProcessor's buffers and the connected AnalyserNode (if any) is NOT
+    // sampled that frame — used to feed native-backend PCM in place of a real
+    // WebAudio analyser tap.
+    render(opts?: {
+      audioLevels?: {
+        timeByteArray: Uint8Array
+        timeByteArrayL: Uint8Array
+        timeByteArrayR: Uint8Array
+      }
+    }): void
     setRendererSize(width: number, height: number): void
   }
   interface ButterchurnStatic {

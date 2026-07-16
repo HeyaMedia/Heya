@@ -1,9 +1,15 @@
 <!--
   VisualizerMilkdrop — the butterchurn (Milkdrop) WebGL renderer.
 
-  Taps the engine's shared AnalyserNode (already sitting at the tail of the
-  signal chain, so it sees the fully-processed post-EQ/limiter mix) and drives
-  a full-bleed canvas. Preset navigation + auto-cycle are exposed so a host
+  Web backend: taps the engine's shared AnalyserNode (already sitting at the
+  tail of the signal chain, so it sees the fully-processed post-EQ/limiter
+  mix) via `connectAudio()`. Native backend: there's no AnalyserNode to
+  connect (native playback doesn't route through the WebAudio graph at all),
+  so instead each frame copies usePlaybackAnalyser()'s streamed time-domain
+  PCM into byte buffers and hands them to butterchurn via
+  `render({ audioLevels })`, which skips its own analyser sampling — see the
+  native branches of onMounted()/render() below. Both paths drive the same
+  full-bleed canvas; preset navigation + auto-cycle are exposed so a host
   (VisualizerFullscreen) can wire buttons/hotkeys to them.
 
   Client-only in practice: butterchurn is dynamically imported in onMounted,
@@ -26,6 +32,11 @@ const player = usePlayerBindings()
 // useAudioEngine() returns a union with an SSR stub that omits the analyser;
 // the real engine (client) always has it. Narrow via cast, guard at use.
 const engine = useAudioEngine() as ReturnType<typeof useAudioEngine> & { analyserBridge?: AnalyserBridge }
+// Backend-neutral frame source. Under the web backend this component still
+// talks to the engine's AnalyserNode directly (butterchurn needs a real node
+// to `connectAudio`); under native it's the only way to reach the streamed
+// PCM frames — see the native branch of onMounted()/render() below.
+const analyser = usePlaybackAnalyser()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const error = ref('')
@@ -49,6 +60,22 @@ let visualizer: Visualizer | null = null
 let presets: Record<string, object> = {}
 let presetKeys: string[] = []
 let presetIndex = 0
+
+// Native-backend only: a locally-owned AudioContext (butterchurn's
+// constructor requires one to exist, purely to spin up its own internal,
+// never-connected analyser nodes — it's not routed to anything) plus the
+// per-frame byte buffers fed via `render({ audioLevels })` instead of a real
+// `connectAudio()` tap. Sized from `visualizer.audio.*.length` once the
+// visualizer exists (see onMounted) rather than hardcoded, since that's
+// butterchurn's own AudioProcessor allocation (fftSize, currently 1024).
+let nativeAudioCtx: AudioContext | null = null
+let nativeTimeBytes: Uint8Array | null = null
+let nativeTimeBytesL: Uint8Array | null = null
+let nativeTimeBytesR: Uint8Array | null = null
+// Only set when connectAudio() was actually called (web backend), so
+// onUnmounted's disconnectAudio pairs with it exactly — engine.analyserBridge
+// may exist but be unrelated under the native backend.
+let connectedAnalyserNode: AnalyserNode | null = null
 
 function applyPresetByKey(key: string, blend = 2.0) {
   const preset = presets[key]
@@ -143,10 +170,40 @@ function startRenderLoop() {
   rafId = requestAnimationFrame(render)
 }
 
+// Nearest-index resample of the −1..1 Float32 time-domain samples into an
+// unsigned-byte buffer centered at 128 — the same representation
+// AnalyserNode.getByteTimeDomainData() produces, which is what butterchurn's
+// AudioProcessor expects via updateAudio()/render({ audioLevels }).
+function resampleToBytes(src: Float32Array, dst: Uint8Array) {
+  const n = dst.length
+  const m = src.length
+  for (let i = 0; i < n; i++) {
+    const s = src[m === n ? i : Math.min(m - 1, Math.floor((i * m) / n))] ?? 0
+    dst[i] = Math.max(0, Math.min(255, Math.round(s * 127 + 128)))
+  }
+}
+
 function render() {
   rafId = 0
   if (cancelled || !shouldAnimate.value) return
-  try { visualizer?.render() } catch { return }
+  try {
+    if (player.playbackBackend.value === 'native' && nativeTimeBytes && nativeTimeBytesL && nativeTimeBytesR) {
+      const timeData = analyser.getTimeDomainData()
+      if (timeData.length) {
+        resampleToBytes(timeData, nativeTimeBytes)
+        // Mono source — L and R both read the same resampled data.
+        resampleToBytes(timeData, nativeTimeBytesL)
+        resampleToBytes(timeData, nativeTimeBytesR)
+        visualizer?.render({
+          audioLevels: { timeByteArray: nativeTimeBytes, timeByteArrayL: nativeTimeBytesL, timeByteArrayR: nativeTimeBytesR },
+        })
+      } else {
+        visualizer?.render()
+      }
+    } else {
+      visualizer?.render()
+    }
+  } catch { return }
   startRenderLoop()
 }
 
@@ -154,14 +211,33 @@ onMounted(async () => {
   const canvas = canvasRef.value
   if (!canvas) return
 
-  if (player.playbackBackend.value === 'native') {
-    error.value = 'Milkdrop requires WebAudio. Spectrum, scope, VU, and starfield support native playback.'
-    return
-  }
+  const isNative = player.playbackBackend.value === 'native'
+  let audioCtx: AudioContext
+  let webAnalyserNode: AnalyserNode | null = null
 
-  const audioCtx = getAudioContext()
-  const analyser = engine.analyserBridge?.analyserNode
-  if (!audioCtx || !analyser) { error.value = 'No audio context available'; return }
+  if (isNative) {
+    // No AnalyserNode to connect to under native playback — the frame data
+    // arrives as copied PCM via usePlaybackAnalyser() instead (fed in per
+    // frame below via render({ audioLevels })). If that stream itself isn't
+    // available (e.g. the native shell doesn't support the visualizer
+    // capability), there's nothing to drive butterchurn with at all.
+    if (!analyser.available.value) {
+      error.value = 'No native audio visualizer stream available.'
+      return
+    }
+    // The page still has the WebAudio API under native playback (only
+    // routing is native) — butterchurn's constructor requires a real
+    // AudioContext to exist, even though nothing gets connected to it here.
+    // Locally owned (not the shared engine singleton) and closed on unmount.
+    nativeAudioCtx = new AudioContext()
+    audioCtx = nativeAudioCtx
+  } else {
+    const ctx = getAudioContext()
+    const node = engine.analyserBridge?.analyserNode
+    if (!ctx || !node) { error.value = 'No audio context available'; return }
+    audioCtx = ctx
+    webAnalyserNode = node
+  }
 
   try {
     // The bare `butterchurn-presets` specifier resolves to the package `main`,
@@ -201,7 +277,19 @@ onMounted(async () => {
       error.value = `WebGL unavailable: ${String(err)}`
       return
     }
-    visualizer.connectAudio(analyser)
+    if (webAnalyserNode) {
+      visualizer.connectAudio(webAnalyserNode)
+      connectedAnalyserNode = webAnalyserNode
+    } else {
+      // Native: no connectAudio — size the per-frame byte buffers from
+      // butterchurn's own AudioProcessor allocation (fftSize, currently 1024)
+      // rather than hardcoding, per the exact arrays `render({ audioLevels })`
+      // expects (see resampleToBytes/render above).
+      const a = visualizer.audio
+      nativeTimeBytes = new Uint8Array(a.timeByteArray.length)
+      nativeTimeBytesL = new Uint8Array(a.timeByteArrayL.length)
+      nativeTimeBytesR = new Uint8Array(a.timeByteArrayR.length)
+    }
 
     // Restore the last preset if it still exists; otherwise start random.
     const stored = vis.currentPresetName.value
@@ -238,11 +326,18 @@ onUnmounted(() => {
   stopRenderLoop()
   resizeObserver?.disconnect()
   if (autoTimer) clearInterval(autoTimer)
-  const analyser = engine.analyserBridge?.analyserNode
-  if (visualizer && analyser) {
-    try { visualizer.disconnectAudio(analyser) } catch { /* already gone */ }
+  if (visualizer && connectedAnalyserNode) {
+    try { visualizer.disconnectAudio(connectedAnalyserNode) } catch { /* already gone */ }
   }
+  connectedAnalyserNode = null
   visualizer = null
+  nativeTimeBytes = null
+  nativeTimeBytesL = null
+  nativeTimeBytesR = null
+  if (nativeAudioCtx) {
+    nativeAudioCtx.close().catch(() => { /* already closing/closed */ })
+    nativeAudioCtx = null
+  }
 })
 </script>
 

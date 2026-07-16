@@ -191,7 +191,7 @@ import { trackLyricsQuery } from '~/queries/music'
 const open = defineModel<boolean>('open', { default: false })
 
 const {
-  currentTrack, playing, position, duration, playbackBackend,
+  currentTrack, playing, position, duration,
   shuffled, repeatMode, volume, muted,
   togglePlay, seek, stop, setVolume, toggleMute,
   toggleShuffle, cycleRepeat, nextTrack, prevTrack, formatTime,
@@ -309,9 +309,9 @@ const visualMode = useLocalStorage<VisualMode>('heya_np_visual_v1', 'art')
 const engine = useAudioEngine()
 const effectiveVisualMode = computed<VisualMode>(() => {
   if (engine.directMode) return 'art'
-  // Butterchurn can only connect to a real WebAudio AnalyserNode. Native PCM
-  // still drives the spectrum/scope/VU/starfield modes through Heya's adapter.
-  if (playbackBackend.value === 'native' && visualMode.value === 'milkdrop') return 'bars'
+  // Milkdrop works under both playback backends (see VisualizerMilkdrop.vue —
+  // native feeds it resampled PCM via render({ audioLevels }) instead of a
+  // real AnalyserNode tap), so no backend-specific override is needed here.
   return visualMode.value
 })
 const spectrumVariant = computed<'bars' | 'scope' | 'vu'>(() =>
