@@ -12,10 +12,11 @@
       v-if="mixes.length"
       title="Mixes for You"
       :card-size="200"
+      :items="mixes"
+      :item-key="(mix, i) => `mix-${mix.seed_artist_id}`"
     >
+      <template #default="{ item: mix }">
       <AppContextMenu
-        v-for="mix in mixes"
-        :key="`mix-${mix.seed_artist_id}`"
         :items="actions.forMix({ name: mix.name, seed_artist_slug: mix.seed_artist_slug, tracks: mix.tracks.map(mixTrackToEntity) })"
       >
       <NuxtLink
@@ -32,6 +33,7 @@
         />
       </NuxtLink>
       </AppContextMenu>
+      </template>
     </MusicScrollRow>
 
     <!-- Quick Stations: gold-tinted cards. Each links to a per-station page. -->

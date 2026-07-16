@@ -39,10 +39,12 @@
       aside="rotates daily"
       title-href="/music/stations/mixes"
       :card-size="260"
+      :phone-card-size="208"
+      :items="mixes"
+      :item-key="(mix, i) => `mix-${mix.seed_artist_id}`"
     >
+      <template #default="{ item: mix }">
       <AppContextMenu
-        v-for="mix in mixes"
-        :key="`mix-${mix.seed_artist_id}`"
         :items="actions.forMix({ name: mix.name, seed_artist_slug: mix.seed_artist_slug, tracks: mix.tracks.map(mixTrackToEntity) })"
       >
       <NuxtLink
@@ -59,6 +61,7 @@
         />
       </NuxtLink>
       </AppContextMenu>
+      </template>
     </MusicScrollRow>
 
     <!-- 2. Recently Added — album_type as a chip when EP/single/etc. -->
@@ -68,10 +71,14 @@
       :aside="addedThisWeek ? `${addedThisWeek} this week` : undefined"
       title-href="/music/albums"
       :card-size="170"
+      :items="recentAlbums"
+      :item-key="(al, i) => `ra-${al.id}`"
+      :has-more="recentAlbumsQuery.hasNextPage.value"
+      :loading-more="recentAlbumsQuery.asyncStatus.value === 'loading'"
+      @load-more="loadMoreRecentAlbums"
     >
+      <template #default="{ item: al }">
       <AppContextMenu
-        v-for="al in recentAlbums"
-        :key="`ra-${al.id}`"
         :items="actions.forAlbum({ id: al.id, title: al.title, artist_slug: al.artist_slug, album_slug: al.slug, artist_name: al.artist_name, available: al.available })"
       >
       <NuxtLink
@@ -93,6 +100,7 @@
         />
       </NuxtLink>
       </AppContextMenu>
+      </template>
     </MusicScrollRow>
 
     <!-- 3. Recently Played Artists — circular portraits with the name + count
@@ -102,10 +110,11 @@
       title="Recently Played"
       title-href="/music/artists"
       :card-size="150"
+      :items="recentArtists"
+      :item-key="(a, i) => `artist-${a.artist_id}`"
     >
+      <template #default="{ item: a }">
       <AppContextMenu
-        v-for="a in recentArtists"
-        :key="`artist-${a.artist_id}`"
         :items="actions.forArtist({ id: a.artist_id, name: a.artist_name, slug: a.artist_slug, media_item_id: a.media_item_id, available: a.available })"
       >
       <NuxtLink
@@ -125,6 +134,7 @@
         />
       </NuxtLink>
       </AppContextMenu>
+      </template>
     </MusicScrollRow>
 
     <!-- 4. On This Day — year chip top-left, anniversary releases. -->
@@ -132,10 +142,11 @@
       v-if="onThisDay.length"
       title="On This Day"
       :card-size="170"
+      :items="onThisDay"
+      :item-key="(al, i) => `otd-${al.id}`"
     >
+      <template #default="{ item: al }">
       <AppContextMenu
-        v-for="al in onThisDay"
-        :key="`otd-${al.id}`"
         :items="actions.forAlbum({ id: al.id, title: al.title, artist_slug: al.artist_slug, album_slug: al.slug, artist_name: al.artist_name })"
       >
       <NuxtLink
@@ -155,6 +166,7 @@
         />
       </NuxtLink>
       </AppContextMenu>
+      </template>
     </MusicScrollRow>
 
     <!-- 5. Recent Playlists — "Playlist" chip differentiates from albums. -->
@@ -163,10 +175,11 @@
       title="Your Playlists"
       title-href="/music/playlists"
       :card-size="170"
+      :items="recentPlaylists"
+      :item-key="(p, i) => `pl-${p.id}`"
     >
+      <template #default="{ item: p }">
       <AppContextMenu
-        v-for="p in recentPlaylists"
-        :key="`pl-${p.id}`"
         :items="playlistMenu.menuFor({ id: p.id, name: p.name, track_count: p.track_count, slug: p.slug })"
       >
       <NuxtLink
@@ -184,6 +197,7 @@
         />
       </NuxtLink>
       </AppContextMenu>
+      </template>
     </MusicScrollRow>
 
     <!-- 6. More By <Artist> — rotates every 5 minutes. -->
@@ -195,10 +209,11 @@
         aside="rotates"
         :title-href="`/music/artist/${entry.artist_slug}`"
         :card-size="170"
+        :items="entry.albums"
+        :item-key="(al, i) => `mb-al-${al.id}`"
       >
+        <template #default="{ item: al }">
         <AppContextMenu
-          v-for="al in entry.albums"
-          :key="`mb-al-${al.id}`"
           :items="actions.forAlbum({ id: al.id, title: al.title, artist_slug: entry.artist_slug, album_slug: al.slug, artist_name: entry.artist_name })"
         >
         <NuxtLink
@@ -218,6 +233,7 @@
           />
         </NuxtLink>
         </AppContextMenu>
+        </template>
       </MusicScrollRow>
     </template>
 
@@ -250,10 +266,11 @@
       v-if="mostPlayedShelf && mostPlayedShelf.enabled && mostPlayedShelf.albums.length"
       :title="mostPlayedShelf.window_label"
       :card-size="170"
+      :items="mostPlayedShelf.albums"
+      :item-key="(al, i) => `mp-${al.album_id}`"
     >
+      <template #default="{ item: al }">
       <AppContextMenu
-        v-for="al in mostPlayedShelf.albums"
-        :key="`mp-${al.album_id}`"
         :items="actions.forAlbum({ id: al.album_id, title: al.album_title, artist_slug: al.artist_slug, album_slug: al.album_slug, artist_name: al.artist_name })"
       >
       <NuxtLink
@@ -273,6 +290,7 @@
         />
       </NuxtLink>
       </AppContextMenu>
+      </template>
     </MusicScrollRow>
 
     <!-- 9. Haven't Played in a While — one scroll-row per lapsed artist. -->
@@ -284,10 +302,11 @@
         :title="`${formatLapsed(a)} ${a.artist_name}`"
         :title-href="`/music/artist/${a.artist_slug}`"
         :card-size="170"
+        :items="a.albums"
+        :item-key="(al, i) => `lapsed-al-${al.id}`"
       >
+        <template #default="{ item: al }">
         <AppContextMenu
-          v-for="al in a.albums"
-          :key="`lapsed-al-${al.id}`"
           :items="actions.forAlbum({ id: al.id, title: al.title, artist_slug: a.artist_slug, album_slug: al.slug, artist_name: a.artist_name })"
         >
         <NuxtLink
@@ -306,6 +325,7 @@
           />
         </NuxtLink>
         </AppContextMenu>
+        </template>
       </MusicScrollRow>
     </template>
 
@@ -314,10 +334,11 @@
       v-if="labelShelf && labelShelf.enabled && labelShelf.albums.length"
       :title="`More from ${labelShelf.label}`"
       :card-size="170"
+      :items="labelShelf.albums"
+      :item-key="(al, i) => `label-${al.album_id}`"
     >
+      <template #default="{ item: al }">
       <AppContextMenu
-        v-for="al in labelShelf.albums"
-        :key="`label-${al.album_id}`"
         :items="actions.forAlbum({ id: al.album_id, title: al.album_title, artist_slug: al.artist_slug, album_slug: al.album_slug, artist_name: al.artist_name })"
       >
       <NuxtLink
@@ -336,6 +357,7 @@
         />
       </NuxtLink>
       </AppContextMenu>
+      </template>
     </MusicScrollRow>
 
     <!-- Empty fallback — first-launch state when nothing has loaded yet. -->
@@ -354,26 +376,13 @@ import type { Track } from '~/composables/usePlayer'
 import type { ImageTone } from '~/composables/useImageTone'
 import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
 import type { StationTrack } from '~/components/music/StationResults.vue'
-import { useQuery } from '@pinia/colada'
+import { useInfiniteQuery, useQuery } from '@pinia/colada'
+import { recentAlbumsInfinite, type RecentAlbumRow } from '~/queries/rails'
 import { musicAlbumDetailQuery, musicMixesQuery, type MusicMix as Mix, type MusicMixTrack as MixTrack } from '~/queries/music'
 
 // Inline row shape declarations — these mirror the sqlc-generated Go types
 // 1:1, but kept local since they're only used in this file and the OpenAPI
 // types are wider (carry pgtype shapes etc.) than we want to bind against.
-interface RecentAlbumRow {
-  id: number
-  title: string
-  slug: string
-  year: string
-  artist_name: string
-  artist_slug: string
-  album_type: string
-  cover_path: string
-  available?: boolean
-  /** pgtype.Timestamptz — feeds the "added this week" ledger cell. */
-  added_at?: unknown
-}
-
 interface RecentArtistRow {
   artist_id: number
   artist_name: string
@@ -509,12 +518,12 @@ async function fetchItems<T>(path: string): Promise<T[]> {
 const mixesQuery = useQuery(musicMixesQuery())
 const mixes = computed<Mix[]>(() => (mixesQuery.data.value ?? []).slice(0, 6))
 
-const recentAlbumsQuery = useQuery({
-  key: ['music', 'home', 'recently-added'],
-  query: () => fetchItems<RecentAlbumRow>('/api/music/home/recently-added'),
-  staleTime: 1000 * 30,
-})
-const recentAlbums = computed<RecentAlbumRow[]>(() => recentAlbumsQuery.data.value ?? [])
+// Endless shelf: same paginated endpoint (and cache key) as the main home
+// rail, so both surfaces share pages and the shelf keeps loading as the
+// user scrolls right.
+const recentAlbumsQuery = useInfiniteQuery(() => recentAlbumsInfinite())
+const recentAlbums = computed<RecentAlbumRow[]>(() => (recentAlbumsQuery.data.value?.pages ?? []).flat())
+const loadMoreRecentAlbums = railLoadMore(recentAlbumsQuery)
 
 const recentArtistsQuery = useQuery({
   key: ['music', 'home', 'recently-played-artists'],
@@ -591,7 +600,7 @@ const labelShelf = computed<LabelShelf | null>(() => labelShelfQuery.data.value 
 // media_type='music' — see useLiveRefresh for why this is coalesced rather
 // than invalidating on every event.
 useLiveRefresh([
-  { events: ['media.added', 'media.updated'], filter: byMediaType('music'), keys: [['music', 'home', 'recently-added']] },
+  { events: ['media.added', 'media.updated'], filter: byMediaType('music'), keys: [['home', 'recent-albums']] },
 ])
 
 // ── Greeting head ───────────────────────────────────────────────────────────
@@ -966,12 +975,6 @@ async function playPlaylist(id: number, name: string) {
 
 /* "Haven't played in a while" heading — a touch of top room over the rails. */
 .mh-lapsed-head { margin-top: 8px; }
-
-/* Mixes rail: the gradient cards are wider (16/10) than square covers. Keep a
-   readable width on phones instead of MusicScrollRow's 140px square default. */
-@media (max-width: 720px) {
-  .mh-mix-rail :deep(.msr-scroller) > * { width: 208px !important; }
-}
 
 /* ── More in <Genre> — hairline name list, mono counts ── */
 .mh-genre { margin-bottom: 36px; }

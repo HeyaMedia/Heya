@@ -67,6 +67,8 @@ export interface RecentAlbumRow {
   year: string
   artist_name: string
   artist_slug: string
+  album_type?: string
+  cover_path?: string
   /** MIN(file created_at) for the album — pgtype.Timestamptz object. */
   added_at?: { Time?: string; Valid?: boolean } | string
   available?: boolean

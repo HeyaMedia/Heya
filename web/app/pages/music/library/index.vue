@@ -42,10 +42,11 @@
       title="Recently Added Albums"
       title-href="/music/albums"
       :card-size="170"
+      :items="recentAlbums"
+      :item-key="(al, i) => `ra-${al.id}`"
     >
+      <template #default="{ item: al, index: i }">
       <AppContextMenu
-        v-for="(al, i) in recentAlbums"
-        :key="`ra-${al.id}`"
         :items="actions.forAlbum({ id: al.id, title: al.title, artist_slug: al.artist_slug, album_slug: al.slug, artist_name: al.artist_name })"
       >
       <NuxtLink
@@ -62,6 +63,7 @@
         />
       </NuxtLink>
       </AppContextMenu>
+      </template>
     </MusicScrollRow>
 
     <!-- Recently Added Artists -->
@@ -70,10 +72,11 @@
       title="Recently Added Artists"
       title-href="/music/artists"
       :card-size="170"
+      :items="recentArtists"
+      :item-key="(ar, i) => `ar-${ar.id}`"
     >
+      <template #default="{ item: ar }">
       <AppContextMenu
-        v-for="ar in recentArtists"
-        :key="`ar-${ar.id}`"
         :items="actions.forArtist({ id: ar.id, name: ar.name, slug: ar.slug, media_item_id: ar.media_item_id })"
       >
       <NuxtLink
@@ -90,6 +93,7 @@
         />
       </NuxtLink>
       </AppContextMenu>
+      </template>
     </MusicScrollRow>
 
     <div v-if="homeLoading && !recentAlbums.length" class="ms-loading">Loading library overview…</div>

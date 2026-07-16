@@ -19,10 +19,10 @@
       </button>
       <div class="msr-grow" />
       <template v-if="!expanded && overflows">
-        <button class="msr-nav msr-nav-scroll" @click="scroll('left')" title="Scroll left" aria-label="Scroll left">
+        <button class="msr-nav msr-nav-scroll" @click="rail?.scrollByDir(-1, 440)" title="Scroll left" aria-label="Scroll left">
           <Icon name="chevleft" :size="16" />
         </button>
-        <button class="msr-nav msr-nav-scroll" @click="scroll('right')" title="Scroll right" aria-label="Scroll right">
+        <button class="msr-nav msr-nav-scroll" @click="rail?.scrollByDir(1, 440)" title="Scroll right" aria-label="Scroll right">
           <Icon name="chevright" :size="16" />
         </button>
       </template>
@@ -38,26 +38,42 @@
       </button>
     </header>
 
-    <!-- Expanded: wrap into a grid. Default: horizontal scroller. -->
+    <!-- Expanded: wrap into a grid (bounded — it renders every loaded item).
+         Default: the shared AppRail virtualized endless sidescroller. -->
     <div
       v-if="expanded"
       class="msr-grid"
       :style="{ gridTemplateColumns: `repeat(auto-fill, minmax(${cardSize}px, 1fr))` }"
     >
-      <slot />
+      <div v-for="(item, i) in items" :key="keyFor(item, i)">
+        <slot :item="item" :index="i" />
+      </div>
     </div>
-    <div
+    <AppRail
       v-else
-      ref="scroller"
-      class="msr-scroller"
-      :data-scroll-memory="memoryKey || title"
+      ref="rail"
+      class="msr-rail"
+      :items="items"
+      :tile-width="cardSize"
+      :phone-tile-width="phoneCardSize ?? 140"
+      :gap="16"
+      :phone-gap="10"
+      aspect="1/1"
+      snap
+      :memory-key="memoryKey || title"
+      :item-key="itemKey"
+      :has-more="hasMore"
+      :loading-more="loadingMore"
+      @load-more="$emit('load-more')"
     >
-      <slot />
-    </div>
+      <template #default="{ item, index }">
+        <slot :item="item" :index="index" />
+      </template>
+    </AppRail>
   </section>
 </template>
 
-<script setup lang="ts">
+<script setup lang="ts" generic="T">
 const props = withDefaults(defineProps<{
   title: string
   /** Mono dim aside after the title (e.g. "refreshed daily", a count). */
@@ -65,35 +81,39 @@ const props = withDefaults(defineProps<{
   memoryKey?: string
   titleHref?: string
   cardSize?: number
+  /** Phone tile width — e.g. the Mixes rail keeps 208px on phones. */
+  phoneCardSize?: number
+  /** Shelf items — rendered one per tile through the scoped slot. */
+  items: T[]
+  /** v-for key extractor; defaults to (item.key ?? item.id ?? index). */
+  itemKey?: (item: T, index: number) => string | number
+  /** More pages exist — AppRail shows its tail spinner and emits load-more. */
+  hasMore?: boolean
+  loadingMore?: boolean
   onPlayAll?: () => void
   onShuffleAll?: () => void
 }>(), {
   cardSize: 170,
 })
 
-const scroller = ref<HTMLElement | null>(null)
+defineEmits<{ 'load-more': [] }>()
+
+const rail = ref<{ scrollByDir: (dir: number, step?: number) => void; overflows: boolean } | null>(null)
 const expanded = ref(false)
-const overflows = ref(false)
-
-function scroll(dir: 'left' | 'right') {
-  scroller.value?.scrollBy({ left: dir === 'left' ? -440 : 440, behavior: 'smooth' })
-}
-
-function checkOverflow() {
-  const el = scroller.value
-  if (!el) { overflows.value = false; return }
-  overflows.value = el.scrollWidth > el.clientWidth + 1
-}
-
-useResizeObserver(scroller, checkOverflow)
-useMutationObserver(scroller, checkOverflow, { childList: true, subtree: true })
-watch(scroller, (el) => { if (el) checkOverflow() })
-
-watch(expanded, () => {
-  // When collapsing back, the scroller mounts fresh — observers latch on
-  // via the scroller-ref watch above the next tick.
-  nextTick(checkOverflow)
+// AppRail knows whether its track exceeds the viewport; while expanded the
+// rail is unmounted, so remember the last rail-mode answer for the collapse
+// toggle.
+const lastOverflow = ref(false)
+watchEffect(() => {
+  if (rail.value) lastOverflow.value = rail.value.overflows
 })
+const overflows = computed(() => (expanded.value ? lastOverflow.value : rail.value?.overflows ?? false))
+
+function keyFor(item: T, index: number): string | number {
+  if (props.itemKey) return props.itemKey(item, index)
+  const anyItem = item as { key?: string; id?: string | number }
+  return anyItem.key ?? anyItem.id ?? index
+}
 
 // Hint card-size to children that opt into it.
 provide('msr:cardSize', props.cardSize)
@@ -173,46 +193,6 @@ provide('msr:cardSize', props.cardSize)
 .msr-nav:active { transform: scale(0.95); }
 .msr-nav :deep(svg) { transition: transform 0.2s; }
 
-.msr-scroller {
-  display: flex;
-  gap: 16px;
-  overflow-x: auto;
-  scroll-snap-type: x proximity;
-  /* Shadow escape (ContentRow's pattern): pad the clip box out to the page
-     gutter and pull it back with matching negative margins, so the cards'
-     --shadow-card isn't cut off by overflow-x — and the rail runs edge to
-     edge under the page-pad gutter. --msr-bleed MUST track .page-pad's
-     per-breakpoint gutter (40/24/12): every consumer is a page-pad page,
-     and a bleed wider than the gutter would overflow .music-main sideways. */
-  --msr-bleed: var(--page-pad-x, 40px);
-  /* Heya 2.0 shadow room: big symmetric vertical padding/negative-margin so the
-     enlarged directional shadows + -4px hover lift aren't sliced. Horizontal
-     bleed STAYS at the page gutter (--msr-bleed) — a wider bleed would overflow
-     .music-main sideways (it doesn't clip overflow-x like the home .scroll). */
-  padding: 44px var(--msr-bleed) 130px;
-  margin: -44px calc(-1 * var(--msr-bleed)) -130px;
-  scroll-padding-left: var(--msr-bleed);
-  scrollbar-width: none;
-}
-@media (max-width: 1100px) { .msr-scroller { --msr-bleed: 24px; } }
-@media (max-width: 720px) {
-  .msr-scroller {
-    --msr-bleed: 12px;
-    padding-top: 30px; padding-bottom: 100px;
-    margin-top: -30px; margin-bottom: -100px;
-  }
-}
-.msr-scroller::-webkit-scrollbar { display: none; }
-/* Use :deep(*) instead of :slotted(*) so the sizing rule survives reka-ui's
-   slot cloning — AppContextMenu's <Slot>-with-as-child wraps swap the slot
-   child for a cloned VNode that loses Vue's :slotted() marker, so tiles
-   inside an AppContextMenu wrapper would otherwise lose their width. */
-.msr-scroller > :deep(*) {
-  flex-shrink: 0;
-  scroll-snap-align: start;
-  width: v-bind('`${cardSize}px`');
-}
-
 .msr-grid {
   display: grid;
   gap: 16px;
@@ -234,12 +214,7 @@ provide('msr:cardSize', props.cardSize)
   }
 }
 
-/* Phone: rail cards (mixes at 220px, everything else at 170px on desktop)
-   collapse to one sensible size — these are all square covers or circular
-   artist portraits, not text-heavy, so a uniform ~140px reads fine. */
 @media (max-width: 720px) {
-  .msr-scroller { gap: 10px; }
-  .msr-scroller > :deep(*) { width: 140px; }
   .msr-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)) !important; gap: 14px 12px; }
 }
 </style>

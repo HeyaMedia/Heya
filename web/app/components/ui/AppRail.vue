@@ -135,12 +135,25 @@ watchEffect(() => {
   maybeLoadMore()
 })
 
-function scrollByDir(dir: number) {
+function scrollByDir(dir: number, step = 600) {
   if (!scrollEl.value) return
-  scrollEl.value.scrollBy({ left: dir * 600, behavior: 'smooth' })
+  scrollEl.value.scrollBy({ left: dir * step, behavior: 'smooth' })
 }
 
-defineExpose({ scrollByDir })
+/** Center tile i in the viewport (used by strips that highlight a "current"
+ *  item — the tile may not be in the DOM yet, so scrollIntoView can't work;
+ *  position math can). */
+function scrollToIndex(i: number, behavior: ScrollBehavior = 'auto') {
+  if (!scrollEl.value) return
+  const left = Math.max(0, i * stride.value - (viewportW.value - tileW.value) / 2)
+  scrollEl.value.scrollTo({ left, behavior })
+}
+
+// Whether the rail actually overflows its viewport — consumers gate their
+// scroll-arrow / expand chrome on this.
+const overflows = computed(() => trackWidth.value > viewportW.value + 1)
+
+defineExpose({ scrollByDir, scrollToIndex, overflows })
 </script>
 
 <style scoped>

@@ -29,15 +29,30 @@
     </div>
 
     <TabsContent value="cast" style="margin-top: 16px">
-      <!-- Scroll mode -->
-      <div v-if="variant === 'underline' || !castExpanded" ref="castScrollEl" class="hscroll">
-        <NuxtLink v-for="c in cast" :key="c.id" :to="personUrl(c)" class="person">
-          <LoadingImage v-if="showImg(c)" :src="`/api/person/${c.id}/image`" :width="264" :quality="80" :alt="c.name" class="person-img" @error="failedImg.add(c.id)" />
-          <div v-else class="person-noimg">{{ personInitials(c.name) }}</div>
-          <div class="person-nm">{{ c.name }}</div>
-          <div v-if="c.character" class="person-as">as {{ c.character }}</div>
-        </NuxtLink>
-      </div>
+      <!-- Scroll mode: AppRail owns the virtualization + scroller chrome; only
+           the person-portrait tile markup lives in the slot. `aspect` covers
+           the image box only (132x176) — the name/role caption sits below it
+           as plain flow content and bleeds into AppRail's shadow padding,
+           the same model ContentRow uses for its title overlay. -->
+      <AppRail
+        v-if="variant === 'underline' || !castExpanded"
+        ref="castRail"
+        :items="cast || []"
+        :tile-width="132"
+        :phone-tile-width="104"
+        :gap="variant === 'underline' ? 14 : 16"
+        :phone-gap="variant === 'underline' ? 14 : 16"
+        aspect="3/4"
+      >
+        <template #default="{ item: c }">
+          <NuxtLink :to="personUrl(c)" class="person">
+            <LoadingImage v-if="showImg(c)" :src="`/api/person/${c.id}/image`" :width="264" :quality="80" :alt="c.name" class="person-img" @error="failedImg.add(c.id)" />
+            <div v-else class="person-noimg">{{ personInitials(c.name) }}</div>
+            <div class="person-nm">{{ c.name }}</div>
+            <div v-if="c.character" class="person-as">as {{ c.character }}</div>
+          </NuxtLink>
+        </template>
+      </AppRail>
       <!-- Expanded grid mode (pill variant only) -->
       <div v-else class="cast-grid">
         <NuxtLink v-for="c in cast" :key="c.id" :to="personUrl(c)" class="person">
@@ -78,8 +93,11 @@ const props = defineProps<{
 
 const peopleTab = ref<'cast' | 'crew'>('cast')
 const castExpanded = ref(false)
-const castScrollEl = ref<HTMLElement | null>(null)
-const castOverflows = ref(false)
+// AppRail is generic, so InstanceType<> can't name it — type the exposed
+// surface directly (same pattern as ContentRow). Only mounted in scroll mode,
+// so this — and the overflows it exposes — goes null while expanded to grid.
+const castRail = ref<{ scrollByDir: (dir: number, step?: number) => void; overflows: boolean } | null>(null)
+const castOverflows = computed(() => castRail.value?.overflows ?? false)
 
 // Per-person portrait fallback: a person shows their profile image when it
 // exists AND hasn't 404'd; otherwise a mono-initials tile (heya2.css .noimg).
@@ -96,22 +114,8 @@ function personInitials(name: string): string {
   return (words.length >= 2 ? words[0]!.charAt(0) + words[1]!.charAt(0) : t.slice(0, 2)).toUpperCase()
 }
 
-function checkCastOverflow() {
-  nextTick(() => {
-    if (castScrollEl.value) {
-      castOverflows.value = castScrollEl.value.scrollWidth > castScrollEl.value.clientWidth
-    } else {
-      castOverflows.value = (props.cast?.length || 0) > 8
-    }
-  })
-}
-
-watch(() => props.cast, () => checkCastOverflow(), { immediate: true })
-
 function scrollCast(dir: 'left' | 'right') {
-  if (!castScrollEl.value) return
-  const amount = props.variant === 'underline' ? 500 : castScrollEl.value.clientWidth * 0.75
-  castScrollEl.value.scrollBy({ left: dir === 'left' ? -amount : amount, behavior: 'smooth' })
+  castRail.value?.scrollByDir(dir === 'left' ? -1 : 1)
 }
 
 // Department-ordered crew grouping (Directing first, then Writing, …).
@@ -137,8 +141,9 @@ const crewByDepartment = computed(() => {
 </script>
 
 <style scoped>
-/* Shared — both variants. `.hscroll` base + `.scroll-controls`/`.scroll-ctrl-btn`
-   come from heya.css globals. */
+/* Shared — both variants. The cast rail (scroll mode) is an AppRail; its
+   scroller chrome (padding/shadow-room/snap/scrollbar-hiding) lives there.
+   `.scroll-controls`/`.scroll-ctrl-btn` come from heya.css globals. */
 
 /* ── Person portrait tiles (heya2.css `.person`): 132×176 rounded-rect
    portrait, name + mono role line BELOW the art, hairline ring + top-left
@@ -179,9 +184,6 @@ const crewByDepartment = computed(() => {
   text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-/* Rail tiles get a fixed basis; grid tiles fill their column (width auto). */
-.hscroll .person { flex: 0 0 132px; width: 132px; }
-
 /* ── Pill variant (movies / tv) ─────────────────────────────────────── */
 .cct-pill .section-row-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .cct-pill .tab-bar { display: flex; gap: 4px; }
@@ -219,7 +221,6 @@ const crewByDepartment = computed(() => {
 .cct-underline .tab-btn:hover { color: var(--fg-0); }
 .cct-underline .tab-btn[data-state="active"] { color: var(--gold); border-bottom-color: var(--gold); }
 .cct-underline .tab-count { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); margin-left: 6px; }
-.cct-underline .hscroll { gap: 14px; }
 /* Crew dept label replicates the previous `.section-title` + inline styles. */
 .cct-underline .crew-dept { margin-bottom: 24px; }
 .cct-underline .crew-dept-label {
@@ -237,13 +238,14 @@ const crewByDepartment = computed(() => {
 }
 .cct-underline .scroll-arrow:hover { background: rgb(var(--ink) / 0.12); color: var(--fg-0); }
 
-/* Expanded grid (pill only). `.person` (no `.hscroll` ancestor) fills each
-   grid cell at width auto. */
+/* Expanded grid (pill only). `.person` fills each grid cell (width auto,
+   grid's default stretch). */
 .cast-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 18px; }
 
-/* Phone: smaller portraits (heya2.css ≤560 .person). */
+/* Phone: smaller portraits (heya2.css ≤560 .person). The rail's own tile
+   width comes from AppRail's `phone-tile-width` prop; this just shrinks the
+   caption text. */
 @media (max-width: 560px) {
-  .hscroll .person { flex-basis: 104px; width: 104px; }
   .person-nm { font-size: 12.5px; }
 }
 

@@ -118,25 +118,25 @@
           </template>
         </SectionHeader>
 
-        <div class="epstrip">
-          <NuxtLink
-            v-for="ep in episodes"
-            :key="ep.id"
-            :to="episodeLink(ep)"
-            class="epstrip-it"
-            :class="{ on: ep.episode_number === currentEpNum, seen: watchedEpisodes.has(ep.id) }"
-          >
-            <LoadingImage
-              :src="episodeStillUrl(ep)"
-              :width="400"
-              :quality="80"
-              alt=""
-              @error="hideBroken"
-            />
-            <span class="epstrip-n">E{{ pad(ep.episode_number) }}</span>
-            <div class="epstrip-t">{{ ep.preferred_title || ep.title || `Episode ${ep.episode_number}` }}</div>
-          </NuxtLink>
-        </div>
+        <AppRail :items="episodes" :tile-width="172" :phone-tile-width="150" aspect="16/9" :gap="14" :phone-gap="14" memory-key="episode-strip">
+          <template #default="{ item: ep }">
+            <NuxtLink
+              :to="episodeLink(ep)"
+              class="epstrip-it"
+              :class="{ on: ep.episode_number === currentEpNum, seen: watchedEpisodes.has(ep.id) }"
+            >
+              <LoadingImage
+                :src="episodeStillUrl(ep)"
+                :width="400"
+                :quality="80"
+                alt=""
+                @error="hideBroken"
+              />
+              <span class="epstrip-n">E{{ pad(ep.episode_number) }}</span>
+              <div class="epstrip-t">{{ ep.preferred_title || ep.title || `Episode ${ep.episode_number}` }}</div>
+            </NuxtLink>
+          </template>
+        </AppRail>
       </section>
 
       <!-- ── Details: stream info + audio/subtitle preferences ── -->
@@ -666,18 +666,11 @@ watch([numParam, epParam], async () => {
   overflow: hidden;
 }
 
-/* episode mini-strip (heya2.css .epstrip). Shadow-room trick keeps ringed/
-   hover elevation from clipping at the scroller edge. */
-.epstrip {
-  display: flex;
-  gap: 14px;
-  overflow-x: auto;
-  padding: 30px 44px 60px;
-  margin: -30px -44px -40px;
-  scrollbar-width: none;
-}
-.epstrip::-webkit-scrollbar { display: none; }
-.epstrip-it { flex: 0 0 172px; position: relative; text-decoration: none; color: inherit; }
+/* episode mini-strip (heya2.css .epstrip) — AppRail owns the scroller/
+   shadow-room chrome now. epstrip-it was a flex item before (which
+   blockifies regardless of its own `display`); now a plain AppRail slot
+   child, it needs `display: block` explicitly to keep the same box. */
+.epstrip-it { display: block; position: relative; text-decoration: none; color: inherit; }
 .epstrip-it :deep(img) {
   width: 172px;
   aspect-ratio: 16/9;
@@ -736,8 +729,6 @@ watch([numParam, epParam], async () => {
   .nav-pill { display: none; }
   .btn-play { height: 48px; padding: 0 22px 0 18px; }
   .pill.icon { width: 48px; height: 48px; }
-  .epstrip { padding: 24px 16px 50px; margin: -24px -16px -34px; }
-  .epstrip-it { flex-basis: 150px; }
   .epstrip-it :deep(img) { width: 150px; }
 }
 </style>

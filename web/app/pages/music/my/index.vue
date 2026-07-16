@@ -26,10 +26,11 @@
       v-if="playlists.length"
       title="My Playlists"
       :card-size="170"
+      :items="playlists"
+      :item-key="(pl, i) => `pl-${pl.id}`"
     >
+      <template #default="{ item: pl }">
       <AppContextMenu
-        v-for="pl in playlists"
-        :key="`pl-${pl.id}`"
         :items="playlistMenu.menuFor({ id: pl.id, name: pl.name, track_count: pl.track_count, slug: pl.slug })"
       >
       <NuxtLink
@@ -46,6 +47,7 @@
         />
       </NuxtLink>
       </AppContextMenu>
+      </template>
     </MusicScrollRow>
 
     <!-- Liked Artists -->
@@ -54,10 +56,11 @@
       title="Liked Artists"
       title-href="/music/my/artists"
       :card-size="160"
+      :items="lovedArtists"
+      :item-key="(ar, i) => `la-${ar.id}`"
     >
+      <template #default="{ item: ar }">
       <AppContextMenu
-        v-for="ar in lovedArtists"
-        :key="`la-${ar.id}`"
         :items="actions.forArtist({ id: ar.id, name: ar.name, slug: ar.slug, media_item_id: ar.media_item_id })"
       >
       <NuxtLink
@@ -74,6 +77,7 @@
         <div class="ms-circle-label">{{ ar.name }}</div>
       </NuxtLink>
       </AppContextMenu>
+      </template>
     </MusicScrollRow>
 
     <!-- Liked Albums -->
@@ -82,10 +86,11 @@
       title="Liked Albums"
       title-href="/music/my/albums"
       :card-size="170"
+      :items="lovedAlbums"
+      :item-key="(al, i) => `lal-${al.id}`"
     >
+      <template #default="{ item: al }">
       <AppContextMenu
-        v-for="al in lovedAlbums"
-        :key="`lal-${al.id}`"
         :items="actions.forAlbum({ id: al.id, title: al.title, artist_slug: al.artist_slug, album_slug: al.slug, artist_name: al.artist_name })"
       >
       <NuxtLink
@@ -101,6 +106,7 @@
         />
       </NuxtLink>
       </AppContextMenu>
+      </template>
     </MusicScrollRow>
 
     <!-- Loved Songs — rated 1★+, capped at 8 so it doesn't dominate. Page-owned

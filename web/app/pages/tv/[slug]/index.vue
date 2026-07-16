@@ -136,8 +136,8 @@
           <template #subtitle>{{ displaySeasons.length }}</template>
           <template v-if="seasonsOverflows || seasonsExpanded" #actions>
             <div class="scroll-controls">
-              <button v-if="!seasonsExpanded" class="scroll-ctrl-btn" aria-label="Scroll left" @click="scrollSeasons('left')"><Icon name="chevleft" :size="14" /></button>
-              <button v-if="!seasonsExpanded" class="scroll-ctrl-btn" aria-label="Scroll right" @click="scrollSeasons('right')"><Icon name="chevright" :size="14" /></button>
+              <button v-if="!seasonsExpanded" class="scroll-ctrl-btn" aria-label="Scroll left" @click="seasonsRail?.scrollByDir(-1)"><Icon name="chevleft" :size="14" /></button>
+              <button v-if="!seasonsExpanded" class="scroll-ctrl-btn" aria-label="Scroll right" @click="seasonsRail?.scrollByDir(1)"><Icon name="chevright" :size="14" /></button>
               <button class="scroll-ctrl-btn expand" aria-label="Toggle expanded view" :aria-expanded="seasonsExpanded" @click="seasonsExpanded = !seasonsExpanded">
                 <Icon name="chevdown" :size="14" :style="{ transform: seasonsExpanded ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }" />
               </button>
@@ -145,7 +145,7 @@
           </template>
         </SectionHeader>
 
-        <div ref="seasonsScrollEl" :class="seasonsExpanded ? 'seasons-grid' : 'card-rail'">
+        <div v-if="seasonsExpanded" class="seasons-grid">
           <AppContextMenu v-for="s in displaySeasons" :key="s.season_number" :items="seasonContextItems(s)">
             <div class="season-card-wrap">
               <NuxtLink :to="seasonUrl(s)" class="season-card">
@@ -192,6 +192,55 @@
             </div>
           </AppContextMenu>
         </div>
+        <AppRail v-else ref="seasonsRail" :items="displaySeasons" :tile-width="178" :phone-tile-width="132" aspect="2/3" :gap="18" :item-key="(s: any) => s.season_number">
+          <template #default="{ item: s }">
+            <AppContextMenu :items="seasonContextItems(s)">
+              <div class="season-card-wrap">
+                <NuxtLink :to="seasonUrl(s)" class="season-card">
+                  <MediaCard
+                    :idx="s.season_number"
+                    :src="seasonPosterUrl(s)"
+                    aspect="2/3"
+                    :width="260"
+                    :title="seasonLabel(s)"
+                    :subtitle="seasonSubtitle(s)"
+                    :progress-pct="seasonWatchInfo(s) ? seasonWatchPct(s) : 0"
+                  >
+                    <template #badges>
+                      <div v-if="seasonWatchInfo(s)" class="season-badge" :class="{ complete: seasonWatchInfo(s)!.remaining === 0 }">
+                        <Icon v-if="seasonWatchInfo(s)!.remaining === 0" name="check" :size="10" />
+                        <span v-else>{{ seasonWatchInfo(s)!.remaining }}</span>
+                      </div>
+                    </template>
+                  </MediaCard>
+                </NuxtLink>
+                <!-- Sibling of the NuxtLink, not a descendant — real buttons
+                     can't nest inside a real anchor. -->
+                <div class="season-overlay">
+                  <button
+                    class="season-action" :class="{ loved: isSeasonFavorited(s) }"
+                    :aria-label="isSeasonFavorited(s) ? 'Remove season from loved' : 'Add season to loved'"
+                    :aria-pressed="isSeasonFavorited(s)"
+                    @click.stop.prevent="toggleSeasonFavorite(s)"
+                  >
+                    <Icon :name="isSeasonFavorited(s) ? 'heartfill' : 'heart'" :size="14" />
+                  </button>
+                  <button
+                    class="season-action" :class="{ watched: seasonFullyWatched(s) }"
+                    :aria-label="seasonFullyWatched(s) ? 'Mark season unwatched' : 'Mark season watched'"
+                    :aria-pressed="seasonFullyWatched(s)"
+                    @click.stop.prevent="toggleSeasonWatched(s)"
+                  >
+                    <Icon name="check" :size="14" />
+                  </button>
+                  <button class="season-action" aria-label="Expand season poster" @click.stop.prevent="openSeasonLightbox(s)">
+                    <Icon name="expand" :size="14" />
+                  </button>
+                </div>
+              </div>
+            </AppContextMenu>
+          </template>
+        </AppRail>
       </section>
 
       <!-- Cast & Crew (shared component, consumed as-is) -->
@@ -204,22 +253,24 @@
         <SectionHeader title="Videos">
           <template #subtitle>{{ detail.videos.length }}</template>
         </SectionHeader>
-        <div class="card-rail">
-          <button v-for="(v, i) in detail.videos" :key="v.id" class="vid-card" @click="openVideo(v.video_key, v.name)">
-            <MediaCard
-              :idx="i"
-              :src="`https://img.youtube.com/vi/${v.video_key}/mqdefault.jpg`"
-              aspect="16/9"
-              :width="360"
-              :title="v.name"
-              :badge-tl="v.video_type"
-            >
-              <template #badges>
-                <div class="video-play"><Icon name="play" :size="20" /></div>
-              </template>
-            </MediaCard>
-          </button>
-        </div>
+        <AppRail :items="detail.videos" :tile-width="300" :phone-tile-width="240" aspect="16/9" :gap="18" memory-key="tv-videos">
+          <template #default="{ item: v, index: i }">
+            <button class="vid-card" @click="openVideo(v.video_key, v.name)">
+              <MediaCard
+                :idx="i"
+                :src="`https://img.youtube.com/vi/${v.video_key}/mqdefault.jpg`"
+                aspect="16/9"
+                :width="360"
+                :title="v.name"
+                :badge-tl="v.video_type"
+              >
+                <template #badges>
+                  <div class="video-play"><Icon name="play" :size="20" /></div>
+                </template>
+              </MediaCard>
+            </button>
+          </template>
+        </AppRail>
       </section>
 
       <!-- Video modal -->
@@ -247,15 +298,15 @@
         <SectionHeader title="More Like This">
           <template v-if="recsOverflows || recsExpanded" #actions>
             <div class="scroll-controls">
-              <button v-if="!recsExpanded" class="scroll-ctrl-btn" aria-label="Scroll left" @click="scrollRecs('left')"><Icon name="chevleft" :size="14" /></button>
-              <button v-if="!recsExpanded" class="scroll-ctrl-btn" aria-label="Scroll right" @click="scrollRecs('right')"><Icon name="chevright" :size="14" /></button>
+              <button v-if="!recsExpanded" class="scroll-ctrl-btn" aria-label="Scroll left" @click="recsRail?.scrollByDir(-1)"><Icon name="chevleft" :size="14" /></button>
+              <button v-if="!recsExpanded" class="scroll-ctrl-btn" aria-label="Scroll right" @click="recsRail?.scrollByDir(1)"><Icon name="chevright" :size="14" /></button>
               <button class="scroll-ctrl-btn expand" aria-label="Toggle expanded view" :aria-expanded="recsExpanded" @click="recsExpanded = !recsExpanded">
                 <Icon name="chevdown" :size="14" :style="{ transform: recsExpanded ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }" />
               </button>
             </div>
           </template>
         </SectionHeader>
-        <div ref="recsScrollEl" :class="recsExpanded ? 'rec-grid' : 'card-rail'">
+        <div v-if="recsExpanded" class="rec-grid">
           <AppContextMenu v-for="r in visibleRecs" :key="r.id" :items="recContextItems(r)" :disabled="!r.local_media_item_id">
             <NuxtLink :to="recTo(r)" :target="r.local_media_item_id ? undefined : '_blank'" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
               <MediaCard
@@ -270,6 +321,23 @@
             </NuxtLink>
           </AppContextMenu>
         </div>
+        <AppRail v-else ref="recsRail" :items="visibleRecs" :tile-width="148" :phone-tile-width="124" aspect="2/3" :gap="18" memory-key="tv-recs">
+          <template #default="{ item: r }">
+            <AppContextMenu :items="recContextItems(r)" :disabled="!r.local_media_item_id">
+              <NuxtLink :to="recTo(r)" :target="r.local_media_item_id ? undefined : '_blank'" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
+                <MediaCard
+                  :idx="r.id"
+                  :src="recPosterUrl(r)"
+                  aspect="2/3"
+                  :width="260"
+                  :title="r.title ?? 'Untitled'"
+                  :badge-tl="r.local_media_item_id ? '' : 'provider ↗'"
+                  :badge-tr="r.vote_average ? `★ ${formatVote(r.vote_average)}` : ''"
+                />
+              </NuxtLink>
+            </AppContextMenu>
+          </template>
+        </AppRail>
       </section>
 
       <!-- Ratings — full external-ratings panel -->
@@ -363,46 +431,18 @@ useLiveRefresh([
 ])
 
 // ── Recommendations rail state ──────────────────────────────────────────────
+// AppRail is generic, so InstanceType<> can't name it — type the exposed
+// surface directly. The chevron/expand cluster's `v-if` already ORs in
+// `recsExpanded`, so `overflows` going stale/undefined while the rail is
+// unmounted (expanded → grid mode) can't hide the collapse toggle.
 const recsExpanded = ref(false)
-const recsScrollEl = ref<HTMLElement | null>(null)
-const recsOverflows = ref(false)
-
-function checkRecsOverflow() {
-  nextTick(() => {
-    if (recsScrollEl.value && !recsExpanded.value) {
-      recsOverflows.value = recsScrollEl.value.scrollWidth > recsScrollEl.value.clientWidth
-    } else {
-      recsOverflows.value = visibleRecs.value.length > 6
-    }
-  })
-}
-
-function scrollRecs(dir: 'left' | 'right') {
-  if (!recsScrollEl.value) return
-  const amount = recsScrollEl.value.clientWidth * 0.75
-  recsScrollEl.value.scrollBy({ left: dir === 'left' ? -amount : amount, behavior: 'smooth' })
-}
+const recsRail = ref<{ scrollByDir: (dir: number, step?: number) => void; overflows: boolean } | null>(null)
+const recsOverflows = computed(() => recsRail.value?.overflows ?? false)
 
 // ── Seasons rail state ──────────────────────────────────────────────────────
 const seasonsExpanded = ref(false)
-const seasonsScrollEl = ref<HTMLElement | null>(null)
-const seasonsOverflows = ref(false)
-
-function checkSeasonsOverflow() {
-  nextTick(() => {
-    if (seasonsScrollEl.value && !seasonsExpanded.value) {
-      seasonsOverflows.value = seasonsScrollEl.value.scrollWidth > seasonsScrollEl.value.clientWidth
-    } else {
-      seasonsOverflows.value = displaySeasons.value.length > 6
-    }
-  })
-}
-
-function scrollSeasons(dir: 'left' | 'right') {
-  if (!seasonsScrollEl.value) return
-  const amount = seasonsScrollEl.value.clientWidth * 0.75
-  seasonsScrollEl.value.scrollBy({ left: dir === 'left' ? -amount : amount, behavior: 'smooth' })
-}
+const seasonsRail = ref<{ scrollByDir: (dir: number, step?: number) => void; overflows: boolean } | null>(null)
+const seasonsOverflows = computed(() => seasonsRail.value?.overflows ?? false)
 
 function recPosterUrl(r: any): string {
   if (r.local_media_item_id || r.local_public_id) return usePosterUrl({ id: r.local_media_item_id, public_id: r.local_public_id }) ?? ''
@@ -903,12 +943,7 @@ watch(detail, async (d) => {
   loadState()
   loadRecommendationContextState()
   loadUpNext()
-  checkRecsOverflow()
-  checkSeasonsOverflow()
 }, { immediate: true })
-
-watch([visibleRecs, recsExpanded], () => checkRecsOverflow())
-watch([displaySeasons, seasonsExpanded], () => checkSeasonsOverflow())
 </script>
 
 <style scoped>
@@ -1184,30 +1219,20 @@ watch([displaySeasons, seasonsExpanded], () => checkSeasonsOverflow())
 }
 .credit-row .cv { font-size: 14px; color: rgb(var(--ink) / 0.88); }
 
-/* rails (shadow-room trick: pronounced directional shadows clear the scroller
-   edge). Applies to seasons/videos/recs rails. */
-.card-rail {
-  display: flex;
-  align-items: flex-start;
-  gap: 18px;
-  overflow-x: auto;
-  padding: 30px 44px 60px;
-  margin: -30px -44px -44px;
-  scrollbar-width: none;
-}
-.card-rail::-webkit-scrollbar { display: none; }
+/* rails — AppRail owns the scroller/shadow-room chrome now; only the tile
+   dimensions stay page-local. Applies to seasons/videos/recs rails. */
 
 /* season tiles — MediaCard supplies the embedded label + progress; the wrap
-   carries the directional float shadow + hover elevation. In a `.card-rail` (a
-   scroll container: overflow-x:auto forces overflow-y:auto), the tile needs an
-   EXPLICIT height, not just width: MediaCard's Poster paints via an
-   absolutely-positioned <img> + aspect-ratio, so it contributes no in-flow
-   intrinsic height for the flex line to measure and the card would overflow a
-   collapsed rail. Height = width × 3/2. The expanded grid needs no height —
-   grid rows size to the Poster's aspect-ratio (proven by the old grid). */
+   carries the directional float shadow + hover elevation. Width/height are
+   only needed in rail mode (AppRail's tile already carries the width, but an
+   explicit height keeps this rule self-describing); the expanded grid needs
+   neither — grid rows size to the Poster's aspect-ratio and the track width
+   comes from `.seasons-grid`'s own columns. */
 .seasons-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); gap: 22px 18px; }
-.card-rail .season-card-wrap { width: 178px; height: 267px; flex-shrink: 0; }
+.seasons-grid .season-card-wrap { width: auto; height: auto; }
 .season-card-wrap {
+  width: 178px;
+  height: 267px;
   position: relative;
   border-radius: 10px;
   box-shadow: var(--shadow-card);
@@ -1249,7 +1274,6 @@ watch([displaySeasons, seasonsExpanded], () => checkSeasonsOverflow())
 .vid-card {
   width: 300px;
   height: 169px;
-  flex-shrink: 0;
   position: relative;
   text-align: left;
   background: none; border: 0; padding: 0; color: inherit; cursor: pointer;
@@ -1271,9 +1295,11 @@ watch([displaySeasons, seasonsExpanded], () => checkSeasonsOverflow())
 .video-dialog .app-dialog-body { padding: 0; }
 .video-dialog-iframe { width: 100%; aspect-ratio: 16 / 9; display: block; border: 0; }
 
-/* recs */
-.card-rail .rec-card { width: 148px; height: 222px; flex-shrink: 0; }
+/* recs — width/height only bite in rail mode; the expanded grid sizes tiles
+   from its own columns. */
 .rec-card {
+  width: 148px;
+  height: 222px;
   position: relative;
   text-decoration: none; color: inherit; display: block;
   border-radius: 9px;
@@ -1285,6 +1311,7 @@ watch([displaySeasons, seasonsExpanded], () => checkSeasonsOverflow())
 .rec-card.rec-external { opacity: 0.62; }
 .rec-card.rec-external:hover { opacity: 1; }
 .rec-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 22px 18px; }
+.rec-grid .rec-card { width: auto; height: auto; }
 
 /* ratings panel */
 .ratings-panel { max-width: 480px; }
@@ -1324,9 +1351,8 @@ watch([displaySeasons, seasonsExpanded], () => checkSeasonsOverflow())
   /* Play takes its own full-width row; My List + the icon pills wrap onto the
      next row (all reachable — My List must not vanish on phone). */
   .pill.icon { width: 48px; height: 48px; }
-  .card-rail { padding: 24px 16px 50px; margin: -24px -16px -36px; }
-  .card-rail .season-card-wrap { width: 132px; height: 198px; }
-  .card-rail .rec-card { width: 124px; height: 186px; }
+  .season-card-wrap { width: 132px; height: 198px; }
+  .rec-card { width: 124px; height: 186px; }
   .vid-card { width: 240px; height: 135px; }
   .detail-grid { grid-template-columns: 1fr; gap: 26px; }
 }

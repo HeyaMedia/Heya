@@ -346,19 +346,19 @@
       <!-- Sonic similar — local pgvector centroids, circular avatars. -->
       <section v-if="sonicSimilar.length" class="section">
         <SectionHeader title="Sounds Like" :subtitle="String(sonicSimilar.length)" />
-        <div class="avatar-row">
-          <NuxtLink
-            v-for="row in sonicSimilar"
-            :key="row.id"
-            :to="`/music/artist/${row.media_slug}`"
-            class="avatar-tile"
-            :title="`${row.name} — cosine distance ${row.distance.toFixed(3)}`"
-          >
-            <Poster :idx="row.id" :src="usePosterUrl({ id: row.media_item_id, public_id: row.media_item_public_id })" aspect="1/1" :width="160" class="avatar-img" />
-            <div class="avatar-nm">{{ row.name }}</div>
-            <div class="avatar-src">sonic match</div>
-          </NuxtLink>
-        </div>
+        <AppRail :items="sonicSimilar" :tile-width="132" :phone-tile-width="132" aspect="1/1" :gap="18" :phone-gap="18" snap memory-key="artist-sonic-similar">
+          <template #default="{ item: row }">
+            <NuxtLink
+              :to="`/music/artist/${row.media_slug}`"
+              class="avatar-tile"
+              :title="`${row.name} — cosine distance ${row.distance.toFixed(3)}`"
+            >
+              <Poster :idx="row.id" :src="usePosterUrl({ id: row.media_item_id, public_id: row.media_item_public_id })" aspect="1/1" :width="160" class="avatar-img" />
+              <div class="avatar-nm">{{ row.name }}</div>
+              <div class="avatar-src">sonic match</div>
+            </NuxtLink>
+          </template>
+        </AppRail>
       </section>
 
       <!-- Similar artists — Last.fm + ListenBrainz via heya.media. Gated by the
@@ -366,27 +366,27 @@
            portrait (upstream Last.fm images are mostly dead). -->
       <section v-if="visibleSimilar.length" class="section">
         <SectionHeader title="Similar Artists" :subtitle="String(visibleSimilar.length)" />
-        <div class="avatar-row">
-          <component
-            :is="row.local_slug ? 'NuxtLink' : 'div'"
-            v-for="(row, i) in visibleSimilar"
-            :key="row.name + i"
-            :to="row.local_slug ? `/music/artist/${row.local_slug}` : undefined"
-            class="avatar-tile"
-            :class="{ 'avatar-external': !row.local_slug }"
-            :title="row.local_slug ? `Open ${row.name}` : `${row.name} (not in library)`"
-          >
-            <Poster
-              :idx="i"
-              :src="row.local_slug ? `/api/media/${row.local_slug}/image/poster` : row.image"
-              aspect="1/1"
-              :width="160"
-              class="avatar-img"
-            />
-            <div class="avatar-nm">{{ row.name }}</div>
-            <div class="avatar-src">{{ row.source }}</div>
-          </component>
-        </div>
+        <AppRail :items="visibleSimilar" :tile-width="132" :phone-tile-width="132" aspect="1/1" :gap="18" :phone-gap="18" snap memory-key="artist-similar">
+          <template #default="{ item: row, index: i }">
+            <component
+              :is="row.local_slug ? 'NuxtLink' : 'div'"
+              :to="row.local_slug ? `/music/artist/${row.local_slug}` : undefined"
+              class="avatar-tile"
+              :class="{ 'avatar-external': !row.local_slug }"
+              :title="row.local_slug ? `Open ${row.name}` : `${row.name} (not in library)`"
+            >
+              <Poster
+                :idx="i"
+                :src="row.local_slug ? `/api/media/${row.local_slug}/image/poster` : row.image"
+                aspect="1/1"
+                :width="160"
+                class="avatar-img"
+              />
+              <div class="avatar-nm">{{ row.name }}</div>
+              <div class="avatar-src">{{ row.source }}</div>
+            </component>
+          </template>
+        </AppRail>
       </section>
     </main>
 
@@ -1490,24 +1490,16 @@ a.trk-al:hover { color: var(--tone); }
 .member-yrs { font: 500 11px var(--font-mono); color: rgb(var(--ink) / 0.5); margin-top: 3px; }
 .mt-gap { margin-top: 36px; }
 
-/* ── Sounds Like / Similar — circular avatar rails ── */
-.avatar-row {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 132px;
-  gap: 18px;
-  overflow-x: auto;
-  padding: 6px 44px 12px;
-  margin: -6px -44px 0;
-  scroll-snap-type: x proximity;
-  scrollbar-width: none;
-}
-.avatar-row::-webkit-scrollbar { display: none; }
+/* ── Sounds Like / Similar — circular avatar rails (AppRail owns the
+   scroller/snap/shadow-room chrome now). avatar-tile was a grid item before
+   (blockified regardless of its own `display`); now a plain AppRail slot
+   child, the NuxtLink variant needs `display: block` explicitly to keep the
+   same box. */
 .avatar-tile {
+  display: block;
   text-align: center;
   text-decoration: none;
   color: inherit;
-  scroll-snap-align: start;
 }
 .avatar-img {
   border-radius: 50%;
@@ -1587,7 +1579,6 @@ a.trk-al:hover { color: var(--tone); }
   .trk-more:active { color: var(--tone); }
 
   .album-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 18px 12px; }
-  .avatar-row { padding-left: var(--pad-fluid); padding-right: var(--pad-fluid); margin-left: calc(-1 * var(--pad-fluid)); margin-right: calc(-1 * var(--pad-fluid)); }
 }
 </style>
 

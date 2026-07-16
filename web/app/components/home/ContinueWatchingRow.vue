@@ -2,37 +2,46 @@
   <section v-if="items.length" class="content-row">
     <SectionHeader title="Continue Watching">
       <template #actions>
-        <button class="scroll-btn" aria-label="Scroll left" @click="scrollBy(-1)"><Icon name="chevleft" :size="16" /></button>
-        <button class="scroll-btn" aria-label="Scroll right" @click="scrollBy(1)"><Icon name="chevright" :size="16" /></button>
+        <button class="scroll-btn" aria-label="Scroll left" @click="rail?.scrollByDir(-1)"><Icon name="chevleft" :size="16" /></button>
+        <button class="scroll-btn" aria-label="Scroll right" @click="rail?.scrollByDir(1)"><Icon name="chevright" :size="16" /></button>
       </template>
     </SectionHeader>
-    <div class="row-scroll" ref="scrollEl" data-scroll-memory="continue-watching">
-      <div
-        v-for="(item, i) in items"
-        :key="item.id"
-        class="cw-tile card-tile"
-        @click="$emit('play', item)"
-      >
-        <MediaCard
-          :idx="i"
-          :src="thumbUrl(item)"
-          aspect="16/9"
-          :title="item.title"
-          :title-to="detailUrl(item)"
-          :subtitle="bottomLine(item)"
-          :badge-tl="episodeBadge(item)"
-          :badge-tr="formatRemaining(item)"
-          :badge-tr-gold="false"
-          :progress-pct="progressPct(item)"
-        >
-          <template #badges>
-            <div class="cw-play-overlay">
-              <div class="cw-play-btn"><Icon name="play" :size="16" /></div>
-            </div>
-          </template>
-        </MediaCard>
-      </div>
-    </div>
+    <!-- AppRail owns the virtualization + scroller chrome; this component is
+         just the Continue Watching tile skin (progress bar, play overlay). -->
+    <AppRail
+      ref="rail"
+      :items="items"
+      :tile-width="280"
+      :phone-tile-width="260"
+      :gap="16"
+      :phone-gap="12"
+      aspect="16/9"
+      memory-key="continue-watching"
+      snap
+    >
+      <template #default="{ item, index }">
+        <div class="cw-tile card-tile" @click="$emit('play', item)">
+          <MediaCard
+            :idx="index"
+            :src="thumbUrl(item)"
+            aspect="16/9"
+            :title="item.title"
+            :title-to="detailUrl(item)"
+            :subtitle="bottomLine(item)"
+            :badge-tl="episodeBadge(item)"
+            :badge-tr="formatRemaining(item)"
+            :badge-tr-gold="false"
+            :progress-pct="progressPct(item)"
+          >
+            <template #badges>
+              <div class="cw-play-overlay">
+                <div class="cw-play-btn"><Icon name="play" :size="16" /></div>
+              </div>
+            </template>
+          </MediaCard>
+        </div>
+      </template>
+    </AppRail>
   </section>
 </template>
 
@@ -42,12 +51,9 @@ import type { ContinueWatchingItem } from '~/types/home'
 defineProps<{ items: ContinueWatchingItem[] }>()
 defineEmits<{ play: [item: ContinueWatchingItem] }>()
 
-const scrollEl = ref<HTMLElement>()
-
-function scrollBy(dir: number) {
-  if (!scrollEl.value) return
-  scrollEl.value.scrollBy({ left: dir * 600, behavior: 'smooth' })
-}
+// AppRail is generic, so InstanceType<> can't name it — type the exposed
+// surface directly (same pattern as ContentRow).
+const rail = ref<{ scrollByDir: (dir: number, step?: number) => void; overflows: boolean } | null>(null)
 
 function thumbUrl(item: ContinueWatchingItem): string {
   if (item.entity_type === 'episode' && item.season_number && item.episode_number) {
@@ -93,31 +99,6 @@ function detailUrl(item: ContinueWatchingItem): string {
 <style scoped>
 .content-row { margin-bottom: 40px; }
 
-.row-scroll {
-  display: flex; gap: 16px;
-  overflow-x: auto; overflow-y: hidden;
-  scroll-snap-type: x mandatory;
-  /* Shadow room (Heya 2.0): layout-neutral padding/negative-margin pair so the
-     enlarged directional shadows + hover lift aren't sliced by overflow.
-     Horizontal bleed tracks the page gutter (--page-pad-x) → edge-to-edge with
-     no sideways page overflow. Snap aligns to the content edge, not the pad. */
-  --rail-bleed: var(--page-pad-x, 40px);
-  scroll-padding-left: var(--rail-bleed);
-  padding: 44px var(--rail-bleed) 130px;
-  margin: -44px calc(-1 * var(--rail-bleed)) -130px;
-  scrollbar-width: none;
-}
-@media (max-width: 1100px) { .row-scroll { --rail-bleed: 24px; } }
-@media (max-width: 720px) {
-  .row-scroll {
-    --rail-bleed: 12px;
-    padding-top: 30px; padding-bottom: 100px;
-    margin-top: -30px; margin-bottom: -100px;
-  }
-}
-.row-scroll::-webkit-scrollbar { display: none; }
-.row-scroll > * { scroll-snap-align: start; }
-
 .scroll-btn {
   width: 32px; height: 32px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
@@ -127,7 +108,7 @@ function detailUrl(item: ContinueWatchingItem): string {
 .scroll-btn:hover { background: rgb(var(--ink) / 0.12); color: var(--fg-0); }
 
 .cw-tile {
-  width: 280px; flex-shrink: 0; cursor: pointer;
+  width: 100%; cursor: pointer;
 }
 
 /* Play overlay sits in MediaCard's badges slot — covers the full image,
@@ -149,13 +130,5 @@ function detailUrl(item: ContinueWatchingItem): string {
 /* Touch: swipe replaces the mouse-only scroll arrows. */
 @media (pointer: coarse) {
   .scroll-btn { display: none; }
-}
-
-/* Phone: the 280px 16/9 backdrop card was rendering at ~85% of a 390px
-   viewport (280 / (390 - page-pad) after the page's horizontal padding) —
-   nearly the full screen for a "rail" tile. Cap wide episode cards at 70vw. */
-@media (max-width: 720px) {
-  .row-scroll { gap: 12px; }
-  .cw-tile { width: min(70vw, 300px); }
 }
 </style>

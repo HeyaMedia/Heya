@@ -471,23 +471,23 @@ if (import.meta.client) {
       <!-- Sounds Like — sonic-similar albums (existing endpoint). -->
       <section v-if="sonicSimilar.length" class="section">
         <SectionHeader title="Sounds Like" :subtitle="String(sonicSimilar.length)" />
-        <div class="card-row">
-          <AppContextMenu
-            v-for="r in sonicSimilar"
-            :key="`sl-${r.id}`"
-            :items="actions.forAlbum({ id: r.id, title: r.title, artist_slug: r.artist_slug, album_slug: r.album_slug, artist_name: r.artist_name })"
-          >
-            <NuxtLink :to="`/music/artist/${r.artist_slug}/${r.album_slug}`" class="card-tile">
-              <MusicCard
-                :src="useAlbumCoverUrl(r.artist_slug, r.album_slug)"
-                :title="r.title"
-                :subtitle="`${r.artist_name}${r.album_year ? ' · ' + r.album_year : ''}`"
-                :width="200"
-                @play="playContext({ kind: 'album', id: r.id })"
-              />
-            </NuxtLink>
-          </AppContextMenu>
-        </div>
+        <AppRail :items="sonicSimilar" :tile-width="172" :phone-tile-width="132" aspect="1/1" :gap="18" snap :item-key="(r: any) => `sl-${r.id}`" memory-key="album-sounds-like">
+          <template #default="{ item: r }">
+            <AppContextMenu
+              :items="actions.forAlbum({ id: r.id, title: r.title, artist_slug: r.artist_slug, album_slug: r.album_slug, artist_name: r.artist_name })"
+            >
+              <NuxtLink :to="`/music/artist/${r.artist_slug}/${r.album_slug}`" class="card-tile">
+                <MusicCard
+                  :src="useAlbumCoverUrl(r.artist_slug, r.album_slug)"
+                  :title="r.title"
+                  :subtitle="`${r.artist_name}${r.album_year ? ' · ' + r.album_year : ''}`"
+                  :width="200"
+                  @play="playContext({ kind: 'album', id: r.id })"
+                />
+              </NuxtLink>
+            </AppContextMenu>
+          </template>
+        </AppRail>
       </section>
 
       <!-- More by this artist — existing albums endpoint, current album excluded. -->
@@ -497,25 +497,25 @@ if (import.meta.client) {
             <NuxtLink :to="`/music/artist/${artistSlug}`" class="sec-more">All releases</NuxtLink>
           </template>
         </SectionHeader>
-        <div class="card-row">
-          <AppContextMenu
-            v-for="a in moreBy"
-            :key="`mb-${a.id}`"
-            :items="actions.forAlbum({ id: a.id, title: a.title, artist_slug: artistSlug, album_slug: a.slug, artist_name: artistName, available: a.available })"
-          >
-            <NuxtLink :to="`/music/artist/${artistSlug}/${a.slug}`" class="card-tile">
-              <MusicCard
-                :src="useAlbumCoverUrl(artistSlug, a.slug)"
-                :title="a.title"
-                :subtitle="a.year || '—'"
-                :badge-tl="a.album_type && a.album_type.toLowerCase() !== 'album' ? a.album_type.toUpperCase() : ''"
-                :missing="!a.available"
-                :width="200"
-                @play="playContext({ kind: 'album', id: a.id })"
-              />
-            </NuxtLink>
-          </AppContextMenu>
-        </div>
+        <AppRail :items="moreBy" :tile-width="172" :phone-tile-width="132" aspect="1/1" :gap="18" snap :item-key="(a: any) => `mb-${a.id}`" memory-key="album-more-by">
+          <template #default="{ item: a }">
+            <AppContextMenu
+              :items="actions.forAlbum({ id: a.id, title: a.title, artist_slug: artistSlug, album_slug: a.slug, artist_name: artistName, available: a.available })"
+            >
+              <NuxtLink :to="`/music/artist/${artistSlug}/${a.slug}`" class="card-tile">
+                <MusicCard
+                  :src="useAlbumCoverUrl(artistSlug, a.slug)"
+                  :title="a.title"
+                  :subtitle="a.year || '—'"
+                  :badge-tl="a.album_type && a.album_type.toLowerCase() !== 'album' ? a.album_type.toUpperCase() : ''"
+                  :missing="!a.available"
+                  :width="200"
+                  @play="playContext({ kind: 'album', id: a.id })"
+                />
+              </NuxtLink>
+            </AppContextMenu>
+          </template>
+        </AppRail>
       </section>
     </main>
 
@@ -876,25 +876,12 @@ if (import.meta.client) {
 }
 .trk-more:hover { color: rgb(var(--ink) / 0.9); background: rgb(var(--ink) / 0.06); }
 
-/* ── Card rails (Sounds Like / More by) — shadow room so the directional
-   card shadows aren't clipped by the scroll box. ── */
-.card-row {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 172px;
-  gap: 18px;
-  overflow-x: auto;
-  padding: 44px 64px 24px;
-  margin: -44px -64px 0;
-  scroll-snap-type: x proximity;
-  scrollbar-width: none;
-}
-.card-row::-webkit-scrollbar { display: none; }
+/* ── Card rails (Sounds Like / More by) — AppRail owns the scroller/snap/
+   shadow-room chrome now. ── */
 .card-tile {
   display: block;
   text-decoration: none;
   color: inherit;
-  scroll-snap-align: start;
 }
 
 /* ═══ RESPONSIVE ═══════════════════════════════════════════════════════════ */
@@ -936,13 +923,5 @@ if (import.meta.client) {
   .trk-stars { display: none; }
   .trk-d { grid-column: 3; }
   .trk-more { grid-column: 4; opacity: 1; width: 40px; height: 40px; }
-
-  .card-row {
-    grid-auto-columns: 132px;
-    padding-left: var(--pad-fluid);
-    padding-right: var(--pad-fluid);
-    margin-left: calc(-1 * var(--pad-fluid));
-    margin-right: calc(-1 * var(--pad-fluid));
-  }
 }
 </style>

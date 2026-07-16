@@ -195,7 +195,7 @@
               </button>
             </div>
           </div>
-          <div :class="extrasExpanded[group.type] ? 'extras-grid' : 'hscroll'" :ref="(el: any) => setExtrasRef(group.type, el)">
+          <div v-if="extrasExpanded[group.type]" class="extras-grid">
             <div v-for="e in group.items" :key="e.id" class="extra-card">
               <div class="extra-thumb">
                 <LoadingImage v-if="e.thumbnail_path" :src="`/api/extras/${e.id}/thumbnail`" :width="400" :quality="80" alt="" class="extra-thumb-img" loading="lazy" />
@@ -207,27 +207,56 @@
               </div>
             </div>
           </div>
+          <!-- extra-card is a fixed-height list-item tile (thumb + meta), not
+               an image-box aspect tile — explicit tileHeight measured from the
+               rendered card: 48px thumb + 2×10px padding + 2×1px border. -->
+          <AppRail
+            v-else
+            :ref="(el: any) => setExtrasRailRef(group.type, el)"
+            :items="group.items"
+            :tile-width="280"
+            :tile-height="70"
+            :gap="16"
+            :phone-gap="16"
+            :memory-key="`extras-${group.type}`"
+          >
+            <template #default="{ item: e }">
+              <div class="extra-card">
+                <div class="extra-thumb">
+                  <LoadingImage v-if="e.thumbnail_path" :src="`/api/extras/${e.id}/thumbnail`" :width="400" :quality="80" alt="" class="extra-thumb-img" loading="lazy" />
+                  <Icon v-else name="play" :size="20" />
+                </div>
+                <div class="extra-meta">
+                  <div class="extra-title">{{ e.title }}</div>
+                  <div v-if="e.duration_ms" class="extra-sub">{{ formatExtraDuration(e.duration_ms) }}</div>
+                </div>
+              </div>
+            </template>
+          </AppRail>
         </div>
       </section>
 
-      <!-- Videos / Trailers -->
+      <!-- Videos / Trailers — swipe-only, no arrows; no phone-specific size in
+           the original CSS, so pin phone-tile-width to the same 300px. -->
       <section v-if="detail.videos?.length" class="section">
         <SectionHeader title="Videos" />
-        <div class="hscroll">
-          <button v-for="(v, i) in detail.videos" :key="v.id" class="video-card" @click="openVideo(v.video_key, v.name)">
-            <MediaCard
-              :idx="i"
-              :src="`https://img.youtube.com/vi/${v.video_key}/mqdefault.jpg`"
-              aspect="16/9"
-              :title="v.name"
-              :badge-tl="v.video_type"
-            >
-              <template #badges>
-                <div class="video-play"><Icon name="play" :size="20" /></div>
-              </template>
-            </MediaCard>
-          </button>
-        </div>
+        <AppRail :items="detail.videos" :tile-width="300" :phone-tile-width="300" aspect="16/9" :gap="16" :phone-gap="16" memory-key="movie-videos">
+          <template #default="{ item: v, index: i }">
+            <button class="video-card" @click="openVideo(v.video_key, v.name)">
+              <MediaCard
+                :idx="i"
+                :src="`https://img.youtube.com/vi/${v.video_key}/mqdefault.jpg`"
+                aspect="16/9"
+                :title="v.name"
+                :badge-tl="v.video_type"
+              >
+                <template #badges>
+                  <div class="video-play"><Icon name="play" :size="20" /></div>
+                </template>
+              </MediaCard>
+            </button>
+          </template>
+        </AppRail>
       </section>
 
       <!-- Video modal -->
@@ -268,8 +297,8 @@
         <SectionHeader title="More Like This">
           <template #actions>
             <div v-if="recsOverflows" class="scroll-controls">
-              <button class="scroll-ctrl-btn" aria-label="Scroll left" @click="scrollRecs('left')"><Icon name="chevleft" :size="14" /></button>
-              <button class="scroll-ctrl-btn" aria-label="Scroll right" @click="scrollRecs('right')"><Icon name="chevright" :size="14" /></button>
+              <button class="scroll-ctrl-btn" aria-label="Scroll left" @click="recsRail?.scrollByDir(-1)"><Icon name="chevleft" :size="14" /></button>
+              <button class="scroll-ctrl-btn" aria-label="Scroll right" @click="recsRail?.scrollByDir(1)"><Icon name="chevright" :size="14" /></button>
               <button class="scroll-ctrl-btn expand" aria-label="Toggle expanded view" :aria-expanded="recsExpanded" @click="recsExpanded = !recsExpanded">
                 <Icon name="chevdown" :size="14" :style="{ transform: recsExpanded ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }" />
               </button>
@@ -277,7 +306,7 @@
           </template>
         </SectionHeader>
 
-        <div v-if="!recsExpanded" ref="recsScrollEl" class="hscroll">
+        <div v-if="recsExpanded" class="rec-grid">
           <AppContextMenu v-for="r in visibleRecs" :key="r.id" :items="recContextItems(r)" :disabled="!r.local_media_item_id">
             <NuxtLink :to="recTo(r)" :target="r.local_media_item_id ? undefined : '_blank'" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
               <MediaCard
@@ -291,20 +320,24 @@
             </NuxtLink>
           </AppContextMenu>
         </div>
-        <div v-else class="rec-grid">
-          <AppContextMenu v-for="r in visibleRecs" :key="r.id" :items="recContextItems(r)" :disabled="!r.local_media_item_id">
-            <NuxtLink :to="recTo(r)" :target="r.local_media_item_id ? undefined : '_blank'" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
-              <MediaCard
-                :idx="r.id"
-                :src="recPosterUrl(r)"
-                aspect="2/3"
-                :title="r.title ?? 'Untitled'"
-                :badge-tl="r.local_media_item_id ? '' : 'provider ↗'"
-                :badge-tr="r.vote_average ? `★ ${formatVote(r.vote_average)}` : ''"
-              />
-            </NuxtLink>
-          </AppContextMenu>
-        </div>
+        <!-- rec-card is a fixed 150px column (no phone-specific size in the
+             original CSS) — pin phone-tile-width to match. -->
+        <AppRail v-else ref="recsRail" :items="visibleRecs" :tile-width="150" :phone-tile-width="150" aspect="2/3" :gap="16" :phone-gap="16" memory-key="movie-recs">
+          <template #default="{ item: r }">
+            <AppContextMenu :items="recContextItems(r)" :disabled="!r.local_media_item_id">
+              <NuxtLink :to="recTo(r)" :target="r.local_media_item_id ? undefined : '_blank'" class="rec-card" :class="{ 'rec-external': !r.local_media_item_id }">
+                <MediaCard
+                  :idx="r.id"
+                  :src="recPosterUrl(r)"
+                  aspect="2/3"
+                  :title="r.title ?? 'Untitled'"
+                  :badge-tl="r.local_media_item_id ? '' : 'provider ↗'"
+                  :badge-tr="r.vote_average ? `★ ${formatVote(r.vote_average)}` : ''"
+                />
+              </NuxtLink>
+            </AppContextMenu>
+          </template>
+        </AppRail>
       </section>
 
       <!-- Ratings: the full color-graded meter panel (the ledger carries only
@@ -414,37 +447,25 @@ const streamInfo = ref<StreamInfoResponse | null>(null)
 const videoModal = ref<{ key: string; title: string } | null>(null)
 const showMetadataEditor = ref(false)
 const extrasExpanded = reactive<Record<string, boolean>>({})
-const extrasRefs: Record<string, HTMLElement> = {}
+const extrasRailRefs: Record<string, { scrollByDir: (dir: number, step?: number) => void } | null> = {}
 
 const recsExpanded = ref(false)
-const recsScrollEl = ref<HTMLElement | null>(null)
-const recsOverflows = ref(false)
+// AppRail is generic, so InstanceType<> can't name it — type the exposed
+// surface directly (ContentRow/MusicScrollRow pattern).
+const recsRail = ref<{ scrollByDir: (dir: number, step?: number) => void; overflows: boolean } | null>(null)
+// AppRail unmounts (v-if) while expanded, so remember the last known overflow
+// answer — otherwise the chevron/expand cluster (itself gated on this flag)
+// would vanish the moment the user expands, trapping them in the grid.
+const lastRecsOverflow = ref(false)
+watchEffect(() => { if (recsRail.value) lastRecsOverflow.value = recsRail.value.overflows })
+const recsOverflows = computed(() => (recsExpanded.value ? lastRecsOverflow.value : (recsRail.value?.overflows ?? false)))
 
-function checkRecsOverflow() {
-  nextTick(() => {
-    if (recsScrollEl.value) {
-      recsOverflows.value = recsScrollEl.value.scrollWidth > recsScrollEl.value.clientWidth
-    } else {
-      recsOverflows.value = visibleRecs.value.length > 6
-    }
-  })
-}
-
-function scrollRecs(dir: 'left' | 'right') {
-  if (!recsScrollEl.value) return
-  const amount = recsScrollEl.value.clientWidth * 0.75
-  recsScrollEl.value.scrollBy({ left: dir === 'left' ? -amount : amount, behavior: 'smooth' })
-}
-
-function setExtrasRef(key: string, el: any) {
-  if (el) extrasRefs[key] = el
+function setExtrasRailRef(key: string, el: any) {
+  extrasRailRefs[key] = el
 }
 
 function scrollExtras(key: string, dir: 'left' | 'right') {
-  const el = extrasRefs[key]
-  if (!el) return
-  const amount = el.clientWidth * 0.75
-  el.scrollBy({ left: dir === 'left' ? -amount : amount, behavior: 'smooth' })
+  extrasRailRefs[key]?.scrollByDir(dir === 'left' ? -1 : 1)
 }
 
 function recPosterUrl(r: any): string {
@@ -869,7 +890,6 @@ watch(detail, async (d) => {
   seedCarousel()
   loadState()
   loadStreamInfo()
-  checkRecsOverflow()
 }, { immediate: true })
 </script>
 
@@ -1095,7 +1115,7 @@ watch(detail, async (d) => {
 .tab-count { font-size: 10px; color: rgb(var(--ink) / 0.4); font-family: var(--font-mono); margin-left: 4px; }
 .extra-card {
   display: flex; align-items: center; gap: 12px;
-  padding: 10px; min-width: 280px; flex-shrink: 0;
+  padding: 10px; min-width: 280px;
   background: var(--bg-2); border: 1px solid var(--hair);
   border-radius: var(--r-md); transition: background 0.12s;
 }
@@ -1110,7 +1130,7 @@ watch(detail, async (d) => {
 
 /* Videos */
 .video-card {
-  width: 300px; flex-shrink: 0; text-align: left;
+  width: 300px; text-align: left;
   background: none; border: none; cursor: pointer; color: inherit; padding: 0;
 }
 .video-play {
@@ -1129,7 +1149,7 @@ watch(detail, async (d) => {
 .collection-row { margin-top: 40px; }
 
 /* Recs */
-.rec-card { width: 150px; flex-shrink: 0; text-decoration: none; color: inherit; display: block; }
+.rec-card { width: 150px; text-decoration: none; color: inherit; display: block; }
 .rec-card.rec-external { opacity: 0.65; transition: opacity 0.15s; }
 .rec-card.rec-external:hover { opacity: 1; }
 .rec-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 20px 18px; }

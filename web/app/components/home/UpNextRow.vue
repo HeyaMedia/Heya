@@ -2,11 +2,23 @@
   <section v-if="items.length" class="content-row">
     <SectionHeader title="Up Next" subtitle="Pick up where you left off">
       <template #actions>
-        <button class="scroll-btn" aria-label="Scroll left" @click="scrollBy(-1)"><Icon name="chevleft" :size="16" /></button>
-        <button class="scroll-btn" aria-label="Scroll right" @click="scrollBy(1)"><Icon name="chevright" :size="16" /></button>
+        <button class="scroll-btn" aria-label="Scroll left" @click="rail?.scrollByDir(-1)"><Icon name="chevleft" :size="16" /></button>
+        <button class="scroll-btn" aria-label="Scroll right" @click="rail?.scrollByDir(1)"><Icon name="chevright" :size="16" /></button>
       </template>
     </SectionHeader>
-    <div class="row-scroll" ref="scrollEl" data-scroll-memory="up-next">
+    <!-- AppRail owns the virtualization + scroller chrome; this component is
+         just the Up Next tile skin. -->
+    <AppRail
+      ref="rail"
+      :items="items"
+      :tile-width="168"
+      :phone-tile-width="140"
+      :gap="18"
+      :phone-gap="12"
+      aspect="2/3"
+      memory-key="up-next"
+      snap
+    >
       <!-- Mouse-click plays the next episode; the title deep-links to the
            series detail page (same interaction model as Continue Watching) so
            you can reach the show without starting playback. `title-to`
@@ -15,29 +27,25 @@
            The tile is a plain click target (no tabindex/role) on purpose:
            the only keyboard-focusable thing is the title link, so Enter on it
            navigates without a competing tile handler double-firing play. -->
-      <div
-        v-for="(item, i) in items"
-        :key="item.id"
-        class="un-tile card-tile"
-        :style="{ width: '168px' }"
-        @click="$emit('play', item)"
-      >
-        <MediaCard
-          :idx="i"
-          :src="usePosterUrl(item)"
-          :title="item.title"
-          :title-to="detailUrl(item)"
-          :subtitle="item.episode_label"
-          aspect="2/3"
-        >
-          <template #badges>
-            <div class="un-play-overlay">
-              <div class="un-play-btn"><Icon name="play" :size="18" /></div>
-            </div>
-          </template>
-        </MediaCard>
-      </div>
-    </div>
+      <template #default="{ item, index }">
+        <div class="un-tile card-tile" @click="$emit('play', item)">
+          <MediaCard
+            :idx="index"
+            :src="usePosterUrl(item)"
+            :title="item.title"
+            :title-to="detailUrl(item)"
+            :subtitle="item.episode_label"
+            aspect="2/3"
+          >
+            <template #badges>
+              <div class="un-play-overlay">
+                <div class="un-play-btn"><Icon name="play" :size="18" /></div>
+              </div>
+            </template>
+          </MediaCard>
+        </div>
+      </template>
+    </AppRail>
   </section>
 </template>
 
@@ -47,12 +55,9 @@ import type { UpNextItem } from '~/types/home'
 defineProps<{ items: UpNextItem[] }>()
 defineEmits<{ play: [item: UpNextItem] }>()
 
-const scrollEl = ref<HTMLElement>()
-
-function scrollBy(dir: number) {
-  if (!scrollEl.value) return
-  scrollEl.value.scrollBy({ left: dir * 600, behavior: 'smooth' })
-}
+// AppRail is generic, so InstanceType<> can't name it — type the exposed
+// surface directly (same pattern as ContentRow).
+const rail = ref<{ scrollByDir: (dir: number, step?: number) => void; overflows: boolean } | null>(null)
 
 // Up Next is always the next TV episode, so the title links to the series
 // detail page. The tile itself still plays; this is the escape hatch to the
@@ -65,33 +70,6 @@ function detailUrl(item: UpNextItem): string {
 <style scoped>
 .content-row { margin-bottom: 40px; }
 
-.row-scroll {
-  display: flex;
-  gap: 18px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scroll-snap-type: x mandatory;
-  /* Shadow room (Heya 2.0): layout-neutral padding/negative-margin pair so the
-     enlarged directional shadows + hover lift aren't sliced by overflow.
-     Horizontal bleed tracks the page gutter (--page-pad-x) → edge-to-edge with
-     no sideways page overflow. Snap aligns to the content edge, not the pad. */
-  --rail-bleed: var(--page-pad-x, 40px);
-  scroll-padding-left: var(--rail-bleed);
-  padding: 44px var(--rail-bleed) 130px;
-  margin: -44px calc(-1 * var(--rail-bleed)) -130px;
-  scrollbar-width: none;
-}
-@media (max-width: 1100px) { .row-scroll { --rail-bleed: 24px; } }
-@media (max-width: 720px) {
-  .row-scroll {
-    --rail-bleed: 12px;
-    padding-top: 30px; padding-bottom: 100px;
-    margin-top: -30px; margin-bottom: -100px;
-  }
-}
-.row-scroll::-webkit-scrollbar { display: none; }
-.row-scroll > * { scroll-snap-align: start; }
-
 .scroll-btn {
   width: 32px; height: 32px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
@@ -100,7 +78,7 @@ function detailUrl(item: UpNextItem): string {
 }
 .scroll-btn:hover { background: rgb(var(--ink) / 0.12); color: var(--fg-0); }
 
-.un-tile { flex-shrink: 0; cursor: pointer; }
+.un-tile { width: 100%; cursor: pointer; }
 
 /* Play overlay lives in MediaCard's badges slot — covers the whole art and
    fades in on tile hover/focus. Above the gradient, below the title text via
@@ -126,13 +104,5 @@ function detailUrl(item: UpNextItem): string {
 /* Touch: swipe replaces the mouse-only scroll arrows. */
 @media (pointer: coarse) {
   .scroll-btn { display: none; }
-}
-
-/* Phone: 168px poster tiles are too wide for a 390px screen — the
-   width is a literal inline style (`:style="{ width: '168px' }"`) so this
-   needs !important to win. */
-@media (max-width: 720px) {
-  .row-scroll { gap: 12px; }
-  .un-tile { width: 140px !important; }
 }
 </style>
