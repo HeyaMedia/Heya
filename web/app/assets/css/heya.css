@@ -1240,7 +1240,9 @@ a { color: inherit; text-decoration: none; }
 /* Section-header scroll controls (chev left/right + expand toggle) */
 .scroll-controls { display: flex; gap: 4px; align-items: center; }
 .scroll-ctrl-btn {
-  width: 28px; height: 28px; border-radius: var(--r-sm);
+  /* circle, matching every other rail arrow (ContentRow .scroll-btn,
+     MusicScrollRow .msr-nav) */
+  width: 28px; height: 28px; border-radius: 50%;
   background: color-mix(in oklab, var(--bg-2) 78%, transparent);
   backdrop-filter: blur(var(--glass-blur-sm));
   -webkit-backdrop-filter: blur(var(--glass-blur-sm));

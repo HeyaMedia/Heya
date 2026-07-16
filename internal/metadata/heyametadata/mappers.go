@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/rs/zerolog/log"
 )
 
 func (p *HeyaProvider) mapDocument(ctx context.Context, body []byte) (*metadata.MediaDetail, error) {
@@ -418,6 +419,10 @@ func (p *HeyaProvider) mapArtist(ctx context.Context, document artistDocument) (
 			detail.ArtistMembers = append(detail.ArtistMembers, entry)
 		}
 	}
+	for provider := range document.Freshness.Providers {
+		detail.ArtistMetadataSources = append(detail.ArtistMetadataSources, provider)
+	}
+	sort.Strings(detail.ArtistMetadataSources)
 	for _, item := range document.Data.SimilarArtists {
 		entry := metadata.SimilarArtistEntry{Name: item.Name, Match: item.Score, URL: item.URL, Provider: item.Provider}
 		if entry.Provider == "" {
@@ -445,7 +450,12 @@ func (p *HeyaProvider) mapArtist(ctx context.Context, document artistDocument) (
 			Official:    true,
 		})
 	}
-	if tracks, err := p.client.TopTracks(ctx, document.ID, p.credentials); err == nil {
+	if tracks, err := p.client.TopTracks(ctx, document.ID, p.credentials); err != nil {
+		// Loaded stays false so the writer preserves the last known local
+		// ranking. Don't swallow the error silently — an always-failing
+		// fetch looks identical to "artist has no top tracks" otherwise.
+		log.Warn().Err(err).Str("entity_id", document.ID).Msg("heyametadata: artist top-tracks fetch failed; keeping previous ranking")
+	} else {
 		detail.ArtistTopTracksLoaded = true
 		for _, track := range tracks {
 			recordingEntityID := ""

@@ -110,6 +110,9 @@
             <button class="mini-pill mini-pill-ghost" :disabled="!hasPlayableTopTracks" @click="playTopAll(true)">
               <Icon name="shuffle" :size="12" /><span>Shuffle</span>
             </button>
+            <NuxtLink class="mini-pill mini-pill-ghost" :to="`/music/artist/${route.params.slug}/top-tracks`">
+              <Icon name="chart" :size="12" /><span>Full chart</span>
+            </NuxtLink>
           </template>
         </SectionHeader>
 
@@ -257,8 +260,15 @@
            heya.media). External content, played in the same nocookie-embed
            modal the movie/TV Videos rows use. -->
       <section v-if="musicVideos.length" class="section">
-        <SectionHeader title="Music Videos" :subtitle="String(musicVideos.length)" />
-        <AppRail :items="musicVideos" :tile-width="300" :phone-tile-width="260" aspect="16/9" :gap="16" :phone-gap="12" snap memory-key="artist-music-videos" :item-key="(v: MediaVideo) => v.video_key">
+        <SectionHeader title="Music Videos" :subtitle="String(musicVideos.length)">
+          <template #actions>
+            <div v-if="mvRail?.overflows" class="scroll-controls">
+              <AppHoldButton class="scroll-ctrl-btn" aria-label="Scroll left" title="Hold to jump to start" @click="mvRail?.scrollByDir(-1)" @hold="mvRail?.scrollToStart()"><Icon name="chevleft" :size="14" /></AppHoldButton>
+              <button class="scroll-ctrl-btn" aria-label="Scroll right" @click="mvRail?.scrollByDir(1)"><Icon name="chevright" :size="14" /></button>
+            </div>
+          </template>
+        </SectionHeader>
+        <AppRail ref="mvRail" :items="musicVideos" :tile-width="300" :phone-tile-width="260" aspect="16/9" :gap="16" :phone-gap="12" snap memory-key="artist-music-videos" :item-key="(v: MediaVideo) => v.video_key">
           <template #default="{ item: v, index: i }">
             <button class="video-card" @click="openVideo(v.video_key, v.name)">
               <MediaCard
@@ -317,6 +327,13 @@
                   </div>
                 </AppMenu>
                 <ExternalLinks kind="artist" :external-ids="detail?.media_item?.external_ids ?? {}" class="atw-ext" />
+              </dd>
+            </div>
+            <div v-if="(artist.metadata_sources?.length ?? 0) > 0">
+              <dt>Metadata sources</dt>
+              <dd class="src-chips">
+                <span v-for="s in artist.metadata_sources" :key="s" class="src-chip">{{ providerLabel(s) }}</span>
+                <span class="src-via">via heya.media</span>
               </dd>
             </div>
             <div v-if="artist.musicbrainz_id">
@@ -384,8 +401,15 @@
 
       <!-- Sonic similar — local pgvector centroids, circular avatars. -->
       <section v-if="sonicSimilar.length" class="section">
-        <SectionHeader title="Sounds Like" :subtitle="String(sonicSimilar.length)" />
-        <AppRail :items="sonicSimilar" :tile-width="132" :phone-tile-width="132" aspect="1/1" :gap="18" :phone-gap="18" snap memory-key="artist-sonic-similar">
+        <SectionHeader title="Sounds Like" :subtitle="String(sonicSimilar.length)">
+          <template #actions>
+            <div v-if="sonicRail?.overflows" class="scroll-controls">
+              <AppHoldButton class="scroll-ctrl-btn" aria-label="Scroll left" title="Hold to jump to start" @click="sonicRail?.scrollByDir(-1)" @hold="sonicRail?.scrollToStart()"><Icon name="chevleft" :size="14" /></AppHoldButton>
+              <button class="scroll-ctrl-btn" aria-label="Scroll right" @click="sonicRail?.scrollByDir(1)"><Icon name="chevright" :size="14" /></button>
+            </div>
+          </template>
+        </SectionHeader>
+        <AppRail ref="sonicRail" :items="sonicSimilar" :tile-width="132" :phone-tile-width="132" aspect="1/1" :gap="18" :phone-gap="18" snap memory-key="artist-sonic-similar">
           <template #default="{ item: row }">
             <NuxtLink
               :to="`/music/artist/${row.media_slug}`"
@@ -404,8 +428,15 @@
            same Appearance switch as movie/TV recs; local rows use the library
            portrait (upstream Last.fm images are mostly dead). -->
       <section v-if="visibleSimilar.length" class="section">
-        <SectionHeader title="Similar Artists" :subtitle="String(visibleSimilar.length)" />
-        <AppRail :items="visibleSimilar" :tile-width="132" :phone-tile-width="132" aspect="1/1" :gap="18" :phone-gap="18" snap memory-key="artist-similar">
+        <SectionHeader title="Similar Artists" :subtitle="String(visibleSimilar.length)">
+          <template #actions>
+            <div v-if="simRail?.overflows" class="scroll-controls">
+              <AppHoldButton class="scroll-ctrl-btn" aria-label="Scroll left" title="Hold to jump to start" @click="simRail?.scrollByDir(-1)" @hold="simRail?.scrollToStart()"><Icon name="chevleft" :size="14" /></AppHoldButton>
+              <button class="scroll-ctrl-btn" aria-label="Scroll right" @click="simRail?.scrollByDir(1)"><Icon name="chevright" :size="14" /></button>
+            </div>
+          </template>
+        </SectionHeader>
+        <AppRail ref="simRail" :items="visibleSimilar" :tile-width="132" :phone-tile-width="132" aspect="1/1" :gap="18" :phone-gap="18" snap memory-key="artist-similar">
           <template #default="{ item: row, index: i }">
             <component
               :is="row.local_slug ? 'NuxtLink' : 'div'"
@@ -764,6 +795,13 @@ function memberTitle(m: ArtistMember): string {
 // video_type=music_video for artists). External YouTube content.
 const musicVideos = computed<MediaVideo[]>(() => detail.value?.videos ?? [])
 
+// Rail handles for the header scroll-controls — AppRail is generic, so
+// InstanceType<> can't name it; type the exposed surface directly.
+type RailHandle = { scrollByDir: (dir: number, step?: number) => void; scrollToStart: () => void; overflows: boolean }
+const mvRail = ref<RailHandle | null>(null)
+const sonicRail = ref<RailHandle | null>(null)
+const simRail = ref<RailHandle | null>(null)
+
 const videoModal = ref<{ key: string; title: string } | null>(null)
 function openVideo(key: string, title: string) {
   videoModal.value = { key, title }
@@ -901,6 +939,7 @@ const ledgerCells = computed<LedgerCell[]>(() => {
   }
   if (lifecycleLabel.value) cells.push({ k: isGroup.value ? 'Active' : 'Life', v: lifecycleLabel.value })
   if (originLabel.value) cells.push({ k: 'From', v: originLabel.value })
+  if ((a.popularity ?? 0) > 0) cells.push({ k: 'Popularity', v: String(a.popularity), unit: '/ 100' })
   return cells
 })
 
@@ -1612,6 +1651,19 @@ a.trk-al:hover { color: var(--tone); }
 }
 .mchip-more:hover { background: rgb(var(--ink) / 0.1); color: rgb(var(--ink) / 0.9); }
 .mt-gap { margin-top: 36px; }
+
+/* metadata-source provenance chips (About column) */
+.src-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.src-chip {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid var(--hair);
+  font: 550 10.5px var(--font-mono);
+  letter-spacing: 0.04em;
+  color: rgb(var(--ink) / 0.7);
+}
+.src-via { font: 500 10.5px var(--font-mono); color: rgb(var(--ink) / 0.4); margin-left: 2px; }
 
 /* music videos — YouTube thumb tiles + hover play scrim (movie page recipe) */
 .video-card {

@@ -2221,6 +2221,15 @@
               "null"
             ]
           },
+          "metadata_sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "musicbrainz_id": {
             "type": "string"
           },
@@ -5349,6 +5358,15 @@
             "contentEncoding": "base64",
             "type": "string"
           },
+          "metadata_sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "musicbrainz_id": {
             "type": "string"
           },
@@ -5429,6 +5447,7 @@
           "birthplace",
           "tags",
           "genres",
+          "metadata_sources",
           "slug",
           "media_item_public_id",
           "poster_path",
@@ -7815,6 +7834,15 @@
             "contentEncoding": "base64",
             "type": "string"
           },
+          "metadata_sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "musicbrainz_id": {
             "type": "string"
           },
@@ -7895,6 +7923,7 @@
           "birthplace",
           "tags",
           "genres",
+          "metadata_sources",
           "slug",
           "media_item_public_id",
           "poster_path",
@@ -9425,6 +9454,15 @@
             "contentEncoding": "base64",
             "type": "string"
           },
+          "metadata_sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "musicbrainz_id": {
             "type": "string"
           },
@@ -9505,6 +9543,7 @@
           "birthplace",
           "tags",
           "genres",
+          "metadata_sources",
           "slug",
           "poster_path",
           "album_count",
@@ -9968,6 +10007,15 @@
             "contentEncoding": "base64",
             "type": "string"
           },
+          "metadata_sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "musicbrainz_id": {
             "type": "string"
           },
@@ -10055,6 +10103,7 @@
           "birthplace",
           "tags",
           "genres",
+          "metadata_sources",
           "slug",
           "media_item_public_id",
           "poster_path",
@@ -36087,7 +36136,7 @@
             "schema": {
               "default": 25,
               "format": "int32",
-              "maximum": 50,
+              "maximum": 200,
               "minimum": 1,
               "type": "integer"
             }

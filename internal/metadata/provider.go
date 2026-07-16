@@ -233,6 +233,10 @@ type MediaDetail struct {
 	// local ranking instead of silently clearing it.
 	ArtistTopTracksLoaded bool                 `json:"-"`
 	ArtistSimilarArtists  []SimilarArtistEntry `json:"artist_similar_artists,omitempty"`
+	// ArtistMetadataSources lists the upstream providers that fed the
+	// canonical document (heya.media freshness.providers keys) — surfaced
+	// on the artist page as a provenance strip.
+	ArtistMetadataSources []string `json:"artist_metadata_sources,omitempty"`
 }
 
 // URLEntry is one external link on an artist ({type: "AllMusic", url: "..."}).

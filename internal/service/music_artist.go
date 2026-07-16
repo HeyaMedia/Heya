@@ -103,6 +103,7 @@ type ArtistView struct {
 	Popularity            int32             `json:"popularity,omitempty"`
 	Genres                []string          `json:"genres,omitempty"`
 	Tags                  []string          `json:"tags,omitempty"`
+	MetadataSources       []string          `json:"metadata_sources,omitempty"`
 	Aliases               []string          `json:"aliases,omitempty"`
 	URLs                  []ArtistURL       `json:"urls,omitempty"`
 	WikipediaLinks        map[string]string `json:"wikipedia_links,omitempty"`
@@ -119,27 +120,28 @@ type ArtistView struct {
 // sections.
 func BuildArtistView(a sqlc.Artist) ArtistView {
 	v := ArtistView{
-		ID:             a.ID,
-		MediaItemID:    a.MediaItemID,
-		MusicbrainzID:  a.MusicbrainzID,
-		Name:           a.Name,
-		SortName:       a.SortName,
-		Disambiguation: a.Disambiguation,
-		Biography:      a.Biography,
-		Annotation:     a.Annotation,
-		ArtistType:     a.ArtistType,
-		BeginDate:      a.BeginDate,
-		BeginYear:      a.BeginYear,
-		EndDate:        a.EndDate,
-		Ended:          a.Ended,
-		Deathday:       a.Deathday,
-		Birthplace:     a.Birthplace,
-		Listeners:      a.Listeners,
-		Playcount:      a.Playcount,
-		Popularity:     a.Popularity,
-		Genres:         nonNilStrings(a.Genres),
-		Tags:           nonNilStrings(a.Tags),
-		Aliases:        nonNilStrings(a.Aliases),
+		ID:              a.ID,
+		MediaItemID:     a.MediaItemID,
+		MusicbrainzID:   a.MusicbrainzID,
+		Name:            a.Name,
+		SortName:        a.SortName,
+		Disambiguation:  a.Disambiguation,
+		Biography:       a.Biography,
+		Annotation:      a.Annotation,
+		ArtistType:      a.ArtistType,
+		BeginDate:       a.BeginDate,
+		BeginYear:       a.BeginYear,
+		EndDate:         a.EndDate,
+		Ended:           a.Ended,
+		Deathday:        a.Deathday,
+		Birthplace:      a.Birthplace,
+		Listeners:       a.Listeners,
+		Playcount:       a.Playcount,
+		Popularity:      a.Popularity,
+		Genres:          nonNilStrings(a.Genres),
+		Tags:            nonNilStrings(a.Tags),
+		MetadataSources: nonNilStrings(a.MetadataSources),
+		Aliases:         nonNilStrings(a.Aliases),
 	}
 	if len(a.Urls) > 0 {
 		var urls []ArtistURL
@@ -286,7 +288,9 @@ type ArtistTopTrackRow struct {
 //  5. case-fold substring containment (either direction, romanized) — only
 //     when the shorter side is ≥ 3 chars so "Show" doesn't catch "Show me"
 func (a *App) ListArtistTopTracksBySlug(ctx context.Context, artistSlug string, limit int32) ([]ArtistTopTrackRow, error) {
-	if limit <= 0 || limit > 50 {
+	// 200 covers the full persisted chart (upstream caps each provider's
+	// snapshot at its top 100) — the dedicated chart page requests it all.
+	if limit <= 0 || limit > 200 {
 		limit = 25
 	}
 	q := sqlc.New(a.db)

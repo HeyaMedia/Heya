@@ -29,7 +29,7 @@ by_name_disambig AS (
 SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector,
        discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation,
        urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year,
-       end_date, ended, deathday, birthplace, tags, genres
+       end_date, ended, deathday, birthplace, tags, genres, metadata_sources
 FROM (
   SELECT * FROM inserted
   UNION ALL
@@ -408,37 +408,40 @@ UPDATE artists SET
     deathday         = $17,
     birthplace       = $18,
     tags             = $19,
-    genres           = $20
+    genres           = $20,
+    metadata_sources = $21
 WHERE id = $1;
 
--- name: ReplaceArtistTopTracks :exec
+-- name: InsertArtistTopTracks :exec
 -- Top tracks are a small ranked list per artist. We replace-on-refresh
--- rather than upsert because the rank ordering is what we actually
--- care about. The data-modifying CTE makes deletion + replacement one SQL
--- statement, so a failed decode/insert cannot expose a partial ranking.
-WITH deleted AS (
-  DELETE FROM artist_top_tracks WHERE artist_id = sqlc.arg(artist_id)
-), incoming AS (
-  SELECT *
-  FROM jsonb_to_recordset(sqlc.arg(tracks)::jsonb) AS value(
-    rank integer,
-    provider text,
-    provider_rank integer,
-    title text,
-    mbid text,
-    recording_entity_id text,
-    playcount bigint,
-    listeners bigint,
-    url text
-  )
-)
+-- rather than upsert because the rank ordering is what we actually care
+-- about — the caller sequences DeleteArtistTopTracks first (this pair was
+-- one statement with a data-modifying `WITH deleted AS (DELETE ...)` CTE,
+-- but an unreferenced CTE's execution order vs the main statement is
+-- UNSPECIFIED, and the insert ran first and collided with the old rows
+-- on (artist_id, rank)).
+-- jsonb_array_elements + per-field ->> extraction, NOT jsonb_to_recordset:
+-- sqlc v1.31 can't model a recordset's AS value(...) column list — it
+-- expanded `SELECT *` over it into the bare alias (one record column),
+-- which broke this write with `column "rank" does not exist` on every
+-- refresh since the V2 migration, and it rejects qualified references
+-- (value.rank) outright. Every key is always present: the rows are
+-- marshaled from a Go struct with no omitempty.
 INSERT INTO artist_top_tracks (
   artist_id, rank, provider, provider_rank, title, mbid,
   recording_entity_id, playcount, listeners, url
 )
-SELECT sqlc.arg(artist_id), rank, provider, provider_rank, title, mbid,
-       NULLIF(recording_entity_id, '')::uuid, playcount, listeners, url
-FROM incoming;
+SELECT sqlc.arg(artist_id),
+       (t.value->>'rank')::int,
+       t.value->>'provider',
+       (t.value->>'provider_rank')::int,
+       t.value->>'title',
+       t.value->>'mbid',
+       NULLIF(t.value->>'recording_entity_id', '')::uuid,
+       (t.value->>'playcount')::bigint,
+       (t.value->>'listeners')::bigint,
+       t.value->>'url'
+FROM jsonb_array_elements(sqlc.arg(tracks)::jsonb) AS t;
 
 -- name: ReplaceArtistSimilarArtists :exec
 -- Same replace-on-refresh story as top_tracks. The match scores and

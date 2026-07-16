@@ -667,6 +667,7 @@ export type ArtistView = {
     listeners?: number;
     media_item_id: number;
     members?: Array<ArtistMember> | null;
+    metadata_sources?: Array<string> | null;
     musicbrainz_id?: string;
     name: string;
     playcount?: number;
@@ -1641,6 +1642,7 @@ export type GetMusicArtistBySlugRow = {
     media_item_id: number;
     media_item_public_id: string;
     members: string;
+    metadata_sources: Array<string> | null;
     musicbrainz_id: string;
     name: string;
     playcount: number;
@@ -2294,6 +2296,7 @@ export type ListMusicArtistsRow = {
     media_item_id: number;
     media_item_public_id: string;
     members: string;
+    metadata_sources: Array<string> | null;
     musicbrainz_id: string;
     name: string;
     playcount: number;
@@ -2661,6 +2664,7 @@ export type ListUserLovedArtistsRow = {
     loved_at: Timestamptz;
     media_item_id: number;
     members: string;
+    metadata_sources: Array<string> | null;
     musicbrainz_id: string;
     name: string;
     playcount: number;
@@ -2781,6 +2785,7 @@ export type ListUserRatedArtistsRow = {
     media_item_id: number;
     media_item_public_id: string;
     members: string;
+    metadata_sources: Array<string> | null;
     musicbrainz_id: string;
     name: string;
     playcount: number;
@@ -6512,6 +6517,7 @@ export type GetMusicArtistBySlugRowWritable = {
     media_item_id: number;
     media_item_public_id: string;
     members: string;
+    metadata_sources: Array<string> | null;
     musicbrainz_id: string;
     name: string;
     playcount: number;

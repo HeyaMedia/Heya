@@ -166,7 +166,7 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/artists/{slug}/top-tracks", "artist-top-tracks", "Artist's Last.fm top tracks rail, with local linkage when owned", "Music")),
 		func(ctx context.Context, in *struct {
 			Slug  string `path:"slug" pattern:"^[a-z0-9-]+$" maxLength:"200" example:"ado"`
-			Limit int32  `query:"limit" minimum:"1" maximum:"50" default:"25"`
+			Limit int32  `query:"limit" minimum:"1" maximum:"200" default:"25"`
 		}) (*JSONOutput[topTracksBody], error) {
 			rows, err := app.ListArtistTopTracksBySlug(ctx, in.Slug, in.Limit)
 			if err != nil {

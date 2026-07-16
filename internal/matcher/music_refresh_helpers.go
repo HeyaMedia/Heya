@@ -57,26 +57,27 @@ func (m *Matcher) writeArtistExtendedMetadata(ctx context.Context, artistID int6
 	membersJSON, _ := json.Marshal(safeRelations(d.ArtistMembers))
 
 	return m.q.UpdateArtistExtendedMetadata(ctx, sqlc.UpdateArtistExtendedMetadataParams{
-		ID:             artistID,
-		Listeners:      d.ArtistListeners,
-		Playcount:      d.ArtistPlaycount,
-		Popularity:     int32(d.ArtistPopularity),
-		Annotation:     d.ArtistAnnotation,
-		Urls:           urlsJSON,
-		WikipediaLinks: wikipediaJSON,
-		Profiles:       profilesJSON,
-		Aliases:        nonNilStrings(d.ArtistAliases),
-		Groups:         groupsJSON,
-		Members:        membersJSON,
-		ArtistType:     d.ArtistType,
-		BeginDate:      d.ArtistBeginDate,
-		BeginYear:      int32(d.ArtistBeginYear),
-		EndDate:        d.ArtistEndDate,
-		Ended:          d.ArtistEnded,
-		Deathday:       d.ArtistDeathday,
-		Birthplace:     d.ArtistBirthplace,
-		Tags:           nonNilStrings(d.ArtistTags),
-		Genres:         nonNilStrings(d.Genres),
+		ID:              artistID,
+		Listeners:       d.ArtistListeners,
+		Playcount:       d.ArtistPlaycount,
+		Popularity:      int32(d.ArtistPopularity),
+		Annotation:      d.ArtistAnnotation,
+		Urls:            urlsJSON,
+		WikipediaLinks:  wikipediaJSON,
+		Profiles:        profilesJSON,
+		Aliases:         nonNilStrings(d.ArtistAliases),
+		Groups:          groupsJSON,
+		Members:         membersJSON,
+		ArtistType:      d.ArtistType,
+		BeginDate:       d.ArtistBeginDate,
+		BeginYear:       int32(d.ArtistBeginYear),
+		EndDate:         d.ArtistEndDate,
+		Ended:           d.ArtistEnded,
+		Deathday:        d.ArtistDeathday,
+		Birthplace:      d.ArtistBirthplace,
+		Tags:            nonNilStrings(d.ArtistTags),
+		Genres:          nonNilStrings(d.Genres),
+		MetadataSources: nonNilStrings(d.ArtistMetadataSources),
 	})
 }
 
@@ -102,7 +103,10 @@ func (m *Matcher) writeArtistTopTracks(ctx context.Context, artistID int64, tops
 	if err != nil {
 		return err
 	}
-	return m.q.ReplaceArtistTopTracks(ctx, sqlc.ReplaceArtistTopTracksParams{ArtistID: artistID, Tracks: body})
+	if err := m.q.DeleteArtistTopTracks(ctx, artistID); err != nil {
+		return err
+	}
+	return m.q.InsertArtistTopTracks(ctx, sqlc.InsertArtistTopTracksParams{ArtistID: artistID, Tracks: body})
 }
 
 func (m *Matcher) writeArtistSimilarArtists(ctx context.Context, artistID int64, sims []metadata.SimilarArtistEntry) error {

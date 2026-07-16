@@ -8,10 +8,36 @@
 pre-commit:
   parallel: true
   jobs:
-    - name: frontend-typecheck
-      glob: 'web/**/*.{vue,ts,tsx,d.ts}'
-      root: web/
-      run: bun run typecheck
+    # openapi-drift rewrites web/shared/api/types.gen.ts in place; running
+    # the typecheck in parallel with it raced (vue-tsc read the file mid-
+    # rewrite → phantom "Cannot find module './types.gen'"). Piped: drift
+    # regenerates first, then the typecheck reads a settled tree.
+    - name: web-contract
+      group:
+        piped: true
+        jobs:
+          # If any Huma handler changes, regenerate the OpenAPI spec and
+          # block the commit on drift. Catches "I added a new endpoint but
+          # forgot to run make gen-api-client" before it ships. Both the
+          # spec and generated TypeScript contract are committed review
+          # artifacts.
+          - name: openapi-drift
+            glob:
+              - 'internal/server/*_huma.go'
+              - 'internal/server/huma.go'
+            run: |
+              make gen-api-client >/dev/null
+              if ! git diff --quiet -- web/shared/api.openapi.json web/shared/api/; then
+                echo "openapi: regenerated spec/types differ from committed output." >&2
+                echo "Stage web/shared/api.openapi.json and web/shared/api/ or revert the handler change." >&2
+                git diff --stat -- web/shared/api.openapi.json web/shared/api/ >&2
+                exit 1
+              fi
+
+          - name: frontend-typecheck
+            glob: 'web/**/*.{vue,ts,tsx,d.ts}'
+            root: web/
+            run: bun run typecheck
 
     # Refuse commits that introduce `trustedDependencies` in package.json.
     # That field is the only way for a package to escape bun's default
@@ -65,19 +91,3 @@ pre-commit:
           exit 1
         fi
 
-    # If any Huma handler changes, regenerate the OpenAPI spec and block
-    # the commit on drift. Catches "I added a new endpoint but forgot to
-    # run make gen-api-client" before it ships. Both the spec and generated
-    # TypeScript contract are committed review artifacts.
-    - name: openapi-drift
-      glob:
-        - 'internal/server/*_huma.go'
-        - 'internal/server/huma.go'
-      run: |
-        make gen-api-client >/dev/null
-        if ! git diff --quiet -- web/shared/api.openapi.json web/shared/api/; then
-          echo "openapi: regenerated spec/types differ from committed output." >&2
-          echo "Stage web/shared/api.openapi.json and web/shared/api/ or revert the handler change." >&2
-          git diff --stat -- web/shared/api.openapi.json web/shared/api/ >&2
-          exit 1
-        fi

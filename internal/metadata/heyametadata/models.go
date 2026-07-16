@@ -7,6 +7,13 @@ type canonicalHeader struct {
 	Kind              string       `json:"kind"`
 	Slug              string       `json:"slug"`
 	ExternalIDs       []ExternalID `json:"external_ids"`
+	// Freshness carries per-provider collection state — the keys are the
+	// canonical answer to "which providers fed this document".
+	Freshness struct {
+		Providers map[string]struct {
+			State string `json:"state"`
+		} `json:"providers"`
+	} `json:"freshness"`
 }
 
 type localizedText struct {

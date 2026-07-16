@@ -237,6 +237,7 @@ type Artist struct {
 	Birthplace            string             `json:"birthplace"`
 	Tags                  []string           `json:"tags"`
 	Genres                []string           `json:"genres"`
+	MetadataSources       []string           `json:"metadata_sources"`
 }
 
 type ArtistCentroid struct {

@@ -330,7 +330,7 @@ func (q *Queries) ListUserRatedAlbums(ctx context.Context, arg ListUserRatedAlbu
 }
 
 const listUserRatedArtists = `-- name: ListUserRatedArtists :many
-SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags, a.genres,
+SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags, a.genres, a.metadata_sources,
        mi.slug         AS slug,
        mi.public_id    AS media_item_public_id,
        mi.poster_path  AS poster_path,
@@ -386,6 +386,7 @@ type ListUserRatedArtistsRow struct {
 	Birthplace            string             `json:"birthplace"`
 	Tags                  []string           `json:"tags"`
 	Genres                []string           `json:"genres"`
+	MetadataSources       []string           `json:"metadata_sources"`
 	Slug                  string             `json:"slug"`
 	MediaItemPublicID     uuid.UUID          `json:"media_item_public_id"`
 	PosterPath            string             `json:"poster_path"`
@@ -442,6 +443,7 @@ func (q *Queries) ListUserRatedArtists(ctx context.Context, arg ListUserRatedArt
 			&i.Birthplace,
 			&i.Tags,
 			&i.Genres,
+			&i.MetadataSources,
 			&i.Slug,
 			&i.MediaItemPublicID,
 			&i.PosterPath,

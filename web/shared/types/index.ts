@@ -193,6 +193,7 @@ export interface Artist {
   popularity?: number
   genres?: string[]
   tags?: string[]
+  metadata_sources?: string[]
   aliases?: string[]
   urls?: ArtistURL[]
   wikipedia_links?: Record<string, string>
