@@ -673,6 +673,61 @@ func (q *Queries) GetAlbumByArtistAndSlug(ctx context.Context, arg GetAlbumByArt
 	return i, err
 }
 
+const getAlbumByArtistMusicBrainzID = `-- name: GetAlbumByArtistMusicBrainzID :one
+SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance FROM albums
+WHERE artist_id = $1 AND musicbrainz_id = $2 AND musicbrainz_id != ''
+LIMIT 1
+`
+
+type GetAlbumByArtistMusicBrainzIDParams struct {
+	ArtistID      int64  `json:"artist_id"`
+	MusicbrainzID string `json:"musicbrainz_id"`
+}
+
+func (q *Queries) GetAlbumByArtistMusicBrainzID(ctx context.Context, arg GetAlbumByArtistMusicBrainzIDParams) (Album, error) {
+	row := q.db.QueryRow(ctx, getAlbumByArtistMusicBrainzID, arg.ArtistID, arg.MusicbrainzID)
+	var i Album
+	err := row.Scan(
+		&i.ID,
+		&i.ArtistID,
+		&i.Title,
+		&i.Slug,
+		&i.Year,
+		&i.MusicbrainzID,
+		&i.AlbumType,
+		&i.Genres,
+		&i.CoverPath,
+		&i.ReleaseDate,
+		&i.Label,
+		&i.Country,
+		&i.Barcode,
+		&i.TotalTracks,
+		&i.TotalDiscs,
+		&i.Tags,
+		&i.IntegratedLufs,
+		&i.TruePeakDb,
+		&i.LoudnessRangeDb,
+		&i.LoudnessAnalyzedAt,
+		&i.SearchVector,
+		&i.CatalogNo,
+		&i.Explicit,
+		&i.OriginalTitle,
+		&i.SecondaryTypes,
+		&i.Styles,
+		&i.Language,
+		&i.DurationSeconds,
+		&i.Isrcs,
+		&i.Rating,
+		&i.Popularity,
+		&i.Listeners,
+		&i.Playcount,
+		&i.ExternalIds,
+		&i.ArtistCredits,
+		&i.FieldProvenance,
+	)
+	return i, err
+}
+
 const getAlbumByArtistTitleYear = `-- name: GetAlbumByArtistTitleYear :one
 SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance FROM albums
 WHERE artist_id = $1 AND lower(title) = lower($2) AND year = $3
@@ -3446,6 +3501,20 @@ func (q *Queries) ListTracksForArtistMatching(ctx context.Context, artistID int6
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockArtistAlbumsForApply = `-- name: LockArtistAlbumsForApply :one
+SELECT id FROM artists WHERE id = $1 FOR UPDATE
+`
+
+// Scanner apply uses a read-before-write identity decision for every album.
+// Serialize those decisions per artist so concurrent scoped scan entities
+// cannot both observe a missing tuple and race into the unique index.
+func (q *Queries) LockArtistAlbumsForApply(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, lockArtistAlbumsForApply, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
 }
 
 const markArtistCoverArtEnriched = `-- name: MarkArtistCoverArtEnriched :exec

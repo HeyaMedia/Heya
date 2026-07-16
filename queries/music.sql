@@ -322,10 +322,21 @@ SELECT * FROM albums WHERE id = $1;
 -- name: GetAlbumByMusicBrainzID :one
 SELECT * FROM albums WHERE musicbrainz_id = $1 AND musicbrainz_id != '';
 
+-- name: GetAlbumByArtistMusicBrainzID :one
+SELECT * FROM albums
+WHERE artist_id = $1 AND musicbrainz_id = $2 AND musicbrainz_id != ''
+LIMIT 1;
+
 -- name: GetAlbumByArtistTitleYear :one
 SELECT * FROM albums
 WHERE artist_id = $1 AND lower(title) = lower($2) AND year = $3
 LIMIT 1;
+
+-- name: LockArtistAlbumsForApply :one
+-- Scanner apply uses a read-before-write identity decision for every album.
+-- Serialize those decisions per artist so concurrent scoped scan entities
+-- cannot both observe a missing tuple and race into the unique index.
+SELECT id FROM artists WHERE id = $1 FOR UPDATE;
 
 -- name: UpdateAlbum :one
 UPDATE albums

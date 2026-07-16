@@ -470,6 +470,9 @@ type musicApplyCounts struct {
 
 func applyMusicAlbumsTracksAndFiles(ctx context.Context, q *sqlc.Queries, libraryID, mediaItemID, artistID int64, preview MusicMaterializePreview, meta MusicFetchPreview, tracksByRel map[string]MusicTrackPlan, filesByRel map[string][]InventoryFile) (musicApplyCounts, error) {
 	var counts musicApplyCounts
+	if _, err := q.LockArtistAlbumsForApply(ctx, artistID); err != nil {
+		return counts, fmt.Errorf("lock artist albums for apply: %w", err)
+	}
 	fileActionByRel := map[string]MovieMaterializeFileAction{}
 	for _, action := range preview.FileActions {
 		fileActionByRel[action.RelPath] = action
@@ -531,27 +534,45 @@ func applyMusicAlbumsTracksAndFiles(ctx context.Context, q *sqlc.Queries, librar
 func applyMusicAlbum(ctx context.Context, q *sqlc.Queries, artistID int64, mapping MusicAlbumFetchMatch, remote metadata.AlbumEntry) (sqlc.Album, string, error) {
 	mbid := firstNonEmpty(remote.ExternalIDs["musicbrainz_release_group"], remote.ExternalIDs["musicbrainz_album"], mapping.RemoteExternalIDs["musicbrainz_release_group"], mapping.RemoteExternalIDs["musicbrainz_album"])
 	year := musicMaterializeAlbumYear(mapping)
-	existing, found := sqlc.Album{}, false
-	if mbid != "" {
-		if album, err := q.GetAlbumByMusicBrainzID(ctx, mbid); err == nil && album.ArtistID == artistID {
-			existing, found = album, true
-		} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return sqlc.Album{}, "", err
-		}
+	params := musicAlbumParams(artistID, mapping, remote, mbid, year)
+	existing, tupleFound := sqlc.Album{}, false
+	if album, err := q.GetAlbumByArtistTitleYear(ctx, sqlc.GetAlbumByArtistTitleYearParams{
+		ArtistID: artistID,
+		Lower:    params.Title,
+		Year:     params.Year,
+	}); err == nil {
+		existing, tupleFound = album, true
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return sqlc.Album{}, "", err
 	}
-	if !found {
-		if album, err := q.GetAlbumByArtistTitleYear(ctx, sqlc.GetAlbumByArtistTitleYearParams{
-			ArtistID: artistID,
-			Lower:    firstNonEmpty(remote.Title, mapping.RemoteAlbum),
-			Year:     year,
-		}); err == nil {
-			existing, found = album, true
-		} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+
+	mbidAlbum, mbidFound := sqlc.Album{}, false
+	if mbid != "" {
+		album, err := q.GetAlbumByArtistMusicBrainzID(ctx, sqlc.GetAlbumByArtistMusicBrainzIDParams{
+			ArtistID:      artistID,
+			MusicbrainzID: mbid,
+		})
+		if err == nil {
+			mbidAlbum, mbidFound = album, true
+		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return sqlc.Album{}, "", err
 		}
 	}
 
-	params := musicAlbumParams(artistID, mapping, remote, mbid, year)
+	// Exact local identity wins when embedded MBID evidence points at a
+	// different sibling. This occurs in real libraries when an edition/remix
+	// NFO carries the parent release-group MBID: choosing MBID first would load
+	// the parent row and rename it onto the already-existing edition tuple,
+	// tripping uq_albums_artist_title_year. Preserve the tuple owner's existing
+	// MBID instead of moving the sibling's identity across albums.
+	found := tupleFound || mbidFound
+	if tupleFound {
+		if mbidFound && mbidAlbum.ID != existing.ID {
+			params.MusicbrainzID = existing.MusicbrainzID
+		}
+	} else if mbidFound {
+		existing = mbidAlbum
+	}
 	if found {
 		updated, err := q.UpdateAlbum(ctx, sqlc.UpdateAlbumParams{
 			ID:            existing.ID,

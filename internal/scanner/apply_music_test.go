@@ -90,3 +90,57 @@ func TestApplyMusicArtistAdoptsExistingNameDisambiguation(t *testing.T) {
 	_, err = q.GetMediaItemByID(ctx, duplicateItem.ID)
 	require.True(t, errors.Is(err, pgx.ErrNoRows), "duplicate media item should be removed after adopting canonical artist")
 }
+
+func TestApplyMusicAlbumPrefersExistingTupleOverSiblingMBID(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	userID := testutil.TestUserID(t, pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         fmt.Sprintf("scanner-music-album-identity-test-%d", time.Now().UnixNano()),
+		MediaType:    sqlc.MediaTypeMusic,
+		Paths:        []string{"/tmp/music-album-identity"},
+		ScanInterval: pgtype.Interval{Microseconds: int64(time.Hour / time.Microsecond), Valid: true},
+		CreatedBy:    userID,
+		Settings:     []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	item, err := q.CreateMediaItem(ctx, sqlc.CreateMediaItemParams{
+		LibraryID: lib.ID, MediaType: sqlc.MediaTypeMusic,
+		Title: "Scanner Wilkinson", SortTitle: "Scanner Wilkinson",
+	})
+	require.NoError(t, err)
+	artist, err := q.CreateArtist(ctx, sqlc.CreateArtistParams{MediaItemID: item.ID, Name: "Scanner Wilkinson"})
+	require.NoError(t, err)
+
+	parent, err := q.CreateAlbum(ctx, sqlc.CreateAlbumParams{
+		ArtistID: artist.ID, Title: "Afterglow", Year: "2013", MusicbrainzID: "scanner-parent-release-group",
+		Genres: []string{}, Tags: []string{},
+	})
+	require.NoError(t, err)
+	edition, err := q.CreateAlbum(ctx, sqlc.CreateAlbumParams{
+		ArtistID: artist.ID, Title: "Afterglow (remixes)", Year: "2013", MusicbrainzID: "scanner-edition-release-group",
+		Genres: []string{}, Tags: []string{},
+	})
+	require.NoError(t, err)
+
+	// Reproduce production evidence: the remixes folder carries the parent
+	// release-group MBID even though its exact local tuple already has a row.
+	mapping := MusicAlbumFetchMatch{
+		LocalAlbum: "Afterglow (Remixes)", LocalYear: "2013",
+		LocalExternalIDs: map[string]string{"musicbrainz_release_group": parent.MusicbrainzID},
+	}
+	got, action, err := applyMusicAlbum(ctx, q, artist.ID, mapping, musicAlbumEntryForApply(nil, mapping))
+	require.NoError(t, err)
+	require.Equal(t, "update", action)
+	require.Equal(t, edition.ID, got.ID, "exact title/year owner must win over a sibling MBID")
+	require.Equal(t, edition.MusicbrainzID, got.MusicbrainzID, "conflicting sibling MBID must not move onto the edition")
+
+	unchangedParent, err := q.GetAlbumByID(ctx, parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Afterglow", unchangedParent.Title)
+	require.Equal(t, parent.MusicbrainzID, unchangedParent.MusicbrainzID)
+}
