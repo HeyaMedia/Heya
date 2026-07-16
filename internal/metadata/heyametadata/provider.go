@@ -1017,7 +1017,7 @@ func (p *HeyaProvider) SimilarArtists(ctx context.Context, mbid, name string) ([
 	}
 	result := make([]SimilarHit, 0, len(detail.ArtistSimilarArtists))
 	for _, item := range detail.ArtistSimilarArtists {
-		result = append(result, SimilarHit{Kind: "artist", Name: item.Name, MBID: item.MBID, Score: item.Match, Source: "heyametadata", URL: item.URL})
+		result = append(result, SimilarHit{Kind: "artist", Name: item.Name, MBID: item.MBID, Score: item.Match, Source: firstNonEmpty(item.Provider, "heyametadata"), URL: item.URL})
 	}
 	return result, nil
 }

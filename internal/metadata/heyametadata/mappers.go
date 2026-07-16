@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -329,8 +330,16 @@ func (p *HeyaProvider) mapArtist(ctx context.Context, document artistDocument) (
 			detail.ArtistNativeName, detail.ArtistNativeLanguage = name.Value, name.Language
 		}
 	}
-	if len(document.Data.Biographies) > 0 {
-		detail.ArtistBio = document.Data.Biographies[0].Value
+	// TheAudioDB ships up to 12 language variants and upstream order is not
+	// language-sorted — prefer English (or untagged) over positional first.
+	for _, bio := range document.Data.Biographies {
+		if detail.ArtistBio == "" {
+			detail.ArtistBio = bio.Value
+		}
+		if bio.Language == "" || strings.HasPrefix(strings.ToLower(bio.Language), "en") {
+			detail.ArtistBio = bio.Value
+			break
+		}
 	}
 	if len(document.Data.Annotations) > 0 {
 		detail.ArtistAnnotation = document.Data.Annotations[0].Value
@@ -357,10 +366,25 @@ func (p *HeyaProvider) mapArtist(ctx context.Context, document artistDocument) (
 	if document.Data.Lifecycle.Ended != nil {
 		detail.ArtistEnded = *document.Data.Lifecycle.Ended
 	}
+	// Multiple providers repeat the same genre/tag with different casing
+	// ("rock" / "Rock") — dedupe case-insensitively, keeping first-seen
+	// casing and upstream order (weight-ranked within each provider).
+	seenGenres := map[string]struct{}{}
 	for _, genre := range document.Data.Genres {
+		key := strings.ToLower(strings.TrimSpace(genre.Name))
+		if _, dup := seenGenres[key]; dup || key == "" {
+			continue
+		}
+		seenGenres[key] = struct{}{}
 		detail.Genres = append(detail.Genres, genre.Name)
 	}
+	seenTags := map[string]struct{}{}
 	for _, tag := range document.Data.Tags {
+		key := strings.ToLower(strings.TrimSpace(tag.Name))
+		if _, dup := seenTags[key]; dup || key == "" {
+			continue
+		}
+		seenTags[key] = struct{}{}
 		detail.ArtistTags = append(detail.ArtistTags, tag.Name)
 	}
 	for _, link := range document.Data.Links {
@@ -375,7 +399,12 @@ func (p *HeyaProvider) mapArtist(ctx context.Context, document artistDocument) (
 		case "playcount":
 			detail.ArtistPlaycount = int64(metric.Value)
 		case "popularity":
-			detail.ArtistPopularity = int(metric.Value)
+			// Reported on different scales (tidal 0..1, audiodb 0..100) —
+			// int-truncating the fractional scale would zero the field, so
+			// keep the largest value seen.
+			if v := int(metric.Value); v > detail.ArtistPopularity {
+				detail.ArtistPopularity = v
+			}
 		}
 	}
 	for _, relation := range document.Data.Relationships {
@@ -390,7 +419,31 @@ func (p *HeyaProvider) mapArtist(ctx context.Context, document artistDocument) (
 		}
 	}
 	for _, item := range document.Data.SimilarArtists {
-		detail.ArtistSimilarArtists = append(detail.ArtistSimilarArtists, metadata.SimilarArtistEntry{Name: item.Name, MBID: item.ProviderID, Match: item.Score, URL: item.URL})
+		entry := metadata.SimilarArtistEntry{Name: item.Name, Match: item.Score, URL: item.URL, Provider: item.Provider}
+		if entry.Provider == "" {
+			entry.Provider = "lastfm"
+		}
+		// provider_id is only an MBID for Last.fm rows (deezer/tidal send
+		// their own numeric ids) — and Last.fm omits it for artists it
+		// can't resolve, so shape-check before trusting it.
+		if entry.Provider == "lastfm" && looksLikeUUID(item.ProviderID) {
+			entry.MBID = item.ProviderID
+		}
+		detail.ArtistSimilarArtists = append(detail.ArtistSimilarArtists, entry)
+	}
+	for _, video := range document.Data.MusicVideos {
+		key := youtubeVideoKey(video.URL)
+		if key == "" {
+			continue
+		}
+		detail.Videos = append(detail.Videos, metadata.VideoDetail{
+			ProviderKey: video.ProviderVideoID,
+			Name:        video.TrackTitle,
+			Site:        "YouTube",
+			Key:         key,
+			Type:        "music_video",
+			Official:    true,
+		})
 	}
 	if tracks, err := p.client.TopTracks(ctx, document.ID, p.credentials); err == nil {
 		detail.ArtistTopTracksLoaded = true
@@ -750,4 +803,54 @@ func firstPositive(values ...int) int {
 		}
 	}
 	return 0
+}
+
+// looksLikeUUID is a shape check (8-4-4-4-12 hex), not RFC validation —
+// enough to keep Deezer/Tidal numeric artist ids out of MBID columns.
+func looksLikeUUID(value string) bool {
+	if len(value) != 36 {
+		return false
+	}
+	for i, r := range value {
+		switch i {
+		case 8, 13, 18, 23:
+			if r != '-' {
+				return false
+			}
+		default:
+			if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// youtubeVideoKey extracts the watch key from the YouTube link shapes
+// TheAudioDB ships (watch?v=, youtu.be/, /embed/, /shorts/). Empty means
+// "not a YouTube link" and the video is skipped — media_videos.video_key
+// is what the FE builds thumbnails and embeds from.
+func youtubeVideoKey(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	host := strings.TrimPrefix(strings.ToLower(parsed.Host), "www.")
+	switch host {
+	case "youtube.com", "m.youtube.com", "music.youtube.com", "youtube-nocookie.com":
+		if key := parsed.Query().Get("v"); key != "" {
+			return key
+		}
+		for _, prefix := range []string{"/embed/", "/shorts/", "/live/"} {
+			if rest, ok := strings.CutPrefix(parsed.Path, prefix); ok {
+				if idx := strings.IndexByte(rest, '/'); idx >= 0 {
+					rest = rest[:idx]
+				}
+				return rest
+			}
+		}
+	case "youtu.be":
+		return strings.Trim(strings.SplitN(strings.TrimPrefix(parsed.Path, "/"), "/", 2)[0], "/")
+	}
+	return ""
 }

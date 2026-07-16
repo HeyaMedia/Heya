@@ -101,6 +101,7 @@ type ArtistView struct {
 	Listeners             int64             `json:"listeners,omitempty"`
 	Playcount             int64             `json:"playcount,omitempty"`
 	Popularity            int32             `json:"popularity,omitempty"`
+	Genres                []string          `json:"genres,omitempty"`
 	Tags                  []string          `json:"tags,omitempty"`
 	Aliases               []string          `json:"aliases,omitempty"`
 	URLs                  []ArtistURL       `json:"urls,omitempty"`
@@ -136,6 +137,7 @@ func BuildArtistView(a sqlc.Artist) ArtistView {
 		Listeners:      a.Listeners,
 		Playcount:      a.Playcount,
 		Popularity:     a.Popularity,
+		Genres:         nonNilStrings(a.Genres),
 		Tags:           nonNilStrings(a.Tags),
 		Aliases:        nonNilStrings(a.Aliases),
 	}
@@ -255,6 +257,7 @@ func (a *App) matchArtistMembersLocal(ctx context.Context, v *ArtistView) {
 // owned recording; otherwise the chip falls back to a Last.fm link.
 type ArtistTopTrackRow struct {
 	Rank             int32  `json:"rank"`
+	Provider         string `json:"provider,omitempty"`
 	Title            string `json:"title"`
 	MBID             string `json:"mbid,omitempty"`
 	Playcount        int64  `json:"playcount"`
@@ -309,6 +312,7 @@ func (a *App) ListArtistTopTracksBySlug(ctx context.Context, artistSlug string, 
 	for _, t := range tops {
 		row := ArtistTopTrackRow{
 			Rank:      t.Rank,
+			Provider:  t.Provider,
 			Title:     t.Title,
 			MBID:      t.Mbid,
 			Playcount: t.Playcount,

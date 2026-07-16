@@ -345,6 +345,15 @@ type artistDocument struct {
 			Score      float64 `json:"score"`
 			Provider   string  `json:"provider"`
 		} `json:"similar_artists"`
+		// MusicVideos are artist-scoped YouTube links (source: audiodb).
+		// No recording ids upstream — track_title is the only association.
+		MusicVideos []struct {
+			Provider        string `json:"provider"`
+			ProviderVideoID string `json:"provider_video_id"`
+			TrackTitle      string `json:"track_title"`
+			URL             string `json:"url"`
+			Description     string `json:"description"`
+		} `json:"music_videos"`
 	} `json:"data"`
 }
 

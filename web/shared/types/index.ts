@@ -191,6 +191,7 @@ export interface Artist {
   listeners?: number
   playcount?: number
   popularity?: number
+  genres?: string[]
   tags?: string[]
   aliases?: string[]
   urls?: ArtistURL[]
@@ -204,6 +205,7 @@ export interface Artist {
 
 export interface ArtistTopTrackRow {
   rank: number
+  provider?: string
   title: string
   mbid?: string
   playcount: number

@@ -451,7 +451,8 @@ func applyMusicArtistExtended(ctx context.Context, q *sqlc.Queries, artistID int
 		Ended:          detail.ArtistEnded,
 		Deathday:       detail.ArtistDeathday,
 		Birthplace:     detail.ArtistBirthplace,
-		Tags:           nonNilStrings(sortedUnique(append(append([]string{}, detail.Genres...), detail.ArtistTags...))),
+		Tags:           nonNilStrings(sortedUnique(detail.ArtistTags)),
+		Genres:         nonNilStrings(sortedUnique(detail.Genres)),
 	})
 }
 

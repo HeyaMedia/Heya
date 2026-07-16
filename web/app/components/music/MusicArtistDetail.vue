@@ -45,14 +45,19 @@
             <template v-if="statusLabel">
               <span class="dot">&middot;</span><span class="status">{{ statusLabel }}</span>
             </template>
-            <template v-if="(artist.tags?.length ?? 0) > 0">
+            <template v-if="heroPills.length > 0">
               <span class="dot">&middot;</span>
               <NuxtLink
-                v-for="tag in (artist.tags ?? []).slice(0, 5)"
+                v-for="tag in heroPills"
                 :key="tag"
                 :to="`/music/browse/genre/${encodeURIComponent(tag)}`"
                 class="genre"
               >{{ tag }}</NuxtLink>
+              <span
+                v-if="heroPillOverflow > 0"
+                class="genre genre-more"
+                :title="heroPillsAll.join(' · ')"
+              >+{{ heroPillOverflow }}</span>
             </template>
           </p>
 
@@ -248,6 +253,29 @@
         </div>
       </section>
 
+      <!-- Music videos — artist-scoped YouTube links (TheAudioDB via
+           heya.media). External content, played in the same nocookie-embed
+           modal the movie/TV Videos rows use. -->
+      <section v-if="musicVideos.length" class="section">
+        <SectionHeader title="Music Videos" :subtitle="String(musicVideos.length)" />
+        <AppRail :items="musicVideos" :tile-width="300" :phone-tile-width="260" aspect="16/9" :gap="16" :phone-gap="12" snap memory-key="artist-music-videos" :item-key="(v: MediaVideo) => v.video_key">
+          <template #default="{ item: v, index: i }">
+            <button class="video-card" @click="openVideo(v.video_key, v.name)">
+              <MediaCard
+                :idx="i"
+                :src="`https://img.youtube.com/vi/${v.video_key}/mqdefault.jpg`"
+                aspect="16/9"
+                :title="v.name"
+              >
+                <template #badges>
+                  <div class="video-play"><Icon name="play" :size="20" /></div>
+                </template>
+              </MediaCard>
+            </button>
+          </template>
+        </AppRail>
+      </section>
+
       <!-- About + band lifecycle — two-column (mockup .cols). -->
       <section class="section cols">
         <div class="col-about">
@@ -298,46 +326,57 @@
           </dl>
         </div>
 
+        <!-- Band lifecycle — compact wrapping chips (was full-width 48px
+             avatar rows; big bands like orchestras pushed the About column
+             off-screen). Tenure lives in the chip title + a tiny year range. -->
         <div v-if="displayMembers.length > 0 || displayGroups.length > 0" class="col-side">
           <template v-if="displayMembers.length > 0">
             <SectionHeader title="Members" :subtitle="String(displayMembers.length)" />
-            <div class="member-list">
+            <div class="member-chips">
               <component
                 :is="m.local_slug ? 'NuxtLink' : 'div'"
-                v-for="m in displayMembers"
+                v-for="m in visibleMembers"
                 :key="`mem-${m.name}`"
                 :to="m.local_slug ? `/music/artist/${m.local_slug}` : undefined"
-                class="member"
-                :class="{ 'member-linked': !!m.local_slug }"
+                class="mchip"
+                :class="{ 'mchip-linked': !!m.local_slug }"
+                :title="memberTitle(m)"
               >
-                <Poster v-if="m.local_slug" :idx="0" :src="`/api/media/${m.local_slug}/image/poster`" aspect="1/1" :width="104" class="member-av" />
-                <div v-else class="member-av member-av-initials">{{ initials(m.name) }}</div>
-                <div class="member-body">
-                  <div class="member-nm">{{ m.name }}</div>
-                  <div v-if="m.begin_year || m.end_year" class="member-yrs">{{ m.begin_year || '?' }}–{{ m.end_year || 'present' }}</div>
-                </div>
+                <Poster v-if="m.local_slug" :idx="0" :src="`/api/media/${m.local_slug}/image/poster`" aspect="1/1" :width="56" class="mchip-av" />
+                <span v-else class="mchip-av mchip-av-initials">{{ initials(m.name) }}</span>
+                <span class="mchip-nm">{{ m.name }}</span>
+                <span v-if="m.begin_year || m.end_year" class="mchip-yrs">{{ m.begin_year || '?' }}–{{ m.end_year || 'now' }}</span>
               </component>
+              <button
+                v-if="displayMembers.length > MEMBER_CHIP_MAX"
+                class="mchip mchip-more"
+                @click="membersExpanded = !membersExpanded"
+              >{{ membersExpanded ? 'Show fewer' : `+${displayMembers.length - MEMBER_CHIP_MAX} more` }}</button>
             </div>
           </template>
 
           <template v-if="displayGroups.length > 0">
             <SectionHeader title="Member of" :subtitle="String(displayGroups.length)" :class="{ 'mt-gap': displayMembers.length > 0 }" />
-            <div class="member-list">
+            <div class="member-chips">
               <component
                 :is="g.local_slug ? 'NuxtLink' : 'div'"
-                v-for="g in displayGroups"
+                v-for="g in visibleGroups"
                 :key="`grp-${g.name}`"
                 :to="g.local_slug ? `/music/artist/${g.local_slug}` : undefined"
-                class="member"
-                :class="{ 'member-linked': !!g.local_slug }"
+                class="mchip"
+                :class="{ 'mchip-linked': !!g.local_slug }"
+                :title="memberTitle(g)"
               >
-                <Poster v-if="g.local_slug" :idx="0" :src="`/api/media/${g.local_slug}/image/poster`" aspect="1/1" :width="104" class="member-av" />
-                <div v-else class="member-av member-av-initials">{{ initials(g.name) }}</div>
-                <div class="member-body">
-                  <div class="member-nm">{{ g.name }}</div>
-                  <div v-if="g.begin_year || g.end_year" class="member-yrs">{{ g.begin_year || '?' }}–{{ g.end_year || 'present' }}</div>
-                </div>
+                <Poster v-if="g.local_slug" :idx="0" :src="`/api/media/${g.local_slug}/image/poster`" aspect="1/1" :width="56" class="mchip-av" />
+                <span v-else class="mchip-av mchip-av-initials">{{ initials(g.name) }}</span>
+                <span class="mchip-nm">{{ g.name }}</span>
+                <span v-if="g.begin_year || g.end_year" class="mchip-yrs">{{ g.begin_year || '?' }}–{{ g.end_year || 'now' }}</span>
               </component>
+              <button
+                v-if="displayGroups.length > MEMBER_CHIP_MAX"
+                class="mchip mchip-more"
+                @click="groupsExpanded = !groupsExpanded"
+              >{{ groupsExpanded ? 'Show fewer' : `+${displayGroups.length - MEMBER_CHIP_MAX} more` }}</button>
             </div>
           </template>
         </div>
@@ -397,6 +436,25 @@
       @close="onEditorClose"
     />
 
+    <!-- Music-video modal — same nocookie YouTube embed as the movie page. -->
+    <AppDialog
+      :model-value="!!videoModal"
+      :title="videoModal?.title"
+      size="lg"
+      prevent-auto-focus
+      content-class="video-dialog"
+      @update:model-value="(v) => v ? null : videoModal = null"
+    >
+      <iframe
+        v-if="videoModal"
+        class="video-dialog-iframe"
+        :src="videoEmbedSrc(videoModal.key)"
+        frameborder="0"
+        allow="autoplay; encrypted-media; picture-in-picture"
+        allowfullscreen
+      />
+    </AppDialog>
+
     <!-- Phone ⋯ target for Popular Tracks rows (play/queue/rate/navigate). -->
     <ActionSheet
       v-model:open="ttSheetOpen"
@@ -407,7 +465,7 @@
 </template>
 
 <script setup lang="ts">
-import type { AlbumView, Artist, ArtistTopTrackRow, MediaDetail, TrackView } from '~~/shared/types'
+import type { AlbumView, Artist, ArtistMember, ArtistTopTrackRow, MediaDetail, MediaVideo, TrackView } from '~~/shared/types'
 import type { Track } from '~/composables/usePlayer'
 import type { DragAlbumPayload } from '~/composables/useMusicDragDrop'
 import type { ImageTone } from '~/composables/useImageTone'
@@ -662,6 +720,25 @@ const heroAliases = computed(() => {
   return list.length > 3 ? `${shown} +${list.length - 3}` : shown
 })
 
+// Hero pills: curated genres first (upstream separates them from folksonomy
+// tags since the 2026-07 provider expansion), then tags that add something
+// new, case-insensitively deduped. Capped with a +N chip whose tooltip
+// carries the full list.
+const HERO_PILL_MAX = 10
+const heroPillsAll = computed(() => {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const t of [...(artist.value?.genres ?? []), ...(artist.value?.tags ?? [])]) {
+    const key = t.trim().toLowerCase()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push(t)
+  }
+  return out
+})
+const heroPills = computed(() => heroPillsAll.value.slice(0, HERO_PILL_MAX))
+const heroPillOverflow = computed(() => Math.max(0, heroPillsAll.value.length - HERO_PILL_MAX))
+
 // artist_type comes through lower-cased in prod ('group'/'person'); compare
 // case-insensitively so group-only treatments (status, lifecycle, ledger label)
 // don't silently miss.
@@ -670,6 +747,33 @@ const isGroup = computed(() => (artist.value?.artist_type ?? '').toLowerCase() =
 // leaves placeholder rows); the original rendered them as blank chips.
 const displayMembers = computed(() => (artist.value?.members ?? []).filter((m) => m.name?.trim()))
 const displayGroups = computed(() => (artist.value?.groups ?? []).filter((g) => g.name?.trim()))
+
+// Member chips collapse past this count; MusicBrainz lists 20+ people for
+// long-running groups and every one of them used to render as a full row.
+const MEMBER_CHIP_MAX = 10
+const membersExpanded = ref(false)
+const groupsExpanded = ref(false)
+const visibleMembers = computed(() => (membersExpanded.value ? displayMembers.value : displayMembers.value.slice(0, MEMBER_CHIP_MAX)))
+const visibleGroups = computed(() => (groupsExpanded.value ? displayGroups.value : displayGroups.value.slice(0, MEMBER_CHIP_MAX)))
+function memberTitle(m: ArtistMember): string {
+  if (!m.begin_year && !m.end_year) return m.name
+  return `${m.name} · ${m.begin_year || '?'}–${m.end_year || 'present'}`
+}
+
+// Music videos — media_videos rows on the artist's media item (all
+// video_type=music_video for artists). External YouTube content.
+const musicVideos = computed<MediaVideo[]>(() => detail.value?.videos ?? [])
+
+const videoModal = ref<{ key: string; title: string } | null>(null)
+function openVideo(key: string, title: string) {
+  videoModal.value = { key, title }
+}
+// Autoplay is a motion trigger — skip it under prefers-reduced-motion so
+// opening the dialog doesn't immediately start moving video.
+function videoEmbedSrc(key: string): string {
+  const reduceMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  return `https://www.youtube-nocookie.com/embed/${key}?autoplay=${reduceMotion ? 0 : 1}&rel=0`
+}
 
 // Strip MusicBrainz annotation link markup from the bio ([a=Name], [artist=
 // Name|Display], [l=Label]…) → the plain display text. The raw prose shipped
@@ -1109,6 +1213,8 @@ if (import.meta.client) {
   transition: color 0.15s, border-color 0.15s;
 }
 .metaline .genre:hover { color: rgb(var(--oink) / 0.95); border-color: rgb(var(--tone-rgb) / 0.6); }
+/* +N overflow — informational, not a browse link; tooltip has the full list */
+.metaline .genre-more { border-bottom: none; color: rgb(var(--oink) / 0.5); cursor: default; }
 
 /* actions */
 .actions {
@@ -1454,41 +1560,71 @@ a.trk-al:hover { color: var(--tone); }
 .detail-grid dd .mbid { font-family: var(--font-mono); font-size: 11px; color: rgb(var(--ink) / 0.5); }
 .atw-ext { margin-top: 12px; }
 
-/* members (heya2.css .member) */
-.member-list { display: flex; flex-direction: column; }
-.member {
-  display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) auto;
-  gap: 16px;
+/* members — compact wrapping chips (26px avatar + name + tiny tenure). */
+.member-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.mchip {
+  display: inline-flex;
   align-items: center;
-  padding: 12px 4px;
-  border-bottom: 1px solid var(--hair);
+  gap: 8px;
+  padding: 4px 12px 4px 5px;
+  border-radius: 999px;
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid var(--hair);
   text-decoration: none;
   color: inherit;
+  max-width: 100%;
+  min-width: 0;
 }
-.member:first-child { border-top: 1px solid var(--hair-strong); }
-.member-linked { transition: background 0.15s; border-radius: var(--r-sm); }
-.member-linked:hover { background: rgb(var(--ink) / 0.04); }
-.member-linked:hover .member-nm { color: var(--tone); }
-.member-av {
-  width: 48px;
-  height: 48px;
+.mchip-linked { transition: background 0.15s, border-color 0.15s; }
+.mchip-linked:hover { background: rgb(var(--ink) / 0.1); border-color: rgb(var(--ink) / 0.18); }
+.mchip-linked:hover .mchip-nm { color: var(--tone); }
+.mchip-av {
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   flex-shrink: 0;
 }
-.member-av-initials {
-  display: flex;
+.mchip-av-initials {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   background: var(--bg-2);
   box-shadow: 0 0 0 1px rgb(var(--ink) / 0.12);
-  font: 700 15px var(--font-mono);
+  font: 700 10px var(--font-mono);
   color: rgb(var(--ink) / 0.35);
 }
-.member-body { min-width: 0; }
-.member-nm { font-size: 14.5px; font-weight: 650; color: rgb(var(--ink) / 0.9); transition: color 0.15s; }
-.member-yrs { font: 500 11px var(--font-mono); color: rgb(var(--ink) / 0.5); margin-top: 3px; }
+.mchip-nm {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgb(var(--ink) / 0.85);
+  transition: color 0.15s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mchip-yrs { font: 500 10px var(--font-mono); color: rgb(var(--ink) / 0.45); white-space: nowrap; }
+.mchip-more {
+  padding: 4px 12px;
+  cursor: pointer;
+  font: 600 11.5px var(--font-mono);
+  color: rgb(var(--ink) / 0.6);
+  transition: background 0.15s, color 0.15s;
+}
+.mchip-more:hover { background: rgb(var(--ink) / 0.1); color: rgb(var(--ink) / 0.9); }
 .mt-gap { margin-top: 36px; }
+
+/* music videos — YouTube thumb tiles + hover play scrim (movie page recipe) */
+.video-card {
+  width: 100%; text-align: left;
+  background: none; border: none; cursor: pointer; color: inherit; padding: 0;
+}
+.video-play {
+  position: absolute; inset: 0; z-index: 3;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.35); opacity: 0; transition: opacity 0.15s;
+  color: #fff; pointer-events: none; /* on artwork — stays literal */
+}
+.video-card:hover .video-play { opacity: 1; }
 
 /* ── Sounds Like / Similar — circular avatar rails (AppRail owns the
    scroller/snap/shadow-room chrome now). avatar-tile was a grid item before
@@ -1586,6 +1722,11 @@ a.trk-al:hover { color: var(--tone); }
      the trigger renders inside the AppMenu child component, so none of these
      rules can live in the scoped block (docs/ui.md gotcha #2). -->
 <style>
+/* Video modal internals — the dialog content is portaled, so these rules
+   must be unscoped to reach it. */
+.video-dialog .app-dialog-body { padding: 0; }
+.video-dialog-iframe { width: 100%; aspect-ratio: 16 / 9; display: block; border: 0; }
+
 .atw-trigger {
   display: inline-flex;
   align-items: center;

@@ -636,6 +636,7 @@ export type ArtistTopTrackRow = {
     local_track_id?: number;
     mbid?: string;
     playcount: number;
+    provider?: string;
     rank: number;
     title: string;
     url?: string;
@@ -660,6 +661,7 @@ export type ArtistView = {
     discography_enriched_at?: string;
     end_date?: string;
     ended?: boolean;
+    genres?: Array<string> | null;
     groups?: Array<ArtistMember> | null;
     id: number;
     listeners?: number;
@@ -1632,6 +1634,7 @@ export type GetMusicArtistBySlugRow = {
     discography_enriched_at: Timestamptz;
     end_date: string;
     ended: boolean;
+    genres: Array<string> | null;
     groups: string;
     id: number;
     listeners: number;
@@ -2284,6 +2287,7 @@ export type ListMusicArtistsRow = {
     discography_enriched_at: Timestamptz;
     end_date: string;
     ended: boolean;
+    genres: Array<string> | null;
     groups: string;
     id: number;
     listeners: number;
@@ -2650,6 +2654,7 @@ export type ListUserLovedArtistsRow = {
     discography_enriched_at: Timestamptz;
     end_date: string;
     ended: boolean;
+    genres: Array<string> | null;
     groups: string;
     id: number;
     listeners: number;
@@ -2769,6 +2774,7 @@ export type ListUserRatedArtistsRow = {
     discography_enriched_at: Timestamptz;
     end_date: string;
     ended: boolean;
+    genres: Array<string> | null;
     groups: string;
     id: number;
     listeners: number;
@@ -6499,6 +6505,7 @@ export type GetMusicArtistBySlugRowWritable = {
     discography_enriched_at: Timestamptz;
     end_date: string;
     ended: boolean;
+    genres: Array<string> | null;
     groups: string;
     id: number;
     listeners: number;

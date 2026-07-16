@@ -76,6 +76,7 @@ func (m *Matcher) writeArtistExtendedMetadata(ctx context.Context, artistID int6
 		Deathday:       d.ArtistDeathday,
 		Birthplace:     d.ArtistBirthplace,
 		Tags:           nonNilStrings(d.ArtistTags),
+		Genres:         nonNilStrings(d.Genres),
 	})
 }
 
@@ -108,7 +109,20 @@ func (m *Matcher) writeArtistSimilarArtists(ctx context.Context, artistID int64,
 	if err := m.q.ReplaceArtistSimilarArtists(ctx, artistID); err != nil {
 		return err
 	}
-	for i, s := range sims {
+	// Three providers now feed this list and often suggest the same artist;
+	// dedupe by folded name, keeping the first hit (upstream orders Last.fm
+	// — the only provider with MBIDs — ahead of Deezer/Tidal).
+	seen := make(map[string]struct{}, len(sims))
+	rank := 0
+	for _, s := range sims {
+		nameKey := strings.ToLower(strings.TrimSpace(s.Name))
+		if nameKey == "" {
+			continue
+		}
+		if _, dup := seen[nameKey]; dup {
+			continue
+		}
+		seen[nameKey] = struct{}{}
 		// Best-effort local-artist resolution: when the similar artist's
 		// MBID matches a row in our artists table, link to it so the
 		// frontend can render an internal /music/artist/{slug} link
@@ -121,12 +135,40 @@ func (m *Matcher) writeArtistSimilarArtists(ctx context.Context, artistID int64,
 		}
 		if err := m.q.CreateArtistSimilarArtist(ctx, sqlc.CreateArtistSimilarArtistParams{
 			ArtistID:      artistID,
-			Rank:          int32(i),
+			Rank:          int32(rank),
 			Name:          s.Name,
 			Mbid:          s.MBID,
 			MatchScore:    pgNumericFromFloat(s.Match),
 			Url:           s.URL,
 			LocalArtistID: localID,
+			Provider:      s.Provider,
+		}); err != nil {
+			return err
+		}
+		rank++
+	}
+	return nil
+}
+
+// writeArtistMusicVideos replaces the artist's media_videos rows (YouTube
+// music videos, TheAudioDB via heya.media). Same replace-on-refresh story
+// as similar artists: the entity document is authoritative, including an
+// empty list. Artists only ever carry music videos, so the by-item delete
+// cannot collide with another video kind.
+func (m *Matcher) writeArtistMusicVideos(ctx context.Context, mediaItemID int64, videos []metadata.VideoDetail) error {
+	if err := m.q.DeleteMediaVideosByItem(ctx, mediaItemID); err != nil {
+		return err
+	}
+	for _, v := range videos {
+		if err := m.q.CreateMediaVideo(ctx, sqlc.CreateMediaVideoParams{
+			MediaItemID: mediaItemID,
+			ProviderKey: v.ProviderKey,
+			Name:        v.Name,
+			Site:        v.Site,
+			VideoKey:    v.Key,
+			VideoType:   v.Type,
+			Language:    v.Language,
+			Official:    v.Official,
 		}); err != nil {
 			return err
 		}

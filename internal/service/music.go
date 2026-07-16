@@ -330,11 +330,57 @@ type SimilarArtistRow struct {
 	LocalArtistID int64   `json:"local_artist_id,omitempty"`
 }
 
-// GetSimilarArtists fetches Last.fm + ListenBrainz similar suggestions for an
-// artist and folds in any local matches so the UI can route to the in-library
-// detail page rather than a dead-end "external" tile.
+// GetSimilarArtists returns the similar-artist suggestions for an artist,
+// with local matches folded in so the UI can route to the in-library detail
+// page rather than a dead-end "external" tile.
+//
+// DB-first: every enrichment persists the multi-provider (lastfm / deezer /
+// tidal) list into artist_similar_artists, so page views serve locally
+// instead of paying a full heya.media entity fetch each time. The live
+// fetch survives only as a fallback for artists whose stored list predates
+// the persistence (or was emptied by an upstream hiccup).
 func (a *App) GetSimilarArtists(ctx context.Context, artistID int64) ([]SimilarArtistRow, error) {
 	q := sqlc.New(a.db)
+
+	// Index our local artists once for cheap MBID + name lookups. The pool
+	// of artists is small (hundreds at most) so an in-memory map beats N
+	// per-hit queries.
+	byMBID, byName := a.localArtistIndex(ctx)
+	localize := func(row *SimilarArtistRow) {
+		if row.MBID != "" {
+			if ref, ok := byMBID[row.MBID]; ok {
+				row.LocalSlug = ref.slug
+				row.LocalArtistID = ref.artistID
+				return
+			}
+		}
+		if ref, ok := byName[strings.ToLower(strings.TrimSpace(row.Name))]; ok {
+			row.LocalSlug = ref.slug
+			row.LocalArtistID = ref.artistID
+		}
+	}
+
+	stored, storedErr := q.ListArtistSimilarLocalArtistsByArtistID(ctx, sqlc.ListArtistSimilarLocalArtistsByArtistIDParams{
+		ArtistID:    artistID,
+		ArtistLimit: 100,
+	})
+	if storedErr == nil && len(stored) > 0 {
+		out := make([]SimilarArtistRow, 0, len(stored))
+		for _, s := range stored {
+			row := SimilarArtistRow{
+				Name:   s.Name,
+				MBID:   s.Mbid,
+				Source: s.Provider,
+				URL:    s.Url,
+			}
+			if f, err := s.MatchScore.Float64Value(); err == nil && f.Valid {
+				row.Score = f.Float64
+			}
+			localize(&row)
+			out = append(out, row)
+		}
+		return out, nil
+	}
 
 	artist, err := q.GetArtistByID(ctx, artistID)
 	if err != nil {
@@ -354,11 +400,6 @@ func (a *App) GetSimilarArtists(ctx context.Context, artistID int64) ([]SimilarA
 		return []SimilarArtistRow{}, nil
 	}
 
-	// Index our local artists once for cheap MBID + name lookups. The pool
-	// of artists is small (hundreds at most) so an in-memory map beats N
-	// per-hit queries.
-	byMBID, byName := a.localArtistIndex(ctx)
-
 	out := make([]SimilarArtistRow, 0, len(hits))
 	for _, h := range hits {
 		row := SimilarArtistRow{
@@ -369,18 +410,7 @@ func (a *App) GetSimilarArtists(ctx context.Context, artistID int64) ([]SimilarA
 			Source: h.Source,
 			URL:    h.URL,
 		}
-		if h.MBID != "" {
-			if ref, ok := byMBID[h.MBID]; ok {
-				row.LocalSlug = ref.slug
-				row.LocalArtistID = ref.artistID
-			}
-		}
-		if row.LocalSlug == "" {
-			if ref, ok := byName[strings.ToLower(strings.TrimSpace(h.Name))]; ok {
-				row.LocalSlug = ref.slug
-				row.LocalArtistID = ref.artistID
-			}
-		}
+		localize(&row)
 		out = append(out, row)
 	}
 	return out, nil

@@ -236,6 +236,7 @@ type Artist struct {
 	Deathday              string             `json:"deathday"`
 	Birthplace            string             `json:"birthplace"`
 	Tags                  []string           `json:"tags"`
+	Genres                []string           `json:"genres"`
 }
 
 type ArtistCentroid struct {
@@ -255,6 +256,7 @@ type ArtistSimilarArtist struct {
 	MatchScore    pgtype.Numeric `json:"match_score"`
 	Url           string         `json:"url"`
 	LocalArtistID pgtype.Int8    `json:"local_artist_id"`
+	Provider      string         `json:"provider"`
 }
 
 type ArtistTopTrack struct {

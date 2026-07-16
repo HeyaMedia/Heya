@@ -4049,6 +4049,7 @@ paths:
         - Ratings
   /api/v2/entities/{id}/refreshes:
     post:
+      description: Enqueues an interactive provider refresh. Admin role required.
       operationId: refresh-entity
       parameters:
         - in: path
@@ -4057,34 +4058,17 @@ paths:
           schema:
             format: uuid
             type: string
-        - description: Preferred BCP 47 presentation language
-          explode: false
-          in: query
-          name: language
+        - description: Opaque browser session
+          in: cookie
+          name: __Host-heya_session
           schema:
-            description: Preferred BCP 47 presentation language
+            description: Opaque browser session
             type: string
-        - description: Comma-separated ordered presentation language fallbacks
-          explode: false
-          in: query
-          name: fallback_languages
-          schema:
-            description: Comma-separated ordered presentation language fallbacks
-            type: string
-        - description: Presentation preferences used after explicit query preferences
+        - description: Optional Heya API key using the Bearer scheme
           in: header
-          name: Accept-Language
+          name: Authorization
           schema:
-            description: Presentation preferences used after explicit query preferences
-            type: string
-        - description: Optional ISO 3166-1 alpha-2 presentation region
-          explode: false
-          in: query
-          name: country
-          schema:
-            description: Optional ISO 3166-1 alpha-2 presentation region
-            maxLength: 2
-            minLength: 2
+            description: Optional Heya API key using the Bearer scheme
             type: string
         - description: Optional request-scoped TMDB API key; never persisted
           in: header
@@ -4147,12 +4131,42 @@ paths:
               schema:
                 $ref: "#/components/schemas/JobResource"
           description: Accepted
-        default:
+        "401":
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/ErrorModel"
-          description: Error
+          description: Unauthorized
+        "403":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Forbidden
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Not Found
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Internal Server Error
+        "503":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Service Unavailable
       summary: Refresh a canonical entity
       tags:
         - Entities

@@ -29,7 +29,7 @@ by_name_disambig AS (
 SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector,
        discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation,
        urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year,
-       end_date, ended, deathday, birthplace, tags
+       end_date, ended, deathday, birthplace, tags, genres
 FROM (
   SELECT * FROM inserted
   UNION ALL
@@ -407,7 +407,8 @@ UPDATE artists SET
     ended            = $16,
     deathday         = $17,
     birthplace       = $18,
-    tags             = $19
+    tags             = $19,
+    genres           = $20
 WHERE id = $1;
 
 -- name: ReplaceArtistTopTracks :exec
@@ -447,8 +448,8 @@ DELETE FROM artist_similar_artists WHERE artist_id = $1;
 
 -- name: CreateArtistSimilarArtist :exec
 INSERT INTO artist_similar_artists (
-    artist_id, rank, name, mbid, match_score, url, local_artist_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7);
+    artist_id, rank, name, mbid, match_score, url, local_artist_id, provider
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 
 -- name: UpdateAlbumExtendedMetadata :exec
 -- The post-00019 album columns. Mirrors UpdateAlbumEnrichedFields' style
@@ -1228,6 +1229,7 @@ SELECT
     asa.mbid,
     asa.match_score,
     asa.url,
+    asa.provider,
     asa.local_artist_id,
     COALESCE(local_mi.slug, '')::text AS local_slug,
     COALESCE(local_mi.id, 0)::bigint  AS local_media_item_id

@@ -1787,17 +1787,8 @@ type EntityRatingsParams struct {
 
 // RefreshEntityParams defines parameters for RefreshEntity.
 type RefreshEntityParams struct {
-	// Language Preferred BCP 47 presentation language
-	Language *string `form:"language,omitempty" json:"language,omitempty"`
-
-	// FallbackLanguages Comma-separated ordered presentation language fallbacks
-	FallbackLanguages *string `form:"fallback_languages,omitempty" json:"fallback_languages,omitempty"`
-
-	// Country Optional ISO 3166-1 alpha-2 presentation region
-	Country *string `form:"country,omitempty" json:"country,omitempty"`
-
-	// AcceptLanguage Presentation preferences used after explicit query preferences
-	AcceptLanguage *string `json:"Accept-Language,omitempty"`
+	// Authorization Optional Heya API key using the Bearer scheme
+	Authorization *string `json:"Authorization,omitempty"`
 
 	// XHeyaTMDBAPIKey Optional request-scoped TMDB API key; never persisted
 	XHeyaTMDBAPIKey *string `json:"X-Heya-TMDB-API-Key,omitempty"`
@@ -1825,6 +1816,9 @@ type RefreshEntityParams struct {
 
 	// XHeyaMALClientID Optional request-scoped MyAnimeList client ID; never persisted
 	XHeyaMALClientID *string `json:"X-Heya-MAL-Client-ID,omitempty"`
+
+	// UnderscoreUnderscoreHostHeyaSession Opaque browser session
+	UnderscoreUnderscoreHostHeyaSession *string `form:"__Host-heya_session,omitempty" json:"__Host-heya_session,omitempty"`
 }
 
 // EntityRelationsParams defines parameters for EntityRelations.
@@ -5221,57 +5215,6 @@ func NewRefreshEntityRequest(server string, id openapi_types.UUID, params *Refre
 		return nil, err
 	}
 
-	if params != nil {
-		// queryValues collects non-styled parameters (passthrough, JSON)
-		// that are safe to round-trip through url.Values.Encode().
-		queryValues := queryURL.Query()
-		// rawQueryFragments collects pre-encoded query fragments from
-		// styled parameters, preserving literal commas as delimiters
-		// per the OpenAPI spec (e.g. "color=blue,black,brown").
-		var rawQueryFragments []string
-
-		if params.Language != nil {
-
-			if queryFrag, err := runtime.StyleParamWithOptions("form", false, "language", *params.Language, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
-				return nil, err
-			} else {
-				for _, qp := range strings.Split(queryFrag, "&") {
-					rawQueryFragments = append(rawQueryFragments, qp)
-				}
-			}
-
-		}
-
-		if params.FallbackLanguages != nil {
-
-			if queryFrag, err := runtime.StyleParamWithOptions("form", false, "fallback_languages", *params.FallbackLanguages, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
-				return nil, err
-			} else {
-				for _, qp := range strings.Split(queryFrag, "&") {
-					rawQueryFragments = append(rawQueryFragments, qp)
-				}
-			}
-
-		}
-
-		if params.Country != nil {
-
-			if queryFrag, err := runtime.StyleParamWithOptions("form", false, "country", *params.Country, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
-				return nil, err
-			} else {
-				for _, qp := range strings.Split(queryFrag, "&") {
-					rawQueryFragments = append(rawQueryFragments, qp)
-				}
-			}
-
-		}
-
-		if encoded := queryValues.Encode(); encoded != "" {
-			rawQueryFragments = append(rawQueryFragments, encoded)
-		}
-		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
-	}
-
 	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
@@ -5279,15 +5222,15 @@ func NewRefreshEntityRequest(server string, id openapi_types.UUID, params *Refre
 
 	if params != nil {
 
-		if params.AcceptLanguage != nil {
+		if params.Authorization != nil {
 			var headerParam0 string
 
-			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "Accept-Language", *params.AcceptLanguage, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "Authorization", *params.Authorization, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
 			if err != nil {
 				return nil, err
 			}
 
-			req.Header.Set("Accept-Language", headerParam0)
+			req.Header.Set("Authorization", headerParam0)
 		}
 
 		if params.XHeyaTMDBAPIKey != nil {
@@ -5391,6 +5334,23 @@ func NewRefreshEntityRequest(server string, id openapi_types.UUID, params *Refre
 
 	}
 
+	if params != nil {
+
+		if params.UnderscoreUnderscoreHostHeyaSession != nil {
+			var cookieParam0 string
+
+			cookieParam0, err = runtime.StyleParamWithOptions("simple", true, "__Host-heya_session", *params.UnderscoreUnderscoreHostHeyaSession, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationCookie, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			cookie0 := &http.Cookie{
+				Name:  "__Host-heya_session",
+				Value: cookieParam0,
+			}
+			req.AddCookie(cookie0)
+		}
+	}
 	return req, nil
 }
 
@@ -8486,10 +8446,15 @@ func (r EntityRatingsResponse) ContentType() string {
 }
 
 type RefreshEntityResponse struct {
-	Body                          []byte
-	HTTPResponse                  *http.Response
-	JSON202                       *JobResource
-	ApplicationproblemJSONDefault *ErrorModel
+	Body                      []byte
+	HTTPResponse              *http.Response
+	JSON202                   *JobResource
+	ApplicationproblemJSON401 *ErrorModel
+	ApplicationproblemJSON403 *ErrorModel
+	ApplicationproblemJSON404 *ErrorModel
+	ApplicationproblemJSON422 *ErrorModel
+	ApplicationproblemJSON500 *ErrorModel
+	ApplicationproblemJSON503 *ErrorModel
 }
 
 // Status returns HTTPResponse.Status
@@ -11071,12 +11036,47 @@ func ParseRefreshEntityResponse(rsp *http.Response) (*RefreshEntityResponse, err
 		}
 		response.JSON202 = &dest
 
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest ErrorModel
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
-		response.ApplicationproblemJSONDefault = &dest
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON503 = &dest
 
 	}
 

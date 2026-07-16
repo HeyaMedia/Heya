@@ -259,6 +259,9 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 	if err := m.writeArtistSimilarArtists(ctx, artistID, detail.ArtistSimilarArtists); err != nil {
 		log.Warn().Err(err).Int64("artist_id", artistID).Msg("write artist similar artists failed")
 	}
+	if err := m.writeArtistMusicVideos(ctx, artist.MediaItemID, detail.Videos); err != nil {
+		log.Warn().Err(err).Int64("artist_id", artistID).Msg("write artist music videos failed")
+	}
 
 	// media_item.external_ids: merge enriched IDs into whatever's there.
 	if item, err := m.q.GetMediaItemByID(ctx, artist.MediaItemID); err == nil {

@@ -267,10 +267,14 @@ type TopTrackEntry struct {
 
 // SimilarArtistEntry is one Last.fm / ListenBrainz similarity hit.
 type SimilarArtistEntry struct {
-	Name  string  `json:"name"`
-	MBID  string  `json:"mbid,omitempty"`
-	Match float64 `json:"match,omitempty"`
-	URL   string  `json:"url,omitempty"`
+	Name string `json:"name"`
+	MBID string `json:"mbid,omitempty"`
+	// Match is the provider-native score. Scales differ per provider
+	// (lastfm 0..1 match, deezer fan count, tidal 0..1 popularity) — the
+	// values only order rows within one provider, never across providers.
+	Match    float64 `json:"match,omitempty"`
+	URL      string  `json:"url,omitempty"`
+	Provider string  `json:"provider,omitempty"`
 }
 
 // ArtistCreditEntry is one credit on an album or track ({name, mbid, slug,

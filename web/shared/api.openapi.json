@@ -2095,6 +2095,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "provider": {
+            "type": "string"
+          },
           "rank": {
             "format": "int32",
             "type": "integer"
@@ -2178,6 +2181,15 @@
           },
           "ended": {
             "type": "boolean"
+          },
+          "genres": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "groups": {
             "items": {
@@ -5305,6 +5317,15 @@
           "ended": {
             "type": "boolean"
           },
+          "genres": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "groups": {
             "contentEncoding": "base64",
             "type": "string"
@@ -5407,6 +5428,7 @@
           "deathday",
           "birthplace",
           "tags",
+          "genres",
           "slug",
           "media_item_public_id",
           "poster_path",
@@ -7761,6 +7783,15 @@
           "ended": {
             "type": "boolean"
           },
+          "genres": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "groups": {
             "contentEncoding": "base64",
             "type": "string"
@@ -7863,6 +7894,7 @@
           "deathday",
           "birthplace",
           "tags",
+          "genres",
           "slug",
           "media_item_public_id",
           "poster_path",
@@ -9361,6 +9393,15 @@
           "ended": {
             "type": "boolean"
           },
+          "genres": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "groups": {
             "contentEncoding": "base64",
             "type": "string"
@@ -9463,6 +9504,7 @@
           "deathday",
           "birthplace",
           "tags",
+          "genres",
           "slug",
           "poster_path",
           "album_count",
@@ -9894,6 +9936,15 @@
           "ended": {
             "type": "boolean"
           },
+          "genres": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "groups": {
             "contentEncoding": "base64",
             "type": "string"
@@ -10003,6 +10054,7 @@
           "deathday",
           "birthplace",
           "tags",
+          "genres",
           "slug",
           "media_item_public_id",
           "poster_path",
