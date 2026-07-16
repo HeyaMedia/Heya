@@ -158,21 +158,38 @@ async function doRefresh() {
   liveMessage.value = 'Refreshed'
 }
 
-onMounted(() => {
-  if (!isCoarse.value) return
+function attach() {
   // touchmove must be non-passive so we can preventDefault the native scroll
   // while a gesture is active; the others stay passive for scroll perf.
   window.addEventListener('touchstart', onStart, { passive: true })
   window.addEventListener('touchmove', onMove, { passive: false })
   window.addEventListener('touchend', onEnd, { passive: true })
   window.addEventListener('touchcancel', onEnd, { passive: true })
-})
-onUnmounted(() => {
+}
+function detach() {
   window.removeEventListener('touchstart', onStart)
   window.removeEventListener('touchmove', onMove)
   window.removeEventListener('touchend', onEnd)
   window.removeEventListener('touchcancel', onEnd)
+}
+
+onMounted(() => {
+  // Track pointer coarseness reactively rather than sampling it once: a
+  // one-shot mount check leaves the gesture permanently dead when coarse
+  // arrives after mount (DevTools device-mode toggled on a loaded page,
+  // a convertible switching modes) — the indicator would render via v-if
+  // while the listeners were never attached.
+  watch(isCoarse, (coarse, _, onCleanup) => {
+    if (!coarse) return
+    attach()
+    onCleanup(() => {
+      detach()
+      pullY.value = 0
+      mode = 'idle'
+    })
+  }, { immediate: true })
 })
+onUnmounted(detach)
 </script>
 
 <style scoped>
