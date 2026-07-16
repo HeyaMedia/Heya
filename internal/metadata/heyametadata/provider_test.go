@@ -808,6 +808,36 @@ func TestAsyncDiscoveryIsDeferredForDurableScannerWork(t *testing.T) {
 	}
 }
 
+func TestFailedDiscoveryResponseIsTerminalForDurableScannerWork(t *testing.T) {
+	const discoveryID = "99999999-9999-4999-8999-999999999999"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v2/discoveries/"+discoveryID {
+			http.Error(w, "unexpected endpoint", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"id":"` + discoveryID + `","state":"failed","error":"write movie search projection","expires_at":"2099-01-01T00:00:00Z"}`))
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := metadata.WithDeferredRemoteWork(context.Background(), 30*time.Second)
+
+	discovery, err := client.checkDiscovery(ctx, uuid.MustParse(discoveryID), ProviderCredentials{})
+	if discovery == nil || discovery.State != gen.DiscoveryResourceStateFailed {
+		t.Fatalf("failed discovery = %#v", discovery)
+	}
+	if err == nil || !strings.Contains(err.Error(), "metadata discovery failed: write movie search projection") {
+		t.Fatalf("failed discovery error = %v", err)
+	}
+	if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
+		t.Fatalf("terminal discovery failure was treated as deferred: %v", err)
+	}
+}
+
 func TestAsyncResolutionIsDeferredForDurableScannerWork(t *testing.T) {
 	var jobPolls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

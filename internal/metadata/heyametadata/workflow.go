@@ -209,15 +209,15 @@ func (c *Client) checkDiscovery(ctx context.Context, id uuid.UUID, credentials P
 		}
 		return nil, fmt.Errorf("poll metadata discovery: %w", err)
 	}
+	resource := discoveryResource(response)
+	if resource != nil && (resource.State == gen.DiscoveryResourceStateCompleted || resource.State == gen.DiscoveryResourceStateFailed) {
+		return resource, discoveryTerminalError(resource)
+	}
 	if response.StatusCode() != http.StatusOK || response.JSON200 == nil {
 		if deferred := transientDeferredWorkError(ctx, "retry metadata discovery "+id.String(), response.HTTPResponse); deferred != nil {
 			return nil, deferred
 		}
 		return nil, responseError("poll metadata discovery", response.StatusCode(), response.Body)
-	}
-	resource := response.JSON200
-	if resource.State == gen.DiscoveryResourceStateCompleted || resource.State == gen.DiscoveryResourceStateFailed {
-		return resource, discoveryTerminalError(resource)
 	}
 	return nil, deferredWorkError(ctx, "metadata discovery "+id.String(), response.HTTPResponse)
 }
@@ -232,17 +232,29 @@ func (c *Client) pollDiscovery(ctx context.Context, id uuid.UUID, credentials Pr
 		if err != nil {
 			return nil, fmt.Errorf("poll metadata discovery: %w", err)
 		}
+		resource := discoveryResource(response)
+		if resource != nil && (resource.State == gen.DiscoveryResourceStateCompleted || resource.State == gen.DiscoveryResourceStateFailed) {
+			return resource, discoveryTerminalError(resource)
+		}
 		if response.StatusCode() != http.StatusOK || response.JSON200 == nil {
 			return nil, responseError("poll metadata discovery", response.StatusCode(), response.Body)
-		}
-		resource := response.JSON200
-		switch resource.State {
-		case gen.DiscoveryResourceStateCompleted, gen.DiscoveryResourceStateFailed:
-			return resource, discoveryTerminalError(resource)
 		}
 		backoff = growPollBackoff(backoff)
 		delay = pollDelay(backoff, response.HTTPResponse)
 	}
+}
+
+// HeyaMetadata returns a failed discovery as a structured 503 response. Keep
+// that terminal resource visible to durable callers so they can discard the
+// stale discovery ID and create a fresh run instead of snoozing forever.
+func discoveryResource(response *gen.GetDiscoveryResponse) *gen.DiscoveryResource {
+	if response == nil {
+		return nil
+	}
+	if response.JSON200 != nil {
+		return response.JSON200
+	}
+	return response.JSON503
 }
 
 func discoveryTerminalError(resource *gen.DiscoveryResource) error {
