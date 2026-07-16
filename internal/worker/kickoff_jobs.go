@@ -13,6 +13,40 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// scannerQueueMediaTypes is the complete set of library domains that can own
+// an independent scanner queue. Some domains do not have a scanner
+// implementation yet, but reserving their queues keeps the routing model
+// future-proof and lets their kickoff inventory work stay isolated today.
+var scannerQueueMediaTypes = []sqlc.MediaType{
+	sqlc.MediaTypeMovie,
+	sqlc.MediaTypeTv,
+	sqlc.MediaTypeAnime,
+	sqlc.MediaTypeMusic,
+	sqlc.MediaTypeBook,
+	sqlc.MediaTypeComic,
+	sqlc.MediaTypePodcast,
+	sqlc.MediaTypeRadio,
+}
+
+var scannerQueueKinds = []string{
+	"kickoff_library_scan",
+	"process_scan",
+	"fetch_metadata",
+	"apply_metadata",
+}
+
+// scannerQueueName isolates the scanner pipeline by library media type. The
+// unsuffixed queue remains the safe fallback for scan-all coordination,
+// malformed/legacy payloads, and media types introduced by a newer database.
+func scannerQueueName(kind string, mediaType sqlc.MediaType) string {
+	for _, supported := range scannerQueueMediaTypes {
+		if mediaType == supported {
+			return kind + "_" + string(mediaType)
+		}
+	}
+	return kind
+}
+
 // Kickoff Args / InsertOpts live here so the dispatch table (kind →
 // kickoff Args constructor) used by the scheduler trigger loop is a
 // quick read.
@@ -105,7 +139,36 @@ func renameLegacyScannerJobs(ctx context.Context, db *pgxpool.Pool) error {
 			log.Info().Str("old", oldKind).Str("new", newKind).Int64("rows", n).Msg("renamed legacy scanner jobs")
 		}
 	}
+
+	// Jobs already waiting when this version deploys were inserted on the old
+	// shared stage queues. Move active work to its media-type queue immediately
+	// so a large pre-deploy Music backlog cannot continue starving Anime/TV.
+	// Completed history stays untouched.
+	tag, err := db.Exec(ctx, `
+		UPDATE river_job AS rj
+		   SET queue = rj.kind || '_' || l.media_type::text
+		  FROM libraries AS l
+		 WHERE rj.kind = ANY($1::text[])
+		   AND rj.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
+		   AND NULLIF(rj.args->>'library_id', '')::bigint = l.id
+		   AND l.media_type::text = ANY($2::text[])
+		   AND rj.queue IS DISTINCT FROM rj.kind || '_' || l.media_type::text
+	`, scannerQueueKinds, scannerQueueMediaTypeStrings())
+	if err != nil {
+		return err
+	}
+	if n := tag.RowsAffected(); n > 0 {
+		log.Info().Int64("rows", n).Msg("routed active scanner jobs to media-type queues")
+	}
 	return nil
+}
+
+func scannerQueueMediaTypeStrings() []string {
+	values := make([]string, 0, len(scannerQueueMediaTypes))
+	for _, mediaType := range scannerQueueMediaTypes {
+		values = append(values, string(mediaType))
+	}
+	return values
 }
 
 // KickoffLibraryScanArgs replaces scheduler.ScanLibrariesTask. It is the fast
@@ -113,15 +176,16 @@ func renameLegacyScannerJobs(ctx context.Context, db *pgxpool.Pool) error {
 // skip unchanged inputs, soft-delete missing inputs, and enqueue
 // ProcessLibraryScanArgs for changed scopes.
 type KickoffLibraryScanArgs struct {
-	LibraryID       int64  `json:"library_id,omitempty"` // 0 = all libraries
-	Force           bool   `json:"force,omitempty"`
-	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
+	LibraryID       int64          `json:"library_id,omitempty"` // 0 = all libraries
+	MediaType       sqlc.MediaType `json:"media_type,omitempty"`
+	Force           bool           `json:"force,omitempty"`
+	ScheduledTaskID string         `json:"scheduled_task_id,omitempty"`
 }
 
 func (KickoffLibraryScanArgs) Kind() string { return "kickoff_library_scan" }
-func (KickoffLibraryScanArgs) InsertOpts() river.InsertOpts {
+func (a KickoffLibraryScanArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
-		Queue:       "kickoff_library_scan",
+		Queue:       scannerQueueName("kickoff_library_scan", a.MediaType),
 		MaxAttempts: 1,
 		UniqueOpts:  uniqueWhileActive(),
 	}
@@ -137,16 +201,17 @@ func (KickoffLibraryScanArgs) InsertOpts() river.InsertOpts {
 // scopes so a watcher event can process one movie/show/album folder with its
 // sidecars.
 type ProcessLibraryScanArgs struct {
-	LibraryID       int64    `json:"library_id" river:"unique"`
-	ScopePaths      []string `json:"scope_paths,omitempty" river:"unique"`
-	Force           bool     `json:"force,omitempty"`
-	ScheduledTaskID string   `json:"scheduled_task_id,omitempty"`
+	LibraryID       int64          `json:"library_id" river:"unique"`
+	MediaType       sqlc.MediaType `json:"media_type,omitempty"`
+	ScopePaths      []string       `json:"scope_paths,omitempty" river:"unique"`
+	Force           bool           `json:"force,omitempty"`
+	ScheduledTaskID string         `json:"scheduled_task_id,omitempty"`
 }
 
 func (ProcessLibraryScanArgs) Kind() string { return "process_scan" }
-func (ProcessLibraryScanArgs) InsertOpts() river.InsertOpts {
+func (a ProcessLibraryScanArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
-		Queue:       "process_scan",
+		Queue:       scannerQueueName("process_scan", a.MediaType),
 		MaxAttempts: 3,
 		Priority:    PriorityScan,
 		UniqueOpts:  uniqueWhileActive(),
@@ -156,18 +221,19 @@ func (ProcessLibraryScanArgs) InsertOpts() river.InsertOpts {
 // FetchLibraryMetadataArgs resumes a persisted search result, fetches remote
 // metadata, and persists a fetch artifact for the apply phase.
 type FetchLibraryMetadataArgs struct {
-	LibraryID        int64    `json:"library_id" river:"unique"`
-	ScopePaths       []string `json:"scope_paths,omitempty" river:"unique"`
-	ScannerEntityID  int64    `json:"scanner_entity_id" river:"unique"`
-	SearchArtifactID int64    `json:"search_artifact_id" river:"unique"`
-	Force            bool     `json:"force,omitempty"`
-	ScheduledTaskID  string   `json:"scheduled_task_id,omitempty"`
+	LibraryID        int64          `json:"library_id" river:"unique"`
+	MediaType        sqlc.MediaType `json:"media_type,omitempty"`
+	ScopePaths       []string       `json:"scope_paths,omitempty" river:"unique"`
+	ScannerEntityID  int64          `json:"scanner_entity_id" river:"unique"`
+	SearchArtifactID int64          `json:"search_artifact_id" river:"unique"`
+	Force            bool           `json:"force,omitempty"`
+	ScheduledTaskID  string         `json:"scheduled_task_id,omitempty"`
 }
 
 func (FetchLibraryMetadataArgs) Kind() string { return "fetch_metadata" }
-func (FetchLibraryMetadataArgs) InsertOpts() river.InsertOpts {
+func (a FetchLibraryMetadataArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
-		Queue:       "fetch_metadata",
+		Queue:       scannerQueueName("fetch_metadata", a.MediaType),
 		MaxAttempts: 3,
 		Priority:    PriorityScan,
 		UniqueOpts:  uniqueWhileActive(),
@@ -179,18 +245,19 @@ func (FetchLibraryMetadataArgs) InsertOpts() river.InsertOpts {
 // The queue payload stays intentionally small; the rich scanner state lives in
 // scanner_entity_artifacts.
 type ApplyLibraryScanArgs struct {
-	LibraryID          int64    `json:"library_id" river:"unique"`
-	ScopePaths         []string `json:"scope_paths,omitempty" river:"unique"`
-	ScannerEntityID    int64    `json:"scanner_entity_id" river:"unique"`
-	MetadataArtifactID int64    `json:"metadata_artifact_id" river:"unique"`
-	Force              bool     `json:"force,omitempty"`
-	ScheduledTaskID    string   `json:"scheduled_task_id,omitempty"`
+	LibraryID          int64          `json:"library_id" river:"unique"`
+	MediaType          sqlc.MediaType `json:"media_type,omitempty"`
+	ScopePaths         []string       `json:"scope_paths,omitempty" river:"unique"`
+	ScannerEntityID    int64          `json:"scanner_entity_id" river:"unique"`
+	MetadataArtifactID int64          `json:"metadata_artifact_id" river:"unique"`
+	Force              bool           `json:"force,omitempty"`
+	ScheduledTaskID    string         `json:"scheduled_task_id,omitempty"`
 }
 
 func (ApplyLibraryScanArgs) Kind() string { return "apply_metadata" }
-func (ApplyLibraryScanArgs) InsertOpts() river.InsertOpts {
+func (a ApplyLibraryScanArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
-		Queue:       "apply_metadata",
+		Queue:       scannerQueueName("apply_metadata", a.MediaType),
 		MaxAttempts: 3,
 		Priority:    PriorityScan,
 		UniqueOpts:  uniqueWhileActive(),

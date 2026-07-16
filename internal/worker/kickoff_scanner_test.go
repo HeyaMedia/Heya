@@ -221,6 +221,83 @@ func TestKickoffLibraryScanSupportsScannerDomains(t *testing.T) {
 	}
 }
 
+func TestScannerPipelineQueuesArePartitionedByMediaType(t *testing.T) {
+	tests := []struct {
+		name      string
+		mediaType sqlc.MediaType
+		wantQueue string
+	}{
+		{name: "movies", mediaType: sqlc.MediaTypeMovie, wantQueue: "process_scan_movie"},
+		{name: "tv", mediaType: sqlc.MediaTypeTv, wantQueue: "process_scan_tv"},
+		{name: "anime", mediaType: sqlc.MediaTypeAnime, wantQueue: "process_scan_anime"},
+		{name: "music", mediaType: sqlc.MediaTypeMusic, wantQueue: "process_scan_music"},
+		{name: "books", mediaType: sqlc.MediaTypeBook, wantQueue: "process_scan_book"},
+		{name: "unknown fallback", mediaType: sqlc.MediaType("future"), wantQueue: "process_scan"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.wantQueue, ProcessLibraryScanArgs{MediaType: tt.mediaType}.InsertOpts().Queue)
+		})
+	}
+
+	require.Equal(t, "kickoff_library_scan_anime", KickoffLibraryScanArgs{MediaType: sqlc.MediaTypeAnime}.InsertOpts().Queue)
+	require.Equal(t, "fetch_metadata_music", FetchLibraryMetadataArgs{MediaType: sqlc.MediaTypeMusic}.InsertOpts().Queue)
+	require.Equal(t, "apply_metadata_tv", ApplyLibraryScanArgs{MediaType: sqlc.MediaTypeTv}.InsertOpts().Queue)
+}
+
+func TestRenameLegacyScannerJobsRoutesActiveBacklogByMediaType(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	userID := testutil.TestUserID(t, pool)
+
+	createLibrary := func(name string, mediaType sqlc.MediaType) sqlc.Library {
+		lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+			Name:         name,
+			MediaType:    mediaType,
+			Paths:        []string{"/media/" + name},
+			ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+			CreatedBy:    userID,
+			Settings:     []byte("{}"),
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+		return lib
+	}
+
+	music := createLibrary("typed-queue-music", sqlc.MediaTypeMusic)
+	anime := createLibrary("typed-queue-anime", sqlc.MediaTypeAnime)
+	rc, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
+	require.NoError(t, err)
+
+	musicJob, err := rc.Insert(ctx, ProcessLibraryScanArgs{
+		LibraryID:  music.ID,
+		ScopePaths: []string{"/media/typed-queue-music/Artist"},
+	}, nil)
+	require.NoError(t, err)
+	animeJob, err := rc.Insert(ctx, ProcessLibraryScanArgs{
+		LibraryID:  anime.ID,
+		ScopePaths: []string{"/media/typed-queue-anime/Series"},
+	}, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE id = ANY($1::bigint[])`, []int64{musicJob.Job.ID, animeJob.Job.ID})
+	})
+
+	queueFor := func(jobID int64) string {
+		var queue string
+		require.NoError(t, pool.QueryRow(ctx, `SELECT queue FROM river_job WHERE id = $1`, jobID).Scan(&queue))
+		return queue
+	}
+	require.Equal(t, "process_scan", queueFor(musicJob.Job.ID))
+	require.Equal(t, "process_scan", queueFor(animeJob.Job.ID))
+
+	require.NoError(t, renameLegacyScannerJobs(ctx, pool))
+	require.Equal(t, "process_scan_music", queueFor(musicJob.Job.ID))
+	require.Equal(t, "process_scan_anime", queueFor(animeJob.Job.ID))
+}
+
 func TestScannerInventoryPostApplyPaths(t *testing.T) {
 	inv := scanner.Inventory{Roots: []scanner.InventoryRoot{{
 		Root: "/media",
@@ -683,6 +760,14 @@ func TestInsertScanUnitWithBurstResetsWhenIdleIncrementsWhenActive(t *testing.T)
 		ScopePaths: []string{"/media/music/Alpha"},
 	}, PriorityScan, ""))
 	require.EqualValues(t, 1, burstTotal(), "first unit of a burst resets the stale total")
+	var firstQueue string
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT queue FROM river_job
+		WHERE kind = 'process_scan'
+		  AND NULLIF(args->>'library_id', '')::bigint = $1
+		ORDER BY id
+		LIMIT 1`, lib.ID).Scan(&firstQueue))
+	require.Equal(t, "process_scan_music", firstQueue)
 
 	// Second unit while the first is queued → increment.
 	require.NoError(t, EnqueueProcessLibraryScan(ctx, rc, pool, ProcessLibraryScanArgs{

@@ -286,8 +286,10 @@ func (t *Trigger) TriggerNow(ctx context.Context, taskID string, manual bool) er
 // when a path change wants a rescan. UniqueByArgs deduplicates rapid
 // retriggers per (LibraryID, Force) pair.
 func (t *Trigger) EnqueueLibraryScan(ctx context.Context, libraryID int64, force bool) error {
-	_, err := t.river.Insert(ctx, worker.KickoffLibraryScanArgs{LibraryID: libraryID, Force: force}, nil)
-	return err
+	return worker.EnqueueKickoffLibraryScan(ctx, t.river, t.db, worker.KickoffLibraryScanArgs{
+		LibraryID: libraryID,
+		Force:     force,
+	})
 }
 
 func nextRunAfter(now time.Time, intervalHours int32, dailyStartTime, dailyEndTime string) time.Time {

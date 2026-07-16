@@ -125,6 +125,11 @@ In `internal/worker/worker.go`:
   `detect_local_assets`) has per-queue worker counts. The default scanner
   stages use 4 workers for `process_scan`, `fetch_metadata`, and
   `apply_metadata`; heavier file/analysis queues keep lower defaults.
+  Kickoff/process/fetch/apply are each partitioned by library media type
+  (`*_movie`, `*_tv`, `*_anime`, `*_music`, `*_book`, etc.), and the configured
+  worker count applies to every media-type queue. This prevents an older bulk
+  Music fan-out from FIFO-starving later Anime/TV/Movie work. The unsuffixed
+  kickoff queue remains the lightweight `Scan all` coordinator and fallback.
   `kickoff_library_scan` is the fast inventory/change detector; it skips
   unchanged paths, soft-deletes missing paths, and enqueues
   `process_scan` for changed scopes.

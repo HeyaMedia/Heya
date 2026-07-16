@@ -170,27 +170,56 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	river.AddWorker(workers, &SyncMetadataChangesWorker{DB: cfg.DB, Source: cfg.HeyaMetadata})
 
 	client, err := river.NewClient(riverpgxv5.New(cfg.DB), &river.Config{
-		// One queue per worker kind. Two reasons:
-		//   1. Scanner / probe / match touch the source filesystem (or
-		//      SMB share); serialising each step keeps us from
-		//      hammering the source with concurrent IO.
-		//   2. Each external dependency (HeyaMetadata search, TMDB people,
-		//      rating providers) gets its own concurrency knob without
-		//      contending against unrelated work.
-		// download_image is the lone exception — it hits provider CDNs,
-		// not the source, so parallelism there is fine.
-		// New kinds added in this refactor (kickoff_*, trickplay_file,
-		// thumbnail_extra, analyze_track_facets, refresh_*_centroids)
-		// also live here at MaxWorkers=1.
+		// Scanner stages are split by media type, so a large Music fan-out
+		// cannot monopolize the workers needed by Movies, TV, or Anime. The
+		// unsuffixed queues remain for scan-all coordination and as a safe
+		// fallback for legacy or unknown media-type payloads.
 		Queues: map[string]river.QueueConfig{
 			// Scanner pipeline (source-throttled).
 			"kickoff_library_scan": {MaxWorkers: queueWorkers(cfg, "kickoff_library_scan", 1)}, // priority bands: P1=watcher, P2=scheduled/manual
 			"process_scan":         {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},         // local analysis + search; scoped for watcher-triggered folders
 			"fetch_metadata":       {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},       // remote metadata fetch from persisted search artifact
 			"apply_metadata":       {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},       // materialize + apply from persisted fetch artifact
-			"apply_rich_metadata":  {MaxWorkers: queueWorkers(cfg, "apply_rich_metadata", 4)},  // local set-based projection writes; shared people are locked canonically and concurrency-tested
-			"ffprobe":              {MaxWorkers: queueWorkers(cfg, "ffprobe", 1)},
-			"detect_local_assets":  {MaxWorkers: queueWorkers(cfg, "detect_local_assets", 1)},
+
+			"kickoff_library_scan_movie":   {MaxWorkers: queueWorkers(cfg, "kickoff_library_scan", 1)},
+			"kickoff_library_scan_tv":      {MaxWorkers: queueWorkers(cfg, "kickoff_library_scan", 1)},
+			"kickoff_library_scan_anime":   {MaxWorkers: queueWorkers(cfg, "kickoff_library_scan", 1)},
+			"kickoff_library_scan_music":   {MaxWorkers: queueWorkers(cfg, "kickoff_library_scan", 1)},
+			"kickoff_library_scan_book":    {MaxWorkers: queueWorkers(cfg, "kickoff_library_scan", 1)},
+			"kickoff_library_scan_comic":   {MaxWorkers: queueWorkers(cfg, "kickoff_library_scan", 1)},
+			"kickoff_library_scan_podcast": {MaxWorkers: queueWorkers(cfg, "kickoff_library_scan", 1)},
+			"kickoff_library_scan_radio":   {MaxWorkers: queueWorkers(cfg, "kickoff_library_scan", 1)},
+
+			"process_scan_movie":   {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},
+			"process_scan_tv":      {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},
+			"process_scan_anime":   {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},
+			"process_scan_music":   {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},
+			"process_scan_book":    {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},
+			"process_scan_comic":   {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},
+			"process_scan_podcast": {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},
+			"process_scan_radio":   {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},
+
+			"fetch_metadata_movie":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
+			"fetch_metadata_tv":      {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
+			"fetch_metadata_anime":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
+			"fetch_metadata_music":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
+			"fetch_metadata_book":    {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
+			"fetch_metadata_comic":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
+			"fetch_metadata_podcast": {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
+			"fetch_metadata_radio":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
+
+			"apply_metadata_movie":   {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},
+			"apply_metadata_tv":      {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},
+			"apply_metadata_anime":   {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},
+			"apply_metadata_music":   {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},
+			"apply_metadata_book":    {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},
+			"apply_metadata_comic":   {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},
+			"apply_metadata_podcast": {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},
+			"apply_metadata_radio":   {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},
+
+			"apply_rich_metadata": {MaxWorkers: queueWorkers(cfg, "apply_rich_metadata", 4)}, // local set-based projection writes; shared people are locked canonically and concurrency-tested
+			"ffprobe":             {MaxWorkers: queueWorkers(cfg, "ffprobe", 1)},
+			"detect_local_assets": {MaxWorkers: queueWorkers(cfg, "detect_local_assets", 1)},
 
 			// Enrich pipeline (external rate-limit safety).
 			"enrich_media_item":      {MaxWorkers: queueWorkers(cfg, "enrich_media_item", 1)}, // priority bands P1=watcher/view, P2=movies+tv, P3=music+books

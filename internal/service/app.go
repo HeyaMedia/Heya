@@ -294,7 +294,10 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	}
 
 	wm := watcher.NewManager(db, riverClient, func(libraryID int64, force bool) {
-		_, _ = riverClient.Insert(ctx, worker.KickoffLibraryScanArgs{LibraryID: libraryID, Force: force}, nil)
+		_ = worker.EnqueueKickoffLibraryScan(ctx, riverClient, db, worker.KickoffLibraryScanArgs{
+			LibraryID: libraryID,
+			Force:     force,
+		})
 	})
 	watcherPauser = wm
 

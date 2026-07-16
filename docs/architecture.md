@@ -181,7 +181,9 @@ Concurrency rules of thumb (full table in [`pipeline.md`](./pipeline.md#queue-co
 
 - One queue per worker kind — keeps cancellation simple and isolates each
   upstream's rate-limit budget.
-- Scanner pipeline is `MaxWorkers=1` end-to-end (protects the source FS).
+- Scanner kickoff/process/fetch/apply queues are partitioned by library media
+  type, so a large Music scan cannot starve Movies, TV, Anime, or Books. The
+  default process/fetch/apply pools are four workers **per media type**.
 - Enrich queue is `MaxWorkers=1` per kind, with priority bands
   (P1 = watcher/view, P2 = movies+TV, P3 = music+books, P4 = analysis).
 - Only `download_image` runs at `MaxWorkers=4` — it hits provider CDNs, not

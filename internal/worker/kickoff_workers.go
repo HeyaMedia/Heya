@@ -254,6 +254,7 @@ func (w *KickoffLibraryScanWorker) Work(ctx context.Context, job *river.Job[Kick
 		if supportsScanner(lib.MediaType) && (job.Args.Force || result.New > 0) {
 			queued, enqueueFailed := enqueueProcessLibraryScanFanout(ctx, rc, w.DB, lib, ProcessLibraryScanArgs{
 				LibraryID:       lib.ID,
+				MediaType:       lib.MediaType,
 				Force:           job.Args.Force,
 				ScheduledTaskID: taskID,
 			}, remainingScopes, inv, PriorityScan, source)
@@ -410,6 +411,7 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 		}
 		if err := enqueueFetchLibraryMetadata(ctx, rc, w.DB, FetchLibraryMetadataArgs{
 			LibraryID:        lib.ID,
+			MediaType:        lib.MediaType,
 			ScopePaths:       job.Args.ScopePaths,
 			ScannerEntityID:  ref.Entity.ID,
 			SearchArtifactID: ref.Artifact.ID,
@@ -517,6 +519,7 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 
 	if err := enqueueApplyLibraryScan(ctx, rc, w.DB, ApplyLibraryScanArgs{
 		LibraryID:          lib.ID,
+		MediaType:          lib.MediaType,
 		ScopePaths:         job.Args.ScopePaths,
 		ScannerEntityID:    job.Args.ScannerEntityID,
 		MetadataArtifactID: metadataArtifactID,
@@ -1528,9 +1531,39 @@ func insertScanUnitWithBurst(ctx context.Context, rc *river.Client[pgx.Tx], db *
 // through here (watcher, review actions, pruner requeues, kickoff fan-out)
 // or the progress bar loses its denominator.
 func EnqueueProcessLibraryScan(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, args ProcessLibraryScanArgs, priority int, source string) error {
+	mediaType, err := resolveScannerQueueMediaType(ctx, db, args.LibraryID, args.MediaType)
+	if err != nil {
+		return err
+	}
+	args.MediaType = mediaType
 	opts := args.InsertOpts()
 	opts.Priority = priority
 	return insertScanUnitWithBurst(ctx, rc, db, args.LibraryID, args, applyScheduledJobSource(opts, source))
+}
+
+// EnqueueKickoffLibraryScan routes a single-library inventory to its
+// media-type queue. LibraryID=0 is the scan-all coordinator and deliberately
+// remains on the unsuffixed queue; its per-library process work fans out to
+// the independent queues below.
+func EnqueueKickoffLibraryScan(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, args KickoffLibraryScanArgs) error {
+	mediaType, err := resolveScannerQueueMediaType(ctx, db, args.LibraryID, args.MediaType)
+	if err != nil {
+		return err
+	}
+	args.MediaType = mediaType
+	_, err = rc.Insert(ctx, args, nil)
+	return err
+}
+
+func resolveScannerQueueMediaType(ctx context.Context, db *pgxpool.Pool, libraryID int64, mediaType sqlc.MediaType) (sqlc.MediaType, error) {
+	if mediaType != "" || libraryID == 0 || db == nil {
+		return mediaType, nil
+	}
+	lib, err := sqlc.New(db).GetLibraryByID(ctx, libraryID)
+	if err != nil {
+		return "", err
+	}
+	return lib.MediaType, nil
 }
 
 func enqueueProcessLibraryScanFanout(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, lib sqlc.Library, base ProcessLibraryScanArgs, scopes []string, inv scanner.Inventory, priority int, source string) (queued, failed int) {
@@ -1559,6 +1592,7 @@ func enqueueProcessLibraryScanFanout(ctx context.Context, rc *river.Client[pgx.T
 // provider traffic. A library-root scope expands to the owner units the
 // inventory actually contains; multi-scope requests split per scope.
 func processLibraryScanFanoutArgs(lib sqlc.Library, base ProcessLibraryScanArgs, scopes []string, inv scanner.Inventory) []ProcessLibraryScanArgs {
+	base.MediaType = lib.MediaType
 	ownerScopes := scannerOwnerScopesFromInventory(lib, inv)
 	requested := compactScannerScopes(scopes)
 	if len(requested) == 0 {
@@ -1645,12 +1679,22 @@ func scannerScopeIsLibraryRoot(lib sqlc.Library, scope string) bool {
 }
 
 func enqueueApplyLibraryScan(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, args ApplyLibraryScanArgs, priority int, source string) error {
+	mediaType, err := resolveScannerQueueMediaType(ctx, db, args.LibraryID, args.MediaType)
+	if err != nil {
+		return err
+	}
+	args.MediaType = mediaType
 	opts := args.InsertOpts()
 	opts.Priority = priority
 	return insertScanUnitWithBurst(ctx, rc, db, args.LibraryID, args, applyScheduledJobSource(opts, source))
 }
 
 func enqueueFetchLibraryMetadata(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, args FetchLibraryMetadataArgs, priority int, source string) error {
+	mediaType, err := resolveScannerQueueMediaType(ctx, db, args.LibraryID, args.MediaType)
+	if err != nil {
+		return err
+	}
+	args.MediaType = mediaType
 	opts := args.InsertOpts()
 	opts.Priority = priority
 	return insertScanUnitWithBurst(ctx, rc, db, args.LibraryID, args, applyScheduledJobSource(opts, source))
