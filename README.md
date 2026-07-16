@@ -74,6 +74,7 @@ Day-to-day development (hot reload via `make dev`, tests, hooks, CI) lives in
 | [cli.md](docs/cli.md)                        | Full CLI reference                               |
 | [jellyfin.md](docs/jellyfin.md)              | Jellyfin-compatible API                          |
 | [tailscale.md](docs/tailscale.md)            | tsnet integration                                |
+| [system-media.md](docs/system-media.md)      | Browser/PWA and native OS media integration      |
 | [ui.md](docs/ui.md)                          | Frontend conventions                             |
 
 The HTTP API documents itself at `/api/docs` (Scalar over OpenAPI 3.1 via

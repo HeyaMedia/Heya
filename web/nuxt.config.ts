@@ -66,6 +66,9 @@ export default defineNuxtConfig({
       ],
     },
     workbox: {
+      // Adds only the click behavior for locally-triggered now-playing
+      // notifications; Workbox continues to own generation and precaching.
+      importScripts: ["/notification-click.js"],
       // Defaults only glob js/css/html; add the icon + font formats that
       // make up the rest of the "app shell" so the standalone window has
       // something to paint from cache immediately. `akarisub` (libass WASM

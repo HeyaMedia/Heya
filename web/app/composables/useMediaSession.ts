@@ -1,28 +1,24 @@
-// Bridges the OS Media Session API to the music player: hardware media keys,
-// lock-screen / notification-shade transport controls, now-playing metadata,
-// artwork, and a live scrubber on the OS surface. Mounted once from the
-// persistent Playbar. No-op on SSR and on browsers without the API.
-//
-// Heya specifics vs a stock implementation:
-//   - the now-playing artwork comes from the track's `poster` URL
-//   - usePlayerBindings().seek() takes a 0..1 fraction, so the per-second seek actions
-//     convert through the current duration
-//   - radio streams carry negative ids, so the metadata key is stringified
-export function useMediaSession() {
-  if (import.meta.server) return
-  if (!('mediaSession' in navigator)) return
+// Browser implementation of Heya's system-media adapter. HeyaClient uses the
+// native protocol instead, preventing a WebView Media Session and the native
+// OS session from both claiming the same hardware-key event.
+import type { usePlayerBindings } from '~/composables/usePlayer'
+import { systemMediaItemKey, systemMediaNotificationBody } from '~/utils/systemMedia'
 
-  const player = usePlayerBindings()
+type PlayerBindings = ReturnType<typeof usePlayerBindings>
+
+function resolveArtworkUrl(src: string | null | undefined): string | null {
+  if (!src) return null
+  if (src.startsWith('/')) return window.location.origin + src
+  if (src.startsWith('http://') || src.startsWith('https://')) return src
+  return null
+}
+
+/** Install browser Media Session metadata, timeline, and transport handlers. */
+export function installBrowserMediaSession(player: PlayerBindings): () => void {
+  if (!('mediaSession' in navigator)) return () => {}
+
   const ms = navigator.mediaSession
-
-  // Media Session artwork must be an absolute HTTP(S) URL the OS can fetch —
-  // blob:/data: and relative paths don't work across browsers.
-  function resolveArtworkUrl(src: string | null | undefined): string | null {
-    if (!src) return null
-    if (src.startsWith('/')) return window.location.origin + src
-    if (src.startsWith('http://') || src.startsWith('https://')) return src
-    return null
-  }
+  const stops: Array<() => void> = []
 
   function seekToSeconds(seconds: number) {
     const dur = player.duration.value
@@ -34,53 +30,120 @@ export function useMediaSession() {
     ['pause', () => player.pause()],
     ['previoustrack', () => { void player.prevTrack() }],
     ['nexttrack', () => { void player.nextTrack() }],
-    ['seekto', (d) => { if (d.seekTime != null) seekToSeconds(d.seekTime) }],
-    ['seekbackward', (d) => seekToSeconds(player.position.value - (d.seekOffset ?? 10))],
-    ['seekforward', (d) => seekToSeconds(player.position.value + (d.seekOffset ?? 10))],
+    ['seekto', (details) => { if (details.seekTime != null) seekToSeconds(details.seekTime) }],
+    ['seekbackward', details => seekToSeconds(player.position.value - (details.seekOffset ?? 10))],
+    ['seekforward', details => seekToSeconds(player.position.value + (details.seekOffset ?? 10))],
   ]
   for (const [action, handler] of actions) {
     try { ms.setActionHandler(action, handler) } catch { /* action unsupported here */ }
   }
 
-  // Metadata: set title/artist/album immediately, upgrade with artwork when present.
-  let lastKey: string | null = null
-  watch(() => player.currentTrack.value, (track) => {
-    if (!track) { ms.metadata = null; lastKey = null; return }
-    const key = String(track.id)
-    if (key === lastKey) return
-    lastKey = key
+  let lastMetadataKey: string | null = null
+  stops.push(watch(() => player.currentTrack.value, (track) => {
+    if (!track) {
+      ms.metadata = null
+      ms.playbackState = 'none'
+      lastMetadataKey = null
+      return
+    }
+    const key = systemMediaItemKey(track)
+    if (key === lastMetadataKey) return
+    lastMetadataKey = key
 
     const base = {
       title: track.title,
-      artist: track.artist ?? undefined,
-      album: track.album ?? undefined,
+      artist: track.artist || undefined,
+      album: track.album || undefined,
     }
-    ms.metadata = new MediaMetadata(base)
+    const artwork = resolveArtworkUrl(track.poster)
+    ms.metadata = new MediaMetadata(artwork
+      ? {
+          ...base,
+          artwork: [
+            { src: artwork, sizes: '256x256' },
+            { src: artwork, sizes: '512x512' },
+          ],
+        }
+      : base)
+  }, { immediate: true, deep: true }))
 
-    const artUrl = resolveArtworkUrl(track.poster)
-    if (artUrl) {
-      ms.metadata = new MediaMetadata({
-        ...base,
-        artwork: [
-          { src: artUrl, sizes: '256x256' },
-          { src: artUrl, sizes: '512x512' },
-        ],
+  stops.push(watch(() => player.playing.value, (playing) => {
+    ms.playbackState = player.currentTrack.value ? (playing ? 'playing' : 'paused') : 'none'
+  }, { immediate: true }))
+
+  stops.push(watchEffect(() => {
+    const duration = player.duration.value
+    const position = player.position.value
+    if (duration <= 0 || !Number.isFinite(duration) || !Number.isFinite(position)) return
+    try {
+      ms.setPositionState({
+        duration,
+        position: Math.max(0, Math.min(position, duration)),
+        playbackRate: 1,
       })
-    }
-  }, { immediate: true })
+    } catch { /* browsers reject transiently inconsistent position state */ }
+  }))
 
-  watch(() => player.playing.value, (playing) => {
-    ms.playbackState = playing ? 'playing' : 'paused'
-  }, { immediate: true })
-
-  // Live position for the OS scrubber. Some browsers reject invalid states.
-  watchEffect(() => {
-    const dur = player.duration.value
-    const pos = player.position.value
-    if (dur > 0) {
-      try {
-        ms.setPositionState({ duration: dur, position: Math.min(pos, dur), playbackRate: 1 })
-      } catch { /* invalid position state — ignore */ }
+  return () => {
+    for (const stop of stops) stop()
+    for (const [action] of actions) {
+      try { ms.setActionHandler(action, null) } catch { /* unsupported action */ }
     }
-  })
+    ms.metadata = null
+    ms.playbackState = 'none'
+  }
+}
+
+export function browserTrackNotificationsSupported(): boolean {
+  return import.meta.client && 'Notification' in window
+}
+
+export async function requestBrowserTrackNotificationPermission(): Promise<NotificationPermission> {
+  if (!browserTrackNotificationsSupported()) return 'denied'
+  if (Notification.permission !== 'default') return Notification.permission
+  return await Notification.requestPermission()
+}
+
+/**
+ * Show one replaceable, silent notification. The caller owns change detection;
+ * this adapter owns browser permission and background eligibility.
+ */
+export async function showBrowserTrackNotification(track: NonNullable<PlayerBindings['currentTrack']['value']>): Promise<boolean> {
+  if (!browserTrackNotificationsSupported()
+    || Notification.permission !== 'granted'
+    || (document.visibilityState === 'visible' && document.hasFocus())) return false
+
+  const icon = resolveArtworkUrl(track.poster) ?? undefined
+  const options: NotificationOptions = {
+    body: systemMediaNotificationBody(track),
+    icon,
+    tag: 'heya-now-playing',
+    silent: true,
+    data: { url: '/music' },
+  }
+
+  // Persistent notifications are required by some mobile browsers and keep
+  // working while an installed PWA is backgrounded. The imported SW click
+  // handler focuses the existing Heya client rather than opening duplicates.
+  if ('serviceWorker' in navigator) {
+    try {
+      const registration = await navigator.serviceWorker.getRegistration()
+      if (registration) {
+        await registration.showNotification(track.title, options)
+        return true
+      }
+    } catch { /* fall through to the page-scoped constructor */ }
+  }
+
+  try {
+    const notification = new Notification(track.title, options)
+    notification.onclick = () => {
+      window.focus()
+      void navigateTo('/music')
+      notification.close()
+    }
+    return true
+  } catch {
+    return false
+  }
 }

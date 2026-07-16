@@ -14,6 +14,7 @@ import {
 
 const { settings, update } = useDeviceSettings()
 const { toast } = useToast()
+const { isTauriClient } = useClientSurface()
 const { user } = useAuth()
 const userId = computed(() => (user.value?.id ?? Number(localStorage.getItem('heya_user_id'))) || null)
 
@@ -41,6 +42,26 @@ const wifiOnlyChoice = computed({
   get: () => settings.value.wifiOnlyPrefetch,
   set: (value: boolean) => update({ wifiOnlyPrefetch: value }),
 })
+
+const browserNotificationsSupported = ref(false)
+const browserNotificationPermission = ref<NotificationPermission>('default')
+
+async function setTrackChangeNotifications(enabled: boolean) {
+  if (!enabled) {
+    update({ trackChangeNotifications: false })
+    return
+  }
+  const permission = await requestBrowserTrackNotificationPermission()
+  browserNotificationPermission.value = permission
+  if (permission === 'granted') {
+    update({ trackChangeNotifications: true })
+  } else {
+    update({ trackChangeNotifications: false })
+    toast.err(permission === 'denied'
+      ? 'Notifications are blocked for Heya in this browser.'
+      : 'Notification permission was not granted.')
+  }
+}
 
 const qualityLabel = computed(() => QUALITY_OPTIONS.find(option => option.value === settings.value.streamQuality)?.label.split(' (')[0] ?? 'Original')
 const storedBytes = computed(() => storage.value?.totalBytes == null ? '—' : fmtBytes(storage.value.totalBytes))
@@ -91,7 +112,16 @@ function areaSub(area: StorageAreaUsage, noun: string) {
   return `${count} · ${area.exact ? '' : 'at least '}${fmtBytes(area.bytes)}`
 }
 
-onMounted(loadStorage)
+onMounted(() => {
+  void loadStorage()
+  browserNotificationsSupported.value = browserTrackNotificationsSupported()
+  if (browserNotificationsSupported.value) {
+    browserNotificationPermission.value = Notification.permission
+    if (Notification.permission === 'denied' && settings.value.trackChangeNotifications) {
+      update({ trackChangeNotifications: false })
+    }
+  }
+})
 </script>
 
 <template>
@@ -132,6 +162,35 @@ onMounted(loadStorage)
         </SettingsField>
       </SettingsSection>
     </div>
+
+    <SettingsSection title="System integration" icon="bell"
+      description="Control how this device announces music while Heya is in the background.">
+      <SettingsField
+        v-if="!isTauriClient"
+        label="Song-change notifications"
+        description="Show one silent, replaceable notification when the song changes while Heya is hidden."
+        :hint="browserNotificationPermission === 'denied' ? 'Blocked in browser settings.' : 'Permission is requested only when you turn this on.'"
+        v-slot="{ fieldId, hintId }"
+      >
+        <AppSwitch
+          :id="fieldId"
+          :aria-describedby="hintId"
+          :model-value="settings.trackChangeNotifications"
+          :disabled="!browserNotificationsSupported || browserNotificationPermission === 'denied'"
+          size="md"
+          aria-label="Song-change notifications"
+          @update:model-value="setTrackChangeNotifications"
+        />
+      </SettingsField>
+      <SettingsField
+        v-else
+        label="Native song-change notifications"
+        description="HeyaClient owns OS notification permission and background eligibility."
+        hint="Open HeyaClient Settings with Cmd/Ctrl+, to turn this on or off."
+      >
+        <span class="local-owner">Managed by HeyaClient</span>
+      </SettingsField>
+    </SettingsSection>
 
     <SettingsSection title="Storage" icon="hard-drives"
       description="Data kept on this device for instant and offline use. Clearing it never touches your server library or account.">
@@ -259,6 +318,10 @@ onMounted(loadStorage)
   margin: 10px 2px 0;
   color: var(--fg-2);
   font-size: 11.5px;
+}
+.local-owner {
+  color: var(--fg-2);
+  font-size: 12.5px;
 }
 
 @media (max-width: 720px) {

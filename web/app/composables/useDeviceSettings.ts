@@ -31,6 +31,8 @@ export interface DeviceSettings {
    * null = auto (on for iOS, off elsewhere); true/false = explicit override.
    */
   forceDirectEngine: boolean | null
+  /** Optional song-change toast while this browser/PWA is in the background. */
+  trackChangeNotifications: boolean
 }
 
 const KEY = 'heya_device_settings_v1'
@@ -40,6 +42,7 @@ const DEFAULTS: DeviceSettings = {
   prefetchCount: 2,
   wifiOnlyPrefetch: false,
   forceDirectEngine: null,
+  trackChangeNotifications: false,
 }
 
 function loadInitial(): DeviceSettings {

@@ -34,11 +34,10 @@ const DataMetrics = import.meta.dev
 const route = useRoute()
 const { ready, isAuthenticated } = useAuth()
 
-// Bridge OS media keys / lock-screen transport to the player. Mounted here
-// (not Playbar) so the bridge is always active regardless of route or which
-// responsive player host is visible. No-op
-// on SSR and on browsers without the Media Session API (guards itself).
-useMediaSession()
+// One app-wide coordinator selects the browser Media Session adapter or, only
+// after an origin-validated handshake, HeyaClient's native OS-media adapter.
+// The player remains controllable after navigating away from /music.
+useSystemMediaIntegration()
 
 // hydrate() + fetchUser() are now done once at SPA boot in plugins/auth.ts —
 // removing the duplicate that lived here. Doubling the boot-time
