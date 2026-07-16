@@ -167,6 +167,15 @@ export function useNativeVideoPlaybackBackend(
     }
   }
 
+  function setDesiredTransportState(paused: boolean) {
+    nativeState.paused = paused
+    nativeState.playing = !paused
+    nativeState.ended = false
+    state.paused = paused
+    state.playing = !paused
+    state.ended = false
+  }
+
   return {
     kind: 'mpv',
     capabilities,
@@ -178,8 +187,14 @@ export function useNativeVideoPlaybackBackend(
     audioTracks: computed(() => nativeState.audioTracks),
     subtitleTracks: computed(() => nativeState.subtitleTracks),
     controls: {
-      play: () => send({ type: 'play' }),
-      pause: () => send({ type: 'pause' }),
+      play: () => {
+        setDesiredTransportState(false)
+        return send({ type: 'play' })
+      },
+      pause: () => {
+        setDesiredTransportState(true)
+        return send({ type: 'pause' })
+      },
       seek: positionSeconds => send({ type: 'seek', positionSeconds }),
       setVolume: volume => send({ type: 'setVolume', volume: Math.max(0, Math.min(1, volume)) }),
       setMuted: muted => send({ type: 'setMuted', muted }),

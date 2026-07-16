@@ -1412,27 +1412,28 @@ function onPlayerPointerLeave() {
   }, 300)
 }
 
-let videoClickTimer: ReturnType<typeof setTimeout> | null = null
-function clearVideoClickTimer() {
-  if (!videoClickTimer) return
-  clearTimeout(videoClickTimer)
-  videoClickTimer = null
-}
-function onVideoClick(e: MouseEvent) {
-  // The second click of a double-click arrives before `dblclick`; cancel the
-  // pending single-click action so fullscreen never also toggles playback.
-  if (e.detail > 1) { clearVideoClickTimer(); return }
-  clearVideoClickTimer()
-  videoClickTimer = setTimeout(() => {
-    videoClickTimer = null
-    controls.togglePlay()
-    showCtrl()
-  }, 300)
+function onVideoClick() {
+  // Act on each click immediately. A double-click produces two playback
+  // toggles (net no state change) before its fullscreen action, avoiding the
+  // old 300 ms single-click delay without changing double-click semantics.
+  controls.togglePlay()
+  showCtrl()
 }
 function onVideoDoubleClick() {
-  clearVideoClickTimer()
   controls.toggleFullscreen()
   showCtrl()
+}
+
+function onPlayPausePointerDown(event: PointerEvent) {
+  if (event.button !== 0) return
+  controls.togglePlay()
+}
+
+function onPlayPauseClick(event: MouseEvent) {
+  // Pointer input already acted at press time. Keyboard and assistive-tech
+  // activation dispatch a synthetic click with detail=0 and still belongs
+  // on the native button path for accessibility.
+  if (event.detail === 0) controls.togglePlay()
 }
 
 function handleKeydown(e: KeyboardEvent) {
@@ -1515,7 +1516,6 @@ onUnmounted(() => {
   destroySubtitles()
   cancelUpNext()
   clearHideTimer()
-  clearVideoClickTimer()
   void disposeNativePlayback()
 })
 </script>
@@ -1661,7 +1661,7 @@ onUnmounted(() => {
           </div>
 
           <div class="ctrl-row">
-            <button class="c-btn" :aria-label="state.paused ? 'Play' : 'Pause'" :aria-pressed="!state.paused" @click="controls.togglePlay()"><Icon :name="state.paused ? 'play' : 'pause'" :size="22" /></button>
+            <button class="c-btn" :aria-label="state.paused ? 'Play' : 'Pause'" :aria-pressed="!state.paused" @pointerdown="onPlayPausePointerDown" @click="onPlayPauseClick"><Icon :name="state.paused ? 'play' : 'pause'" :size="22" /></button>
             <button class="c-btn" aria-label="Rewind 10 seconds" @click="controls.skip(-10)"><Icon name="skipback" :size="18" /></button>
             <button class="c-btn" aria-label="Forward 10 seconds" @click="controls.skip(10)"><Icon name="skipforward" :size="18" /></button>
 
