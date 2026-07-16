@@ -293,7 +293,7 @@
     </div>
 
     <!-- List modal -->
-    <AddToListDialog v-model:open="showListModal" :media-item-id="detail.media_item.id" />
+    <AddToListDialog v-model:open="showListModal" :media-item-id="detail.media_item.id" :media-type="detail.media_item.media_type" />
   </div>
 
   <div v-else class="scroll" style="height: 100%; display: flex; align-items: center; justify-content: center">

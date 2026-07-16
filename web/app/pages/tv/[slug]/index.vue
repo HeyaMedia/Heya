@@ -303,7 +303,7 @@
     </main>
 
     <!-- List modal -->
-    <AddToListDialog v-model:open="showListModal" :media-item-id="detail.media_item.id" />
+    <AddToListDialog v-model:open="showListModal" :media-item-id="detail.media_item.id" :media-type="detail.media_item.media_type" />
 
     <MetadataEditorModal
       v-if="detail"

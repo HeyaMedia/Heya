@@ -25,11 +25,20 @@ export function useMediaLists(mediaItemId: Ref<number>) {
     } catch { /* empty */ }
   }
 
-  async function createList(name: string, description: string) {
+  async function createList(name: string, description: string, mediaType: string) {
     if (!name.trim()) return
     await $heya('/api/me/lists', {
       method: 'POST',
-      body: { name: name.trim(), description: description.trim() } as any,
+      // The API validates the full manual-list shape — name-only bodies 422
+      // (list_type and media_type are enums). Anime items file under the tv
+      // section: the list enum has no 'anime' member.
+      body: {
+        name: name.trim(),
+        description: description.trim(),
+        list_type: 'manual',
+        filter_json: null,
+        media_type: mediaType === 'anime' ? 'tv' : mediaType,
+      } as any,
     })
     await loadLists()
   }

@@ -18,8 +18,9 @@
     <div v-else>
       <input v-model="newListName" class="modal-input" placeholder="List name" @keydown.enter="createList" />
       <input v-model="newListDesc" class="modal-input" placeholder="Description (optional)" style="margin-top: 8px" />
+      <p v-if="createError" class="create-error">{{ createError }}</p>
       <div style="display: flex; gap: 8px; margin-top: 12px">
-        <button class="btn btn-primary" @click="createList" :disabled="!newListName.trim()">Create</button>
+        <button class="btn btn-primary" @click="createList" :disabled="creating || !newListName.trim()">{{ creating ? 'Creating…' : 'Create' }}</button>
         <button class="btn btn-secondary" @click="showCreateList = false">Cancel</button>
       </div>
     </div>
@@ -27,7 +28,11 @@
 </template>
 
 <script setup lang="ts">
-const props = defineProps<{ mediaItemId: number }>()
+const props = defineProps<{
+  mediaItemId: number
+  /** Section the created list files under — the create API requires it. */
+  mediaType: string
+}>()
 const open = defineModel<boolean>('open', { default: false })
 
 const { userLists, loadLists, createList: submitList, toggleListItem } = useMediaLists(toRef(props, 'mediaItemId'))
@@ -35,16 +40,26 @@ const { userLists, loadLists, createList: submitList, toggleListItem } = useMedi
 const showCreateList = ref(false)
 const newListName = ref('')
 const newListDesc = ref('')
+const creating = ref(false)
+const createError = ref('')
 
 async function createList() {
-  if (!newListName.value.trim()) return
-  await submitList(newListName.value, newListDesc.value)
-  newListName.value = ''
-  newListDesc.value = ''
-  showCreateList.value = false
+  if (!newListName.value.trim() || creating.value) return
+  creating.value = true
+  createError.value = ''
+  try {
+    await submitList(newListName.value, newListDesc.value, props.mediaType)
+    newListName.value = ''
+    newListDesc.value = ''
+    showCreateList.value = false
+  } catch (e: any) {
+    createError.value = e?.data?.detail || e?.message || 'Could not create the list.'
+  } finally {
+    creating.value = false
+  }
 }
 
-watch(open, (v) => { if (v) loadLists() })
+watch(open, (v) => { if (v) { loadLists(); createError.value = '' } })
 </script>
 
 <style scoped>
@@ -72,4 +87,6 @@ watch(open, (v) => { if (v) loadLists() })
   font-size: 13px; color: var(--fg-2); transition: color 0.12s;
 }
 .list-create-btn:hover { color: var(--gold); }
+
+.create-error { font-size: 12px; color: var(--bad); margin: 8px 0 0; }
 </style>
