@@ -21,21 +21,22 @@
         object-position="center 28%"
       />
 
-      <!-- Backdrop cycle cluster — the shared prev/pause/next ring, top-right
-           of the hero (same spot as the home deck's). Drives rotation. -->
-      <CycleControls
-        v-if="backdropAssets.length > 1"
-        v-model:paused="carouselPaused"
-        :cycle-key="cycleKey"
-        :duration="BACKDROP_INTERVAL"
-        item-label="backdrop"
-        class="hero-cycle"
-        @prev="retreatBackdrop"
-        @next="advanceBackdrop"
-      />
-      <button v-if="backdropAssets.length > 0" class="hero-expand" aria-label="Expand backdrop" @click="openBackdropLightbox">
-        <Icon name="expand" :size="14" />
-      </button>
+      <!-- Backdrop tools — expand-to-lightbox + the shared prev/pause/next
+           ring together, top-right of the hero. Drives rotation. -->
+      <div v-if="backdropAssets.length > 0" class="hero-tools">
+        <button class="hero-expand" aria-label="Expand backdrop" @click="openBackdropLightbox">
+          <Icon name="expand" :size="13" />
+        </button>
+        <CycleControls
+          v-if="backdropAssets.length > 1"
+          v-model:paused="carouselPaused"
+          :cycle-key="cycleKey"
+          :duration="BACKDROP_INTERVAL"
+          item-label="backdrop"
+          @prev="retreatBackdrop"
+          @next="advanceBackdrop"
+        />
+      </div>
 
       <div class="hero-inner">
         <!-- Poster record-card — layered directional shadow, poster lightbox
@@ -528,7 +529,7 @@ const toneStyle = computed(() => {
   if (!t) return undefined
   const m = t.main.match(/\d+/g)
   if (!m) return undefined
-  return { '--tone': t.main, '--tone-rgb': m.slice(0, 3).join(' '), '--tone-ink': t.ink }
+  return toneStyleVars(t)
 })
 
 // Part of a collection → the full set as a bottom row (View collection

@@ -104,6 +104,10 @@ function pickFlair(key: keyof AppearancePrefs, value: string) {
   set(key, value as never)
 }
 
+const tintedCaptions = computed({
+  get: () => prefs.value.tintedCaptions !== false,
+  set: (v: boolean) => set('tintedCaptions', v),
+})
 const toneFollow = computed({
   get: () => prefs.value.toneFollow !== false,
   set: (v: boolean) => set('toneFollow', v),
@@ -311,6 +315,17 @@ const isDefaultSections = computed(
             </div>
           </div>
           <AppSwitch v-model="toneFollow" size="md" aria-label="Tone follow" />
+        </div>
+
+        <div class="flair-row">
+          <div class="flair-text">
+            <div class="flair-title">Tinted captions</div>
+            <div class="flair-desc">
+              Card titles (albums, artists, posters) take on the complement of their
+              artwork's color. Off, captions stay neutral.
+            </div>
+          </div>
+          <AppSwitch v-model="tintedCaptions" size="md" aria-label="Tinted captions" />
         </div>
 
         <div v-for="seg in flairSegs" :key="seg.key" class="flair-row">

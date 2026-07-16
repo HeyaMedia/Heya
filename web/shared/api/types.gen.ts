@@ -560,6 +560,7 @@ export type AppearanceSettings = {
     scrollbar?: string;
     show_unavailable_recs: boolean;
     theme?: string;
+    tinted_captions?: boolean;
     tone_follow?: boolean;
     typeset?: string;
 };

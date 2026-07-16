@@ -18,10 +18,21 @@ const emit = defineEmits<{
   toggleWatched: []
 }>()
 
+// Complement caption tint — same recipe/gate as MusicCard/MediaCard.
+const { tintedCaptionsEnabled } = useAppearance()
+const compTint = ref<string | null>(null)
+watch(() => [tintedCaptionsEnabled.value, props.stillUrl] as const, ([tint, src]) => {
+  compTint.value = null
+  if (!tint || !src || !import.meta.client) return
+  sampleImageTone(src).then((t) => {
+    if (t && src === props.stillUrl && tintedCaptionsEnabled.value) compTint.value = toneTextVariant(t.complementTriplet)
+  })
+}, { immediate: true })
+const tintStyle = computed(() => (compTint.value ? { '--epc-comp': compTint.value } : undefined))
 </script>
 
 <template>
-  <div class="epc" :class="{ 'epc-watched': watched }">
+  <div class="epc" :class="{ 'epc-watched': watched }" :style="tintStyle">
     <div
       class="epc-still"
       :role="hasFile ? 'button' : undefined"
@@ -140,7 +151,10 @@ const emit = defineEmits<{
   letter-spacing: 0.08em; color: var(--gold); margin-bottom: 2px;
 }
 .epc-title {
-  font-size: 14px; font-weight: 600; line-height: 1.25; color: #fff;
+  font-size: 14px; font-weight: 600; line-height: 1.25;
+  /* artwork-complement tint when sampled (Appearance knob); fallback
+     collapses the mix to plain white. Over-art — literals stay. */
+  color: color-mix(in oklab, rgb(var(--epc-comp, 255 255 255)) 78%, rgb(255 255 255));
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .epc-meta {

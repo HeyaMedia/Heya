@@ -13,7 +13,24 @@
          AmbientBackdrop, so the blurred underlay mirrors this artist's backdrop
          and pops back to the music pool on unmount. ── -->
     <section class="hero-section artist-hero">
-      <HeroCanvas :src="backdropUrl || ''" object-position="center 22%" />
+      <HeroCanvas :src="backdropA || ''" :src-b="backdropB" :show-a="showA" object-position="center 22%" />
+
+      <!-- Backdrop tools — expand-to-lightbox + the shared prev/pause/next
+           ring together, top-right (same cluster as the movie/TV heroes). -->
+      <div v-if="backdropAssets.length > 0" class="hero-tools">
+        <button class="hero-expand" aria-label="Expand backdrop" @click="openBackdropLightbox">
+          <Icon name="expand" :size="13" />
+        </button>
+        <CycleControls
+          v-if="backdropAssets.length > 1"
+          v-model:paused="carouselPaused"
+          :cycle-key="cycleKey"
+          :duration="BACKDROP_INTERVAL"
+          item-label="backdrop"
+          @prev="retreatBackdrop"
+          @next="advanceBackdrop"
+        />
+      </div>
 
       <div class="hero-inner">
         <div class="grow hero-ink">
@@ -53,13 +70,31 @@
                 :to="`/music/browse/genre/${encodeURIComponent(tag)}`"
                 class="genre"
               >{{ tag }}</NuxtLink>
-              <span
+              <button
                 v-if="heroPillOverflow > 0"
                 class="genre genre-more"
-                :title="heroPillsAll.join(' · ')"
-              >+{{ heroPillOverflow }}</span>
+                :title="pillsExpanded ? 'Show fewer' : heroPillsAll.join(' · ')"
+                :aria-expanded="pillsExpanded"
+                @click="pillsExpanded = !pillsExpanded"
+              >{{ pillsExpanded ? '− less' : `+${heroPillOverflow}` }}</button>
             </template>
           </p>
+
+          <!-- Overflow genres — slide out in their own row: the 0fr→1fr grid
+               row animates the height (nudging the identity block above),
+               each pill staggers in from the left. -->
+          <div v-if="heroPillOverflow > 0" class="genre-flyout" :class="{ open: pillsExpanded }" :aria-hidden="!pillsExpanded">
+            <div class="genre-flyout-inner">
+              <NuxtLink
+                v-for="(tag, i) in heroPillsOverflowList"
+                :key="tag"
+                :to="`/music/browse/genre/${encodeURIComponent(tag)}`"
+                class="genre"
+                :style="{ '--i': i }"
+                :tabindex="pillsExpanded ? 0 : -1"
+              >{{ tag }}</NuxtLink>
+            </div>
+          </div>
 
           <div class="actions">
             <span v-if="!artistPlayable" class="missing"><Icon name="trash" :size="13" /> Missing on disk</span>
@@ -155,14 +190,10 @@
               </button>
             </div>
 
+            <!-- Title is NOT a link: anywhere on the row plays the track —
+                 only the album name (below) navigates. -->
             <div class="trk-meta">
-              <NuxtLink
-                v-if="t.local_album_slug"
-                :to="`/music/artist/${route.params.slug}/${t.local_album_slug}`"
-                class="trk-t trk-t-link"
-                @click.stop
-              >{{ t.title }}</NuxtLink>
-              <span v-else class="trk-t">{{ t.title }}</span>
+              <span class="trk-t">{{ t.title }}</span>
             </div>
 
             <NuxtLink
@@ -213,44 +244,29 @@
             :key="album.id"
             :items="discogMenuItems(album)"
           >
+            <!-- MusicCard paints title/meta ON the cover (front-page /music
+                 grammar); tint-caption mixes each cover's complement into
+                 the title (shared MusicCard recipe). -->
             <NuxtLink
               :to="`/music/artist/${route.params.slug}/${album.slug}`"
               class="album-card"
-              :class="{ 'album-missing': !albumPlayable(album), 'album-active': isAlbumActive(album) }"
+              :class="{ 'album-active': isAlbumActive(album) }"
               :draggable="!isCoarse"
               @dragstart="onDragStart($event, discogDragPayload(album))"
               @dragend="onDragEnd"
             >
-              <div class="album-art-wrap">
-                <Poster :idx="album.id" :src="useAlbumCoverUrl(route.params.slug as string, album.slug)" aspect="1/1" class="album-art" :width="416" />
-                <span v-if="albumTypeFlag(group.kind)" class="album-flag">{{ albumTypeFlag(group.kind) }}</span>
-                <MediaMissingBadge v-if="!albumPlayable(album)" />
-                <div v-if="isAlbumActive(album)" class="album-nowplaying"><VuMeter :playing="playing" /></div>
-                <!-- span, not <button>: this tile is a NuxtLink, and a real
-                     button nested inside an anchor is invalid
-                     interactive-in-interactive HTML (see MusicCard.vue). -->
-                <span
-                  v-if="albumPlayable(album)"
-                  role="button"
-                  tabindex="0"
-                  class="album-play"
-                  :style="discogPlayStyle(album)"
-                  aria-label="Play album"
-                  title="Play album"
-                  @click.stop.prevent="playAlbum(album, false)"
-                  @keydown.enter.stop.prevent="playAlbum(album, false)"
-                  @keydown.space.stop.prevent="playAlbum(album, false)"
-                >
-                  <Icon name="play" :size="14" />
-                </span>
-              </div>
-              <div class="album-nm">{{ album.title }}</div>
-              <div class="album-meta">
-                {{ album.year || '—' }}
-                <template v-if="album.tracks.length">
-                  <span class="dot">&middot;</span>{{ album.tracks.length }} tracks
-                </template>
-              </div>
+              <MusicCard
+                :src="useAlbumCoverUrl(route.params.slug as string, album.slug) ?? undefined"
+                :alt="album.title"
+                :title="album.title"
+                :subtitle="`${album.year || '—'}${album.tracks.length ? ` · ${album.tracks.length} tracks` : ''}`"
+                :badge-tl="albumTypeFlag(group.kind)"
+                :missing="!albumPlayable(album)"
+                :no-play="!albumPlayable(album)"
+                :width="416"
+                @play="playAlbum(album, false)"
+              />
+              <div v-if="isAlbumActive(album)" class="album-nowplaying"><VuMeter :playing="playing" /></div>
             </NuxtLink>
           </AppContextMenu>
         </div>
@@ -286,67 +302,105 @@
         </AppRail>
       </section>
 
-      <!-- About + band lifecycle — two-column (mockup .cols). -->
-      <section class="section cols">
+      <!-- Sonic similar — local pgvector centroids, circular avatars. -->
+      <section v-if="sonicSimilar.length" class="section">
+        <SectionHeader title="Sounds Like" :subtitle="String(sonicSimilar.length)">
+          <template #actions>
+            <div v-if="sonicRail?.overflows" class="scroll-controls">
+              <AppHoldButton class="scroll-ctrl-btn" aria-label="Scroll left" title="Hold to jump to start" @click="sonicRail?.scrollByDir(-1)" @hold="sonicRail?.scrollToStart()"><Icon name="chevleft" :size="14" /></AppHoldButton>
+              <button class="scroll-ctrl-btn" aria-label="Scroll right" @click="sonicRail?.scrollByDir(1)"><Icon name="chevright" :size="14" /></button>
+            </div>
+          </template>
+        </SectionHeader>
+        <AppRail ref="sonicRail" :items="sonicSimilar" :tile-width="150" :phone-tile-width="140" aspect="1/1" :gap="18" :phone-gap="14" snap memory-key="artist-sonic-similar">
+          <template #default="{ item: row }">
+            <NuxtLink
+              :to="`/music/artist/${row.media_slug}`"
+              class="sim-tile"
+              :title="`${row.name} — cosine distance ${row.distance.toFixed(3)}`"
+            >
+              <MusicCard
+                :src="usePosterUrl({ id: row.media_item_id, public_id: row.media_item_public_id })"
+                :alt="row.name"
+                :title="row.name"
+                subtitle="sonic match"
+                no-play
+              />
+            </NuxtLink>
+          </template>
+        </AppRail>
+      </section>
+
+      <!-- Similar artists — Last.fm + ListenBrainz via heya.media. Gated by the
+           same Appearance switch as movie/TV recs; local rows use the library
+           portrait (upstream Last.fm images are mostly dead). -->
+      <section v-if="visibleSimilar.length" class="section">
+        <SectionHeader title="Similar Artists" :subtitle="String(visibleSimilar.length)">
+          <template #actions>
+            <div v-if="simRail?.overflows" class="scroll-controls">
+              <AppHoldButton class="scroll-ctrl-btn" aria-label="Scroll left" title="Hold to jump to start" @click="simRail?.scrollByDir(-1)" @hold="simRail?.scrollToStart()"><Icon name="chevleft" :size="14" /></AppHoldButton>
+              <button class="scroll-ctrl-btn" aria-label="Scroll right" @click="simRail?.scrollByDir(1)"><Icon name="chevright" :size="14" /></button>
+            </div>
+          </template>
+        </SectionHeader>
+        <AppRail ref="simRail" :items="visibleSimilar" :tile-width="150" :phone-tile-width="140" aspect="1/1" :gap="18" :phone-gap="14" snap memory-key="artist-similar">
+          <template #default="{ item: row }">
+            <component
+              :is="row.local_slug ? 'NuxtLink' : 'div'"
+              :to="row.local_slug ? `/music/artist/${row.local_slug}` : undefined"
+              class="sim-tile"
+              :class="{ 'sim-external': !row.local_slug }"
+              :title="row.local_slug ? `Open ${row.name}` : `${row.name} (not in library)`"
+            >
+              <MusicCard
+                :src="row.local_slug ? `/api/media/${row.local_slug}/image/poster` : row.image"
+                :alt="row.name"
+                :title="row.name"
+                :subtitle="providerLabel(row.source)"
+                no-play
+              />
+            </component>
+          </template>
+        </AppRail>
+      </section>
+
+      <!-- About + band lifecycle — two-column (mockup .cols). The RIGHT
+           column drives the section height: on wide screens the About
+           column absolutely fills the row and the bio clamps to whatever
+           height is left over ("cuts off only what it has to"); More
+           releases the clamp and the row grows. -->
+      <section class="section cols" :class="{ 'cols-linked': colSideVisible && !bioOpen }">
         <div class="col-about">
-          <SectionHeader title="About" />
-          <div v-if="cleanBio" class="prose">
-            <p :class="{ collapsed: !bioOpen && cleanBio.length > 360 }">{{ cleanBio }}</p>
-            <button v-if="cleanBio.length > 360" class="see-all bio-toggle" @click="bioOpen = !bioOpen">
+          <div class="col-about-fill">
+            <SectionHeader title="About" />
+            <div v-if="cleanBio" class="prose">
+              <p>{{ cleanBio }}</p>
+            </div>
+            <p v-else class="prose-empty">No biography available.</p>
+            <button v-if="cleanBio" class="see-all bio-toggle" @click="bioOpen = !bioOpen">
               {{ bioOpen ? 'Less' : 'More' }}
             </button>
-          </div>
-          <p v-else class="prose-empty">No biography available.</p>
 
-          <dl class="detail-grid">
-            <div v-if="linkGroups.length || hasExternalIds">
-              <dt>Around the web</dt>
-              <dd>
-                <AppMenu v-if="linkGroups.length" :width="320" trigger-class="atw-trigger" trigger-title="Around the web">
-                  <template #trigger>
-                    <Icon name="link" :size="12" />
-                    <span>All links</span>
-                    <span class="atw-count">{{ linkTotal }}</span>
-                    <Icon name="chevdown" :size="10" />
-                  </template>
-                  <div class="atw-scroll">
-                    <template v-for="grp in linkGroups" :key="grp.label">
-                      <div class="surface-section-label">{{ grp.label }}</div>
-                      <DropdownMenuItem
-                        v-for="(l, i) in grp.links"
-                        :key="`${grp.label}-${i}`"
-                        class="surface-item atw-item"
-                        as-child
-                      >
-                        <a :href="l.url" target="_blank" rel="noopener">
-                          <span class="atw-host">{{ l.label }}</span>
-                          <span v-if="l.sub" class="atw-type">{{ l.sub }}</span>
-                        </a>
-                      </DropdownMenuItem>
-                    </template>
-                  </div>
-                </AppMenu>
-                <ExternalLinks kind="artist" :external-ids="detail?.media_item?.external_ids ?? {}" class="atw-ext" />
-              </dd>
-            </div>
-            <div v-if="(artist.metadata_sources?.length ?? 0) > 0">
-              <dt>Metadata sources</dt>
-              <dd class="src-chips">
-                <span v-for="s in artist.metadata_sources" :key="s" class="src-chip">{{ providerLabel(s) }}</span>
-                <span class="src-via">via heya.media</span>
-              </dd>
-            </div>
-            <div v-if="artist.musicbrainz_id">
-              <dt>Library</dt>
-              <dd>Music &middot; matched by MusicBrainz ID<br><span class="mbid">{{ artist.musicbrainz_id }}</span></dd>
-            </div>
-          </dl>
+            <dl class="detail-grid">
+              <div v-if="(artist.metadata_sources?.length ?? 0) > 0">
+                <dt>Metadata sources</dt>
+                <dd class="src-chips">
+                  <span v-for="s in artist.metadata_sources" :key="s" class="src-chip">{{ providerLabel(s) }}</span>
+                  <span class="src-via">via heya.media</span>
+                </dd>
+              </div>
+              <div v-if="artist.musicbrainz_id">
+                <dt>Library</dt>
+                <dd>Music &middot; matched by MusicBrainz ID<br><span class="mbid">{{ artist.musicbrainz_id }}</span></dd>
+              </div>
+            </dl>
+          </div>
         </div>
 
         <!-- Band lifecycle — compact wrapping chips (was full-width 48px
              avatar rows; big bands like orchestras pushed the About column
              off-screen). Tenure lives in the chip title + a tiny year range. -->
-        <div v-if="displayMembers.length > 0 || displayGroups.length > 0" class="col-side">
+        <div v-if="colSideVisible" class="col-side">
           <template v-if="displayMembers.length > 0">
             <SectionHeader title="Members" :subtitle="String(displayMembers.length)" />
             <div class="member-chips">
@@ -396,68 +450,39 @@
               >{{ groupsExpanded ? 'Show fewer' : `+${displayGroups.length - MEMBER_CHIP_MAX} more` }}</button>
             </div>
           </template>
+
+          <!-- Around the web — the old "All links" dropdown dissolved into
+               the same chip vocabulary as the member rows above. -->
+          <template v-if="allLinks.length > 0 || hasExternalIds">
+            <SectionHeader
+              title="Around the web"
+              :subtitle="allLinks.length ? String(allLinks.length) : ''"
+              :class="{ 'mt-gap': displayMembers.length > 0 || displayGroups.length > 0 }"
+            />
+            <ExternalLinks kind="artist" :external-ids="detail?.media_item?.external_ids ?? {}" class="atw-ext-side" />
+            <div v-if="allLinks.length" class="member-chips">
+              <a
+                v-for="l in visibleLinks"
+                :key="l.url"
+                :href="l.url"
+                target="_blank"
+                rel="noopener"
+                class="mchip mchip-linked lchip"
+                :title="l.sub ? `${l.label} — ${l.sub}` : l.label"
+              >
+                <span class="mchip-nm">{{ l.label }}</span>
+                <span v-if="l.sub" class="mchip-yrs">{{ l.sub }}</span>
+              </a>
+              <button
+                v-if="allLinks.length > LINK_CHIP_MAX"
+                class="mchip mchip-more"
+                @click="linksExpanded = !linksExpanded"
+              >{{ linksExpanded ? 'Show fewer' : `+${allLinks.length - LINK_CHIP_MAX} more` }}</button>
+            </div>
+          </template>
         </div>
       </section>
 
-      <!-- Sonic similar — local pgvector centroids, circular avatars. -->
-      <section v-if="sonicSimilar.length" class="section">
-        <SectionHeader title="Sounds Like" :subtitle="String(sonicSimilar.length)">
-          <template #actions>
-            <div v-if="sonicRail?.overflows" class="scroll-controls">
-              <AppHoldButton class="scroll-ctrl-btn" aria-label="Scroll left" title="Hold to jump to start" @click="sonicRail?.scrollByDir(-1)" @hold="sonicRail?.scrollToStart()"><Icon name="chevleft" :size="14" /></AppHoldButton>
-              <button class="scroll-ctrl-btn" aria-label="Scroll right" @click="sonicRail?.scrollByDir(1)"><Icon name="chevright" :size="14" /></button>
-            </div>
-          </template>
-        </SectionHeader>
-        <AppRail ref="sonicRail" :items="sonicSimilar" :tile-width="132" :phone-tile-width="132" aspect="1/1" :gap="18" :phone-gap="18" snap memory-key="artist-sonic-similar">
-          <template #default="{ item: row }">
-            <NuxtLink
-              :to="`/music/artist/${row.media_slug}`"
-              class="avatar-tile"
-              :title="`${row.name} — cosine distance ${row.distance.toFixed(3)}`"
-            >
-              <Poster :idx="row.id" :src="usePosterUrl({ id: row.media_item_id, public_id: row.media_item_public_id })" aspect="1/1" :width="160" class="avatar-img" />
-              <div class="avatar-nm">{{ row.name }}</div>
-              <div class="avatar-src">sonic match</div>
-            </NuxtLink>
-          </template>
-        </AppRail>
-      </section>
-
-      <!-- Similar artists — Last.fm + ListenBrainz via heya.media. Gated by the
-           same Appearance switch as movie/TV recs; local rows use the library
-           portrait (upstream Last.fm images are mostly dead). -->
-      <section v-if="visibleSimilar.length" class="section">
-        <SectionHeader title="Similar Artists" :subtitle="String(visibleSimilar.length)">
-          <template #actions>
-            <div v-if="simRail?.overflows" class="scroll-controls">
-              <AppHoldButton class="scroll-ctrl-btn" aria-label="Scroll left" title="Hold to jump to start" @click="simRail?.scrollByDir(-1)" @hold="simRail?.scrollToStart()"><Icon name="chevleft" :size="14" /></AppHoldButton>
-              <button class="scroll-ctrl-btn" aria-label="Scroll right" @click="simRail?.scrollByDir(1)"><Icon name="chevright" :size="14" /></button>
-            </div>
-          </template>
-        </SectionHeader>
-        <AppRail ref="simRail" :items="visibleSimilar" :tile-width="132" :phone-tile-width="132" aspect="1/1" :gap="18" :phone-gap="18" snap memory-key="artist-similar">
-          <template #default="{ item: row, index: i }">
-            <component
-              :is="row.local_slug ? 'NuxtLink' : 'div'"
-              :to="row.local_slug ? `/music/artist/${row.local_slug}` : undefined"
-              class="avatar-tile"
-              :class="{ 'avatar-external': !row.local_slug }"
-              :title="row.local_slug ? `Open ${row.name}` : `${row.name} (not in library)`"
-            >
-              <Poster
-                :idx="i"
-                :src="row.local_slug ? `/api/media/${row.local_slug}/image/poster` : row.image"
-                aspect="1/1"
-                :width="160"
-                class="avatar-img"
-              />
-              <div class="avatar-nm">{{ row.name }}</div>
-              <div class="avatar-src">{{ row.source }}</div>
-            </component>
-          </template>
-        </AppRail>
-      </section>
     </main>
 
     <MetadataEditorModal
@@ -501,14 +526,12 @@ import type { Track } from '~/composables/usePlayer'
 import type { DragAlbumPayload } from '~/composables/useMusicDragDrop'
 import type { ImageTone } from '~/composables/useImageTone'
 import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
-import { DropdownMenuItem } from 'reka-ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { mediaDetailQuery } from '~/queries/media'
+import { musicArtistDetailQuery } from '~/queries/music'
 
-// slug keys + addresses the detail query so it shares the Pinia Colada cache
-// entry with the parent page's ['media','detail',slug] fetch — keying by
-// mediaId created a second cache entry and re-ran the heaviest endpoint on
-// every artist page view, sequentially after the page's own copy.
+// Keep the slug-addressed artist query shared with the parent page. Besides
+// avoiding a second detail fetch, this preserves the slug-only resolution
+// needed by artists whose names are entirely numeric.
 const props = defineProps<{ mediaId: number; slug: string }>()
 
 const route = useRoute()
@@ -559,7 +582,7 @@ function onEditorClose() {
   showMetadataEditor.value = false
   // Edits and refreshes land server-side; drop the cached detail so the
   // page (and this component) re-reads the updated artist.
-  queryClient.invalidateQueries({ key: ['media', 'detail', props.slug] })
+  queryClient.invalidateQueries({ key: ['music', 'artist', 'detail', props.slug] })
 }
 
 interface SimilarArtistRow {
@@ -583,7 +606,7 @@ interface SonicSimilarArtistRow {
 }
 
 const { $heya } = useNuxtApp()
-const detailQuery = useQuery(() => mediaDetailQuery(props.slug))
+const detailQuery = useQuery(() => musicArtistDetailQuery(props.slug))
 const detail = computed<MediaDetail | null>(() => detailQuery.data.value ?? null)
 const loading = computed(() => detailQuery.isPending.value)
 
@@ -688,10 +711,22 @@ const artistPosterUrl = computed(() => {
   if (!detail.value?.media_item) return null
   return `/api/media/${useMediaImageKey(detail.value.media_item)}/image/poster`
 })
-const backdropUrl = computed(() => {
-  if (!detail.value?.media_item) return null
-  return `/api/media/${useMediaImageKey(detail.value.media_item)}/image/backdrop`
-})
+
+// Crossfade backdrops — the same shared carousel engine as the movie/TV
+// heroes. HeroCanvas renders the sharp A/B pair and claims the blurred
+// ambient underlay; CycleControls' ring drives rotation.
+const {
+  showA, backdropA, backdropB, carouselPaused, cycleKey, backdropAssets,
+  advanceBackdrop, retreatBackdrop, seedCarousel, openBackdropLightbox,
+} = useBackdropCarousel(detail, { maxSortOrder: 1000 })
+
+watch(detail, async (d) => {
+  if (!d) return
+  await nextTick()
+  seedCarousel()
+}, { immediate: true })
+
+const currentHeroBackdrop = computed(() => (showA.value ? backdropA.value : backdropB.value) || null)
 
 const { prefs } = useAppearance()
 
@@ -704,7 +739,7 @@ const { prefs } = useAppearance()
 const bgTone = useBackgroundTone()
 const localTone = ref<ImageTone | null>(null)
 let toneSeq = 0
-watch(() => backdropUrl.value || artistPosterUrl.value, (src) => {
+watch(() => currentHeroBackdrop.value || artistPosterUrl.value, (src) => {
   const seq = ++toneSeq
   if (!src) { localTone.value = null; return }
   sampleImageTone(src).then((t) => { if (seq === toneSeq) localTone.value = t })
@@ -717,7 +752,7 @@ const toneStyle = computed(() => {
   if (!t) return undefined
   const m = t.main.match(/\d+/g)
   if (!m) return undefined
-  return { '--tone': t.main, '--tone-rgb': m.slice(0, 3).join(' '), '--tone-ink': t.ink }
+  return toneStyleVars(t)
 })
 
 // Similar Artists honors the same Appearance switch as the movie/TV
@@ -755,7 +790,7 @@ const heroAliases = computed(() => {
 // tags since the 2026-07 provider expansion), then tags that add something
 // new, case-insensitively deduped. Capped with a +N chip whose tooltip
 // carries the full list.
-const HERO_PILL_MAX = 10
+const HERO_PILL_MAX = 5
 const heroPillsAll = computed(() => {
   const out: string[] = []
   const seen = new Set<string>()
@@ -767,8 +802,10 @@ const heroPillsAll = computed(() => {
   }
   return out
 })
+const pillsExpanded = ref(false)
 const heroPills = computed(() => heroPillsAll.value.slice(0, HERO_PILL_MAX))
-const heroPillOverflow = computed(() => Math.max(0, heroPillsAll.value.length - HERO_PILL_MAX))
+const heroPillsOverflowList = computed(() => heroPillsAll.value.slice(HERO_PILL_MAX))
+const heroPillOverflow = computed(() => heroPillsOverflowList.value.length)
 
 // artist_type comes through lower-cased in prod ('group'/'person'); compare
 // case-insensitively so group-only treatments (status, lifecycle, ledger label)
@@ -868,26 +905,6 @@ const groupedDiscography = computed(() => {
     .map((kind) => ({ kind, label: KIND_LABEL[kind] ?? kind, albums: byKind.get(kind)! }))
 })
 
-// Per-album cover tone: the always-visible discography Play button wears each
-// record's own sampled palette (semi-transparent glass over the art — see
-// .album-play). Cheap: sampleImageTone() memoizes per URL and the covers are
-// already HTTP-cached by the Poster render, so a whole grid samples once.
-// Declared AFTER groupedDiscography — the immediate watch reads it at setup.
-const albumTones = reactive<Record<number, { main: string; ink: string }>>({})
-function discogPlayStyle(album: { id: number }): Record<string, string> | undefined {
-  const t = albumTones[album.id]
-  return t ? { '--btn-tone': t.main, color: t.ink } : undefined
-}
-watch(groupedDiscography, (groups) => {
-  if (!import.meta.client || !groups) return
-  for (const g of groups) {
-    for (const al of g.albums) {
-      if (albumTones[al.id] || !albumPlayable(al)) continue
-      const url = useAlbumCoverUrl(route.params.slug as string, al.slug)
-      if (url) sampleImageTone(url).then((t) => { if (t) albumTones[al.id] = { main: t.main, ink: t.ink } })
-    }
-  }
-}, { immediate: true })
 
 // Birthplace can come through as a Wikidata QID we don't yet resolve; only
 // show when it's a human-readable token.
@@ -1005,8 +1022,18 @@ const linkGroups = computed(() => {
     }))
 })
 
-const linkTotal = computed(() => linkGroups.value.reduce((n, g) => n + g.links.length, 0))
 const hasExternalIds = computed(() => Object.keys(detail.value?.media_item?.external_ids ?? {}).length > 0)
+
+// "Around the web" chips — the grouped dropdown flattened (group order
+// kept: Official → Listen & Buy → Social → Live → Reference → Wikipedia),
+// collapsed past LINK_CHIP_MAX like the member rows above them.
+const LINK_CHIP_MAX = 12
+const linksExpanded = ref(false)
+const allLinks = computed(() => linkGroups.value.flatMap((g) => g.links))
+const visibleLinks = computed(() => (linksExpanded.value ? allLinks.value : allLinks.value.slice(0, LINK_CHIP_MAX)))
+
+const colSideVisible = computed(() =>
+  displayMembers.value.length > 0 || displayGroups.value.length > 0 || allLinks.value.length > 0 || hasExternalIds.value)
 
 function initials(name: string): string {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('')
@@ -1130,7 +1157,7 @@ if (import.meta.client) {
   const off = bus.on('media.updated', (e) => {
     const payload = e.payload as { media_item_id?: number } | undefined
     if (payload?.media_item_id === props.mediaId) {
-      queryClient.invalidateQueries({ key: ['media', 'detail', props.slug] })
+      queryClient.invalidateQueries({ key: ['music', 'artist', 'detail', props.slug] })
       queryClient.invalidateQueries({ key: ['music', 'artist', 'similar', artistSlugForQueries.value] })
       queryClient.invalidateQueries({ key: ['music', 'artist', 'sonic-similar', artistSlugForQueries.value, { limit: 12 }] })
       queryClient.invalidateQueries({ key: ['music', 'artist', 'top-tracks', artistSlugForQueries.value, { limit: 25 }] })
@@ -1170,7 +1197,8 @@ if (import.meta.client) {
 }
 .hero-inner > .grow { min-width: 0; }
 
-/* mono eyebrow — tone-colored, over the dark art grade (--oink stays light) */
+/* mono eyebrow — complement-colored (hue-opposite of the art tone, text-
+   lifted; falls back to the tone itself pre-sample) over the dark grade */
 .eyebrow {
   display: flex;
   align-items: center;
@@ -1180,7 +1208,7 @@ if (import.meta.client) {
   font: 600 11.5px var(--font-mono);
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: var(--tone);
+  color: var(--tone-comp, var(--tone));
 }
 .eyebrow .sep { color: rgb(var(--oink) / 0.3); }
 
@@ -1243,17 +1271,65 @@ if (import.meta.client) {
   letter-spacing: 0.04em;
   color: rgb(var(--oink) / 0.72);
 }
-.metaline .dot { color: rgb(var(--tone-rgb) / 0.85); }
+.metaline .dot { color: rgb(var(--tone-comp-rgb, var(--tone-rgb)) / 0.85); }
 .metaline .status { letter-spacing: 0.1em; color: rgb(var(--oink) / 0.85); }
-.metaline .genre {
+.metaline .genre,
+.genre-flyout .genre {
   border-bottom: 1px solid rgb(var(--oink) / 0.25);
   padding-bottom: 1px;
   text-transform: lowercase;
   transition: color 0.15s, border-color 0.15s;
 }
-.metaline .genre:hover { color: rgb(var(--oink) / 0.95); border-color: rgb(var(--tone-rgb) / 0.6); }
-/* +N overflow — informational, not a browse link; tooltip has the full list */
-.metaline .genre-more { border-bottom: none; color: rgb(var(--oink) / 0.5); cursor: default; }
+.metaline .genre:hover,
+.genre-flyout .genre:hover { color: rgb(var(--oink) / 0.95); border-color: rgb(var(--tone-rgb) / 0.6); }
+/* +N overflow — slides the remaining genres out below; not a browse
+   link, so no underline. */
+.metaline .genre-more {
+  border: 0;
+  background: none;
+  padding: 0 0 1px;
+  font: inherit;
+  letter-spacing: inherit;
+  color: rgb(var(--oink) / 0.55);
+  cursor: pointer;
+}
+.metaline .genre-more:hover { color: rgb(var(--oink) / 0.95); }
+
+/* Overflow genre row — 0fr→1fr grid row animates the reveal height (the
+   identity block above nudges up as the row grows), pills stagger in from
+   the left. Shares the metaline's type + complement ink. */
+.genre-flyout {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+  font: 500 12.5px var(--font-mono);
+  letter-spacing: 0.04em;
+  color: rgb(var(--tone-comp-rgb, var(--oink)) / 0.82);
+  text-shadow: var(--hero-halo);
+}
+.genre-flyout.open { grid-template-rows: 1fr; }
+.genre-flyout-inner {
+  overflow: hidden;
+  min-height: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding-top: 10px;
+}
+.genre-flyout .genre {
+  opacity: 0;
+  transform: translateX(-16px);
+  transition: opacity 0.28s ease, transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: calc(var(--i, 0) * 26ms);
+}
+.genre-flyout.open .genre {
+  opacity: 1;
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .genre-flyout, .genre-flyout .genre { transition: none; }
+}
 
 /* actions */
 .actions {
@@ -1449,8 +1525,6 @@ if (import.meta.client) {
   text-overflow: ellipsis;
   display: block;
 }
-.trk-t-link { text-decoration: none; }
-.trk-t-link:hover { color: var(--tone); }
 .trk-al {
   font: 500 11.5px var(--font-mono);
   letter-spacing: 0.04em;
@@ -1484,63 +1558,14 @@ a.trk-al:hover { color: var(--tone); }
   text-decoration: none;
   color: inherit;
 }
-.album-art-wrap { position: relative; }
-.album-art {
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-card);
-  transition: transform 0.18s ease, box-shadow 0.28s ease;
-}
-.album-card:hover .album-art { transform: translateY(-4px); box-shadow: var(--shadow-card-hover); }
-.album-missing .album-art { filter: grayscale(1); opacity: 0.5; }
-.album-flag {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 2;
-  font: 650 9px var(--font-mono);
-  letter-spacing: 0.14em;
-  padding: 4px 8px;
-  border-radius: 5px;
-  background: rgb(6 7 10 / 0.78); /* over artwork — literal */
-  backdrop-filter: blur(6px);
-  color: rgb(255 255 255 / 0.78);
-  text-transform: uppercase;
-}
-.album-play {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  border: 0;
-  /* Always visible: a semi-transparent glass disc tinted with the album's own
-     sampled cover colour (--btn-tone, --tone until the sample lands), so the
-     artwork reads through and each record wears its palette. Tap = play. */
-  background: color-mix(in srgb, var(--btn-tone, var(--tone)) 52%, transparent);
-  color: var(--tone-ink, #0a0c10);
-  -webkit-backdrop-filter: blur(8px) saturate(140%);
-  backdrop-filter: blur(8px) saturate(140%);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: background 0.18s, transform 0.15s, box-shadow 0.18s;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.38); /* over artwork — literal */
-}
-.album-card:hover .album-play,
-.album-play:focus-visible {
-  background: color-mix(in srgb, var(--btn-tone, var(--tone)) 94%, transparent);
-  transform: scale(1.08);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
-}
-.album-active .album-art { box-shadow: var(--shadow-card), 0 0 0 2px var(--tone); }
-.album-active .album-nm { color: var(--tone); }
+.album-card :deep(.mc-art) { transition: transform 0.18s ease, box-shadow 0.28s ease; }
+.album-card:hover :deep(.mc-art) { transform: translateY(-4px); box-shadow: var(--shadow-card-hover); }
+.album-active :deep(.mc-art) { box-shadow: var(--shadow-card), 0 0 0 2px var(--tone); }
 .album-nowplaying {
   position: absolute;
   top: 10px;
-  left: 10px;
-  z-index: 2;
+  right: 10px;
+  z-index: 3;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1549,26 +1574,6 @@ a.trk-al:hover { color: var(--tone); }
   background: rgb(0 0 0 / 0.6); /* over artwork — literal */
   backdrop-filter: blur(6px);
 }
-.album-nm {
-  margin-top: 10px;
-  font-size: 14px;
-  font-weight: 650;
-  color: rgb(var(--ink) / 0.92);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.album-meta {
-  margin-top: 3px;
-  font: 500 10.5px var(--font-mono);
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: rgb(var(--ink) / 0.5);
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-.album-meta .dot { color: rgb(var(--ink) / 0.3); }
 
 /* ── About + Members two-column (heya2.css .cols) ── */
 .cols {
@@ -1576,13 +1581,35 @@ a.trk-al:hover { color: var(--tone); }
   grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
   gap: 56px;
   align-items: start;
+  /* The avatar rails above carry no shadow-room below their tiles the way
+     card rails do — without this the About header sat tight under them. */
+  margin-top: 48px;
 }
 .prose { font-size: 15.5px; line-height: 1.75; color: rgb(var(--ink) / 0.82); max-width: 64ch; }
-.prose p.collapsed {
-  display: -webkit-box;
-  -webkit-line-clamp: 5;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+
+/* Height link (wide screens only — single-column below 1100px): the right
+   chip column decides the row height. The About column contributes no
+   height of its own (absolute fill), its bio flex-shrinks to the leftover
+   space with a fade-out, and the sources/library rows never shrink. The
+   More toggle drops .cols-linked entirely, releasing the row. */
+@media (min-width: 1100.02px) {
+  .cols-linked .col-about { position: relative; align-self: stretch; }
+  .cols-linked .col-about-fill {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .cols-linked .col-about-fill .prose {
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    mask-image: linear-gradient(to bottom, rgb(0 0 0) 72%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, rgb(0 0 0) 72%, transparent 100%);
+  }
+  .cols-linked .col-about-fill .bio-toggle,
+  .cols-linked .col-about-fill .detail-grid { flex-shrink: 0; }
 }
 .bio-toggle::before { content: '▾ '; opacity: 0.7; }
 .prose-empty { font-size: 14px; color: rgb(var(--ink) / 0.5); font-style: italic; }
@@ -1652,6 +1679,10 @@ a.trk-al:hover { color: var(--tone); }
 .mchip-more:hover { background: rgb(var(--ink) / 0.1); color: rgb(var(--ink) / 0.9); }
 .mt-gap { margin-top: 36px; }
 
+/* link chips — mchip minus the avatar slot; sub-label rides mchip-yrs */
+.lchip { padding: 4px 12px; }
+.atw-ext-side { margin-bottom: 12px; }
+
 /* metadata-source provenance chips (About column) */
 .src-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .src-chip {
@@ -1678,42 +1709,18 @@ a.trk-al:hover { color: var(--tone); }
 }
 .video-card:hover .video-play { opacity: 1; }
 
-/* ── Sounds Like / Similar — circular avatar rails (AppRail owns the
-   scroller/snap/shadow-room chrome now). avatar-tile was a grid item before
-   (blockified regardless of its own `display`); now a plain AppRail slot
-   child, the NuxtLink variant needs `display: block` explicitly to keep the
-   same box. */
-.avatar-tile {
+/* ── Sounds Like / Similar — square overlay cards (MusicCard paints the
+   name/source on the art, same grammar as the discography tiles). ── */
+.sim-tile {
   display: block;
-  text-align: center;
   text-decoration: none;
   color: inherit;
 }
-.avatar-img {
-  border-radius: 50%;
-  box-shadow: var(--shadow-card);
-  transition: transform 0.18s ease, box-shadow 0.28s ease;
-}
-.avatar-tile:hover .avatar-img { transform: translateY(-4px); box-shadow: var(--shadow-card-hover); }
-.avatar-external { opacity: 0.7; cursor: default; }
-.avatar-external:hover { opacity: 1; }
-.avatar-external:hover .avatar-img { transform: none; box-shadow: var(--shadow-card); }
-.avatar-nm {
-  margin-top: 10px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: rgb(var(--ink) / 0.85);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.avatar-src {
-  margin-top: 2px;
-  font: 500 9px var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: rgb(var(--ink) / 0.4);
-}
+.sim-tile :deep(.mc-art) { transition: transform 0.18s ease, box-shadow 0.28s ease; }
+.sim-tile:hover :deep(.mc-art) { transform: translateY(-4px); box-shadow: var(--shadow-card-hover); }
+.sim-external { opacity: 0.75; cursor: default; }
+.sim-external:hover { opacity: 1; }
+.sim-external:hover :deep(.mc-art) { transform: none; box-shadow: none; }
 
 /* ═══ RESPONSIVE ═══════════════════════════════════════════════════════════ */
 @media (max-width: 1100px) {

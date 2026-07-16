@@ -186,9 +186,7 @@ const toneStyle = computed(() => {
   if (!toneFollowEnabled.value) return undefined
   const t: ImageTone | null = bgTone.value
   if (!t) return undefined
-  const m = t.main.match(/\d+/g)
-  if (!m) return undefined
-  return { '--tone': t.main, '--tone-rgb': m.slice(0, 3).join(' '), '--tone-ink': t.ink }
+  return toneStyleVars(t)
 })
 
 // ── Library ledger — real totals from /api/music/counts (user-facing facts).
@@ -229,11 +227,19 @@ async function playAlbum(al: RecentAlbumRow, _i: number) {
 </script>
 
 <style scoped>
-.ms-lib { max-width: 1400px; }
-
 /* Full-bleed ledger reaches to the page gutter (the shell content column has
    no hero, so it wants the page pad, not the wider --pad-fluid inset). */
 .ms-ledger { --pad-fluid: 0px; margin-bottom: 28px; }
+
+/* Complement-tinted, centered page head — this landing page has no header
+   actions, so centering the lone title/subtitle block reads better than the
+   left-aligned default other music list pages use. */
+.ms-lib :deep(.mhd) { justify-content: center; text-align: center; }
+.ms-lib :deep(.mhd-title) { color: rgb(var(--tone-comp-rgb, var(--ink)) / 0.95); }
+.ms-lib :deep(.mhd-sub) { color: rgb(var(--tone-comp-rgb, var(--ink)) / 0.6); }
+
+/* Center the ledger's cells to match the centered head above it. */
+.ms-ledger :deep(.ledger-strip) { justify-content: center; }
 
 /* ── Quick-browse nav cards — 2.0 hairline grammar: tone-tinted glyph well,
    mono sub, directional card shadow, tone-kiss on hover. ── */
@@ -271,7 +277,7 @@ async function playAlbum(al: RecentAlbumRow, _i: number) {
 .ms-nav-card-text { flex: 1; min-width: 0; }
 .ms-nav-card-title {
   font-size: 15px; font-weight: 650;
-  color: var(--fg-0);
+  color: rgb(var(--tone-comp-rgb, var(--ink)) / 0.9);
   letter-spacing: -0.01em;
 }
 .ms-nav-card-sub {

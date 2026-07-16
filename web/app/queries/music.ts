@@ -1,5 +1,5 @@
 import { defineQueryOptions } from '@pinia/colada'
-import type { MusicAlbumDetail, MusicAlbumRow, MusicArtistRow, MusicListPage } from '~~/shared/types'
+import type { MediaDetail, MusicAlbumDetail, MusicAlbumRow, MusicArtistRow, MusicListPage } from '~~/shared/types'
 
 export interface PlaylistTrackRow {
   track_id: number
@@ -124,6 +124,27 @@ const intentMeta = {
   persistence: 'device',
   sensitivity: 'normal',
 } as const
+
+// Artist slugs can be entirely numeric (for example, the artist "666").
+// /api/media/{id} deliberately interprets an all-digit path value as an
+// internal media ID, so resolve the artist through the slug-only music route
+// first and use its unambiguous public UUID for the full detail request.
+export const musicArtistDetailQuery = defineQueryOptions((slug: string) => ({
+  key: ['music', 'artist', 'detail', slug],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    const artist = await $heya('/api/music/artists/{slug}', {
+      path: { slug },
+    }) as unknown as MusicArtistRow
+    const mediaRef = artist.media_item_public_id || String(artist.media_item_id)
+    return await $heya('/api/media/{id}', {
+      path: { id: mediaRef as never },
+    }) as MediaDetail
+  },
+  staleTime: 1000 * 60 * 5,
+  retry: 0,
+  meta: intentMeta,
+}))
 
 export const musicAlbumDetailQuery = defineQueryOptions((target: { artistSlug: string; albumSlug: string }) => ({
   key: ['music', 'album', target.artistSlug, target.albumSlug],

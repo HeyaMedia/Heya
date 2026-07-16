@@ -113,9 +113,13 @@ function hideBroken(e: Event | string) {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  /* Floors raised (0.3→0.38 / 0.05→0.14 horizontal, 0.28→0.34 / 0.12→0.22
+     vertical) when the per-text .hero-ink::before wash was removed — the
+     whole hero now carries one even, seamless grade instead of a boxed
+     tint behind the identity block. */
   background:
-    linear-gradient(90deg, rgb(10 12 16 / 0.82), rgb(10 12 16 / 0.3) 38%, rgb(10 12 16 / 0.05) 68%),
-    linear-gradient(to top, rgb(10 12 16 / 0.75) 0%, rgb(10 12 16 / 0.28) 22%, rgb(10 12 16 / 0.12) 56%, rgb(10 12 16 / 0.32) 100%);
+    linear-gradient(90deg, rgb(10 12 16 / 0.82), rgb(10 12 16 / 0.38) 38%, rgb(10 12 16 / 0.14) 68%),
+    linear-gradient(to top, rgb(10 12 16 / 0.75) 0%, rgb(10 12 16 / 0.34) 22%, rgb(10 12 16 / 0.22) 56%, rgb(10 12 16 / 0.36) 100%);
 }
 
 .hc-tone {

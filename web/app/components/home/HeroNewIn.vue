@@ -367,7 +367,7 @@ const toneVars = computed<Record<string, string> | undefined>(() => {
   if (!t) return undefined
   const m = t.main.match(/\d+/g)
   if (!m) return undefined
-  return { '--tone': t.main, '--tone-rgb': m.slice(0, 3).join(' '), '--tone-ink': t.ink }
+  return toneStyleVars(t)
 })
 
 const summary = computed(() => {

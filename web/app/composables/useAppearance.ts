@@ -70,6 +70,9 @@ export interface AppearancePrefs {
   /** "More Like This" on detail pages: also show titles NOT in the library
    *  (they link out to the strongest public metadata provider). */
   showUnavailableRecs: boolean
+  /** Card captions (album/artist/poster tiles) tint with the complement of
+   *  the artwork's sampled color. Off → neutral ink. Default on. */
+  tintedCaptions: boolean
 }
 
 export const ACCENTS: { name: AccentName; label: string; hex: string }[] = [
@@ -113,6 +116,7 @@ const DEFAULTS: AppearancePrefs = {
   ambientMode: 'on',
   ambientIntensity: AMBIENT_INTENSITY_DEFAULT,
   showUnavailableRecs: false,
+  tintedCaptions: true,
 }
 
 // Boot-inline-style backgrounds must match --bg-1 per theme (heya.css).
@@ -340,6 +344,7 @@ export function useAppearance() {
           ambient_mode: prefs.value.ambientMode,
           ambient_intensity: prefs.value.ambientIntensity,
           show_unavailable_recs: prefs.value.showUnavailableRecs,
+          tinted_captions: prefs.value.tintedCaptions,
         }
         await $fetch('/api/me/settings', { method: 'PUT', body: settings, headers })
       } catch {
@@ -384,6 +389,7 @@ export function useAppearance() {
       tone_follow?: boolean; lighting?: string; glass?: string
       radius?: string; hero?: string; motion?: string; scrollbar?: string
       ambient_mode?: string; ambient_intensity?: number; show_unavailable_recs?: boolean
+      tinted_captions?: boolean
     }
     if (s.theme) next.theme = s.theme as ThemeMode
     if (s.accent) next.accent = s.accent as AccentName
@@ -406,6 +412,7 @@ export function useAppearance() {
     if (s.ambient_mode === 'on' || s.ambient_mode === 'off') next.ambientMode = s.ambient_mode
     if (s.ambient_intensity) next.ambientIntensity = s.ambient_intensity
     if (typeof s.show_unavailable_recs === 'boolean') next.showUnavailableRecs = s.show_unavailable_recs
+    if (typeof s.tinted_captions === 'boolean') next.tintedCaptions = s.tinted_captions
     prefs.value = next
     apply()
     mirror()
@@ -414,9 +421,11 @@ export function useAppearance() {
   const ambientEnabled = computed(() => prefs.value.ambientMode !== 'off')
   /** Whether pages should tint their chrome from artwork tone (knob #6). */
   const toneFollowEnabled = computed(() => prefs.value.toneFollow !== false)
+  /** Whether card captions tint with their artwork's complement color. */
+  const tintedCaptionsEnabled = computed(() => prefs.value.tintedCaptions !== false)
 
   return {
-    prefs, resolvedTheme, ambientEnabled, toneFollowEnabled,
+    prefs, resolvedTheme, ambientEnabled, toneFollowEnabled, tintedCaptionsEnabled,
     set, setAccentPreset, setAccentCustom, apply, hydrateFromServer,
   }
 }

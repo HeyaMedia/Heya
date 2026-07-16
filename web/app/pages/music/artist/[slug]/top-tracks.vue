@@ -2,7 +2,7 @@
 import type { ArtistTopTrackRow, TrackView } from '~~/shared/types'
 import type { Track } from '~/composables/usePlayer'
 import { useQuery } from '@pinia/colada'
-import { mediaDetailQuery } from '~/queries/media'
+import { musicArtistDetailQuery } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
 
@@ -15,7 +15,7 @@ const { isCoarse } = useViewport()
 
 // Shares the artist page's cache entry — usually already warm from the
 // detail page the user navigated here from.
-const detailQuery = useQuery(() => mediaDetailQuery(slug.value))
+const detailQuery = useQuery(() => musicArtistDetailQuery(slug.value))
 await waitForQuery(detailQuery)
 watch(detailQuery.error, (err) => {
   if (err) navigateTo('/music')
@@ -126,7 +126,7 @@ useHead(() => ({ title: artist.value ? `${artist.value.name} — Top Tracks` : '
 <template>
   <div class="ttp">
     <header class="ttp-head">
-      <Poster :idx="0" :src="`/api/media/${slug}/image/poster`" aspect="1/1" :width="128" class="ttp-avatar" />
+      <Poster :idx="0" :src="usePosterUrl(detailQuery.data.value?.media_item)" aspect="1/1" :width="128" class="ttp-avatar" />
       <div class="ttp-text">
         <NuxtLink :to="`/music/artist/${slug}`" class="ttp-eyebrow">
           <Icon name="chevleft" :size="12" /> {{ artist?.name ?? 'Artist' }}

@@ -1151,20 +1151,11 @@ a { color: inherit; text-decoration: none; }
     0 0 11px rgb(0 0 0 / 0.5),
     0 0 30px rgb(0 0 0 / 0.36);
 }
-.hero-ink::before {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  pointer-events: none;
-  /* feather well past the text box so the wash dies before its own edge —
-     no boxy darkening, just a soft rescue behind the glyphs */
-  inset: -34px -120px -48px -76px;
-  background: radial-gradient(125% 125% at 17% 46%,
-    rgb(0 0 0 / 0.42) 0%,
-    rgb(0 0 0 / 0.26) 37%,
-    rgb(0 0 0 / 0.1) 61%,
-    transparent 80%);
-}
+/* No per-text-block wash: the old .hero-ink::before radial died past its
+   own box on the sides but its top/bottom edges cut the gradient at
+   ~0.3 alpha — a visible hard seam across every detail hero. Readability
+   now comes from the full-bleed canvas grade (HeroCanvas .hc-grade and
+   the home carousels' mirrored copies) + the halos/stroke below. */
 
 /* Targeted halos — every identity line across the ported detail heroes
    (movie / series / season / episode / artist / album) and the home carousels
@@ -1188,6 +1179,36 @@ a { color: inherit; text-decoration: none; }
   text-shadow: var(--hero-halo);
 }
 
+/* Complement type — hero fonts wear the hue-opposite of the sampled art
+   tone (text-lifted lightness, see toneStyleVars/toneTextVariant), while
+   the play button keeps the art's own tone. Falls back to the standard
+   over-art ink wherever a hero hasn't published --tone-comp-rgb (tone
+   follow off, sample pending). Same element-qualified specificity story
+   as the halo block above. */
+.hero-ink h1.title,
+.hero-ink h1.season-title,
+.hero-ink h1.ep-title,
+.hero-ink h1.newin-title,
+.hero-ink h1.music-title {
+  color: rgb(var(--tone-comp-rgb, var(--oink)) / 0.98);
+  /* the complement re-derives on every backdrop crossfade — fade with it */
+  transition: color 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.hero-ink p.tagline,
+.hero-ink p.metaline,
+.hero-ink div.hero-aka,
+.hero-ink p.newin-desc,
+.hero-ink span.newin-meta-sub,
+.hero-ink span.newin-meta-time,
+.hero-ink span.music-meta-sub {
+  color: rgb(var(--tone-comp-rgb, var(--oink)) / 0.82);
+}
+.hero-ink div.eyebrow,
+.hero-ink div.newin-eyebrow,
+.hero-ink div.music-eyebrow {
+  color: var(--tone-comp, var(--tone));
+}
+
 /* Tone eyebrow special-case — a thin dark stroke painted BEHIND the fill
    (paint-order) defines the glyph edge on bright art without altering the
    tone color itself. */
@@ -1203,24 +1224,36 @@ a { color: inherit; text-decoration: none; }
    .bd-indicators bar strip. Detail heroes are `hero-flush` (art rides up
    under the fixed glass topbar), so the cluster tucks its top clear of the
    bar — `--topbar-h` + a 14px gap. Pages no longer need to scope this. */
-.hero-cycle {
+/* Backdrop tools cluster — the expand-to-lightbox button and the shared
+   prev/pause/next ring TOGETHER, top-right below the glass topbar (was: a
+   ring top-right + a separate hover-revealed expand floating on the hero's
+   right edge). Same glass-circle grammar as the season/TV heroes. */
+.hero-tools {
   position: absolute;
   top: calc(var(--topbar-h) + 14px);
-  right: 24px;
+  right: var(--pad-fluid, 24px);
   z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-
-/* Expand-backdrop button (bottom-right of hero, revealed on hover) */
 .hero-expand {
-  position: absolute; bottom: 24px; right: 16px; z-index: 4;
-  width: 30px; height: 30px; border-radius: var(--r-sm);
-  background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1);
-  color: rgba(255,255,255,0.6);
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; transition: all 0.15s; opacity: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-1);
+  background: color-mix(in oklab, var(--bg-2) 78%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-el);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
 }
-.hero-section:hover .hero-expand { opacity: 1; }
-.hero-expand:hover { background: rgba(0,0,0,0.6); color: #fff; }
+.hero-expand:hover { background: var(--bg-3); color: var(--fg-0); }
 
 /* Zoom button overlaid on hero images (poster / portrait) */
 .zoom-btn {

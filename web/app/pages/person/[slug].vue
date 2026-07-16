@@ -22,20 +22,22 @@
         object-position="center 24%"
       />
 
-      <!-- Backdrop cycle cluster — the shared prev/pause/next ring, top-right. -->
-      <CycleControls
-        v-if="heroArtPool.length > 1"
-        v-model:paused="carouselPaused"
-        :cycle-key="cycleKey"
-        :duration="BACKDROP_INTERVAL"
-        item-label="backdrop"
-        class="hero-cycle"
-        @prev="retreatBackdrop"
-        @next="advanceBackdrop"
-      />
-      <button v-if="creditBackdrops.length > 0" class="hero-expand" aria-label="Expand backdrop" @click="openBackdropLightbox">
-        <Icon name="expand" :size="14" />
-      </button>
+      <!-- Backdrop tools — expand-to-lightbox + the shared prev/pause/next
+           ring together, top-right. -->
+      <div v-if="creditBackdrops.length > 0 || heroArtPool.length > 1" class="hero-tools">
+        <button v-if="creditBackdrops.length > 0" class="hero-expand" aria-label="Expand backdrop" @click="openBackdropLightbox">
+          <Icon name="expand" :size="13" />
+        </button>
+        <CycleControls
+          v-if="heroArtPool.length > 1"
+          v-model:paused="carouselPaused"
+          :cycle-key="cycleKey"
+          :duration="BACKDROP_INTERVAL"
+          item-label="backdrop"
+          @prev="retreatBackdrop"
+          @next="advanceBackdrop"
+        />
+      </div>
 
       <div class="hero-inner">
         <!-- Portrait record-card — layered directional shadow, initials fallback
@@ -425,7 +427,7 @@ const toneStyle = computed(() => {
   if (!t) return undefined
   const m = t.main.match(/\d+/g)
   if (!m) return undefined
-  return { '--tone': t.main, '--tone-rgb': m.slice(0, 3).join(' '), '--tone-ink': t.ink }
+  return toneStyleVars(t)
 })
 
 // ── Derived facts ────────────────────────────────────────────────────────────

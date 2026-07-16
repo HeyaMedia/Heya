@@ -42,6 +42,38 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   return [Math.round(f(h + 1 / 3) * 255), Math.round(f(h) * 255), Math.round(f(h - 1 / 3) * 255)]
 }
 
+/** Lift a sampled "r g b" triplet into text-grade lightness (hue kept).
+ *  The sampler clamps tones into button-fill territory (l ≤ 0.58) — as a
+ *  FONT color over the hero grade that's too dark, so text consumers lift
+ *  lightness while keeping the hue identity. */
+export function toneTextVariant(triplet: string): string {
+  const parts = triplet.split(' ').map(Number)
+  if (parts.length < 3 || parts.some(Number.isNaN)) return triplet
+  let [h, s, l] = rgbToHsl(parts[0]!, parts[1]!, parts[2]!)
+  s = Math.min(0.9, Math.max(0.45, s))
+  // Floor to text-grade, then +15% — hero type reads brighter than a
+  // button fill needs to be.
+  l = Math.min(0.92, Math.max(0.68, l) * 1.15)
+  const [r, g, b] = hslToRgb(h, s, l)
+  return `${r} ${g} ${b}`
+}
+
+/** The CSS custom-property set a tone-following hero publishes on its root.
+ *  One builder so every hero (movie / tv / season / episode / artist /
+ *  album / person / home carousels) ships the same vocabulary — including
+ *  the complement accent the hero typography wears. */
+export function toneStyleVars(t: ImageTone): Record<string, string> {
+  const m = t.main.match(/\d+/g)
+  const style: Record<string, string> = { '--tone': t.main, '--tone-ink': t.ink }
+  if (m) style['--tone-rgb'] = m.slice(0, 3).join(' ')
+  if (t.complementTriplet) {
+    const comp = toneTextVariant(t.complementTriplet)
+    style['--tone-comp'] = `rgb(${comp})`
+    style['--tone-comp-rgb'] = comp
+  }
+  return style
+}
+
 // A tone is deterministic per URL (it's a function of the image bytes), so
 // memoize the promise: the hero, the discography grid, and the album page can
 // all sample the same cover and only the first pays. Keeps per-tile tinting

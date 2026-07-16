@@ -7,7 +7,7 @@
 // chips/overlays — watched check, resolution tag, etc. Each consumer
 // positions them absolutely with the existing badge classes.
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   src?: string | null
   idx?: number
   title: string
@@ -46,10 +46,24 @@ withDefaults(defineProps<{
   progressPct: 0,
   missing: false,
 })
+
+// Complement caption tint — same recipe/gate as MusicCard: sample the art,
+// lift its hue-opposite into text-grade lightness, mix into the title via
+// --mediac-comp. Appearance "Tinted captions" off → CSS fallback = white.
+const { tintedCaptionsEnabled } = useAppearance()
+const compTint = ref<string | null>(null)
+watch(() => [tintedCaptionsEnabled.value, props.src] as const, ([tint, src]) => {
+  compTint.value = null
+  if (!tint || !src || !import.meta.client) return
+  sampleImageTone(src).then((t) => {
+    if (t && src === props.src && tintedCaptionsEnabled.value) compTint.value = toneTextVariant(t.complementTriplet)
+  })
+}, { immediate: true })
+const tintStyle = computed(() => (compTint.value ? { '--mediac-comp': compTint.value } : undefined))
 </script>
 
 <template>
-  <div class="mediac" :aria-label="title">
+  <div class="mediac" :aria-label="title" :style="tintStyle">
     <!-- Forward the title so Poster's no-art tile can paint big centred mono
          INITIALS (not the full title — that would collide with our bottom
          overlay). The initials sit behind our own always-on .mediac-title,
@@ -122,7 +136,9 @@ withDefaults(defineProps<{
 .mediac-info.has-br { padding-right: 60px; }
 .mediac-title {
   font-size: 14px; font-weight: 700; line-height: 1.25;
-  color: #fff;
+  /* artwork-complement tint when sampled (Appearance knob); the fallback
+     triplet collapses the mix to plain white. Over-art — literals stay. */
+  color: color-mix(in oklab, rgb(var(--mediac-comp, 255 255 255)) 78%, rgb(255 255 255));
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;

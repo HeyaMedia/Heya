@@ -492,7 +492,7 @@ const toneStyle = computed(() => {
   if (!t) return undefined
   const m = t.main.match(/\d+/g)
   if (!m) return undefined
-  return { '--tone': t.main, '--tone-rgb': m.slice(0, 3).join(' '), '--tone-ink': t.ink }
+  return toneStyleVars(t)
 })
 
 // ── Recommendations ─────────────────────────────────────────────────────────
@@ -959,33 +959,8 @@ watch(detail, async (d) => {
   --oink: 233 236 242;
 }
 
-/* Backdrop tools cluster, top-right below the glass topbar. */
-.hero-tools {
-  position: absolute;
-  top: calc(var(--topbar-h) + 14px);
-  right: var(--pad-fluid);
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.hero-expand {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--fg-1);
-  background: color-mix(in oklab, var(--bg-2) 78%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-el);
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s;
-}
-.hero-expand:hover { background: var(--bg-3); color: var(--fg-0); }
+/* Backdrop tools cluster (.hero-tools / .hero-expand) — shared chrome in
+   heya.css since the movie/artist/person heroes adopted the same layout. */
 
 .tv-hero-inner {
   position: relative;

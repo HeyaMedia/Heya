@@ -1,16 +1,12 @@
 <template>
   <header class="topbar">
-    <!-- topbar-left wraps the burger + brand as a flex row on phone (<=720px)
-         and in the compact band (720.02-1200px) — see
-         useSectionSidebar()/useViewport() below. The burger is a SIBLING of
-         the brand anchor, never nested inside it (the anchor is a link;
-         nesting a button in it would fire both on tap). At >1200px desktop the
-         burger never renders (persistent sidebars are visible there), so
-         `.topbar-left` holds a single child and lays out identically to the
-         old bare `.topbar-brand` grid item. Phone shows it too so the section
-         nav (movies/tv/books Library, music Browse) is always one tap away in
-         the same spot as tablet — the per-page Browse/Library buttons are
-         retired in favour of this single standardized trigger. -->
+    <!-- topbar-left holds only the burger (phone <=720px + the compact band
+         720.02-1200px — see useSectionSidebar()/useViewport() below); the
+         brand wordmark is gone (it duplicated the Home tab). At >1200px
+         desktop the burger never renders (persistent sidebars are visible
+         there), so the cell sits empty — the `1fr auto 1fr` grid keeps the
+         tabs centered regardless. Phone shows the burger so the section nav
+         (movies/tv/books Library, music Browse) is always one tap away. -->
     <div class="topbar-left">
       <button
         v-if="sidebar.kind.value && (isCompact || isPhone)"
@@ -21,16 +17,6 @@
       >
         <Icon name="menu" :size="18" />
       </button>
-      <NuxtLink to="/" class="topbar-brand">
-        <div class="brand-mark">
-          <svg width="22" height="22" viewBox="0 0 22 22">
-            <circle cx="11" cy="11" r="10" fill="none" stroke="var(--gold)" stroke-width="1.5" />
-            <circle cx="11" cy="11" r="4" fill="var(--gold)" />
-            <circle cx="11" cy="11" r="1.5" fill="var(--bg-0)" />
-          </svg>
-        </div>
-        <span class="brand-name">heya<span class="brand-dot">.</span>media</span>
-      </NuxtLink>
     </div>
 
     <nav class="topbar-tabs" aria-label="Primary">
@@ -648,18 +634,12 @@ const { tabs, isActive } = useNavTabs()
   border-bottom: 0;
   box-shadow: 0 1px 18px rgb(var(--shade) / 0.22);
 }
-/* `.topbar-left` is the actual grid item (column 1) — `.topbar-brand` used
-   to hold `justify-self: start` directly, back when it was the grid item
-   itself. Moved here so the wrapper shrinks to content instead of
-   stretching across the 1fr track; at >1200px and <=720px it holds a single
-   child (the brand link) so this is a no-op layout-wise. `display: flex`
-   only gets added in the compact media query below, where the burger can
-   also be present — see the comment there for why it must stay gated. */
+/* `.topbar-left` is the grid item (column 1); it shrinks to content
+   (empty at >1200px where the burger never renders) instead of stretching
+   across the 1fr track. `display: flex` only gets added in the compact
+   media query below, where the burger can be present — see the comment
+   there for why it must stay gated. */
 .topbar-left { justify-self: start; min-width: 0; }
-.topbar-brand { display: flex; align-items: center; gap: 10px; cursor: pointer; text-decoration: none; }
-.brand-mark { display: flex; align-items: center; justify-content: center; }
-.brand-name { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; color: var(--fg-0); }
-.brand-name .brand-dot { color: var(--gold); }
 .topbar-tabs { display: flex; gap: 2px; justify-self: center; }
 .topbar-tabs .tab {
   display: inline-flex; align-items: center; gap: 8px;
@@ -737,26 +717,22 @@ const { tabs, isActive } = useNavTabs()
 /* Activity-dropdown styles moved to the non-scoped block below — see note there. */
 
 /* Phone (<=720px): BottomNav.vue takes over the tab row, so the topbar
-   collapses to brand + search + avatar (Activity is dropped too — see the
+   collapses to burger + search + avatar (Activity is dropped too — see the
    `.activity-btn` rule in the unscoped block below). Desktop rule above is
    untouched — everything mobile-specific is gated behind this query. */
 @media (max-width: 720px) {
   .topbar {
     /* Was `1fr auto 1fr` to center .topbar-tabs; with the tabs row hidden
-       there's nothing to center, so give the brand a content-sized column
-       and hand everything else to topbar-right. */
+       there's nothing to center, so give the left cell a content-sized
+       column and hand everything else to topbar-right. */
     grid-template-columns: auto 1fr;
     gap: 12px;
     padding: 0 16px;
   }
   .topbar-tabs { display: none; }
-  /* Burger + brand sit in a row (mirrors the compact band below). The burger
-     only renders on section routes (`sidebar.kind.value`), so on Home/Settings
-     `.topbar-left` still holds just the brand mark and this is a no-op. */
+  /* The burger only renders on section routes (`sidebar.kind.value`), so on
+     Home/Settings `.topbar-left` sits empty and this is a no-op. */
   .topbar-left { display: flex; align-items: center; gap: 6px; }
-  /* Drop the wordmark, keep the gold ring mark — reclaims width for the
-     search input, which is the thing that actually needs the room. */
-  .brand-name { display: none; }
   .topbar-right {
     /* Desktop hugs the right edge (`justify-self: end`) inside an equal-
        width flex column; on phone the column should fill so the flex-grow
@@ -801,15 +777,13 @@ const { tabs, isActive } = useNavTabs()
     align-items: center;
     gap: 8px;
   }
-  /* Same reclaim-the-width move as the phone query, just for the narrower
-     compact band instead of dropping the tab row entirely. */
-  .brand-name { display: none; }
-  /* Tabs sit immediately after the brand (left-aligned), not centered. Labels
-     stay visible — with the layout left-aligned they no longer compete with a
-     centered block for the search's room, so Home/Movies/TV/Music/Books read
-     as named buttons just like desktop, only with tighter padding/gap so all
-     five labels + brand + search still fit at the narrow end of the band
-     (~720px, where a burger also occupies the left). */
+  /* Tabs sit immediately after the burger (left-aligned), not centered.
+     Labels stay visible — with the layout left-aligned they no longer
+     compete with a centered block for the search's room, so
+     Home/Movies/TV/Music/Books read as named buttons just like desktop,
+     only with tighter padding/gap so all five labels + search still fit at
+     the narrow end of the band (~720px, where the burger also occupies the
+     left). */
   .topbar-tabs { justify-self: start; min-width: 0; }
   .topbar-tabs .tab { padding: 0 10px; gap: 6px; }
   /* Stretch the right cluster across the flexible column so the flex-grow

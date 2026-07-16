@@ -57,6 +57,23 @@ const emit = defineEmits<{ play: [] }>()
 const imgError = ref(false)
 watch(() => props.src, () => { imgError.value = false })
 
+// Complement caption tint — sample the art's tone and lift its hue-opposite
+// into text-grade lightness (sampleImageTone memoizes per URL, so grids pay
+// once per cover). Gated by the Appearance "Tinted captions" switch; off →
+// the CSS fallback collapses the mix to plain white. Sequence-guarded: a
+// slow sample must not land after the card was recycled onto a different
+// src (virtual grids reuse instances).
+const { tintedCaptionsEnabled } = useAppearance()
+const compTint = ref<string | null>(null)
+watch(() => [tintedCaptionsEnabled.value, props.src] as const, ([tint, src]) => {
+  compTint.value = null
+  if (!tint || !src || !import.meta.client) return
+  sampleImageTone(src).then((t) => {
+    if (t && src === props.src && tintedCaptionsEnabled.value) compTint.value = toneTextVariant(t.complementTriplet)
+  })
+}, { immediate: true })
+const tintStyle = computed(() => (compTint.value ? { '--mc-comp': compTint.value } : undefined))
+
 // No-art tile initials (Heya 2.0), from the title — first letters of the
 // first two words, else the first two characters. Falls back to a music icon
 // only when there's no usable title.
@@ -70,7 +87,7 @@ const initials = computed(() => {
 </script>
 
 <template>
-  <div class="mc" :class="[`mc-${variant}`, { 'mc-missing': missing, 'mc-captioned': captioned }]">
+  <div class="mc" :class="[`mc-${variant}`, { 'mc-missing': missing, 'mc-captioned': captioned }]" :style="tintStyle">
     <MediaMissingBadge v-if="missing" />
     <div class="mc-art">
       <LoadingImage
@@ -197,8 +214,10 @@ const initials = computed(() => {
 
 .mc-gradient {
   position: absolute; inset: 0;
-  /* scrim over the cover art for caption legibility — stays literal */
-  background: linear-gradient(0deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.25) 45%, transparent 75%);
+  /* Caption-band scrim ONLY: dense under the two text lines, fully gone
+     by ~a third up — the art above stays untinted (the old scrim washed
+     the lower half of every cover). Stays literal. */
+  background: linear-gradient(0deg, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.62) 22%, rgba(0,0,0,0.26) 42%, transparent 62%);
   pointer-events: none;
 }
 
@@ -296,19 +315,25 @@ const initials = computed(() => {
   font-size: 14px;
   font-weight: 700;
   line-height: 1.25;
-  color: #fff; /* caption painted over the cover art — stays literal */
+  /* tint-caption cards mix the cover's complement in; without the sample
+     the fallback triplet collapses the mix to plain white. Painted over
+     the cover art — the literals stay. */
+  color: color-mix(in oklab, rgb(var(--mc-comp, 255 255 255)) 78%, rgb(255 255 255));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  /* multi-layer halo (hero-halo recipe, scaled down) — the scrim alone
+     couldn't rescue captions on busy/bright covers */
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7), 0 0 8px rgba(0, 0, 0, 0.55), 0 0 18px rgba(0, 0, 0, 0.4);
 }
 .mc-sub {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.65); /* caption painted over the cover art — stays literal */
+  color: rgba(255, 255, 255, 0.85); /* caption painted over the cover art — stays literal */
   margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7), 0 0 8px rgba(0, 0, 0, 0.5);
 }
 
 /* Circular variant — keep label outside the clipped art so it remains

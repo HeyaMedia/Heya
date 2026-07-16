@@ -48,6 +48,11 @@ type AppearanceSettings struct {
 	// (the FE appearance hydrate) could never learn about the off cross-
 	// device. Always speaking true/false makes the server authoritative.
 	ShowUnavailableRecs bool `json:"show_unavailable_recs"`
+	// TintedCaptions tints card captions (album/poster tiles) with the
+	// complement of the artwork's sampled tone. Default ON — a *bool so a
+	// user who never touched the knob keeps the app default (absent key)
+	// instead of being flattened to false by the zero value.
+	TintedCaptions *bool `json:"tinted_captions,omitempty"`
 	// AccentCustom is a user-picked hex accent overriding the preset.
 	// Empty = the named preset in Accent applies.
 	AccentCustom string `json:"accent_custom,omitempty"`
