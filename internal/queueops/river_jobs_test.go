@@ -227,3 +227,55 @@ func TestScheduledTaskExceededRuntimeIgnoresManualJobs(t *testing.T) {
 
 	_ = kickoffID
 }
+
+// TestCountLiveByKindAndTaskMatchesPerDefinitionHelpers pins the grouped
+// single-pass count to the per-definition helpers it replaced in the hot
+// paths: folding by (kinds, taskID) must yield exactly what
+// CountScheduledTask/CountByKinds report, including the splits the old
+// helpers encoded — 'pending' state is not counted, and jobs missing a
+// scheduled_task_id only count for synthetic (taskID == "") folds.
+func TestCountLiveByKindAndTaskMatchesPerDefinitionHelpers(t *testing.T) {
+	pool := queueopsTestPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx)
+
+	const taskID = "grpcount_task"
+	const kindA = "grpcount_child_a"
+	const kindB = "grpcount_child_b"
+	taskArgs := `{"scheduled_task_id": "` + taskID + `"}`
+
+	insert := func(kind, state, args string) {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO river_job (state, max_attempts, kind, queue, args, metadata)
+			VALUES ($1, 1, $2, $2, $3::jsonb, '{}'::jsonb)
+		`, state, kind, args)
+		require.NoError(t, err)
+	}
+	insert(kindA, "available", taskArgs)
+	insert(kindA, "available", taskArgs)
+	insert(kindA, "running", taskArgs)
+	insert(kindA, "available", `{}`) // no owner: synthetic folds only
+	insert(kindB, "scheduled", taskArgs)
+	insert(kindA, "pending", taskArgs) // never counted
+
+	live, err := CountLiveByKindAndTask(ctx, tx)
+	require.NoError(t, err)
+
+	scheduled := RuntimeCountsFor(live, []string{kindA, kindB}, taskID)
+	assert.Equal(t, RuntimeCounts{Pending: 3, Running: 1}, scheduled)
+	fromHelper, err := CountScheduledTask(ctx, tx, taskID, []string{kindA, kindB})
+	require.NoError(t, err)
+	assert.Equal(t, fromHelper, scheduled)
+
+	synthetic := RuntimeCountsFor(live, []string{kindA}, "")
+	assert.Equal(t, RuntimeCounts{Pending: 3, Running: 1}, synthetic)
+	fromHelper, err = CountByKinds(ctx, tx, []string{kindA})
+	require.NoError(t, err)
+	assert.Equal(t, fromHelper, synthetic)
+
+	assert.Equal(t, RuntimeCounts{Pending: 1}, RuntimeCountsFor(live, []string{kindB}, ""))
+	assert.Equal(t, RuntimeCounts{}, RuntimeCountsFor(live, []string{"grpcount_absent"}, taskID))
+}

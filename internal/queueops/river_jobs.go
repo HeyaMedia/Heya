@@ -3,6 +3,7 @@ package queueops
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -203,6 +204,12 @@ func GetActiveKickoff(ctx context.Context, db DB, kickoffKind, taskID string) (*
 	return &run, nil
 }
 
+// The count helpers below pass pgx.QueryExecModeExec so the plan is built
+// with the actual kind values each call. pgx's default cached prepared
+// statements flip to a generic plan that estimates kind = ANY($1) far too
+// high and full-scans river_job — with a parked backlog (metadata outage =
+// 650k+ live rows) that's ~100ms of pure CPU per count instead of an index
+// probe.
 func CountByKinds(ctx context.Context, db DB, kinds []string) (RuntimeCounts, error) {
 	if len(kinds) == 0 {
 		return RuntimeCounts{}, nil
@@ -214,8 +221,67 @@ func CountByKinds(ctx context.Context, db DB, kinds []string) (RuntimeCounts, er
 			count(*) FILTER (WHERE state = 'running')
 		FROM river_job
 		WHERE kind = ANY($1::text[])
-	`, kinds).Scan(&counts.Pending, &counts.Running)
+	`, pgx.QueryExecModeExec, kinds).Scan(&counts.Pending, &counts.Running)
 	return counts, err
+}
+
+// TaskKindCounts is one row of CountLiveByKindAndTask: live pending/running
+// totals for one (kind, scheduled_task_id) pair.
+type TaskKindCounts struct {
+	Kind            string
+	ScheduledTaskID string
+	Pending         int
+	Running         int
+}
+
+// CountLiveByKindAndTask returns live job counts for every (kind,
+// scheduled_task_id) pair in one river_job pass. Callers that need counts
+// for many task definitions at once (the task-progress ticker, the tasks
+// API) must fold this with RuntimeCountsFor instead of looping
+// CountByKinds/CountScheduledTask — with a large backlog each of those is
+// a full-table scan, and one ticker tick used to issue eighteen.
+func CountLiveByKindAndTask(ctx context.Context, db DB) ([]TaskKindCounts, error) {
+	rows, err := db.Query(ctx, `
+		SELECT kind,
+		       COALESCE(args->>'scheduled_task_id', '') AS scheduled_task_id,
+		       count(*) FILTER (WHERE state IN ('available', 'scheduled', 'retryable')) AS pending,
+		       count(*) FILTER (WHERE state = 'running') AS running
+		FROM river_job
+		WHERE state IN ('available', 'scheduled', 'retryable', 'running')
+		GROUP BY 1, 2
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TaskKindCounts
+	for rows.Next() {
+		var c TaskKindCounts
+		if err := rows.Scan(&c.Kind, &c.ScheduledTaskID, &c.Pending, &c.Running); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// RuntimeCountsFor folds CountLiveByKindAndTask rows into one task
+// definition's counts. taskID == "" counts every job of the given kinds
+// regardless of which task enqueued it (synthetic definitions); otherwise
+// only jobs stamped with that scheduled_task_id count — the same split the
+// CountByKinds/CountScheduledTask pair implements.
+func RuntimeCountsFor(rows []TaskKindCounts, kinds []string, taskID string) RuntimeCounts {
+	var counts RuntimeCounts
+	for _, row := range rows {
+		if taskID != "" && row.ScheduledTaskID != taskID {
+			continue
+		}
+		if slices.Contains(kinds, row.Kind) {
+			counts.Pending += row.Pending
+			counts.Running += row.Running
+		}
+	}
+	return counts
 }
 
 func CountScheduledTask(ctx context.Context, db DB, taskID string, kinds []string) (RuntimeCounts, error) {
@@ -230,7 +296,7 @@ func CountScheduledTask(ctx context.Context, db DB, taskID string, kinds []strin
 		FROM river_job
 		WHERE kind = ANY($1::text[])
 		  AND args->>'scheduled_task_id' = $2
-	`, kinds, taskID).Scan(&counts.Pending, &counts.Running)
+	`, pgx.QueryExecModeExec, kinds, taskID).Scan(&counts.Pending, &counts.Running)
 	return counts, err
 }
 
@@ -248,7 +314,7 @@ func ScheduledTaskExceededRuntime(ctx context.Context, db DB, taskID string, kin
 			  AND created_at < now() - ($3::int * interval '1 minute')
 			  AND COALESCE(metadata->>'source', '') <> $4
 		)
-	`, kinds, taskID, minutes, KickoffSourceManual).Scan(&exceeded)
+	`, pgx.QueryExecModeExec, kinds, taskID, minutes, KickoffSourceManual).Scan(&exceeded)
 	return exceeded, err
 }
 
@@ -261,7 +327,7 @@ func CountActiveByKinds(ctx context.Context, db DB, kinds []string) (int64, erro
 		SELECT count(*) FROM river_job
 		WHERE state IN ('available', 'running', 'retryable', 'scheduled')
 		  AND kind = ANY($1::text[])
-	`, kinds).Scan(&count)
+	`, pgx.QueryExecModeExec, kinds).Scan(&count)
 	return count, err
 }
 

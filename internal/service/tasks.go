@@ -72,11 +72,15 @@ type TaskRuntimeState struct {
 func (a *App) GetAllTaskRuntimeState(ctx context.Context) map[string]TaskRuntimeState {
 	defs := taskdefs.Scheduled()
 	out := make(map[string]TaskRuntimeState, len(defs))
+	// One grouped river_job pass for all definitions — a per-definition
+	// CountScheduledTask loop costs a full-table scan per task when a large
+	// backlog is parked.
+	live, err := queueops.CountLiveByKindAndTask(ctx, a.db)
+	if err != nil {
+		return out
+	}
 	for _, def := range defs {
-		counts, err := queueops.CountScheduledTask(ctx, a.db, def.ID, taskdefs.TaskKinds(def.ID))
-		if err != nil {
-			continue
-		}
+		counts := queueops.RuntimeCountsFor(live, taskdefs.TaskKinds(def.ID), def.ID)
 		state := "idle"
 		if counts.Pending > 0 || counts.Running > 0 {
 			state = "running"

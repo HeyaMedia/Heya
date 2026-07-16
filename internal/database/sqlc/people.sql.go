@@ -275,76 +275,12 @@ func (q *Queries) DeletePerson(ctx context.Context, id int64) error {
 	return err
 }
 
-const findPersonByExternalID = `-- name: FindPersonByExternalID :one
-SELECT id, external_ids, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, popularity, slug, created_at, updated_at, sort_name, known_for_department, birth_year, heya_slug, heya_enriched_at, search_vector FROM people WHERE external_ids @> $1::jsonb LIMIT 1
-`
-
-func (q *Queries) FindPersonByExternalID(ctx context.Context, dollar_1 []byte) (Person, error) {
-	row := q.db.QueryRow(ctx, findPersonByExternalID, dollar_1)
-	var i Person
-	err := row.Scan(
-		&i.ID,
-		&i.ExternalIds,
-		&i.Name,
-		&i.AlsoKnownAs,
-		&i.Biography,
-		&i.Birthday,
-		&i.Deathday,
-		&i.PlaceOfBirth,
-		&i.Gender,
-		&i.ProfilePath,
-		&i.Homepage,
-		&i.Popularity,
-		&i.Slug,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.SortName,
-		&i.KnownForDepartment,
-		&i.BirthYear,
-		&i.HeyaSlug,
-		&i.HeyaEnrichedAt,
-		&i.SearchVector,
-	)
-	return i, err
-}
-
-const getPersonByExternalID = `-- name: GetPersonByExternalID :one
-SELECT id, external_ids, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, popularity, slug, created_at, updated_at, sort_name, known_for_department, birth_year, heya_slug, heya_enriched_at, search_vector FROM people WHERE external_ids @> $1::jsonb LIMIT 1
-`
-
-func (q *Queries) GetPersonByExternalID(ctx context.Context, dollar_1 []byte) (Person, error) {
-	row := q.db.QueryRow(ctx, getPersonByExternalID, dollar_1)
-	var i Person
-	err := row.Scan(
-		&i.ID,
-		&i.ExternalIds,
-		&i.Name,
-		&i.AlsoKnownAs,
-		&i.Biography,
-		&i.Birthday,
-		&i.Deathday,
-		&i.PlaceOfBirth,
-		&i.Gender,
-		&i.ProfilePath,
-		&i.Homepage,
-		&i.Popularity,
-		&i.Slug,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.SortName,
-		&i.KnownForDepartment,
-		&i.BirthYear,
-		&i.HeyaSlug,
-		&i.HeyaEnrichedAt,
-		&i.SearchVector,
-	)
-	return i, err
-}
-
 const getPersonByHeyaSlug = `-- name: GetPersonByHeyaSlug :one
-SELECT id, external_ids, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, popularity, slug, created_at, updated_at, sort_name, known_for_department, birth_year, heya_slug, heya_enriched_at, search_vector FROM people WHERE heya_slug = $1
+SELECT id, external_ids, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, popularity, slug, created_at, updated_at, sort_name, known_for_department, birth_year, heya_slug, heya_enriched_at, search_vector FROM people WHERE heya_slug = $1 AND heya_slug <> ''
 `
 
+// heya_slug <> ” matches the partial index predicate (see GetPersonBySlug) and
+// keeps an empty probe from matching an arbitrary not-yet-enriched row.
 func (q *Queries) GetPersonByHeyaSlug(ctx context.Context, heyaSlug string) (Person, error) {
 	row := q.db.QueryRow(ctx, getPersonByHeyaSlug, heyaSlug)
 	var i Person
@@ -408,9 +344,12 @@ func (q *Queries) GetPersonByID(ctx context.Context, id int64) (Person, error) {
 }
 
 const getPersonBySlug = `-- name: GetPersonBySlug :one
-SELECT id, external_ids, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, popularity, slug, created_at, updated_at, sort_name, known_for_department, birth_year, heya_slug, heya_enriched_at, search_vector FROM people WHERE slug = $1
+SELECT id, external_ids, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, popularity, slug, created_at, updated_at, sort_name, known_for_department, birth_year, heya_slug, heya_enriched_at, search_vector FROM people WHERE slug = $1 AND slug <> ''
 `
 
+// The slug indexes are partial (WHERE slug <> ”), and a cached generic plan
+// can't prove an unknown $1 is non-empty — without the explicit predicate the
+// planner falls back to scanning all of people on every lookup.
 func (q *Queries) GetPersonBySlug(ctx context.Context, slug string) (Person, error) {
 	row := q.db.QueryRow(ctx, getPersonBySlug, slug)
 	var i Person
@@ -988,7 +927,7 @@ func (q *Queries) MarkPersonEnriched(ctx context.Context, id int64) error {
 }
 
 const personSlugExists = `-- name: PersonSlugExists :one
-SELECT EXISTS(SELECT 1 FROM people WHERE slug = $1 AND id != $2) as exists
+SELECT EXISTS(SELECT 1 FROM people WHERE slug = $1 AND slug <> '' AND id != $2) as exists
 `
 
 type PersonSlugExistsParams struct {
@@ -996,6 +935,7 @@ type PersonSlugExistsParams struct {
 	ID   int64  `json:"id"`
 }
 
+// slug <> ” matches the partial index predicate; see GetPersonBySlug.
 func (q *Queries) PersonSlugExists(ctx context.Context, arg PersonSlugExistsParams) (bool, error) {
 	row := q.db.QueryRow(ctx, personSlugExists, arg.Slug, arg.ID)
 	var exists bool

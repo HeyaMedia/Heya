@@ -1,9 +1,3 @@
--- name: GetPersonByExternalID :one
-SELECT * FROM people WHERE external_ids @> $1::jsonb LIMIT 1;
-
--- name: FindPersonByExternalID :one
-SELECT * FROM people WHERE external_ids @> $1::jsonb LIMIT 1;
-
 -- name: CreatePerson :one
 INSERT INTO people (external_ids, name, also_known_as, biography, birthday, deathday, place_of_birth, gender, profile_path, homepage, popularity, sort_name, known_for_department, birth_year, heya_slug)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
@@ -176,13 +170,17 @@ SELECT (SELECT count(*) FROM inserted_cast)::bigint AS cast_count,
        (SELECT count(*) FROM inserted_crew)::bigint AS crew_count;
 
 -- name: GetPersonBySlug :one
-SELECT * FROM people WHERE slug = $1;
+-- The slug indexes are partial (WHERE slug <> ''), and a cached generic plan
+-- can't prove an unknown $1 is non-empty — without the explicit predicate the
+-- planner falls back to scanning all of people on every lookup.
+SELECT * FROM people WHERE slug = $1 AND slug <> '';
 
 -- name: UpdatePersonSlug :exec
 UPDATE people SET slug = $2 WHERE id = $1;
 
 -- name: PersonSlugExists :one
-SELECT EXISTS(SELECT 1 FROM people WHERE slug = $1 AND id != $2) as exists;
+-- slug <> '' matches the partial index predicate; see GetPersonBySlug.
+SELECT EXISTS(SELECT 1 FROM people WHERE slug = $1 AND slug <> '' AND id != $2) as exists;
 
 -- name: ListMediaCrew :many
 SELECT mc.job, mc.department, p.*
@@ -229,7 +227,9 @@ FROM media_crew mc
 WHERE mc.person_id = ANY(@person_ids::bigint[]);
 
 -- name: GetPersonByHeyaSlug :one
-SELECT * FROM people WHERE heya_slug = $1;
+-- heya_slug <> '' matches the partial index predicate (see GetPersonBySlug) and
+-- keeps an empty probe from matching an arbitrary not-yet-enriched row.
+SELECT * FROM people WHERE heya_slug = $1 AND heya_slug <> '';
 
 -- name: UpdatePersonFull :one
 UPDATE people SET

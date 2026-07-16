@@ -35,18 +35,21 @@ func (h *Hub) taskProgressTicker(ctx context.Context, db *pgxpool.Pool) {
 			if !h.HasSubscribers() {
 				continue
 			}
+			// One grouped river_job pass per tick, folded per definition in
+			// Go. Counting per definition here costs a full-table scan each
+			// when a backlog is parked (a metadata-service stall leaves 650k+
+			// live rows), and 18 definitions every 2s was enough to keep two
+			// Postgres cores busy on counts alone.
+			live, err := queueops.CountLiveByKindAndTask(ctx, db)
+			if err != nil {
+				continue
+			}
 			for _, def := range taskdefs.All() {
-				var counts queueops.RuntimeCounts
-				var err error
-				kinds := taskdefs.TaskKinds(def.ID)
+				taskID := def.ID
 				if def.Synthetic {
-					counts, err = queueops.CountByKinds(ctx, db, kinds)
-				} else {
-					counts, err = queueops.CountScheduledTask(ctx, db, def.ID, kinds)
+					taskID = ""
 				}
-				if err != nil {
-					continue
-				}
+				counts := queueops.RuntimeCountsFor(live, taskdefs.TaskKinds(def.ID), taskID)
 				state := "idle"
 				if counts.Pending > 0 || counts.Running > 0 {
 					state = "running"
