@@ -189,7 +189,7 @@ func (q *Queries) GetUserArtistRatingsForIDs(ctx context.Context, arg GetUserArt
 }
 
 const listUserRatedAlbums = `-- name: ListUserRatedAlbums :many
-SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance,
+SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist,
        a.name        AS artist_name,
        mi.slug       AS artist_slug,
        uar.rating    AS rating,
@@ -250,6 +250,7 @@ type ListUserRatedAlbumsRow struct {
 	ExternalIds        []byte             `json:"external_ids"`
 	ArtistCredits      []byte             `json:"artist_credits"`
 	FieldProvenance    []byte             `json:"field_provenance"`
+	SortArtist         string             `json:"sort_artist"`
 	ArtistName         string             `json:"artist_name"`
 	ArtistSlug         string             `json:"artist_slug"`
 	Rating_2           int16              `json:"rating_2"`
@@ -310,6 +311,7 @@ func (q *Queries) ListUserRatedAlbums(ctx context.Context, arg ListUserRatedAlbu
 			&i.ExternalIds,
 			&i.ArtistCredits,
 			&i.FieldProvenance,
+			&i.SortArtist,
 			&i.ArtistName,
 			&i.ArtistSlug,
 			&i.Rating_2,

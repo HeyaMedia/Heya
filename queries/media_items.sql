@@ -77,7 +77,9 @@ SELECT * FROM media_item_cards WHERE id = $1;
 SELECT * FROM media_item_cards WHERE public_id = $1;
 
 -- name: GetMediaItemBySlug :one
-SELECT * FROM media_item_cards WHERE slug = $1;
+-- slug <> '' matches the partial index predicate (idx_media_items_slug is
+-- WHERE slug <> ''); without it a cached generic plan can't use the index.
+SELECT * FROM media_item_cards WHERE slug = $1 AND slug <> '';
 
 -- name: UpdateMediaItemSlug :exec
 UPDATE media_items SET slug = $2 WHERE id = $1;
@@ -92,7 +94,7 @@ UPDATE media_items SET slug = $2 WHERE id = $1;
 UPDATE media_items SET heya_slug = $2, updated_at = now() WHERE id = $1;
 
 -- name: MediaItemSlugExists :one
-SELECT EXISTS(SELECT 1 FROM media_items WHERE slug = $1 AND id != $2) as exists;
+SELECT EXISTS(SELECT 1 FROM media_items WHERE slug = $1 AND slug <> '' AND id != $2) as exists;
 
 -- name: ListMediaItemsByLibrary :many
 SELECT * FROM media_item_cards

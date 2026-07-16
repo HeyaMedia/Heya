@@ -337,9 +337,11 @@ func (q *Queries) GetMediaItemByPublicID(ctx context.Context, publicID uuid.UUID
 }
 
 const getMediaItemBySlug = `-- name: GetMediaItemBySlug :one
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked, public_id FROM media_item_cards WHERE slug = $1
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked, public_id FROM media_item_cards WHERE slug = $1 AND slug <> ''
 `
 
+// slug <> ” matches the partial index predicate (idx_media_items_slug is
+// WHERE slug <> ”); without it a cached generic plan can't use the index.
 func (q *Queries) GetMediaItemBySlug(ctx context.Context, slug string) (MediaItemCard, error) {
 	row := q.db.QueryRow(ctx, getMediaItemBySlug, slug)
 	var i MediaItemCard
@@ -1001,7 +1003,7 @@ func (q *Queries) MarkMetadataRefreshed(ctx context.Context, id int64) error {
 }
 
 const mediaItemSlugExists = `-- name: MediaItemSlugExists :one
-SELECT EXISTS(SELECT 1 FROM media_items WHERE slug = $1 AND id != $2) as exists
+SELECT EXISTS(SELECT 1 FROM media_items WHERE slug = $1 AND slug <> '' AND id != $2) as exists
 `
 
 type MediaItemSlugExistsParams struct {

@@ -201,7 +201,7 @@ SELECT al.*
 FROM albums al
 JOIN artists a ON a.id = al.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
-WHERE mi.slug = $1 AND al.slug = $2
+WHERE mi.slug = $1 AND mi.slug <> '' AND al.slug = $2 AND al.slug <> ''
 LIMIT 1;
 
 -- name: ListAlbumsByArtist :many
@@ -650,7 +650,7 @@ SELECT a.*,
 FROM artists a
 JOIN media_item_cards mi ON mi.id = a.media_item_id
 JOIN libraries   l  ON l.id  = mi.library_id
-WHERE mi.slug = $1 AND l.media_type = 'music'
+WHERE mi.slug = $1 AND mi.slug <> '' AND l.media_type = 'music'
 LIMIT 1;
 
 -- name: ListAlbumsByArtistSlug :many
@@ -664,7 +664,7 @@ SELECT al.*,
 FROM albums al
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
-WHERE mi.slug = $1
+WHERE mi.slug = $1 AND mi.slug <> ''
 ORDER BY al.year DESC NULLS LAST, lower(al.title) ASC
 LIMIT $2 OFFSET $3;
 
@@ -672,7 +672,7 @@ LIMIT $2 OFFSET $3;
 SELECT count(*) FROM albums al
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
-WHERE mi.slug = $1;
+WHERE mi.slug = $1 AND mi.slug <> '';
 
 -- name: ListTracksByArtistSlug :many
 -- Paginated flat-track listing for one artist. Same row shape as
@@ -694,7 +694,7 @@ FROM tracks t
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
-WHERE mi.slug = $1
+WHERE mi.slug = $1 AND mi.slug <> ''
 ORDER BY al.year DESC NULLS LAST, lower(al.title) ASC,
          t.disc_number ASC, t.track_number ASC
 LIMIT $2 OFFSET $3;
@@ -704,7 +704,7 @@ SELECT count(*) FROM tracks t
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
-WHERE mi.slug = $1;
+WHERE mi.slug = $1 AND mi.slug <> '';
 
 -- name: ListMusicAlbums :many
 -- Merged listing of every album across every music library. Joins the artist
@@ -713,12 +713,15 @@ WHERE mi.slug = $1;
 -- detail page.
 --
 -- Perf notes (do not "simplify"):
---  * The derived table bounds the top-N sort before the per-album
---    track_count/available subplans run; mi.media_type replaces the libraries
---    join (equivalent: library_id NOT NULL FK, media_type mirrors the
---    library) whose row misestimate forced a serial nested loop over all 51k
---    albums. Do NOT swap the predicate without the wrap — that plan hashes
---    the EXISTS over all library_files (measured 12x regression).
+--  * The keys subquery walks idx_albums_catalog_order (trigger-maintained
+--    sort_artist + same-table year/title) as an index-only scan, so the deep
+--    offsets the virtual scroller random-accesses cost an index skip instead
+--    of sorting all 54k joined rows (222ms at offset 50k before; ~1-10ms
+--    after). Joins and the per-album track_count/available subplans run on
+--    page rows only — inlined, the planner hashes the EXISTS over all
+--    library_files (measured 12x regression on the old shape).
+--  * No media-type filter needed: albums exist only under music libraries
+--    (see CountMusicAlbums).
 --  * al.id tie-break: duplicate (name, year, title) sort keys exist, so
 --    OFFSET pagination needs it to stay deterministic across plan changes.
 SELECT sub.*,
@@ -728,14 +731,17 @@ FROM (
     SELECT al.*,
            a.name  AS artist_name,
            mi.slug AS artist_slug
-    FROM albums al
+    FROM (
+        SELECT k.id
+        FROM albums k
+        ORDER BY k.sort_artist ASC, k.year ASC, lower(k.title) ASC, k.id ASC
+        LIMIT $1 OFFSET $2
+    ) keys
+    JOIN albums al ON al.id = keys.id
     JOIN artists     a  ON a.id  = al.artist_id
     JOIN media_item_cards mi ON mi.id = a.media_item_id
-    WHERE mi.media_type = 'music'
-    ORDER BY lower(a.name) ASC, al.year ASC, lower(al.title) ASC, al.id ASC
-    LIMIT $1 OFFSET $2
 ) sub
-ORDER BY lower(sub.artist_name) ASC, sub.year ASC, lower(sub.title) ASC, sub.id ASC;
+ORDER BY sub.sort_artist ASC, sub.year ASC, lower(sub.title) ASC, sub.id ASC;
 
 -- name: CountMusicAlbums :one
 -- Bare count: albums exist only under music libraries (created solely by the
@@ -750,15 +756,19 @@ SELECT count(*) FROM albums;
 -- the album cover endpoint without an ID lookup.
 --
 -- Perf notes (do not "simplify"):
---  * mi.media_type filter (not JOIN libraries + l.media_type): accurate stats
---    let the planner pick an incremental-sort plan instead of materializing
---    all 240k joined tracks per page. Equivalent because media_items.media_type
---    mirrors its library's media_type and library_id is a NOT NULL FK.
---  * The derived-table wrap is mandatory: it keeps the availability EXISTS a
---    per-row index lookup on the page's rows only. Inlined, the planner flips
---    it to a hashed subplan that seq-scans all track_files x library_files.
+--  * The keys subquery selects the page by walking idx_tracks_catalog_order
+--    (the trigger-maintained denormalized sort keys) as an index-only scan —
+--    the virtual scroller random-accesses deep offsets (offset≈224k when the
+--    scrollbar is dragged), and the previous cross-table ORDER BY hash-joined
+--    and quicksorted all 280k tracks per deep page (464ms; this shape
+--    measured 63ms worst-case, ~3ms shallow). Joins run on page rows only.
+--  * No media-type filter needed: tracks exist only under music libraries
+--    (created solely by the music matcher — see CountMusicTracks).
+--  * The availability EXISTS stays outside the page derived table so it runs
+--    per page row, not per candidate.
 --  * The outer ORDER BY re-sorts only the page rows (cheap) and guarantees
---    output order — SQL does not promise derived-table order preservation.
+--    output order; the expressions equal the denormalized keys by
+--    construction (sort_artist = lower(artist name), etc).
 --  * t.id tie-break keeps OFFSET page boundaries deterministic.
 SELECT page.*,
        EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = page.track_id AND lf.deleted_at IS NULL) AS available
@@ -776,14 +786,17 @@ FROM (
          a.id              AS artist_id,
          a.name            AS artist_name,
          mi.slug           AS artist_slug
-  FROM tracks t
+  FROM (
+    SELECT k.id
+    FROM tracks k
+    ORDER BY k.sort_artist ASC, k.sort_album_year ASC, k.sort_album ASC,
+             k.disc_number ASC, k.track_number ASC, k.id ASC
+    LIMIT $1 OFFSET $2
+  ) keys
+  JOIN tracks t ON t.id = keys.id
   JOIN albums      al ON al.id = t.album_id
   JOIN artists     a  ON a.id  = al.artist_id
   JOIN media_item_cards mi ON mi.id = a.media_item_id
-  WHERE mi.media_type = 'music'
-  ORDER BY lower(a.name) ASC, al.year ASC, lower(al.title) ASC,
-           t.disc_number ASC, t.track_number ASC, t.id ASC
-  LIMIT $1 OFFSET $2
 ) page
 ORDER BY lower(page.artist_name) ASC, page.album_year ASC, lower(page.album_title) ASC,
          page.disc_number ASC, page.track_number ASC, page.track_id ASC;

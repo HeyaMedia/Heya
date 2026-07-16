@@ -195,6 +195,7 @@ type Album struct {
 	ExternalIds        []byte             `json:"external_ids"`
 	ArtistCredits      []byte             `json:"artist_credits"`
 	FieldProvenance    []byte             `json:"field_provenance"`
+	SortArtist         string             `json:"sort_artist"`
 }
 
 type AlbumCentroid struct {
@@ -1063,6 +1064,9 @@ type Track struct {
 	Explicit        bool        `json:"explicit"`
 	ArtistCredits   []byte      `json:"artist_credits"`
 	LyricsAvailable bool        `json:"lyrics_available"`
+	SortArtist      string      `json:"sort_artist"`
+	SortAlbumYear   string      `json:"sort_album_year"`
+	SortAlbum       string      `json:"sort_album"`
 }
 
 type TrackFacet struct {

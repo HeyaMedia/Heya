@@ -497,6 +497,7 @@ export type Album = {
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
+    sort_artist: string;
     styles: Array<string> | null;
     tags: Array<string> | null;
     title: string;
@@ -2084,6 +2085,7 @@ export type ListAlbumsByArtistIdForShelfRow = {
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
+    sort_artist: string;
     styles: Array<string> | null;
     tags: Array<string> | null;
     title: string;
@@ -2127,6 +2129,7 @@ export type ListAlbumsByArtistSlugRow = {
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
+    sort_artist: string;
     styles: Array<string> | null;
     tags: Array<string> | null;
     title: string;
@@ -2250,6 +2253,7 @@ export type ListMusicAlbumsRow = {
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
+    sort_artist: string;
     styles: Array<string> | null;
     tags: Array<string> | null;
     title: string;
@@ -2347,6 +2351,7 @@ export type ListOnThisDayAlbumsRow = {
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
+    sort_artist: string;
     styles: Array<string> | null;
     tags: Array<string> | null;
     title: string;
@@ -2444,6 +2449,7 @@ export type ListRecentlyAddedAlbumsRow = {
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
+    sort_artist: string;
     styles: Array<string> | null;
     tags: Array<string> | null;
     title: string;
@@ -2611,6 +2617,7 @@ export type ListUserLovedAlbumsRow = {
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
+    sort_artist: string;
     styles: Array<string> | null;
     tags: Array<string> | null;
     title: string;
@@ -2729,6 +2736,7 @@ export type ListUserRatedAlbumsRow = {
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
+    sort_artist: string;
     styles: Array<string> | null;
     tags: Array<string> | null;
     title: string;
@@ -5332,6 +5340,9 @@ export type TrackView = {
     preview_url: string;
     recording_mbid: string;
     search_vector: unknown;
+    sort_album: string;
+    sort_album_year: string;
+    sort_artist: string;
     title: string;
     track_number: number;
 };
@@ -6084,6 +6095,7 @@ export type AlbumWritable = {
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
+    sort_artist: string;
     styles: Array<string> | null;
     tags: Array<string> | null;
     title: string;

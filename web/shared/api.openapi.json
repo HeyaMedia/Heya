@@ -1596,6 +1596,9 @@
           "slug": {
             "type": "string"
           },
+          "sort_artist": {
+            "type": "string"
+          },
           "styles": {
             "items": {
               "type": "string"
@@ -1668,7 +1671,8 @@
           "playcount",
           "external_ids",
           "artist_credits",
-          "field_provenance"
+          "field_provenance",
+          "sort_artist"
         ],
         "type": "object"
       },
@@ -6860,6 +6864,9 @@
           "slug": {
             "type": "string"
           },
+          "sort_artist": {
+            "type": "string"
+          },
           "styles": {
             "items": {
               "type": "string"
@@ -6937,6 +6944,7 @@
           "external_ids",
           "artist_credits",
           "field_provenance",
+          "sort_artist",
           "artist_name",
           "artist_slug",
           "track_count"
@@ -7067,6 +7075,9 @@
           "slug": {
             "type": "string"
           },
+          "sort_artist": {
+            "type": "string"
+          },
           "styles": {
             "items": {
               "type": "string"
@@ -7144,6 +7155,7 @@
           "external_ids",
           "artist_credits",
           "field_provenance",
+          "sort_artist",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -7589,6 +7601,9 @@
           "slug": {
             "type": "string"
           },
+          "sort_artist": {
+            "type": "string"
+          },
           "styles": {
             "items": {
               "type": "string"
@@ -7666,6 +7681,7 @@
           "external_ids",
           "artist_credits",
           "field_provenance",
+          "sort_artist",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -8035,6 +8051,9 @@
           "slug": {
             "type": "string"
           },
+          "sort_artist": {
+            "type": "string"
+          },
           "styles": {
             "items": {
               "type": "string"
@@ -8112,6 +8131,7 @@
           "external_ids",
           "artist_credits",
           "field_provenance",
+          "sort_artist",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -8450,6 +8470,9 @@
           "slug": {
             "type": "string"
           },
+          "sort_artist": {
+            "type": "string"
+          },
           "styles": {
             "items": {
               "type": "string"
@@ -8527,6 +8550,7 @@
           "external_ids",
           "artist_credits",
           "field_provenance",
+          "sort_artist",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -9168,6 +9192,9 @@
           "slug": {
             "type": "string"
           },
+          "sort_artist": {
+            "type": "string"
+          },
           "styles": {
             "items": {
               "type": "string"
@@ -9245,6 +9272,7 @@
           "external_ids",
           "artist_credits",
           "field_provenance",
+          "sort_artist",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -9697,6 +9725,9 @@
           "slug": {
             "type": "string"
           },
+          "sort_artist": {
+            "type": "string"
+          },
           "styles": {
             "items": {
               "type": "string"
@@ -9770,6 +9801,7 @@
           "external_ids",
           "artist_credits",
           "field_provenance",
+          "sort_artist",
           "artist_name",
           "artist_slug",
           "rating_2",
@@ -18600,6 +18632,15 @@
             "type": "string"
           },
           "search_vector": {},
+          "sort_album": {
+            "type": "string"
+          },
+          "sort_album_year": {
+            "type": "string"
+          },
+          "sort_artist": {
+            "type": "string"
+          },
           "title": {
             "type": "string"
           },
@@ -18626,7 +18667,10 @@
           "preview_url",
           "explicit",
           "artist_credits",
-          "lyrics_available"
+          "lyrics_available",
+          "sort_artist",
+          "sort_album_year",
+          "sort_album"
         ],
         "type": "object"
       },

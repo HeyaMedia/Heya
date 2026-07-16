@@ -221,17 +221,18 @@ SELECT r.created_at, r.media_item_id,
        t.album_id, al.artist_id,
        al.title AS album_title, al.slug AS album_slug,
        al.album_type
-FROM (
+FROM libraries l
+CROSS JOIN LATERAL (
   SELECT lf.id, lf.created_at, lf.media_item_id
   FROM library_files lf
-  JOIN media_item_cards mi ON mi.id = lf.media_item_id
-  WHERE mi.media_type = 'music' AND lf.deleted_at IS NULL
+  WHERE lf.library_id = l.id AND lf.deleted_at IS NULL
   ORDER BY lf.created_at DESC
   LIMIT $1
 ) r
 JOIN track_files tf ON tf.library_file_id = r.id
 JOIN tracks      t  ON t.id = tf.track_id
 JOIN albums      al ON al.id = t.album_id
+WHERE l.media_type = 'music'
 `
 
 type ListRecentlyAddedMusicFilesRow struct {
@@ -246,7 +247,9 @@ type ListRecentlyAddedMusicFilesRow struct {
 
 // Newest N live music files mapped through their track to the album and
 // artist. Files not yet matched to a track drop out (inner joins) — they
-// can't be attributed to an artist event yet.
+// can't be attributed to an artist event yet. Per-library LATERAL top-N for
+// the same reason as ListRecentlyAddedTVFiles: the global created_at walk
+// degrades whenever another library type dominates recent additions.
 func (q *Queries) ListRecentlyAddedMusicFiles(ctx context.Context, limit int32) ([]ListRecentlyAddedMusicFilesRow, error) {
 	rows, err := q.db.Query(ctx, listRecentlyAddedMusicFiles, limit)
 	if err != nil {
@@ -278,7 +281,7 @@ func (q *Queries) ListRecentlyAddedMusicFiles(ctx context.Context, limit int32) 
 const listRecentlyAddedTVFiles = `-- name: ListRecentlyAddedTVFiles :many
 
 SELECT r.id, r.media_item_id, r.created_at,
-       r.public_id, r.library_id, r.title, r.slug,
+       mi.public_id, mi.library_id, mi.title, mi.slug,
        (COALESCE((r.parse_result->'parsed'->'release'->'seasons'->>0)::int, -1))::int AS season_number,
        -- Some parser versions wrote a bare number instead of an array for
        -- single-episode files; normalize so scalars survive as [n] instead of
@@ -288,16 +291,18 @@ SELECT r.id, r.media_item_id, r.created_at,
           WHEN 'number' THEN jsonb_build_array(r.parse_result->'parsed'->'release'->'episodes')
           ELSE '[]'::jsonb
         END)::jsonb AS episode_numbers
-FROM (
-  SELECT lf.id, lf.media_item_id, lf.created_at, lf.parse_result,
-         mi.public_id, mi.library_id, mi.title, mi.slug
+FROM libraries l
+CROSS JOIN LATERAL (
+  SELECT lf.id, lf.media_item_id, lf.created_at, lf.parse_result
   FROM library_files lf
-  JOIN media_item_cards mi ON mi.id = lf.media_item_id
-  WHERE mi.media_type IN ('tv', 'anime') AND lf.deleted_at IS NULL
+  WHERE lf.library_id = l.id AND lf.deleted_at IS NULL
   ORDER BY lf.created_at DESC
   LIMIT NULLIF($1::bigint, 0)
 ) r
+JOIN media_item_cards mi ON mi.id = r.media_item_id
+WHERE l.media_type IN ('tv', 'anime')
 ORDER BY r.created_at DESC
+LIMIT NULLIF($1::bigint, 0)
 `
 
 type ListRecentlyAddedTVFilesRow struct {
@@ -320,14 +325,16 @@ type ListRecentlyAddedTVFilesRow struct {
 // quality upgrade replaces the library_files row, and the old (deleted) row
 // is what proves the episode/album isn't actually new.
 // Newest N live TV files with the season/episode numbers the parser
-// extracted. The derived table pins the plan to a backward
-// idx_library_files_created_at scan with a per-row media_items probe that
-// stops at LIMIT, instead of sorting every live file. A window of 0 lifts
-// the cap entirely (LIMIT NULL) — the deep-history pages of the infinite
-// rail group the show's full arrival timeline. Show descriptions are NOT
-// carried per file row (they'd multiply a ~1KB blob by every file in the
-// window); the service overlays them per surfaced entry via
-// ListMediaDescriptionsByIDs below.
+// extracted. The LATERAL takes a per-library top-N off
+// idx_library_files_library_created (a pure backward index scan per TV/anime
+// library) instead of walking the global created_at index filtering on the
+// joined item's type — mid music-import that walk visited 434k entries to
+// find 500 TV files (368ms; this shape measured 0.7ms). The media join runs
+// on surfaced rows only. A window of 0 lifts the cap entirely (LIMIT NULL) —
+// the deep-history pages of the infinite rail group the show's full arrival
+// timeline. Show descriptions are NOT carried per file row (they'd multiply
+// a ~1KB blob by every file in the window); the service overlays them per
+// surfaced entry via ListMediaDescriptionsByIDs below.
 func (q *Queries) ListRecentlyAddedTVFiles(ctx context.Context, fileWindow int64) ([]ListRecentlyAddedTVFilesRow, error) {
 	rows, err := q.db.Query(ctx, listRecentlyAddedTVFiles, fileWindow)
 	if err != nil {

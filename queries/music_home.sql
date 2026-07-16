@@ -195,7 +195,9 @@ FROM (
     JOIN media_item_cards mi ON mi.id = a.media_item_id
     JOIN libraries    l  ON l.id  = mi.library_id
     WHERE l.media_type = 'music'
-      AND sqlc.arg(genre)::text = ANY(al.genres)
+      -- @> (not = ANY) so idx_albums_genres_gin serves the genre probe; the
+      -- ANY form seq-scanned all 54k albums (74ms per shelf rotation).
+      AND al.genres @> ARRAY[sqlc.arg(genre)::text]
       AND EXISTS (SELECT 1 FROM library_files alf WHERE alf.media_item_id = a.media_item_id AND alf.deleted_at IS NULL)
     ORDER BY a.name ASC, a.id ASC
     LIMIT $1
@@ -350,7 +352,7 @@ FROM tracks t
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
-WHERE mi.slug = sqlc.arg(slug)
+WHERE mi.slug = sqlc.arg(slug) AND mi.slug <> ''
   AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 ORDER BY user_play_count DESC, al.year DESC NULLS LAST,
          t.disc_number ASC, t.track_number ASC
