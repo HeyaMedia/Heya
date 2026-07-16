@@ -82,7 +82,11 @@ func ParseStoragePathWithOptions(inputPath string, opts ParseOptions) ParsedStor
 
 	if release != nil && release.Strategy == StrategyMusicCurated {
 		if releaseCandidate.index > 0 {
-			if _, disambig := splitArtistDisambiguator(segments[releaseCandidate.index-1]); disambig != "" {
+			folderArtist, disambig := splitArtistDisambiguator(segments[releaseCandidate.index-1])
+			// The preceding folder's qualifier belongs to that folder artist,
+			// not automatically to an album folder which names another artist.
+			// This is common for compilations and misfiled releases.
+			if disambig != "" && (release.Artist == "" || strings.EqualFold(strings.TrimSpace(folderArtist), strings.TrimSpace(release.Artist))) {
 				release.ArtistDisambiguation = disambig
 			}
 		}

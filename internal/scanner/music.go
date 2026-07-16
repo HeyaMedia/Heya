@@ -452,7 +452,7 @@ func planMusicTrack(file InventoryFile, nfos map[string]musicNFOEntry, tags audi
 	artist, disambig := splitMusicArtistFolder(artistFolder)
 	albumInfo := parseMusicAlbumFolder(albumFolder, artist)
 	if albumInfo.Artist != "" {
-		artist = albumInfo.Artist
+		replaceMusicArtist(&artist, &disambig, albumInfo.Artist)
 	}
 	album := albumInfo.Album
 	year := albumInfo.Year
@@ -465,7 +465,7 @@ func planMusicTrack(file InventoryFile, nfos map[string]musicNFOEntry, tags audi
 
 	if release != nil && release.Media == parser.MediaAudio {
 		if release.Artist != "" {
-			artist = release.Artist
+			replaceMusicArtist(&artist, &disambig, release.Artist)
 		}
 		if release.ArtistDisambiguation != "" {
 			disambig = release.ArtistDisambiguation
@@ -513,7 +513,7 @@ func planMusicTrack(file InventoryFile, nfos map[string]musicNFOEntry, tags audi
 	tagsApplied := false
 	tagArtist := firstNonEmpty(tags.AlbumArtist, tags.Artist)
 	if shouldUseMusicTagName(artist, tagArtist, source) {
-		artist = tagArtist
+		replaceMusicArtist(&artist, &disambig, tagArtist)
 		tagsApplied = true
 	}
 	if shouldUseMusicTagText(album, tags.Album, source) {
@@ -553,7 +553,7 @@ func planMusicTrack(file InventoryFile, nfos map[string]musicNFOEntry, tags audi
 		localNFO = entry
 		hasNFO = true
 		if localNFO.nfo.AlbumArtist != "" {
-			artist = localNFO.nfo.AlbumArtist
+			replaceMusicArtist(&artist, &disambig, localNFO.nfo.AlbumArtist)
 		}
 		if localNFO.nfo.Title != "" {
 			album = cleanMusicAlbumName(localNFO.nfo.Title)
@@ -736,7 +736,6 @@ func groupMusicArtists(albums []MusicAlbumPlan) []MusicArtistPlan {
 				Key:                  key,
 				Artist:               album.Artist,
 				ArtistDisambiguation: album.ArtistDisambiguation,
-				ExternalIDs:          musicArtistExternalIDsFromAlbum(album),
 				Confidence:           album.Confidence,
 			}
 			byKey[key] = artist
@@ -744,14 +743,6 @@ func groupMusicArtists(albums []MusicAlbumPlan) []MusicArtistPlan {
 		artist.Albums = append(artist.Albums, album)
 		artist.Files = append(artist.Files, album.Files...)
 		artist.Confidence = minFloat(artist.Confidence, album.Confidence)
-		for k, v := range musicArtistExternalIDsFromAlbum(album) {
-			if artist.ExternalIDs == nil {
-				artist.ExternalIDs = map[string]string{}
-			}
-			if artist.ExternalIDs[k] == "" {
-				artist.ExternalIDs[k] = v
-			}
-		}
 		for _, issue := range album.Issues {
 			if !contains(artist.Issues, issue) {
 				artist.Issues = append(artist.Issues, issue)
@@ -760,6 +751,7 @@ func groupMusicArtists(albums []MusicAlbumPlan) []MusicArtistPlan {
 	}
 	artists := make([]MusicArtistPlan, 0, len(byKey))
 	for _, artist := range byKey {
+		artist.ExternalIDs = consistentMusicArtistExternalIDs(artist.Albums, &artist.Issues)
 		sortMusicAlbums(artist.Albums)
 		sort.Strings(artist.Files)
 		sort.Strings(artist.Issues)
@@ -769,6 +761,61 @@ func groupMusicArtists(albums []MusicAlbumPlan) []MusicArtistPlan {
 		return artists[i].Artist < artists[j].Artist
 	})
 	return artists
+}
+
+// replaceMusicArtist keeps a folder disambiguation attached to the artist it
+// actually described. Tags and NFOs can legitimately replace a folder artist
+// (compilations and misfiled releases are common); carrying the old folder's
+// qualifier onto the replacement creates a new, false local identity.
+func replaceMusicArtist(artist, disambiguation *string, replacement string) {
+	replacement = strings.TrimSpace(replacement)
+	if replacement == "" {
+		return
+	}
+	if strings.TrimSpace(*disambiguation) != "" &&
+		normalizeMusicKeyPart(*artist) != normalizeMusicKeyPart(replacement) {
+		*disambiguation = ""
+	}
+	*artist = replacement
+}
+
+// consistentMusicArtistExternalIDs promotes only artist identifiers that do
+// not disagree across the albums grouped into one local artist. The previous
+// first-value-wins behaviour paired arbitrary MusicBrainz and Apple IDs and
+// turned inconsistent local evidence into a misleading upstream conflict.
+func consistentMusicArtistExternalIDs(albums []MusicAlbumPlan, issues *[]string) map[string]string {
+	values := map[string]map[string]struct{}{}
+	for _, album := range albums {
+		for provider, value := range musicArtistExternalIDsFromAlbum(album) {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			if values[provider] == nil {
+				values[provider] = map[string]struct{}{}
+			}
+			values[provider][value] = struct{}{}
+		}
+	}
+
+	result := map[string]string{}
+	for _, provider := range []string{"mbid", "apple"} {
+		providerValues := values[provider]
+		switch len(providerValues) {
+		case 0:
+			continue
+		case 1:
+			for value := range providerValues {
+				result[provider] = value
+			}
+		default:
+			issue := "conflicting_artist_" + provider + "_ids"
+			if !contains(*issues, issue) {
+				*issues = append(*issues, issue)
+			}
+		}
+	}
+	return nonEmptyStringMap(result)
 }
 
 func musicArtistExternalIDsFromAlbum(album MusicAlbumPlan) map[string]string {

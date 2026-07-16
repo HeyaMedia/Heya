@@ -14,6 +14,7 @@ import (
 	"github.com/karbowiak/heya/internal/audiotags"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/karbowiak/heya/internal/musicconsensus"
 	"github.com/karbowiak/heya/internal/nfo"
 	"github.com/karbowiak/heya/internal/titlematch"
@@ -229,6 +230,77 @@ func TestSearchMusicArtistsSelectsAndRejects(t *testing.T) {
 		if !strings.Contains(report.String(), want) {
 			t.Fatalf("music search report missing %q:\n%s", want, report.String())
 		}
+	}
+}
+
+func TestSearchMusicArtistsUsesConsistentMusicBrainzSpine(t *testing.T) {
+	const providerID = "heyametadata:v2:entity:10000000-0000-4000-8000-000000000001"
+	provider := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{
+		"Ado": {{ProviderID: providerID, ProviderName: "heya", Title: "Ado", Confidence: 1}},
+	}}
+	artist := MusicArtistPlan{
+		Key: "artist:ado", Artist: "Ado",
+		ExternalIDs: map[string]string{"mbid": "ado-mbid", "apple": "123"},
+		Albums: []MusicAlbumPlan{{
+			Album: "Kyougen", Year: "2022", ReleaseKind: "album",
+			ExternalIDs: map[string]string{"musicbrainz_release_group": "release-group", "itunes_album": "456"},
+		}},
+	}
+
+	results, err := SearchMusicArtists(context.Background(), []MusicArtistPlan{artist}, provider, &captureEmitter{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || !results[0].Accepted {
+		t.Fatalf("search result = %#v", results)
+	}
+	query := provider.queries["Ado"]
+	if len(query.Identifiers) != 1 || query.Identifiers["mbid"] != "ado-mbid" {
+		t.Fatalf("artist identifiers = %#v", query.Identifiers)
+	}
+	if len(query.Releases) != 1 || len(query.Releases[0].Identifiers) != 0 {
+		t.Fatalf("release hints retained competing hard IDs = %#v", query.Releases)
+	}
+}
+
+func TestSearchMusicArtistsAcceptsOnlyCanonicalCandidateConvergence(t *testing.T) {
+	const (
+		candidateA = "heyametadata:v2:candidate:artist:10000000-0000-4000-8000-000000000001"
+		candidateB = "heyametadata:v2:candidate:artist:10000000-0000-4000-8000-000000000002"
+		canonical  = "20000000-0000-4000-8000-000000000001"
+	)
+	search := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{
+		"$uicideboy$": {
+			{ProviderID: candidateA, ProviderName: "heya", Title: "$uicideboy$", Recommendation: "conflicting_identifiers", RequiresReview: true},
+			{ProviderID: candidateB, ProviderName: "heya", Title: "$uicideboy$", Recommendation: "conflicting_identifiers", RequiresReview: true},
+		},
+	}}
+	provider := &convergingMusicSearchProvider{
+		fakeMusicSearchProvider: search,
+		details: map[string]*metadata.MediaDetail{
+			candidateA: {CanonicalID: canonical, Title: "$uicideboy$", ArtistName: "$uicideboy$", ExternalIDs: map[string]string{"mbid": "artist-mbid"}},
+			candidateB: {CanonicalID: canonical, Title: "$uicideboy$", ArtistName: "$uicideboy$", ExternalIDs: map[string]string{"mbid": "artist-mbid"}},
+		},
+	}
+
+	results, err := SearchMusicArtists(context.Background(), []MusicArtistPlan{{Key: "artist:uicideboy", Artist: "$uicideboy$"}}, provider, &captureEmitter{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || !results[0].Accepted || results[0].ProviderID != heyametadata.EncodeEntityProviderID(canonical) {
+		t.Fatalf("converged search = %#v", results)
+	}
+	if len(results[0].Candidates) != 1 || results[0].Candidates[0].RequiresReview {
+		t.Fatalf("converged candidates = %#v", results[0].Candidates)
+	}
+
+	provider.details[candidateB] = &metadata.MediaDetail{CanonicalID: "20000000-0000-4000-8000-000000000002", Title: "$uicideboy$"}
+	results, err = SearchMusicArtists(context.Background(), []MusicArtistPlan{{Key: "artist:uicideboy", Artist: "$uicideboy$"}}, provider, &captureEmitter{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Accepted {
+		t.Fatalf("distinct same-name canonical artists were accepted = %#v", results)
 	}
 }
 
@@ -455,6 +527,44 @@ func TestApplyMusicReleaseConsensusRejectsAsacoOutlierAndPoisonedNFO(t *testing.
 	}
 }
 
+func TestPlanMusicTrackDoesNotLeakFolderDisambiguationToReplacementArtist(t *testing.T) {
+	file := InventoryFile{
+		Name:    "0101 - Here With Me.flac",
+		RelPath: "ATRIP (Patrick Alexander Pache)/d4vd - Album - 2024 - Petals to Thorns/0101 - Here With Me.flac",
+		Ext:     ".flac",
+	}
+	plan, ok := planMusicTrack(file, nil, audiotags.Tags{
+		AlbumArtist: "d4vd",
+		Album:       "Petals to Thorns",
+		Year:        "2024",
+		Title:       "Here With Me",
+		TrackNumber: 1,
+	})
+	if !ok {
+		t.Fatal("track was not planned")
+	}
+	if plan.Artist != "d4vd" || plan.ArtistDisambiguation != "" {
+		t.Fatalf("replacement artist inherited folder disambiguation: %#v", plan)
+	}
+}
+
+func TestGroupMusicArtistsRejectsInconsistentProviderIDs(t *testing.T) {
+	albums := []MusicAlbumPlan{
+		{Artist: "Example", Album: "One", ExternalIDs: map[string]string{"musicbrainz_album_artist": "mbid-one", "itunes_artist": "apple-one"}, Confidence: 1},
+		{Artist: "Example", Album: "Two", ExternalIDs: map[string]string{"musicbrainz_album_artist": "mbid-two", "itunes_artist": "apple-one"}, Confidence: 1},
+	}
+	artists := groupMusicArtists(albums)
+	if len(artists) != 1 {
+		t.Fatalf("artists = %#v", artists)
+	}
+	if artists[0].ExternalIDs["mbid"] != "" || artists[0].ExternalIDs["apple"] != "apple-one" {
+		t.Fatalf("consistent IDs = %#v", artists[0].ExternalIDs)
+	}
+	if !contains(artists[0].Issues, "conflicting_artist_mbid_ids") {
+		t.Fatalf("artist issues = %#v", artists[0].Issues)
+	}
+}
+
 func TestMusicReleaseDirScopesConsensusToAlbumFolder(t *testing.T) {
 	cases := map[string]string{
 		"Asaco/Asaco - Nomake Story/01.flac":        "Asaco/Asaco - Nomake Story",
@@ -587,6 +697,15 @@ type fakeMusicSearchProvider struct {
 	results map[string][]metadata.SearchResult
 	calls   map[string]int
 	queries map[string]metadata.SearchQuery
+}
+
+type convergingMusicSearchProvider struct {
+	*fakeMusicSearchProvider
+	details map[string]*metadata.MediaDetail
+}
+
+func (f *convergingMusicSearchProvider) GetDetail(_ context.Context, providerID string, _ *metadata.FetchOptions) (*metadata.MediaDetail, error) {
+	return f.details[providerID], nil
 }
 
 func (f *fakeMusicSearchProvider) Search(_ context.Context, kind metadata.MediaKind, query metadata.SearchQuery) ([]metadata.SearchResult, error) {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/karbowiak/heya/internal/titlematch"
 )
 
@@ -128,7 +129,15 @@ func SearchMusicArtists(ctx context.Context, artists []MusicArtistPlan, provider
 
 func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider MusicSearchProvider, emit Emitter, threshold float64, decisions SearchDecisions) (MusicSearchMatch, error) {
 	releases := musicDiscoveryReleaseHints(artist.Albums)
-	query := metadata.SearchQuery{Title: artist.Artist, Identifiers: cloneStringMap(artist.ExternalIDs), Releases: releases}
+	identifiers := musicDiscoveryArtistIdentifiers(artist.ExternalIDs)
+	if identifiers["mbid"] != "" {
+		// A consistent MusicBrainz artist ID is the authoritative artist spine.
+		// Release identifiers remain useful when no artist spine is known, but
+		// submitting them alongside an exact MBID lets one stale album/NFO turn
+		// an otherwise exact artist lookup into conflicting-identifiers review.
+		releases = musicReleaseHintsWithoutIdentifiers(releases)
+	}
+	query := metadata.SearchQuery{Title: artist.Artist, Identifiers: identifiers, Releases: releases}
 	search := MusicSearchMatch{
 		Key:   artist.Key,
 		Query: MusicSearchQuery{Artist: artist.Artist, Releases: releases},
@@ -204,6 +213,16 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 					},
 				})
 			}
+		}
+	}
+
+	if !musicSearchCanAutoAccept(scored, selectionArtist.Artist, threshold) {
+		converged, ok, err := resolveConvergedMusicCandidates(ctx, selectionArtist, scored, provider, threshold, emit)
+		if err != nil {
+			return search, err
+		}
+		if ok {
+			scored = []metadata.SearchResult{converged}
 		}
 	}
 
@@ -397,6 +416,102 @@ func musicDiscoveryReleaseHints(albums []MusicAlbumPlan) []metadata.ReleaseHint 
 		}
 	}
 	return hints
+}
+
+func musicDiscoveryArtistIdentifiers(values map[string]string) map[string]string {
+	if mbid := strings.TrimSpace(values["mbid"]); mbid != "" {
+		return map[string]string{"mbid": mbid}
+	}
+	if apple := strings.TrimSpace(values["apple"]); apple != "" {
+		return map[string]string{"apple": apple}
+	}
+	return nil
+}
+
+func musicReleaseHintsWithoutIdentifiers(values []metadata.ReleaseHint) []metadata.ReleaseHint {
+	if len(values) == 0 {
+		return nil
+	}
+	result := append([]metadata.ReleaseHint(nil), values...)
+	for i := range result {
+		result[i].Identifiers = nil
+	}
+	return result
+}
+
+// resolveConvergedMusicCandidates handles the safe subset of duplicate
+// review candidates: opaque conflict candidates which all resolve (including
+// redirects) to one canonical Heya entity. Same labels alone are never enough;
+// genuinely distinct same-name artists retain their separate canonical IDs
+// and stay in review.
+func resolveConvergedMusicCandidates(ctx context.Context, artist MusicArtistPlan, scored []metadata.SearchResult, provider MusicSearchProvider, threshold float64, emit Emitter) (metadata.SearchResult, bool, error) {
+	if len(scored) < 2 || scored[0].Recommendation != "conflicting_identifiers" ||
+		scored[0].Confidence < threshold || !musicSearchArtistExact(artist, scored[0].Title) {
+		return metadata.SearchResult{}, false, nil
+	}
+	detailProvider, ok := provider.(MusicDetailProvider)
+	if !ok {
+		return metadata.SearchResult{}, false, nil
+	}
+
+	top := scored[0]
+	topTitle := normalizeMusicKeyPart(top.Title)
+	var duplicates []metadata.SearchResult
+	for _, candidate := range scored {
+		if candidate.Confidence < threshold || top.Confidence-candidate.Confidence > 0.10 {
+			continue
+		}
+		if candidate.Recommendation != top.Recommendation || candidate.RequiresReview != top.RequiresReview {
+			continue
+		}
+		if normalizeMusicKeyPart(candidate.Title) != topTitle {
+			return metadata.SearchResult{}, false, nil
+		}
+		duplicates = append(duplicates, candidate)
+	}
+	if len(duplicates) < 2 || len(duplicates) > musicFetchCandidateLimit {
+		return metadata.SearchResult{}, false, nil
+	}
+
+	canonicalID := ""
+	var canonical *metadata.MediaDetail
+	for _, candidate := range duplicates {
+		fetchCtx, cancel := context.WithTimeout(ctx, musicMetadataFetchTimeout)
+		detail, err := detailProvider.GetDetail(fetchCtx, candidate.ProviderID, nil)
+		cancel()
+		if err != nil {
+			if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
+				return metadata.SearchResult{}, false, err
+			}
+			emit.Emit(Event{Event: "match.candidate_convergence_failed", Severity: SeverityInfo, Kind: "music", Message: err.Error(), Data: map[string]any{
+				"key": artist.Key, "provider_id": candidate.ProviderID,
+			}})
+			return metadata.SearchResult{}, false, nil
+		}
+		if detail == nil || strings.TrimSpace(detail.CanonicalID) == "" {
+			return metadata.SearchResult{}, false, nil
+		}
+		if canonicalID == "" {
+			canonicalID = detail.CanonicalID
+			canonical = detail
+		} else if canonicalID != detail.CanonicalID {
+			return metadata.SearchResult{}, false, nil
+		}
+	}
+
+	result := top
+	result.ProviderID = heyametadata.EncodeEntityProviderID(canonicalID)
+	result.Title = firstNonEmpty(canonical.ArtistName, canonical.Title, top.Title)
+	result.Description = firstNonEmpty(canonical.ArtistDisambiguation, top.Description)
+	result.ExternalIDs = cloneStringMap(canonical.ExternalIDs)
+	result.HeyaSlug = canonicalID
+	result.Recommendation = "canonical_convergence"
+	result.RequiresReview = false
+	result.Enriched = true
+	emit.Emit(Event{Event: "match.candidates_converged", Kind: "music", Data: map[string]any{
+		"key": artist.Key, "artist": artist.Artist, "canonical_id": canonicalID, "candidates": len(duplicates),
+	}})
+	return result, true, nil
 }
 
 // musicReleaseHintIdentifiers keeps exact release/catalog identifiers while
