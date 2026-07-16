@@ -434,3 +434,26 @@ func TestLoadedSearchArtifactCanFetchWithoutSearchProvider(t *testing.T) {
 	require.Len(t, run.result.MovieMetadata, 1)
 	require.Equal(t, "Dune", run.result.MovieMetadata[0].Title)
 }
+
+func TestLoadedAnalysisArtifactCanSearchWithoutWalkingLibrary(t *testing.T) {
+	searcher := &fakeMovieSearchProvider{results: map[string][]metadata.SearchResult{
+		"Dune\x002021": {{
+			ProviderID:   "heya:movie:tmdb:438631",
+			ProviderName: "heya",
+			Title:        "Dune",
+			Year:         "2021",
+		}},
+	}}
+	run := NewLibraryRun(sqlc.Library{MediaType: sqlc.MediaTypeMovie}, Options{MovieSearcher: searcher}, io.Discard)
+	run.ResumeAnalysisResult(Result{
+		Inventory: Inventory{Roots: []InventoryRoot{{Root: "/not-mounted", Files: []InventoryFile{{RelPath: "Dune (2021)/Dune.mkv"}}}}},
+		MovieMatches: []MovieMatch{{
+			Key: "title_year:dune|2021", Title: "Dune", Year: "2021", Files: []string{"Dune (2021)/Dune.mkv"},
+		}},
+	}, 42)
+
+	require.NoError(t, run.Run(context.Background(), PhaseSearch))
+	require.Len(t, searcher.queries, 1)
+	require.Len(t, run.result.MovieSearch, 1)
+	require.True(t, run.result.MovieSearch[0].Accepted)
+}

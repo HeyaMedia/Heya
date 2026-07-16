@@ -181,9 +181,12 @@ Concurrency rules of thumb (full table in [`pipeline.md`](./pipeline.md#queue-co
 
 - One queue per worker kind — keeps cancellation simple and isolates each
   upstream's rate-limit budget.
-- Scanner kickoff/process/fetch/apply queues are partitioned by library media
-  type, so a large Music scan cannot starve Movies, TV, Anime, or Books. The
-  default process/fetch/apply pools are four workers **per media type**.
+- Scanner kickoff/process/search/fetch/apply queues are partitioned by library
+  media type, so a large Music scan cannot starve Movies, TV, Anime, or Books.
+  Local analysis and apply default to four workers **per media type**. Remote
+  search/fetch submission and their scheduled poll queues default to 50 workers
+  per media type; pending HeyaMetadata workflow IDs are persisted, so those
+  workers submit ahead instead of waiting on upstream enrichment.
 - Enrich queue is `MaxWorkers=1` per kind, with priority bands
   (P1 = watcher/view, P2 = movies+TV, P3 = music+books, P4 = analysis).
 - Only `download_image` runs at `MaxWorkers=4` — it hits provider CDNs, not

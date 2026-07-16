@@ -130,7 +130,7 @@ func identityFilesByKey(lib sqlc.Library, result Result) map[string][]string {
 
 // acceptedIdentityRelPaths collects the relpaths of every file claimed by a
 // search identity that was accepted with a provider match — the same
-// criterion the process_scan worker uses to enqueue fetch_metadata.
+// criterion the search_metadata worker uses to enqueue fetch_metadata.
 func acceptedIdentityRelPaths(lib sqlc.Library, result Result) map[string]bool {
 	filesByKey := identityFilesByKey(lib, result)
 	claimed := map[string]bool{}

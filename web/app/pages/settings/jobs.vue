@@ -71,7 +71,10 @@ const WORKER_PRESETS: WorkerPreset[] = [
 
 const SPEEDY_WORKERS: Record<string, number> = {
   process_scan: 6,
-  fetch_metadata: 6,
+  search_metadata: 56,
+  search_metadata_poll: 56,
+  fetch_metadata: 56,
+  fetch_metadata_poll: 56,
   apply_metadata: 5,
   ffprobe: 2,
   scan_keyframes: 2,
@@ -93,7 +96,10 @@ const SPEEDY_WORKERS: Record<string, number> = {
 
 const TURBO_WORKERS: Record<string, number> = {
   process_scan: 8,
-  fetch_metadata: 8,
+  search_metadata: 64,
+  search_metadata_poll: 64,
+  fetch_metadata: 64,
+  fetch_metadata_poll: 64,
   apply_metadata: 6,
   ffprobe: 3,
   scan_keyframes: 3,
@@ -334,7 +340,7 @@ function formatArgs(raw: string) {
 }
 
 const WORKER_GROUPS: Array<{ title: string, kinds: string[] }> = [
-  { title: 'Scanner', kinds: ['kickoff_library_scan', 'process_scan', 'fetch_metadata', 'apply_metadata', 'ffprobe', 'scan_keyframes', 'detect_local_assets'] },
+  { title: 'Scanner', kinds: ['kickoff_library_scan', 'process_scan', 'search_metadata', 'search_metadata_poll', 'fetch_metadata', 'fetch_metadata_poll', 'apply_metadata', 'ffprobe', 'scan_keyframes', 'detect_local_assets'] },
   { title: 'Metadata', kinds: ['enrich_media_item', 'person_fetch', 'ratings_fetch', 'fetch_artwork', 'force_refresh_metadata', 'force_refresh_images'] },
   { title: 'Files', kinds: ['download_image', 'save_images', 'save_nfo', 'save_music_nfo', 'soft_delete', 'scan_library_disk'] },
   { title: 'Analysis', kinds: ['scan_track_fingerprint', 'scan_track_loudness', 'scan_album_loudness', 'scan_media_segments_file', 'detect_segments_season', 'detect_segments_movie', 'trickplay', 'thumbnails', 'sonic_analysis', 'transcode', 'artist_centroid', 'album_centroid'] },

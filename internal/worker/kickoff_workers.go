@@ -312,7 +312,6 @@ type libraryScanOutcome struct {
 type ProcessLibraryScanWorker struct {
 	river.WorkerDefaults[ProcessLibraryScanArgs]
 	DB       *pgxpool.Pool
-	Heya     *heyametadata.HeyaProvider
 	Hub      EventPublisher
 	Watcher  WatcherPauser
 	Progress *TaskProgressBroadcaster
@@ -377,15 +376,102 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 	})
 
 	scanCtx, cancel := context.WithTimeout(ctx, scannerProcessTimeout)
+	defer cancel()
+	outcome, result, err := w.scanLibraryAnalyze(scanCtx, lib, job.Args.ScopePaths)
+	if err != nil {
+		logScannerPipelineFailure("process_scan", job.ID, lib, 0, job.Args.ScopePaths, err)
+		return scannerWorkerError(err)
+	}
+
+	entityOpts := scannerAnalysisOptions(w.DB)
+	entityOpts.ScopePaths = job.Args.ScopePaths
+	refs, err := scanner.PersistScannerAnalysisEntities(ctx, w.DB, lib, entityOpts, result)
+	if err != nil {
+		log.Error().Err(err).Int64("library_id", lib.ID).Msg("process_scan: persist scanner analysis entities failed")
+		return scannerWorkerError(err)
+	}
+	enqueued := 0
+	for _, ref := range refs {
+		if err := enqueueSearchLibraryMetadata(ctx, rc, w.DB, SearchLibraryMetadataArgs{
+			LibraryID:          lib.ID,
+			MediaType:          lib.MediaType,
+			ScopePaths:         job.Args.ScopePaths,
+			ScannerEntityID:    ref.Entity.ID,
+			AnalysisArtifactID: ref.Artifact.ID,
+			Force:              job.Args.Force,
+			ScheduledTaskID:    job.Args.ScheduledTaskID,
+		}, PriorityScan, source); err != nil {
+			log.Warn().Err(err).Int64("library_id", lib.ID).Int64("scanner_entity_id", ref.Entity.ID).Msg("process_scan: enqueue metadata search failed")
+			return err
+		}
+		enqueued++
+	}
+
+	log.Info().
+		Int64("library_id", lib.ID).
+		Int("scopes", len(job.Args.ScopePaths)).
+		Int("discovered", outcome.Discovered).
+		Int("entities", len(refs)).
+		Int("enqueued_search", enqueued).
+		Msg("process_scan: library done")
+	// An empty owner scope has no search/fetch/apply worker to emit the terminal
+	// lifecycle event.
+	if enqueued == 0 {
+		emit(w.Hub, eventhub.EventScanCompleted, eventhub.ScanPayload{
+			LibraryID:   lib.ID,
+			LibraryName: lib.Name,
+			Discovered:  outcome.Discovered,
+			New:         outcome.New,
+		})
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// search_metadata
+// ---------------------------------------------------------------------------
+
+type SearchLibraryMetadataWorker struct {
+	river.WorkerDefaults[SearchLibraryMetadataArgs]
+	DB       *pgxpool.Pool
+	Heya     *heyametadata.HeyaProvider
+	Hub      EventPublisher
+	Progress *TaskProgressBroadcaster
+}
+
+func (w *SearchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[SearchLibraryMetadataArgs]) error {
+	started := time.Now()
+	q := sqlc.New(w.DB)
+	rc := river.ClientFromContext[pgx.Tx](ctx)
+	source := scheduledJobSource(job.Metadata)
+	lib, err := q.GetLibraryByID(ctx, job.Args.LibraryID)
+	if err != nil {
+		return err
+	}
+	if !supportsScanner(lib.MediaType) {
+		log.Warn().Int64("library_id", lib.ID).Str("library", lib.Name).Str("media_type", string(lib.MediaType)).Msg("search_metadata: scanner does not support this library type")
+		return nil
+	}
+
+	w.Progress.Set("scan_libraries", "search_metadata", libraryScanProgressLabel(lib, job.Args.ScopePaths))
+	scanCtx, cancel := context.WithTimeout(ctx, scannerProcessTimeout)
 	scanCtx = metadata.WithDeferredRemoteWork(scanCtx, metadataDeferredRetry)
 	defer cancel()
-	outcome, result, searchScanRunID, err := w.scanLibrarySearch(scanCtx, lib, job.Args.ScopePaths)
+	outcome, result, searchScanRunID, err := w.scanLibrarySearchArtifact(scanCtx, lib, job.Args.ScopePaths, job.Args.AnalysisArtifactID)
 	if err != nil {
 		if retryAfter, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
-			log.Info().Dur("retry_after", retryAfter).Int64("library_id", lib.ID).Msg("process_scan: metadata work deferred")
-		} else {
-			logScannerPipelineFailure("process_scan", job.ID, lib, 0, job.Args.ScopePaths, err)
+			log.Info().Bool("poll", job.Args.Poll).Dur("retry_after", retryAfter).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("search_metadata: metadata work deferred")
+			if !job.Args.Poll {
+				pollArgs := job.Args
+				pollArgs.Poll = true
+				return enqueueSearchLibraryMetadataAfter(ctx, rc, pollArgs, PriorityScan, source, retryAfter)
+			}
+			return river.JobSnooze(retryAfter)
 		}
+		if markErr := scanner.MarkScannerEntityFailed(ctx, w.DB, job.Args.ScannerEntityID, "error", err); markErr != nil {
+			log.Error().Err(markErr).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("search_metadata: failure state persistence failed")
+		}
+		logScannerPipelineFailure("search_metadata", job.ID, lib, job.Args.ScannerEntityID, job.Args.ScopePaths, err)
 		return scannerWorkerError(err)
 	}
 
@@ -393,16 +479,11 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 	entityOpts.ScopePaths = job.Args.ScopePaths
 	refs, err := scanner.PersistScannerSearchEntities(ctx, w.DB, lib, entityOpts, result, searchScanRunID)
 	if err != nil {
-		log.Error().Err(err).Int64("library_id", lib.ID).Msg("process_scan: persist scanner entities failed")
 		return scannerWorkerError(err)
 	}
-	// Park files no accepted identity claims so unmatched/needs-review scopes
-	// stop re-triggering a live search on every scan. Best-effort: a parking
-	// failure just means those files re-detect next scan, which was the old
-	// behavior anyway.
 	parked, parkErr := scanner.ParkUnmatchedFiles(ctx, w.DB, lib, result)
 	if parkErr != nil {
-		log.Warn().Err(parkErr).Int64("library_id", lib.ID).Int("parked", parked).Msg("process_scan: park unmatched files failed")
+		log.Warn().Err(parkErr).Int64("library_id", lib.ID).Int("parked", parked).Msg("search_metadata: park unmatched files failed")
 	}
 	enqueued := 0
 	for _, ref := range refs {
@@ -418,31 +499,13 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 			Force:            job.Args.Force,
 			ScheduledTaskID:  job.Args.ScheduledTaskID,
 		}, PriorityScan, source); err != nil {
-			log.Warn().Err(err).Int64("library_id", lib.ID).Int64("scanner_entity_id", ref.Entity.ID).Msg("process_scan: enqueue metadata fetch failed")
 			return err
 		}
 		enqueued++
 	}
-
-	log.Info().
-		Int64("library_id", lib.ID).
-		Int("scopes", len(job.Args.ScopePaths)).
-		Int("discovered", outcome.Discovered).
-		Int("selected", outcome.New).
-		Int("entities", len(refs)).
-		Int("parked", parked).
-		Int("enqueued_fetch", enqueued).
-		Msg("process_scan: library done")
-	// An unresolved/needs-review search has no fetch or apply worker to emit
-	// the terminal lifecycle event. Without this, the UI keeps the scanner's
-	// final persistence checkpoint around as if the library were still active.
+	log.Info().Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Bool("poll", job.Args.Poll).Int("selected", outcome.New).Int("parked", parked).Int("enqueued_fetch", enqueued).Dur("duration", time.Since(started)).Msg("search_metadata: library done")
 	if enqueued == 0 {
-		emit(w.Hub, eventhub.EventScanCompleted, eventhub.ScanPayload{
-			LibraryID:   lib.ID,
-			LibraryName: lib.Name,
-			Discovered:  outcome.Discovered,
-			New:         outcome.New,
-		})
+		emit(w.Hub, eventhub.EventScanCompleted, eventhub.ScanPayload{LibraryID: lib.ID, LibraryName: lib.Name, Discovered: outcome.Discovered, New: outcome.New})
 	}
 	return nil
 }
@@ -491,7 +554,13 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 	result, fetchScanRunID, metadataArtifactID, err := w.scanLibraryFetch(scanCtx, lib, job.Args.ScopePaths, job.Args.ScannerEntityID, job.Args.SearchArtifactID)
 	if err != nil {
 		if retryAfter, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
-			log.Info().Dur("retry_after", retryAfter).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("fetch_metadata: metadata work deferred")
+			log.Info().Bool("poll", job.Args.Poll).Dur("retry_after", retryAfter).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("fetch_metadata: metadata work deferred")
+			if !job.Args.Poll {
+				pollArgs := job.Args
+				pollArgs.Poll = true
+				return enqueueFetchLibraryMetadataAfter(ctx, rc, pollArgs, PriorityScan, source, retryAfter)
+			}
+			return river.JobSnooze(retryAfter)
 		} else {
 			if markErr := scanner.MarkScannerEntityFailed(ctx, w.DB, job.Args.ScannerEntityID, "metadata_error", err); markErr != nil {
 				log.Error().Err(markErr).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("fetch_metadata: failure state persistence failed")
@@ -836,7 +905,7 @@ func compactAppliedScannerArtifacts(ctx context.Context, db *pgxpool.Pool, scann
 	}
 	// Compaction deletes ALL of the entity's artifacts, so the guard must be
 	// entity-scoped AND cover any pipeline job that could still produce or
-	// consume an artifact for this entity: a live fetch_metadata/apply_metadata
+	// consume an artifact for this entity: a live search/fetch/apply_metadata
 	// cycle will enqueue a rich job we haven't seen yet, and an already-queued
 	// apply_rich_metadata will load one. Guarding on apply_rich_metadata alone
 	// left a window — a concurrent apply cycle mid-flight (before it reached
@@ -877,7 +946,7 @@ func activeScannerJobsForEntity(ctx context.Context, db *pgxpool.Pool, scannerEn
 	err := db.QueryRow(ctx, `
 		SELECT count(*)
 		FROM river_job
-		WHERE kind IN ('fetch_metadata', 'apply_metadata', 'apply_rich_metadata')
+		WHERE kind IN ('search_metadata', 'fetch_metadata', 'apply_metadata', 'apply_rich_metadata')
 		  AND state IN ('available', 'pending', 'retryable', 'running', 'scheduled')
 		  AND (args->>'scanner_entity_id')::bigint = $1
 		  AND ($2::bigint = 0 OR id <> $2)
@@ -1503,7 +1572,7 @@ func insertScanUnitWithBurst(ctx context.Context, rc *river.Client[pgx.Tx], db *
 	if err := tx.QueryRow(ctx, `
 		SELECT NOT EXISTS (
 			SELECT 1 FROM river_job
-			WHERE kind IN ('process_scan', 'fetch_metadata', 'apply_metadata')
+			WHERE kind IN ('process_scan', 'search_metadata', 'fetch_metadata', 'apply_metadata')
 			  AND state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
 			  AND NULLIF(args->>'library_id', '')::bigint = $1
 		)`, libraryID).Scan(&idle); err != nil {
@@ -1689,6 +1758,25 @@ func enqueueApplyLibraryScan(ctx context.Context, rc *river.Client[pgx.Tx], db *
 	return insertScanUnitWithBurst(ctx, rc, db, args.LibraryID, args, applyScheduledJobSource(opts, source))
 }
 
+func enqueueSearchLibraryMetadata(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, args SearchLibraryMetadataArgs, priority int, source string) error {
+	mediaType, err := resolveScannerQueueMediaType(ctx, db, args.LibraryID, args.MediaType)
+	if err != nil {
+		return err
+	}
+	args.MediaType = mediaType
+	opts := args.InsertOpts()
+	opts.Priority = priority
+	return insertScanUnitWithBurst(ctx, rc, db, args.LibraryID, args, applyScheduledJobSource(opts, source))
+}
+
+func enqueueSearchLibraryMetadataAfter(ctx context.Context, rc *river.Client[pgx.Tx], args SearchLibraryMetadataArgs, priority int, source string, delay time.Duration) error {
+	opts := args.InsertOpts()
+	opts.Priority = priority
+	opts.ScheduledAt = time.Now().Add(delay)
+	_, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, source))
+	return err
+}
+
 func enqueueFetchLibraryMetadata(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, args FetchLibraryMetadataArgs, priority int, source string) error {
 	mediaType, err := resolveScannerQueueMediaType(ctx, db, args.LibraryID, args.MediaType)
 	if err != nil {
@@ -1700,16 +1788,47 @@ func enqueueFetchLibraryMetadata(ctx context.Context, rc *river.Client[pgx.Tx], 
 	return insertScanUnitWithBurst(ctx, rc, db, args.LibraryID, args, applyScheduledJobSource(opts, source))
 }
 
-func (w *ProcessLibraryScanWorker) scanLibrarySearch(ctx context.Context, lib sqlc.Library, scopePaths []string) (libraryScanOutcome, scanner.Result, int64, error) {
-	opts := scannerSearchOptions(w.DB, w.Heya)
+func enqueueFetchLibraryMetadataAfter(ctx context.Context, rc *river.Client[pgx.Tx], args FetchLibraryMetadataArgs, priority int, source string, delay time.Duration) error {
+	opts := args.InsertOpts()
+	opts.Priority = priority
+	opts.ScheduledAt = time.Now().Add(delay)
+	_, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, source))
+	return err
+}
+
+func (w *ProcessLibraryScanWorker) scanLibraryAnalyze(ctx context.Context, lib sqlc.Library, scopePaths []string) (libraryScanOutcome, scanner.Result, error) {
+	opts := scannerAnalysisOptions(w.DB)
 	opts.ScopePaths = scopePaths
 	opts.EventWriters = []scanner.EventWriter{newScannerEventBridge(w.Hub, "process_scan")}
 	run := scanner.NewLibraryRun(lib, opts, io.Discard)
-	if err := run.Run(ctx, scanner.PhasesForOptions(opts)...); err != nil {
+	if err := run.Run(ctx, scanner.PhaseAnalyze); err != nil {
 		result := run.Result()
+		return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, result, err
+	}
+	result := run.Result()
+	return libraryScanOutcome{
+		Discovered: countScannerInventoryFiles(result.Inventory),
+	}, result, nil
+}
+
+func (w *SearchLibraryMetadataWorker) scanLibrarySearchArtifact(ctx context.Context, lib sqlc.Library, scopePaths []string, analysisArtifactID int64) (libraryScanOutcome, scanner.Result, int64, error) {
+	if analysisArtifactID == 0 {
+		return libraryScanOutcome{}, scanner.Result{}, 0, fmt.Errorf("search_metadata requires analysis_artifact_id")
+	}
+	opts := scannerSearchOptions(w.DB, w.Heya)
+	opts.ScopePaths = scopePaths
+	opts.EventWriters = []scanner.EventWriter{newScannerEventBridge(w.Hub, "search_metadata")}
+	run := scanner.NewLibraryRun(lib, opts, io.Discard)
+	_, result, err := scanner.LoadScannerEntityArtifactResult(ctx, w.DB, analysisArtifactID)
+	if err != nil {
+		return libraryScanOutcome{}, scanner.Result{}, 0, err
+	}
+	run.ResumeAnalysisResult(result, analysisArtifactID)
+	if err := run.Run(ctx, scanner.PhaseSearch); err != nil {
+		result = run.Result()
 		return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, result, 0, err
 	}
-	result, err := run.Finish(ctx)
+	result, err = run.Finish(ctx)
 	return libraryScanOutcome{
 		Discovered: countScannerInventoryFiles(result.Inventory),
 		New:        countScannerAcceptedSearch(result),
@@ -2083,6 +2202,14 @@ func scannerSearchOptions(db *pgxpool.Pool, heya *heyametadata.HeyaProvider) sca
 	opts := scannerBaseOptions(db, heya)
 	opts.RemoteSearch = true
 	return opts
+}
+
+func scannerAnalysisOptions(db *pgxpool.Pool) scanner.Options {
+	return scanner.Options{
+		ApplyDB:       db,
+		MusicProbe:    ProbeFile,
+		PersistenceDB: db,
+	}
 }
 
 func scannerFetchOptions(db *pgxpool.Pool, heya *heyametadata.HeyaProvider) scanner.Options {

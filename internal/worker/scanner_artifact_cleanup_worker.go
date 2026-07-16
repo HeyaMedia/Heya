@@ -73,7 +73,7 @@ func (w *CleanupScannerArtifactsWorker) Work(ctx context.Context, job *river.Job
 
 // orphanedScannerEntity is an in-flight scanner entity whose queue job died —
 // crash, cancelled deploy, exhausted retries — leaving no live
-// fetch_metadata/apply_metadata job to ever advance it.
+// search_metadata/fetch_metadata/apply_metadata job to ever advance it.
 type orphanedScannerEntity struct {
 	ID         int64
 	LibraryID  int64
@@ -95,19 +95,19 @@ func listOrphanedInFlightScannerEntities(ctx context.Context, db *pgxpool.Pool, 
 		  EXISTS (
 		    SELECT 1
 		    FROM river_job job
-		    WHERE job.kind IN ('fetch_metadata', 'apply_metadata')
+		    WHERE job.kind IN ('search_metadata', 'fetch_metadata', 'apply_metadata')
 		      AND job.state = 'cancelled'
 		      AND job.args ? 'scanner_entity_id'
 		      AND (job.args->>'scanner_entity_id')::bigint = entity.id
 		  ) AS cancelled
 		FROM scanner_entities entity
-		WHERE entity.status IN ('matched', 'fetching', 'fetched', 'applying')
+		WHERE entity.status IN ('discovered', 'matched', 'fetching', 'fetched', 'applying')
 		  AND entity.updated_at < $1
 		  AND ($2::bigint = 0 OR entity.library_id = $2)
 		  AND NOT EXISTS (
 		    SELECT 1
 		    FROM river_job job
-		    WHERE job.kind IN ('fetch_metadata', 'apply_metadata')
+		    WHERE job.kind IN ('search_metadata', 'fetch_metadata', 'apply_metadata')
 		      AND job.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
 		      AND job.args ? 'scanner_entity_id'
 		      AND (job.args->>'scanner_entity_id')::bigint = entity.id

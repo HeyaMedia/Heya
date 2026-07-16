@@ -39,6 +39,9 @@ func TestWorkToTaskOmitsSharedKinds(t *testing.T) {
 	if owner := workToTask["process_scan"]; owner != "scan_libraries" {
 		t.Fatalf("process_scan resolved to %q, want scan_libraries", owner)
 	}
+	if owner := workToTask["search_metadata"]; owner != "scan_libraries" {
+		t.Fatalf("search_metadata resolved to %q, want scan_libraries", owner)
+	}
 	if owner := workToTask["fetch_metadata"]; owner != "scan_libraries" {
 		t.Fatalf("fetch_metadata resolved to %q, want scan_libraries", owner)
 	}
@@ -53,6 +56,7 @@ func TestTaskOwnsKind(t *testing.T) {
 		kind string
 	}{
 		{task: "scan_libraries", kind: "process_scan"},
+		{task: "scan_libraries", kind: "search_metadata"},
 		{task: "scan_libraries", kind: "fetch_metadata"},
 		{task: "scan_libraries", kind: "apply_metadata"},
 		{task: "scan_libraries", kind: "scan_keyframes"},

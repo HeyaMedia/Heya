@@ -34,7 +34,15 @@ type scannerEntityDraft struct {
 }
 
 func PersistScannerSearchEntities(ctx context.Context, db *pgxpool.Pool, lib sqlc.Library, opts Options, result Result, scanRunID int64) ([]ScannerEntityRef, error) {
-	return persistScannerEntitiesForStage(ctx, db, lib, opts, result, scanRunID, scanArtifactKindSearch)
+	return persistScannerEntitiesForStage(ctx, db, lib, opts, result, scanRunID, scanArtifactKindSearch, true)
+}
+
+// PersistScannerAnalysisEntities stores one narrow local-analysis artifact per
+// canonical owner candidate. The artifact ID is carried by search_metadata;
+// it is deliberately not attached as search_artifact_id until remote search
+// has actually completed.
+func PersistScannerAnalysisEntities(ctx context.Context, db *pgxpool.Pool, lib sqlc.Library, opts Options, result Result) ([]ScannerEntityRef, error) {
+	return persistScannerEntitiesForStage(ctx, db, lib, opts, result, 0, scanArtifactKindAnalyze, false)
 }
 
 func PersistScannerFetchEntity(ctx context.Context, db *pgxpool.Pool, entityID int64, result Result, scanRunID int64) (sqlc.ScannerEntityArtifact, error) {
@@ -133,7 +141,7 @@ func MarkScannerEntityFailed(ctx context.Context, db *pgxpool.Pool, entityID int
 	return nil
 }
 
-func persistScannerEntitiesForStage(ctx context.Context, db *pgxpool.Pool, lib sqlc.Library, opts Options, result Result, scanRunID int64, stage string) ([]ScannerEntityRef, error) {
+func persistScannerEntitiesForStage(ctx context.Context, db *pgxpool.Pool, lib sqlc.Library, opts Options, result Result, scanRunID int64, stage string, attachSearchArtifact bool) ([]ScannerEntityRef, error) {
 	if db == nil {
 		return nil, nil
 	}
@@ -142,6 +150,14 @@ func persistScannerEntitiesForStage(ctx context.Context, db *pgxpool.Pool, lib s
 	drafts := scannerEntityDrafts(lib, result)
 	refs := make([]ScannerEntityRef, 0, len(drafts))
 	for _, draft := range drafts {
+		status := draft.Status
+		providerID := draft.ProviderID
+		accepted := draft.Accepted
+		if stage == scanArtifactKindAnalyze {
+			status = "discovered"
+			providerID = ""
+			accepted = false
+		}
 		narrow := filterResultToIdentityKey(result, draft.IdentityKey)
 		data, err := marshalResultArtifact(stage, opts, narrow)
 		if err != nil {
@@ -155,8 +171,8 @@ func persistScannerEntitiesForStage(ctx context.Context, db *pgxpool.Pool, lib s
 			IdentityKey:      draft.IdentityKey,
 			Title:            draft.Title,
 			Year:             draft.Year,
-			ProviderID:       draft.ProviderID,
-			Status:           draft.Status,
+			ProviderID:       providerID,
+			Status:           status,
 			SearchScanRunID:  pgInt8(scanRunID),
 			SearchArtifactID: pgtypeZeroInt8(),
 			ErrorMessage:     "",
@@ -175,6 +191,17 @@ func persistScannerEntitiesForStage(ctx context.Context, db *pgxpool.Pool, lib s
 		if err != nil {
 			return refs, fmt.Errorf("persist scanner entity artifact %s: %w", draft.IdentityKey, err)
 		}
+		if !attachSearchArtifact {
+			refs = append(refs, ScannerEntityRef{
+				Entity:       entity,
+				Artifact:     artifact,
+				Accepted:     accepted,
+				ProviderID:   providerID,
+				IdentityKey:  draft.IdentityKey,
+				ReviewStatus: status,
+			})
+			continue
+		}
 		entity, err = q.UpsertScannerEntity(ctx, sqlc.UpsertScannerEntityParams{
 			LibraryID:        lib.ID,
 			MediaType:        lib.MediaType,
@@ -183,8 +210,8 @@ func persistScannerEntitiesForStage(ctx context.Context, db *pgxpool.Pool, lib s
 			IdentityKey:      draft.IdentityKey,
 			Title:            draft.Title,
 			Year:             draft.Year,
-			ProviderID:       draft.ProviderID,
-			Status:           draft.Status,
+			ProviderID:       providerID,
+			Status:           status,
 			SearchScanRunID:  pgInt8(scanRunID),
 			SearchArtifactID: pgInt8(artifact.ID),
 			ErrorMessage:     "",
@@ -196,10 +223,10 @@ func persistScannerEntitiesForStage(ctx context.Context, db *pgxpool.Pool, lib s
 		refs = append(refs, ScannerEntityRef{
 			Entity:       entity,
 			Artifact:     artifact,
-			Accepted:     draft.Accepted,
-			ProviderID:   draft.ProviderID,
+			Accepted:     accepted,
+			ProviderID:   providerID,
 			IdentityKey:  draft.IdentityKey,
-			ReviewStatus: draft.Status,
+			ReviewStatus: status,
 		})
 	}
 	return refs, nil

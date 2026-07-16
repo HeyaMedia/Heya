@@ -226,7 +226,10 @@ func Load() *Config {
 var DefaultJobWorkerCounts = map[string]int{
 	"kickoff_library_scan":      1,
 	"process_scan":              4,
-	"fetch_metadata":            4,
+	"search_metadata":           50,
+	"search_metadata_poll":      50,
+	"fetch_metadata":            50,
+	"fetch_metadata_poll":       50,
 	"apply_metadata":            4,
 	"ffprobe":                   1,
 	"detect_local_assets":       1,

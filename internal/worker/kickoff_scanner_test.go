@@ -183,7 +183,7 @@ func TestActiveScannerJobsForEntityGuardsByEntity(t *testing.T) {
 
 	// Each pipeline kind that can still lead to a rich job must block compaction,
 	// including a mid-flight apply cycle that hasn't enqueued its rich job yet.
-	for _, kind := range []string{"fetch_metadata", "apply_metadata", "apply_rich_metadata"} {
+	for _, kind := range []string{"search_metadata", "fetch_metadata", "apply_metadata", "apply_rich_metadata"} {
 		jobID := insertJob(kind)
 
 		busy, err := activeScannerJobsForEntity(ctx, pool, entityWithJob, 0)
@@ -242,8 +242,45 @@ func TestScannerPipelineQueuesArePartitionedByMediaType(t *testing.T) {
 	}
 
 	require.Equal(t, "kickoff_library_scan_anime", KickoffLibraryScanArgs{MediaType: sqlc.MediaTypeAnime}.InsertOpts().Queue)
+	require.Equal(t, "search_metadata_music", SearchLibraryMetadataArgs{MediaType: sqlc.MediaTypeMusic}.InsertOpts().Queue)
+	require.Equal(t, "search_metadata_poll_music", SearchLibraryMetadataArgs{MediaType: sqlc.MediaTypeMusic, Poll: true}.InsertOpts().Queue)
 	require.Equal(t, "fetch_metadata_music", FetchLibraryMetadataArgs{MediaType: sqlc.MediaTypeMusic}.InsertOpts().Queue)
+	require.Equal(t, "fetch_metadata_poll_music", FetchLibraryMetadataArgs{MediaType: sqlc.MediaTypeMusic, Poll: true}.InsertOpts().Queue)
 	require.Equal(t, "apply_metadata_tv", ApplyLibraryScanArgs{MediaType: sqlc.MediaTypeTv}.InsertOpts().Queue)
+}
+
+func TestRemoteMetadataPollContinuationsAreScheduledOnPollQueues(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	rc, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
+	require.NoError(t, err)
+
+	require.NoError(t, enqueueSearchLibraryMetadataAfter(ctx, rc, SearchLibraryMetadataArgs{
+		LibraryID: 901, MediaType: sqlc.MediaTypeAnime, ScannerEntityID: 902, AnalysisArtifactID: 903, Poll: true,
+	}, PriorityScan, "", time.Minute))
+	require.NoError(t, enqueueFetchLibraryMetadataAfter(ctx, rc, FetchLibraryMetadataArgs{
+		LibraryID: 904, MediaType: sqlc.MediaTypeMusic, ScannerEntityID: 905, SearchArtifactID: 906, Poll: true,
+	}, PriorityScan, "", time.Minute))
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE NULLIF(args->>'library_id', '')::bigint IN (901, 904)`)
+	})
+
+	rows, err := pool.Query(ctx, `
+		SELECT kind, queue, state
+		FROM river_job
+		WHERE NULLIF(args->>'library_id', '')::bigint IN (901, 904)
+		ORDER BY kind`)
+	require.NoError(t, err)
+	defer rows.Close()
+	got := map[string][2]string{}
+	for rows.Next() {
+		var kind, queue, state string
+		require.NoError(t, rows.Scan(&kind, &queue, &state))
+		got[kind] = [2]string{queue, state}
+	}
+	require.NoError(t, rows.Err())
+	require.Equal(t, [2]string{"search_metadata_poll_anime", "scheduled"}, got["search_metadata"])
+	require.Equal(t, [2]string{"fetch_metadata_poll_music", "scheduled"}, got["fetch_metadata"])
 }
 
 func TestRenameLegacyScannerJobsRoutesActiveBacklogByMediaType(t *testing.T) {
@@ -281,8 +318,15 @@ func TestRenameLegacyScannerJobsRoutesActiveBacklogByMediaType(t *testing.T) {
 		ScopePaths: []string{"/media/typed-queue-anime/Series"},
 	}, nil)
 	require.NoError(t, err)
+	musicPollJob, err := rc.Insert(ctx, FetchLibraryMetadataArgs{
+		LibraryID:        music.ID,
+		ScannerEntityID:  991,
+		SearchArtifactID: 992,
+		Poll:             true,
+	}, nil)
+	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE id = ANY($1::bigint[])`, []int64{musicJob.Job.ID, animeJob.Job.ID})
+		_, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE id = ANY($1::bigint[])`, []int64{musicJob.Job.ID, animeJob.Job.ID, musicPollJob.Job.ID})
 	})
 
 	queueFor := func(jobID int64) string {
@@ -292,10 +336,12 @@ func TestRenameLegacyScannerJobsRoutesActiveBacklogByMediaType(t *testing.T) {
 	}
 	require.Equal(t, "process_scan", queueFor(musicJob.Job.ID))
 	require.Equal(t, "process_scan", queueFor(animeJob.Job.ID))
+	require.Equal(t, "fetch_metadata_poll", queueFor(musicPollJob.Job.ID))
 
 	require.NoError(t, renameLegacyScannerJobs(ctx, pool))
 	require.Equal(t, "process_scan_music", queueFor(musicJob.Job.ID))
 	require.Equal(t, "process_scan_anime", queueFor(animeJob.Job.ID))
+	require.Equal(t, "fetch_metadata_poll_music", queueFor(musicPollJob.Job.ID))
 }
 
 func TestScannerInventoryPostApplyPaths(t *testing.T) {

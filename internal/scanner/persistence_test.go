@@ -290,6 +290,21 @@ func TestPersistScannerSearchEntitiesStoresNarrowArtifacts(t *testing.T) {
 		}},
 	}
 
+	analysisResult := result
+	analysisResult.MovieSearch = nil
+	analysisRefs, err := PersistScannerAnalysisEntities(ctx, pool, lib, Options{ScopePaths: []string{"/media/movies"}}, analysisResult)
+	require.NoError(t, err)
+	require.Len(t, analysisRefs, 2)
+	for _, ref := range analysisRefs {
+		require.Equal(t, "discovered", ref.Entity.Status)
+		require.False(t, ref.Entity.SearchArtifactID.Valid, "analysis is not a completed search artifact")
+		require.Equal(t, scanArtifactKindAnalyze, ref.Artifact.Stage)
+		_, loaded, loadErr := LoadScannerEntityArtifactResult(ctx, pool, ref.Artifact.ID)
+		require.NoError(t, loadErr)
+		require.Len(t, loaded.MovieMatches, 1, "analysis hand-off is narrow per entity")
+		require.Empty(t, loaded.MovieSearch)
+	}
+
 	refs, err := PersistScannerSearchEntities(ctx, pool, lib, Options{ScopePaths: []string{"/media/movies"}}, result, 0)
 	require.NoError(t, err)
 	require.Len(t, refs, 2)

@@ -288,7 +288,7 @@ func (w *ScanAlbumLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanA
 // queue boundaries here — these run in parallel queues but all compete for the
 // same CPU/disk/heya.media bandwidth as loudness scanning.
 func snoozeIfMatchingPending(ctx context.Context, db *pgxpool.Pool) error {
-	return snoozeIfKindsPending(ctx, db, []string{"kickoff_library_scan", "process_scan", "fetch_metadata", "apply_metadata", "enrich_media_item"})
+	return snoozeIfKindsPending(ctx, db, []string{"kickoff_library_scan", "process_scan", "search_metadata", "fetch_metadata", "apply_metadata", "enrich_media_item"})
 }
 
 // snoozeIfScannerPipelinePending is the lighter readiness gate for work that
@@ -297,7 +297,7 @@ func snoozeIfMatchingPending(ctx context.Context, db *pgxpool.Pool) error {
 // and the file's current probed duration, so an unrelated enrich backlog must
 // not hold it hostage.
 func snoozeIfScannerPipelinePending(ctx context.Context, db *pgxpool.Pool) error {
-	return snoozeIfKindsPending(ctx, db, []string{"kickoff_library_scan", "process_scan", "fetch_metadata", "apply_metadata"})
+	return snoozeIfKindsPending(ctx, db, []string{"kickoff_library_scan", "process_scan", "search_metadata", "fetch_metadata", "apply_metadata"})
 }
 
 func snoozeIfKindsPending(ctx context.Context, db *pgxpool.Pool, kinds []string) error {

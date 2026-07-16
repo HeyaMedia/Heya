@@ -135,14 +135,14 @@ func scanJobsActive(ctx context.Context, db *pgxpool.Pool) bool {
 		SELECT EXISTS (
 			SELECT 1 FROM river_job
 			WHERE state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
-			  AND kind IN ('kickoff_library_scan', 'process_scan', 'fetch_metadata', 'apply_metadata')
+			  AND kind IN ('kickoff_library_scan', 'process_scan', 'search_metadata', 'fetch_metadata', 'apply_metadata')
 		)`).Scan(&active)
 	return err == nil && active
 }
 
 // emitScanProgress reports per-library scan state for libraries with scan
 // pipeline work in flight. Presence in the payload = the library is
-// scanning (it has an active kickoff/process/fetch/apply job).
+// scanning (it has an active kickoff/process/search/fetch/apply job).
 //
 // The progress bar is stateless and depends on nothing deletable:
 // library_scan_bursts.units_total is a durable count maintained by the
@@ -164,7 +164,7 @@ func (h *Hub) emitScanProgress(ctx context.Context, db *pgxpool.Pool) {
 			SELECT NULLIF(rj.args->>'library_id', '')::bigint AS library_id, count(*) AS cnt
 			FROM river_job rj
 			WHERE rj.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
-			  AND rj.kind IN ('process_scan', 'fetch_metadata', 'apply_metadata')
+			  AND rj.kind IN ('process_scan', 'search_metadata', 'fetch_metadata', 'apply_metadata')
 			GROUP BY 1
 		),
 		active_kickoffs AS (

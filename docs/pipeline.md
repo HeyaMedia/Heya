@@ -47,9 +47,12 @@ library processing run.
 queue. Queue workers split those phases so slow remote metadata calls do not
 hold the whole library scan hostage:
 
-- `process_scan`: local inventory/parse/identity + HeyaMetadata search.
-  Persists review identities, candidates, findings, and a `search_result`
-  artifact.
+- `process_scan`: local inventory/parse/identity only. Persists one narrow
+  `analysis_result` artifact per identified entity, then enqueues each entity
+  independently for remote search.
+- `search_metadata`: resumes that exact analysis artifact, overlays any
+  admin/manual decisions, runs HeyaMetadata search/discovery, and persists
+  review identities, candidates, findings, and a `search_result` artifact.
 - `fetch_metadata`: resumes that exact search artifact, overlays any
   admin/manual decisions made after search, fetches remote metadata, and
   persists a `fetch_result` artifact.
@@ -75,8 +78,9 @@ into per-identity work.
 persists in `local_media_identities` with its provider id; the decisions
 overlay is loaded before each search pass and short-circuits *before* the
 HeyaMetadata call. Re-scanning an artist to pick up a new album costs zero
-provider searches — the unit goes straight to `fetch_metadata` /
-`apply_metadata`, which always fan out per identity. Root or multi-owner
+provider searches — the search stage resolves the persisted decision without
+remote discovery and continues to `fetch_metadata` / `apply_metadata`, which
+always fan out per identity. Root or multi-owner
 scoped jobs (legacy batches, pruner requeues) re-fan into per-owner jobs
 before running, so one slow unit can never hold up others and unique args
 stay stable per unit across scans.
@@ -121,11 +125,14 @@ In `internal/worker/worker.go`:
   lets each external dependency (HeyaMetadata search, ratings, community segments)
   carry its own concurrency knob without contending with unrelated work.
 - **Scanner pipeline** (`kickoff_library_scan`, `process_scan`,
-  `fetch_metadata`, `apply_metadata`, `ffprobe`, `scan_keyframes`,
-  `detect_local_assets`) has per-queue worker counts. The default scanner
-  stages use 4 workers for `process_scan`, `fetch_metadata`, and
-  `apply_metadata`; heavier file/analysis queues keep lower defaults.
-  Kickoff/process/fetch/apply are each partitioned by library media type
+  `search_metadata`, `fetch_metadata`, `apply_metadata`, `ffprobe`,
+  `scan_keyframes`, `detect_local_assets`) has per-queue worker counts.
+  `process_scan` now performs local analysis only and persists one narrow
+  analysis artifact per owner entity. `search_metadata` resumes that artifact
+  and submits canonical search/discovery without re-walking the library.
+  Search submission, search polling, fetch/resolution submission, and fetch
+  polling each default to 50 workers; local analysis and apply default to 4.
+  Every stage is partitioned by library media type
   (`*_movie`, `*_tv`, `*_anime`, `*_music`, `*_book`, etc.), and the configured
   worker count applies to every media-type queue. This prevents an older bulk
   Music fan-out from FIFO-starving later Anime/TV/Movie work. The unsuffixed
@@ -133,6 +140,14 @@ In `internal/worker/worker.go`:
   `kickoff_library_scan` is the fast inventory/change detector; it skips
   unchanged paths, soft-deletes missing paths, and enqueues
   `process_scan` for changed scopes.
+- **Durable remote hand-off.** HeyaMetadata `202` discovery and resolution
+  identifiers are stored in `metadata_resolution_workflows`. The submission
+  job inserts one scheduled continuation on `search_metadata_poll_*` or
+  `fetch_metadata_poll_*` and completes, immediately freeing submission
+  capacity for another entity. Poll jobs honor `Retry-After` (30 seconds by
+  default) and snooze on their separate queues. HTTP requests remain
+  entity-scoped rather than bulk, but the number of upstream workflows in
+  flight is not bounded by the local worker count.
 - **Enrich pipeline** (`enrich_media_item`, `person_fetch`, `ratings_fetch`,
   `force_refresh_metadata`) is MaxWorkers=1 per kind for upstream rate-limit
   safety. The `enrich_media_item` queue keeps the priority-banded ordering:
@@ -182,7 +197,7 @@ Same pattern for all six scheduled tasks:
 
 | Task                   | Kickoff kind                | Per-item kind        |
 | ---------------------- | --------------------------- | -------------------- |
-| `scan_libraries`       | `kickoff_library_scan`      | `process_scan` → `fetch_metadata` → `apply_metadata` |
+| `scan_libraries`       | `kickoff_library_scan`      | `process_scan` → `search_metadata` → `fetch_metadata` → `apply_metadata` |
 | `refresh_stale_items`  | retired compatibility no-op | —                    |
 | `scan_music_loudness`  | `kickoff_music_loudness`    | `scan_track_loudness`|
 | `generate_trickplay`   | `kickoff_trickplay`         | `trickplay_file`     |

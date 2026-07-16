@@ -145,7 +145,8 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	// concurrent clicks coalesce.
 	kickoffLibraryWorker := &KickoffLibraryScanWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress}
 	river.AddWorker(workers, kickoffLibraryWorker)
-	river.AddWorker(workers, &ProcessLibraryScanWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress})
+	river.AddWorker(workers, &ProcessLibraryScanWorker{DB: cfg.DB, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress})
+	river.AddWorker(workers, &SearchLibraryMetadataWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Progress: cfg.Progress})
 	river.AddWorker(workers, &FetchLibraryMetadataWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress})
 	river.AddWorker(workers, &ApplyLibraryScanWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, SonicEnabled: cfg.SonicEnabled, Progress: cfg.Progress})
 	river.AddWorker(workers, &ApplyRichMetadataWorker{DB: cfg.DB, Matcher: cfg.Matcher, Hub: cfg.Hub, Progress: cfg.Progress})
@@ -175,11 +176,15 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 		// unsuffixed queues remain for scan-all coordination and as a safe
 		// fallback for legacy or unknown media-type payloads.
 		Queues: map[string]river.QueueConfig{
-			// Scanner pipeline (source-throttled).
-			"kickoff_library_scan": {MaxWorkers: queueWorkers(cfg, "kickoff_library_scan", 1)}, // priority bands: P1=watcher, P2=scheduled/manual
-			"process_scan":         {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},         // local analysis + search; scoped for watcher-triggered folders
-			"fetch_metadata":       {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},       // remote metadata fetch from persisted search artifact
-			"apply_metadata":       {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},       // materialize + apply from persisted fetch artifact
+			// Scanner pipeline. Local disk analysis stays conservative; remote
+			// submission and polling are independent high-concurrency queues.
+			"kickoff_library_scan": {MaxWorkers: queueWorkers(cfg, "kickoff_library_scan", 1)},  // priority bands: P1=watcher, P2=scheduled/manual
+			"process_scan":         {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},          // local analysis only; scoped for watcher-triggered folders
+			"search_metadata":      {MaxWorkers: queueWorkers(cfg, "search_metadata", 50)},      // canonical search + discovery submission
+			"search_metadata_poll": {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 50)}, // scheduled discovery status checks
+			"fetch_metadata":       {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 50)},       // resolution submission + ready entity fetch
+			"fetch_metadata_poll":  {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 50)},  // scheduled resolution status checks
+			"apply_metadata":       {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},        // materialize + apply from persisted fetch artifact
 
 			"kickoff_library_scan_movie":   {MaxWorkers: queueWorkers(cfg, "kickoff_library_scan", 1)},
 			"kickoff_library_scan_tv":      {MaxWorkers: queueWorkers(cfg, "kickoff_library_scan", 1)},
@@ -199,14 +204,39 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			"process_scan_podcast": {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},
 			"process_scan_radio":   {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},
 
-			"fetch_metadata_movie":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
-			"fetch_metadata_tv":      {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
-			"fetch_metadata_anime":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
-			"fetch_metadata_music":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
-			"fetch_metadata_book":    {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
-			"fetch_metadata_comic":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
-			"fetch_metadata_podcast": {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
-			"fetch_metadata_radio":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
+			"search_metadata_movie":        {MaxWorkers: queueWorkers(cfg, "search_metadata", 50)},
+			"search_metadata_tv":           {MaxWorkers: queueWorkers(cfg, "search_metadata", 50)},
+			"search_metadata_anime":        {MaxWorkers: queueWorkers(cfg, "search_metadata", 50)},
+			"search_metadata_music":        {MaxWorkers: queueWorkers(cfg, "search_metadata", 50)},
+			"search_metadata_book":         {MaxWorkers: queueWorkers(cfg, "search_metadata", 50)},
+			"search_metadata_comic":        {MaxWorkers: queueWorkers(cfg, "search_metadata", 50)},
+			"search_metadata_podcast":      {MaxWorkers: queueWorkers(cfg, "search_metadata", 50)},
+			"search_metadata_radio":        {MaxWorkers: queueWorkers(cfg, "search_metadata", 50)},
+			"search_metadata_poll_movie":   {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 50)},
+			"search_metadata_poll_tv":      {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 50)},
+			"search_metadata_poll_anime":   {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 50)},
+			"search_metadata_poll_music":   {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 50)},
+			"search_metadata_poll_book":    {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 50)},
+			"search_metadata_poll_comic":   {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 50)},
+			"search_metadata_poll_podcast": {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 50)},
+			"search_metadata_poll_radio":   {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 50)},
+
+			"fetch_metadata_movie":        {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 50)},
+			"fetch_metadata_tv":           {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 50)},
+			"fetch_metadata_anime":        {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 50)},
+			"fetch_metadata_music":        {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 50)},
+			"fetch_metadata_book":         {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 50)},
+			"fetch_metadata_comic":        {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 50)},
+			"fetch_metadata_podcast":      {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 50)},
+			"fetch_metadata_radio":        {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 50)},
+			"fetch_metadata_poll_movie":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 50)},
+			"fetch_metadata_poll_tv":      {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 50)},
+			"fetch_metadata_poll_anime":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 50)},
+			"fetch_metadata_poll_music":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 50)},
+			"fetch_metadata_poll_book":    {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 50)},
+			"fetch_metadata_poll_comic":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 50)},
+			"fetch_metadata_poll_podcast": {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 50)},
+			"fetch_metadata_poll_radio":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 50)},
 
 			"apply_metadata_movie":   {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},
 			"apply_metadata_tv":      {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},

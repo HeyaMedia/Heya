@@ -477,11 +477,11 @@ func (a *App) cancelScanJobs(ctx context.Context, kinds []string, libraryID int6
 }
 
 // CancelLibraryJobs stops one library's scan: the pipeline kinds carrying
-// library_id in their args (kickoff/process/fetch/apply). Derived per-file
+// library_id in their args (kickoff/process/search/fetch/apply). Derived per-file
 // work (ffprobe, fingerprints, …) has no library_id and is only reachable
 // via CancelAllPendingJobs.
 func (a *App) CancelLibraryJobs(ctx context.Context, libraryID int64) (int64, error) {
-	kinds := []string{"kickoff_library_scan", "process_scan", "fetch_metadata", "apply_metadata"}
+	kinds := []string{"kickoff_library_scan", "process_scan", "search_metadata", "fetch_metadata", "apply_metadata"}
 	return a.cancelScanJobs(ctx, kinds, libraryID)
 }
 

@@ -31,6 +31,7 @@ var scannerQueueMediaTypes = []sqlc.MediaType{
 var scannerQueueKinds = []string{
 	"kickoff_library_scan",
 	"process_scan",
+	"search_metadata",
 	"fetch_metadata",
 	"apply_metadata",
 }
@@ -146,13 +147,25 @@ func renameLegacyScannerJobs(ctx context.Context, db *pgxpool.Pool) error {
 	// Completed history stays untouched.
 	tag, err := db.Exec(ctx, `
 		UPDATE river_job AS rj
-		   SET queue = rj.kind || '_' || l.media_type::text
+		   SET queue = rj.kind ||
+		       CASE
+		         WHEN rj.kind IN ('search_metadata', 'fetch_metadata')
+		          AND COALESCE(NULLIF(rj.args->>'poll', '')::boolean, false)
+		         THEN '_poll_'
+		         ELSE '_'
+		       END || l.media_type::text
 		  FROM libraries AS l
 		 WHERE rj.kind = ANY($1::text[])
 		   AND rj.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
 		   AND NULLIF(rj.args->>'library_id', '')::bigint = l.id
 		   AND l.media_type::text = ANY($2::text[])
-		   AND rj.queue IS DISTINCT FROM rj.kind || '_' || l.media_type::text
+		   AND rj.queue IS DISTINCT FROM rj.kind ||
+		       CASE
+		         WHEN rj.kind IN ('search_metadata', 'fetch_metadata')
+		          AND COALESCE(NULLIF(rj.args->>'poll', '')::boolean, false)
+		         THEN '_poll_'
+		         ELSE '_'
+		       END || l.media_type::text
 	`, scannerQueueKinds, scannerQueueMediaTypeStrings())
 	if err != nil {
 		return err
@@ -191,10 +204,9 @@ func (a KickoffLibraryScanArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
-// ProcessLibraryScanArgs runs the scanner's local analysis + search phase for
-// a library and persists the review candidates. Heavy metadata fetching and DB
-// materialization are delegated to later scanner jobs so the first response to
-// a library refresh is fast and reviewable.
+// ProcessLibraryScanArgs runs only local filesystem analysis. It persists one
+// narrow analysis artifact per owner entity, then delegates remote canonical
+// search to the high-concurrency search_metadata queues.
 //
 // When ScopePaths is present, each value is treated as a directory scope; the
 // scanner still walks the library roots but only analyzes files under those
@@ -218,22 +230,58 @@ func (a ProcessLibraryScanArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
+// SearchLibraryMetadataArgs resumes one persisted local analysis artifact and
+// performs canonical index search/discovery. Poll jobs use a separate queue so
+// thousands of outstanding HeyaMetadata workflows cannot consume submission
+// capacity. Poll participates in uniqueness so the submit worker can insert
+// its one scheduled continuation while it is still running.
+type SearchLibraryMetadataArgs struct {
+	LibraryID          int64          `json:"library_id" river:"unique"`
+	MediaType          sqlc.MediaType `json:"media_type,omitempty"`
+	ScopePaths         []string       `json:"scope_paths,omitempty" river:"unique"`
+	ScannerEntityID    int64          `json:"scanner_entity_id" river:"unique"`
+	AnalysisArtifactID int64          `json:"analysis_artifact_id" river:"unique"`
+	Poll               bool           `json:"poll,omitempty" river:"unique"`
+	Force              bool           `json:"force,omitempty"`
+	ScheduledTaskID    string         `json:"scheduled_task_id,omitempty"`
+}
+
+func (SearchLibraryMetadataArgs) Kind() string { return "search_metadata" }
+func (a SearchLibraryMetadataArgs) InsertOpts() river.InsertOpts {
+	queue := "search_metadata"
+	if a.Poll {
+		queue = "search_metadata_poll"
+	}
+	return river.InsertOpts{
+		Queue:       scannerQueueName(queue, a.MediaType),
+		MaxAttempts: 3,
+		Priority:    PriorityScan,
+		UniqueOpts:  uniqueWhileActive(),
+	}
+}
+
 // FetchLibraryMetadataArgs resumes a persisted search result, fetches remote
-// metadata, and persists a fetch artifact for the apply phase.
+// metadata, and persists a fetch artifact for the apply phase. Asynchronous
+// resolution polling is moved to the corresponding fetch_metadata_poll queue.
 type FetchLibraryMetadataArgs struct {
 	LibraryID        int64          `json:"library_id" river:"unique"`
 	MediaType        sqlc.MediaType `json:"media_type,omitempty"`
 	ScopePaths       []string       `json:"scope_paths,omitempty" river:"unique"`
 	ScannerEntityID  int64          `json:"scanner_entity_id" river:"unique"`
 	SearchArtifactID int64          `json:"search_artifact_id" river:"unique"`
+	Poll             bool           `json:"poll,omitempty" river:"unique"`
 	Force            bool           `json:"force,omitempty"`
 	ScheduledTaskID  string         `json:"scheduled_task_id,omitempty"`
 }
 
 func (FetchLibraryMetadataArgs) Kind() string { return "fetch_metadata" }
 func (a FetchLibraryMetadataArgs) InsertOpts() river.InsertOpts {
+	queue := "fetch_metadata"
+	if a.Poll {
+		queue = "fetch_metadata_poll"
+	}
 	return river.InsertOpts{
-		Queue:       scannerQueueName("fetch_metadata", a.MediaType),
+		Queue:       scannerQueueName(queue, a.MediaType),
 		MaxAttempts: 3,
 		Priority:    PriorityScan,
 		UniqueOpts:  uniqueWhileActive(),

@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	scanArtifactKindSearch = "search_result"
-	scanArtifactKindFetch  = "fetch_result"
-	scanArtifactSchemaV1   = int32(1)
+	scanArtifactKindAnalyze = "analysis_result"
+	scanArtifactKindSearch  = "search_result"
+	scanArtifactKindFetch   = "fetch_result"
+	scanArtifactSchemaV1    = int32(1)
 	// PostgreSQL jsonb has a hard 256 MiB limit for the total size of array
 	// elements. Keep every artifact comfortably below that boundary; scanner
 	// entity artifacts are the durable hand-off for the worker pipeline.

@@ -174,6 +174,18 @@ func (r *LibraryRun) ScanRunID() int64 {
 	return r.scanRunID
 }
 
+// ResumeAnalysisResult restores the local, per-entity analysis hand-off used
+// by remote metadata search workers. Search can then be retried or polled
+// without walking and probing the library files again.
+func (r *LibraryRun) ResumeAnalysisResult(result Result, artifactID int64) {
+	r.result = result
+	r.analyzed = true
+	r.sink.Emit(Event{Event: "scan.artifact_loaded", Data: map[string]any{
+		"kind":        scanArtifactKindAnalyze,
+		"artifact_id": artifactID,
+	}})
+}
+
 func (r *LibraryRun) ResumeSearchResult(ctx context.Context, result Result, artifactID int64) error {
 	r.result = result
 	r.analyzed = true
