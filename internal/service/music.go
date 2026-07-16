@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/worker"
 )
@@ -236,6 +238,10 @@ type MusicAlbumDetail struct {
 	ArtistSlug        string      `json:"artist_slug"`
 	MediaItemID       int64       `json:"media_item_id"`
 	MediaItemPublicID string      `json:"media_item_public_id,omitempty"`
+	// Parsed views of the albums jsonb columns — sqlc hands them back as
+	// []byte, which would marshal as base64 through the raw Album embed.
+	Ratings  []metadata.AlbumRating  `json:"ratings,omitempty"`
+	Editions []metadata.AlbumEdition `json:"editions,omitempty"`
 }
 
 // GetAlbumDetail resolves an album by (artist_slug, album_slug) and returns
@@ -305,14 +311,22 @@ func (a *App) assembleAlbumDetail(ctx context.Context, q *sqlc.Queries, album sq
 		views = append(views, TrackView{Track: t, Files: files})
 	}
 
-	return &MusicAlbumDetail{
+	detail := &MusicAlbumDetail{
 		Album:             album,
 		Tracks:            views,
 		Artist:            BuildArtistView(artist),
 		ArtistSlug:        mediaItem.Slug,
 		MediaItemID:       mediaItem.ID,
 		MediaItemPublicID: mediaItem.PublicID.String(),
-	}, nil
+	}
+	// Parse failures degrade to absent sections, never a failed page.
+	if len(album.Ratings) > 0 {
+		_ = json.Unmarshal(album.Ratings, &detail.Ratings)
+	}
+	if len(album.Editions) > 0 {
+		_ = json.Unmarshal(album.Editions, &detail.Editions)
+	}
+	return detail, nil
 }
 
 // SimilarArtistRow is one row of the augmented /api/music/artists/{id}/similar

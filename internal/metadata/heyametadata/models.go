@@ -407,7 +407,27 @@ type releaseGroupDocument struct {
 			DurationMS int64    `json:"duration_ms"`
 			Formats    []string `json:"formats"`
 			ImageID    string   `json:"image_id"`
+			// Labels come from MusicBrainz/Discogs (with catalog numbers)
+			// and Deezer (name-only); Link is the provider's own album page
+			// (Bandcamp editions).
+			Labels []struct {
+				ProviderID    string `json:"provider_id"`
+				Name          string `json:"name"`
+				CatalogNumber string `json:"catalog_number"`
+			} `json:"labels"`
+			Link string `json:"link"`
 		} `json:"editions"`
+		// Descriptions/annotations/metrics — TheAudioDB (2026-07 expansion)
+		// ships localized descriptions, an editorial provider_review
+		// annotation, and a sales metric alongside the older sources.
+		Descriptions []localizedText `json:"descriptions"`
+		Annotations  []localizedText `json:"annotations"`
+		Metrics      []struct {
+			Name     string  `json:"name"`
+			Value    float64 `json:"value"`
+			RawValue string  `json:"raw_value"`
+			Provider string  `json:"provider"`
+		} `json:"metrics"`
 	} `json:"data"`
 }
 

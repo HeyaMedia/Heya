@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { MusicAlbumDetail, TrackFile, TrackView } from '~~/shared/types'
+import type { AlbumEdition, MusicAlbumDetail, TrackFile, TrackView } from '~~/shared/types'
 import type { Track } from '~/composables/usePlayer'
 import type { ImageTone } from '~/composables/useImageTone'
 import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
@@ -152,8 +152,53 @@ const ledgerCells = computed<LedgerCell[]>(() => {
   if (totalDuration.value > 0) cells.push({ k: 'Runtime', v: formatRunTime(totalDuration.value) })
   if (qualityLabel.value) cells.push({ k: 'Quality', v: qualityLabel.value, tone: true })
   if (a.label) cells.push({ k: 'Label', v: a.label })
+  // Provider-native ratings — scales differ per system, so each cell says
+  // its own denominator instead of pretending they're comparable.
+  for (const r of (detail.value?.ratings ?? []).slice(0, 2)) {
+    cells.push({
+      k: providerLabel(r.system),
+      v: String(r.value),
+      unit: `/ ${r.scale_max}`,
+      sub: r.votes ? `${r.votes} votes` : undefined,
+    })
+  }
+  if ((a.sales ?? 0) > 0) cells.push({ k: 'Sales', v: formatBigInt(a.sales!) })
   return cells
 })
+
+function formatBigInt(n: number): string {
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1).replace(/\.0$/, '')}B`
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}K`
+  return n.toLocaleString()
+}
+
+// ── About / review / editions (heya.media 2026-07 album expansion) ──────────
+const aboutOpen = ref(false)
+const reviewOpen = ref(false)
+const albumDescription = computed(() => album.value?.description?.trim() ?? '')
+const albumReview = computed(() => album.value?.review?.trim() ?? '')
+
+// Editions: pressings with real detail (labels / formats / a provider page)
+// lead; inside each band newest first. Collapsed past EDITIONS_SHOWN.
+const EDITIONS_SHOWN = 8
+const editionsExpanded = ref(false)
+const sortedEditions = computed(() => {
+  const list = [...(detail.value?.editions ?? [])]
+  const weight = (e: AlbumEdition) => (e.labels?.length ? 2 : 0) + (e.formats?.length ? 2 : 0) + (e.link ? 1 : 0)
+  return list.sort((a, b) => weight(b) - weight(a) || (b.date ?? '').localeCompare(a.date ?? ''))
+})
+const visibleEditions = computed(() =>
+  editionsExpanded.value ? sortedEditions.value : sortedEditions.value.slice(0, EDITIONS_SHOWN))
+function editionLine(e: AlbumEdition): string {
+  const parts = [
+    e.date || '',
+    e.country || '',
+    e.formats?.join(', ') || '',
+    (e.labels ?? []).map((l) => l.catalog_number ? `${l.name} · ${l.catalog_number}` : l.name).join(', '),
+  ].filter(Boolean)
+  return parts.join('  ·  ')
+}
 
 // ── Now-playing markers ──────────────────────────────────────────────────────
 function isTrackActive(t: TrackView) {
@@ -469,6 +514,57 @@ if (import.meta.client) {
       </section>
 
       <!-- Sounds Like — sonic-similar albums (existing endpoint). -->
+      <!-- About + editorial review — TheAudioDB via heya.media. Side by
+           side when both exist; either alone takes the full row. -->
+      <section v-if="albumDescription || albumReview" class="section">
+        <div class="about-cols">
+          <div v-if="albumDescription" class="about-col">
+            <SectionHeader title="About" />
+            <div class="prose">
+              <p :class="{ collapsed: !aboutOpen && albumDescription.length > 480 }">{{ albumDescription }}</p>
+              <button v-if="albumDescription.length > 480" class="see-all" @click="aboutOpen = !aboutOpen">
+                {{ aboutOpen ? 'Less' : 'More' }}
+              </button>
+            </div>
+          </div>
+          <div v-if="albumReview" class="about-col">
+            <SectionHeader title="Review" subtitle="TheAudioDB" />
+            <div class="prose">
+              <p :class="{ collapsed: !reviewOpen && albumReview.length > 480 }">{{ albumReview }}</p>
+              <button v-if="albumReview.length > 480" class="see-all" @click="reviewOpen = !reviewOpen">
+                {{ reviewOpen ? 'Less' : 'More' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Editions / pressings — labels+catalog numbers from MusicBrainz /
+           Discogs, formats from Discogs/Bandcamp, external provider pages. -->
+      <section v-if="sortedEditions.length" class="section">
+        <SectionHeader title="Editions" :subtitle="String(sortedEditions.length)" />
+        <ul class="ed-list">
+          <li v-for="(e, i) in visibleEditions" :key="`${e.provider}-${e.provider_id ?? i}`" class="ed-row">
+            <span class="ed-provider">{{ providerLabel(e.provider) }}</span>
+            <span class="ed-main">
+              <span class="ed-title">{{ e.title || album?.title }}</span>
+              <span v-if="editionLine(e)" class="ed-meta">{{ editionLine(e) }}</span>
+            </span>
+            <a
+              v-if="e.link"
+              :href="e.link"
+              target="_blank"
+              rel="noopener"
+              class="ed-link"
+              :title="`Open on ${providerLabel(e.provider)}`"
+            ><Icon name="link" :size="12" /></a>
+          </li>
+        </ul>
+        <button v-if="sortedEditions.length > EDITIONS_SHOWN" class="see-all" @click="editionsExpanded = !editionsExpanded">
+          {{ editionsExpanded ? 'Show fewer' : `Show all ${sortedEditions.length}` }}
+        </button>
+      </section>
+
       <section v-if="sonicSimilar.length" class="section">
         <SectionHeader title="Sounds Like" :subtitle="String(sonicSimilar.length)" />
         <AppRail :items="sonicSimilar" :tile-width="172" :phone-tile-width="132" aspect="1/1" :gap="18" snap :item-key="(r: any) => `sl-${r.id}`" memory-key="album-sounds-like">
@@ -924,4 +1020,60 @@ if (import.meta.client) {
   .trk-d { grid-column: 3; }
   .trk-more { grid-column: 4; opacity: 1; width: 40px; height: 40px; }
 }
+
+/* ── About / review prose (artist-page .prose vocabulary) ── */
+.prose { font-size: 15.5px; line-height: 1.75; color: rgb(var(--ink) / 0.82); max-width: 64ch; }
+.prose p.collapsed {
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.see-all {
+  display: block;
+  margin: 10px auto 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font: 600 12px var(--font-mono);
+  letter-spacing: 0.08em;
+  color: var(--tone, var(--gold));
+}
+.see-all:hover { text-decoration: underline; }
+/* About + Review side by side (either alone spans the row). */
+.about-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 48px;
+  align-items: start;
+}
+.about-col { min-width: 0; }
+@media (max-width: 1100px) {
+  .about-cols { grid-template-columns: 1fr; gap: 36px; }
+}
+
+/* ── Editions — mono ledger rows ── */
+.ed-list { list-style: none; margin: 0; padding: 0; }
+.ed-row {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 9px 4px;
+  border-bottom: 1px solid var(--hair);
+  min-width: 0;
+}
+.ed-row:last-child { border-bottom: 0; }
+.ed-provider {
+  flex-shrink: 0;
+  width: 92px;
+  font: 550 10px var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(var(--ink) / 0.45);
+}
+.ed-main { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; min-width: 0; flex: 1; }
+.ed-title { font-size: 13.5px; font-weight: 600; color: rgb(var(--ink) / 0.88); }
+.ed-meta { font: 500 11.5px var(--font-mono); color: rgb(var(--ink) / 0.5); }
+.ed-link { color: rgb(var(--ink) / 0.4); display: inline-flex; transition: color 0.15s; flex-shrink: 0; }
+.ed-link:hover { color: var(--tone, var(--gold)); }
 </style>

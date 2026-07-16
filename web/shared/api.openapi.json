@@ -1507,9 +1507,16 @@
           "cover_path": {
             "type": "string"
           },
+          "description": {
+            "type": "string"
+          },
           "duration_seconds": {
             "format": "int32",
             "type": "integer"
+          },
+          "editions": {
+            "contentEncoding": "base64",
+            "type": "string"
           },
           "explicit": {
             "type": "boolean"
@@ -1580,8 +1587,19 @@
           "rating": {
             "$ref": "#/components/schemas/Numeric"
           },
+          "ratings": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "release_date": {
             "$ref": "#/components/schemas/Date"
+          },
+          "review": {
+            "type": "string"
+          },
+          "sales": {
+            "format": "int64",
+            "type": "integer"
           },
           "search_vector": {},
           "secondary_types": {
@@ -1676,7 +1694,82 @@
           "artist_credits",
           "field_provenance",
           "sort_artist",
-          "sort_title"
+          "sort_title",
+          "description",
+          "review",
+          "ratings",
+          "editions",
+          "sales"
+        ],
+        "type": "object"
+      },
+      "AlbumEdition": {
+        "additionalProperties": false,
+        "properties": {
+          "barcode": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "formats": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "labels": {
+            "items": {
+              "$ref": "#/components/schemas/AlbumEditionLabel"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "link": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "track_count": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "type": "object"
+      },
+      "AlbumEditionLabel": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog_number": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
         ],
         "type": "object"
       },
@@ -1706,6 +1799,32 @@
         },
         "required": [
           "album_ids"
+        ],
+        "type": "object"
+      },
+      "AlbumRating": {
+        "additionalProperties": false,
+        "properties": {
+          "scale_max": {
+            "format": "double",
+            "type": "number"
+          },
+          "system": {
+            "type": "string"
+          },
+          "value": {
+            "format": "double",
+            "type": "number"
+          },
+          "votes": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "system",
+          "value",
+          "scale_max"
         ],
         "type": "object"
       },
@@ -6823,9 +6942,16 @@
           "cover_path": {
             "type": "string"
           },
+          "description": {
+            "type": "string"
+          },
           "duration_seconds": {
             "format": "int32",
             "type": "integer"
+          },
+          "editions": {
+            "contentEncoding": "base64",
+            "type": "string"
           },
           "explicit": {
             "type": "boolean"
@@ -6896,8 +7022,19 @@
           "rating": {
             "$ref": "#/components/schemas/Numeric"
           },
+          "ratings": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "release_date": {
             "$ref": "#/components/schemas/Date"
+          },
+          "review": {
+            "type": "string"
+          },
+          "sales": {
+            "format": "int64",
+            "type": "integer"
           },
           "search_vector": {},
           "secondary_types": {
@@ -6997,6 +7134,11 @@
           "field_provenance",
           "sort_artist",
           "sort_title",
+          "description",
+          "review",
+          "ratings",
+          "editions",
+          "sales",
           "artist_name",
           "artist_slug",
           "track_count"
@@ -7038,9 +7180,16 @@
           "cover_path": {
             "type": "string"
           },
+          "description": {
+            "type": "string"
+          },
           "duration_seconds": {
             "format": "int32",
             "type": "integer"
+          },
+          "editions": {
+            "contentEncoding": "base64",
+            "type": "string"
           },
           "explicit": {
             "type": "boolean"
@@ -7111,8 +7260,19 @@
           "rating": {
             "$ref": "#/components/schemas/Numeric"
           },
+          "ratings": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "release_date": {
             "$ref": "#/components/schemas/Date"
+          },
+          "review": {
+            "type": "string"
+          },
+          "sales": {
+            "format": "int64",
+            "type": "integer"
           },
           "search_vector": {},
           "secondary_types": {
@@ -7212,6 +7372,11 @@
           "field_provenance",
           "sort_artist",
           "sort_title",
+          "description",
+          "review",
+          "ratings",
+          "editions",
+          "sales",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -7568,9 +7733,16 @@
           "cover_path": {
             "type": "string"
           },
+          "description": {
+            "type": "string"
+          },
           "duration_seconds": {
             "format": "int32",
             "type": "integer"
+          },
+          "editions": {
+            "contentEncoding": "base64",
+            "type": "string"
           },
           "explicit": {
             "type": "boolean"
@@ -7641,8 +7813,19 @@
           "rating": {
             "$ref": "#/components/schemas/Numeric"
           },
+          "ratings": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "release_date": {
             "$ref": "#/components/schemas/Date"
+          },
+          "review": {
+            "type": "string"
+          },
+          "sales": {
+            "format": "int64",
+            "type": "integer"
           },
           "search_vector": {},
           "secondary_types": {
@@ -7742,6 +7925,11 @@
           "field_provenance",
           "sort_artist",
           "sort_title",
+          "description",
+          "review",
+          "ratings",
+          "editions",
+          "sales",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -8038,9 +8226,16 @@
           "cover_path": {
             "type": "string"
           },
+          "description": {
+            "type": "string"
+          },
           "duration_seconds": {
             "format": "int32",
             "type": "integer"
+          },
+          "editions": {
+            "contentEncoding": "base64",
+            "type": "string"
           },
           "explicit": {
             "type": "boolean"
@@ -8111,11 +8306,22 @@
           "rating": {
             "$ref": "#/components/schemas/Numeric"
           },
+          "ratings": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "release_date": {
             "$ref": "#/components/schemas/Date"
           },
           "release_year": {
             "format": "int32",
+            "type": "integer"
+          },
+          "review": {
+            "type": "string"
+          },
+          "sales": {
+            "format": "int64",
             "type": "integer"
           },
           "search_vector": {},
@@ -8216,6 +8422,11 @@
           "field_provenance",
           "sort_artist",
           "sort_title",
+          "description",
+          "review",
+          "ratings",
+          "editions",
+          "sales",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -8465,9 +8676,16 @@
           "cover_path": {
             "type": "string"
           },
+          "description": {
+            "type": "string"
+          },
           "duration_seconds": {
             "format": "int32",
             "type": "integer"
+          },
+          "editions": {
+            "contentEncoding": "base64",
+            "type": "string"
           },
           "explicit": {
             "type": "boolean"
@@ -8538,8 +8756,19 @@
           "rating": {
             "$ref": "#/components/schemas/Numeric"
           },
+          "ratings": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "release_date": {
             "$ref": "#/components/schemas/Date"
+          },
+          "review": {
+            "type": "string"
+          },
+          "sales": {
+            "format": "int64",
+            "type": "integer"
           },
           "search_vector": {},
           "secondary_types": {
@@ -8639,6 +8868,11 @@
           "field_provenance",
           "sort_artist",
           "sort_title",
+          "description",
+          "review",
+          "ratings",
+          "editions",
+          "sales",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -9188,9 +9422,16 @@
           "cover_path": {
             "type": "string"
           },
+          "description": {
+            "type": "string"
+          },
           "duration_seconds": {
             "format": "int32",
             "type": "integer"
+          },
+          "editions": {
+            "contentEncoding": "base64",
+            "type": "string"
           },
           "explicit": {
             "type": "boolean"
@@ -9264,8 +9505,19 @@
           "rating": {
             "$ref": "#/components/schemas/Numeric"
           },
+          "ratings": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "release_date": {
             "$ref": "#/components/schemas/Date"
+          },
+          "review": {
+            "type": "string"
+          },
+          "sales": {
+            "format": "int64",
+            "type": "integer"
           },
           "search_vector": {},
           "secondary_types": {
@@ -9365,6 +9617,11 @@
           "field_provenance",
           "sort_artist",
           "sort_title",
+          "description",
+          "review",
+          "ratings",
+          "editions",
+          "sales",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -9741,9 +9998,16 @@
           "cover_path": {
             "type": "string"
           },
+          "description": {
+            "type": "string"
+          },
           "duration_seconds": {
             "format": "int32",
             "type": "integer"
+          },
+          "editions": {
+            "contentEncoding": "base64",
+            "type": "string"
           },
           "explicit": {
             "type": "boolean"
@@ -9821,8 +10085,19 @@
             "format": "int32",
             "type": "integer"
           },
+          "ratings": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "release_date": {
             "$ref": "#/components/schemas/Date"
+          },
+          "review": {
+            "type": "string"
+          },
+          "sales": {
+            "format": "int64",
+            "type": "integer"
           },
           "search_vector": {},
           "secondary_types": {
@@ -9918,6 +10193,11 @@
           "field_provenance",
           "sort_artist",
           "sort_title",
+          "description",
+          "review",
+          "ratings",
+          "editions",
+          "sales",
           "artist_name",
           "artist_slug",
           "rating_2",
@@ -11820,12 +12100,30 @@
           "artist_slug": {
             "type": "string"
           },
+          "editions": {
+            "items": {
+              "$ref": "#/components/schemas/AlbumEdition"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "media_item_id": {
             "format": "int64",
             "type": "integer"
           },
           "media_item_public_id": {
             "type": "string"
+          },
+          "ratings": {
+            "items": {
+              "$ref": "#/components/schemas/AlbumRating"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "tracks": {
             "items": {

@@ -475,7 +475,9 @@ export type Album = {
     catalog_no: string;
     country: string;
     cover_path: string;
+    description: string;
     duration_seconds: number;
+    editions: string;
     explicit: boolean;
     external_ids: string;
     field_provenance: string;
@@ -493,7 +495,10 @@ export type Album = {
     playcount: number;
     popularity: number;
     rating: Numeric;
+    ratings: string;
     release_date: Date;
+    review: string;
+    sales: number;
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
@@ -508,6 +513,25 @@ export type Album = {
     year: string;
 };
 
+export type AlbumEdition = {
+    barcode?: string;
+    country?: string;
+    date?: string;
+    formats?: Array<string> | null;
+    labels?: Array<AlbumEditionLabel> | null;
+    link?: string;
+    provider: string;
+    provider_id?: string;
+    status?: string;
+    title?: string;
+    track_count?: number;
+};
+
+export type AlbumEditionLabel = {
+    catalog_number?: string;
+    name: string;
+};
+
 export type AlbumIdsBody = {
     /**
      * A URL to the JSON Schema for this object.
@@ -517,6 +541,13 @@ export type AlbumIdsBody = {
      * List of album IDs to look up
      */
     album_ids: Array<number> | null;
+};
+
+export type AlbumRating = {
+    scale_max: number;
+    system: string;
+    value: number;
+    votes?: number;
 };
 
 export type AlbumResultsBody = {
@@ -2070,7 +2101,9 @@ export type ListAlbumsByArtistIdForShelfRow = {
     catalog_no: string;
     country: string;
     cover_path: string;
+    description: string;
     duration_seconds: number;
+    editions: string;
     explicit: boolean;
     external_ids: string;
     field_provenance: string;
@@ -2088,7 +2121,10 @@ export type ListAlbumsByArtistIdForShelfRow = {
     playcount: number;
     popularity: number;
     rating: Numeric;
+    ratings: string;
     release_date: Date;
+    review: string;
+    sales: number;
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
@@ -2115,7 +2151,9 @@ export type ListAlbumsByArtistSlugRow = {
     catalog_no: string;
     country: string;
     cover_path: string;
+    description: string;
     duration_seconds: number;
+    editions: string;
     explicit: boolean;
     external_ids: string;
     field_provenance: string;
@@ -2133,7 +2171,10 @@ export type ListAlbumsByArtistSlugRow = {
     playcount: number;
     popularity: number;
     rating: Numeric;
+    ratings: string;
     release_date: Date;
+    review: string;
+    sales: number;
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
@@ -2240,7 +2281,9 @@ export type ListMusicAlbumsRow = {
     catalog_no: string;
     country: string;
     cover_path: string;
+    description: string;
     duration_seconds: number;
+    editions: string;
     explicit: boolean;
     external_ids: string;
     field_provenance: string;
@@ -2258,7 +2301,10 @@ export type ListMusicAlbumsRow = {
     playcount: number;
     popularity: number;
     rating: Numeric;
+    ratings: string;
     release_date: Date;
+    review: string;
+    sales: number;
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
@@ -2340,7 +2386,9 @@ export type ListOnThisDayAlbumsRow = {
     catalog_no: string;
     country: string;
     cover_path: string;
+    description: string;
     duration_seconds: number;
+    editions: string;
     explicit: boolean;
     external_ids: string;
     field_provenance: string;
@@ -2358,8 +2406,11 @@ export type ListOnThisDayAlbumsRow = {
     playcount: number;
     popularity: number;
     rating: Numeric;
+    ratings: string;
     release_date: Date;
     release_year: number;
+    review: string;
+    sales: number;
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
@@ -2440,7 +2491,9 @@ export type ListRecentlyAddedAlbumsRow = {
     catalog_no: string;
     country: string;
     cover_path: string;
+    description: string;
     duration_seconds: number;
+    editions: string;
     explicit: boolean;
     external_ids: string;
     field_provenance: string;
@@ -2458,7 +2511,10 @@ export type ListRecentlyAddedAlbumsRow = {
     playcount: number;
     popularity: number;
     rating: Numeric;
+    ratings: string;
     release_date: Date;
+    review: string;
+    sales: number;
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
@@ -2608,7 +2664,9 @@ export type ListUserLovedAlbumsRow = {
     catalog_no: string;
     country: string;
     cover_path: string;
+    description: string;
     duration_seconds: number;
+    editions: string;
     explicit: boolean;
     external_ids: string;
     field_provenance: string;
@@ -2627,7 +2685,10 @@ export type ListUserLovedAlbumsRow = {
     playcount: number;
     popularity: number;
     rating: Numeric;
+    ratings: string;
     release_date: Date;
+    review: string;
+    sales: number;
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
@@ -2729,7 +2790,9 @@ export type ListUserRatedAlbumsRow = {
     catalog_no: string;
     country: string;
     cover_path: string;
+    description: string;
     duration_seconds: number;
+    editions: string;
     explicit: boolean;
     external_ids: string;
     field_provenance: string;
@@ -2749,7 +2812,10 @@ export type ListUserRatedAlbumsRow = {
     rated_at: Timestamptz;
     rating: Numeric;
     rating_2: number;
+    ratings: string;
     release_date: Date;
+    review: string;
+    sales: number;
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
@@ -3274,8 +3340,10 @@ export type MusicAlbumDetail = {
     album: Album;
     artist: ArtistView;
     artist_slug: string;
+    editions?: Array<AlbumEdition> | null;
     media_item_id: number;
     media_item_public_id?: string;
+    ratings?: Array<AlbumRating> | null;
     tracks: Array<TrackView> | null;
 };
 
@@ -6093,7 +6161,9 @@ export type AlbumWritable = {
     catalog_no: string;
     country: string;
     cover_path: string;
+    description: string;
     duration_seconds: number;
+    editions: string;
     explicit: boolean;
     external_ids: string;
     field_provenance: string;
@@ -6111,7 +6181,10 @@ export type AlbumWritable = {
     playcount: number;
     popularity: number;
     rating: Numeric;
+    ratings: string;
     release_date: Date;
+    review: string;
+    sales: number;
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
@@ -6799,8 +6872,10 @@ export type MusicAlbumDetailWritable = {
     album: AlbumWritable;
     artist: ArtistView;
     artist_slug: string;
+    editions?: Array<AlbumEdition> | null;
     media_item_id: number;
     media_item_public_id?: string;
+    ratings?: Array<AlbumRating> | null;
     tracks: Array<TrackView> | null;
 };
 

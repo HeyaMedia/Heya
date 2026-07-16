@@ -183,6 +183,8 @@ func (m *Matcher) writeArtistMusicVideos(ctx context.Context, mediaItemID int64,
 func (m *Matcher) writeAlbumExtendedMetadata(ctx context.Context, albumID int64, e *metadata.AlbumEntry) error {
 	externalIDsJSON, _ := json.Marshal(safeStringMap(e.ExternalIDs))
 	creditsJSON, _ := json.Marshal(safeCredits(e.ArtistCredits))
+	ratingsJSON, _ := json.Marshal(nonNilRatings(e.Ratings))
+	editionsJSON, _ := json.Marshal(nonNilEditions(e.Editions))
 
 	return m.q.UpdateAlbumExtendedMetadata(ctx, sqlc.UpdateAlbumExtendedMetadataParams{
 		ID:             albumID,
@@ -200,7 +202,26 @@ func (m *Matcher) writeAlbumExtendedMetadata(ctx context.Context, albumID int64,
 		Isrcs:          nonNilStrings(e.ISRCs),
 		ExternalIds:    externalIDsJSON,
 		ArtistCredits:  creditsJSON,
+		Column16:       e.Description,
+		Column17:       e.Review,
+		Ratings:        ratingsJSON,
+		Editions:       editionsJSON,
+		Column20:       e.Sales,
 	})
+}
+
+func nonNilRatings(values []metadata.AlbumRating) []metadata.AlbumRating {
+	if values == nil {
+		return []metadata.AlbumRating{}
+	}
+	return values
+}
+
+func nonNilEditions(values []metadata.AlbumEdition) []metadata.AlbumEdition {
+	if values == nil {
+		return []metadata.AlbumEdition{}
+	}
+	return values
 }
 
 func (m *Matcher) writeTrackExtendedMetadata(ctx context.Context, trackID int64, t *metadata.TrackDetail) error {

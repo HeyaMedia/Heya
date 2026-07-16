@@ -520,6 +520,48 @@ type AlbumEntry struct {
 	Playcount      int64               `json:"playcount,omitempty"`
 	Explicit       bool                `json:"explicit,omitempty"`
 	ArtistCredits  []ArtistCreditEntry `json:"artist_credits,omitempty"`
+
+	// 2026-07 heya.media provider expansion (audiodb / bandcamp / discogs
+	// depth): editorial prose, per-system ratings, editions, sales.
+	Description string         `json:"description,omitempty"`
+	Review      string         `json:"review,omitempty"`
+	Ratings     []AlbumRating  `json:"ratings,omitempty"`
+	Editions    []AlbumEdition `json:"editions,omitempty"`
+	Sales       int64          `json:"sales,omitempty"`
+}
+
+// AlbumRating is one provider-native rating. Scales differ per system
+// (musicbrainz 0-5, audiodb 0-10) — normalize by Value/ScaleMax, never
+// compare raw values across systems.
+type AlbumRating struct {
+	System   string  `json:"system"`
+	Value    float64 `json:"value"`
+	ScaleMax float64 `json:"scale_max"`
+	Votes    int     `json:"votes,omitempty"`
+}
+
+// AlbumEdition is one issued pressing/release of an album (MusicBrainz /
+// Discogs / Deezer / Apple / Bandcamp). Formats only come from Discogs and
+// Bandcamp; catalog numbers from MusicBrainz/Discogs; Link is an external
+// provider page (Bandcamp album URL).
+type AlbumEdition struct {
+	Provider   string              `json:"provider"`
+	ProviderID string              `json:"provider_id,omitempty"`
+	Title      string              `json:"title,omitempty"`
+	Status     string              `json:"status,omitempty"`
+	Date       string              `json:"date,omitempty"`
+	Country    string              `json:"country,omitempty"`
+	Barcode    string              `json:"barcode,omitempty"`
+	TrackCount int                 `json:"track_count,omitempty"`
+	Formats    []string            `json:"formats,omitempty"`
+	Labels     []AlbumEditionLabel `json:"labels,omitempty"`
+	Link       string              `json:"link,omitempty"`
+}
+
+// AlbumEditionLabel is one record-label credit on an edition.
+type AlbumEditionLabel struct {
+	Name          string `json:"name"`
+	CatalogNumber string `json:"catalog_number,omitempty"`
 }
 
 type NFOIDs struct {

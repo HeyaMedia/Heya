@@ -13,7 +13,7 @@ import (
 )
 
 const listAlbumsByArtistIDForShelf = `-- name: ListAlbumsByArtistIDForShelf :many
-SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title,
+SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales,
        a.name                                                   AS artist_name,
        mi.slug                                                  AS artist_slug,
        (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count
@@ -70,6 +70,11 @@ type ListAlbumsByArtistIDForShelfRow struct {
 	FieldProvenance    []byte             `json:"field_provenance"`
 	SortArtist         string             `json:"sort_artist"`
 	SortTitle          string             `json:"sort_title"`
+	Description        string             `json:"description"`
+	Review             string             `json:"review"`
+	Ratings            []byte             `json:"ratings"`
+	Editions           []byte             `json:"editions"`
+	Sales              int64              `json:"sales"`
 	ArtistName         string             `json:"artist_name"`
 	ArtistSlug         string             `json:"artist_slug"`
 	TrackCount         int64              `json:"track_count"`
@@ -125,6 +130,11 @@ func (q *Queries) ListAlbumsByArtistIDForShelf(ctx context.Context, arg ListAlbu
 			&i.FieldProvenance,
 			&i.SortArtist,
 			&i.SortTitle,
+			&i.Description,
+			&i.Review,
+			&i.Ratings,
+			&i.Editions,
+			&i.Sales,
 			&i.ArtistName,
 			&i.ArtistSlug,
 			&i.TrackCount,
@@ -560,7 +570,7 @@ func (q *Queries) ListLapsedArtists(ctx context.Context, arg ListLapsedArtistsPa
 }
 
 const listOnThisDayAlbums = `-- name: ListOnThisDayAlbums :many
-SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title,
+SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales,
        a.name                                                       AS artist_name,
        mi.slug                                                      AS artist_slug,
        (SELECT count(*) FROM tracks t WHERE t.album_id = al.id)     AS track_count,
@@ -617,6 +627,11 @@ type ListOnThisDayAlbumsRow struct {
 	FieldProvenance    []byte             `json:"field_provenance"`
 	SortArtist         string             `json:"sort_artist"`
 	SortTitle          string             `json:"sort_title"`
+	Description        string             `json:"description"`
+	Review             string             `json:"review"`
+	Ratings            []byte             `json:"ratings"`
+	Editions           []byte             `json:"editions"`
+	Sales              int64              `json:"sales"`
 	ArtistName         string             `json:"artist_name"`
 	ArtistSlug         string             `json:"artist_slug"`
 	TrackCount         int64              `json:"track_count"`
@@ -675,6 +690,11 @@ func (q *Queries) ListOnThisDayAlbums(ctx context.Context, limit int32) ([]ListO
 			&i.FieldProvenance,
 			&i.SortArtist,
 			&i.SortTitle,
+			&i.Description,
+			&i.Review,
+			&i.Ratings,
+			&i.Editions,
+			&i.Sales,
 			&i.ArtistName,
 			&i.ArtistSlug,
 			&i.TrackCount,

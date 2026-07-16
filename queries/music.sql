@@ -472,7 +472,12 @@ UPDATE albums SET
     styles           = $12,
     isrcs            = $13,
     external_ids     = $14,
-    artist_credits   = $15
+    artist_credits   = $15,
+    description      = CASE WHEN $16::text != '' THEN $16 ELSE description END,
+    review           = CASE WHEN $17::text != '' THEN $17 ELSE review END,
+    ratings          = $18,
+    editions         = $19,
+    sales            = CASE WHEN $20::bigint != 0 THEN $20 ELSE sales END
 WHERE id = $1;
 
 -- name: UpdateTrackExtendedMetadata :exec

@@ -242,6 +242,35 @@ export interface Album {
   true_peak_db: string | null
   loudness_range_db: string | null
   loudness_analyzed_at: string | null
+  description?: string
+  review?: string
+  sales?: number
+}
+
+// One provider-native album rating — scales differ per system (musicbrainz
+// 0-5, audiodb 0-10); normalize by value/scale_max.
+export interface AlbumRating {
+  system: string
+  value: number
+  scale_max: number
+  votes?: number
+}
+
+// One issued pressing/release of an album. Formats only from Discogs /
+// Bandcamp; catalog numbers from MusicBrainz/Discogs; link is an external
+// provider page (Bandcamp).
+export interface AlbumEdition {
+  provider: string
+  provider_id?: string
+  title?: string
+  status?: string
+  date?: string
+  country?: string
+  barcode?: string
+  track_count?: number
+  formats?: string[]
+  labels?: { name: string; catalog_number?: string }[]
+  link?: string
 }
 
 export interface MusicAlbumDetail {
@@ -251,6 +280,8 @@ export interface MusicAlbumDetail {
   artist_slug: string
   media_item_id: number
   media_item_public_id?: string
+  ratings?: AlbumRating[]
+  editions?: AlbumEdition[]
 }
 
 export interface Track {

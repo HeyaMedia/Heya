@@ -13,13 +13,13 @@ import (
 )
 
 const searchAlbums = `-- name: SearchAlbums :many
-SELECT a.id, a.artist_id, a.title, a.slug, a.year, a.musicbrainz_id, a.album_type, a.genres, a.cover_path, a.release_date, a.label, a.country, a.barcode, a.total_tracks, a.total_discs, a.tags, a.integrated_lufs, a.true_peak_db, a.loudness_range_db, a.loudness_analyzed_at, a.search_vector, a.catalog_no, a.explicit, a.original_title, a.secondary_types, a.styles, a.language, a.duration_seconds, a.isrcs, a.rating, a.popularity, a.listeners, a.playcount, a.external_ids, a.artist_credits, a.field_provenance, a.sort_artist, a.sort_title,
+SELECT a.id, a.artist_id, a.title, a.slug, a.year, a.musicbrainz_id, a.album_type, a.genres, a.cover_path, a.release_date, a.label, a.country, a.barcode, a.total_tracks, a.total_discs, a.tags, a.integrated_lufs, a.true_peak_db, a.loudness_range_db, a.loudness_analyzed_at, a.search_vector, a.catalog_no, a.explicit, a.original_title, a.secondary_types, a.styles, a.language, a.duration_seconds, a.isrcs, a.rating, a.popularity, a.listeners, a.playcount, a.external_ids, a.artist_credits, a.field_provenance, a.sort_artist, a.sort_title, a.description, a.review, a.ratings, a.editions, a.sales,
        mi.id AS artist_media_item_id,
        mi.public_id AS artist_media_item_public_id,
        mi.title AS artist_name,
        mi.slug AS artist_slug
 FROM (
-  SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title
+  SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales
   FROM albums al
   WHERE (
       lower(al.title) % lower($1)
@@ -91,6 +91,11 @@ type SearchAlbumsRow struct {
 	FieldProvenance         []byte             `json:"field_provenance"`
 	SortArtist              string             `json:"sort_artist"`
 	SortTitle               string             `json:"sort_title"`
+	Description             string             `json:"description"`
+	Review                  string             `json:"review"`
+	Ratings                 []byte             `json:"ratings"`
+	Editions                []byte             `json:"editions"`
+	Sales                   int64              `json:"sales"`
 	ArtistMediaItemID       int64              `json:"artist_media_item_id"`
 	ArtistMediaItemPublicID uuid.UUID          `json:"artist_media_item_public_id"`
 	ArtistName              string             `json:"artist_name"`
@@ -149,6 +154,11 @@ func (q *Queries) SearchAlbums(ctx context.Context, arg SearchAlbumsParams) ([]S
 			&i.FieldProvenance,
 			&i.SortArtist,
 			&i.SortTitle,
+			&i.Description,
+			&i.Review,
+			&i.Ratings,
+			&i.Editions,
+			&i.Sales,
 			&i.ArtistMediaItemID,
 			&i.ArtistMediaItemPublicID,
 			&i.ArtistName,

@@ -622,10 +622,71 @@ func (p *HeyaProvider) albumFromReleaseGroup(document releaseGroupDocument) meta
 		album.Tags = append(album.Tags, tag.Name)
 	}
 	album.Rating, _ = preferredRating(document.Data.Ratings)
+	for _, rating := range document.Data.Ratings {
+		album.Ratings = append(album.Ratings, metadata.AlbumRating{
+			System:   firstNonEmpty(rating.System, rating.Provider),
+			Value:    rating.Value,
+			ScaleMax: rating.ScaleMax,
+			Votes:    rating.Votes,
+		})
+	}
 	for _, credit := range document.Data.ArtistCredits {
 		album.ArtistCredits = append(album.ArtistCredits, metadata.ArtistCreditEntry{Name: firstNonEmpty(credit.Name, credit.ArtistName), MBID: credit.ArtistID, JoinPhrase: credit.JoinPhrase})
 	}
+	album.Description = pickAlbumDescription(document.Data.Descriptions)
+	for _, annotation := range document.Data.Annotations {
+		if annotation.Type == "provider_review" && englishOrUntagged(annotation.Language) {
+			album.Review = annotation.Value
+			break
+		}
+	}
+	for _, metric := range document.Data.Metrics {
+		if strings.EqualFold(metric.Name, "sales") {
+			album.Sales = int64(metric.Value)
+		}
+	}
+	for _, edition := range document.Data.Editions {
+		mapped := metadata.AlbumEdition{
+			Provider:   edition.Provider,
+			ProviderID: edition.ProviderID,
+			Title:      edition.Title,
+			Status:     edition.Status,
+			Date:       edition.Date.Value,
+			Country:    edition.Country,
+			Barcode:    edition.Barcode,
+			TrackCount: edition.TrackCount,
+			Formats:    edition.Formats,
+			Link:       edition.Link,
+		}
+		for _, label := range edition.Labels {
+			mapped.Labels = append(mapped.Labels, metadata.AlbumEditionLabel{Name: label.Name, CatalogNumber: label.CatalogNumber})
+		}
+		album.Editions = append(album.Editions, mapped)
+	}
 	return album
+}
+
+func englishOrUntagged(language string) bool {
+	return language == "" || strings.HasPrefix(strings.ToLower(language), "en")
+}
+
+// pickAlbumDescription prefers TheAudioDB's English provider_description;
+// otherwise the longest substantial English/untagged description. The length
+// floor drops Wikidata's one-line stubs ("album nga Daft Punk").
+func pickAlbumDescription(values []localizedText) string {
+	best := ""
+	for _, value := range values {
+		if !englishOrUntagged(value.Language) {
+			continue
+		}
+		if value.Type == "provider_description" {
+			return value.Value
+		}
+		if len(value.Value) >= 120 && len(value.Value) > len(best) {
+			best = value.Value
+		}
+	}
+	return best
 }
 
 func mergeIssuedRelease(album *metadata.AlbumEntry, release releaseDocument) {

@@ -655,6 +655,14 @@ func musicAlbumParams(artistID int64, mapping MusicAlbumFetchMatch, remote metad
 }
 
 func applyMusicAlbumExtended(ctx context.Context, q *sqlc.Queries, albumID int64, remote metadata.AlbumEntry) error {
+	ratings := remote.Ratings
+	if ratings == nil {
+		ratings = []metadata.AlbumRating{}
+	}
+	editions := remote.Editions
+	if editions == nil {
+		editions = []metadata.AlbumEdition{}
+	}
 	return q.UpdateAlbumExtendedMetadata(ctx, sqlc.UpdateAlbumExtendedMetadataParams{
 		ID:             albumID,
 		Column2:        remote.CatalogNo,
@@ -671,6 +679,11 @@ func applyMusicAlbumExtended(ctx context.Context, q *sqlc.Queries, albumID int64
 		Isrcs:          nonNilStrings(remote.ISRCs),
 		ExternalIds:    mustJSONBytes(remote.ExternalIDs),
 		ArtistCredits:  mustJSONBytes(remote.ArtistCredits),
+		Column16:       remote.Description,
+		Column17:       remote.Review,
+		Ratings:        mustJSONBytes(ratings),
+		Editions:       mustJSONBytes(editions),
+		Column20:       remote.Sales,
 	})
 }
 

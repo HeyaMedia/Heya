@@ -197,6 +197,11 @@ type Album struct {
 	FieldProvenance    []byte             `json:"field_provenance"`
 	SortArtist         string             `json:"sort_artist"`
 	SortTitle          string             `json:"sort_title"`
+	Description        string             `json:"description"`
+	Review             string             `json:"review"`
+	Ratings            []byte             `json:"ratings"`
+	Editions           []byte             `json:"editions"`
+	Sales              int64              `json:"sales"`
 }
 
 type AlbumCentroid struct {
