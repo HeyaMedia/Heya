@@ -3,51 +3,52 @@
     <SectionHeader :title="title" :subtitle="subtitle">
       <template #actions>
         <button v-if="more" class="more" @click="$emit('more')">{{ more }}</button>
-        <button class="scroll-btn" aria-label="Scroll left" @click="scrollByDir(-1)"><Icon name="chevleft" :size="16" /></button>
-        <button class="scroll-btn" aria-label="Scroll right" @click="scrollByDir(1)"><Icon name="chevright" :size="16" /></button>
+        <button class="scroll-btn" aria-label="Scroll left" @click="rail?.scrollByDir(-1)"><Icon name="chevleft" :size="16" /></button>
+        <button class="scroll-btn" aria-label="Scroll right" @click="rail?.scrollByDir(1)"><Icon name="chevright" :size="16" /></button>
       </template>
     </SectionHeader>
-    <div ref="scrollEl" class="row-scroll" :data-scroll-memory="memoryKey || title" @scroll.passive="onScroll">
-      <!-- Virtualized track: only the tiles inside the viewport (± overscan)
-           exist in the DOM; each is absolutely positioned at its slot. The
-           track's fixed width keeps the scrollbar honest for the full item
-           count, so a 2000-deep rail scrubs like a plain overflow row. -->
-      <div class="row-track" :style="{ width: `${trackWidth}px`, height: `${tileHeight}px` }">
+    <!-- AppRail owns the virtualization: fixed-stride tiles, honest scrollbar,
+         tail spinner, load-ahead. This component is just the media-card skin. -->
+    <AppRail
+      ref="rail"
+      :items="items"
+      :tile-width="tileWidth || 168"
+      :aspect="aspect || '2/3'"
+      :memory-key="memoryKey || title"
+      :has-more="hasMore"
+      :loading-more="loadingMore"
+      @load-more="$emit('load-more')"
+    >
+      <template #default="{ item, index }">
         <AppContextMenu
-          v-for="v in visibleTiles"
-          :key="v.item.key ?? v.item.id"
-          :items="contextMenuItems(v.item)"
-          :disabled="!contextItems || contextMenuItems(v.item).length === 0"
+          :items="contextMenuItems(item)"
+          :disabled="!contextItems || contextMenuItems(item).length === 0"
         >
           <div
             class="card-tile"
-            :class="{ unavailable: v.item.available === false }"
-            :style="{ left: `${v.left}px`, width: `${tileW}px` }"
-            :tabindex="v.item.available === false ? -1 : 0"
+            :class="{ unavailable: item.available === false }"
+            :tabindex="item.available === false ? -1 : 0"
             role="link"
-            @click="v.item.available !== false && $emit('tile', v.item)"
-            @keydown.enter.prevent="v.item.available !== false && $emit('tile', v.item)"
-            @pointerenter="scheduleIntent(v.item)"
+            @click="item.available !== false && $emit('tile', item)"
+            @keydown.enter.prevent="item.available !== false && $emit('tile', item)"
+            @pointerenter="scheduleIntent(item)"
             @pointerleave="cancelIntent"
-            @focus="signalIntent(v.item)"
-            @pointerdown="signalIntent(v.item)"
+            @focus="signalIntent(item)"
+            @pointerdown="signalIntent(item)"
           >
             <MediaCard
-              :idx="v.index"
-              :src="v.item.poster_src ?? usePosterUrl(v.item)"
-              :title="v.item.title"
-              :subtitle="v.item.year || v.item.sub"
+              :idx="index"
+              :src="item.poster_src ?? usePosterUrl(item)"
+              :title="item.title"
+              :subtitle="item.year || item.sub"
               :aspect="aspect || '2/3'"
-              :missing="v.item.available === false"
-              :badge-br="showAdded ? timeAgoShort(v.item.added_at ?? v.item.created_at) : ''"
+              :missing="item.available === false"
+              :badge-br="showAdded ? timeAgoShort(item.added_at ?? item.created_at) : ''"
             />
           </div>
         </AppContextMenu>
-        <div v-if="hasMore" class="rail-tail" :style="{ left: `${items.length * stride}px` }" aria-hidden="true">
-          <span class="rail-tail-spin" />
-        </div>
-      </div>
-    </div>
+      </template>
+    </AppRail>
   </section>
 </template>
 
@@ -92,69 +93,9 @@ const emit = defineEmits<{
   'load-more': []
 }>()
 
-const { isPhone } = useViewport()
-
-// Tile geometry is the whole virtualization contract: fixed width + gap →
-// slot i lives at i*stride, and the visible range is pure arithmetic on
-// scrollLeft. Phone tiles collapse to 140px (used to be a CSS !important
-// override — the JS math has to know the real width, so it lives here now).
-const tileW = computed(() => (isPhone.value ? 140 : props.tileWidth || 168))
-const gap = computed(() => (isPhone.value ? 12 : 18))
-const stride = computed(() => tileW.value + gap.value)
-const tileHeight = computed(() => {
-  const [w, h] = (props.aspect || '2/3').split('/').map(Number)
-  return Math.round(tileW.value * ((h || 3) / (w || 2)))
-})
-const trackWidth = computed(() =>
-  props.items.length * stride.value - (props.items.length ? gap.value : 0)
-  + (props.hasMore ? stride.value : 0))
-
-const scrollEl = ref<HTMLElement>()
-const scrollLeft = ref(0)
-const viewportW = ref(0)
-
-const OVERSCAN = 4
-const visibleTiles = computed(() => {
-  const s = stride.value
-  const start = Math.max(0, Math.floor(scrollLeft.value / s) - OVERSCAN)
-  const end = Math.min(props.items.length, Math.ceil((scrollLeft.value + viewportW.value) / s) + OVERSCAN)
-  const out: { item: RowItem; index: number; left: number }[] = []
-  for (let i = start; i < end; i++) {
-    out.push({ item: props.items[i]!, index: i, left: i * s })
-  }
-  return out
-})
-
-let ro: ResizeObserver | null = null
-onMounted(() => {
-  if (!scrollEl.value) return
-  viewportW.value = scrollEl.value.clientWidth
-  ro = new ResizeObserver(() => {
-    if (scrollEl.value) viewportW.value = scrollEl.value.clientWidth
-  })
-  ro.observe(scrollEl.value)
-})
-onBeforeUnmount(() => ro?.disconnect())
-
-// Ask for the next page while the user still has ~8 tiles of runway, so the
-// rail keeps flowing instead of hitting a wall. The watchEffect also covers
-// the "first page doesn't even fill the viewport" case with no scroll at all.
-const LOAD_AHEAD_TILES = 8
-function maybeLoadMore() {
-  if (!props.hasMore || props.loadingMore) return
-  const remaining = trackWidth.value - (scrollLeft.value + viewportW.value)
-  if (remaining < stride.value * LOAD_AHEAD_TILES) emit('load-more')
-}
-function onScroll() {
-  if (scrollEl.value) scrollLeft.value = scrollEl.value.scrollLeft
-  maybeLoadMore()
-}
-watchEffect(() => {
-  // touch the reactive deps so a new page / resize / prop change re-checks
-  void props.items.length
-  void viewportW.value
-  maybeLoadMore()
-})
+// AppRail is generic, so InstanceType<> can't name it — type the exposed
+// surface directly.
+const rail = ref<{ scrollByDir: (dir: number) => void } | null>(null)
 
 let intentTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -179,65 +120,13 @@ onScopeDispose(cancelIntent)
 function contextMenuItems(item: RowItem): ContextMenuItem[] {
   return props.contextItems?.(item) ?? []
 }
-
-function scrollByDir(dir: number) {
-  if (!scrollEl.value) return
-  scrollEl.value.scrollBy({ left: dir * 600, behavior: 'smooth' })
-}
 </script>
 
 <style scoped>
 .content-row { margin-bottom: 40px; }
 
-.row-scroll {
-  overflow-x: auto;
-  overflow-y: hidden;
-  /* Shadow room (Heya 2.0): a layout-neutral padding/negative-margin pair pushes
-     the clip box out so the enlarged directional shadows + the -4px hover lift
-     aren't sliced by overflow. Horizontal bleed tracks the page gutter
-     (--page-pad-x) so the rail runs edge-to-edge WITHOUT ever overflowing the
-     page sideways. The virtualizer's tile geometry is pure stride arithmetic
-     (padding-agnostic — see visibleTiles), so the bigger padding only widens
-     the clip box; overscan absorbs the few px of clientWidth the padding adds. */
-  --rail-bleed: var(--page-pad-x, 40px);
-  padding: 44px var(--rail-bleed) 130px;
-  margin: -44px calc(-1 * var(--rail-bleed)) -130px;
-  scrollbar-width: none;
-}
-@media (max-width: 1100px) { .row-scroll { --rail-bleed: 24px; } }
-@media (max-width: 720px) {
-  .row-scroll {
-    --rail-bleed: 12px;
-    padding-top: 30px; padding-bottom: 100px;
-    margin-top: -30px; margin-bottom: -100px;
-  }
-}
-.row-scroll::-webkit-scrollbar { display: none; }
-
-.row-track { position: relative; }
-.row-track > .card-tile,
-.row-track :deep(.card-tile) { position: absolute; top: 0; }
-
-.rail-tail {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 80px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.rail-tail-spin {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  border: 2px solid rgb(var(--ink) / 0.15);
-  border-top-color: var(--gold);
-  animation: rail-spin 0.8s linear infinite;
-}
-@keyframes rail-spin {
-  to { transform: rotate(360deg); }
-}
+.card-tile { width: 100%; }
+.unavailable { opacity: 0.4; cursor: default !important; }
 
 .scroll-btn {
   width: 32px;
@@ -255,7 +144,6 @@ function scrollByDir(dir: number) {
   background: rgb(var(--ink) / 0.12);
   color: var(--fg-0);
 }
-.unavailable { opacity: 0.4; cursor: default !important; }
 
 /* Touch: swipe replaces the mouse-only scroll arrows. */
 @media (pointer: coarse) {
