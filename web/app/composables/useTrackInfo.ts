@@ -1,4 +1,4 @@
-import type { TrackFile } from '~~/shared/types'
+import type { RecordingCredit, TrackFile } from '~~/shared/types'
 
 // ── Shared "Track information" dialog channel ────────────────────────────────
 // A singleton (module-scope) store + a single globally-mounted
@@ -19,6 +19,7 @@ export interface TrackInfoPrefetch {
   isrc?: string
   explicit?: boolean
   files?: TrackFile[]
+  credits?: RecordingCredit[]
 }
 
 interface TrackInfoState {
@@ -56,6 +57,7 @@ export function useTrackInfo() {
         isrc: r.isrc,
         explicit: r.explicit,
         files: r.files,
+        credits: r.credits,
       })
     }
   }

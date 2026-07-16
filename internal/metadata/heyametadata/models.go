@@ -465,7 +465,21 @@ type releaseDocument struct {
 		Country        string         `json:"country"`
 		Barcode        string         `json:"barcode"`
 		ArtistCredits  []artistCredit `json:"artist_credits"`
-		Labels         []struct {
+		// Language/Script/ASIN + release_events are the 2026-07 provider
+		// expansion's issued-release facts (mergeIssuedRelease).
+		Language      string                       `json:"language"`
+		Script        string                       `json:"script"`
+		ASIN          string                       `json:"asin"`
+		Genres        []weightedTerm               `json:"genres"`
+		Tags          []weightedTerm               `json:"tags"`
+		Links         []struct{ Type, URL string } `json:"links"`
+		ReleaseEvents []struct {
+			Date struct {
+				Value string `json:"value"`
+			} `json:"date"`
+			Country string `json:"country"`
+		} `json:"release_events"`
+		Labels []struct {
 			ProviderID    string `json:"provider_id"`
 			Name          string `json:"name"`
 			CatalogNumber string `json:"catalog_number"`

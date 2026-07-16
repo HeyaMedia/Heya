@@ -12,12 +12,13 @@ import (
 )
 
 const createMediaVideo = `-- name: CreateMediaVideo :exec
-INSERT INTO media_videos (media_item_id, provider_key, name, site, video_key, video_type, language, official, published_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO media_videos (media_item_id, provider_key, name, site, video_key, video_type, language, official, published_at, description)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (media_item_id, video_key) DO UPDATE SET
   name = EXCLUDED.name,
   video_type = EXCLUDED.video_type,
-  official = EXCLUDED.official
+  official = EXCLUDED.official,
+  description = EXCLUDED.description
 `
 
 type CreateMediaVideoParams struct {
@@ -30,6 +31,7 @@ type CreateMediaVideoParams struct {
 	Language    string             `json:"language"`
 	Official    bool               `json:"official"`
 	PublishedAt pgtype.Timestamptz `json:"published_at"`
+	Description string             `json:"description"`
 }
 
 func (q *Queries) CreateMediaVideo(ctx context.Context, arg CreateMediaVideoParams) error {
@@ -43,6 +45,7 @@ func (q *Queries) CreateMediaVideo(ctx context.Context, arg CreateMediaVideoPara
 		arg.Language,
 		arg.Official,
 		arg.PublishedAt,
+		arg.Description,
 	)
 	return err
 }
@@ -57,7 +60,7 @@ func (q *Queries) DeleteMediaVideosByItem(ctx context.Context, mediaItemID int64
 }
 
 const listMediaVideos = `-- name: ListMediaVideos :many
-SELECT id, media_item_id, provider_key, name, site, video_key, video_type, language, official, published_at FROM media_videos WHERE media_item_id = $1 ORDER BY video_type, name
+SELECT id, media_item_id, provider_key, name, site, video_key, video_type, language, official, published_at, description FROM media_videos WHERE media_item_id = $1 ORDER BY video_type, name
 `
 
 func (q *Queries) ListMediaVideos(ctx context.Context, mediaItemID int64) ([]MediaVideo, error) {
@@ -80,6 +83,7 @@ func (q *Queries) ListMediaVideos(ctx context.Context, mediaItemID int64) ([]Med
 			&i.Language,
 			&i.Official,
 			&i.PublishedAt,
+			&i.Description,
 		); err != nil {
 			return nil, err
 		}

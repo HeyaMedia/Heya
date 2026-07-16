@@ -29,7 +29,7 @@ by_name_disambig AS (
 SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector,
        discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation,
        urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year,
-       end_date, ended, deathday, birthplace, tags, genres, metadata_sources
+       end_date, ended, deathday, birthplace, tags, genres, metadata_sources, followers
 FROM (
   SELECT * FROM inserted
   UNION ALL
@@ -409,7 +409,8 @@ UPDATE artists SET
     birthplace       = $18,
     tags             = $19,
     genres           = $20,
-    metadata_sources = $21
+    metadata_sources = $21,
+    followers        = $22
 WHERE id = $1;
 
 -- name: InsertArtistTopTracks :exec
@@ -477,8 +478,18 @@ UPDATE albums SET
     review           = CASE WHEN $17::text != '' THEN $17 ELSE review END,
     ratings          = $18,
     editions         = $19,
-    sales            = CASE WHEN $20::bigint != 0 THEN $20 ELSE sales END
+    sales            = CASE WHEN $20::bigint != 0 THEN $20 ELSE sales END,
+    artwork          = $21,
+    script           = CASE WHEN $22::text != '' THEN $22 ELSE script END,
+    release_events   = $23
 WHERE id = $1;
+
+-- name: UpdateTrackCredits :exec
+-- Performance credits from the canonical recording document. Written only
+-- when the per-recording fetch succeeded — a failed fetch keeps the last
+-- known credits instead of clearing them (its own statement so the
+-- extended-metadata write can't half-apply on fetch errors).
+UPDATE tracks SET credits = $2 WHERE id = $1;
 
 -- name: UpdateTrackExtendedMetadata :exec
 -- The post-00019 track columns. external_ids / isrc / recording_mbid remain

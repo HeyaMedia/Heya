@@ -237,6 +237,9 @@ type MediaDetail struct {
 	// canonical document (heya.media freshness.providers keys) — surfaced
 	// on the artist page as a provenance strip.
 	ArtistMetadataSources []string `json:"artist_metadata_sources,omitempty"`
+	// ArtistFollowers is TheAudioDB's follower count — a ledger cell next
+	// to Last.fm listeners.
+	ArtistFollowers int64 `json:"artist_followers,omitempty"`
 }
 
 // URLEntry is one external link on an artist ({type: "AllMusic", url: "..."}).
@@ -369,6 +372,8 @@ type VideoDetail struct {
 	Language    string `json:"language"`
 	Official    bool   `json:"official"`
 	PublishedAt string `json:"published_at,omitempty"`
+	// Description is TheAudioDB's editorial writeup for artist music videos.
+	Description string `json:"description,omitempty"`
 }
 
 type CertificationDetail struct {
@@ -484,6 +489,20 @@ type TrackDetail struct {
 	ExternalIDs     map[string]string   `json:"external_ids,omitempty"`
 	Explicit        bool                `json:"explicit,omitempty"`
 	ArtistCredits   []ArtistCreditEntry `json:"artist_credits,omitempty"`
+	// Credits are performance credits from the canonical recording document
+	// (producer / engineer / mix / per-instrument / vocals). ArtistEntityID
+	// is only set when the person exists canonically — otherwise render
+	// ArtistName as plain text. Roles/attributes are snake_case.
+	Credits []RecordingCredit `json:"credits,omitempty"`
+}
+
+// RecordingCredit is one performance credit on a recording.
+type RecordingCredit struct {
+	Role           string   `json:"role"`
+	Attributes     []string `json:"attributes,omitempty"`
+	ArtistName     string   `json:"artist_name"`
+	ArtistMBID     string   `json:"artist_mbid,omitempty"`
+	ArtistEntityID string   `json:"artist_entity_id,omitempty"`
 }
 
 // AlbumEntry is one album as returned in payload.albums on an artist lookup.
@@ -528,6 +547,34 @@ type AlbumEntry struct {
 	Ratings     []AlbumRating  `json:"ratings,omitempty"`
 	Editions    []AlbumEdition `json:"editions,omitempty"`
 	Sales       int64          `json:"sales,omitempty"`
+
+	// Artwork is the audiodb "extra render" pool (back/cdart/spine/case/
+	// flat/face) — albums have no media_item, so this gallery rides the
+	// row as [{type, url}] remote references through the image proxy
+	// instead of media_assets.
+	Artwork []ArtworkResult `json:"artwork,omitempty"`
+
+	// Script + ReleaseEvents come from the matched issued release document
+	// (mergeIssuedRelease), not the release group.
+	Script        string              `json:"script,omitempty"`
+	ReleaseEvents []AlbumReleaseEvent `json:"release_events,omitempty"`
+}
+
+// AlbumReleaseEvent is one per-country release date from the issued release
+// document.
+type AlbumReleaseEvent struct {
+	Date    string `json:"date"`
+	Country string `json:"country,omitempty"`
+}
+
+// AlbumArtworkRef is one gallery tile persisted on albums.artwork — a slim
+// {type, url} projection of ArtworkResult. Albums have no media_item, so
+// this gallery rides the row as remote references through the image proxy
+// rather than media_assets, and doesn't need the full ArtworkResult
+// bookkeeping (score/width/height/...) that download queueing wants.
+type AlbumArtworkRef struct {
+	Type string `json:"type"`
+	URL  string `json:"url"`
 }
 
 // AlbumRating is one provider-native rating. Scales differ per system

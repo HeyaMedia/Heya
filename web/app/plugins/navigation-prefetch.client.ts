@@ -1,7 +1,7 @@
 import { useQueryCache, type UseQueryOptions } from '@pinia/colada'
 import { collectionDetailQuery, personDetailQuery } from '~/queries/discovery'
 import { mediaDetailQuery } from '~/queries/media'
-import { musicAlbumDetailQuery, musicMixesQuery, playlistDetailQuery } from '~/queries/music'
+import { musicAlbumDetailQuery, musicArtistDetailQuery, musicMixesQuery, playlistDetailQuery } from '~/queries/music'
 import { enrichedCatalogQuery } from '~/queries/catalog'
 import { toValue } from 'vue'
 
@@ -26,8 +26,8 @@ function queryForPath(pathname: string): UseQueryOptions<unknown> | null {
   }
   if (parts[0] === 'music' && parts[1] === 'artist' && parts[2]) {
     const artist = decodeURIComponent(parts[2])
-    if (parts[3]) return musicAlbumDetailQuery({ artistSlug: artist, albumSlug: decodeURIComponent(parts[3]) })
-    return mediaDetailQuery(artist)
+    if (parts[3] && parts[3] !== 'top-tracks') return musicAlbumDetailQuery({ artistSlug: artist, albumSlug: decodeURIComponent(parts[3]) })
+    return musicArtistDetailQuery(artist)
   }
   if (parts[0] === 'music' && parts[1] === 'playlist' && parts[2]) {
     const id = Number(parts[2])

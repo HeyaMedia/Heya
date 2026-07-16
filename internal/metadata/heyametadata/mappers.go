@@ -399,6 +399,8 @@ func (p *HeyaProvider) mapArtist(ctx context.Context, document artistDocument) (
 			detail.ArtistListeners = int64(metric.Value)
 		case "playcount":
 			detail.ArtistPlaycount = int64(metric.Value)
+		case "followers":
+			detail.ArtistFollowers = int64(metric.Value)
 		case "popularity":
 			// Reported on different scales (tidal 0..1, audiodb 0..100) —
 			// int-truncating the fractional scale would zero the field, so
@@ -448,6 +450,7 @@ func (p *HeyaProvider) mapArtist(ctx context.Context, document artistDocument) (
 			Key:         key,
 			Type:        "music_video",
 			Official:    true,
+			Description: video.Description,
 		})
 	}
 	if tracks, err := p.client.TopTracks(ctx, document.ID, p.credentials); err != nil {
@@ -663,11 +666,47 @@ func (p *HeyaProvider) albumFromReleaseGroup(document releaseGroupDocument) meta
 		}
 		album.Editions = append(album.Editions, mapped)
 	}
+	// Extra audiodb render classes (back/cdart/spine/case/flat/face) — the
+	// album's own gallery. Albums have no media_item, so this rides the row
+	// as remote references rather than media_assets.
+	for _, img := range p.mapImages(document.Data.Images) {
+		if albumGalleryAssetClasses[img.AssetType] {
+			album.Artwork = append(album.Artwork, img)
+		}
+	}
 	return album
+}
+
+// albumGalleryAssetClasses are the audiodb "extra render" classes shown as
+// the album's artwork gallery — distinct from the single front cover
+// (CoverURL) that already rides album.CoverURL.
+var albumGalleryAssetClasses = map[string]bool{
+	"back": true, "cdart": true, "spine": true, "case": true, "flat": true, "face": true,
 }
 
 func englishOrUntagged(language string) bool {
 	return language == "" || strings.HasPrefix(strings.ToLower(language), "en")
+}
+
+// mergeWeightedTermNames appends terms not already present in dst
+// (case-insensitive, trimmed), preserving dst's existing casing/order and
+// upstream order for the new arrivals.
+func mergeWeightedTermNames(dst *[]string, terms []weightedTerm) {
+	seen := make(map[string]struct{}, len(*dst))
+	for _, v := range *dst {
+		seen[strings.ToLower(strings.TrimSpace(v))] = struct{}{}
+	}
+	for _, t := range terms {
+		key := strings.ToLower(strings.TrimSpace(t.Name))
+		if key == "" {
+			continue
+		}
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		*dst = append(*dst, t.Name)
+	}
 }
 
 // pickAlbumDescription prefers TheAudioDB's English provider_description;
@@ -708,6 +747,23 @@ func mergeIssuedRelease(album *metadata.AlbumEntry, release releaseDocument) {
 	if len(release.Data.Labels) > 0 {
 		album.Label, album.CatalogNo = release.Data.Labels[0].Name, release.Data.Labels[0].CatalogNumber
 	}
+	// Issued-release facts (2026-07 expansion): language/script are the
+	// matched edition's, not the release group's; ASIN rides ExternalIDs
+	// alongside the other provider ids; genres/tags merge case-insensitively
+	// with whatever the release group already contributed.
+	album.Language = firstNonEmpty(release.Data.Language, album.Language)
+	album.Script = firstNonEmpty(release.Data.Script, album.Script)
+	if release.Data.ASIN != "" {
+		album.ExternalIDs["asin"] = release.Data.ASIN
+	}
+	for _, event := range release.Data.ReleaseEvents {
+		if event.Date.Value == "" {
+			continue
+		}
+		album.ReleaseEvents = append(album.ReleaseEvents, metadata.AlbumReleaseEvent{Date: event.Date.Value, Country: event.Country})
+	}
+	mergeWeightedTermNames(&album.Genres, release.Data.Genres)
+	mergeWeightedTermNames(&album.Tags, release.Data.Tags)
 	for _, medium := range release.Data.Media {
 		for _, track := range medium.Tracks {
 			mapped := metadata.TrackDetail{CanonicalID: track.RecordingEntityID, DiscNumber: medium.Position, TrackNumber: track.Sequence, Title: track.Title, Duration: int(track.DurationMS / 1000), RecordingMBID: track.Recording.ProviderID, LyricsAvailable: track.LyricsAvailable, ExternalIDs: map[string]string{track.Recording.Provider: track.Recording.ProviderID}}

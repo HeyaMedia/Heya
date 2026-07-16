@@ -93,6 +93,10 @@ watch(
 
 const prefetch = computed(() => state.value.prefetch)
 
+// Credits — same grouping as the album page's Credits section, sourced
+// from the page prefetch (MusicTrackDetail doesn't carry credits yet).
+const creditGroups = computed(() => groupTrackCredits(prefetch.value?.credits ?? []))
+
 // Prefer the richer prefetch files (album TrackView) when present, else the
 // fetched detail's — identical shape either way.
 const files = computed<TrackFile[]>(() => prefetch.value?.files ?? detail.value?.files ?? [])
@@ -186,6 +190,18 @@ const hasSonic = computed(() => {
             <div v-if="isrc" class="tid-row"><dt>ISRC</dt><dd class="tid-mono">{{ isrc }}</dd></div>
             <div v-if="recordingMbid" class="tid-row"><dt>Recording MBID</dt><dd class="tid-mono">{{ recordingMbid }}</dd></div>
             <div class="tid-row"><dt>Lyrics</dt><dd>{{ detail.lyrics_available ? 'Available' : 'None' }}</dd></div>
+          </dl>
+        </section>
+
+        <!-- Credits — performance credits on this recording (MusicBrainz
+             artist-relationships). Plain text — no local-artist linking yet. -->
+        <section v-if="creditGroups.length" class="tid-sec">
+          <h4 class="tid-h">Credits</h4>
+          <dl class="tid-rows">
+            <div v-for="g in creditGroups" :key="g.role" class="tid-row">
+              <dt>{{ g.role }}</dt>
+              <dd>{{ g.names.join(', ') }}</dd>
+            </div>
           </dl>
         </section>
 

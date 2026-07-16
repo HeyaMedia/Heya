@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	gen "github.com/karbowiak/heya/clients/heyametadata"
+	"github.com/karbowiak/heya/internal/metadata"
 )
 
 // ProviderCredentials are forwarded only on the request that needs them. They
@@ -220,6 +221,48 @@ func (c *Client) Entity(ctx context.Context, entityID, language, country string,
 		return nil, responseError("read canonical metadata entity", response.StatusCode(), response.Body)
 	}
 	return response.Body, nil
+}
+
+// RecordingCredits fetches the canonical recording document and returns its
+// performance credits (producer / engineer / instruments / vocals). The
+// recording-detail response is polymorphic in the contract (schema: {}), so
+// the decode is hand-written like the entity documents.
+func (c *Client) RecordingCredits(ctx context.Context, entityID string, credentials ProviderCredentials) ([]metadata.RecordingCredit, error) {
+	id, err := uuid.Parse(entityID)
+	if err != nil {
+		return nil, fmt.Errorf("heyametadata recording: invalid UUID %q: %w", entityID, err)
+	}
+	response, err := c.gen.RecordingDetailWithResponse(ctx, id, c.credentialEditor(credentials))
+	if err != nil {
+		return nil, fmt.Errorf("read canonical recording %s: %w", entityID, err)
+	}
+	if response.StatusCode() != http.StatusOK {
+		return nil, responseError("read canonical recording", response.StatusCode(), response.Body)
+	}
+	var document struct {
+		Data struct {
+			Credits []struct {
+				Role           string   `json:"role"`
+				Attributes     []string `json:"attributes"`
+				ArtistEntityID string   `json:"artist_entity_id"`
+				ArtistProvider string   `json:"artist_provider"`
+				ArtistID       string   `json:"artist_id"`
+				ArtistName     string   `json:"artist_name"`
+			} `json:"credits"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body, &document); err != nil {
+		return nil, fmt.Errorf("decode canonical recording %s: %w", entityID, err)
+	}
+	credits := make([]metadata.RecordingCredit, 0, len(document.Data.Credits))
+	for _, value := range document.Data.Credits {
+		mapped := metadata.RecordingCredit{Role: value.Role, Attributes: value.Attributes, ArtistName: value.ArtistName, ArtistEntityID: value.ArtistEntityID}
+		if value.ArtistProvider == "musicbrainz" {
+			mapped.ArtistMBID = value.ArtistID
+		}
+		credits = append(credits, mapped)
+	}
+	return credits, nil
 }
 
 func (c *Client) Credits(ctx context.Context, entityID string, credentials ProviderCredentials) ([]credit, error) {

@@ -454,6 +454,7 @@ func applyMusicArtistExtended(ctx context.Context, q *sqlc.Queries, artistID int
 		Tags:            nonNilStrings(sortedUnique(detail.ArtistTags)),
 		Genres:          nonNilStrings(sortedUnique(detail.Genres)),
 		MetadataSources: nonNilStrings(detail.ArtistMetadataSources),
+		Followers:       detail.ArtistFollowers,
 	})
 }
 
@@ -663,6 +664,10 @@ func applyMusicAlbumExtended(ctx context.Context, q *sqlc.Queries, albumID int64
 	if editions == nil {
 		editions = []metadata.AlbumEdition{}
 	}
+	releaseEvents := remote.ReleaseEvents
+	if releaseEvents == nil {
+		releaseEvents = []metadata.AlbumReleaseEvent{}
+	}
 	return q.UpdateAlbumExtendedMetadata(ctx, sqlc.UpdateAlbumExtendedMetadataParams{
 		ID:             albumID,
 		Column2:        remote.CatalogNo,
@@ -684,7 +689,25 @@ func applyMusicAlbumExtended(ctx context.Context, q *sqlc.Queries, albumID int64
 		Ratings:        mustJSONBytes(ratings),
 		Editions:       mustJSONBytes(editions),
 		Column20:       remote.Sales,
+		Artwork:        mustJSONBytes(albumArtworkRefs(remote.Artwork)),
+		Column22:       remote.Script,
+		ReleaseEvents:  mustJSONBytes(releaseEvents),
 	})
+}
+
+// albumArtworkRefs projects the full ArtworkResult pool down to the slim
+// {type, url} shape albums.artwork persists (never nil — jsonb NOT NULL).
+// Mirrors the matcher's twin of the same name (separate package, same
+// write contract).
+func albumArtworkRefs(values []metadata.ArtworkResult) []metadata.AlbumArtworkRef {
+	out := make([]metadata.AlbumArtworkRef, 0, len(values))
+	for _, v := range values {
+		if v.URL == "" {
+			continue
+		}
+		out = append(out, metadata.AlbumArtworkRef{Type: v.AssetType, URL: v.URL})
+	}
+	return out
 }
 
 func nonNilStrings(values []string) []string {

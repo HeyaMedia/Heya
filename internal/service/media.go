@@ -1233,6 +1233,22 @@ func (a *App) ListUnmatched(ctx context.Context, libraryID int64) ([]UnmatchedFi
 type TrackView struct {
 	sqlc.Track
 	Files []sqlc.TrackFile `json:"files"`
+	// Parsed view of tracks.credits jsonb — the raw sqlc embed would
+	// marshal it as base64. Shadows the embedded field in JSON.
+	Credits []metadata.RecordingCredit `json:"credits,omitempty"`
+}
+
+// parseTrackCredits decodes tracks.credits; failures and empty lists both
+// degrade to an absent field rather than a failed page.
+func parseTrackCredits(raw []byte) []metadata.RecordingCredit {
+	if len(raw) == 0 {
+		return nil
+	}
+	var credits []metadata.RecordingCredit
+	if json.Unmarshal(raw, &credits) != nil || len(credits) == 0 {
+		return nil
+	}
+	return credits
 }
 
 // AlbumView wraps an album with its enriched tracks.
@@ -1279,7 +1295,7 @@ func buildAlbumViews(ctx context.Context, q *sqlc.Queries, artistID int64) []Alb
 		if files == nil {
 			files = []sqlc.TrackFile{} // keep `files: []` (not null) for fileless tracks
 		}
-		tracksByAlbum[t.AlbumID] = append(tracksByAlbum[t.AlbumID], TrackView{Track: t, Files: files})
+		tracksByAlbum[t.AlbumID] = append(tracksByAlbum[t.AlbumID], TrackView{Track: t, Files: files, Credits: parseTrackCredits(t.Credits)})
 	}
 
 	views := make([]AlbumView, 0, len(albums))

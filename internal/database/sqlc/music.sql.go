@@ -162,7 +162,7 @@ const createAlbum = `-- name: CreateAlbum :one
 INSERT INTO albums (artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date,
     label, country, barcode, total_tracks, total_discs, tags)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-RETURNING id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales
+RETURNING id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork
 `
 
 type CreateAlbumParams struct {
@@ -246,6 +246,9 @@ func (q *Queries) CreateAlbum(ctx context.Context, arg CreateAlbumParams) (Album
 		&i.Ratings,
 		&i.Editions,
 		&i.Sales,
+		&i.ReleaseEvents,
+		&i.Script,
+		&i.Artwork,
 	)
 	return i, err
 }
@@ -253,7 +256,7 @@ func (q *Queries) CreateAlbum(ctx context.Context, arg CreateAlbumParams) (Album
 const createArtist = `-- name: CreateArtist :one
 INSERT INTO artists (media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources
+RETURNING id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources, followers
 `
 
 type CreateArtistParams struct {
@@ -306,6 +309,7 @@ func (q *Queries) CreateArtist(ctx context.Context, arg CreateArtistParams) (Art
 		&i.Tags,
 		&i.Genres,
 		&i.MetadataSources,
+		&i.Followers,
 	)
 	return i, err
 }
@@ -315,15 +319,15 @@ WITH inserted AS (
   INSERT INTO artists (media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography)
   VALUES ($1, $2, $3, $4, $5, $6)
   ON CONFLICT DO NOTHING
-  RETURNING 0::int AS ord, artists.id, artists.media_item_id, artists.musicbrainz_id, artists.name, artists.sort_name, artists.disambiguation, artists.biography, artists.search_vector, artists.discography_enriched_at, artists.cover_art_enriched_at, artists.listeners, artists.playcount, artists.popularity, artists.annotation, artists.urls, artists.wikipedia_links, artists.profiles, artists.aliases, artists.groups, artists.members, artists.artist_type, artists.begin_date, artists.begin_year, artists.end_date, artists.ended, artists.deathday, artists.birthplace, artists.tags, artists.genres, artists.metadata_sources
+  RETURNING 0::int AS ord, artists.id, artists.media_item_id, artists.musicbrainz_id, artists.name, artists.sort_name, artists.disambiguation, artists.biography, artists.search_vector, artists.discography_enriched_at, artists.cover_art_enriched_at, artists.listeners, artists.playcount, artists.popularity, artists.annotation, artists.urls, artists.wikipedia_links, artists.profiles, artists.aliases, artists.groups, artists.members, artists.artist_type, artists.begin_date, artists.begin_year, artists.end_date, artists.ended, artists.deathday, artists.birthplace, artists.tags, artists.genres, artists.metadata_sources, artists.followers
 ),
 by_media_item AS (
-  SELECT 1::int AS ord, artists.id, artists.media_item_id, artists.musicbrainz_id, artists.name, artists.sort_name, artists.disambiguation, artists.biography, artists.search_vector, artists.discography_enriched_at, artists.cover_art_enriched_at, artists.listeners, artists.playcount, artists.popularity, artists.annotation, artists.urls, artists.wikipedia_links, artists.profiles, artists.aliases, artists.groups, artists.members, artists.artist_type, artists.begin_date, artists.begin_year, artists.end_date, artists.ended, artists.deathday, artists.birthplace, artists.tags, artists.genres, artists.metadata_sources
+  SELECT 1::int AS ord, artists.id, artists.media_item_id, artists.musicbrainz_id, artists.name, artists.sort_name, artists.disambiguation, artists.biography, artists.search_vector, artists.discography_enriched_at, artists.cover_art_enriched_at, artists.listeners, artists.playcount, artists.popularity, artists.annotation, artists.urls, artists.wikipedia_links, artists.profiles, artists.aliases, artists.groups, artists.members, artists.artist_type, artists.begin_date, artists.begin_year, artists.end_date, artists.ended, artists.deathday, artists.birthplace, artists.tags, artists.genres, artists.metadata_sources, artists.followers
   FROM artists
   WHERE media_item_id = $1
 ),
 by_name_disambig AS (
-  SELECT 2::int AS ord, artists.id, artists.media_item_id, artists.musicbrainz_id, artists.name, artists.sort_name, artists.disambiguation, artists.biography, artists.search_vector, artists.discography_enriched_at, artists.cover_art_enriched_at, artists.listeners, artists.playcount, artists.popularity, artists.annotation, artists.urls, artists.wikipedia_links, artists.profiles, artists.aliases, artists.groups, artists.members, artists.artist_type, artists.begin_date, artists.begin_year, artists.end_date, artists.ended, artists.deathday, artists.birthplace, artists.tags, artists.genres, artists.metadata_sources
+  SELECT 2::int AS ord, artists.id, artists.media_item_id, artists.musicbrainz_id, artists.name, artists.sort_name, artists.disambiguation, artists.biography, artists.search_vector, artists.discography_enriched_at, artists.cover_art_enriched_at, artists.listeners, artists.playcount, artists.popularity, artists.annotation, artists.urls, artists.wikipedia_links, artists.profiles, artists.aliases, artists.groups, artists.members, artists.artist_type, artists.begin_date, artists.begin_year, artists.end_date, artists.ended, artists.deathday, artists.birthplace, artists.tags, artists.genres, artists.metadata_sources, artists.followers
   FROM artists
   WHERE lower(name) = lower($3)
     AND lower(disambiguation) = lower($5)
@@ -332,13 +336,13 @@ by_name_disambig AS (
 SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector,
        discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation,
        urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year,
-       end_date, ended, deathday, birthplace, tags, genres, metadata_sources
+       end_date, ended, deathday, birthplace, tags, genres, metadata_sources, followers
 FROM (
-  SELECT ord, id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources FROM inserted
+  SELECT ord, id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources, followers FROM inserted
   UNION ALL
-  SELECT ord, id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources FROM by_media_item
+  SELECT ord, id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources, followers FROM by_media_item
   UNION ALL
-  SELECT ord, id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources FROM by_name_disambig
+  SELECT ord, id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources, followers FROM by_name_disambig
 ) candidates
 ORDER BY ord
 LIMIT 1
@@ -384,6 +388,7 @@ type CreateArtistIfNotExistsRow struct {
 	Tags                  []string           `json:"tags"`
 	Genres                []string           `json:"genres"`
 	MetadataSources       []string           `json:"metadata_sources"`
+	Followers             int64              `json:"followers"`
 }
 
 // Scanner apply can process several scoped album folders for the same artist
@@ -431,6 +436,7 @@ func (q *Queries) CreateArtistIfNotExists(ctx context.Context, arg CreateArtistI
 		&i.Tags,
 		&i.Genres,
 		&i.MetadataSources,
+		&i.Followers,
 	)
 	return i, err
 }
@@ -469,7 +475,7 @@ func (q *Queries) CreateArtistSimilarArtist(ctx context.Context, arg CreateArtis
 const createTrack = `-- name: CreateTrack :one
 INSERT INTO tracks (album_id, disc_number, track_number, title, duration, file_path, lyrics_path, library_file_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album
+RETURNING id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits
 `
 
 type CreateTrackParams struct {
@@ -516,6 +522,7 @@ func (q *Queries) CreateTrack(ctx context.Context, arg CreateTrackParams) (Track
 		&i.SortArtist,
 		&i.SortAlbumYear,
 		&i.SortAlbum,
+		&i.Credits,
 	)
 	return i, err
 }
@@ -634,7 +641,7 @@ func (q *Queries) DeleteUserArtistRatingsByArtist(ctx context.Context, srcID int
 }
 
 const getAlbumByArtistAndSlug = `-- name: GetAlbumByArtistAndSlug :one
-SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales
+SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork
 FROM albums al
 JOIN artists a ON a.id = al.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
@@ -694,12 +701,15 @@ func (q *Queries) GetAlbumByArtistAndSlug(ctx context.Context, arg GetAlbumByArt
 		&i.Ratings,
 		&i.Editions,
 		&i.Sales,
+		&i.ReleaseEvents,
+		&i.Script,
+		&i.Artwork,
 	)
 	return i, err
 }
 
 const getAlbumByArtistMusicBrainzID = `-- name: GetAlbumByArtistMusicBrainzID :one
-SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales FROM albums
+SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork FROM albums
 WHERE artist_id = $1 AND musicbrainz_id = $2 AND musicbrainz_id != ''
 LIMIT 1
 `
@@ -756,12 +766,15 @@ func (q *Queries) GetAlbumByArtistMusicBrainzID(ctx context.Context, arg GetAlbu
 		&i.Ratings,
 		&i.Editions,
 		&i.Sales,
+		&i.ReleaseEvents,
+		&i.Script,
+		&i.Artwork,
 	)
 	return i, err
 }
 
 const getAlbumByArtistTitleYear = `-- name: GetAlbumByArtistTitleYear :one
-SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales FROM albums
+SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork FROM albums
 WHERE artist_id = $1 AND lower(title) = lower($2) AND year = $3
 LIMIT 1
 `
@@ -819,12 +832,15 @@ func (q *Queries) GetAlbumByArtistTitleYear(ctx context.Context, arg GetAlbumByA
 		&i.Ratings,
 		&i.Editions,
 		&i.Sales,
+		&i.ReleaseEvents,
+		&i.Script,
+		&i.Artwork,
 	)
 	return i, err
 }
 
 const getAlbumByID = `-- name: GetAlbumByID :one
-SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales FROM albums WHERE id = $1
+SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork FROM albums WHERE id = $1
 `
 
 func (q *Queries) GetAlbumByID(ctx context.Context, id int64) (Album, error) {
@@ -874,12 +890,15 @@ func (q *Queries) GetAlbumByID(ctx context.Context, id int64) (Album, error) {
 		&i.Ratings,
 		&i.Editions,
 		&i.Sales,
+		&i.ReleaseEvents,
+		&i.Script,
+		&i.Artwork,
 	)
 	return i, err
 }
 
 const getAlbumByMusicBrainzID = `-- name: GetAlbumByMusicBrainzID :one
-SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales FROM albums WHERE musicbrainz_id = $1 AND musicbrainz_id != ''
+SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork FROM albums WHERE musicbrainz_id = $1 AND musicbrainz_id != ''
 `
 
 func (q *Queries) GetAlbumByMusicBrainzID(ctx context.Context, musicbrainzID string) (Album, error) {
@@ -929,6 +948,9 @@ func (q *Queries) GetAlbumByMusicBrainzID(ctx context.Context, musicbrainzID str
 		&i.Ratings,
 		&i.Editions,
 		&i.Sales,
+		&i.ReleaseEvents,
+		&i.Script,
+		&i.Artwork,
 	)
 	return i, err
 }
@@ -948,7 +970,7 @@ func (q *Queries) GetAlbumReleaseDir(ctx context.Context, albumID int64) (interf
 }
 
 const getArtistByID = `-- name: GetArtistByID :one
-SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources FROM artists WHERE id = $1
+SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources, followers FROM artists WHERE id = $1
 `
 
 func (q *Queries) GetArtistByID(ctx context.Context, id int64) (Artist, error) {
@@ -985,12 +1007,13 @@ func (q *Queries) GetArtistByID(ctx context.Context, id int64) (Artist, error) {
 		&i.Tags,
 		&i.Genres,
 		&i.MetadataSources,
+		&i.Followers,
 	)
 	return i, err
 }
 
 const getArtistByLibraryMediaItemMBID = `-- name: GetArtistByLibraryMediaItemMBID :one
-SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags, a.genres, a.metadata_sources FROM artists a
+SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags, a.genres, a.metadata_sources, a.followers FROM artists a
 JOIN media_items mi ON mi.id = a.media_item_id
 JOIN media_item_external_ids ei ON ei.media_item_id = mi.id
 WHERE mi.library_id = $1
@@ -1044,12 +1067,13 @@ func (q *Queries) GetArtistByLibraryMediaItemMBID(ctx context.Context, arg GetAr
 		&i.Tags,
 		&i.Genres,
 		&i.MetadataSources,
+		&i.Followers,
 	)
 	return i, err
 }
 
 const getArtistByMediaItemID = `-- name: GetArtistByMediaItemID :one
-SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources FROM artists WHERE media_item_id = $1
+SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources, followers FROM artists WHERE media_item_id = $1
 `
 
 func (q *Queries) GetArtistByMediaItemID(ctx context.Context, mediaItemID int64) (Artist, error) {
@@ -1086,12 +1110,13 @@ func (q *Queries) GetArtistByMediaItemID(ctx context.Context, mediaItemID int64)
 		&i.Tags,
 		&i.Genres,
 		&i.MetadataSources,
+		&i.Followers,
 	)
 	return i, err
 }
 
 const getArtistByMusicBrainzID = `-- name: GetArtistByMusicBrainzID :one
-SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources FROM artists WHERE musicbrainz_id = $1 AND musicbrainz_id != ''
+SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources, followers FROM artists WHERE musicbrainz_id = $1 AND musicbrainz_id != ''
 `
 
 func (q *Queries) GetArtistByMusicBrainzID(ctx context.Context, musicbrainzID string) (Artist, error) {
@@ -1128,12 +1153,13 @@ func (q *Queries) GetArtistByMusicBrainzID(ctx context.Context, musicbrainzID st
 		&i.Tags,
 		&i.Genres,
 		&i.MetadataSources,
+		&i.Followers,
 	)
 	return i, err
 }
 
 const getArtistByMusicBrainzIDExcludingID = `-- name: GetArtistByMusicBrainzIDExcludingID :one
-SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources
+SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources, followers
 FROM artists
 WHERE musicbrainz_id = $1
   AND musicbrainz_id != ''
@@ -1185,12 +1211,13 @@ func (q *Queries) GetArtistByMusicBrainzIDExcludingID(ctx context.Context, arg G
 		&i.Tags,
 		&i.Genres,
 		&i.MetadataSources,
+		&i.Followers,
 	)
 	return i, err
 }
 
 const getArtistByNameAndDisambiguation = `-- name: GetArtistByNameAndDisambiguation :one
-SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources FROM artists
+SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources, followers FROM artists
 WHERE lower(name) = lower($1) AND lower(disambiguation) = lower($2)
 LIMIT 1
 `
@@ -1234,12 +1261,13 @@ func (q *Queries) GetArtistByNameAndDisambiguation(ctx context.Context, arg GetA
 		&i.Tags,
 		&i.Genres,
 		&i.MetadataSources,
+		&i.Followers,
 	)
 	return i, err
 }
 
 const getArtistByNameAndDisambiguationExcludingID = `-- name: GetArtistByNameAndDisambiguationExcludingID :one
-SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources FROM artists
+SELECT id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources, followers FROM artists
 WHERE lower(name) = lower($1)
   AND lower(disambiguation) = lower($2)
   AND disambiguation != ''
@@ -1293,12 +1321,13 @@ func (q *Queries) GetArtistByNameAndDisambiguationExcludingID(ctx context.Contex
 		&i.Tags,
 		&i.Genres,
 		&i.MetadataSources,
+		&i.Followers,
 	)
 	return i, err
 }
 
 const getMusicArtistBySlug = `-- name: GetMusicArtistBySlug :one
-SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags, a.genres, a.metadata_sources,
+SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags, a.genres, a.metadata_sources, a.followers,
        mi.slug         AS slug,
        mi.public_id    AS media_item_public_id,
        mi.poster_path  AS poster_path,
@@ -1343,6 +1372,7 @@ type GetMusicArtistBySlugRow struct {
 	Tags                  []string           `json:"tags"`
 	Genres                []string           `json:"genres"`
 	MetadataSources       []string           `json:"metadata_sources"`
+	Followers             int64              `json:"followers"`
 	Slug                  string             `json:"slug"`
 	MediaItemPublicID     uuid.UUID          `json:"media_item_public_id"`
 	PosterPath            string             `json:"poster_path"`
@@ -1387,6 +1417,7 @@ func (q *Queries) GetMusicArtistBySlug(ctx context.Context, slug string) (GetMus
 		&i.Tags,
 		&i.Genres,
 		&i.MetadataSources,
+		&i.Followers,
 		&i.Slug,
 		&i.MediaItemPublicID,
 		&i.PosterPath,
@@ -1403,7 +1434,7 @@ VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (album_id, disc_number, track_number) DO UPDATE
     SET title = CASE WHEN tracks.title = '' THEN EXCLUDED.title ELSE tracks.title END,
         duration = CASE WHEN tracks.duration = 0 THEN EXCLUDED.duration ELSE tracks.duration END
-RETURNING id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album
+RETURNING id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits
 `
 
 type GetOrCreateTrackParams struct {
@@ -1447,6 +1478,7 @@ func (q *Queries) GetOrCreateTrack(ctx context.Context, arg GetOrCreateTrackPara
 		&i.SortArtist,
 		&i.SortAlbumYear,
 		&i.SortAlbum,
+		&i.Credits,
 	)
 	return i, err
 }
@@ -1499,7 +1531,7 @@ func (q *Queries) GetPrimaryTrackFile(ctx context.Context, trackID int64) (Track
 }
 
 const getTrackByAlbumDiscTrack = `-- name: GetTrackByAlbumDiscTrack :one
-SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album FROM tracks
+SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits FROM tracks
 WHERE album_id = $1
   AND disc_number = $2
   AND track_number = $3
@@ -1535,12 +1567,13 @@ func (q *Queries) GetTrackByAlbumDiscTrack(ctx context.Context, arg GetTrackByAl
 		&i.SortArtist,
 		&i.SortAlbumYear,
 		&i.SortAlbum,
+		&i.Credits,
 	)
 	return i, err
 }
 
 const getTrackByID = `-- name: GetTrackByID :one
-SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album FROM tracks WHERE id = $1
+SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits FROM tracks WHERE id = $1
 `
 
 func (q *Queries) GetTrackByID(ctx context.Context, id int64) (Track, error) {
@@ -1567,12 +1600,13 @@ func (q *Queries) GetTrackByID(ctx context.Context, id int64) (Track, error) {
 		&i.SortArtist,
 		&i.SortAlbumYear,
 		&i.SortAlbum,
+		&i.Credits,
 	)
 	return i, err
 }
 
 const getTrackByLibraryFileID = `-- name: GetTrackByLibraryFileID :one
-SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album FROM tracks WHERE library_file_id = $1
+SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits FROM tracks WHERE library_file_id = $1
 `
 
 func (q *Queries) GetTrackByLibraryFileID(ctx context.Context, libraryFileID pgtype.Int8) (Track, error) {
@@ -1599,6 +1633,7 @@ func (q *Queries) GetTrackByLibraryFileID(ctx context.Context, libraryFileID pgt
 		&i.SortArtist,
 		&i.SortAlbumYear,
 		&i.SortAlbum,
+		&i.Credits,
 	)
 	return i, err
 }
@@ -1923,7 +1958,7 @@ func (q *Queries) ListAlbumTracksUnderFolder(ctx context.Context, arg ListAlbumT
 }
 
 const listAlbumsByArtist = `-- name: ListAlbumsByArtist :many
-SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales FROM albums WHERE artist_id = $1 ORDER BY year ASC, title ASC
+SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork FROM albums WHERE artist_id = $1 ORDER BY year ASC, title ASC
 `
 
 func (q *Queries) ListAlbumsByArtist(ctx context.Context, artistID int64) ([]Album, error) {
@@ -1979,6 +2014,9 @@ func (q *Queries) ListAlbumsByArtist(ctx context.Context, artistID int64) ([]Alb
 			&i.Ratings,
 			&i.Editions,
 			&i.Sales,
+			&i.ReleaseEvents,
+			&i.Script,
+			&i.Artwork,
 		); err != nil {
 			return nil, err
 		}
@@ -1991,7 +2029,7 @@ func (q *Queries) ListAlbumsByArtist(ctx context.Context, artistID int64) ([]Alb
 }
 
 const listAlbumsByArtistSlug = `-- name: ListAlbumsByArtistSlug :many
-SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales,
+SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork,
        a.name           AS artist_name,
        mi.slug          AS artist_slug,
        (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
@@ -2054,6 +2092,9 @@ type ListAlbumsByArtistSlugRow struct {
 	Ratings            []byte             `json:"ratings"`
 	Editions           []byte             `json:"editions"`
 	Sales              int64              `json:"sales"`
+	ReleaseEvents      []byte             `json:"release_events"`
+	Script             string             `json:"script"`
+	Artwork            []byte             `json:"artwork"`
 	ArtistName         string             `json:"artist_name"`
 	ArtistSlug         string             `json:"artist_slug"`
 	TrackCount         int64              `json:"track_count"`
@@ -2115,6 +2156,9 @@ func (q *Queries) ListAlbumsByArtistSlug(ctx context.Context, arg ListAlbumsByAr
 			&i.Ratings,
 			&i.Editions,
 			&i.Sales,
+			&i.ReleaseEvents,
+			&i.Script,
+			&i.Artwork,
 			&i.ArtistName,
 			&i.ArtistSlug,
 			&i.TrackCount,
@@ -2131,7 +2175,7 @@ func (q *Queries) ListAlbumsByArtistSlug(ctx context.Context, arg ListAlbumsByAr
 }
 
 const listAlbumsByArtistUnderFolder = `-- name: ListAlbumsByArtistUnderFolder :many
-SELECT DISTINCT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales
+SELECT DISTINCT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork
 FROM albums al
 WHERE al.artist_id = $1
   AND EXISTS (
@@ -2207,6 +2251,9 @@ func (q *Queries) ListAlbumsByArtistUnderFolder(ctx context.Context, arg ListAlb
 			&i.Ratings,
 			&i.Editions,
 			&i.Sales,
+			&i.ReleaseEvents,
+			&i.Script,
+			&i.Artwork,
 		); err != nil {
 			return nil, err
 		}
@@ -2405,7 +2452,7 @@ func (q *Queries) ListArtistTopTracksRawByArtistID(ctx context.Context, arg List
 }
 
 const listArtistsByLibrary = `-- name: ListArtistsByLibrary :many
-SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags, a.genres, a.metadata_sources FROM artists a
+SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags, a.genres, a.metadata_sources, a.followers FROM artists a
 JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE mi.library_id = $1
 ORDER BY a.name
@@ -2451,6 +2498,7 @@ func (q *Queries) ListArtistsByLibrary(ctx context.Context, libraryID int64) ([]
 			&i.Tags,
 			&i.Genres,
 			&i.MetadataSources,
+			&i.Followers,
 		); err != nil {
 			return nil, err
 		}
@@ -2463,11 +2511,11 @@ func (q *Queries) ListArtistsByLibrary(ctx context.Context, libraryID int64) ([]
 }
 
 const listMusicAlbums = `-- name: ListMusicAlbums :many
-SELECT sub.id, sub.artist_id, sub.title, sub.slug, sub.year, sub.musicbrainz_id, sub.album_type, sub.genres, sub.cover_path, sub.release_date, sub.label, sub.country, sub.barcode, sub.total_tracks, sub.total_discs, sub.tags, sub.integrated_lufs, sub.true_peak_db, sub.loudness_range_db, sub.loudness_analyzed_at, sub.search_vector, sub.catalog_no, sub.explicit, sub.original_title, sub.secondary_types, sub.styles, sub.language, sub.duration_seconds, sub.isrcs, sub.rating, sub.popularity, sub.listeners, sub.playcount, sub.external_ids, sub.artist_credits, sub.field_provenance, sub.sort_artist, sub.sort_title, sub.description, sub.review, sub.ratings, sub.editions, sub.sales, sub.artist_name, sub.artist_slug,
+SELECT sub.id, sub.artist_id, sub.title, sub.slug, sub.year, sub.musicbrainz_id, sub.album_type, sub.genres, sub.cover_path, sub.release_date, sub.label, sub.country, sub.barcode, sub.total_tracks, sub.total_discs, sub.tags, sub.integrated_lufs, sub.true_peak_db, sub.loudness_range_db, sub.loudness_analyzed_at, sub.search_vector, sub.catalog_no, sub.explicit, sub.original_title, sub.secondary_types, sub.styles, sub.language, sub.duration_seconds, sub.isrcs, sub.rating, sub.popularity, sub.listeners, sub.playcount, sub.external_ids, sub.artist_credits, sub.field_provenance, sub.sort_artist, sub.sort_title, sub.description, sub.review, sub.ratings, sub.editions, sub.sales, sub.release_events, sub.script, sub.artwork, sub.artist_name, sub.artist_slug,
        (SELECT count(*) FROM tracks t WHERE t.album_id = sub.id) AS track_count,
        EXISTS (SELECT 1 FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = sub.id AND lf.deleted_at IS NULL) AS available
 FROM (
-    SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales,
+    SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork,
            a.name  AS artist_name,
            mi.slug AS artist_slug
     FROM (
@@ -2532,6 +2580,9 @@ type ListMusicAlbumsRow struct {
 	Ratings            []byte             `json:"ratings"`
 	Editions           []byte             `json:"editions"`
 	Sales              int64              `json:"sales"`
+	ReleaseEvents      []byte             `json:"release_events"`
+	Script             string             `json:"script"`
+	Artwork            []byte             `json:"artwork"`
 	ArtistName         string             `json:"artist_name"`
 	ArtistSlug         string             `json:"artist_slug"`
 	TrackCount         int64              `json:"track_count"`
@@ -2608,6 +2659,9 @@ func (q *Queries) ListMusicAlbums(ctx context.Context, arg ListMusicAlbumsParams
 			&i.Ratings,
 			&i.Editions,
 			&i.Sales,
+			&i.ReleaseEvents,
+			&i.Script,
+			&i.Artwork,
 			&i.ArtistName,
 			&i.ArtistSlug,
 			&i.TrackCount,
@@ -2624,7 +2678,7 @@ func (q *Queries) ListMusicAlbums(ctx context.Context, arg ListMusicAlbumsParams
 }
 
 const listMusicArtists = `-- name: ListMusicArtists :many
-SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags, a.genres, a.metadata_sources,
+SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags, a.genres, a.metadata_sources, a.followers,
        mi.slug         AS slug,
        mi.public_id    AS media_item_public_id,
        mi.poster_path  AS poster_path,
@@ -2675,6 +2729,7 @@ type ListMusicArtistsRow struct {
 	Tags                  []string           `json:"tags"`
 	Genres                []string           `json:"genres"`
 	MetadataSources       []string           `json:"metadata_sources"`
+	Followers             int64              `json:"followers"`
 	Slug                  string             `json:"slug"`
 	MediaItemPublicID     uuid.UUID          `json:"media_item_public_id"`
 	PosterPath            string             `json:"poster_path"`
@@ -2726,6 +2781,7 @@ func (q *Queries) ListMusicArtists(ctx context.Context, arg ListMusicArtistsPara
 			&i.Tags,
 			&i.Genres,
 			&i.MetadataSources,
+			&i.Followers,
 			&i.Slug,
 			&i.MediaItemPublicID,
 			&i.PosterPath,
@@ -2854,7 +2910,7 @@ func (q *Queries) ListMusicTracks(ctx context.Context, arg ListMusicTracksParams
 }
 
 const listRecentlyAddedAlbums = `-- name: ListRecentlyAddedAlbums :many
-SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales,
+SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork,
        a.name           AS artist_name,
        mi.slug          AS artist_slug,
        (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
@@ -2863,7 +2919,7 @@ SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.al
        -- of their own) — feeds the "3d ago" chip on the Recently Added rail.
        (SELECT MIN(lf.created_at) FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = al.id)::timestamptz AS added_at
 FROM (
-  SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales FROM albums ORDER BY id DESC LIMIT $2 OFFSET $1
+  SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork FROM albums ORDER BY id DESC LIMIT $2 OFFSET $1
 ) al
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
@@ -2920,6 +2976,9 @@ type ListRecentlyAddedAlbumsRow struct {
 	Ratings            []byte             `json:"ratings"`
 	Editions           []byte             `json:"editions"`
 	Sales              int64              `json:"sales"`
+	ReleaseEvents      []byte             `json:"release_events"`
+	Script             string             `json:"script"`
+	Artwork            []byte             `json:"artwork"`
 	ArtistName         string             `json:"artist_name"`
 	ArtistSlug         string             `json:"artist_slug"`
 	TrackCount         int64              `json:"track_count"`
@@ -2986,6 +3045,9 @@ func (q *Queries) ListRecentlyAddedAlbums(ctx context.Context, arg ListRecentlyA
 			&i.Ratings,
 			&i.Editions,
 			&i.Sales,
+			&i.ReleaseEvents,
+			&i.Script,
+			&i.Artwork,
 			&i.ArtistName,
 			&i.ArtistSlug,
 			&i.TrackCount,
@@ -3003,7 +3065,7 @@ func (q *Queries) ListRecentlyAddedAlbums(ctx context.Context, arg ListRecentlyA
 }
 
 const listRecentlyAddedArtists = `-- name: ListRecentlyAddedArtists :many
-SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags, a.genres, a.metadata_sources,
+SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags, a.genres, a.metadata_sources, a.followers,
        mi.slug         AS slug,
        mi.poster_path  AS poster_path,
        (SELECT count(*) FROM albums al WHERE al.artist_id = a.id) AS album_count,
@@ -3048,6 +3110,7 @@ type ListRecentlyAddedArtistsRow struct {
 	Tags                  []string           `json:"tags"`
 	Genres                []string           `json:"genres"`
 	MetadataSources       []string           `json:"metadata_sources"`
+	Followers             int64              `json:"followers"`
 	Slug                  string             `json:"slug"`
 	PosterPath            string             `json:"poster_path"`
 	AlbumCount            int64              `json:"album_count"`
@@ -3099,6 +3162,7 @@ func (q *Queries) ListRecentlyAddedArtists(ctx context.Context, limit int32) ([]
 			&i.Tags,
 			&i.Genres,
 			&i.MetadataSources,
+			&i.Followers,
 			&i.Slug,
 			&i.PosterPath,
 			&i.AlbumCount,
@@ -3116,7 +3180,7 @@ func (q *Queries) ListRecentlyAddedArtists(ctx context.Context, limit int32) ([]
 }
 
 const listStaleArtistsByLibrary = `-- name: ListStaleArtistsByLibrary :many
-SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags, a.genres, a.metadata_sources FROM artists a
+SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags, a.genres, a.metadata_sources, a.followers FROM artists a
 JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE mi.library_id = $1
   AND (a.discography_enriched_at IS NULL OR a.discography_enriched_at < $2)
@@ -3169,6 +3233,7 @@ func (q *Queries) ListStaleArtistsByLibrary(ctx context.Context, arg ListStaleAr
 			&i.Tags,
 			&i.Genres,
 			&i.MetadataSources,
+			&i.Followers,
 		); err != nil {
 			return nil, err
 		}
@@ -3477,7 +3542,7 @@ func (q *Queries) ListTrackFilesPendingLoudness(ctx context.Context, arg ListTra
 }
 
 const listTracksByAlbum = `-- name: ListTracksByAlbum :many
-SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album FROM tracks WHERE album_id = $1 ORDER BY disc_number ASC, track_number ASC
+SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits FROM tracks WHERE album_id = $1 ORDER BY disc_number ASC, track_number ASC
 `
 
 func (q *Queries) ListTracksByAlbum(ctx context.Context, albumID int64) ([]Track, error) {
@@ -3510,6 +3575,7 @@ func (q *Queries) ListTracksByAlbum(ctx context.Context, albumID int64) ([]Track
 			&i.SortArtist,
 			&i.SortAlbumYear,
 			&i.SortAlbum,
+			&i.Credits,
 		); err != nil {
 			return nil, err
 		}
@@ -3522,7 +3588,7 @@ func (q *Queries) ListTracksByAlbum(ctx context.Context, albumID int64) ([]Track
 }
 
 const listTracksByArtist = `-- name: ListTracksByArtist :many
-SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.file_path, t.lyrics_path, t.search_vector, t.library_file_id, t.external_ids, t.isrc, t.recording_mbid, t.preview_url, t.explicit, t.artist_credits, t.lyrics_available, t.sort_artist, t.sort_album_year, t.sort_album FROM tracks t
+SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.file_path, t.lyrics_path, t.search_vector, t.library_file_id, t.external_ids, t.isrc, t.recording_mbid, t.preview_url, t.explicit, t.artist_credits, t.lyrics_available, t.sort_artist, t.sort_album_year, t.sort_album, t.credits FROM tracks t
 JOIN albums al ON al.id = t.album_id
 WHERE al.artist_id = $1
 ORDER BY t.album_id ASC, t.disc_number ASC, t.track_number ASC
@@ -3560,6 +3626,7 @@ func (q *Queries) ListTracksByArtist(ctx context.Context, artistID int64) ([]Tra
 			&i.SortArtist,
 			&i.SortAlbumYear,
 			&i.SortAlbum,
+			&i.Credits,
 		); err != nil {
 			return nil, err
 		}
@@ -4195,7 +4262,7 @@ SET title = $2, slug = $3, year = $4, musicbrainz_id = $5, album_type = $6,
     genres = $7, cover_path = $8, release_date = $9,
     label = $10, country = $11, barcode = $12, total_tracks = $13, total_discs = $14, tags = $15
 WHERE id = $1
-RETURNING id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales
+RETURNING id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork
 `
 
 type UpdateAlbumParams struct {
@@ -4279,6 +4346,9 @@ func (q *Queries) UpdateAlbum(ctx context.Context, arg UpdateAlbumParams) (Album
 		&i.Ratings,
 		&i.Editions,
 		&i.Sales,
+		&i.ReleaseEvents,
+		&i.Script,
+		&i.Artwork,
 	)
 	return i, err
 }
@@ -4365,7 +4435,10 @@ UPDATE albums SET
     review           = CASE WHEN $17::text != '' THEN $17 ELSE review END,
     ratings          = $18,
     editions         = $19,
-    sales            = CASE WHEN $20::bigint != 0 THEN $20 ELSE sales END
+    sales            = CASE WHEN $20::bigint != 0 THEN $20 ELSE sales END,
+    artwork          = $21,
+    script           = CASE WHEN $22::text != '' THEN $22 ELSE script END,
+    release_events   = $23
 WHERE id = $1
 `
 
@@ -4390,6 +4463,9 @@ type UpdateAlbumExtendedMetadataParams struct {
 	Ratings        []byte         `json:"ratings"`
 	Editions       []byte         `json:"editions"`
 	Column20       int64          `json:"column_20"`
+	Artwork        []byte         `json:"artwork"`
+	Column22       string         `json:"column_22"`
+	ReleaseEvents  []byte         `json:"release_events"`
 }
 
 // The post-00019 album columns. Mirrors UpdateAlbumEnrichedFields' style
@@ -4417,6 +4493,9 @@ func (q *Queries) UpdateAlbumExtendedMetadata(ctx context.Context, arg UpdateAlb
 		arg.Ratings,
 		arg.Editions,
 		arg.Column20,
+		arg.Artwork,
+		arg.Column22,
+		arg.ReleaseEvents,
 	)
 	return err
 }
@@ -4451,7 +4530,7 @@ const updateArtist = `-- name: UpdateArtist :one
 UPDATE artists
 SET musicbrainz_id = $2, name = $3, sort_name = $4, disambiguation = $5, biography = $6
 WHERE id = $1
-RETURNING id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources
+RETURNING id, media_item_id, musicbrainz_id, name, sort_name, disambiguation, biography, search_vector, discography_enriched_at, cover_art_enriched_at, listeners, playcount, popularity, annotation, urls, wikipedia_links, profiles, aliases, groups, members, artist_type, begin_date, begin_year, end_date, ended, deathday, birthplace, tags, genres, metadata_sources, followers
 `
 
 type UpdateArtistParams struct {
@@ -4504,6 +4583,7 @@ func (q *Queries) UpdateArtist(ctx context.Context, arg UpdateArtistParams) (Art
 		&i.Tags,
 		&i.Genres,
 		&i.MetadataSources,
+		&i.Followers,
 	)
 	return i, err
 }
@@ -4564,7 +4644,8 @@ UPDATE artists SET
     birthplace       = $18,
     tags             = $19,
     genres           = $20,
-    metadata_sources = $21
+    metadata_sources = $21,
+    followers        = $22
 WHERE id = $1
 `
 
@@ -4590,6 +4671,7 @@ type UpdateArtistExtendedMetadataParams struct {
 	Tags            []string `json:"tags"`
 	Genres          []string `json:"genres"`
 	MetadataSources []string `json:"metadata_sources"`
+	Followers       int64    `json:"followers"`
 }
 
 // Writes the post-00019 fields on artists (everything beyond name / bio /
@@ -4620,6 +4702,7 @@ func (q *Queries) UpdateArtistExtendedMetadata(ctx context.Context, arg UpdateAr
 		arg.Tags,
 		arg.Genres,
 		arg.MetadataSources,
+		arg.Followers,
 	)
 	return err
 }
@@ -4667,6 +4750,24 @@ type UpdateMediaItemExternalIdsParams struct {
 
 func (q *Queries) UpdateMediaItemExternalIds(ctx context.Context, arg UpdateMediaItemExternalIdsParams) error {
 	_, err := q.db.Exec(ctx, updateMediaItemExternalIds, arg.ID, arg.ExternalIds)
+	return err
+}
+
+const updateTrackCredits = `-- name: UpdateTrackCredits :exec
+UPDATE tracks SET credits = $2 WHERE id = $1
+`
+
+type UpdateTrackCreditsParams struct {
+	ID      int64  `json:"id"`
+	Credits []byte `json:"credits"`
+}
+
+// Performance credits from the canonical recording document. Written only
+// when the per-recording fetch succeeded — a failed fetch keeps the last
+// known credits instead of clearing them (its own statement so the
+// extended-metadata write can't half-apply on fetch errors).
+func (q *Queries) UpdateTrackCredits(ctx context.Context, arg UpdateTrackCreditsParams) error {
+	_, err := q.db.Exec(ctx, updateTrackCredits, arg.ID, arg.Credits)
 	return err
 }
 
@@ -4910,7 +5011,7 @@ func (q *Queries) UpdateTrackPrimary(ctx context.Context, arg UpdateTrackPrimary
 }
 
 const updateTrackTitleAndDuration = `-- name: UpdateTrackTitleAndDuration :one
-UPDATE tracks SET title = $2, duration = $3 WHERE id = $1 RETURNING id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album
+UPDATE tracks SET title = $2, duration = $3 WHERE id = $1 RETURNING id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits
 `
 
 type UpdateTrackTitleAndDurationParams struct {
@@ -4945,6 +5046,7 @@ func (q *Queries) UpdateTrackTitleAndDuration(ctx context.Context, arg UpdateTra
 		&i.SortArtist,
 		&i.SortAlbumYear,
 		&i.SortAlbum,
+		&i.Credits,
 	)
 	return i, err
 }

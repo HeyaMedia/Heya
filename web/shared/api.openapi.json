@@ -1495,6 +1495,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "artwork": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "barcode": {
             "type": "string"
           },
@@ -1594,12 +1598,19 @@
           "release_date": {
             "$ref": "#/components/schemas/Date"
           },
+          "release_events": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "review": {
             "type": "string"
           },
           "sales": {
             "format": "int64",
             "type": "integer"
+          },
+          "script": {
+            "type": "string"
           },
           "search_vector": {},
           "secondary_types": {
@@ -1699,7 +1710,26 @@
           "review",
           "ratings",
           "editions",
-          "sales"
+          "sales",
+          "release_events",
+          "script",
+          "artwork"
+        ],
+        "type": "object"
+      },
+      "AlbumArtworkRef": {
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "url"
         ],
         "type": "object"
       },
@@ -1825,6 +1855,21 @@
           "system",
           "value",
           "scale_max"
+        ],
+        "type": "object"
+      },
+      "AlbumReleaseEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "country": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "date"
         ],
         "type": "object"
       },
@@ -2303,6 +2348,10 @@
           },
           "ended": {
             "type": "boolean"
+          },
+          "followers": {
+            "format": "int64",
+            "type": "integer"
           },
           "genres": {
             "items": {
@@ -5448,6 +5497,10 @@
           "ended": {
             "type": "boolean"
           },
+          "followers": {
+            "format": "int64",
+            "type": "integer"
+          },
           "genres": {
             "items": {
               "type": "string"
@@ -5570,6 +5623,7 @@
           "tags",
           "genres",
           "metadata_sources",
+          "followers",
           "slug",
           "media_item_public_id",
           "poster_path",
@@ -6930,6 +6984,10 @@
           "artist_slug": {
             "type": "string"
           },
+          "artwork": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "barcode": {
             "type": "string"
           },
@@ -7029,12 +7087,19 @@
           "release_date": {
             "$ref": "#/components/schemas/Date"
           },
+          "release_events": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "review": {
             "type": "string"
           },
           "sales": {
             "format": "int64",
             "type": "integer"
+          },
+          "script": {
+            "type": "string"
           },
           "search_vector": {},
           "secondary_types": {
@@ -7139,6 +7204,9 @@
           "ratings",
           "editions",
           "sales",
+          "release_events",
+          "script",
+          "artwork",
           "artist_name",
           "artist_slug",
           "track_count"
@@ -7163,6 +7231,10 @@
             "type": "string"
           },
           "artist_slug": {
+            "type": "string"
+          },
+          "artwork": {
+            "contentEncoding": "base64",
             "type": "string"
           },
           "available": {
@@ -7267,12 +7339,19 @@
           "release_date": {
             "$ref": "#/components/schemas/Date"
           },
+          "release_events": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "review": {
             "type": "string"
           },
           "sales": {
             "format": "int64",
             "type": "integer"
+          },
+          "script": {
+            "type": "string"
           },
           "search_vector": {},
           "secondary_types": {
@@ -7377,6 +7456,9 @@
           "ratings",
           "editions",
           "sales",
+          "release_events",
+          "script",
+          "artwork",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -7718,6 +7800,10 @@
           "artist_slug": {
             "type": "string"
           },
+          "artwork": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "available": {
             "type": "boolean"
           },
@@ -7820,12 +7906,19 @@
           "release_date": {
             "$ref": "#/components/schemas/Date"
           },
+          "release_events": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "review": {
             "type": "string"
           },
           "sales": {
             "format": "int64",
             "type": "integer"
+          },
+          "script": {
+            "type": "string"
           },
           "search_vector": {},
           "secondary_types": {
@@ -7930,6 +8023,9 @@
           "ratings",
           "editions",
           "sales",
+          "release_events",
+          "script",
+          "artwork",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -7992,6 +8088,10 @@
           },
           "ended": {
             "type": "boolean"
+          },
+          "followers": {
+            "format": "int64",
+            "type": "integer"
           },
           "genres": {
             "items": {
@@ -8115,6 +8215,7 @@
           "tags",
           "genres",
           "metadata_sources",
+          "followers",
           "slug",
           "media_item_public_id",
           "poster_path",
@@ -8212,6 +8313,10 @@
             "type": "string"
           },
           "artist_slug": {
+            "type": "string"
+          },
+          "artwork": {
+            "contentEncoding": "base64",
             "type": "string"
           },
           "barcode": {
@@ -8313,6 +8418,10 @@
           "release_date": {
             "$ref": "#/components/schemas/Date"
           },
+          "release_events": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "release_year": {
             "format": "int32",
             "type": "integer"
@@ -8323,6 +8432,9 @@
           "sales": {
             "format": "int64",
             "type": "integer"
+          },
+          "script": {
+            "type": "string"
           },
           "search_vector": {},
           "secondary_types": {
@@ -8427,6 +8539,9 @@
           "ratings",
           "editions",
           "sales",
+          "release_events",
+          "script",
+          "artwork",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -8661,6 +8776,10 @@
           "artist_slug": {
             "type": "string"
           },
+          "artwork": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "available": {
             "type": "boolean"
           },
@@ -8763,12 +8882,19 @@
           "release_date": {
             "$ref": "#/components/schemas/Date"
           },
+          "release_events": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "review": {
             "type": "string"
           },
           "sales": {
             "format": "int64",
             "type": "integer"
+          },
+          "script": {
+            "type": "string"
           },
           "search_vector": {},
           "secondary_types": {
@@ -8873,6 +8999,9 @@
           "ratings",
           "editions",
           "sales",
+          "release_events",
+          "script",
+          "artwork",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -9410,6 +9539,10 @@
           "artist_slug": {
             "type": "string"
           },
+          "artwork": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "barcode": {
             "type": "string"
           },
@@ -9512,12 +9645,19 @@
           "release_date": {
             "$ref": "#/components/schemas/Date"
           },
+          "release_events": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "review": {
             "type": "string"
           },
           "sales": {
             "format": "int64",
             "type": "integer"
+          },
+          "script": {
+            "type": "string"
           },
           "search_vector": {},
           "secondary_types": {
@@ -9622,6 +9762,9 @@
           "ratings",
           "editions",
           "sales",
+          "release_events",
+          "script",
+          "artwork",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -9681,6 +9824,10 @@
           },
           "ended": {
             "type": "boolean"
+          },
+          "followers": {
+            "format": "int64",
+            "type": "integer"
           },
           "genres": {
             "items": {
@@ -9804,6 +9951,7 @@
           "tags",
           "genres",
           "metadata_sources",
+          "followers",
           "slug",
           "poster_path",
           "album_count",
@@ -9986,6 +10134,10 @@
           "artist_slug": {
             "type": "string"
           },
+          "artwork": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "barcode": {
             "type": "string"
           },
@@ -10092,12 +10244,19 @@
           "release_date": {
             "$ref": "#/components/schemas/Date"
           },
+          "release_events": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
           "review": {
             "type": "string"
           },
           "sales": {
             "format": "int64",
             "type": "integer"
+          },
+          "script": {
+            "type": "string"
           },
           "search_vector": {},
           "secondary_types": {
@@ -10198,6 +10357,9 @@
           "ratings",
           "editions",
           "sales",
+          "release_events",
+          "script",
+          "artwork",
           "artist_name",
           "artist_slug",
           "rating_2",
@@ -10257,6 +10419,10 @@
           },
           "ended": {
             "type": "boolean"
+          },
+          "followers": {
+            "format": "int64",
+            "type": "integer"
           },
           "genres": {
             "items": {
@@ -10387,6 +10553,7 @@
           "tags",
           "genres",
           "metadata_sources",
+          "followers",
           "slug",
           "media_item_public_id",
           "poster_path",
@@ -12100,6 +12267,15 @@
           "artist_slug": {
             "type": "string"
           },
+          "artwork": {
+            "items": {
+              "$ref": "#/components/schemas/AlbumArtworkRef"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "editions": {
             "items": {
               "$ref": "#/components/schemas/AlbumEdition"
@@ -12119,6 +12295,15 @@
           "ratings": {
             "items": {
               "$ref": "#/components/schemas/AlbumRating"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "release_events": {
+            "items": {
+              "$ref": "#/components/schemas/AlbumReleaseEvent"
             },
             "type": [
               "array",
@@ -15242,6 +15427,37 @@
         },
         "required": [
           "rails"
+        ],
+        "type": "object"
+      },
+      "RecordingCredit": {
+        "additionalProperties": false,
+        "properties": {
+          "artist_entity_id": {
+            "type": "string"
+          },
+          "artist_mbid": {
+            "type": "string"
+          },
+          "artist_name": {
+            "type": "string"
+          },
+          "attributes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "role": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "artist_name"
         ],
         "type": "object"
       },
@@ -19015,6 +19231,15 @@
           "artist_credits": {
             "contentEncoding": "base64",
             "type": "string"
+          },
+          "credits": {
+            "items": {
+              "$ref": "#/components/schemas/RecordingCredit"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "disc_number": {
             "format": "int32",

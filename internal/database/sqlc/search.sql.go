@@ -13,13 +13,13 @@ import (
 )
 
 const searchAlbums = `-- name: SearchAlbums :many
-SELECT a.id, a.artist_id, a.title, a.slug, a.year, a.musicbrainz_id, a.album_type, a.genres, a.cover_path, a.release_date, a.label, a.country, a.barcode, a.total_tracks, a.total_discs, a.tags, a.integrated_lufs, a.true_peak_db, a.loudness_range_db, a.loudness_analyzed_at, a.search_vector, a.catalog_no, a.explicit, a.original_title, a.secondary_types, a.styles, a.language, a.duration_seconds, a.isrcs, a.rating, a.popularity, a.listeners, a.playcount, a.external_ids, a.artist_credits, a.field_provenance, a.sort_artist, a.sort_title, a.description, a.review, a.ratings, a.editions, a.sales,
+SELECT a.id, a.artist_id, a.title, a.slug, a.year, a.musicbrainz_id, a.album_type, a.genres, a.cover_path, a.release_date, a.label, a.country, a.barcode, a.total_tracks, a.total_discs, a.tags, a.integrated_lufs, a.true_peak_db, a.loudness_range_db, a.loudness_analyzed_at, a.search_vector, a.catalog_no, a.explicit, a.original_title, a.secondary_types, a.styles, a.language, a.duration_seconds, a.isrcs, a.rating, a.popularity, a.listeners, a.playcount, a.external_ids, a.artist_credits, a.field_provenance, a.sort_artist, a.sort_title, a.description, a.review, a.ratings, a.editions, a.sales, a.release_events, a.script, a.artwork,
        mi.id AS artist_media_item_id,
        mi.public_id AS artist_media_item_public_id,
        mi.title AS artist_name,
        mi.slug AS artist_slug
 FROM (
-  SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales
+  SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork
   FROM albums al
   WHERE (
       lower(al.title) % lower($1)
@@ -96,6 +96,9 @@ type SearchAlbumsRow struct {
 	Ratings                 []byte             `json:"ratings"`
 	Editions                []byte             `json:"editions"`
 	Sales                   int64              `json:"sales"`
+	ReleaseEvents           []byte             `json:"release_events"`
+	Script                  string             `json:"script"`
+	Artwork                 []byte             `json:"artwork"`
 	ArtistMediaItemID       int64              `json:"artist_media_item_id"`
 	ArtistMediaItemPublicID uuid.UUID          `json:"artist_media_item_public_id"`
 	ArtistName              string             `json:"artist_name"`
@@ -159,6 +162,9 @@ func (q *Queries) SearchAlbums(ctx context.Context, arg SearchAlbumsParams) ([]S
 			&i.Ratings,
 			&i.Editions,
 			&i.Sales,
+			&i.ReleaseEvents,
+			&i.Script,
+			&i.Artwork,
 			&i.ArtistMediaItemID,
 			&i.ArtistMediaItemPublicID,
 			&i.ArtistName,
@@ -576,7 +582,7 @@ func (q *Queries) SearchPeopleCount(ctx context.Context, query string) (int64, e
 }
 
 const searchTracks = `-- name: SearchTracks :many
-SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.file_path, t.lyrics_path, t.search_vector, t.library_file_id, t.external_ids, t.isrc, t.recording_mbid, t.preview_url, t.explicit, t.artist_credits, t.lyrics_available, t.sort_artist, t.sort_album_year, t.sort_album,
+SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.file_path, t.lyrics_path, t.search_vector, t.library_file_id, t.external_ids, t.isrc, t.recording_mbid, t.preview_url, t.explicit, t.artist_credits, t.lyrics_available, t.sort_artist, t.sort_album_year, t.sort_album, t.credits,
        a.title AS album_title,
        a.slug AS album_slug,
        a.cover_path AS album_cover_path,
@@ -586,7 +592,7 @@ SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.f
        mi.slug AS artist_slug,
        EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL) AS available
 FROM (
-  SELECT tr.id, tr.album_id, tr.disc_number, tr.track_number, tr.title, tr.duration, tr.file_path, tr.lyrics_path, tr.search_vector, tr.library_file_id, tr.external_ids, tr.isrc, tr.recording_mbid, tr.preview_url, tr.explicit, tr.artist_credits, tr.lyrics_available, tr.sort_artist, tr.sort_album_year, tr.sort_album
+  SELECT tr.id, tr.album_id, tr.disc_number, tr.track_number, tr.title, tr.duration, tr.file_path, tr.lyrics_path, tr.search_vector, tr.library_file_id, tr.external_ids, tr.isrc, tr.recording_mbid, tr.preview_url, tr.explicit, tr.artist_credits, tr.lyrics_available, tr.sort_artist, tr.sort_album_year, tr.sort_album, tr.credits
   FROM tracks tr
   WHERE (
       tr.search_vector @@ websearch_to_tsquery('simple', $1)
@@ -638,6 +644,7 @@ type SearchTracksRow struct {
 	SortArtist              string      `json:"sort_artist"`
 	SortAlbumYear           string      `json:"sort_album_year"`
 	SortAlbum               string      `json:"sort_album"`
+	Credits                 []byte      `json:"credits"`
 	AlbumTitle              string      `json:"album_title"`
 	AlbumSlug               string      `json:"album_slug"`
 	AlbumCoverPath          string      `json:"album_cover_path"`
@@ -687,6 +694,7 @@ func (q *Queries) SearchTracks(ctx context.Context, arg SearchTracksParams) ([]S
 			&i.SortArtist,
 			&i.SortAlbumYear,
 			&i.SortAlbum,
+			&i.Credits,
 			&i.AlbumTitle,
 			&i.AlbumSlug,
 			&i.AlbumCoverPath,

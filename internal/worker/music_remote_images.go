@@ -95,7 +95,13 @@ func rankRemoteArtistImages(images []metadata.ArtworkResult, posterURL, backdrop
 		case "banner":
 			considerTyped(&bannerBest, r)
 			continue
-		case "clearart":
+		case "clearart", "cutout":
+			// "cutout" (transparent character/cutout art) has no dedicated
+			// asset_type in the DB enum — file it alongside clearart, the
+			// closest existing slot, rather than adding a migration for one
+			// upstream class. Without this it fell through to the
+			// aspect-based classifier below and got misfiled as a poster/
+			// backdrop candidate.
 			considerTyped(&clearartBest, r)
 			continue
 		case "thumb":

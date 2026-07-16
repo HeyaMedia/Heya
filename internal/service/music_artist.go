@@ -100,6 +100,7 @@ type ArtistView struct {
 	Birthplace            string            `json:"birthplace,omitempty"`
 	Listeners             int64             `json:"listeners,omitempty"`
 	Playcount             int64             `json:"playcount,omitempty"`
+	Followers             int64             `json:"followers,omitempty"`
 	Popularity            int32             `json:"popularity,omitempty"`
 	Genres                []string          `json:"genres,omitempty"`
 	Tags                  []string          `json:"tags,omitempty"`
@@ -137,6 +138,7 @@ func BuildArtistView(a sqlc.Artist) ArtistView {
 		Birthplace:      a.Birthplace,
 		Listeners:       a.Listeners,
 		Playcount:       a.Playcount,
+		Followers:       a.Followers,
 		Popularity:      a.Popularity,
 		Genres:          nonNilStrings(a.Genres),
 		Tags:            nonNilStrings(a.Tags),

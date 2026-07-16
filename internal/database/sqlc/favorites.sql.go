@@ -202,7 +202,7 @@ func (q *Queries) ListUserLovedAlbumIDs(ctx context.Context, userID int64) ([]in
 }
 
 const listUserLovedAlbums = `-- name: ListUserLovedAlbums :many
-SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales,
+SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork,
        a.name           AS artist_name,
        mi.slug          AS artist_slug,
        (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
@@ -267,6 +267,9 @@ type ListUserLovedAlbumsRow struct {
 	Ratings            []byte             `json:"ratings"`
 	Editions           []byte             `json:"editions"`
 	Sales              int64              `json:"sales"`
+	ReleaseEvents      []byte             `json:"release_events"`
+	Script             string             `json:"script"`
+	Artwork            []byte             `json:"artwork"`
 	ArtistName         string             `json:"artist_name"`
 	ArtistSlug         string             `json:"artist_slug"`
 	TrackCount         int64              `json:"track_count"`
@@ -327,6 +330,9 @@ func (q *Queries) ListUserLovedAlbums(ctx context.Context, arg ListUserLovedAlbu
 			&i.Ratings,
 			&i.Editions,
 			&i.Sales,
+			&i.ReleaseEvents,
+			&i.Script,
+			&i.Artwork,
 			&i.ArtistName,
 			&i.ArtistSlug,
 			&i.TrackCount,
@@ -369,7 +375,7 @@ func (q *Queries) ListUserLovedArtistIDs(ctx context.Context, userID int64) ([]i
 }
 
 const listUserLovedArtists = `-- name: ListUserLovedArtists :many
-SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags, a.genres, a.metadata_sources,
+SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags, a.genres, a.metadata_sources, a.followers,
        mi.slug         AS slug,
        mi.poster_path  AS poster_path,
        (SELECT count(*) FROM albums al WHERE al.artist_id = a.id) AS album_count,
@@ -421,6 +427,7 @@ type ListUserLovedArtistsRow struct {
 	Tags                  []string           `json:"tags"`
 	Genres                []string           `json:"genres"`
 	MetadataSources       []string           `json:"metadata_sources"`
+	Followers             int64              `json:"followers"`
 	Slug                  string             `json:"slug"`
 	PosterPath            string             `json:"poster_path"`
 	AlbumCount            int64              `json:"album_count"`
@@ -471,6 +478,7 @@ func (q *Queries) ListUserLovedArtists(ctx context.Context, arg ListUserLovedArt
 			&i.Tags,
 			&i.Genres,
 			&i.MetadataSources,
+			&i.Followers,
 			&i.Slug,
 			&i.PosterPath,
 			&i.AlbumCount,

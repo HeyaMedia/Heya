@@ -240,8 +240,10 @@ type MusicAlbumDetail struct {
 	MediaItemPublicID string      `json:"media_item_public_id,omitempty"`
 	// Parsed views of the albums jsonb columns — sqlc hands them back as
 	// []byte, which would marshal as base64 through the raw Album embed.
-	Ratings  []metadata.AlbumRating  `json:"ratings,omitempty"`
-	Editions []metadata.AlbumEdition `json:"editions,omitempty"`
+	Ratings       []metadata.AlbumRating       `json:"ratings,omitempty"`
+	Editions      []metadata.AlbumEdition      `json:"editions,omitempty"`
+	Artwork       []metadata.AlbumArtworkRef   `json:"artwork,omitempty"`
+	ReleaseEvents []metadata.AlbumReleaseEvent `json:"release_events,omitempty"`
 }
 
 // GetAlbumDetail resolves an album by (artist_slug, album_slug) and returns
@@ -308,7 +310,7 @@ func (a *App) assembleAlbumDetail(ctx context.Context, q *sqlc.Queries, album sq
 		if files == nil {
 			files = []sqlc.TrackFile{} // keep JSON "files": [] for fileless tracks
 		}
-		views = append(views, TrackView{Track: t, Files: files})
+		views = append(views, TrackView{Track: t, Files: files, Credits: parseTrackCredits(t.Credits)})
 	}
 
 	detail := &MusicAlbumDetail{
@@ -325,6 +327,12 @@ func (a *App) assembleAlbumDetail(ctx context.Context, q *sqlc.Queries, album sq
 	}
 	if len(album.Editions) > 0 {
 		_ = json.Unmarshal(album.Editions, &detail.Editions)
+	}
+	if len(album.Artwork) > 0 {
+		_ = json.Unmarshal(album.Artwork, &detail.Artwork)
+	}
+	if len(album.ReleaseEvents) > 0 {
+		_ = json.Unmarshal(album.ReleaseEvents, &detail.ReleaseEvents)
 	}
 	return detail, nil
 }

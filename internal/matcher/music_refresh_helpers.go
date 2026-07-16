@@ -78,6 +78,7 @@ func (m *Matcher) writeArtistExtendedMetadata(ctx context.Context, artistID int6
 		Tags:            nonNilStrings(d.ArtistTags),
 		Genres:          nonNilStrings(d.Genres),
 		MetadataSources: nonNilStrings(d.ArtistMetadataSources),
+		Followers:       d.ArtistFollowers,
 	})
 }
 
@@ -173,6 +174,7 @@ func (m *Matcher) writeArtistMusicVideos(ctx context.Context, mediaItemID int64,
 			VideoType:   v.Type,
 			Language:    v.Language,
 			Official:    v.Official,
+			Description: v.Description,
 		}); err != nil {
 			return err
 		}
@@ -185,6 +187,8 @@ func (m *Matcher) writeAlbumExtendedMetadata(ctx context.Context, albumID int64,
 	creditsJSON, _ := json.Marshal(safeCredits(e.ArtistCredits))
 	ratingsJSON, _ := json.Marshal(nonNilRatings(e.Ratings))
 	editionsJSON, _ := json.Marshal(nonNilEditions(e.Editions))
+	artworkJSON, _ := json.Marshal(albumArtworkRefs(e.Artwork))
+	releaseEventsJSON, _ := json.Marshal(nonNilReleaseEvents(e.ReleaseEvents))
 
 	return m.q.UpdateAlbumExtendedMetadata(ctx, sqlc.UpdateAlbumExtendedMetadataParams{
 		ID:             albumID,
@@ -207,6 +211,9 @@ func (m *Matcher) writeAlbumExtendedMetadata(ctx context.Context, albumID int64,
 		Ratings:        ratingsJSON,
 		Editions:       editionsJSON,
 		Column20:       e.Sales,
+		Artwork:        artworkJSON,
+		Column22:       e.Script,
+		ReleaseEvents:  releaseEventsJSON,
 	})
 }
 
@@ -220,6 +227,26 @@ func nonNilRatings(values []metadata.AlbumRating) []metadata.AlbumRating {
 func nonNilEditions(values []metadata.AlbumEdition) []metadata.AlbumEdition {
 	if values == nil {
 		return []metadata.AlbumEdition{}
+	}
+	return values
+}
+
+// albumArtworkRefs projects the full ArtworkResult pool down to the slim
+// {type, url} shape albums.artwork persists (never nil — jsonb NOT NULL).
+func albumArtworkRefs(values []metadata.ArtworkResult) []metadata.AlbumArtworkRef {
+	out := make([]metadata.AlbumArtworkRef, 0, len(values))
+	for _, v := range values {
+		if v.URL == "" {
+			continue
+		}
+		out = append(out, metadata.AlbumArtworkRef{Type: v.AssetType, URL: v.URL})
+	}
+	return out
+}
+
+func nonNilReleaseEvents(values []metadata.AlbumReleaseEvent) []metadata.AlbumReleaseEvent {
+	if values == nil {
+		return []metadata.AlbumReleaseEvent{}
 	}
 	return values
 }

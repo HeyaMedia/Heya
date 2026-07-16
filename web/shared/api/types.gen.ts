@@ -471,6 +471,7 @@ export type Album = {
     album_type: string;
     artist_credits: string;
     artist_id: number;
+    artwork: string;
     barcode: string;
     catalog_no: string;
     country: string;
@@ -497,8 +498,10 @@ export type Album = {
     rating: Numeric;
     ratings: string;
     release_date: Date;
+    release_events: string;
     review: string;
     sales: number;
+    script: string;
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
@@ -511,6 +514,11 @@ export type Album = {
     total_tracks: number;
     true_peak_db: Numeric;
     year: string;
+};
+
+export type AlbumArtworkRef = {
+    type: string;
+    url: string;
 };
 
 export type AlbumEdition = {
@@ -548,6 +556,11 @@ export type AlbumRating = {
     system: string;
     value: number;
     votes?: number;
+};
+
+export type AlbumReleaseEvent = {
+    country?: string;
+    date: string;
 };
 
 export type AlbumResultsBody = {
@@ -693,6 +706,7 @@ export type ArtistView = {
     discography_enriched_at?: string;
     end_date?: string;
     ended?: boolean;
+    followers?: number;
     genres?: Array<string> | null;
     groups?: Array<ArtistMember> | null;
     id: number;
@@ -1667,6 +1681,7 @@ export type GetMusicArtistBySlugRow = {
     discography_enriched_at: Timestamptz;
     end_date: string;
     ended: boolean;
+    followers: number;
     genres: Array<string> | null;
     groups: string;
     id: number;
@@ -2097,6 +2112,7 @@ export type ListAlbumsByArtistIdForShelfRow = {
     artist_id: number;
     artist_name: string;
     artist_slug: string;
+    artwork: string;
     barcode: string;
     catalog_no: string;
     country: string;
@@ -2123,8 +2139,10 @@ export type ListAlbumsByArtistIdForShelfRow = {
     rating: Numeric;
     ratings: string;
     release_date: Date;
+    release_events: string;
     review: string;
     sales: number;
+    script: string;
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
@@ -2146,6 +2164,7 @@ export type ListAlbumsByArtistSlugRow = {
     artist_id: number;
     artist_name: string;
     artist_slug: string;
+    artwork: string;
     available: boolean;
     barcode: string;
     catalog_no: string;
@@ -2173,8 +2192,10 @@ export type ListAlbumsByArtistSlugRow = {
     rating: Numeric;
     ratings: string;
     release_date: Date;
+    release_events: string;
     review: string;
     sales: number;
+    script: string;
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
@@ -2276,6 +2297,7 @@ export type ListMusicAlbumsRow = {
     artist_id: number;
     artist_name: string;
     artist_slug: string;
+    artwork: string;
     available: boolean;
     barcode: string;
     catalog_no: string;
@@ -2303,8 +2325,10 @@ export type ListMusicAlbumsRow = {
     rating: Numeric;
     ratings: string;
     release_date: Date;
+    release_events: string;
     review: string;
     sales: number;
+    script: string;
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
@@ -2336,6 +2360,7 @@ export type ListMusicArtistsRow = {
     discography_enriched_at: Timestamptz;
     end_date: string;
     ended: boolean;
+    followers: number;
     genres: Array<string> | null;
     groups: string;
     id: number;
@@ -2382,6 +2407,7 @@ export type ListOnThisDayAlbumsRow = {
     artist_id: number;
     artist_name: string;
     artist_slug: string;
+    artwork: string;
     barcode: string;
     catalog_no: string;
     country: string;
@@ -2408,9 +2434,11 @@ export type ListOnThisDayAlbumsRow = {
     rating: Numeric;
     ratings: string;
     release_date: Date;
+    release_events: string;
     release_year: number;
     review: string;
     sales: number;
+    script: string;
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
@@ -2486,6 +2514,7 @@ export type ListRecentlyAddedAlbumsRow = {
     artist_id: number;
     artist_name: string;
     artist_slug: string;
+    artwork: string;
     available: boolean;
     barcode: string;
     catalog_no: string;
@@ -2513,8 +2542,10 @@ export type ListRecentlyAddedAlbumsRow = {
     rating: Numeric;
     ratings: string;
     release_date: Date;
+    release_events: string;
     review: string;
     sales: number;
+    script: string;
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
@@ -2660,6 +2691,7 @@ export type ListUserLovedAlbumsRow = {
     artist_id: number;
     artist_name: string;
     artist_slug: string;
+    artwork: string;
     barcode: string;
     catalog_no: string;
     country: string;
@@ -2687,8 +2719,10 @@ export type ListUserLovedAlbumsRow = {
     rating: Numeric;
     ratings: string;
     release_date: Date;
+    release_events: string;
     review: string;
     sales: number;
+    script: string;
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
@@ -2719,6 +2753,7 @@ export type ListUserLovedArtistsRow = {
     discography_enriched_at: Timestamptz;
     end_date: string;
     ended: boolean;
+    followers: number;
     genres: Array<string> | null;
     groups: string;
     id: number;
@@ -2786,6 +2821,7 @@ export type ListUserRatedAlbumsRow = {
     artist_id: number;
     artist_name: string;
     artist_slug: string;
+    artwork: string;
     barcode: string;
     catalog_no: string;
     country: string;
@@ -2814,8 +2850,10 @@ export type ListUserRatedAlbumsRow = {
     rating_2: number;
     ratings: string;
     release_date: Date;
+    release_events: string;
     review: string;
     sales: number;
+    script: string;
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
@@ -2845,6 +2883,7 @@ export type ListUserRatedArtistsRow = {
     discography_enriched_at: Timestamptz;
     end_date: string;
     ended: boolean;
+    followers: number;
     genres: Array<string> | null;
     groups: string;
     id: number;
@@ -3340,10 +3379,12 @@ export type MusicAlbumDetail = {
     album: Album;
     artist: ArtistView;
     artist_slug: string;
+    artwork?: Array<AlbumArtworkRef> | null;
     editions?: Array<AlbumEdition> | null;
     media_item_id: number;
     media_item_public_id?: string;
     ratings?: Array<AlbumRating> | null;
+    release_events?: Array<AlbumReleaseEvent> | null;
     tracks: Array<TrackView> | null;
 };
 
@@ -4300,6 +4341,14 @@ export type RecommendedResult = {
      */
     readonly $schema?: string;
     rails: Array<RecRail> | null;
+};
+
+export type RecordingCredit = {
+    artist_entity_id?: string;
+    artist_mbid?: string;
+    artist_name: string;
+    attributes?: Array<string> | null;
+    role: string;
 };
 
 export type RegisterInputBody = {
@@ -5414,6 +5463,7 @@ export type TrackTextSearchBody = {
 export type TrackView = {
     album_id: number;
     artist_credits: string;
+    credits?: Array<RecordingCredit> | null;
     disc_number: number;
     duration: number;
     explicit: boolean;
@@ -6157,6 +6207,7 @@ export type AlbumWritable = {
     album_type: string;
     artist_credits: string;
     artist_id: number;
+    artwork: string;
     barcode: string;
     catalog_no: string;
     country: string;
@@ -6183,8 +6234,10 @@ export type AlbumWritable = {
     rating: Numeric;
     ratings: string;
     release_date: Date;
+    release_events: string;
     review: string;
     sales: number;
+    script: string;
     search_vector: unknown;
     secondary_types: Array<string> | null;
     slug: string;
@@ -6584,6 +6637,7 @@ export type GetMusicArtistBySlugRowWritable = {
     discography_enriched_at: Timestamptz;
     end_date: string;
     ended: boolean;
+    followers: number;
     genres: Array<string> | null;
     groups: string;
     id: number;
@@ -6872,10 +6926,12 @@ export type MusicAlbumDetailWritable = {
     album: AlbumWritable;
     artist: ArtistView;
     artist_slug: string;
+    artwork?: Array<AlbumArtworkRef> | null;
     editions?: Array<AlbumEdition> | null;
     media_item_id: number;
     media_item_public_id?: string;
     ratings?: Array<AlbumRating> | null;
+    release_events?: Array<AlbumReleaseEvent> | null;
     tracks: Array<TrackView> | null;
 };
 

@@ -2,7 +2,7 @@
   <section class="msr">
     <header class="msr-head">
       <component
-        :is="titleHref ? 'NuxtLink' : 'span'"
+        :is="titleHref ? NuxtLink : 'span'"
         :to="titleHref"
         class="msr-title"
         :class="{ link: !!titleHref }"
@@ -74,6 +74,7 @@
 </template>
 
 <script setup lang="ts" generic="T">
+import { NuxtLink } from '#components'
 const props = withDefaults(defineProps<{
   title: string
   /** Mono dim aside after the title (e.g. "refreshed daily", a count). */

@@ -202,6 +202,9 @@ type Album struct {
 	Ratings            []byte             `json:"ratings"`
 	Editions           []byte             `json:"editions"`
 	Sales              int64              `json:"sales"`
+	ReleaseEvents      []byte             `json:"release_events"`
+	Script             string             `json:"script"`
+	Artwork            []byte             `json:"artwork"`
 }
 
 type AlbumCentroid struct {
@@ -243,6 +246,7 @@ type Artist struct {
 	Tags                  []string           `json:"tags"`
 	Genres                []string           `json:"genres"`
 	MetadataSources       []string           `json:"metadata_sources"`
+	Followers             int64              `json:"followers"`
 }
 
 type ArtistCentroid struct {
@@ -736,6 +740,7 @@ type MediaVideo struct {
 	Language    string             `json:"language"`
 	Official    bool               `json:"official"`
 	PublishedAt pgtype.Timestamptz `json:"published_at"`
+	Description string             `json:"description"`
 }
 
 type MetadataChangeConsumer struct {
@@ -1076,6 +1081,7 @@ type Track struct {
 	SortArtist      string      `json:"sort_artist"`
 	SortAlbumYear   string      `json:"sort_album_year"`
 	SortAlbum       string      `json:"sort_album"`
+	Credits         []byte      `json:"credits"`
 }
 
 type TrackFacet struct {

@@ -1022,6 +1022,12 @@ func (p *HeyaProvider) SimilarArtists(ctx context.Context, mbid, name string) ([
 	return result, nil
 }
 
+// RecordingCredits exposes the canonical recording's performance credits
+// for the enrich pipeline (per-track fetch during album refresh).
+func (p *HeyaProvider) RecordingCredits(ctx context.Context, entityID string) ([]metadata.RecordingCredit, error) {
+	return p.client.RecordingCredits(ctx, entityID, p.credentials)
+}
+
 func IsNotFound(err error) bool {
 	var apiErr *APIError
 	return errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound

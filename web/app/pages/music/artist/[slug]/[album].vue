@@ -18,6 +18,7 @@ const radio = useRadio()
 const { onDragStart, onDragEnd } = useMusicDragDrop()
 const actions = useMusicActions()
 const trackInfo = useTrackInfo()
+const lightbox = useLightbox()
 
 const albumRatings = useRatings('album')
 const trackRatings = useRatings('track')
@@ -59,7 +60,7 @@ watch(tracks, (list) => {
   trackRatings.primeBulk(list.map((t) => t.id)).catch(() => 0)
   trackInfo.prime(list.map((t) => {
     const rt = t as TrackView & { recording_mbid?: string; isrc?: string; explicit?: boolean }
-    return { id: t.id, file_path: t.file_path, recording_mbid: rt.recording_mbid, isrc: rt.isrc, explicit: rt.explicit, files: t.files }
+    return { id: t.id, file_path: t.file_path, recording_mbid: rt.recording_mbid, isrc: rt.isrc, explicit: rt.explicit, files: t.files, credits: t.credits }
   }))
 }, { immediate: true })
 
@@ -152,6 +153,7 @@ const ledgerCells = computed<LedgerCell[]>(() => {
   if (totalDuration.value > 0) cells.push({ k: 'Runtime', v: formatRunTime(totalDuration.value) })
   if (qualityLabel.value) cells.push({ k: 'Quality', v: qualityLabel.value, tone: true })
   if (a.label) cells.push({ k: 'Label', v: a.label })
+  if (a.script) cells.push({ k: 'Script', v: a.script })
   // Provider-native ratings — scales differ per system, so each cell says
   // its own denominator instead of pretending they're comparable.
   for (const r of (detail.value?.ratings ?? []).slice(0, 2)) {
@@ -198,6 +200,54 @@ function editionLine(e: AlbumEdition): string {
     (e.labels ?? []).map((l) => l.catalog_number ? `${l.name} · ${l.catalog_number}` : l.name).join(', '),
   ].filter(Boolean)
   return parts.join('  ·  ')
+}
+
+// Release events (issued-release per-country dates) — a compact line above
+// the Editions list, capped at 6 with a title-tooltip for the overflow.
+function formatReleaseEventDate(d: string): string {
+  const parts = d.split('-').map((n) => Number.parseInt(n, 10))
+  if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
+    const dt = new Date(Date.UTC(parts[0]!, parts[1]! - 1, parts[2]!))
+    return dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+  }
+  return d
+}
+function releaseEventLabel(e: { date: string; country?: string }): string {
+  return e.country ? `${formatReleaseEventDate(e.date)} (${e.country})` : formatReleaseEventDate(e.date)
+}
+const RELEASE_EVENTS_SHOWN = 6
+const releaseEventsLine = computed(() => {
+  const events = detail.value?.release_events ?? []
+  if (!events.length) return null
+  const shown = events.slice(0, RELEASE_EVENTS_SHOWN)
+  const rest = events.slice(RELEASE_EVENTS_SHOWN)
+  return {
+    text: shown.map(releaseEventLabel).join(' · '),
+    moreCount: rest.length,
+    moreTitle: rest.map(releaseEventLabel).join(', '),
+  }
+})
+
+// Credits — aggregated across every track, grouped by humanized role.
+// Plain text everywhere (no local-artist linking yet, per PLAN).
+const creditGroups = computed(() => groupTrackCredits(tracks.value.flatMap((t) => t.credits ?? [])))
+
+// Artwork gallery — audiodb "extra render" classes (back/cdart/spine/case/
+// flat/face). Small tiles; click opens the shared lightbox.
+const ARTWORK_TYPE_LABELS: Record<string, string> = {
+  back: 'Back',
+  cdart: 'CD',
+  spine: 'Spine',
+  case: 'Case',
+  flat: 'Flat',
+  face: 'Face',
+}
+function artworkLabel(type: string): string {
+  return ARTWORK_TYPE_LABELS[type] ?? humanizeCreditTerm(type)
+}
+const albumArtwork = computed(() => detail.value?.artwork ?? [])
+function openArtwork(idx: number) {
+  lightbox.open(albumArtwork.value.map((a) => a.url), idx)
 }
 
 // ── Now-playing markers ──────────────────────────────────────────────────────
@@ -543,6 +593,13 @@ if (import.meta.client) {
            Discogs, formats from Discogs/Bandcamp, external provider pages. -->
       <section v-if="sortedEditions.length" class="section">
         <SectionHeader title="Editions" :subtitle="String(sortedEditions.length)" />
+        <p v-if="releaseEventsLine" class="ed-events">
+          Released: {{ releaseEventsLine.text }}<span
+            v-if="releaseEventsLine.moreCount"
+            class="ed-events-more"
+            :title="releaseEventsLine.moreTitle"
+          > +{{ releaseEventsLine.moreCount }}</span>
+        </p>
         <ul class="ed-list">
           <li v-for="(e, i) in visibleEditions" :key="`${e.provider}-${e.provider_id ?? i}`" class="ed-row">
             <span class="ed-provider">{{ providerLabel(e.provider) }}</span>
@@ -563,6 +620,39 @@ if (import.meta.client) {
         <button v-if="sortedEditions.length > EDITIONS_SHOWN" class="see-all" @click="editionsExpanded = !editionsExpanded">
           {{ editionsExpanded ? 'Show fewer' : `Show all ${sortedEditions.length}` }}
         </button>
+      </section>
+
+      <!-- Credits — performance credits aggregated across every track
+           (MusicBrainz artist-relationships via the canonical recording
+           document). Plain text — no local-artist linking yet. -->
+      <section v-if="creditGroups.length" class="section">
+        <SectionHeader title="Credits" :subtitle="String(creditGroups.length)" />
+        <ul class="ed-list">
+          <li v-for="g in creditGroups" :key="g.role" class="ed-row">
+            <span class="ed-provider">{{ g.role }}</span>
+            <span class="ed-main"><span class="ed-title">{{ g.names.join(', ') }}</span></span>
+          </li>
+        </ul>
+      </section>
+
+      <!-- Artwork — audiodb "extra render" gallery (back/CD/spine/case/flat/
+           face). Albums have no media_item, so these ride the row as remote
+           references through the image proxy. -->
+      <section v-if="albumArtwork.length" class="section">
+        <SectionHeader title="Artwork" :subtitle="String(albumArtwork.length)" />
+        <div class="art-gallery">
+          <button
+            v-for="(a, i) in albumArtwork"
+            :key="`${a.type}-${i}`"
+            type="button"
+            class="art-tile"
+            :title="artworkLabel(a.type)"
+            @click="openArtwork(i)"
+          >
+            <LoadingImage :src="a.url" :alt="artworkLabel(a.type)" class="art-tile-img" />
+            <span class="art-tile-label">{{ artworkLabel(a.type) }}</span>
+          </button>
+        </div>
       </section>
 
       <section v-if="sonicSimilar.length" class="section">
@@ -1076,4 +1166,49 @@ if (import.meta.client) {
 .ed-meta { font: 500 11.5px var(--font-mono); color: rgb(var(--ink) / 0.5); }
 .ed-link { color: rgb(var(--ink) / 0.4); display: inline-flex; transition: color 0.15s; flex-shrink: 0; }
 .ed-link:hover { color: var(--tone, var(--gold)); }
+
+/* Release events — compact line above the Editions list. */
+.ed-events {
+  margin: 0 0 14px;
+  font: 500 12px var(--font-mono);
+  color: rgb(var(--ink) / 0.55);
+}
+.ed-events-more { color: var(--tone, var(--gold)); cursor: default; }
+
+/* ── Artwork gallery — small square tiles, click opens the lightbox ── */
+.art-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.art-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 140px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.art-tile-img {
+  display: block;
+  width: 140px;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  box-shadow: 0 0 0 1px var(--hair);
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+.art-tile:hover .art-tile-img {
+  box-shadow: 0 0 0 1px rgb(var(--tone-rgb) / 0.5);
+  transform: translateY(-2px);
+}
+.art-tile-label {
+  font: 550 10px var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(var(--ink) / 0.5);
+}
 </style>

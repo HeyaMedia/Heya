@@ -190,6 +190,8 @@ export interface Artist {
   birthplace?: string
   listeners?: number
   playcount?: number
+  /** TheAudioDB follower count — ledger cell next to Last.fm listeners. */
+  followers?: number
   popularity?: number
   genres?: string[]
   tags?: string[]
@@ -245,6 +247,22 @@ export interface Album {
   description?: string
   review?: string
   sales?: number
+  /** Writing script of the matched issued release (e.g. "Latn"). */
+  script?: string
+}
+
+// One tile in the album's artwork gallery — audiodb "extra render" classes
+// (back/cdart/spine/case/flat/face). Albums have no media_item, so this
+// rides the row as a remote reference through the image proxy.
+export interface AlbumArtworkRef {
+  type: string
+  url: string
+}
+
+// One per-country release date from the matched issued release document.
+export interface AlbumReleaseEvent {
+  date: string
+  country?: string
 }
 
 // One provider-native album rating — scales differ per system (musicbrainz
@@ -282,6 +300,20 @@ export interface MusicAlbumDetail {
   media_item_public_id?: string
   ratings?: AlbumRating[]
   editions?: AlbumEdition[]
+  artwork?: AlbumArtworkRef[]
+  release_events?: AlbumReleaseEvent[]
+}
+
+// One performance credit on a recording (MusicBrainz artist-relationships
+// via the canonical recording document). Roles/attributes are snake_case —
+// humanize on display. artist_entity_id is only set when the person exists
+// canonically in heya.media; it is NOT resolved to a local artist today.
+export interface RecordingCredit {
+  role: string
+  attributes?: string[]
+  artist_name: string
+  artist_mbid?: string
+  artist_entity_id?: string
 }
 
 export interface Track {
@@ -319,6 +351,7 @@ export interface TrackFile {
 
 export interface TrackView extends Track {
   files: TrackFile[]
+  credits?: RecordingCredit[]
 }
 
 export interface AlbumView extends Album {
@@ -449,6 +482,8 @@ export interface MediaVideo {
   video_type: string
   language: string
   official: boolean
+  /** TheAudioDB editorial writeup — music videos only, may be absent. */
+  description?: string
 }
 
 export interface MediaCertification {

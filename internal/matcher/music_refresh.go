@@ -445,6 +445,21 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 			if err := m.writeTrackExtendedMetadata(ctx, dbTrack.ID, embeddedTrack); err != nil {
 				log.Warn().Err(err).Int64("track", dbTrack.ID).Msg("write track extended metadata failed")
 			}
+
+			// Performance credits ride the canonical recording document —
+			// one extra fetch per matched track, background-only cost. A
+			// failed fetch keeps the last known credits (no clear).
+			if embeddedTrack.CanonicalID != "" && m.heya != nil {
+				if credits, creditsErr := m.heya.RecordingCredits(ctx, embeddedTrack.CanonicalID); creditsErr == nil {
+					if body, marshalErr := json.Marshal(credits); marshalErr == nil {
+						if writeErr := m.q.UpdateTrackCredits(ctx, sqlc.UpdateTrackCreditsParams{ID: dbTrack.ID, Credits: body}); writeErr != nil {
+							log.Warn().Err(writeErr).Int64("track", dbTrack.ID).Msg("write track credits failed")
+						}
+					}
+				} else {
+					log.Debug().Err(creditsErr).Str("recording", embeddedTrack.CanonicalID).Msg("recording credits fetch failed; keeping previous")
+				}
+			}
 		}
 	}
 

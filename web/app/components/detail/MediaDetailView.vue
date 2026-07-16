@@ -271,7 +271,7 @@
           <component
             v-for="r in detail.recommendations"
             :key="r.id"
-            :is="r.local_media_item_id ? 'NuxtLink' : 'div'"
+            :is="r.local_media_item_id ? NuxtLink : 'div'"
             :to="r.local_media_item_id ? mediaUrl({ id: r.local_media_item_id, public_id: r.local_public_id, title: r.title, slug: r.local_slug ?? undefined, media_type: r.media_type } as any) : undefined"
             class="rec-tile"
             :class="{ dimmed: !r.local_media_item_id }"
@@ -312,6 +312,7 @@
 </template>
 
 <script setup lang="ts">
+import { NuxtLink } from '#components'
 import type { MediaDetail, MediaExtra } from '~~/shared/types'
 import { TabsRoot, TabsList, TabsTrigger, TabsContent } from 'reka-ui'
 import { useQuery, useQueryCache } from '@pinia/colada'

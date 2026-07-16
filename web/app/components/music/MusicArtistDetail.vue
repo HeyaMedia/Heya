@@ -286,7 +286,7 @@
         </SectionHeader>
         <AppRail ref="mvRail" :items="musicVideos" :tile-width="300" :phone-tile-width="260" aspect="16/9" :gap="16" :phone-gap="12" snap memory-key="artist-music-videos" :item-key="(v: MediaVideo) => v.video_key">
           <template #default="{ item: v, index: i }">
-            <button class="video-card" @click="openVideo(v.video_key, v.name)">
+            <button class="video-card" @click="openVideo(v.video_key, v.name, v.description)">
               <MediaCard
                 :idx="i"
                 :src="`https://img.youtube.com/vi/${v.video_key}/mqdefault.jpg`"
@@ -346,7 +346,7 @@
         <AppRail ref="simRail" :items="visibleSimilar" :tile-width="150" :phone-tile-width="140" aspect="1/1" :gap="18" :phone-gap="14" snap memory-key="artist-similar">
           <template #default="{ item: row }">
             <component
-              :is="row.local_slug ? 'NuxtLink' : 'div'"
+              :is="row.local_slug ? NuxtLink : 'div'"
               :to="row.local_slug ? `/music/artist/${row.local_slug}` : undefined"
               class="sim-tile"
               :class="{ 'sim-external': !row.local_slug }"
@@ -405,7 +405,7 @@
             <SectionHeader title="Members" :subtitle="String(displayMembers.length)" />
             <div class="member-chips">
               <component
-                :is="m.local_slug ? 'NuxtLink' : 'div'"
+                :is="m.local_slug ? NuxtLink : 'div'"
                 v-for="m in visibleMembers"
                 :key="`mem-${m.name}`"
                 :to="m.local_slug ? `/music/artist/${m.local_slug}` : undefined"
@@ -430,7 +430,7 @@
             <SectionHeader title="Member of" :subtitle="String(displayGroups.length)" :class="{ 'mt-gap': displayMembers.length > 0 }" />
             <div class="member-chips">
               <component
-                :is="g.local_slug ? 'NuxtLink' : 'div'"
+                :is="g.local_slug ? NuxtLink : 'div'"
                 v-for="g in visibleGroups"
                 :key="`grp-${g.name}`"
                 :to="g.local_slug ? `/music/artist/${g.local_slug}` : undefined"
@@ -509,6 +509,7 @@
         allow="autoplay; encrypted-media; picture-in-picture"
         allowfullscreen
       />
+      <div v-if="videoModal?.description" class="video-dialog-desc">{{ videoModal.description }}</div>
     </AppDialog>
 
     <!-- Phone ⋯ target for Popular Tracks rows (play/queue/rate/navigate). -->
@@ -521,6 +522,7 @@
 </template>
 
 <script setup lang="ts">
+import { NuxtLink } from '#components'
 import type { AlbumView, Artist, ArtistMember, ArtistTopTrackRow, MediaDetail, MediaVideo, TrackView } from '~~/shared/types'
 import type { Track } from '~/composables/usePlayer'
 import type { DragAlbumPayload } from '~/composables/useMusicDragDrop'
@@ -839,9 +841,9 @@ const mvRail = ref<RailHandle | null>(null)
 const sonicRail = ref<RailHandle | null>(null)
 const simRail = ref<RailHandle | null>(null)
 
-const videoModal = ref<{ key: string; title: string } | null>(null)
-function openVideo(key: string, title: string) {
-  videoModal.value = { key, title }
+const videoModal = ref<{ key: string; title: string; description?: string } | null>(null)
+function openVideo(key: string, title: string, description?: string) {
+  videoModal.value = { key, title, description }
 }
 // Autoplay is a motion trigger — skip it under prefers-reduced-motion so
 // opening the dialog doesn't immediately start moving video.
@@ -945,6 +947,7 @@ const ledgerCells = computed<LedgerCell[]>(() => {
   const cells: LedgerCell[] = []
   if (!a) return cells
   if ((a.listeners ?? 0) > 0) cells.push({ k: 'Listeners', v: formatBigInt(a.listeners!), sub: 'last.fm' })
+  if ((a.followers ?? 0) > 0) cells.push({ k: 'Followers', v: formatBigInt(a.followers!), sub: 'theaudiodb' })
   if ((a.playcount ?? 0) > 0) cells.push({ k: 'Global plays', v: formatBigInt(a.playcount!) })
   if (totalAlbums.value > 0) {
     cells.push({
@@ -1785,6 +1788,15 @@ a.trk-al:hover { color: var(--tone); }
    must be unscoped to reach it. */
 .video-dialog .app-dialog-body { padding: 0; }
 .video-dialog-iframe { width: 100%; aspect-ratio: 16 / 9; display: block; border: 0; }
+.video-dialog-desc {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 14px 20px;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: rgb(var(--ink) / 0.8);
+  white-space: pre-wrap;
+}
 
 .atw-trigger {
   display: inline-flex;
