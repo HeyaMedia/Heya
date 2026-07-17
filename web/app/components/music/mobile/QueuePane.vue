@@ -149,6 +149,26 @@
         </div>
       </template>
 
+      <template v-if="currentTrack?.source === 'radio' && radioSuggestions.length">
+        <div class="qp-section-label">Also worth finding</div>
+        <component
+          :is="suggestion.provider_url ? 'a' : 'div'"
+          v-for="suggestion in radioSuggestions"
+          :key="suggestion.recording_entity_id"
+          class="qp-row qp-catalog-suggestion"
+          :href="suggestion.provider_url || undefined"
+          :target="suggestion.provider_url ? '_blank' : undefined"
+          :rel="suggestion.provider_url ? 'noopener noreferrer' : undefined"
+        >
+          <div class="qp-row-info">
+            <div class="qp-row-title">{{ suggestion.title }}</div>
+            <div class="qp-row-artist">{{ suggestion.artist_name }}</div>
+            <div class="qp-suggestion-reason">{{ suggestion.reason }}</div>
+          </div>
+          <Icon v-if="suggestion.provider_url" name="external-link" :size="15" />
+        </component>
+      </template>
+
       <div v-if="!queue.length && !currentTrack" class="qp-empty">
         <Icon name="music" :size="32" style="opacity: 0.4; margin-bottom: 8px" />
         <p>Queue is empty</p>
@@ -165,6 +185,7 @@ const {
   jumpTo, moveInQueue, removeFromQueue, clearUpcoming, toggleShuffle, cycleRepeat,
   setSimilarAutoplayEnabled,
 } = usePlayerBindings()
+const radioSuggestions = useState<import('~/composables/useRadio').MusicCatalogSuggestion[]>('music_radio_suggestions', () => [])
 
 function clamp(v: number, min: number, max: number) {
   return Math.min(max, Math.max(min, v))
@@ -688,6 +709,24 @@ onScopeDispose(() => {
   border-left-color: var(--gold);
   border-radius: var(--r-sm);
   cursor: default;
+}
+.qp-catalog-suggestion {
+  margin: 3px 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: inherit;
+  text-decoration: none;
+  background: rgb(var(--ink) / 0.025);
+}
+.qp-catalog-suggestion[href]:active { background: var(--gold-soft); }
+.qp-suggestion-reason {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--fg-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Up Next rows are the gesture surface: the outer `.qp-row-upcoming` gets

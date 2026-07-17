@@ -6,10 +6,35 @@ import (
 	"testing"
 
 	"github.com/karbowiak/heya/internal/sonicanalysis"
+	"github.com/sugarme/tokenizer/pretrained"
 )
 
+func TestBGEVocabularyTokenizesUnicode(t *testing.T) {
+	path := os.Getenv("BGE_TOKENIZER")
+	if path == "" {
+		t.Skip("BGE_TOKENIZER not set — needs the BGE-M3 tokenizer.json")
+	}
+	tokenizer, err := pretrained.FromFile(path)
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
+	for _, text := range []string{
+		"激しい女性ボーカルと反抗的なムードの日本のロック",
+		"Énergique, mélancolique et atmosphérique",
+		"어두운 분위기의 신시사이저와 강렬한 보컬",
+	} {
+		encoded, err := tokenizer.EncodeSingle(text, true)
+		if err != nil {
+			t.Fatalf("tokenize %q: %v", text, err)
+		}
+		if len(encoded.Ids) < 3 {
+			t.Fatalf("tokenize %q produced only %d tokens", text, len(encoded.Ids))
+		}
+	}
+}
+
 // TestEmbed is an integration test guarded on BGE_DIR (the model isn't in CI).
-// Run with: BGE_DIR=/path/to/bge go test ./internal/textembed/ -run TestEmbed -v
+// Run with: BGE_DIR=/path/to/models/recommendations go test ./internal/textembed/ -run TestEmbed -v
 func TestEmbed(t *testing.T) {
 	dir := os.Getenv("BGE_DIR")
 	if dir == "" {
@@ -42,6 +67,16 @@ func TestEmbed(t *testing.T) {
 	t.Logf("cosine(melancholy, grief) = %.3f   cosine(melancholy, mecha) = %.3f", simAB, simAC)
 	if simAB <= simAC {
 		t.Errorf("expected melancholy closer to grief than to mecha, got %.3f vs %.3f", simAB, simAC)
+	}
+
+	// Regression for the former ASCII sanitizer: Japanese text must reach the
+	// multilingual tokenizer and produce a finite, normalized vector.
+	jp, err := e.Embed("激しい女性ボーカルと反抗的なムードの日本のロック")
+	if err != nil {
+		t.Fatalf("embed Japanese: %v", err)
+	}
+	if len(jp) != Dim {
+		t.Fatalf("Japanese embedding dim = %d, want %d", len(jp), Dim)
 	}
 }
 

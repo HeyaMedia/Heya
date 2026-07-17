@@ -411,6 +411,33 @@ func TestRecordingLyricsUsesCanonicalEndpointAndPreservesBothForms(t *testing.T)
 	}
 }
 
+func TestRecordingMetadataKeepsFocusedSemanticFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2/recordings/"+testRecordID {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"` + testRecordID + `","kind":"recording","data":{"provider":"musicbrainz","namespace":"recording","provider_id":"recording-mbid","title":"Usseewa","disambiguation":"live","artist_credits":[{"name":"Ado","artist_name":"Ado"}],"genres":[{"name":"J-Rock"}],"tags":[{"name":"aggressive"}],"credits":[{"role":"instrument","attributes":["electric guitar"],"artist_provider":"musicbrainz","artist_id":"artist-mbid","artist_name":"Player"}],"links":[{"type":"lastfm","url":"https://example.test/track"}]}}`))
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := NewHeyaProvider(client)
+	got, err := provider.RecordingMetadata(context.Background(), testRecordID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CanonicalID != testRecordID || got.Title != "Usseewa" || got.ArtistName != "Ado" || got.RecordingMBID != "recording-mbid" {
+		t.Fatalf("recording identity = %#v", got)
+	}
+	if len(got.Genres) != 1 || got.Genres[0] != "J-Rock" || len(got.Tags) != 1 || len(got.Credits) != 1 || len(got.Links) != 1 {
+		t.Fatalf("recording semantic fields = %#v", got)
+	}
+}
+
 func TestCutoverFlowUsesOnlyV2Endpoints(t *testing.T) {
 	var mu sync.Mutex
 	var paths []string

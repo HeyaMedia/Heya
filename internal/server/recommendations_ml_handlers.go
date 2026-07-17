@@ -14,6 +14,7 @@ func collectRecommendationsMLStatus(ctx context.Context, app *service.App) map[s
 	settings := app.RecommendationsMLSettings(ctx)
 	embedded, total := app.EmbeddedVideoCount(ctx)
 	epEmbedded, epTotal := app.EmbeddedEpisodeCount(ctx)
+	musicEmbedded, musicTotal := app.EmbeddedMusicCount(ctx)
 	enabledLock, accelLock := app.RecommendationsMLEnvLock()
 
 	out := map[string]any{
@@ -25,7 +26,9 @@ func collectRecommendationsMLStatus(ctx context.Context, app *service.App) map[s
 		"total":             total,
 		"embedded_episodes": epEmbedded,
 		"total_episodes":    epTotal,
-		"model":             "BGE-large-en-v1.5",
+		"embedded_music":    musicEmbedded,
+		"total_music":       musicTotal,
+		"model":             "BGE-M3",
 		"dimensions":        1024,
 	}
 	if f := app.RecFetcher(); f != nil {

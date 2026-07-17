@@ -305,24 +305,44 @@ func (c *Client) Entity(ctx context.Context, entityID, language, country string,
 	return response.Body, nil
 }
 
-// RecordingCredits fetches the canonical recording document and returns its
-// performance credits (producer / engineer / instruments / vocals). The
-// recording-detail response is polymorphic in the contract (schema: {}), so
-// the decode is hand-written like the entity documents.
-func (c *Client) RecordingCredits(ctx context.Context, entityID string, credentials ProviderCredentials) ([]metadata.RecordingCredit, error) {
+// RecordingMetadata fetches the compact recording-scoped semantic slice used
+// by Heya's recommendation catalog. The recording-detail response is
+// polymorphic in the contract (schema: {}), so the decode is hand-written like
+// the entity documents.
+func (c *Client) RecordingMetadata(ctx context.Context, entityID string, credentials ProviderCredentials) (metadata.RecordingMetadata, error) {
 	id, err := uuid.Parse(entityID)
 	if err != nil {
-		return nil, fmt.Errorf("heyametadata recording: invalid UUID %q: %w", entityID, err)
+		return metadata.RecordingMetadata{}, fmt.Errorf("heyametadata recording: invalid UUID %q: %w", entityID, err)
 	}
 	response, err := c.gen.RecordingDetailWithResponse(ctx, id, c.credentialEditor(credentials))
 	if err != nil {
-		return nil, fmt.Errorf("read canonical recording %s: %w", entityID, err)
+		return metadata.RecordingMetadata{}, fmt.Errorf("read canonical recording %s: %w", entityID, err)
 	}
 	if response.StatusCode() != http.StatusOK {
-		return nil, responseError("read canonical recording", response.StatusCode(), response.Body)
+		return metadata.RecordingMetadata{}, responseError("read canonical recording", response.StatusCode(), response.Body)
 	}
 	var document struct {
+		ID   string `json:"id"`
 		Data struct {
+			Provider       string `json:"provider"`
+			Namespace      string `json:"namespace"`
+			ProviderID     string `json:"provider_id"`
+			Title          string `json:"title"`
+			Disambiguation string `json:"disambiguation"`
+			ArtistCredits  []struct {
+				Name       string `json:"name"`
+				ArtistName string `json:"artist_name"`
+			} `json:"artist_credits"`
+			Genres []struct {
+				Name string `json:"name"`
+			} `json:"genres"`
+			Tags []struct {
+				Name string `json:"name"`
+			} `json:"tags"`
+			Links []struct {
+				Type string `json:"type"`
+				URL  string `json:"url"`
+			} `json:"links"`
 			Credits []struct {
 				Role           string   `json:"role"`
 				Attributes     []string `json:"attributes"`
@@ -334,17 +354,46 @@ func (c *Client) RecordingCredits(ctx context.Context, entityID string, credenti
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(response.Body, &document); err != nil {
-		return nil, fmt.Errorf("decode canonical recording %s: %w", entityID, err)
+		return metadata.RecordingMetadata{}, fmt.Errorf("decode canonical recording %s: %w", entityID, err)
 	}
-	credits := make([]metadata.RecordingCredit, 0, len(document.Data.Credits))
+	result := metadata.RecordingMetadata{
+		CanonicalID: document.ID, Title: document.Data.Title,
+		Disambiguation: document.Data.Disambiguation,
+	}
+	if result.CanonicalID == "" {
+		result.CanonicalID = entityID
+	}
+	if document.Data.Provider == "musicbrainz" && document.Data.Namespace == "recording" {
+		result.RecordingMBID = document.Data.ProviderID
+	}
+	if len(document.Data.ArtistCredits) > 0 {
+		result.ArtistName = firstNonEmpty(document.Data.ArtistCredits[0].Name, document.Data.ArtistCredits[0].ArtistName)
+	}
+	for _, value := range document.Data.Genres {
+		result.Genres = append(result.Genres, value.Name)
+	}
+	for _, value := range document.Data.Tags {
+		result.Tags = append(result.Tags, value.Name)
+	}
+	for _, value := range document.Data.Links {
+		result.Links = append(result.Links, metadata.URLEntry{Type: value.Type, URL: value.URL})
+	}
 	for _, value := range document.Data.Credits {
 		mapped := metadata.RecordingCredit{Role: value.Role, Attributes: value.Attributes, ArtistName: value.ArtistName, ArtistEntityID: value.ArtistEntityID}
 		if value.ArtistProvider == "musicbrainz" {
 			mapped.ArtistMBID = value.ArtistID
 		}
-		credits = append(credits, mapped)
+		result.Credits = append(result.Credits, mapped)
 	}
-	return credits, nil
+	return result, nil
+}
+
+// RecordingCredits retains the narrow compatibility surface for callers that
+// only render credits. New enrichment code should use RecordingMetadata so the
+// same network response also feeds semantic facets.
+func (c *Client) RecordingCredits(ctx context.Context, entityID string, credentials ProviderCredentials) ([]metadata.RecordingCredit, error) {
+	result, err := c.RecordingMetadata(ctx, entityID, credentials)
+	return result.Credits, err
 }
 
 func (c *Client) Credits(ctx context.Context, entityID string, credentials ProviderCredentials) ([]credit, error) {

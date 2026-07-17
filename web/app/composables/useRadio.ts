@@ -39,6 +39,16 @@ interface RadioTrackRow {
 interface RadioResponse {
   seed_track_id: number
   tracks: RadioTrackRow[]
+  suggestions: MusicCatalogSuggestion[]
+}
+
+export interface MusicCatalogSuggestion {
+  recording_entity_id: string
+  title: string
+  artist_name: string
+  provider_url?: string
+  score: number
+  reason: string
 }
 
 function rowToTrack(row: RadioTrackRow): Track {
@@ -61,12 +71,15 @@ function rowToTrack(row: RadioTrackRow): Track {
 export function useRadio() {
   const { playTracks, playLocal } = usePlayerBindings()
   const starting = useState('radio_starting', () => false)
+  const suggestions = useState<MusicCatalogSuggestion[]>('music_radio_suggestions', () => [])
 
   async function startRadio(seed: RadioSeed, seedTrack?: Track) {
     starting.value = true
+    suggestions.value = []
     try {
       const { $heya } = useNuxtApp()
       const res = await $heya('/api/music/radio', { method: 'POST', body: { seed, limit: 50 } }) as RadioResponse
+      suggestions.value = res.suggestions ?? []
       const radioTracks = (res.tracks ?? []).map(rowToTrack)
       const tracks: Track[] = []
       if (seedTrack) tracks.push({ ...seedTrack, source: 'radio' })
@@ -79,6 +92,7 @@ export function useRadio() {
 
   async function startDJMix(seedTrackID: number, seedTrack?: Track) {
     starting.value = true
+    suggestions.value = []
     try {
       const { $heya } = useNuxtApp()
       const res = await $heya('/api/music/tracks/{id}/mix-to', {
@@ -95,7 +109,7 @@ export function useRadio() {
     finally { starting.value = false }
   }
 
-  return { startRadio, startDJMix, starting }
+  return { startRadio, startDJMix, starting, suggestions }
 }
 
 // --- 2) Internet-radio station playback (radio-browser via Heya proxy) ------

@@ -16,9 +16,9 @@ import (
 type EmbedBackfillFn func(ctx context.Context, force bool) (embedded, skipped int, err error)
 
 // KickoffEmbedRecommendationsWorker is the scheduled self-heal sweep for
-// recommendation embeddings: every item/episode doc is recomposed and hash-
-// compared against what its stored embedding was computed from, so metadata
-// changes (refresh, re-identify, edited overviews) re-embed on the next run.
+// recommendation embeddings: every item/episode/canonical-recording doc is
+// recomposed and hash-compared against what its stored embedding was computed
+// from, so metadata changes re-embed on the next run.
 // An unchanged library costs a few queries and zero model inference.
 type KickoffEmbedRecommendationsWorker struct {
 	river.WorkerDefaults[KickoffEmbedRecommendationsArgs]

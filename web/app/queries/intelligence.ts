@@ -17,6 +17,8 @@ export type RecommendationsStatus = {
   total?: number
   embedded_episodes?: number
   total_episodes?: number
+  embedded_music?: number
+  total_music?: number
   model?: string
   dimensions?: number
   accelerators?: AcceleratorAvailability[]

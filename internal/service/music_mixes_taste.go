@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/textembed"
 	"github.com/pgvector/pgvector-go"
 	"github.com/rs/zerolog/log"
 )
@@ -220,6 +221,33 @@ func (a *App) tasteNeighborTracks(ctx context.Context, userID int64, centroid pg
 		              WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 		ORDER BY tf.track_embedding <=> $2
 		LIMIT $3`, userID, centroid, fetch)
+}
+
+// metadataNeighborTracks searches the focused canonical-recording vectors and
+// localizes the nearest results back to playable library tracks. The embedded
+// document contains musical character only: genres/styles, tags, moods,
+// instrumentation, vocal characteristics, and recording attributes.
+func (a *App) metadataNeighborTracks(ctx context.Context, userID int64, centroid pgvector.Vector, fetch int) ([]sqlc.ListArtistTopTracksForMixRow, error) {
+	return a.scanMixRows(ctx, `
+		SELECT t.id, t.title, t.duration, t.disc_number, t.track_number,
+		       al.id, al.title, al.slug, al.cover_path, al.year,
+		       ar.id, ar.name, mi.slug,
+		       (SELECT count(*) FROM play_events pe WHERE pe.track_id = t.id AND pe.completed) AS play_count
+		FROM music_recording_facets mrf
+		JOIN metadata_entity_bindings binding
+		  ON binding.entity_id = mrf.recording_entity_id
+		 AND binding.entity_kind = 'recording' AND binding.local_kind = 'track'
+		JOIN tracks t ON t.id = binding.local_id
+		JOIN albums al ON al.id = t.album_id
+		JOIN artists ar ON ar.id = al.artist_id
+		JOIN media_item_cards mi ON mi.id = ar.media_item_id
+		WHERE mrf.text_embedding IS NOT NULL
+		  AND mrf.embedder_version >= $4
+		  AND `+musicVetoFilter+`
+		  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id
+		              WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+		ORDER BY mrf.text_embedding <=> $2
+		LIMIT $3`, userID, centroid, fetch, int32(textembed.Version))
 }
 
 func (a *App) scanMixRows(ctx context.Context, query string, args ...any) ([]sqlc.ListArtistTopTracksForMixRow, error) {

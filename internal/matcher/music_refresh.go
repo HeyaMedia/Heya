@@ -12,6 +12,7 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/errgroup"
 )
 
 // RefreshArtistResult summarises a single RefreshMusicArtist call. Useful for
@@ -69,6 +70,7 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 	if detail == nil {
 		detail = m.enrichArtistFromHeyaMedia(ctx, artist.MusicbrainzID, artist.Name, artist.Disambiguation)
 	}
+
 	if detail == nil {
 		// Negative cache: mark so the scan task's staleness gate skips it.
 		if markErr := m.q.MarkArtistDiscographyEnriched(ctx, artistID); markErr != nil {
@@ -77,6 +79,17 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 		res.Skipped = true
 		return res, nil
 	}
+
+	// Canonical top-track ids are also the bounded external recommendation
+	// catalog. Local track enrichment below reuses these popularity/link facts;
+	// the remaining unowned rows are hydrated after the local discography pass.
+	topByRecording := make(map[string]metadata.TopTrackEntry, len(detail.ArtistTopTracks))
+	for _, top := range detail.ArtistTopTracks {
+		if top.RecordingEntityID != "" {
+			topByRecording[top.RecordingEntityID] = top
+		}
+	}
+	hydratedRecordings := map[string]bool{}
 	// Identity guard: when both sides carry a real MBID and they disagree, the
 	// upstream record describes a DIFFERENT artist than the locally established
 	// identity — adopting its name/ids would clobber this row with another act
@@ -446,23 +459,59 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 				log.Warn().Err(err).Int64("track", dbTrack.ID).Msg("write track extended metadata failed")
 			}
 
-			// Performance credits ride the canonical recording document —
-			// one extra fetch per matched track, background-only cost. A
-			// failed fetch keeps the last known credits (no clear).
+			// The canonical recording document supplies both renderable credits
+			// and the focused semantic facets. One background fetch feeds both;
+			// a failure keeps the last-known values.
 			if embeddedTrack.CanonicalID != "" && m.heya != nil {
-				if credits, creditsErr := m.heya.RecordingCredits(ctx, embeddedTrack.CanonicalID); creditsErr == nil {
-					if body, marshalErr := json.Marshal(credits); marshalErr == nil {
+				if recording, recordingErr := m.heya.RecordingMetadata(ctx, embeddedTrack.CanonicalID); recordingErr == nil {
+					hydratedRecordings[embeddedTrack.CanonicalID] = true
+					if body, marshalErr := json.Marshal(recording.Credits); marshalErr == nil {
 						if writeErr := m.q.UpdateTrackCredits(ctx, sqlc.UpdateTrackCreditsParams{ID: dbTrack.ID, Credits: body}); writeErr != nil {
 							log.Warn().Err(writeErr).Int64("track", dbTrack.ID).Msg("write track credits failed")
 						}
 					}
+					var top *metadata.TopTrackEntry
+					if value, ok := topByRecording[embeddedTrack.CanonicalID]; ok {
+						top = &value
+					}
+					if storeErr := m.storeRecordingSemanticMetadata(ctx, artistID, recording, top); storeErr != nil {
+						log.Warn().Err(storeErr).Str("recording", embeddedTrack.CanonicalID).Msg("store recording semantic metadata failed")
+					}
 				} else {
-					log.Debug().Err(creditsErr).Str("recording", embeddedTrack.CanonicalID).Msg("recording credits fetch failed; keeping previous")
+					log.Debug().Err(recordingErr).Str("recording", embeddedTrack.CanonicalID).Msg("recording metadata fetch failed; keeping previous")
 				}
 			}
 		}
 	}
 
+	// Hydrate only the first 30 canonical provider tracks per artist. This gives
+	// metadata KNN a useful unowned universe without recursively crawling every
+	// similar artist or turning an ordinary artist refresh into an unbounded job.
+	if m.heya != nil {
+		group, groupCtx := errgroup.WithContext(ctx)
+		group.SetLimit(4)
+		queued := 0
+		for _, top := range detail.ArtistTopTracks {
+			if top.RecordingEntityID == "" || hydratedRecordings[top.RecordingEntityID] || queued >= 30 {
+				continue
+			}
+			hydratedRecordings[top.RecordingEntityID] = true
+			queued++
+			top := top
+			group.Go(func() error {
+				recording, fetchErr := m.heya.RecordingMetadata(groupCtx, top.RecordingEntityID)
+				if fetchErr != nil {
+					log.Debug().Err(fetchErr).Str("recording", top.RecordingEntityID).Msg("external recording metadata fetch failed")
+					return nil
+				}
+				if storeErr := m.storeRecordingSemanticMetadata(groupCtx, artistID, recording, &top); storeErr != nil {
+					log.Warn().Err(storeErr).Str("recording", top.RecordingEntityID).Msg("store external recording semantic metadata failed")
+				}
+				return nil
+			})
+		}
+		_ = group.Wait()
+	}
 	// Backfill any still-empty slugs from the DB-side title. This catches
 	// albums heya.media has no record of (local-only releases, releases
 	// not yet enriched upstream, or — common when the user is on a self-

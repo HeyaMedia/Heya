@@ -1028,6 +1028,12 @@ func (p *HeyaProvider) RecordingCredits(ctx context.Context, entityID string) ([
 	return p.client.RecordingCredits(ctx, entityID, p.credentials)
 }
 
+// RecordingMetadata exposes the canonical recording's focused musical
+// metadata for local catalog hydration and text-embedding generation.
+func (p *HeyaProvider) RecordingMetadata(ctx context.Context, entityID string) (metadata.RecordingMetadata, error) {
+	return p.client.RecordingMetadata(ctx, entityID, p.credentials)
+}
+
 func IsNotFound(err error) bool {
 	var apiErr *APIError
 	return errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound

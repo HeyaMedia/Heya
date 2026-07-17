@@ -1,7 +1,7 @@
 -- +goose Up
 
 -- Text-embedding facets for movies/TV — the optional ML recommendation engine
--- (HEYA_RECOMMENDATIONS_ML_ENABLED, off by default). One BGE-large-en embedding
+-- (HEYA_RECOMMENDATIONS_ML_ENABLED, off by default). One 1024-d text embedding
 -- (1024-dim, cosine) per item's metadata doc; mirrors track_facets for music.
 -- embedder_version is a code constant bumped to force a global re-embed after a
 -- model/doc change, exactly like sonic's analyzer_version.

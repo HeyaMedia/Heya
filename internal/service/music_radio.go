@@ -4,9 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/musicsemantic"
+	"github.com/karbowiak/heya/internal/textembed"
 	"github.com/pgvector/pgvector-go"
 )
 
@@ -36,15 +41,29 @@ type RadioRequest struct {
 type RadioResponse struct {
 	SeedTrackID int64                              `json:"seed_track_id"`
 	Tracks      []sqlc.SimilarTracksByTrackRichRow `json:"tracks"`
+	Suggestions []MusicCatalogSuggestion           `json:"suggestions" doc:"Similar canonical recordings that are not currently playable in this library"`
+}
+
+// MusicCatalogSuggestion is deliberately separate from Tracks: it can be
+// displayed or linked out, but the player must never mistake it for a local
+// file. Its reason comes from shared focused facets, not artist biography,
+// descriptions, titles, or lyrics.
+type MusicCatalogSuggestion struct {
+	RecordingEntityID string  `json:"recording_entity_id"`
+	Title             string  `json:"title"`
+	ArtistName        string  `json:"artist_name"`
+	ProviderURL       string  `json:"provider_url,omitempty"`
+	Score             float64 `json:"score"`
+	Reason            string  `json:"reason"`
 }
 
 // ErrNoRadioSeed is returned when none of the seed fields resolve to a
 // playable track, or when even the metadata/popularity fallback is empty.
 var ErrNoRadioSeed = errors.New("no playable track available for the given seed")
 
-// BuildRadio resolves seeds, averages every available sonic embedding, and
-// asks the shared recommender for a diverse queue. Missing ML data falls back
-// to the seed artists' external graph/provider charts instead of failing.
+// BuildRadio resolves seeds, averages every available sonic and focused
+// metadata embedding independently, and asks the shared recommender for a
+// diverse queue. Either vector path can work without the other.
 func (a *App) BuildRadio(ctx context.Context, userID int64, req RadioRequest) (*RadioResponse, error) {
 	if req.Limit <= 0 || req.Limit > 200 {
 		req.Limit = 50
@@ -92,9 +111,14 @@ func (a *App) BuildRadio(ctx context.Context, userID int64, req RadioRequest) (*
 		}
 		embeddings = append(embeddings, f.TrackEmbedding)
 	}
-	centroid := pgvector.Vector{}
+	sonicCentroid := pgvector.Vector{}
 	if len(embeddings) > 0 {
-		centroid = averageEmbeddings(embeddings)
+		sonicCentroid = averageEmbeddings(embeddings)
+	}
+
+	metadataCentroid, seedMetadata, seedRecordingIDs, err := a.musicMetadataForTracks(ctx, seedIDs)
+	if err != nil {
+		return nil, fmt.Errorf("seed metadata: %w", err)
 	}
 
 	exclude := append(append([]int64{}, seedIDs...), req.ExcludeTrackIDs...)
@@ -107,18 +131,189 @@ func (a *App) BuildRadio(ctx context.Context, userID int64, req RadioRequest) (*
 	if err != nil {
 		return nil, fmt.Errorf("seed artists: %w", err)
 	}
-	rows, err := a.recommendMusicAround(ctx, userID, centroid, artistIDs, recommendRadio, int(req.Limit), exclude)
+	rows, err := a.recommendMusicAround(ctx, userID, sonicCentroid, metadataCentroid, artistIDs, recommendRadio, int(req.Limit), exclude)
 	if err != nil {
 		return nil, fmt.Errorf("recommend radio: %w", err)
 	}
-	if len(rows) == 0 {
+	suggestions, err := a.unownedMetadataSuggestions(ctx, metadataCentroid, seedMetadata, seedRecordingIDs, min(12, max(6, int(req.Limit)/4)))
+	if err != nil {
+		return nil, fmt.Errorf("catalog suggestions: %w", err)
+	}
+	if len(rows) == 0 && len(suggestions) == 0 {
 		return nil, ErrNoRadioSeed
 	}
 	tracks := make([]sqlc.SimilarTracksByTrackRichRow, len(rows))
 	for i, row := range rows {
 		tracks[i] = mixRowToRadioTrack(row)
 	}
-	return &RadioResponse{SeedTrackID: seedIDs[0], Tracks: tracks}, nil
+	return &RadioResponse{SeedTrackID: seedIDs[0], Tracks: tracks, Suggestions: suggestions}, nil
+}
+
+func (a *App) musicMetadataForTracks(ctx context.Context, trackIDs []int64) (pgvector.Vector, musicsemantic.Facets, []uuid.UUID, error) {
+	rows, err := a.db.Query(ctx, `
+		SELECT recording.recording_entity_id,
+		       recording.genres, recording.tags, recording.moods,
+		       recording.instrumentation, recording.vocal_characteristics,
+		       recording.recording_attributes,
+		       COALESCE(facet.text_embedding::text, '')
+		FROM metadata_entity_bindings binding
+		JOIN music_catalog_recordings recording ON recording.recording_entity_id = binding.entity_id
+		LEFT JOIN music_recording_facets facet
+		  ON facet.recording_entity_id = recording.recording_entity_id
+		 AND facet.embedder_version >= $2
+		WHERE binding.local_kind = 'track' AND binding.entity_kind = 'recording'
+		  AND binding.local_id = ANY($1::bigint[])`, trackIDs, int32(textembed.Version))
+	if err != nil {
+		return pgvector.Vector{}, musicsemantic.Facets{}, nil, err
+	}
+	defer rows.Close()
+
+	var vectors []pgvector.Vector
+	var recordingIDs []uuid.UUID
+	type missingFacet struct {
+		id     uuid.UUID
+		facets musicsemantic.Facets
+	}
+	var missing []missingFacet
+	combined := musicsemantic.Facets{}
+	for rows.Next() {
+		var id uuid.UUID
+		var facets musicsemantic.Facets
+		var vectorText string
+		if err := rows.Scan(&id, &facets.Genres, &facets.Tags, &facets.Moods,
+			&facets.Instrumentation, &facets.VocalCharacteristics,
+			&facets.RecordingAttributes, &vectorText); err != nil {
+			return pgvector.Vector{}, musicsemantic.Facets{}, nil, err
+		}
+		recordingIDs = append(recordingIDs, id)
+		combined.Genres = append(combined.Genres, facets.Genres...)
+		combined.Tags = append(combined.Tags, facets.Tags...)
+		combined.Moods = append(combined.Moods, facets.Moods...)
+		combined.Instrumentation = append(combined.Instrumentation, facets.Instrumentation...)
+		combined.VocalCharacteristics = append(combined.VocalCharacteristics, facets.VocalCharacteristics...)
+		combined.RecordingAttributes = append(combined.RecordingAttributes, facets.RecordingAttributes...)
+		if vectorText != "" {
+			var vector pgvector.Vector
+			if err := vector.Parse(vectorText); err != nil {
+				return pgvector.Vector{}, musicsemantic.Facets{}, nil, err
+			}
+			vectors = append(vectors, vector)
+		} else if musicsemantic.Document(facets) != "" {
+			missing = append(missing, missingFacet{id: id, facets: facets})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return pgvector.Vector{}, musicsemantic.Facets{}, nil, err
+	}
+	rows.Close()
+	// Make a newly refreshed seed immediately usable instead of waiting for the
+	// next scheduled catalog sweep. This remains best-effort: radio still has
+	// provider/popularity fallbacks if the optional model is disabled or busy.
+	if len(missing) > 0 {
+		if embedder, embedderErr := a.recEmbedderInstance(ctx); embedderErr == nil && embedder != nil {
+			for _, value := range missing {
+				doc := musicsemantic.Document(value.facets)
+				embedding, embedErr := embedder.Embed(doc)
+				if embedErr != nil {
+					continue
+				}
+				vector := pgvector.NewVector(embedding)
+				vectors = append(vectors, vector)
+				_, _ = a.db.Exec(ctx, `
+					INSERT INTO music_recording_facets
+					  (recording_entity_id, text_embedding, embedder_version, doc_hash, embedded_at)
+					VALUES ($1, $2, $3, $4, now())
+					ON CONFLICT (recording_entity_id) DO UPDATE SET
+					  text_embedding = EXCLUDED.text_embedding,
+					  embedder_version = EXCLUDED.embedder_version,
+					  doc_hash = EXCLUDED.doc_hash,
+					  embedded_at = now()`,
+					value.id, vector, int32(textembed.Version), embedDocHash(doc))
+			}
+		}
+	}
+	return averageEmbeddings(vectors), combined, recordingIDs, nil
+}
+
+type musicCatalogSuggestionRow struct {
+	id     uuid.UUID
+	title  string
+	artist string
+	url    string
+	score  float64
+	facets musicsemantic.Facets
+}
+
+func (a *App) unownedMetadataSuggestions(
+	ctx context.Context,
+	centroid pgvector.Vector,
+	seed musicsemantic.Facets,
+	seedRecordingIDs []uuid.UUID,
+	limit int,
+) ([]MusicCatalogSuggestion, error) {
+	if len(centroid.Slice()) == 0 || limit <= 0 {
+		return []MusicCatalogSuggestion{}, nil
+	}
+	rows, err := a.db.Query(ctx, `
+		SELECT recording.recording_entity_id, recording.title, recording.artist_name,
+		       recording.provider_url, recording.genres, recording.tags, recording.moods,
+		       recording.instrumentation, recording.vocal_characteristics,
+		       recording.recording_attributes,
+		       (facet.text_embedding <=> $1)::float8 AS distance
+		FROM music_recording_facets facet
+		JOIN music_catalog_recordings recording USING (recording_entity_id)
+		WHERE facet.text_embedding IS NOT NULL
+		  AND facet.embedder_version >= $2
+		  AND NOT (recording.recording_entity_id = ANY($3::uuid[]))
+		  AND NOT EXISTS (
+		      SELECT 1
+		      FROM metadata_entity_bindings binding
+		      JOIN track_files tf ON tf.track_id = binding.local_id
+		      JOIN library_files lf ON lf.id = tf.library_file_id AND lf.deleted_at IS NULL
+		      WHERE binding.local_kind = 'track' AND binding.entity_kind = 'recording'
+		        AND binding.entity_id = recording.recording_entity_id)
+		ORDER BY facet.text_embedding <=> $1
+		LIMIT $4`, centroid, int32(textembed.Version), seedRecordingIDs, limit*4)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	artistCounts := map[string]int{}
+	result := make([]MusicCatalogSuggestion, 0, limit)
+	for rows.Next() {
+		var row musicCatalogSuggestionRow
+		var distance float64
+		if err := rows.Scan(&row.id, &row.title, &row.artist, &row.url,
+			&row.facets.Genres, &row.facets.Tags, &row.facets.Moods,
+			&row.facets.Instrumentation, &row.facets.VocalCharacteristics,
+			&row.facets.RecordingAttributes, &distance); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(row.title) == "" || strings.TrimSpace(row.artist) == "" {
+			continue
+		}
+		artistKey := strings.ToLower(strings.TrimSpace(row.artist))
+		if artistCounts[artistKey] >= 2 {
+			continue
+		}
+		artistCounts[artistKey]++
+		row.score = math.Max(-1, math.Min(1, 1-distance))
+		shared := musicsemantic.SharedTerms(seed, row.facets, 3)
+		reason := "Similar musical metadata"
+		if len(shared) > 0 {
+			reason = "Shared: " + strings.Join(shared, ", ")
+		}
+		result = append(result, MusicCatalogSuggestion{
+			RecordingEntityID: row.id.String(), Title: row.title,
+			ArtistName: row.artist, ProviderURL: row.url,
+			Score: math.Round(row.score*1000) / 1000, Reason: reason,
+		})
+		if len(result) == limit {
+			break
+		}
+	}
+	return result, rows.Err()
 }
 
 func (a *App) artistIDsForTracks(ctx context.Context, trackIDs []int64) ([]int64, error) {
@@ -153,9 +348,9 @@ func mixRowToRadioTrack(row sqlc.ListArtistTopTracksForMixRow) sqlc.SimilarTrack
 }
 
 // averageEmbeddings returns the element-wise mean of `vecs`. Caller must
-// ensure all vectors have the same dimension; we assume they do because every
-// track_embedding column is vector(512). Cosine distance is invariant to
-// magnitude so we don't re-normalize — pgvector's HNSW handles that.
+// ensure all vectors in one call have the same dimension. Sonic and metadata
+// centroids call this separately, so their 512-d and 1024-d spaces never mix.
+// Cosine distance is invariant to magnitude, so no re-normalization is needed.
 func averageEmbeddings(vecs []pgvector.Vector) pgvector.Vector {
 	if len(vecs) == 0 {
 		return pgvector.Vector{}

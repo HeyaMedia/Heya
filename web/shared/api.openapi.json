@@ -12775,6 +12775,38 @@
         ],
         "type": "object"
       },
+      "MusicCatalogSuggestion": {
+        "additionalProperties": false,
+        "properties": {
+          "artist_name": {
+            "type": "string"
+          },
+          "provider_url": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "recording_entity_id": {
+            "type": "string"
+          },
+          "score": {
+            "format": "double",
+            "type": "number"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "recording_entity_id",
+          "title",
+          "artist_name",
+          "score",
+          "reason"
+        ],
+        "type": "object"
+      },
       "MusicCounts": {
         "additionalProperties": false,
         "properties": {
@@ -15369,6 +15401,16 @@
             "format": "int64",
             "type": "integer"
           },
+          "suggestions": {
+            "description": "Similar canonical recordings that are not currently playable in this library",
+            "items": {
+              "$ref": "#/components/schemas/MusicCatalogSuggestion"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "tracks": {
             "items": {
               "$ref": "#/components/schemas/SimilarTracksByTrackRichRow"
@@ -15381,7 +15423,8 @@
         },
         "required": [
           "seed_track_id",
-          "tracks"
+          "tracks",
+          "suggestions"
         ],
         "type": "object"
       },

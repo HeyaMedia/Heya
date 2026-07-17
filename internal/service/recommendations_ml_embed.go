@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/musicsemantic"
 	"github.com/karbowiak/heya/internal/textembed"
 	"github.com/pgvector/pgvector-go"
 	"github.com/rs/zerolog/log"
@@ -56,6 +58,31 @@ func capN(s []string, n int) []string {
 type embedDocRow struct {
 	id  int64
 	doc string
+}
+
+type musicEmbedDocRow struct {
+	id  uuid.UUID
+	doc string
+}
+
+func (a *App) loadMusicEmbedDocs(ctx context.Context) ([]musicEmbedDocRow, error) {
+	rows, err := sqlc.New(a.db).ListMusicCatalogEmbeddingRows(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]musicEmbedDocRow, 0, len(rows))
+	for _, row := range rows {
+		doc := musicsemantic.Document(musicsemantic.Facets{
+			Genres: row.Genres, Tags: row.Tags, Moods: row.Moods,
+			Instrumentation:      row.Instrumentation,
+			VocalCharacteristics: row.VocalCharacteristics,
+			RecordingAttributes:  row.RecordingAttributes,
+		})
+		if doc != "" {
+			out = append(out, musicEmbedDocRow{id: row.RecordingEntityID, doc: doc})
+		}
+	}
+	return out, nil
 }
 
 // loadVideoEmbedDocs builds the embed doc for every video item. Staleness is
@@ -243,7 +270,8 @@ func (a *App) loadFacetStates(ctx context.Context, table, keyCol string) (map[in
 	return out, rows.Err()
 }
 
-// BackfillVideoEmbeddings embeds every video item AND episode whose embedding
+// BackfillVideoEmbeddings embeds every video item, episode, and canonical music
+// recording whose embedding
 // is missing or stale — wrong embedder_version, or a doc_hash mismatch after
 // the source metadata changed (or everything when force) — upserting
 // media_item_facets / episode_facets. Returns the count embedded and skipped
@@ -255,6 +283,16 @@ func (a *App) BackfillVideoEmbeddings(ctx context.Context, force bool) (embedded
 	}
 	if emb == nil {
 		return 0, 0, ErrMLDisabled
+	}
+	// Upgrade/backstop path for libraries enriched before the semantic music
+	// catalog existed. Artist refresh handles new data; each embedding sweep
+	// hydrates a bounded batch of already-known canonical recording IDs.
+	if a.matcher != nil {
+		if hydrated, hydrateErr := a.matcher.HydrateMissingMusicSemanticCatalog(ctx, 500); hydrateErr != nil {
+			log.Warn().Err(hydrateErr).Msg("recommendations: bootstrap music semantic catalog failed")
+		} else if hydrated > 0 {
+			log.Info().Int("recordings", hydrated).Msg("recommendations: bootstrapped music semantic catalog")
+		}
 	}
 	process := func(table, keyCol string, docs []embedDocRow) error {
 		states, err := a.loadFacetStates(ctx, table, keyCol)
@@ -287,6 +325,52 @@ func (a *App) BackfillVideoEmbeddings(ctx context.Context, force bool) (embedded
 		}
 		return nil
 	}
+	processMusic := func(docs []musicEmbedDocRow) error {
+		rows, err := a.db.Query(ctx, `SELECT recording_entity_id, embedder_version, doc_hash FROM music_recording_facets`)
+		if err != nil {
+			return fmt.Errorf("load music recording facet states: %w", err)
+		}
+		states := map[uuid.UUID]facetState{}
+		for rows.Next() {
+			var id uuid.UUID
+			var state facetState
+			if err := rows.Scan(&id, &state.version, &state.hash); err != nil {
+				rows.Close()
+				return err
+			}
+			states[id] = state
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, d := range docs {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			hash := embedDocHash(d.doc)
+			if state, ok := states[d.id]; !force && ok && state.version >= textembed.Version && state.hash == hash {
+				continue
+			}
+			vec, err := emb.Embed(d.doc)
+			if err != nil {
+				skipped++
+				continue
+			}
+			if _, err := a.db.Exec(ctx, `
+				INSERT INTO music_recording_facets (recording_entity_id, text_embedding, embedder_version, doc_hash, embedded_at)
+				VALUES ($1, $2, $3, $4, now())
+				ON CONFLICT (recording_entity_id) DO UPDATE SET
+				  text_embedding = EXCLUDED.text_embedding,
+				  embedder_version = EXCLUDED.embedder_version,
+				  doc_hash = EXCLUDED.doc_hash,
+				  embedded_at = now()`, d.id, pgvector.NewVector(vec), textembed.Version, hash); err != nil {
+				return fmt.Errorf("upsert music_recording_facets %s: %w", d.id, err)
+			}
+			embedded++
+		}
+		return nil
+	}
 
 	docs, err := a.loadVideoEmbedDocs(ctx)
 	if err != nil {
@@ -300,6 +384,13 @@ func (a *App) BackfillVideoEmbeddings(ctx context.Context, force bool) (embedded
 		return embedded, skipped, fmt.Errorf("load episode docs: %w", err)
 	}
 	if err := process("episode_facets", "episode_id", epDocs); err != nil {
+		return embedded, skipped, err
+	}
+	musicDocs, err := a.loadMusicEmbedDocs(ctx)
+	if err != nil {
+		return embedded, skipped, fmt.Errorf("load music docs: %w", err)
+	}
+	if err := processMusic(musicDocs); err != nil {
 		return embedded, skipped, err
 	}
 
@@ -332,7 +423,18 @@ func (a *App) pruneOrphanedFacets(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if n := itemTag.RowsAffected() + epTag.RowsAffected(); n > 0 {
+	musicTag, err := a.db.Exec(ctx, `
+		DELETE FROM music_recording_facets f
+		WHERE NOT EXISTS (
+			SELECT 1 FROM music_catalog_recordings r
+			WHERE r.recording_entity_id = f.recording_entity_id
+			  AND cardinality(r.genres) + cardinality(r.tags) + cardinality(r.moods) +
+			      cardinality(r.instrumentation) + cardinality(r.vocal_characteristics) +
+			      cardinality(r.recording_attributes) > 0)`)
+	if err != nil {
+		return err
+	}
+	if n := itemTag.RowsAffected() + epTag.RowsAffected() + musicTag.RowsAffected(); n > 0 {
 		log.Info().Int64("pruned", n).Msg("recommendations: pruned orphaned embedding facets")
 	}
 	return nil
@@ -364,6 +466,17 @@ func (a *App) EmbeddedEpisodeCount(ctx context.Context) (embedded, total int) {
 	return
 }
 
+// EmbeddedMusicCount reports focused metadata embedding coverage for canonical
+// recordings, including external top tracks with no local file.
+func (a *App) EmbeddedMusicCount(ctx context.Context) (embedded, total int) {
+	q := sqlc.New(a.db)
+	totalCount, _ := q.CountMusicCatalogRecordings(ctx)
+	embeddedCount, _ := q.CountEmbeddedMusicCatalogRecordings(ctx, int32(textembed.Version))
+	total = int(totalCount)
+	embedded = int(embeddedCount)
+	return
+}
+
 // fyEmbedScores returns a per-candidate embedding similarity (cosine to the
 // user's taste centroid) for the For You blend, or nil when the ML engine is off
 // / has no usable seed embeddings — the non-ML blend then proceeds unchanged.
@@ -376,7 +489,9 @@ func (a *App) fyEmbedScores(ctx context.Context, seedW map[int64]float64) map[in
 		seedIDs = append(seedIDs, id)
 	}
 	rows, err := a.db.Query(ctx,
-		`SELECT media_item_id, text_embedding FROM media_item_facets WHERE media_item_id = ANY($1) AND text_embedding IS NOT NULL`, seedIDs)
+		`SELECT media_item_id, text_embedding FROM media_item_facets
+		 WHERE media_item_id = ANY($1) AND text_embedding IS NOT NULL AND embedder_version >= $2`,
+		seedIDs, int32(textembed.Version))
 	if err != nil {
 		return nil
 	}
@@ -407,8 +522,9 @@ func (a *App) fyEmbedScores(ctx context.Context, seedW map[int64]float64) map[in
 
 	// Cosine distance for every embedded item, computed in the DB.
 	dr, err := a.db.Query(ctx,
-		`SELECT media_item_id, (text_embedding <=> $1)::float8 FROM media_item_facets WHERE text_embedding IS NOT NULL`,
-		pgvector.NewVector(centroid))
+		`SELECT media_item_id, (text_embedding <=> $1)::float8 FROM media_item_facets
+		 WHERE text_embedding IS NOT NULL AND embedder_version >= $2`,
+		pgvector.NewVector(centroid), int32(textembed.Version))
 	if err != nil {
 		return nil
 	}
@@ -479,11 +595,12 @@ func (a *App) SemanticSearch(ctx context.Context, query string, facets ForYouFac
 		LEFT JOIN movies m     ON m.media_item_id  = mi.id
 		LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
 		WHERE f.text_embedding IS NOT NULL
+		  AND f.embedder_version >= $4
 		  AND EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL)
 		  AND ($2 = '' OR mi.media_type::text = $2 OR ($2 = 'tv' AND mi.media_type = 'anime'))
 		ORDER BY f.text_embedding <=> $1
 		LIMIT $3`,
-		pgvector.NewVector(qv), facets.Type, limit*3) // over-fetch for post-filtering
+		pgvector.NewVector(qv), facets.Type, limit*3, int32(textembed.Version)) // over-fetch for post-filtering
 	if err != nil {
 		return nil, err
 	}
@@ -545,11 +662,12 @@ func (a *App) semanticEpisodeMerge(ctx context.Context, qv []float32, facets For
 		JOIN tv_series ts ON ts.id = se.series_id
 		JOIN media_item_cards mi ON mi.id = ts.media_item_id
 		WHERE f.text_embedding IS NOT NULL
+		  AND f.embedder_version >= $4
 		  AND EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL)
 		  AND ($2 = '' OR mi.media_type::text = $2 OR ($2 = 'tv' AND mi.media_type = 'anime'))
 		ORDER BY f.text_embedding <=> $1
 		LIMIT $3`,
-		pgvector.NewVector(qv), facets.Type, fetch)
+		pgvector.NewVector(qv), facets.Type, fetch, int32(textembed.Version))
 	if err != nil {
 		return err
 	}

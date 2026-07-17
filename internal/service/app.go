@@ -66,7 +66,7 @@ type App struct {
 
 	// Optional embedding recommendation engine (HEYA_RECOMMENDATIONS_ML_ENABLED).
 	// recEmbedder is lazy-loaded on first use when enabled; recModelsDir holds the
-	// BGE model files the recFetcher downloads.
+	// BGE-M3 model files the recFetcher downloads.
 	recFetcher     *sonicanalysis.ModelFetcher
 	recEmbedder    *textembed.Embedder
 	recEmbedderMu  sync.Mutex
@@ -383,7 +383,7 @@ func newApp(ctx context.Context, cfg *config.Config, runtimeMode appRuntimeMode)
 	analyzer := sonicanalysis.NewAnalyzer(saCfg)
 
 	// Optional embedding recommendation engine — its own model dir + fetcher
-	// (BGE-large-en), lazy embedder loaded on first use when enabled.
+	// (multilingual BGE-M3), lazy embedder loaded on first use when enabled.
 	recModelsDir := cfg.DataDir.Value + "/models/recommendations"
 	recFetcher := sonicanalysis.NewModelFetcherWithManifest(recModelsDir, "", recommendationsMLManifest())
 

@@ -23,19 +23,20 @@ const (
 	recMLSettingsKey    = "recommendations_ml"
 )
 
-// recommendationsMLManifest is BGE-large-en-v1.5 (quantized ONNX) + its
-// WordPiece tokenizer, pulled from the Xenova HF mirror when enabled.
+// recommendationsMLManifest is multilingual BGE-M3 (quantized ONNX) + its
+// XLM-R tokenizer. The model keeps the former engine's 1024-d output while
+// covering the non-English titles and music metadata an actual library has.
 func recommendationsMLManifest() []sonicanalysis.ModelFile {
-	const base = "https://huggingface.co/Xenova/bge-large-en-v1.5/resolve/main/"
+	const base = "https://huggingface.co/onnx-community/bge-m3-ONNX/resolve/main/"
 	return []sonicanalysis.ModelFile{
-		{Name: textembed.ModelFile, URL: base + "onnx/" + textembed.ModelFile, Size: 336_983_162},
-		{Name: textembed.TokenizerFile, URL: base + textembed.TokenizerFile, Size: 711_396},
+		{Name: textembed.ModelFile, URL: base + "onnx/model_quantized.onnx", SHA256: "2237f770aad5c71bbc1fc2d361a57f9a37400574cc9eff32626f0cdb49234730", Size: 568_479_395},
+		{Name: textembed.TokenizerFile, URL: base + "tokenizer.json", SHA256: "249df0778f236f6ece390de0de746838ef25b9d6954b68c2ee71249e0a9d8fd4", Size: 17_082_799},
 	}
 }
 
 // RecommendationsMLSettings is the user-tunable part of the embedding engine,
 // stored as one JSON blob in system_settings. Enabled defaults false so a fresh
-// install never downloads the ~340 MB model; flipping it on kicks a fetch.
+// install never downloads the ~585 MB model bundle; flipping it on kicks a fetch.
 type RecommendationsMLSettings struct {
 	Enabled     bool   `json:"enabled"`
 	Accelerator string `json:"accelerator"` // auto|cpu|coreml|cuda|openvino|directml

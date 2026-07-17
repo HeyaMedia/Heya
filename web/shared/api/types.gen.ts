@@ -3494,6 +3494,15 @@ export type MusicAlbumDetail = {
     tracks: Array<TrackView> | null;
 };
 
+export type MusicCatalogSuggestion = {
+    artist_name: string;
+    provider_url?: string;
+    reason: string;
+    recording_entity_id: string;
+    score: number;
+    title: string;
+};
+
 export type MusicCounts = {
     /**
      * A URL to the JSON Schema for this object.
@@ -4285,6 +4294,10 @@ export type RadioResponse = {
      */
     readonly $schema?: string;
     seed_track_id: number;
+    /**
+     * Similar canonical recordings that are not currently playable in this library
+     */
+    suggestions: Array<MusicCatalogSuggestion> | null;
     tracks: Array<SimilarTracksByTrackRichRow> | null;
 };
 
@@ -7495,6 +7508,10 @@ export type RadioRequestWritable = {
 
 export type RadioResponseWritable = {
     seed_track_id: number;
+    /**
+     * Similar canonical recordings that are not currently playable in this library
+     */
+    suggestions: Array<MusicCatalogSuggestion> | null;
     tracks: Array<SimilarTracksByTrackRichRow> | null;
 };
 

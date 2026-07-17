@@ -834,6 +834,42 @@ type Movie struct {
 	OriginCountry    []string       `json:"origin_country"`
 }
 
+type MusicCatalogArtistExpansion struct {
+	SourceArtistID    int64              `json:"source_artist_id"`
+	RelatedArtistMbid string             `json:"related_artist_mbid"`
+	RelatedArtistName string             `json:"related_artist_name"`
+	HydratedAt        pgtype.Timestamptz `json:"hydrated_at"`
+}
+
+type MusicCatalogRecording struct {
+	RecordingEntityID    uuid.UUID          `json:"recording_entity_id"`
+	RecordingMbid        string             `json:"recording_mbid"`
+	Title                string             `json:"title"`
+	ArtistName           string             `json:"artist_name"`
+	SourceArtistID       pgtype.Int8        `json:"source_artist_id"`
+	Provider             string             `json:"provider"`
+	ProviderRank         int32              `json:"provider_rank"`
+	ProviderUrl          string             `json:"provider_url"`
+	Playcount            int64              `json:"playcount"`
+	Listeners            int64              `json:"listeners"`
+	Genres               []string           `json:"genres"`
+	Tags                 []string           `json:"tags"`
+	Moods                []string           `json:"moods"`
+	Instrumentation      []string           `json:"instrumentation"`
+	VocalCharacteristics []string           `json:"vocal_characteristics"`
+	RecordingAttributes  []string           `json:"recording_attributes"`
+	RefreshedAt          pgtype.Timestamptz `json:"refreshed_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
+type MusicRecordingFacet struct {
+	RecordingEntityID uuid.UUID          `json:"recording_entity_id"`
+	TextEmbedding     pgvector.Vector    `json:"text_embedding"`
+	EmbedderVersion   int32              `json:"embedder_version"`
+	DocHash           string             `json:"doc_hash"`
+	EmbeddedAt        pgtype.Timestamptz `json:"embedded_at"`
+}
+
 type Network struct {
 	ID          int64  `json:"id"`
 	Name        string `json:"name"`

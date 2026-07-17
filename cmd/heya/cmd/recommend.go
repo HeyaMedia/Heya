@@ -14,7 +14,7 @@ import (
 
 var recommendEmbedCmd = &cobra.Command{
 	Use:   "embed",
-	Short: "Backfill text embeddings for the video catalog (needs the ML engine enabled)",
+	Short: "Backfill text embeddings for video and music catalogs (needs the ML engine enabled)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		force, _ := cmd.Flags().GetBool("force")
 		return withApp(func(ctx context.Context, app *service.App) error {

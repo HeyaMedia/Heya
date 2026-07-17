@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/textembed"
 	"github.com/pgvector/pgvector-go"
 )
 
@@ -34,6 +35,7 @@ type musicCandidateSource uint8
 
 const (
 	candidateSonic musicCandidateSource = 1 << iota
+	candidateMetadata
 	candidateExternal
 	candidateProviderChart
 	candidateAffinity
@@ -55,8 +57,9 @@ type musicRecommendationCandidate struct {
 }
 
 type musicTasteProfile struct {
-	Centroid  pgvector.Vector
-	ArtistIDs []int64
+	SonicCentroid    pgvector.Vector
+	MetadataCentroid pgvector.Vector
+	ArtistIDs        []int64
 }
 
 // musicTasteProfile combines every positive signal into a user centroid and
@@ -83,7 +86,25 @@ func (a *App) musicTasteProfile(ctx context.Context, userID int64, artistLimit i
 		  AND tf.track_embedding IS NOT NULL
 		  AND `+musicVetoFilter, userID).Scan(&centroid)
 	if err == nil && len(centroid.Slice()) > 0 {
-		profile.Centroid = centroid
+		profile.SonicCentroid = centroid
+	}
+
+	var metadataCentroid pgvector.Vector
+	err = a.db.QueryRow(ctx, `WITH `+musicAffinityCTE+`
+		SELECT AVG(mrf.text_embedding)
+		FROM aff
+		JOIN tracks t ON t.id = aff.track_id
+		JOIN albums al ON al.id = t.album_id
+		JOIN metadata_entity_bindings binding
+		  ON binding.local_kind = 'track' AND binding.local_id = t.id
+		 AND binding.entity_kind = 'recording'
+		JOIN music_recording_facets mrf ON mrf.recording_entity_id = binding.entity_id
+		WHERE aff.score > 0
+		  AND mrf.text_embedding IS NOT NULL
+		  AND mrf.embedder_version >= $2
+		  AND `+musicVetoFilter, userID, int32(textembed.Version)).Scan(&metadataCentroid)
+	if err == nil && len(metadataCentroid.Slice()) > 0 {
+		profile.MetadataCentroid = metadataCentroid
 	}
 	// A profile with only unanalysed signals is still useful: the provider
 	// graph and chart candidates below do not need an embedding.
@@ -95,7 +116,7 @@ func (a *App) recommendMusicForUser(ctx context.Context, userID int64, mode musi
 	if err != nil {
 		return nil, fmt.Errorf("taste profile: %w", err)
 	}
-	return a.recommendMusicAround(ctx, userID, profile.Centroid, profile.ArtistIDs, mode, limit, exclude)
+	return a.recommendMusicAround(ctx, userID, profile.SonicCentroid, profile.MetadataCentroid, profile.ArtistIDs, mode, limit, exclude)
 }
 
 type recommendationMixRule struct {
@@ -132,7 +153,7 @@ func (a *App) generateRecommendationMixes(ctx context.Context, userID int64, max
 
 	mixes := make([]MusicMix, 0, min(maxMixes, len(rules)))
 	used := make([]int64, 0, tracksPerMix*len(rules))
-	pool, err := a.buildMusicRecommendationPool(ctx, userID, profile.Centroid, profile.ArtistIDs, max(120, tracksPerMix*10), 1.0)
+	pool, err := a.buildMusicRecommendationPool(ctx, userID, profile.SonicCentroid, profile.MetadataCentroid, profile.ArtistIDs, max(120, tracksPerMix*10), 1.0)
 	if err != nil {
 		return nil, err
 	}
@@ -155,14 +176,15 @@ func (a *App) generateRecommendationMixes(ctx context.Context, userID int64, max
 	return mixes, nil
 }
 
-// recommendMusicAround is the shared candidate/scoring core. centroid and
-// artistIDs may come from the user profile (For You/mixes) or the requested
-// seed (instant radio). Either may be empty; provider popularity is the final
+// recommendMusicAround is the shared candidate/scoring core. The independent
+// sonic/metadata centroids and artist IDs may come from the user profile or an
+// instant-radio seed. Any source may be empty; provider popularity is the final
 // cold-start fallback.
 func (a *App) recommendMusicAround(
 	ctx context.Context,
 	userID int64,
-	centroid pgvector.Vector,
+	sonicCentroid pgvector.Vector,
+	metadataCentroid pgvector.Vector,
 	artistIDs []int64,
 	mode musicRecommendationMode,
 	limit int,
@@ -175,7 +197,7 @@ func (a *App) recommendMusicAround(
 	if mode == recommendRadio {
 		affinityWeight = 0.22
 	}
-	pool, err := a.buildMusicRecommendationPool(ctx, userID, centroid, artistIDs, max(120, limit*10), affinityWeight)
+	pool, err := a.buildMusicRecommendationPool(ctx, userID, sonicCentroid, metadataCentroid, artistIDs, max(120, limit*10), affinityWeight)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +211,8 @@ func (a *App) recommendMusicAround(
 func (a *App) buildMusicRecommendationPool(
 	ctx context.Context,
 	userID int64,
-	centroid pgvector.Vector,
+	sonicCentroid pgvector.Vector,
+	metadataCentroid pgvector.Vector,
 	artistIDs []int64,
 	poolLimit int,
 	affinityWeight float64,
@@ -205,8 +228,8 @@ func (a *App) buildMusicRecommendationPool(
 		candidate.Score += score
 	}
 
-	if len(centroid.Slice()) > 0 {
-		rows, err := a.tasteNeighborTracks(ctx, userID, centroid, poolLimit)
+	if len(sonicCentroid.Slice()) > 0 {
+		rows, err := a.tasteNeighborTracks(ctx, userID, sonicCentroid, poolLimit)
 		if err != nil {
 			return nil, fmt.Errorf("sonic candidates: %w", err)
 		}
@@ -216,6 +239,18 @@ func (a *App) buildMusicRecommendationPool(
 			// across analyzer/model versions and still preserves KNN order.
 			strength := 4.5 - 3.6*(float64(i)/denom)
 			add(row, candidateSonic, strength)
+		}
+	}
+
+	if len(metadataCentroid.Slice()) > 0 {
+		rows, err := a.metadataNeighborTracks(ctx, userID, metadataCentroid, poolLimit)
+		if err != nil {
+			return nil, fmt.Errorf("metadata candidates: %w", err)
+		}
+		denom := math.Max(1, float64(len(rows)-1))
+		for i, row := range rows {
+			strength := 4.0 - 3.1*(float64(i)/denom)
+			add(row, candidateMetadata, strength)
 		}
 	}
 

@@ -970,15 +970,17 @@ func (a *App) QueryFacetsItems(ctx context.Context, status string, limit, offset
 }
 
 // QueryEmbedItems returns the embedding coverage for embed_recommendations:
-// every video item and episode-with-overview, complete when a current-version
-// facet row exists. Hash-level staleness isn't computed here — recomposing
+// every video item, episode-with-overview, and metadata-bearing canonical
+// recording, complete when a current-version facet row exists. Hash-level
+// staleness isn't computed here — recomposing
 // every doc per page view is the sweep's job, not the modal's; a stale row
 // still shows complete until the next sweep rewrites it.
 func (a *App) QueryEmbedItems(ctx context.Context, status string, limit, offset int) (*TaskItemsResult, error) {
 	itemsEmbedded, itemsTotal := a.EmbeddedVideoCount(ctx)
 	epEmbedded, epTotal := a.EmbeddedEpisodeCount(ctx)
-	total := itemsTotal + epTotal
-	complete := itemsEmbedded + epEmbedded
+	musicEmbedded, musicTotal := a.EmbeddedMusicCount(ctx)
+	total := itemsTotal + epTotal + musicTotal
+	complete := itemsEmbedded + epEmbedded + musicEmbedded
 
 	statusFilter := ""
 	switch status {
@@ -1008,6 +1010,17 @@ func (a *App) QueryEmbedItems(ctx context.Context, status string, limit, offset 
 			JOIN media_item_cards mi ON mi.id = ts.media_item_id
 			LEFT JOIN episode_facets f ON f.episode_id = e.id AND f.embedder_version >= `+ver+`
 			WHERE e.overview <> ''
+			UNION ALL
+			SELECT hashtextextended(r.recording_entity_id::text, 0) AS id,
+			       CASE WHEN r.artist_name <> '' THEN r.artist_name || ' — ' ELSE '' END || r.title AS name,
+			       'recording' AS path,
+			       (f.recording_entity_id IS NOT NULL) AS done
+			FROM music_catalog_recordings r
+			LEFT JOIN music_recording_facets f ON f.recording_entity_id = r.recording_entity_id
+			  AND f.embedder_version >= `+ver+`
+			WHERE cardinality(r.genres) + cardinality(r.tags) + cardinality(r.moods) +
+			      cardinality(r.instrumentation) + cardinality(r.vocal_characteristics) +
+			      cardinality(r.recording_attributes) > 0
 		) u
 		`+statusFilter+`
 		ORDER BY u.done, u.name ASC

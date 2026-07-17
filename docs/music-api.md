@@ -13,8 +13,8 @@ shape doesn't collide with future non-music entities.
 | **Sonic similarity** | `GET /api/music/tracks/{id}/sonic-similar`, `GET /api/music/artists/{slug}/sonic-similar`, `GET /api/music/artists/{aslug}/albums/{bslug}/sonic-similar` (KNN on embeddings), `GET /api/music/artists/{slug}/similar` (metadata-based fallback via Last.fm/ListenBrainz) |
 | **CLAP text search** | `GET /api/music/search-sonic?q=…` (free-form vibe prompt → tracks, gated on the CLAP text model being loaded) |
 | **Browse-by-facet** | `GET /api/music/browse/{moods,genres,tempo}` (tile buckets) and `…/{moods/{mood},genres/{name},tempo/{band}}/tracks` (drilldown). Moods are the 9 canonical heads in `internal/sonicanalysis/musictheory.go`; tempo bands are fixed in `service/music_browse.go::tempoBands` |
-| **Recommendations + mixes** | `GET /api/music/home/mixes-for-you` returns a rule-driven slate (`for_you`, `discovery`, `rediscovery`, `deep_cuts`, then artist mixes). Every mix has its own `slug`, `kind`, `description`, and playable rich-track rows. The shared engine blends explicit track/album/artist ratings, weak completed-listen affinity, CLAP KNN, localized similar-artist edges, provider top tracks, and enriched catalog popularity. |
-| **Instant Radio** | `POST /api/music/radio` with `{seed: {kind, …}, limit, exclude_track_ids}` — seed kinds: `track`, `artist`, `album`, `text`, with optional multi-seed `seeds`. Uses the same recommendation candidates as generated mixes. Sonic KNN is preferred when facets exist; external related artists + provider top tracks provide the fallback for an unanalysed seed. Returns `{seed_track_id, tracks}`. |
+| **Recommendations + mixes** | `GET /api/music/home/mixes-for-you` returns a rule-driven slate (`for_you`, `discovery`, `rediscovery`, `deep_cuts`, then artist mixes). Every mix has its own `slug`, `kind`, `description`, and playable rich-track rows. The shared engine blends explicit track/album/artist ratings, weak completed-listen affinity, independent sonic and focused-metadata KNN, localized similar-artist edges, provider top tracks, and enriched catalog popularity. |
+| **Instant Radio** | `POST /api/music/radio` with `{seed: {kind, …}, limit, exclude_track_ids}` — seed kinds: `track`, `artist`, `album`, `text`, with optional multi-seed `seeds`. Sonic and focused metadata centroids stay in separate vector spaces, so either can drive radio alone. The metadata document contains genres/styles, tags, moods, instrumentation, vocal characteristics, and recording attributes; it excludes lyrics, artist biography/context, descriptions, and title identity. Returns `{seed_track_id, tracks, suggestions}`: `tracks` are playable local files, while `suggestions` are similar canonical recordings absent from the playable library and must never be enqueued as local tracks. |
 | **Quick stations** | `GET /api/music/stations/{library-radio,deep-cuts,time-travel,random-album}`. Library Radio uses the shared For You policy and Deep Cuts targets unplayed catalog from known artists; both retain cold-library fallbacks. |
 | **DJ Mix** | `GET /api/music/tracks/{id}/mix-to` — harmonically-compatible tracks. Constrained to Camelot-wheel adjacency (same position, relative key, or ±1 wheel position) AND ±5 BPM of the seed, ordered by embedding distance. `sonicanalysis.Key.CompatibleKeys()` computes the allowed (root, mode) set. |
 | **Per-track binary** | `GET /api/music/tracks/{id}/stream` (auto-picks best playable + caps fallback to AAC mp4), `…/file/{tfid}` (bit-perfect), `…/lyrics`, `…/facets`, `…/waveform` |
@@ -40,13 +40,18 @@ spelled out (`moodBucketsBody`, `trackResultsBody`, etc. in
 `music_huma.go`) so the generated TS client preserves shape; paginated lists
 use `service.MusicListPage[T]`.
 
-Sonic-similar / sonic-search / radio / drilldown rows all share the **rich
-track row shape**: `track_id, track_title, duration, disc/track number,
+Sonic-similar / sonic-search / radio `tracks` / drilldown rows all share the
+**rich track row shape**: `track_id, track_title, duration, disc/track number,
 album_{id, title, slug, cover_path, year}, artist_{id, name, slug}`. Generated
 as `sqlc.SimilarTracksByTrackRichRow`, `SimilarTracksByTextRichRow`,
 `ListTracksByMoodRow`, etc. — same columns, different `WHERE`. When you add a
 new "tracks filtered by X" query, mirror this shape so the FE keeps one row
 component.
+
+Radio `suggestions` deliberately use a separate shape:
+`recording_entity_id, title, artist_name, provider_url, score, reason`. They
+describe unowned catalog candidates and are display/link-out rows, not player
+queue entries.
 
 ## Slug-first addressing
 

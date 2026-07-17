@@ -21,10 +21,14 @@ const embedded = computed(() => status.value?.embedded ?? 0)
 const total = computed(() => status.value?.total ?? 0)
 const epEmbedded = computed(() => status.value?.embedded_episodes ?? 0)
 const epTotal = computed(() => status.value?.total_episodes ?? 0)
+const musicEmbedded = computed(() => status.value?.embedded_music ?? 0)
+const musicTotal = computed(() => status.value?.total_music ?? 0)
+const allEmbedded = computed(() => embedded.value + epEmbedded.value + musicEmbedded.value)
+const allTotal = computed(() => total.value + epTotal.value + musicTotal.value)
 const missing = computed(() => fetcher.value?.missing_count ?? 0)
 const progress = computed(() => fetcher.value?.progress)
 const availableAccelerators = computed(() => (status.value?.accelerators ?? []).filter(a => a.available))
-const modelReady = computed(() => !!fetcher.value?.all_present && embedded.value > 0)
+const modelReady = computed(() => !!fetcher.value?.all_present && allEmbedded.value > 0)
 
 const fetcherLabel = computed(() => {
   switch (fetcher.value?.state) {
@@ -113,8 +117,8 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
             <span class="enable-label">Embedding engine</span>
           </div>
           <p class="enable-sub">
-            <template v-if="settings?.enabled">Model {{ fetcher?.all_present ? 'downloaded' : 'downloading' }}; {{ embedded }} / {{ total }} items embedded.</template>
-            <template v-else>Enable to download the model (~340 MB) and embed your catalog. Off costs nothing — no disk, RAM, or boot cost.</template>
+            <template v-if="settings?.enabled">Model {{ fetcher?.all_present ? 'downloaded' : 'downloading' }}; {{ allEmbedded }} / {{ allTotal }} catalog entries embedded.</template>
+            <template v-else>Enable to download the model (~590 MB) and embed your catalog. Off costs nothing — no disk, RAM, or boot cost.</template>
           </p>
         </div>
         <button class="enable-toggle" :class="{ on: settings?.enabled }"
@@ -136,6 +140,9 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
         <MetricTile label="Episodes" :value="`${epEmbedded} / ${epTotal}`"
           :tone="epEmbedded >= epTotal && epTotal > 0 ? 'good' : 'warn'" icon="film"
           sub="overview embeddings" />
+        <MetricTile label="Music" :value="`${musicEmbedded} / ${musicTotal}`"
+          :tone="musicEmbedded >= musicTotal && musicTotal > 0 ? 'good' : 'warn'" icon="music"
+          sub="recording metadata" />
         <MetricTile label="Semantic search" :value="modelReady ? 'ready' : 'not ready'"
           :tone="modelReady ? 'good' : 'neutral'" icon="check" />
       </div>
@@ -151,10 +158,11 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
           </button>
         </template>
         <KVTable :rows="[
-          { key: 'Model', value: status?.model ?? 'BGE-large-en-v1.5', mono: true },
+          { key: 'Model', value: status?.model ?? 'BGE-M3', mono: true },
           { key: 'Download', value: fetcherLabel },
           { key: 'Embedded', value: `${embedded} / ${total} items`, mono: true },
           { key: 'Episodes', value: `${epEmbedded} / ${epTotal} episodes`, mono: true },
+          { key: 'Music', value: `${musicEmbedded} / ${musicTotal} recordings`, mono: true },
           { key: 'Last error', value: fetcher?.last_error ?? '' },
         ]" />
         <div v-if="progress && fetcher?.state === 'fetching'" class="fetch-progress">

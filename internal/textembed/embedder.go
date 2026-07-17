@@ -1,4 +1,4 @@
-// Package textembed wraps a BGE-large-en text-embedding model (ONNX) for the
+// Package textembed wraps the multilingual BGE-M3 text-embedding model (ONNX) for the
 // optional ML recommendation engine: text → 1024-dim L2-normalized vector. It
 // reuses the shared ONNX Runtime environment + accelerator logic from
 // internal/sonicanalysis so the two ML subsystems don't fight over ORT init.
@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	"github.com/karbowiak/heya/internal/sonicanalysis"
@@ -18,20 +17,26 @@ import (
 )
 
 const (
-	// Dim is BGE-large-en-v1.5's hidden size (the embedding dimension).
+	// Dim is BGE-M3's dense embedding dimension.
 	Dim = 1024
-	// maxLen caps tokens per doc — metadata docs are short; keeps inference fast.
-	maxLen = 384
+	// BGE-M3 supports much longer documents, but Heya's deliberately compact
+	// metadata documents do not need them. Keeping the cap modest makes the
+	// background catalog sweep predictable on CPU-only servers.
+	maxLen = 512
 
 	// Version stamps every stored embedding. Bump it whenever the model or the
 	// composed doc changes so the backfill re-embeds the whole catalog.
-	Version = 1
+	Version = 2
 
-	ModelFile     = "model_quantized.onnx"
-	TokenizerFile = "tokenizer.json"
+	// Version the on-disk paths as well as Version. Otherwise an upgrade can see
+	// the old files as "present" before the fetcher's verification pass and try
+	// to open an incompatible graph.
+	ModelFile = "bge-m3/model_quantized.onnx"
+	// TokenizerFile is a local model asset path, not a credential.
+	TokenizerFile = "bge-m3/tokenizer.json" //nolint:gosec
 )
 
-// Embedder wraps BGE-large-en (ONNX) + its WordPiece tokenizer. Always-warm and
+// Embedder wraps BGE-M3 (ONNX) + its XLM-R tokenizer. Always-warm and
 // mutex-serialized (native ORT sessions are not concurrency-safe). Mirrors
 // sonicanalysis.TextSearcher; CLS-pooled + L2-normalized so cosine == dot.
 type Embedder struct {
@@ -46,7 +51,7 @@ func New(modelsDir string, accel sonicanalysis.Accelerator) (*Embedder, error) {
 	if err := sonicanalysis.EnsureONNX(); err != nil {
 		return nil, fmt.Errorf("onnx init: %w", err)
 	}
-	// ORT's OpenVINO provider defaults GPU inference to FP16. BGE-large's
+	// ORT's OpenVINO provider defaults GPU inference to FP16. BGE-family
 	// transformer activations overflow at that precision on Intel Arc, yielding
 	// non-finite embeddings. Keep the GPU provider, but compile this model in
 	// FP32; sonic-analysis models continue using their existing defaults.
@@ -62,7 +67,7 @@ func New(modelsDir string, accel sonicanalysis.Accelerator) (*Embedder, error) {
 	}
 	sess, err := ort.NewDynamicAdvancedSession(
 		filepath.Join(modelsDir, ModelFile),
-		[]string{"input_ids", "attention_mask", "token_type_ids"},
+		[]string{"input_ids", "attention_mask"},
 		[]string{"last_hidden_state"},
 		opts,
 	)
@@ -91,15 +96,16 @@ func (e *Embedder) Embed(text string) (vec []float32, err error) {
 	if e.session == nil {
 		return nil, fmt.Errorf("embedder closed")
 	}
-	// sugarme/tokenizer v0.3 panics on some multibyte input; sanitize to ASCII
-	// (BGE-en can't use non-Latin text meaningfully anyway) and guard.
+	// Keep the panic guard around the third-party tokenizer, but pass Unicode
+	// through untouched: multilingual retrieval is the reason BGE-M3 replaced
+	// the former English-only model.
 	defer func() {
 		if r := recover(); r != nil {
 			vec, err = nil, fmt.Errorf("tokenizer panic: %v", r)
 		}
 	}()
 
-	enc, err := e.tk.EncodeSingle(sanitize(text), true)
+	enc, err := e.tk.EncodeSingle(text, true)
 	if err != nil {
 		return nil, err
 	}
@@ -113,9 +119,9 @@ func (e *Embedder) Embed(text string) (vec []float32, err error) {
 	}
 	iid := make([]int64, n)
 	am := make([]int64, n)
-	tt := make([]int64, n) // single sentence → mask all 1, type all 0
+	// XLM-R/BGE-M3 has no token_type_ids input.
 	for i, id := range ids {
-		iid[i], am[i], tt[i] = int64(id), 1, 0
+		iid[i], am[i] = int64(id), 1
 	}
 
 	shape := ort.NewShape(1, int64(n))
@@ -129,18 +135,13 @@ func (e *Embedder) Embed(text string) (vec []float32, err error) {
 		return nil, err
 	}
 	defer func() { _ = ta.Destroy() }()
-	tt2, err := ort.NewTensor(shape, tt)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tt2.Destroy() }()
 	out, err := ort.NewEmptyTensor[float32](ort.NewShape(1, int64(n), Dim))
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = out.Destroy() }()
 
-	if err := e.session.Run([]ort.Value{ti, ta, tt2}, []ort.Value{out}); err != nil {
+	if err := e.session.Run([]ort.Value{ti, ta}, []ort.Value{out}); err != nil {
 		return nil, err
 	}
 	cls := make([]float32, Dim)
@@ -149,24 +150,6 @@ func (e *Embedder) Embed(text string) (vec []float32, err error) {
 		return nil, err
 	}
 	return cls, nil
-}
-
-// sanitize strips to printable ASCII — sidesteps a multibyte offset panic in
-// sugarme/tokenizer v0.3.0; harmless for an English embedder.
-func sanitize(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range s {
-		switch {
-		case r == '\n' || r == '\t' || r == '\r':
-			b.WriteByte(' ')
-		case r >= 32 && r < 127:
-			b.WriteRune(r)
-		case r >= 127:
-			b.WriteByte(' ')
-		}
-	}
-	return b.String()
 }
 
 func l2norm(v []float32) error {

@@ -489,8 +489,8 @@ func (CleanupScannerArtifactsArgs) InsertOpts() river.InsertOpts {
 }
 
 // KickoffEmbedRecommendationsArgs sweeps the recommendation embeddings: any
-// item or episode whose stored doc hash no longer matches its recomposed
-// metadata doc re-embeds (self-heal after refreshes, re-identifies, edits).
+// item, episode, or canonical music recording whose stored doc hash no longer
+// matches its recomposed metadata doc re-embeds.
 // No-ops quickly when the embedding engine is disabled or nothing changed.
 type KickoffEmbedRecommendationsArgs struct {
 	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
