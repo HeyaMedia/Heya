@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -273,21 +274,38 @@ type fyIndex struct {
 }
 
 var (
-	fyIdxMu    sync.Mutex
-	fyIdxCache *fyIndex
+	fyIdxMu    sync.Mutex // serializes rebuilds only, never the read path
+	fyIdxCache atomic.Pointer[fyIndex]
 )
 
+// fyCatalogIndex returns the memoized catalog index, stale-while-revalidate:
+// a fresh copy is served lock-free; when the TTL lapses, exactly one caller
+// rebuilds (5-6 catalog-wide queries) while everyone else keeps getting the
+// stale copy. The old exclusive-lock shape blocked every user's ForYou
+// request behind the whole rebuild each time the TTL expired. Only a true
+// cold start (no index yet) waits.
 func (a *App) fyCatalogIndex(ctx context.Context) (*fyIndex, error) {
-	fyIdxMu.Lock()
+	cached := fyIdxCache.Load()
+	if cached != nil && time.Since(cached.builtAt) < fyCatalogTTL {
+		return cached, nil
+	}
+	if cached != nil {
+		if !fyIdxMu.TryLock() {
+			// Rebuild already in flight — serve stale rather than queue.
+			return cached, nil
+		}
+	} else {
+		fyIdxMu.Lock()
+	}
 	defer fyIdxMu.Unlock()
-	if fyIdxCache != nil && time.Since(fyIdxCache.builtAt) < fyCatalogTTL {
-		return fyIdxCache, nil
+	if idx := fyIdxCache.Load(); idx != nil && time.Since(idx.builtAt) < fyCatalogTTL {
+		return idx, nil
 	}
 	idx, err := a.fyBuildIndex(ctx)
 	if err != nil {
 		return nil, err
 	}
-	fyIdxCache = idx
+	fyIdxCache.Store(idx)
 	return idx, nil
 }
 

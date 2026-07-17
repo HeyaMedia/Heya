@@ -42,6 +42,14 @@ type LocalRuntime struct {
 
 	lastUsed atomic.Int64 // unix seconds
 
+	// pubRunning/pubModel mirror the running-state under mu for lock-free
+	// polling: Running() backs the Settings status endpoint, which is polled
+	// exactly while Ensure holds mu for a whole spawn + health wait (up to
+	// minutes on a cold model load) — taking mu there froze the status page
+	// at the moment the user wants to watch progress.
+	pubRunning atomic.Bool
+	pubModel   atomic.Pointer[string]
+
 	dlBusy     atomic.Bool
 	dlState    atomic.Pointer[DownloadState]
 	dlProgress atomic.Pointer[DownloadProgress]
@@ -291,17 +299,24 @@ func (r *LocalRuntime) Ensure(ctx context.Context, modelID, backend string, ctxS
 	}
 
 	tail := newLogTail(40)
-	go pipeToLog(stderr, tail)
-	go pipeToLog(stdout, tail)
+	var pipesDone sync.WaitGroup
+	pipesDone.Add(2)
+	go func() { defer pipesDone.Done(); pipeToLog(stderr, tail) }()
+	go func() { defer pipesDone.Done(); pipeToLog(stdout, tail) }()
 
 	procDone := make(chan struct{})
 	go func() {
+		// os/exec contract: Wait closes the pipes, so it must not run until
+		// both pipe readers hit EOF — racing them loses the final log lines,
+		// which are exactly what waitHealthy's error message surfaces.
+		pipesDone.Wait()
 		err := cmd.Wait()
 		close(procDone)
 		r.mu.Lock()
 		if r.procDone == procDone { // still the current process
 			r.cmd = nil
 			r.baseURL = ""
+			r.pubRunning.Store(false)
 		}
 		r.mu.Unlock()
 		if err != nil && procCtx.Err() == nil {
@@ -323,6 +338,8 @@ func (r *LocalRuntime) Ensure(ctx context.Context, modelID, backend string, ctxS
 	r.modelID = modelID
 	r.ctxSize = ctxSize
 	r.procDone = procDone
+	r.pubRunning.Store(true)
+	r.pubModel.Store(&modelID)
 	r.Touch()
 	go r.idleReaper(procDone)
 
@@ -341,6 +358,8 @@ func (r *LocalRuntime) Stop() {
 }
 
 func (r *LocalRuntime) stopLocked() {
+	r.pubRunning.Store(false)
+	r.pubModel.Store(nil)
 	if r.cancel != nil {
 		r.cancel()
 		r.cancel = nil
@@ -367,11 +386,18 @@ func (r *LocalRuntime) running() bool {
 }
 
 // Running reports whether a llama-server subprocess is currently serving, and
-// which catalog model it has loaded.
+// which catalog model it has loaded. Reads only the published atomics — never
+// r.mu — so status polls stay responsive while Ensure holds the lock through
+// a multi-minute model load.
 func (r *LocalRuntime) Running() (bool, string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.running(), r.modelID
+	if !r.pubRunning.Load() {
+		return false, ""
+	}
+	model := ""
+	if m := r.pubModel.Load(); m != nil {
+		model = *m
+	}
+	return true, model
 }
 
 func (r *LocalRuntime) idleReaper(procDone chan struct{}) {

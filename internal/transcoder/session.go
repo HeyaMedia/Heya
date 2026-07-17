@@ -885,7 +885,6 @@ func (m *SessionManager) createSession(ctx context.Context, key string, fileID i
 	}
 
 	outputDir := m.cache.SegmentDir(key)
-	os.MkdirAll(outputDir, 0755)
 
 	segments := make([]*segReady, totalSegs)
 	for i := range segments {
@@ -924,14 +923,27 @@ func (m *SessionManager) createSession(ctx context.Context, key string, fileID i
 		return s
 	}
 	prefix := fmt.Sprintf("%d:", fileID)
+	var evicted []*TranscodeSession
 	for k, s := range m.sessions {
 		if strings.HasPrefix(k, prefix) {
-			s.Kill()
+			evicted = append(evicted, s)
 			delete(m.sessions, k)
 		}
 	}
+	// MkdirAll inside the lock on purpose: SegmentDir is key-derived, and
+	// cleanupLoop's map-check + RemoveAll for dead sessions runs under this
+	// same mutex — creating the directory and inserting the session as one
+	// critical section is what makes that check race-free.
+	os.MkdirAll(outputDir, 0755)
 	m.sessions[key] = session
 	m.mu.Unlock()
+
+	// Kill evicted same-file sessions outside the lock: killHead blocks
+	// until their ffmpeg is reaped, and their output dirs are distinct from
+	// ours, so nothing here needs the mutex.
+	for _, s := range evicted {
+		s.Kill()
+	}
 
 	log.Info().
 		Str("key", key).
@@ -968,17 +980,41 @@ func (m *SessionManager) cleanupLoop() {
 		case <-m.cleanupStop:
 			return
 		}
+		type deadSession struct {
+			key string
+			s   *TranscodeSession
+		}
+		var idle []deadSession
 		m.mu.Lock()
 		for key, s := range m.sessions {
 			s.mu.Lock()
-			idle := time.Since(s.LastAccess)
+			idleFor := time.Since(s.LastAccess)
 			s.mu.Unlock()
 
-			if idle > 2*time.Minute {
-				log.Info().Str("key", key).Dur("idle", idle).Msg("cleaning up idle session")
-				s.Kill()
-				os.RemoveAll(s.OutputDir)
+			if idleFor > 2*time.Minute {
+				log.Info().Str("key", key).Dur("idle", idleFor).Msg("cleaning up idle session")
 				delete(m.sessions, key)
+				idle = append(idle, deadSession{key: key, s: s})
+			}
+		}
+		m.mu.Unlock()
+
+		// Kill outside m.mu: killHead blocks until the ffmpeg process is
+		// reaped — indefinitely if the source filesystem has wedged it in
+		// D-state — and holding the manager lock through that freezes
+		// GetOrCreate/GetExisting, i.e. every new playback request.
+		for _, d := range idle {
+			d.s.Kill()
+		}
+		// Directory removal goes back under m.mu: SegmentDir is key-derived,
+		// so the absent-from-map check and the RemoveAll must be atomic with
+		// createSession's MkdirAll+insert critical section, or we could
+		// delete the directory of a just-recreated same-key session. Local
+		// disk I/O, same cost the old code paid under the lock.
+		m.mu.Lock()
+		for _, d := range idle {
+			if _, exists := m.sessions[d.key]; !exists {
+				os.RemoveAll(d.s.OutputDir)
 			}
 		}
 		m.mu.Unlock()
