@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +17,7 @@ import (
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/worker"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/errgroup"
 )
 
 // MediaItemView wraps a media item with its availability status.
@@ -292,253 +294,322 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 		}
 	}
 
-	// Narrow query on purpose: the response renders only id+size, and the
-	// full rows detoast media_info/parse_result jsonb for every file (~30MB
-	// and ~750ms for a large music artist).
-	hasFiles := false
-	var mediaFiles []map[string]any
-	if files, filesErr := q.ListLibraryFileSizesByMediaItem(ctx, pgtype.Int8{Int64: item.ID, Valid: true}); filesErr == nil && len(files) > 0 {
-		hasFiles = true
-		for _, f := range files {
-			mediaFiles = append(mediaFiles, map[string]any{
-				"id":        f.ID,
-				"public_id": f.PublicID.String(),
-				"size":      f.Size,
-			})
-		}
+	result := map[string]any{"media_item": item, "available": false, "files": nil}
+	var mu sync.Mutex
+	set := func(key string, value any) {
+		mu.Lock()
+		defer mu.Unlock()
+		result[key] = value
 	}
 
-	result := map[string]any{"media_item": item, "available": hasFiles, "files": mediaFiles}
-	if binding, err := q.GetMediaItemMetadataBinding(ctx, item.ID); err == nil {
-		result["metadata_binding"] = binding
-	}
+	// Every section below is an independent best-effort read keyed on
+	// item.ID (each already tolerates its own query failing). Fan them out
+	// so detail latency is the depth of the slowest query rather than the
+	// sum of ~15 sequential round trips; the limit keeps a single detail
+	// request from monopolizing the pgx pool.
+	var g errgroup.Group
+	g.SetLimit(8)
+
+	g.Go(func() error {
+		// Narrow query on purpose: the response renders only id+size, and the
+		// full rows detoast media_info/parse_result jsonb for every file (~30MB
+		// and ~750ms for a large music artist).
+		if files, filesErr := q.ListLibraryFileSizesByMediaItem(ctx, pgtype.Int8{Int64: item.ID, Valid: true}); filesErr == nil && len(files) > 0 {
+			var mediaFiles []map[string]any
+			for _, f := range files {
+				mediaFiles = append(mediaFiles, map[string]any{
+					"id":        f.ID,
+					"public_id": f.PublicID.String(),
+					"size":      f.Size,
+				})
+			}
+			set("available", true)
+			set("files", mediaFiles)
+		}
+		return nil
+	})
+
+	g.Go(func() error {
+		if binding, err := q.GetMediaItemMetadataBinding(ctx, item.ID); err == nil {
+			set("metadata_binding", binding)
+		}
+		return nil
+	})
 
 	// TV episode files are consumed twice (available-seasons derivation in
-	// the switch below + the episode_files map at the end) — fetch once, the
-	// rows carry ~2MB of parse_result jsonb on a long-running series.
+	// the switch below + the episode_files map after g.Wait) — fetch once,
+	// the rows carry ~2MB of parse_result jsonb on a long-running series.
+	// Written by the type-specific goroutine, read only after g.Wait().
 	var tvEpisodeFiles []sqlc.ListEpisodeFilesRow
 
-	// Type-specific data
-	switch item.MediaType {
-	case sqlc.MediaTypeMovie:
-		movie, movieErr := q.GetMovieByMediaItemID(ctx, item.ID)
-		if movieErr == nil {
-			result["movie"] = movie
-			if movie.CollectionID.Valid {
-				col, colErr := q.GetCollectionByID(ctx, movie.CollectionID.Int64)
-				if colErr == nil {
-					result["collection"] = col
+	// Type-specific data: internally a dependent chain, so it stays
+	// sequential inside one goroutine, concurrent with the flat sections.
+	g.Go(func() error {
+		switch item.MediaType {
+		case sqlc.MediaTypeMovie:
+			movie, movieErr := q.GetMovieByMediaItemID(ctx, item.ID)
+			if movieErr == nil {
+				set("movie", movie)
+				if movie.CollectionID.Valid {
+					col, colErr := q.GetCollectionByID(ctx, movie.CollectionID.Int64)
+					if colErr == nil {
+						set("collection", col)
+					}
 				}
 			}
-		}
-	case sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
-		series, seriesErr := q.GetTVSeriesByMediaItemID(ctx, item.ID)
-		if seriesErr == nil {
-			result["tv_series"] = series
-			if networks, err := q.ListNetworksForSeries(ctx, series.ID); err == nil {
-				result["networks"] = networks
-			}
-			seasons, _ := q.ListTVSeasonsBySeries(ctx, series.ID)
-
-			availableSeasons := map[int]bool{}
-			if epFiles, err := q.ListEpisodeFiles(ctx, pgtype.Int8{Int64: item.ID, Valid: true}); err == nil {
-				tvEpisodeFiles = epFiles
-				availableSeasons = BuildAvailableSeasonSet(epFiles)
-			}
-
-			type episodeView struct {
-				sqlc.TvEpisode
-				PreferredTitle    string `json:"preferred_title,omitempty"`
-				PreferredOverview string `json:"preferred_overview,omitempty"`
-			}
-			type seasonWithEpisodes struct {
-				sqlc.TvSeason
-				Episodes []episodeView `json:"episodes"`
-			}
-
-			lib, _ := q.GetLibraryByID(ctx, item.LibraryID)
-			libSettings := metadata.ParseSettings(lib.Settings)
-			prefLang := libSettings.PreferredLanguage
-
-			// Three whole-series queries instead of one per season plus 2-4
-			// per episode — the old shape was ~4000 queries on a
-			// 1000-episode series. Preferred-language resolution happens
-			// in-memory off the maps.
-			allEps, _ := q.ListTVEpisodesBySeries(ctx, series.ID)
-			epsBySeason := map[int64][]sqlc.TvEpisode{}
-			for _, ep := range allEps {
-				epsBySeason[ep.SeasonID] = append(epsBySeason[ep.SeasonID], ep)
-			}
-
-			titleByEp := map[int64]map[string]string{}
-			overviewByEp := map[int64]map[string]string{}
-			if prefLang != "" {
-				langs := []string{prefLang}
-				if prefLang != "en" {
-					langs = append(langs, "en")
+		case sqlc.MediaTypeTv, sqlc.MediaTypeAnime:
+			series, seriesErr := q.GetTVSeriesByMediaItemID(ctx, item.ID)
+			if seriesErr == nil {
+				set("tv_series", series)
+				if networks, err := q.ListNetworksForSeries(ctx, series.ID); err == nil {
+					set("networks", networks)
 				}
-				if titles, err := q.ListEpisodeTitlesForSeries(ctx, sqlc.ListEpisodeTitlesForSeriesParams{SeriesID: series.ID, Languages: langs}); err == nil {
-					for _, t := range titles {
-						if titleByEp[t.EpisodeID] == nil {
-							titleByEp[t.EpisodeID] = map[string]string{}
+				seasons, _ := q.ListTVSeasonsBySeries(ctx, series.ID)
+
+				availableSeasons := map[int]bool{}
+				if epFiles, err := q.ListEpisodeFiles(ctx, pgtype.Int8{Int64: item.ID, Valid: true}); err == nil {
+					tvEpisodeFiles = epFiles
+					availableSeasons = BuildAvailableSeasonSet(epFiles)
+				}
+
+				type episodeView struct {
+					sqlc.TvEpisode
+					PreferredTitle    string `json:"preferred_title,omitempty"`
+					PreferredOverview string `json:"preferred_overview,omitempty"`
+				}
+				type seasonWithEpisodes struct {
+					sqlc.TvSeason
+					Episodes []episodeView `json:"episodes"`
+				}
+
+				lib, _ := q.GetLibraryByID(ctx, item.LibraryID)
+				libSettings := metadata.ParseSettings(lib.Settings)
+				prefLang := libSettings.PreferredLanguage
+
+				// Three whole-series queries instead of one per season plus 2-4
+				// per episode — the old shape was ~4000 queries on a
+				// 1000-episode series. Preferred-language resolution happens
+				// in-memory off the maps.
+				allEps, _ := q.ListTVEpisodesBySeries(ctx, series.ID)
+				epsBySeason := map[int64][]sqlc.TvEpisode{}
+				for _, ep := range allEps {
+					epsBySeason[ep.SeasonID] = append(epsBySeason[ep.SeasonID], ep)
+				}
+
+				titleByEp := map[int64]map[string]string{}
+				overviewByEp := map[int64]map[string]string{}
+				if prefLang != "" {
+					langs := []string{prefLang}
+					if prefLang != "en" {
+						langs = append(langs, "en")
+					}
+					if titles, err := q.ListEpisodeTitlesForSeries(ctx, sqlc.ListEpisodeTitlesForSeriesParams{SeriesID: series.ID, Languages: langs}); err == nil {
+						for _, t := range titles {
+							if titleByEp[t.EpisodeID] == nil {
+								titleByEp[t.EpisodeID] = map[string]string{}
+							}
+							titleByEp[t.EpisodeID][t.Language] = t.Title
 						}
-						titleByEp[t.EpisodeID][t.Language] = t.Title
 					}
-				}
-				if overviews, err := q.ListEpisodeOverviewsForSeries(ctx, sqlc.ListEpisodeOverviewsForSeriesParams{SeriesID: series.ID, Languages: langs}); err == nil {
-					for _, o := range overviews {
-						if overviewByEp[o.EpisodeID] == nil {
-							overviewByEp[o.EpisodeID] = map[string]string{}
+					if overviews, err := q.ListEpisodeOverviewsForSeries(ctx, sqlc.ListEpisodeOverviewsForSeriesParams{SeriesID: series.ID, Languages: langs}); err == nil {
+						for _, o := range overviews {
+							if overviewByEp[o.EpisodeID] == nil {
+								overviewByEp[o.EpisodeID] = map[string]string{}
+							}
+							overviewByEp[o.EpisodeID][o.Language] = o.Overview
 						}
-						overviewByEp[o.EpisodeID][o.Language] = o.Overview
 					}
 				}
-			}
-			pick := func(m map[int64]map[string]string, epID int64) string {
-				byLang := m[epID]
-				if v := byLang[prefLang]; v != "" {
-					return v
+				pick := func(m map[int64]map[string]string, epID int64) string {
+					byLang := m[epID]
+					if v := byLang[prefLang]; v != "" {
+						return v
+					}
+					return byLang["en"]
 				}
-				return byLang["en"]
-			}
 
-			var enriched []seasonWithEpisodes
-			for _, s := range seasons {
-				if len(availableSeasons) > 0 && !availableSeasons[int(s.SeasonNumber)] {
-					continue
-				}
-				var views []episodeView
-				for _, ep := range epsBySeason[s.ID] {
-					ev := episodeView{TvEpisode: ep}
-					if prefLang != "" {
-						ev.PreferredTitle = pick(titleByEp, ep.ID)
-						ev.PreferredOverview = pick(overviewByEp, ep.ID)
+				var enriched []seasonWithEpisodes
+				for _, s := range seasons {
+					if len(availableSeasons) > 0 && !availableSeasons[int(s.SeasonNumber)] {
+						continue
 					}
-					views = append(views, ev)
+					var views []episodeView
+					for _, ep := range epsBySeason[s.ID] {
+						ev := episodeView{TvEpisode: ep}
+						if prefLang != "" {
+							ev.PreferredTitle = pick(titleByEp, ep.ID)
+							ev.PreferredOverview = pick(overviewByEp, ep.ID)
+						}
+						views = append(views, ev)
+					}
+					enriched = append(enriched, seasonWithEpisodes{TvSeason: s, Episodes: views})
 				}
-				enriched = append(enriched, seasonWithEpisodes{TvSeason: s, Episodes: views})
+				set("seasons", enriched)
 			}
-			result["seasons"] = enriched
-		}
-	case sqlc.MediaTypeMusic:
-		artist, artistErr := q.GetArtistByMediaItemID(ctx, item.ID)
-		if artistErr == nil {
-			av := BuildArtistView(artist)
-			// Link band members / groups to their own library pages when
-			// the person is also a library artist.
-			a.matchArtistMembersLocal(ctx, &av)
-			result["artist"] = av
-			result["albums"] = buildAlbumViews(ctx, q, artist.ID)
-		}
-	case sqlc.MediaTypeBook:
-		book, bookErr := q.GetBookByMediaItemID(ctx, item.ID)
-		if bookErr == nil {
-			result["book"] = book
-			if book.AuthorID.Valid {
-				author, _ := q.GetAuthorByID(ctx, book.AuthorID.Int64)
-				result["author"] = author
+		case sqlc.MediaTypeMusic:
+			artist, artistErr := q.GetArtistByMediaItemID(ctx, item.ID)
+			if artistErr == nil {
+				av := BuildArtistView(artist)
+				// Link band members / groups to their own library pages when
+				// the person is also a library artist.
+				a.matchArtistMembersLocal(ctx, &av)
+				set("artist", av)
+				set("albums", buildAlbumViews(ctx, q, artist.ID))
+			}
+		case sqlc.MediaTypeBook:
+			book, bookErr := q.GetBookByMediaItemID(ctx, item.ID)
+			if bookErr == nil {
+				set("book", book)
+				if book.AuthorID.Valid {
+					author, _ := q.GetAuthorByID(ctx, book.AuthorID.Int64)
+					set("author", author)
+				}
 			}
 		}
-	}
+		return nil
+	})
 
 	// Cast & crew
-	if cast, castErr := q.ListMediaCastSlim(ctx, item.ID); castErr == nil && len(cast) > 0 {
-		result["cast"] = cast
-	}
-	if crew, crewErr := q.ListMediaCrewSlim(ctx, item.ID); crewErr == nil && len(crew) > 0 {
-		result["crew"] = crew
-	}
+	g.Go(func() error {
+		if cast, castErr := q.ListMediaCastSlim(ctx, item.ID); castErr == nil && len(cast) > 0 {
+			set("cast", cast)
+		}
+		return nil
+	})
+	g.Go(func() error {
+		if crew, crewErr := q.ListMediaCrewSlim(ctx, item.ID); crewErr == nil && len(crew) > 0 {
+			set("crew", crew)
+		}
+		return nil
+	})
 
 	// Keywords
-	if keywords, kwErr := q.ListMediaKeywords(ctx, item.ID); kwErr == nil && len(keywords) > 0 {
-		result["keywords"] = keywords
-	}
+	g.Go(func() error {
+		if keywords, kwErr := q.ListMediaKeywords(ctx, item.ID); kwErr == nil && len(keywords) > 0 {
+			set("keywords", keywords)
+		}
+		return nil
+	})
 
 	// Videos
-	if videos, vidErr := q.ListMediaVideos(ctx, item.ID); vidErr == nil && len(videos) > 0 {
-		result["videos"] = videos
-	}
+	g.Go(func() error {
+		if videos, vidErr := q.ListMediaVideos(ctx, item.ID); vidErr == nil && len(videos) > 0 {
+			set("videos", videos)
+		}
+		return nil
+	})
 
 	// Certifications
-	if certs, certErr := q.ListMediaCertifications(ctx, item.ID); certErr == nil && len(certs) > 0 {
-		result["certifications"] = certs
-	}
+	g.Go(func() error {
+		if certs, certErr := q.ListMediaCertifications(ctx, item.ID); certErr == nil && len(certs) > 0 {
+			set("certifications", certs)
+		}
+		return nil
+	})
 
 	// Recommendations
-	if recs, recErr := q.ListMediaRecommendationsWithLibrary(ctx, item.ID); recErr == nil && len(recs) > 0 {
-		result["recommendations"] = recs
-	}
+	g.Go(func() error {
+		if recs, recErr := q.ListMediaRecommendationsWithLibrary(ctx, item.ID); recErr == nil && len(recs) > 0 {
+			set("recommendations", recs)
+		}
+		return nil
+	})
 
 	// Production companies
-	if companies, compErr := q.ListMediaProductionCompanies(ctx, item.ID); compErr == nil && len(companies) > 0 {
-		result["production_companies"] = companies
-	}
+	g.Go(func() error {
+		if companies, compErr := q.ListMediaProductionCompanies(ctx, item.ID); compErr == nil && len(companies) > 0 {
+			set("production_companies", companies)
+		}
+		return nil
+	})
 
 	// Assets
-	if assets, assetErr := q.ListMediaAssets(ctx, item.ID); assetErr == nil && len(assets) > 0 {
-		result["assets"] = assets
-	}
+	g.Go(func() error {
+		if assets, assetErr := q.ListMediaAssets(ctx, item.ID); assetErr == nil && len(assets) > 0 {
+			set("assets", assets)
+		}
+		return nil
+	})
 
 	// Extras are local files linked by scanner through library_file_links.
-	if extras, extErr := q.ListMediaExtraLinks(ctx, item.ID); extErr == nil && len(extras) > 0 {
-		result["extras"] = extras
-	}
+	g.Go(func() error {
+		if extras, extErr := q.ListMediaExtraLinks(ctx, item.ID); extErr == nil && len(extras) > 0 {
+			set("extras", extras)
+		}
+		return nil
+	})
 
 	// Titles (multi-language)
-	if titles, err := q.ListMediaTitles(ctx, item.ID); err == nil && len(titles) > 0 {
-		result["titles"] = titles
-	}
+	g.Go(func() error {
+		if titles, err := q.ListMediaTitles(ctx, item.ID); err == nil && len(titles) > 0 {
+			set("titles", titles)
+		}
+		return nil
+	})
 
 	// Overviews (multi-language)
-	if overviews, err := q.ListMediaOverviews(ctx, item.ID); err == nil && len(overviews) > 0 {
-		result["overviews"] = overviews
-	}
+	g.Go(func() error {
+		if overviews, err := q.ListMediaOverviews(ctx, item.ID); err == nil && len(overviews) > 0 {
+			set("overviews", overviews)
+		}
+		return nil
+	})
 
 	// External ratings
-	if ratings, ratErr := q.ListExternalRatings(ctx, item.ID); ratErr == nil && len(ratings) > 0 {
-		result["external_ratings"] = ratings
-	}
-
-	// Episode file map for TV-like media — reuses the fetch from the branch above.
-	if mediatype.IsTVLike(item.MediaType) && len(tvEpisodeFiles) > 0 {
-		episodeFileMap := BuildEpisodeFileMap(tvEpisodeFiles)
-		if len(episodeFileMap) > 0 {
-			result["episode_files"] = episodeFileMap
+	g.Go(func() error {
+		if ratings, ratErr := q.ListExternalRatings(ctx, item.ID); ratErr == nil && len(ratings) > 0 {
+			set("external_ratings", ratings)
 		}
-	}
+		return nil
+	})
 
-	lib, libErr := q.GetLibraryByID(ctx, item.LibraryID)
-	if libErr == nil {
+	g.Go(func() error {
+		lib, libErr := q.GetLibraryByID(ctx, item.LibraryID)
+		if libErr != nil {
+			return nil
+		}
 		settings := metadata.ParseSettings(lib.Settings)
 		lang := settings.PreferredLanguage
 		country := settings.PreferredCountry
 
 		if lang != "" {
 			if t, err := q.GetMediaTitleByLanguage(ctx, sqlc.GetMediaTitleByLanguageParams{MediaItemID: item.ID, Language: lang}); err == nil {
-				result["preferred_title"] = t.Title
+				set("preferred_title", t.Title)
 			} else if lang != "en" {
 				if t, err := q.GetMediaTitleByLanguage(ctx, sqlc.GetMediaTitleByLanguageParams{MediaItemID: item.ID, Language: "en"}); err == nil {
-					result["preferred_title"] = t.Title
+					set("preferred_title", t.Title)
 				}
 			}
 
 			if o, err := q.GetMediaOverview(ctx, sqlc.GetMediaOverviewParams{MediaItemID: item.ID, Language: lang}); err == nil {
-				result["preferred_overview"] = o.Overview
+				set("preferred_overview", o.Overview)
 			} else if lang != "en" {
 				if o, err := q.GetMediaOverview(ctx, sqlc.GetMediaOverviewParams{MediaItemID: item.ID, Language: "en"}); err == nil {
-					result["preferred_overview"] = o.Overview
+					set("preferred_overview", o.Overview)
 				}
 			}
 		}
 
 		if country != "" {
 			if c, err := q.GetMediaCertification(ctx, sqlc.GetMediaCertificationParams{MediaItemID: item.ID, Country: country}); err == nil {
-				result["preferred_certification"] = c.Certification
+				set("preferred_certification", c.Certification)
 			} else if country != "US" {
 				if c, err := q.GetMediaCertification(ctx, sqlc.GetMediaCertificationParams{MediaItemID: item.ID, Country: "US"}); err == nil {
-					result["preferred_certification"] = c.Certification
+					set("preferred_certification", c.Certification)
 				}
 			}
+		}
+		return nil
+	})
+
+	_ = g.Wait()
+
+	// Episode file map for TV-like media — reuses the fetch from the
+	// type-specific goroutine (its write happens-before g.Wait returns).
+	if mediatype.IsTVLike(item.MediaType) && len(tvEpisodeFiles) > 0 {
+		episodeFileMap := BuildEpisodeFileMap(tvEpisodeFiles)
+		if len(episodeFileMap) > 0 {
+			result["episode_files"] = episodeFileMap
 		}
 	}
 

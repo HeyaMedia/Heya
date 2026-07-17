@@ -13,6 +13,7 @@ import (
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/worker"
+	"golang.org/x/sync/errgroup"
 )
 
 // MusicListPage is the standard envelope for paginated music listings.
@@ -35,17 +36,26 @@ func clampMusicPage(limit, offset int32) (int32, int32) {
 
 // musicPage clamps paging and assembles the shared envelope from a list+count
 // query pair. The count is best-effort (a failed count reports total=0 rather
-// than failing the listing). errCtx labels the list error.
+// than failing the listing). errCtx labels the list error. List and count are
+// independent queries, so they run concurrently — this helper backs eight
+// music listing endpoints, and sequential list-then-count doubled each one's
+// DB latency for no reason.
 func musicPage[T any](limit, offset int32, errCtx string,
 	list func(limit, offset int32) ([]T, error),
 	count func() (int64, error),
 ) (*MusicListPage[T], error) {
 	limit, offset = clampMusicPage(limit, offset)
+	var total int64
+	countDone := make(chan struct{})
+	go func() {
+		defer close(countDone)
+		total, _ = count()
+	}()
 	items, err := list(limit, offset)
+	<-countDone
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", errCtx, err)
 	}
-	total, _ := count()
 	return &MusicListPage[T]{Items: items, Total: total, Limit: limit, Offset: offset}, nil
 }
 
@@ -200,22 +210,41 @@ type MusicCounts struct {
 }
 
 // GetMusicCounts returns the artist/album/track totals across every music
-// library.
+// library. The three counts are independent and run concurrently — this
+// endpoint exists to keep the music landing page fast, so it shouldn't stack
+// three sequential round trips itself.
 func (a *App) GetMusicCounts(ctx context.Context) (*MusicCounts, error) {
 	q := sqlc.New(a.db)
-	artists, err := q.CountMusicArtists(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("counting artists: %w", err)
+	var counts MusicCounts
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		n, err := q.CountMusicArtists(gctx)
+		if err != nil {
+			return fmt.Errorf("counting artists: %w", err)
+		}
+		counts.Artists = n
+		return nil
+	})
+	g.Go(func() error {
+		n, err := q.CountMusicAlbums(gctx)
+		if err != nil {
+			return fmt.Errorf("counting albums: %w", err)
+		}
+		counts.Albums = n
+		return nil
+	})
+	g.Go(func() error {
+		n, err := q.CountMusicTracks(gctx)
+		if err != nil {
+			return fmt.Errorf("counting tracks: %w", err)
+		}
+		counts.Tracks = n
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
-	albums, err := q.CountMusicAlbums(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("counting albums: %w", err)
-	}
-	tracks, err := q.CountMusicTracks(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("counting tracks: %w", err)
-	}
-	return &MusicCounts{Artists: artists, Albums: albums, Tracks: tracks}, nil
+	return &counts, nil
 }
 
 // ListMusicAlbums returns albums across every music library, paginated.
