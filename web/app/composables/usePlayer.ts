@@ -40,27 +40,28 @@ export interface Track {
 // actually hits — derived from the track row in the caller (Phase A list
 // endpoints set this to `/api/music/tracks/{id}/stream`).
 
-// Volume + mute survive reloads via localStorage. useState seeds a default so
-// the slider has a value before the client restore runs; setVolume/toggleMute
-// are the only mutators, so persistence hangs off them (no watcher needed).
-// SPA-only app (ssr: false), so the synchronous client restore below can't
-// cause a hydration mismatch.
+// Volume + mute survive reloads via localStorage. The store starts with a safe
+// default, then restores synchronously before any player control renders.
 const VOLUME_STORAGE_KEY = 'heya_player_volume_v1'
+const SIMILAR_AUTOPLAY_STORAGE_KEY = 'heya_similar_autoplay_v1'
+const SIMILAR_AUTOPLAY_REFILL_AT = 5
+const SIMILAR_AUTOPLAY_BATCH_SIZE = 20
+const SIMILAR_AUTOPLAY_MAX_SEEDS = 12
+const SIMILAR_AUTOPLAY_MAX_EXCLUDES = 2000
 let volumeRestored = false
 
 function persistVolumePrefs(volume: number, muted: boolean) {
-  if (import.meta.server) return
   try {
     localStorage.setItem(VOLUME_STORAGE_KEY, JSON.stringify({ volume, muted }))
   } catch { /* private mode / quota — non-fatal */ }
 }
 
-// --- Client-only transition coordination (singletons) ----------------------
+// --- Transition coordination (singletons) ---------------------------------
 // These coordinate between prepareTransition() (which preloads the pending
 // deck + arms the scheduler) and handleTransition() (fired by the scheduler
 // ~100ms before a gapless cut, or `duration` seconds before a crossfade).
 // They live at module scope so every usePlayerBindings() closure and the once-wired
-// engine callbacks share the same values. Client-only; SSR never touches them.
+// engine callbacks share the same values.
 let transitioning = false
 let prefetchedTrackId: number | null = null
 let pendingNext: Track | null = null
@@ -94,7 +95,6 @@ let prefetchSyncTimer: ReturnType<typeof setTimeout> | null = null
 // actively-playing track even though it's never part of `upcoming` (the
 // upcoming list excludes the current track by definition).
 function schedulePrefetchSync(upcoming: Track[], current: Track | null) {
-  if (!import.meta.client) return
   if (prefetchSyncTimer) clearTimeout(prefetchSyncTimer)
   prefetchSyncTimer = setTimeout(() => {
     prefetchSyncTimer = null
@@ -106,9 +106,7 @@ function schedulePrefetchSync(upcoming: Track[], current: Track | null) {
   }, PREFETCH_SYNC_DEBOUNCE_MS)
 }
 
-// Minimal view of the real engine — useAudioEngine() returns a union with an
-// SSR stub that lacks the DSP-block accessors. Everything here is only reached
-// behind import.meta.client + engineWired, where the real instance is live.
+// Minimal scheduler view of the audio engine used by transition orchestration.
 type EngineWithScheduler = ReturnType<typeof useAudioEngine> & {
   scheduler?: {
     setMode: (m: 'gapless' | 'crossfade') => void
@@ -140,6 +138,15 @@ interface PlaybackData {
   sample_rate_hz: number | null
   bit_depth: number | null
   channels: number | null
+}
+
+type SimilarAutoplaySeed =
+  | { kind: 'track', track_id: number }
+  | { kind: 'artist', artist_id: number }
+  | { kind: 'album', album_id: number }
+
+interface SimilarAutoplayResponse {
+  tracks?: Array<{ track_id: number }>
 }
 const playbackDataCache = new Map<number, PlaybackData | null>()
 const playbackAnalysisRetries = new Map<number, number>()
@@ -203,6 +210,8 @@ export const usePlayerStore = defineStore('player', () => {
   const sleepAtTrackEnd = ref(false)
   const sleepDeadline = ref<number | null>(null)
   const sleepNowTick = ref(0)
+  const similarAutoplayEnabled = ref(true)
+  const similarAutoplayLoading = ref(false)
 
   // --- Server-owned queue facade (docs/queue-plan.md Phase B) --------------
   // The queue lives server-side (useQueue windowed mirror); `queue` here is
@@ -218,6 +227,18 @@ export const usePlayerStore = defineStore('player', () => {
   const originalOrder = ref<Track[]>([]) // local-mode shuffle restore
   const localShuffled = ref(false)
   const localRepeat = ref<'off' | 'all' | 'one'>('off')
+
+  // Similar autoplay is deliberately queue-session state, not a second queue.
+  // Context tracks describe what the listener intentionally started/added;
+  // generated tracks only enter `seen`, so each refill stays anchored instead
+  // of recursively drifting toward its own previous recommendations.
+  let similarAutoplayContext: SimilarAutoplaySeed[] = []
+  let similarAutoplayIntentTrackIDs: number[] = []
+  const similarAutoplaySeenTrackIDs = new Set<number>()
+  let similarAutoplayGeneration = 0
+  let similarAutoplayRetryAfter = 0
+  let similarAutoplayRequests = 0
+  let similarAutoplayRequest: { generation: number, promise: Promise<boolean> } | null = null
 
   function itemToTrack(i: QueueItem): Track {
     return {
@@ -277,12 +298,13 @@ export const usePlayerStore = defineStore('player', () => {
   const nextUp = computed(() => upcomingTracks.value[0] ?? null)
   const progress = computed(() => duration.value > 0 ? Math.max(0, Math.min(1, position.value / duration.value)) : 0)
   const hasPrevious = computed(() => currentIndex.value > 0 || position.value > 3)
-  const hasNext = computed(() => upcomingCount.value > 0 || (repeatMode.value !== 'off' && queue.value.length > 0))
+  const similarAutoplayAvailable = computed(() => !localMode.value && !!currentTrack.value && currentTrack.value.id > 0)
+  const hasNext = computed(() => upcomingCount.value > 0
+    || (repeatMode.value !== 'off' && queue.value.length > 0)
+    || (similarAutoplayEnabled.value && similarAutoplayAvailable.value))
 
-  // Restore persisted volume/mute once on the client. useState is a singleton,
-  // so a single assignment propagates to every usePlayerBindings() consumer; the flag
-  // keeps repeat calls (one per mounting component) from re-reading storage.
-  if (import.meta.client && !volumeRestored) {
+  // Restore persisted volume/mute once for the singleton player store.
+  if (!volumeRestored) {
     volumeRestored = true
     try {
       const raw = localStorage.getItem(VOLUME_STORAGE_KEY)
@@ -295,6 +317,11 @@ export const usePlayerStore = defineStore('player', () => {
       }
     } catch { /* corrupt/absent — keep defaults */ }
   }
+  try {
+    const stored = localStorage.getItem(SIMILAR_AUTOPLAY_STORAGE_KEY)
+    if (stored === '0') similarAutoplayEnabled.value = false
+    else if (stored === '1') similarAutoplayEnabled.value = true
+  } catch { /* private mode / quota — keep the default-on preference */ }
   const settings = useAudioSettingsBindings()
   let nativeAudioProbe: Promise<NativeAudioPlaybackBackend | null> | null = null
   let nativePreloadGeneration = 0
@@ -306,21 +333,19 @@ export const usePlayerStore = defineStore('player', () => {
   // Music sessions use the same Activity-page controls as video sessions.
   // The session id check ensures only this player reacts when a user has more
   // than one tab or device online.
-  if (import.meta.client) {
-    const { on, connect } = useEventBus()
-    connect()
-    const off = on('session.command', (event) => {
-      const payload = event.payload as { session_id?: string, action?: string, message?: string, by?: string }
-      if (!payload || payload.session_id !== nowPlaying.sessionId) return
-      if (payload.action === 'stop') {
-        stop()
-        useToast().toast.info(payload.by ? `Playback stopped by ${payload.by}` : 'Playback stopped remotely')
-      } else if (payload.action === 'message' && payload.message) {
-        useToast().toast.info(payload.by ? `${payload.by}: ${payload.message}` : payload.message)
-      }
-    })
-    onScopeDispose(off)
-  }
+  const { on, connect } = useEventBus()
+  connect()
+  const offSessionCommand = on('session.command', (event) => {
+    const payload = event.payload as { session_id?: string, action?: string, message?: string, by?: string }
+    if (!payload || payload.session_id !== nowPlaying.sessionId) return
+    if (payload.action === 'stop') {
+      stop()
+      useToast().toast.info(payload.by ? `Playback stopped by ${payload.by}` : 'Playback stopped remotely')
+    } else if (payload.action === 'message' && payload.message) {
+      useToast().toast.info(payload.by ? `${payload.by}: ${payload.message}` : payload.message)
+    }
+  })
+  onScopeDispose(offSessionCommand)
 
   function acceptLocalPosition(t: number) {
     position.value = t
@@ -336,7 +361,7 @@ export const usePlayerStore = defineStore('player', () => {
   // the autoplay-policy warning never fires on mount.
   function ensureEngine() {
     const e = useAudioEngine()
-    if (import.meta.client && !engineWired.value) {
+    if (!engineWired.value) {
       engineWired.value = true
       e.setOnEnded(() => handleEnded())
       e.setOnError(() => { playing.value = false })
@@ -364,7 +389,7 @@ export const usePlayerStore = defineStore('player', () => {
     // default) while engineWired (a useState) survives — gating the seed on
     // !engineWired would leave the rebuilt engine at full blast on the next
     // play. Re-applying every ensureEngine call is cheap and keeps them in sync.
-    if (import.meta.client) e.setVolume(muted.value ? 0 : volume.value / 100)
+    e.setVolume(muted.value ? 0 : volume.value / 100)
     // Register the settings→engine bridge. Deliberately OUTSIDE the engineWired
     // guard and idempotent per backend owner: a hot reload of useAudioSettings
     // resets its module-level bridge while engineWired (a useState)
@@ -372,13 +397,11 @@ export const usePlayerStore = defineStore('player', () => {
     // bridge after any HMR edit — EQ/crossfeed/replay-gain toggles would then
     // silently no-op. Changing owner rewires it; re-registering the same owner
     // is a no-op so transition preparation cannot recurse through ensureEngine.
-    if (import.meta.client) {
-      settings.registerEngineBridge(e, () => {
-        applyAudioSettingsToEngine(e, settings)
-        applyActiveNorm(e, currentTrack.value)
-        prepareTransition()
-      })
-    }
+    settings.registerEngineBridge(e, () => {
+      applyAudioSettingsToEngine(e, settings)
+      applyActiveNorm(e, currentTrack.value)
+      prepareTransition()
+    })
     return e
   }
 
@@ -580,7 +603,6 @@ export const usePlayerStore = defineStore('player', () => {
 
   async function ensureNativeAudioBackend(): Promise<NativeAudioPlaybackBackend | null> {
     if (nativeAudioBackend.value) return nativeAudioBackend.value
-    if (!import.meta.client) return null
     if (!useClientSurface().isTauriClient.value) {
       alog('player', 'native audio skipped — client surface is browser')
       return null
@@ -801,7 +823,8 @@ export const usePlayerStore = defineStore('player', () => {
       void nowPlaying.end()
       return
     }
-    const next = peekNextTrack()
+    let next = peekNextTrack()
+    if (!next && await ensureSimilarAutoplayQueue(true)) next = peekNextTrack()
     if (!next) {
       playing.value = false
       void nowPlaying.end()
@@ -907,7 +930,7 @@ export const usePlayerStore = defineStore('player', () => {
   // preload the pending deck. Called after every play / advance / queue or
   // settings change, and re-run by ensureAnalysisAndArm once analysis lands.
   function armSync() {
-    if (!import.meta.client || !engineWired.value) return
+    if (!engineWired.value) return
     // Remote output: no local decks to arm — transitions are API calls
     // driven by castTrackEnded(), not the scheduler.
     if (useCastStore().engaged) {
@@ -1000,7 +1023,7 @@ export const usePlayerStore = defineStore('player', () => {
   // timing the moment /files responds. Idempotent — the cache stops re-fetching,
   // so the `changed` guard prevents an arm→fetch→arm loop.
   async function ensureAnalysisAndArm() {
-    if (!import.meta.client || !engineWired.value) return
+    if (!engineWired.value) return
     if (playbackBackend.value === 'native') return
     const cur = currentTrack.value
     const next = peekNextTrack()
@@ -1015,9 +1038,13 @@ export const usePlayerStore = defineStore('player', () => {
 
   // Arm immediately from known data, then fetch any missing analysis and re-arm.
   function prepareTransition() {
+    // A short queue begins its recommendation request while there is still
+    // plenty of playback time left, so gapless/crossfade can preload the
+    // generated next track exactly like an ordinary queued track.
+    void ensureSimilarAutoplayQueue()
     // Remote output: skip entirely — ensureAnalysisAndArm would otherwise
     // spin up an AudioContext (via ensureEngine) that nothing will play on.
-    if (import.meta.client && useCastStore().engaged) return
+    if (useCastStore().engaged) return
     if (playbackBackend.value === 'native') {
       void prepareNativeTransition()
       return
@@ -1032,7 +1059,7 @@ export const usePlayerStore = defineStore('player', () => {
   // outgoing deck early would lop off its tail; it swaps on `ended` instead (see
   // handleEnded). Falls back to a cold play if the pending deck wasn't ready.
   async function handleTransition() {
-    if (!import.meta.client || transitioning) return
+    if (transitioning) return
     if (pendingMode !== 'crossfade') return // gapless handled on `ended`
     const e = ensureEngine()
     const cur = currentTrack.value
@@ -1094,11 +1121,183 @@ export const usePlayerStore = defineStore('player', () => {
   // from_item_id guard makes a racing double-report a no-op, and the
   // response/WS event reconciles the mirror.
   function reportAdvance(reason: 'ended' | 'skip' | 'prev') {
-    if (localMode.value || !import.meta.client) return
+    if (localMode.value) return
     const from = qs.currentItemID
     if (!from) return
     void qs.advance(from, reason).catch(() => { /* WS view reconciles */ })
   }
+
+  // --- Endless similar autoplay -------------------------------------------
+  function similarSeedKey(seed: SimilarAutoplaySeed): string {
+    if (seed.kind === 'track') return `track:${seed.track_id}`
+    if (seed.kind === 'artist') return `artist:${seed.artist_id}`
+    return `album:${seed.album_id}`
+  }
+
+  function uniqueSimilarSeeds(seeds: SimilarAutoplaySeed[]): SimilarAutoplaySeed[] {
+    const seen = new Set<string>()
+    return seeds.filter((seed) => {
+      const key = similarSeedKey(seed)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }
+
+  function spreadSimilarSeeds(seeds: SimilarAutoplaySeed[]): SimilarAutoplaySeed[] {
+    if (seeds.length <= SIMILAR_AUTOPLAY_MAX_SEEDS) return seeds
+    const selected: SimilarAutoplaySeed[] = []
+    for (let i = 0; i < SIMILAR_AUTOPLAY_MAX_SEEDS; i++) {
+      const index = Math.round(i * (seeds.length - 1) / (SIMILAR_AUTOPLAY_MAX_SEEDS - 1))
+      const seed = seeds[index]
+      if (seed) selected.push(seed)
+    }
+    return uniqueSimilarSeeds(selected)
+  }
+
+  function rememberSimilarAutoplayTracks(trackIDs: number[]) {
+    for (const id of trackIDs) {
+      if (id > 0) similarAutoplaySeenTrackIDs.add(id)
+    }
+    while (similarAutoplaySeenTrackIDs.size > SIMILAR_AUTOPLAY_MAX_EXCLUDES) {
+      const oldest = similarAutoplaySeenTrackIDs.values().next().value as number | undefined
+      if (oldest == null) break
+      similarAutoplaySeenTrackIDs.delete(oldest)
+    }
+  }
+
+  function queueSourceSeeds(source: QueueSourceInput): SimilarAutoplaySeed[] {
+    if (source.kind === 'tracks') {
+      return (source.track_ids ?? []).filter((id) => id > 0).map((track_id) => ({ kind: 'track', track_id }))
+    }
+    if (source.kind === 'artist' && (source.id ?? 0) > 0) return [{ kind: 'artist', artist_id: source.id! }]
+    if (source.kind === 'album' && (source.id ?? 0) > 0) return [{ kind: 'album', album_id: source.id! }]
+    // Playlist/library/genre queues use their materialized track window. That
+    // keeps continuation working when the optional text-audio model is absent.
+    return []
+  }
+
+  function resetSimilarAutoplayContext(source?: QueueSourceInput, viewItems: QueueItem[] = []) {
+    similarAutoplayGeneration++
+    similarAutoplayRetryAfter = 0
+    similarAutoplayIntentTrackIDs = source?.kind === 'tracks'
+      ? [...new Set((source.track_ids ?? []).filter((id) => id > 0))]
+      : []
+    similarAutoplaySeenTrackIDs.clear()
+    const visibleIDs = viewItems.map((item) => item.track_id)
+    rememberSimilarAutoplayTracks([...similarAutoplayIntentTrackIDs, ...visibleIDs])
+    similarAutoplayContext = uniqueSimilarSeeds([
+      ...(source ? queueSourceSeeds(source) : []),
+      ...visibleIDs.map((track_id) => ({ kind: 'track' as const, track_id })),
+    ])
+  }
+
+  function recalculateSimilarAutoplayContext() {
+    similarAutoplayGeneration++
+    similarAutoplayRetryAfter = 0
+    const visibleIDs = qs.items.map((item) => item.track_id).filter((id) => id > 0)
+    const nonTrackSeeds = similarAutoplayContext.filter((seed) => seed.kind !== 'track')
+    similarAutoplayContext = uniqueSimilarSeeds([
+      ...visibleIDs.map((track_id) => ({ kind: 'track' as const, track_id })),
+      ...nonTrackSeeds,
+      ...similarAutoplayIntentTrackIDs.map((track_id) => ({ kind: 'track' as const, track_id })),
+    ])
+    rememberSimilarAutoplayTracks(visibleIDs)
+  }
+
+  function addSimilarAutoplayIntent(trackIDs: number[]) {
+    const valid = trackIDs.filter((id) => id > 0)
+    if (!valid.length) return
+    similarAutoplayIntentTrackIDs = [...new Set([...similarAutoplayIntentTrackIDs, ...valid])]
+    recalculateSimilarAutoplayContext()
+    rememberSimilarAutoplayTracks(valid)
+  }
+
+  function removeSimilarAutoplayIntent(trackID: number) {
+    similarAutoplayIntentTrackIDs = similarAutoplayIntentTrackIDs.filter((id) => id !== trackID)
+    similarAutoplayContext = similarAutoplayContext.filter((seed) => seed.kind !== 'track' || seed.track_id !== trackID)
+    similarAutoplayGeneration++
+    similarAutoplayRetryAfter = 0
+    // Keep the removed track in `seen`: removing it from Up Next should never
+    // cause the recommender to immediately put it back.
+    rememberSimilarAutoplayTracks([trackID])
+  }
+
+  function ensureSimilarAutoplayQueue(force = false): Promise<boolean> {
+    if (!similarAutoplayEnabled.value || localMode.value) return Promise.resolve(false)
+    if (!currentTrack.value || currentTrack.value.id <= 0 || repeatMode.value !== 'off') return Promise.resolve(false)
+    const remaining = Math.max(0, qs.total - qs.currentIndex - 1)
+    if (!force && remaining > SIMILAR_AUTOPLAY_REFILL_AT) return Promise.resolve(false)
+    if (!force && Date.now() < similarAutoplayRetryAfter) return Promise.resolve(false)
+
+    if (!similarAutoplayContext.length) recalculateSimilarAutoplayContext()
+    if (!similarAutoplayContext.length) {
+      similarAutoplayContext = [{ kind: 'track', track_id: currentTrack.value.id }]
+      rememberSimilarAutoplayTracks([currentTrack.value.id])
+    }
+    const seeds = spreadSimilarSeeds(similarAutoplayContext)
+    if (!seeds.length) return Promise.resolve(false)
+
+    const generation = similarAutoplayGeneration
+    if (similarAutoplayRequest?.generation === generation) return similarAutoplayRequest.promise
+    const excludeTrackIDs = [...similarAutoplaySeenTrackIDs]
+    const { $heya } = useNuxtApp()
+    similarAutoplayRequests++
+    similarAutoplayLoading.value = true
+
+    const promise = (async () => {
+      try {
+        const res = await $heya('/api/music/radio', {
+          method: 'POST',
+          body: {
+            seed: seeds[0],
+            seeds,
+            limit: SIMILAR_AUTOPLAY_BATCH_SIZE,
+            exclude_track_ids: excludeTrackIDs,
+          } as never,
+        }) as SimilarAutoplayResponse
+        if (generation !== similarAutoplayGeneration || !similarAutoplayEnabled.value) return false
+
+        const freshIDs = [...new Set((res.tracks ?? []).map((track) => track.track_id))]
+          .filter((id) => id > 0 && !similarAutoplaySeenTrackIDs.has(id))
+        if (!freshIDs.length) {
+          similarAutoplayRetryAfter = Date.now() + 60_000
+          return false
+        }
+        const added = await qs.enqueue(freshIDs, 'end')
+        if (added > 0) rememberSimilarAutoplayTracks(freshIDs)
+        if (generation !== similarAutoplayGeneration || !similarAutoplayEnabled.value) return added > 0
+        if (added > 0) prepareTransition()
+        return added > 0
+      } catch (error) {
+        if (generation === similarAutoplayGeneration) similarAutoplayRetryAfter = Date.now() + 60_000
+        console.warn('similar autoplay refill failed:', error)
+        return false
+      } finally {
+        similarAutoplayRequests = Math.max(0, similarAutoplayRequests - 1)
+        similarAutoplayLoading.value = similarAutoplayRequests > 0
+        if (similarAutoplayRequest?.generation === generation) similarAutoplayRequest = null
+      }
+    })()
+    similarAutoplayRequest = { generation, promise }
+    return promise
+  }
+
+  function setSimilarAutoplayEnabled(enabled: boolean) {
+    similarAutoplayEnabled.value = enabled
+    similarAutoplayGeneration++
+    similarAutoplayRetryAfter = 0
+    try { localStorage.setItem(SIMILAR_AUTOPLAY_STORAGE_KEY, enabled ? '1' : '0') } catch { /* non-fatal */ }
+    if (enabled) {
+      recalculateSimilarAutoplayContext()
+      void ensureSimilarAutoplayQueue()
+    }
+  }
+
+  watch(
+    [similarAutoplayEnabled, localMode, () => qs.total, () => qs.currentIndex, repeatMode],
+    () => { void ensureSimilarAutoplayQueue() },
+  )
 
   // --- Context playback: THE way to start playing something ---------------
   // The server materializes the full source (an artist's whole
@@ -1112,9 +1311,9 @@ export const usePlayerStore = defineStore('player', () => {
     startTrack?: Track
     shuffle?: boolean
   }) {
-    if (!import.meta.client) return
     localMode.value = false
     originalOrder.value = []
+    resetSimilarAutoplayContext()
     let view
     try {
       view = await qs.replace(source, opts?.startTrack?.id ?? opts?.startTrackId ?? 0, !!opts?.shuffle, queueOutputID())
@@ -1122,6 +1321,7 @@ export const usePlayerStore = defineStore('player', () => {
       useToast().toast.err('Nothing playable in this selection')
       return
     }
+    resetSimilarAutoplayContext(source, view.items)
     if (opts?.startTrack) {
       await play(opts.startTrack, { skipQueueSync: true })
       return
@@ -1153,6 +1353,7 @@ export const usePlayerStore = defineStore('player', () => {
     localMode.value = true
     localQueue.value = tracks
     originalOrder.value = []
+    resetSimilarAutoplayContext()
     const first = start ?? tracks[0]
     if (first) await play(first, { skipQueueSync: true })
   }
@@ -1162,12 +1363,15 @@ export const usePlayerStore = defineStore('player', () => {
   // a one-track queue. jumpTo()/playContext() pass skipQueueSync — they
   // already positioned the pointer precisely.
   function syncQueuePointer(track: Track) {
-    if (!import.meta.client || localMode.value || track.isStream || track.id <= 0) return
+    if (localMode.value || track.isStream || track.id <= 0) return
     const item = qs.items.find((i) => i.track_id === track.id)
     if (item) {
       if (item.item_id !== qs.currentItemID) void qs.jump(item.item_id).catch(() => {})
     } else {
-      void qs.replace({ kind: 'tracks', track_ids: [track.id] }, track.id, false, queueOutputID())
+      const source: QueueSourceInput = { kind: 'tracks', track_ids: [track.id] }
+      resetSimilarAutoplayContext(source)
+      void qs.replace(source, track.id, false, queueOutputID())
+        .then((view) => resetSimilarAutoplayContext(source, view.items))
         .catch(() => { /* view reconciles via WS */ })
     }
   }
@@ -1178,7 +1382,7 @@ export const usePlayerStore = defineStore('player', () => {
   }) {
     // Remote output: the queue/track state stays client-side (Phase 2),
     // but the audio path is an API call — never touch the local engine.
-    if (import.meta.client && useCastStore().engaged) {
+    if (useCastStore().engaged) {
       if (track && !opts?.skipQueueSync) syncQueuePointer(track)
       await playViaCast(track)
       return
@@ -1186,7 +1390,7 @@ export const usePlayerStore = defineStore('player', () => {
     if (track) {
       if (!opts?.skipQueueSync) syncQueuePointer(track)
       // Rendering locally makes this tab the active output.
-      if (import.meta.client && !localMode.value && !qs.isActiveOutput) void qs.claim()
+      if (!localMode.value && !qs.isActiveOutput) void qs.claim()
       // Never play a track whose file was removed from disk.
       if (track.available === false) return
       // Manual play invalidates any armed transition / preloaded pending deck.
@@ -1284,7 +1488,7 @@ export const usePlayerStore = defineStore('player', () => {
     // Mirror tab pressing play = "play here": claim the output and pick
     // up from the server's position via the same cold-load handoff the
     // cast-disconnect path uses.
-    if (import.meta.client && !localMode.value && !qs.isActiveOutput) {
+    if (!localMode.value && !qs.isActiveOutput) {
       localHandoff = { trackId: currentTrack.value.id, position: qs.positionSeconds }
       void qs.claim()
     }
@@ -1358,13 +1562,11 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   function pause() {
-    if (import.meta.client) {
-      const cast = useCastStore()
-      if (cast.engaged) {
-        playing.value = false // optimistic; WS mirror confirms
-        void cast.pause().catch(() => { /* session already gone */ })
-        return
-      }
+    const cast = useCastStore()
+    if (cast.engaged) {
+      playing.value = false // optimistic; WS mirror confirms
+      void cast.pause().catch(() => { /* session already gone */ })
+      return
     }
     if (playbackBackend.value === 'native' && nativeAudioBackend.value) {
       playing.value = false
@@ -1387,7 +1589,7 @@ export const usePlayerStore = defineStore('player', () => {
   function seek(pct: number) {
     const target = Math.max(0, Math.min(1, pct)) * (duration.value || 0)
     alog('player', `seek ${target.toFixed(2)}s via ${playbackBackend.value}`)
-    if (import.meta.client && useCastStore().engaged) {
+    if (useCastStore().engaged) {
       // While paused between tracks (no session) this still moves the
       // frozen position — the next re-cast starts from it.
       void useCastStore().seekTo(target).catch(() => { /* WS restores truth */ })
@@ -1413,7 +1615,7 @@ export const usePlayerStore = defineStore('player', () => {
     if (muted.value && clamped === 0) return
     volume.value = clamped
     if (clamped > 0) muted.value = false
-    if (import.meta.client && useCastStore().engaged) {
+    if (useCastStore().engaged) {
       // The slider is the DEVICE stream volume while casting. Deliberately
       // not persisted — localStorage keeps the local listening level for
       // when the output comes back.
@@ -1430,7 +1632,7 @@ export const usePlayerStore = defineStore('player', () => {
   function toggleMute() {
     if (playbackBackend.value === 'native' && nativeAudioState.value?.bitPerfectActive) return
     muted.value = !muted.value
-    if (import.meta.client && useCastStore().engaged) {
+    if (useCastStore().engaged) {
       // No mute verb on the receiver — drive the stream volume to 0 and
       // back. `muted` stays a local flag so unmute knows the level.
       useCastStore().setVolume(muted.value ? 0 : volume.value)
@@ -1479,9 +1681,17 @@ export const usePlayerStore = defineStore('player', () => {
     localQueue.value = [...head, ...restored, ...added]
     originalOrder.value = []
   }
-  function toggleShuffle() {
+  async function toggleShuffle() {
     if (!localMode.value) {
-      void qs.setShuffle(!qs.shuffled)
+      try {
+        await qs.setShuffle(!qs.shuffled)
+        // The modes event's structural refetch is intentionally async. Fetch
+        // here as well so the next radio centroid is rebuilt from the actual
+        // shuffled queue the listener sees, including anything just added.
+        await qs.refetch()
+        recalculateSimilarAutoplayContext()
+        prepareTransition()
+      } catch { /* the WS mirror will restore the authoritative mode */ }
       return // the items event re-arms the transition via the version watcher
     }
     localShuffled.value = !localShuffled.value
@@ -1513,7 +1723,8 @@ export const usePlayerStore = defineStore('player', () => {
 
   // Plain cold advance — used as a fallback by the transition handlers.
   async function skipToNextInternal() {
-    const next = forwardNext()
+    let next = forwardNext()
+    if (!next && await ensureSimilarAutoplayQueue(true)) next = forwardNext()
     if (next) await play(next)
     else playing.value = false
   }
@@ -1521,9 +1732,10 @@ export const usePlayerStore = defineStore('player', () => {
   // Manual "next": if the next track is already buffered on the pending deck,
   // swap to it instantly (no cold-load gap, no src-clobber); otherwise cold play.
   async function nextTrack() {
-    const next = forwardNext()
+    let next = forwardNext()
+    if (!next && await ensureSimilarAutoplayQueue(true)) next = forwardNext()
     if (!next) { playing.value = false; return }
-    if (import.meta.client && useCastStore().isClientDevice) {
+    if (useCastStore().isClientDevice) {
       await play(next)
       return
     }
@@ -1550,7 +1762,7 @@ export const usePlayerStore = defineStore('player', () => {
 
   async function prevTrack() {
     if (position.value > 3) {
-      if (import.meta.client && useCastStore().engaged) {
+      if (useCastStore().engaged) {
         void useCastStore().seekTo(0).catch(() => { /* WS restores truth */ })
       } else if (playbackBackend.value === 'native' && nativeAudioBackend.value) {
         void nativeAudioBackend.value.seek(0).catch(() => {})
@@ -1587,7 +1799,8 @@ export const usePlayerStore = defineStore('player', () => {
       return
     }
 
-    const next = peekNextTrack() // queue order; returns current for repeat-one
+    let next = peekNextTrack() // queue order; returns current for repeat-one
+    if (!next && await ensureSimilarAutoplayQueue(true)) next = peekNextTrack()
     if (!next) {
       alog('player', `queue ended after "${finished?.title}"`)
       playing.value = false
@@ -1674,12 +1887,16 @@ export const usePlayerStore = defineStore('player', () => {
   // removeFromQueue drops one upcoming track. Guard against removing the
   // current or played items — the sidebar only exposes the up-next bucket
   // anyway, but the guard keeps callers honest.
-  function removeFromQueue(index: number) {
+  async function removeFromQueue(index: number) {
     if (index <= currentIndex.value) return
     if (index >= queue.value.length) return
     if (!localMode.value) {
       const item = qs.items[index]
-      if (item) void qs.removeItem(item.item_id)
+      if (item) {
+        removeSimilarAutoplayIntent(item.track_id)
+        await qs.removeItem(item.item_id)
+        recalculateSimilarAutoplayContext()
+      }
     } else {
       localQueue.value.splice(index, 1)
     }
@@ -1687,7 +1904,7 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   // moveInQueue reorders an upcoming track. Same guards as remove.
-  function moveInQueue(from: number, to: number) {
+  async function moveInQueue(from: number, to: number) {
     if (from <= currentIndex.value || to <= currentIndex.value) return
     if (from >= queue.value.length || to >= queue.value.length) return
     if (from === to) return
@@ -1698,7 +1915,8 @@ export const usePlayerStore = defineStore('player', () => {
       // current item as predecessor means "head of upcoming" (0 works too).
       const without = qs.items.toSpliced(from, 1)
       const pred = without[to - 1]
-      void qs.moveItem(item.item_id, pred ? pred.item_id : 0)
+      await qs.moveItem(item.item_id, pred ? pred.item_id : 0)
+      recalculateSimilarAutoplayContext()
     } else {
       const next = localQueue.value.slice()
       const [item] = next.splice(from, 1)
@@ -1722,7 +1940,10 @@ export const usePlayerStore = defineStore('player', () => {
     if (!localMode.value) {
       // Server-side dedupe against the FULL upcoming slice (the local
       // window only sees part of a big queue).
-      void qs.enqueue(list.map((t) => t.id), 'end').then(() => prepareTransition())
+      const ids = list.map((t) => t.id)
+      await qs.enqueue(ids, 'end')
+      addSimilarAutoplayIntent(ids)
+      prepareTransition()
       return
     }
     const upcomingIds = new Set(upcomingTracks.value.map((t) => t.id))
@@ -1743,7 +1964,10 @@ export const usePlayerStore = defineStore('player', () => {
       return
     }
     if (!localMode.value) {
-      void qs.enqueue(list.map((t) => t.id), 'next').then(() => prepareTransition())
+      const ids = list.map((t) => t.id)
+      await qs.enqueue(ids, 'next')
+      addSimilarAutoplayIntent(ids)
+      prepareTransition()
       return
     }
     const upcomingIds = new Set(upcomingTracks.value.map((t) => t.id))
@@ -1759,9 +1983,12 @@ export const usePlayerStore = defineStore('player', () => {
 
   // clearUpcoming empties everything after the current track. Used by the
   // sidebar's "Clear" button on the Up Next header.
-  function clearUpcoming() {
+  async function clearUpcoming() {
     if (!localMode.value) {
-      void qs.clearUpcoming().then(() => prepareTransition())
+      similarAutoplayGeneration++
+      await qs.clearUpcoming()
+      recalculateSimilarAutoplayContext()
+      prepareTransition()
       return
     }
     const idx = currentIndex.value
@@ -1780,8 +2007,8 @@ export const usePlayerStore = defineStore('player', () => {
   // — the next play targets it again). Engaged-only: a tab merely watching
   // someone else's cast must not kill it by clearing its own local queue.
   function stop() {
-    if (import.meta.client && useCastStore().engaged) void useCastStore().stopSession()
-    if (import.meta.client && !localMode.value) void qs.clearAll() // explicit gesture — labeled "stop & clear queue"
+    if (useCastStore().engaged) void useCastStore().stopSession()
+    if (!localMode.value) void qs.clearAll() // explicit gesture — labeled "stop & clear queue"
     localHandoff = null
     void disposeNativeAudio()
     if (engineWired.value) ensureEngine().stop()
@@ -1791,6 +2018,7 @@ export const usePlayerStore = defineStore('player', () => {
     localMode.value = false
     localQueue.value = []
     originalOrder.value = []
+    resetSimilarAutoplayContext()
     position.value = 0
     duration.value = 0
     transitioning = false
@@ -1869,17 +2097,15 @@ export const usePlayerStore = defineStore('player', () => {
       localHandoff = { trackId: track.id, position: pos }
     }
     // The slider was mirroring the device volume — restore the local pref.
-    if (import.meta.client) {
-      try {
-        const raw = localStorage.getItem(VOLUME_STORAGE_KEY)
-        if (raw) {
-          const p = JSON.parse(raw) as { volume?: number, muted?: boolean }
-          if (typeof p.volume === 'number' && Number.isFinite(p.volume)) {
-            volume.value = Math.max(0, Math.min(100, p.volume))
-          }
+    try {
+      const raw = localStorage.getItem(VOLUME_STORAGE_KEY)
+      if (raw) {
+        const p = JSON.parse(raw) as { volume?: number, muted?: boolean }
+        if (typeof p.volume === 'number' && Number.isFinite(p.volume)) {
+          volume.value = Math.max(0, Math.min(100, p.volume))
         }
-      } catch { /* keep whatever's shown */ }
-    }
+      }
+    } catch { /* keep whatever's shown */ }
   }
 
   // Fired by the cast WS mirror when a track this tab started finishes on
@@ -1893,7 +2119,8 @@ export const usePlayerStore = defineStore('player', () => {
       alog('player', 'sleep timer: stopped at end of cast track')
       return
     }
-    const next = peekNextTrack() // queue order; returns current for repeat-one
+    let next = peekNextTrack() // queue order; returns current for repeat-one
+    if (!next && await ensureSimilarAutoplayQueue(true)) next = peekNextTrack()
     if (!next) {
       alog('player', 'cast queue ended')
       playing.value = false
@@ -1909,6 +2136,7 @@ export const usePlayerStore = defineStore('player', () => {
     engineWired, playbackBackend, nativeAudioState, nativeAudioCapabilities, nativeAudioVisualizer,
     nativeAudioOutputDevices, nativeAudioOutputDeviceId, nativeAudioFollowsSystemDefault,
     scrobbledTrackId, sleepAtTrackEnd, sleepDeadline, sleepNowTick,
+    similarAutoplayEnabled, similarAutoplayLoading, similarAutoplayAvailable,
     currentIndex, playedTracks, upcomingTracks, upcomingCount,
     nextUp, progress, hasPrevious, hasNext,
     play, pause, togglePlay, seek, setVolume, toggleMute, stop,
@@ -1916,7 +2144,7 @@ export const usePlayerStore = defineStore('player', () => {
     toggleShuffle, cycleRepeat, nextTrack, prevTrack,
     toggleLoved, toggleQueue, toggleLyrics, formatTime,
     jumpTo, removeFromQueue, moveInQueue, clearUpcoming,
-    addToQueue, playNext,
+    addToQueue, playNext, setSimilarAutoplayEnabled,
     probeNativeAudio, setBitPerfectAudio, refreshNativeAudioOutputs, setNativeAudioOutputDevice,
     startCastTo, stopCasting, castTrackEnded,
   }
@@ -1955,6 +2183,7 @@ export function usePlayerBindings() {
     clearUpcoming: store.clearUpcoming,
     addToQueue: store.addToQueue,
     playNext: store.playNext,
+    setSimilarAutoplayEnabled: store.setSimilarAutoplayEnabled,
     probeNativeAudio: store.probeNativeAudio,
     setBitPerfectAudio: store.setBitPerfectAudio,
     refreshNativeAudioOutputs: store.refreshNativeAudioOutputs,
@@ -1970,7 +2199,7 @@ export function usePlayerBindings() {
 // needs per-track context for album-aware suppression + plan timing), so they
 // are intentionally NOT set here. Idempotent — re-applied on every mutation.
 function applyAudioSettingsToEngine(engine: ReturnType<typeof useAudioEngine>, settings: ReturnType<typeof useAudioSettingsBindings>) {
-  // The SSR stub lacks the chain block accessors; bail when they're missing.
+  // Native/browser backends expose slightly different optional DSP blocks.
   const e = engine as ReturnType<typeof useAudioEngine> & {
     equalizer?: { enabled: boolean; setAllBands: (b: number[]) => void }
     preamp?: { enabled: boolean; setGain: (db: number) => void }

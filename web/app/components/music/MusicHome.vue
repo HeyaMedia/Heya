@@ -17,9 +17,9 @@
         <button class="mh-pill" :disabled="shuffling" @click="shuffleLibrary">
           <Icon name="shuffle" :size="14" /> Shuffle library
         </button>
-        <NuxtLink to="/music/stations" class="mh-pill">
-          <Icon name="radio" :size="14" /> Start station
-        </NuxtLink>
+        <button class="mh-pill" :disabled="myRadioStarting" @click="startMyRadio">
+          <Icon name="radio" :size="14" /> {{ myRadioStarting ? 'Starting…' : 'My Radio' }}
+        </button>
       </div>
     </header>
 
@@ -520,7 +520,7 @@ async function fetchItems<T>(path: string): Promise<T[]> {
 }
 
 const mixesQuery = useQuery(musicMixesQuery())
-const mixes = computed<Mix[]>(() => (mixesQuery.data.value ?? []).slice(0, 6))
+const mixes = computed<Mix[]>(() => (mixesQuery.data.value ?? []).slice(0, 10))
 
 // Endless shelf: same paginated endpoint (and cache key) as the main home
 // rail, so both surfaces share pages and the shelf keeps loading as the
@@ -715,7 +715,7 @@ function mixArtistsLine(mix: Mix): string {
   return names.join(' · ').toUpperCase()
 }
 
-const { play, queue, playTracks } = usePlayerBindings()
+const { play, queue, playTracks, setSimilarAutoplayEnabled } = usePlayerBindings()
 const actions = useMusicActions()
 const playlistMenu = usePlaylistMenu()
 const { isCoarse } = useViewport()
@@ -748,6 +748,33 @@ async function shuffleLibrary() {
     // Silent — the pill just no-ops if the library has nothing to shuffle.
   } finally {
     shuffling.value = false
+  }
+}
+
+// Deezer-style one-click personal radio: begin with the recommendation
+// engine's broad For You profile, then hand the finite first batch to the
+// queue-level similar-autoplay loop for continuous listening.
+const myRadioStarting = ref(false)
+async function startMyRadio() {
+  if (myRadioStarting.value) return
+  myRadioStarting.value = true
+  try {
+    let available = mixesQuery.data.value ?? []
+    if (!available.some((mix) => mix.kind === 'for_you' && mix.tracks.length)) {
+      const response = await $heya('/api/music/home/mixes-for-you', {
+        query: { max: 1, tracks_per_mix: 50 },
+      }) as { items?: Mix[] }
+      available = [...(response.items ?? []), ...available]
+    }
+    const personal = available.find((mix) => mix.kind === 'for_you' && mix.tracks.length)
+      ?? available.find((mix) => mix.tracks.length)
+    if (!personal) return
+    setSimilarAutoplayEnabled(true)
+    await playTracks(personal.tracks.map((track) => ({ ...mixTrackToTrack(track), source: 'my-radio' })))
+  } catch {
+    useToast().toast.err('My Radio could not find anything playable yet')
+  } finally {
+    myRadioStarting.value = false
   }
 }
 

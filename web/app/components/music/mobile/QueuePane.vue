@@ -42,6 +42,27 @@
         </button>
         <button type="button" class="qp-clear" @click="clearUpcoming">Clear</button>
       </div>
+      <div class="qp-mobile-autoplay">
+        <div class="qp-mobile-autoplay-copy">
+          <div class="qp-mobile-autoplay-title">Play tracks like this…</div>
+          <div class="qp-mobile-autoplay-hint">
+            {{ localMode
+              ? 'Unavailable for live streams'
+              : similarAutoplayLoading
+                ? 'Finding more tracks…'
+                : similarAutoplayEnabled
+                  ? 'Keeps this queue going'
+                  : 'Stops when the queue ends' }}
+          </div>
+        </div>
+        <AppSwitch
+          :model-value="similarAutoplayEnabled"
+          :disabled="localMode"
+          size="md"
+          aria-label="Play tracks like this"
+          @update:model-value="setSimilarAutoplayEnabled"
+        />
+      </div>
     </div>
 
     <div class="qp-list">
@@ -140,7 +161,9 @@
 const {
   queue, currentTrack, currentIndex, playedTracks, upcomingTracks,
   shuffled, repeatMode, formatTime,
+  localMode, similarAutoplayEnabled, similarAutoplayLoading,
   jumpTo, moveInQueue, removeFromQueue, clearUpcoming, toggleShuffle, cycleRepeat,
+  setSimilarAutoplayEnabled,
 } = usePlayerBindings()
 
 function clamp(v: number, min: number, max: number) {
@@ -599,6 +622,19 @@ onScopeDispose(() => {
   align-items: center;
   gap: 8px;
 }
+.qp-mobile-autoplay {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: rgb(var(--ink) / 0.035);
+}
+.qp-mobile-autoplay-copy { flex: 1; min-width: 0; }
+.qp-mobile-autoplay-title { font-size: 12px; font-weight: 650; color: var(--fg-0); }
+.qp-mobile-autoplay-hint { margin-top: 2px; font-size: 10px; color: var(--fg-3); }
 .qp-chip {
   display: inline-flex;
   align-items: center;

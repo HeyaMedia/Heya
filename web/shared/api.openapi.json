@@ -37994,9 +37994,9 @@
             "in": "query",
             "name": "max",
             "schema": {
-              "default": 6,
+              "default": 10,
               "format": "int64",
-              "maximum": 8,
+              "maximum": 10,
               "minimum": 1,
               "type": "integer"
             }

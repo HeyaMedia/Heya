@@ -10,6 +10,28 @@
     <!-- Queue tab — Played / Now Playing / Up Next, three discrete buckets so
          the user can see what's already happened and what's coming. -->
     <div v-if="tab === 'queue'" v-overlay-scrollbar class="qp-body">
+      <div class="qp-autoplay">
+        <div class="qp-autoplay-copy">
+          <div class="qp-autoplay-title">Play tracks like this…</div>
+          <div class="qp-autoplay-hint">
+            {{ localMode
+              ? 'Unavailable for live streams'
+              : similarAutoplayLoading
+                ? 'Finding more tracks for this queue…'
+                : similarAutoplayEnabled
+                  ? 'Keeps the music going when the queue runs low'
+                  : 'Playback stops at the end of the queue' }}
+          </div>
+        </div>
+        <AppSwitch
+          :model-value="similarAutoplayEnabled"
+          :disabled="localMode"
+          size="md"
+          aria-label="Play tracks like this"
+          @update:model-value="setSimilarAutoplayEnabled"
+        />
+      </div>
+
       <!-- Played (faded, clickable to jump back) -->
       <template v-if="playedTracks.length">
         <div class="qp-section-label">
@@ -201,7 +223,9 @@ import { trackLyricsQuery, type LyricsLine } from '~/queries/music'
 const {
   playing, currentTrack, queue, queueOpen, position, formatTime,
   shuffled, repeatMode, currentIndex, playedTracks, upcomingTracks,
+  localMode, similarAutoplayEnabled, similarAutoplayLoading,
   jumpTo, removeFromQueue, moveInQueue, clearUpcoming, seek, sideTab,
+  setSimilarAutoplayEnabled,
 } = usePlayerBindings()
 
 // The active tab lives in shared player state so the playbar's Queue / Lyrics
@@ -413,6 +437,19 @@ function onQueueRowKeydown(e: KeyboardEvent, action: () => void) {
 .qp-tab.active { color: var(--gold); border-bottom-color: var(--gold); }
 
 .qp-body { flex: 1; overflow-y: auto; padding: 6px 0 12px; }
+.qp-autoplay {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 12px 2px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: rgb(var(--ink) / 0.035);
+}
+.qp-autoplay-copy { flex: 1; min-width: 0; }
+.qp-autoplay-title { font-size: 12px; font-weight: 650; color: var(--fg-0); }
+.qp-autoplay-hint { margin-top: 2px; font-size: 10px; line-height: 1.35; color: var(--fg-3); }
 .qp-section-label {
   font-size: 10px;
   font-family: var(--font-mono);

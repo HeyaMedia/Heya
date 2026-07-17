@@ -39,7 +39,7 @@ func registerMusicHomeRoutes(api huma.API, app *service.App) {
 	// listening session and naturally rotates tomorrow's slate.
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/home/mixes-for-you", "music-home-mixes", "Personal mixes from taste, sonic similarity, and provider metadata", "MusicHome")),
 		func(ctx context.Context, in *struct {
-			MaxMixes     int `query:"max"            minimum:"1" maximum:"8"   default:"6"`
+			MaxMixes     int `query:"max"            minimum:"1" maximum:"10"  default:"10"`
 			TracksPerMix int `query:"tracks_per_mix" minimum:"5" maximum:"100" default:"30"`
 		}) (*JSONOutput[mixesBody], error) {
 			mixes, err := app.GenerateMixesForUser(ctx, userFrom(ctx).ID, in.MaxMixes, in.TracksPerMix)

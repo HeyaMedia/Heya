@@ -25,11 +25,11 @@ import (
 // minutes is the user's stated cadence; the bucket index becomes the seed.
 const shelfBucketSize = 5 * time.Minute
 
-// The four profile archetypes plus at most four artist spotlights keep the
+// The four profile archetypes plus at most six artist spotlights keep the
 // slate broad without turning one uncached request into dozens of sequential
 // HNSW queries. Callers may request fewer; requesting 20 is still bounded to
-// a useful eight-mix slate.
-const maxArtistMixesInSlate = 4
+// a useful ten-mix slate.
+const maxArtistMixesInSlate = 6
 
 // shelfSeed returns a string seed that's stable within the current 5-minute
 // window. Combined with the user_id in the query so the same seed produces
@@ -57,15 +57,15 @@ type MusicMix struct {
 }
 
 // GenerateMixesForUser assembles one bounded slate from the shared music
-// recommendation pool: four profile archetypes followed by up to four
+// recommendation pool: four profile archetypes followed by up to six
 // per-artist taste mixes. Provider/catalog popularity keeps cold-start users
 // useful; the legacy generator at the bottom is only a compatibility fallback
 // for installations with sparse older metadata.
 func (a *App) GenerateMixesForUser(ctx context.Context, userID int64, maxMixes, tracksPerMix int) ([]MusicMix, error) {
 	if maxMixes <= 0 {
-		maxMixes = 6
-	} else if maxMixes > 8 {
-		maxMixes = 8
+		maxMixes = 10
+	} else if maxMixes > 10 {
+		maxMixes = 10
 	}
 	if tracksPerMix <= 0 || tracksPerMix > 100 {
 		tracksPerMix = 30

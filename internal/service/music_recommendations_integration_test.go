@@ -29,7 +29,7 @@ func TestMusicRecommendationsIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Ask for the API maximum; the service intentionally caps the useful slate
-	// to four archetypes + four artist mixes so this also guards against an
+	// to four archetypes + six artist mixes so this also guards against an
 	// accidental N+1/per-mix performance blowup.
 	mixes, err := app.GenerateMixesForUser(ctx, userID, 20, 30)
 	if err != nil {
@@ -38,10 +38,11 @@ func TestMusicRecommendationsIntegration(t *testing.T) {
 	if len(mixes) == 0 {
 		t.Fatal("expected at least one recommendation mix")
 	}
-	if len(mixes) > 8 {
-		t.Fatalf("recommendation slate should be bounded to 8 mixes, got %d", len(mixes))
+	if len(mixes) > 10 {
+		t.Fatalf("recommendation slate should be bounded to 10 mixes, got %d", len(mixes))
 	}
 	seenSlugs := map[string]bool{}
+	allMixTrackIDs := make([]int64, 0, len(mixes)*30)
 	for _, mix := range mixes {
 		t.Logf("mix %s (%s): %d tracks", mix.Slug, mix.Kind, len(mix.Tracks))
 		if mix.Slug == "" || seenSlugs[mix.Slug] {
@@ -53,6 +54,7 @@ func TestMusicRecommendationsIntegration(t *testing.T) {
 		}
 		seenTracks := map[int64]bool{}
 		for _, track := range mix.Tracks {
+			allMixTrackIDs = append(allMixTrackIDs, track.TrackID)
 			if seenTracks[track.TrackID] {
 				t.Fatalf("mix %q repeated track %d", mix.Slug, track.TrackID)
 			}
@@ -67,6 +69,33 @@ func TestMusicRecommendationsIntegration(t *testing.T) {
 			if vetoed {
 				t.Fatalf("mix %q included vetoed track %d", mix.Slug, track.TrackID)
 			}
+		}
+	}
+
+	// Exercise the exact endless-queue continuation shape: several tracks from
+	// the queue form a centroid, while everything already queued is excluded.
+	seedCount := min(3, len(mixes[0].Tracks))
+	blendSeeds := make([]RadioSeed, 0, seedCount)
+	for _, track := range mixes[0].Tracks[:seedCount] {
+		blendSeeds = append(blendSeeds, RadioSeed{Kind: "track", TrackID: track.TrackID})
+	}
+	continuation, err := app.BuildRadio(ctx, userID, RadioRequest{
+		Seed:  RadioSeed{Kind: "track", TrackID: blendSeeds[0].TrackID},
+		Seeds: blendSeeds, Limit: 20, ExcludeTrackIDs: allMixTrackIDs,
+	})
+	if err != nil {
+		t.Fatalf("multi-seed queue continuation: %v", err)
+	}
+	if len(continuation.Tracks) < 5 {
+		t.Fatalf("multi-seed queue continuation returned %d tracks", len(continuation.Tracks))
+	}
+	excluded := make(map[int64]bool, len(allMixTrackIDs))
+	for _, id := range allMixTrackIDs {
+		excluded[id] = true
+	}
+	for _, track := range continuation.Tracks {
+		if excluded[track.TrackID] {
+			t.Fatalf("multi-seed queue continuation repeated queued track %d", track.TrackID)
 		}
 	}
 
