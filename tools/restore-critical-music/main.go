@@ -18,6 +18,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -31,26 +32,46 @@ type options struct {
 }
 
 type fileRef struct {
-	LibraryFileID int64
-	TrackFileID   int64
-	TrackID       int64
-	AlbumID       int64
-	ArtistID      int64
+	LibraryFileID      int64
+	TrackFileID        int64
+	TrackID            int64
+	AlbumID            int64
+	ArtistID           int64
+	Size               int64
+	ContentHash        string
+	AlbumMusicBrainzID string
 }
 
 type stats struct {
-	Scanned   int `json:"scanned"`
-	Matched   int `json:"matched"`
-	Unique    int `json:"unique"`
-	Ambiguous int `json:"ambiguous,omitempty"`
-	Applied   int `json:"applied,omitempty"`
+	Scanned          int           `json:"scanned"`
+	PathMatched      int           `json:"path_matched"`
+	Matched          int           `json:"matched"`
+	Unique           int           `json:"unique"`
+	Ambiguous        int           `json:"ambiguous,omitempty"`
+	IdentityMismatch int           `json:"identity_mismatch,omitempty"`
+	IdentityUnknown  int           `json:"identity_unknown,omitempty"`
+	Unlinked         int           `json:"unlinked,omitempty"`
+	Applied          int           `json:"applied,omitempty"`
+	Samples          []issueSample `json:"samples,omitempty"`
+}
+
+type issueSample struct {
+	Reason string   `json:"reason"`
+	Paths  []string `json:"paths"`
+	IDs    []int64  `json:"ids,omitempty"`
+}
+
+type fileIdentity struct {
+	Size        int64  `json:"size"`
+	ContentHash string `json:"content_hash"`
 }
 
 type nullable[T any] = *T
 
 type trackFileExport struct {
-	PathKey   string `json:"path_key"`
-	TrackFile struct {
+	PathKey     string       `json:"path_key"`
+	LibraryFile fileIdentity `json:"library_file"`
+	TrackFile   struct {
 		IntegratedLUFS          nullable[float64]   `json:"integrated_lufs"`
 		TruePeakDB              nullable[float64]   `json:"true_peak_db"`
 		LoudnessRangeDB         nullable[float64]   `json:"loudness_range_db"`
@@ -70,10 +91,14 @@ type trackFileExport struct {
 
 type pathExport struct {
 	PathKey string `json:"path_key"`
+	fileIdentity
 }
 
 type facetExport struct {
 	Paths []pathExport `json:"paths"`
+	Track struct {
+		FilePath string `json:"file_path"`
+	} `json:"track"`
 	Facet struct {
 		TrackEmbedding   nullable[string]  `json:"track_embedding"`
 		ArtistEmbedding  nullable[string]  `json:"artist_embedding"`
@@ -95,6 +120,7 @@ type facetExport struct {
 type albumLoudnessExport struct {
 	Paths []string `json:"paths"`
 	Album struct {
+		MusicBrainzID      string              `json:"musicbrainz_id"`
 		IntegratedLUFS     nullable[float64]   `json:"integrated_lufs"`
 		TruePeakDB         nullable[float64]   `json:"true_peak_db"`
 		LoudnessRangeDB    nullable[float64]   `json:"loudness_range_db"`
@@ -112,6 +138,7 @@ type segmentExport struct {
 		CreatedAt   time.Time `json:"created_at"`
 	} `json:"segment"`
 	LibraryFile struct {
+		fileIdentity
 		SegmentsAnalyzedAt nullable[time.Time] `json:"segments_analyzed_at"`
 		SegmentsDetectedAt nullable[time.Time] `json:"segments_detected_at"`
 	} `json:"library_file"`
@@ -122,14 +149,22 @@ type rawDecoder interface {
 }
 
 func (e *trackFileExport) decodeBackup(data []byte) error {
+	libraryMarker := []byte(`"library_file"`)
+	libraryStart := bytes.Index(data, libraryMarker)
+	if libraryStart < 0 {
+		return errors.New(`field "library_file" not found`)
+	}
 	marker := []byte(`"track_file"`)
 	start := bytes.Index(data, marker)
 	if start < 0 {
 		return errors.New(`field "track_file" not found`)
 	}
+	libraryFile := data[libraryStart:]
 	trackFile := data[start:]
 	return errors.Join(
 		decodeField(data, "path_key", &e.PathKey),
+		decodeField(libraryFile, "size", &e.LibraryFile.Size),
+		decodeField(libraryFile, "content_hash", &e.LibraryFile.ContentHash),
 		decodeField(trackFile, "integrated_lufs", &e.TrackFile.IntegratedLUFS),
 		decodeField(trackFile, "true_peak_db", &e.TrackFile.TruePeakDB),
 		decodeField(trackFile, "loudness_range_db", &e.TrackFile.LoudnessRangeDB),
@@ -150,6 +185,7 @@ func (e *trackFileExport) decodeBackup(data []byte) error {
 func (e *facetExport) decodeBackup(data []byte) error {
 	return errors.Join(
 		decodeField(data, "paths", &e.Paths),
+		decodeField(data, "file_path", &e.Track.FilePath),
 		decodeField(data, "facet", &e.Facet),
 	)
 }
@@ -164,6 +200,7 @@ func (e *albumLoudnessExport) decodeBackup(data []byte) error {
 	}
 	album := data[start:]
 	return errors.Join(
+		decodeField(album, "musicbrainz_id", &e.Album.MusicBrainzID),
 		decodeField(album, "integrated_lufs", &e.Album.IntegratedLUFS),
 		decodeField(album, "true_peak_db", &e.Album.TruePeakDB),
 		decodeField(album, "loudness_range_db", &e.Album.LoudnessRangeDB),
@@ -184,6 +221,8 @@ func (e *segmentExport) decodeBackup(data []byte) error {
 	}
 	libraryFile := data[start:]
 	return errors.Join(
+		decodeField(libraryFile, "size", &e.LibraryFile.Size),
+		decodeField(libraryFile, "content_hash", &e.LibraryFile.ContentHash),
 		decodeField(libraryFile, "segments_analyzed_at", &e.LibraryFile.SegmentsAnalyzedAt),
 		decodeField(libraryFile, "segments_detected_at", &e.LibraryFile.SegmentsDetectedAt),
 	)
@@ -219,13 +258,14 @@ func run() error {
 	fmt.Printf("mode=%s current_paths=%d\n", map[bool]string{false: "dry-run", true: "apply"}[opts.apply], len(refs))
 
 	results := make(map[string]stats)
-	if results["track_files"], err = restoreTrackFiles(ctx, conn, opts, refs); err != nil {
+	backupIdentities := make(map[string]fileIdentity, 450000)
+	if results["track_files"], err = restoreTrackFiles(ctx, conn, opts, refs, backupIdentities); err != nil {
 		return err
 	}
 	if results["track_facets"], err = restoreFacets(ctx, conn, opts, refs); err != nil {
 		return err
 	}
-	if results["album_loudness"], err = restoreAlbumLoudness(ctx, conn, opts, refs); err != nil {
+	if results["album_loudness"], err = restoreAlbumLoudness(ctx, conn, opts, refs, backupIdentities); err != nil {
 		return err
 	}
 	if results["media_segments"], err = restoreSegments(ctx, conn, opts, refs); err != nil {
@@ -248,7 +288,8 @@ func run() error {
 func loadCurrentPaths(ctx context.Context, conn *pgx.Conn) (map[string]fileRef, error) {
 	rows, err := conn.Query(ctx, `
 		SELECT lf.path, lf.id, COALESCE(tf.id, 0), COALESCE(tf.track_id, 0),
-		       COALESCE(t.album_id, 0), COALESCE(a.artist_id, 0)
+		       COALESCE(t.album_id, 0), COALESCE(a.artist_id, 0), lf.size, lf.content_hash,
+		       COALESCE(a.musicbrainz_id, '')
 		FROM library_files lf
 		LEFT JOIN track_files tf ON tf.library_file_id = lf.id
 		LEFT JOIN tracks t ON t.id = tf.track_id
@@ -262,7 +303,8 @@ func loadCurrentPaths(ctx context.Context, conn *pgx.Conn) (map[string]fileRef, 
 	for rows.Next() {
 		var path string
 		var ref fileRef
-		if err := rows.Scan(&path, &ref.LibraryFileID, &ref.TrackFileID, &ref.TrackID, &ref.AlbumID, &ref.ArtistID); err != nil {
+		if err := rows.Scan(&path, &ref.LibraryFileID, &ref.TrackFileID, &ref.TrackID, &ref.AlbumID, &ref.ArtistID,
+			&ref.Size, &ref.ContentHash, &ref.AlbumMusicBrainzID); err != nil {
 			return nil, err
 		}
 		refs[path] = ref
@@ -522,7 +564,55 @@ func flush(ctx context.Context, tx pgx.Tx, table pgx.Identifier, columns []strin
 	return err
 }
 
-func restoreTrackFiles(ctx context.Context, conn *pgx.Conn, opts options, refs map[string]fileRef) (stats, error) {
+type identityResult uint8
+
+const (
+	identityUnknown identityResult = iota
+	identityMatched
+	identityMismatch
+)
+
+func compareIdentity(backup fileIdentity, current fileRef) identityResult {
+	if backup.ContentHash != "" && current.ContentHash != "" {
+		if backup.ContentHash == current.ContentHash {
+			return identityMatched
+		}
+		return identityMismatch
+	}
+	if backup.Size > 0 && current.Size > 0 {
+		if backup.Size == current.Size {
+			return identityMatched
+		}
+		return identityMismatch
+	}
+	return identityUnknown
+}
+
+func addSample(out *stats, reason string, paths []string, ids []int64) {
+	const sampleLimit = 5
+	count := 0
+	for _, sample := range out.Samples {
+		if sample.Reason == reason {
+			count++
+		}
+	}
+	if count >= sampleLimit {
+		return
+	}
+	if len(paths) > 3 {
+		paths = paths[:3]
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	out.Samples = append(out.Samples, issueSample{Reason: reason, Paths: paths, IDs: ids})
+}
+
+func restoreTrackFiles(
+	ctx context.Context,
+	conn *pgx.Conn,
+	opts options,
+	refs map[string]fileRef,
+	backupIdentities map[string]fileIdentity,
+) (stats, error) {
 	var out stats
 	seen := make(map[int64]struct{})
 	var tx pgx.Tx
@@ -543,8 +633,25 @@ func restoreTrackFiles(ctx context.Context, conn *pgx.Conn, opts options, refs m
 	rows := make([][]any, 0, 500)
 	path := filepath.Join(opts.exportDir, "track_files.jsonl.gz")
 	out.Scanned, err = scanFile[trackFileExport](path, func(row trackFileExport) error {
+		backupIdentities[row.PathKey] = row.LibraryFile
 		ref, ok := refs[row.PathKey]
-		if !ok || ref.TrackFileID == 0 {
+		if !ok {
+			return nil
+		}
+		out.PathMatched++
+		if ref.TrackFileID == 0 {
+			out.Unlinked++
+			addSample(&out, "unlinked", []string{row.PathKey}, nil)
+			return nil
+		}
+		switch compareIdentity(row.LibraryFile, ref) {
+		case identityMismatch:
+			out.IdentityMismatch++
+			addSample(&out, "identity_mismatch", []string{row.PathKey}, nil)
+			return nil
+		case identityUnknown:
+			out.IdentityUnknown++
+			addSample(&out, "identity_unknown", []string{row.PathKey}, nil)
 			return nil
 		}
 		out.Matched++
@@ -593,7 +700,22 @@ func restoreTrackFiles(ctx context.Context, conn *pgx.Conn, opts options, refs m
 		chromaprint_algorithm=COALESCE(tf.chromaprint_algorithm,s.chromaprint_algorithm),
 		chromaprint_duration_secs=COALESCE(tf.chromaprint_duration_secs,s.chromaprint_duration_secs),
 		fingerprinted_at=COALESCE(tf.fingerprinted_at,s.fingerprinted_at)
-	FROM restore_track_files s WHERE tf.id=s.track_file_id`)
+	FROM restore_track_files s WHERE tf.id=s.track_file_id AND (
+		(tf.integrated_lufs IS NULL AND s.integrated_lufs IS NOT NULL) OR
+		(tf.true_peak_db IS NULL AND s.true_peak_db IS NOT NULL) OR
+		(tf.loudness_range_db IS NULL AND s.loudness_range_db IS NOT NULL) OR
+		(tf.sample_peak_db IS NULL AND s.sample_peak_db IS NOT NULL) OR
+		(tf.loudness_analyzed_at IS NULL AND s.loudness_analyzed_at IS NOT NULL) OR
+		(tf.intro_end_ms IS NULL AND s.intro_end_ms IS NOT NULL) OR
+		(tf.outro_start_ms IS NULL AND s.outro_start_ms IS NOT NULL) OR
+		(tf.fade_start_ms IS NULL AND s.fade_start_ms IS NOT NULL) OR
+		(tf.silence_start_ms IS NULL AND s.silence_start_ms IS NOT NULL) OR
+		(tf.boundaries_analyzed_at IS NULL AND s.boundaries_analyzed_at IS NOT NULL) OR
+		(tf.chromaprint IS NULL AND s.chromaprint IS NOT NULL) OR
+		(tf.chromaprint_algorithm IS NULL AND s.chromaprint_algorithm IS NOT NULL) OR
+		(tf.chromaprint_duration_secs IS NULL AND s.chromaprint_duration_secs IS NOT NULL) OR
+		(tf.fingerprinted_at IS NULL AND s.fingerprinted_at IS NOT NULL)
+	)`)
 	if err != nil {
 		return out, err
 	}
@@ -601,23 +723,120 @@ func restoreTrackFiles(ctx context.Context, conn *pgx.Conn, opts options, refs m
 	return out, tx.Commit(ctx)
 }
 
-func uniqueEntity(paths []string, refs map[string]fileRef, pick func(fileRef) int64) (id int64, matched, ambiguous bool) {
+type entityMatch struct {
+	ID               int64
+	PathMatched      bool
+	IdentityMatched  bool
+	IdentityMismatch bool
+	IdentityUnknown  bool
+	Unlinked         bool
+	IDs              []int64
+}
+
+func matchEntity(paths []pathExport, refs map[string]fileRef, pick func(fileRef) int64) entityMatch {
+	var result entityMatch
 	ids := make(map[int64]struct{})
 	for _, path := range paths {
-		if ref, ok := refs[path]; ok {
-			matched = true
-			if value := pick(ref); value != 0 {
-				ids[value] = struct{}{}
+		ref, ok := refs[path.PathKey]
+		if !ok {
+			continue
+		}
+		result.PathMatched = true
+		switch compareIdentity(path.fileIdentity, ref) {
+		case identityMismatch:
+			result.IdentityMismatch = true
+			continue
+		case identityUnknown:
+			result.IdentityUnknown = true
+			continue
+		}
+		result.IdentityMatched = true
+		value := pick(ref)
+		if value == 0 {
+			result.Unlinked = true
+			continue
+		}
+		ids[value] = struct{}{}
+	}
+	result.IDs = make([]int64, 0, len(ids))
+	for value := range ids {
+		result.IDs = append(result.IDs, value)
+	}
+	if len(result.IDs) == 1 {
+		result.ID = result.IDs[0]
+	}
+	return result
+}
+
+func resolveEntityByPreferredPath(
+	result *entityMatch,
+	preferredPath string,
+	paths []pathExport,
+	refs map[string]fileRef,
+	pick func(fileRef) int64,
+) {
+	if result.ID != 0 || preferredPath == "" {
+		return
+	}
+	for _, path := range paths {
+		if path.PathKey != preferredPath {
+			continue
+		}
+		ref, ok := refs[path.PathKey]
+		if !ok || compareIdentity(path.fileIdentity, ref) != identityMatched {
+			return
+		}
+		preferredID := pick(ref)
+		for _, candidateID := range result.IDs {
+			if candidateID == preferredID {
+				result.ID = preferredID
+				return
 			}
 		}
+		return
 	}
-	if len(ids) != 1 {
-		return 0, matched, len(ids) > 1
+}
+
+func resolveAlbumByMusicBrainzID(result *entityMatch, mbid string, paths []pathExport, refs map[string]fileRef) {
+	if result.ID != 0 || mbid == "" {
+		return
 	}
-	for value := range ids {
-		return value, matched, false
+	matches := make(map[int64]struct{})
+	for _, path := range paths {
+		ref, ok := refs[path.PathKey]
+		if !ok || compareIdentity(path.fileIdentity, ref) != identityMatched || ref.AlbumMusicBrainzID != mbid {
+			continue
+		}
+		matches[ref.AlbumID] = struct{}{}
 	}
-	return 0, matched, false
+	if len(matches) != 1 {
+		return
+	}
+	for albumID := range matches {
+		result.ID = albumID
+	}
+}
+
+func recordEntityMatch(out *stats, result entityMatch, paths []string) {
+	if result.PathMatched {
+		out.PathMatched++
+	}
+	if result.IdentityMismatch {
+		out.IdentityMismatch++
+	}
+	if result.IdentityUnknown {
+		out.IdentityUnknown++
+	}
+	if result.Unlinked {
+		out.Unlinked++
+	}
+	if len(result.IDs) > 0 {
+		out.Matched++
+	}
+	if result.ID == 0 && len(result.IDs) > 1 {
+		out.Ambiguous++
+		addSample(out, "ambiguous", paths, append([]int64(nil), result.IDs...))
+	}
 }
 
 func restoreFacets(ctx context.Context, conn *pgx.Conn, opts options, refs map[string]fileRef) (stats, error) {
@@ -643,27 +862,22 @@ func restoreFacets(ctx context.Context, conn *pgx.Conn, opts options, refs map[s
 		for _, p := range row.Paths {
 			paths = append(paths, p.PathKey)
 		}
-		trackID, matched, ambiguous := uniqueEntity(paths, refs, func(r fileRef) int64 { return r.TrackID })
-		if matched {
-			out.Matched++
-		}
-		if ambiguous {
-			out.Ambiguous++
+		match := matchEntity(row.Paths, refs, func(r fileRef) int64 { return r.TrackID })
+		resolveEntityByPreferredPath(&match, row.Track.FilePath, row.Paths, refs, func(r fileRef) int64 { return r.TrackID })
+		recordEntityMatch(&out, match, paths)
+		if match.ID == 0 {
 			return nil
 		}
-		if trackID == 0 {
+		if _, ok := seen[match.ID]; ok {
 			return nil
 		}
-		if _, ok := seen[trackID]; ok {
-			return nil
-		}
-		seen[trackID] = struct{}{}
+		seen[match.ID] = struct{}{}
 		out.Unique++
 		if !opts.apply {
 			return nil
 		}
 		f := row.Facet
-		rows = append(rows, []any{trackID, f.TrackEmbedding, f.ArtistEmbedding, f.ReleaseEmbedding,
+		rows = append(rows, []any{match.ID, f.TrackEmbedding, f.ArtistEmbedding, f.ReleaseEmbedding,
 			f.TextEmbedding, f.BPM, f.BPMConfidence, f.KeyRoot, f.KeyMode, f.KeyClarity,
 			nullableJSON(f.TopGenres), nullableJSON(f.MoodTags), nullableJSON(f.Waveform),
 			f.AnalyzedAt, f.AnalyzerVersion})
@@ -710,7 +924,13 @@ func flushFacetRows(ctx context.Context, tx pgx.Tx, rows *[][]any) error {
 		"waveform", "analyzed_at", "analyzer_version"}, rows)
 }
 
-func restoreAlbumLoudness(ctx context.Context, conn *pgx.Conn, opts options, refs map[string]fileRef) (stats, error) {
+func restoreAlbumLoudness(
+	ctx context.Context,
+	conn *pgx.Conn,
+	opts options,
+	refs map[string]fileRef,
+	backupIdentities map[string]fileIdentity,
+) (stats, error) {
 	var out stats
 	seen := make(map[int64]struct{})
 	var tx pgx.Tx
@@ -727,27 +947,26 @@ func restoreAlbumLoudness(ctx context.Context, conn *pgx.Conn, opts options, ref
 	rows := make([][]any, 0, 500)
 	path := filepath.Join(opts.exportDir, "album_loudness.jsonl.gz")
 	out.Scanned, err = scanFile[albumLoudnessExport](path, func(row albumLoudnessExport) error {
-		albumID, matched, ambiguous := uniqueEntity(row.Paths, refs, func(r fileRef) int64 { return r.AlbumID })
-		if matched {
-			out.Matched++
+		paths := make([]pathExport, 0, len(row.Paths))
+		for _, path := range row.Paths {
+			paths = append(paths, pathExport{PathKey: path, fileIdentity: backupIdentities[path]})
 		}
-		if ambiguous {
-			out.Ambiguous++
+		match := matchEntity(paths, refs, func(r fileRef) int64 { return r.AlbumID })
+		resolveAlbumByMusicBrainzID(&match, row.Album.MusicBrainzID, paths, refs)
+		recordEntityMatch(&out, match, row.Paths)
+		if match.ID == 0 {
 			return nil
 		}
-		if albumID == 0 {
+		if _, ok := seen[match.ID]; ok {
 			return nil
 		}
-		if _, ok := seen[albumID]; ok {
-			return nil
-		}
-		seen[albumID] = struct{}{}
+		seen[match.ID] = struct{}{}
 		out.Unique++
 		if !opts.apply {
 			return nil
 		}
 		a := row.Album
-		rows = append(rows, []any{albumID, a.IntegratedLUFS, a.TruePeakDB, a.LoudnessRangeDB, a.LoudnessAnalyzedAt})
+		rows = append(rows, []any{match.ID, a.IntegratedLUFS, a.TruePeakDB, a.LoudnessRangeDB, a.LoudnessAnalyzedAt})
 		if len(rows) == cap(rows) {
 			return flush(ctx, tx, pgx.Identifier{"restore_album_loudness"}, []string{
 				"album_id", "integrated_lufs", "true_peak_db", "loudness_range_db", "loudness_analyzed_at"}, &rows)
@@ -766,7 +985,12 @@ func restoreAlbumLoudness(ctx context.Context, conn *pgx.Conn, opts options, ref
 		true_peak_db=COALESCE(a.true_peak_db,s.true_peak_db),
 		loudness_range_db=COALESCE(a.loudness_range_db,s.loudness_range_db),
 		loudness_analyzed_at=COALESCE(a.loudness_analyzed_at,s.loudness_analyzed_at)
-	FROM restore_album_loudness s WHERE a.id=s.album_id`)
+	FROM restore_album_loudness s WHERE a.id=s.album_id AND (
+		(a.integrated_lufs IS NULL AND s.integrated_lufs IS NOT NULL) OR
+		(a.true_peak_db IS NULL AND s.true_peak_db IS NOT NULL) OR
+		(a.loudness_range_db IS NULL AND s.loudness_range_db IS NOT NULL) OR
+		(a.loudness_analyzed_at IS NULL AND s.loudness_analyzed_at IS NOT NULL)
+	)`)
 	if err != nil {
 		return out, err
 	}
@@ -794,6 +1018,17 @@ func restoreSegments(ctx context.Context, conn *pgx.Conn, opts options, refs map
 	out.Scanned, err = scanFile[segmentExport](path, func(row segmentExport) error {
 		ref, ok := refs[row.PathKey]
 		if !ok {
+			return nil
+		}
+		out.PathMatched++
+		switch compareIdentity(row.LibraryFile.fileIdentity, ref) {
+		case identityMismatch:
+			out.IdentityMismatch++
+			addSample(&out, "identity_mismatch", []string{row.PathKey}, nil)
+			return nil
+		case identityUnknown:
+			out.IdentityUnknown++
+			addSample(&out, "identity_unknown", []string{row.PathKey}, nil)
 			return nil
 		}
 		out.Matched++
