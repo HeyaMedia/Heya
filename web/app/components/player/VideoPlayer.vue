@@ -19,6 +19,11 @@ const props = defineProps<{
   // mediaItemId when empty.
   entityType?: string
   entityId?: number
+  // Episode-shuffle session: "up next" becomes a random held episode
+  // (excluding the current one) instead of the sequential next-unwatched,
+  // and the flag forwards to the next /watch navigation so the chain
+  // keeps shuffling.
+  shuffle?: boolean
 }>()
 const emit = defineEmits<{ close: [] }>()
 const entityPreferenceQuery = useQuery(() => ({
@@ -792,7 +797,10 @@ async function startPlayback(startPositionSeconds = pendingSeekTo.value) {
 
   if (props.mediaItemId) {
     // /api/media/{id} accepts slug or numeric ID — spec types id as string.
-    $heya('/api/media/{id}/up-next', { path: { id: props.mediaItemId } })
+    $heya('/api/media/{id}/up-next', {
+      path: { id: props.mediaItemId },
+      query: props.shuffle ? { shuffle: true, exclude: props.entityId || undefined } : undefined,
+    })
       .then(data => {
         const ud = data as UpNextData
         if (ud?.has_next && (ud.file_public_id || ud.file_id)) upNext.value = ud
@@ -1090,6 +1098,7 @@ function playNextEpisode() {
     params.set('entity_type', 'episode')
     params.set('entity_id', String(upNext.value.episode_id))
   }
+  if (props.shuffle) params.set('shuffle', '1')
   navigateTo(`/watch/${fileRef}?${params}`)
 }
 

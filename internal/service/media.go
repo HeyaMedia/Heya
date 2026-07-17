@@ -828,7 +828,7 @@ func (a *App) GetMediaImagePath(ctx context.Context, mediaItemID int64, imageTyp
 				// libraries content deduplication without an eager startup crawl
 				// of every image on disk.
 				if row.ContentHash == "" {
-					if representative, deduped, fingerprintErr := worker.MaterializeMediaAsset(ctx, a.db, *row, row.LocalPath); fingerprintErr == nil {
+					if representative, deduped, fingerprintErr := worker.MaterializeMediaAsset(ctx, a.db, *row, row.LocalPath, filepath.Join(a.config.DataDir.Value, "images")); fingerprintErr == nil {
 						if deduped {
 							if item, itemErr := q.GetMediaItemByID(ctx, mediaItemID); itemErr == nil {
 								a.emitMediaUpdated(item.ID, item.LibraryID, item.Title, string(item.MediaType))
@@ -879,7 +879,7 @@ func (a *App) GetMediaImagePath(ctx context.Context, mediaItemID int64, imageTyp
 		return "", false
 	}
 	if remoteAsset != nil {
-		representative, deduped, err := worker.MaterializeMediaAsset(ctx, a.db, *remoteAsset, localPath)
+		representative, deduped, err := worker.MaterializeMediaAsset(ctx, a.db, *remoteAsset, localPath, filepath.Join(a.config.DataDir.Value, "images"))
 		if err != nil {
 			log.Debug().Err(err).Int64("asset_id", remoteAsset.ID).Msg("image: fingerprint media asset failed")
 			if updateErr := q.UpdateMediaAssetLocalPath(ctx, sqlc.UpdateMediaAssetLocalPathParams{

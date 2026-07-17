@@ -125,7 +125,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	continuationBackoff := newMetadataContinuationBackoff()
 	river.AddWorker(workers, &EnrichMediaItemWorker{DB: cfg.DB, Matcher: cfg.Matcher, Heya: cfg.Heya, Hub: cfg.Hub, DataDir: cfg.DataDir, Progress: cfg.Progress})
 	river.AddWorker(workers, &DownloadImageWorker{DB: cfg.DB, Downloader: cfg.Downloader, Hub: cfg.Hub, Progress: cfg.Progress})
-	river.AddWorker(workers, &WarmPendingImagesWorker{DB: cfg.DB})
+	river.AddWorker(workers, &WarmPendingImagesWorker{DB: cfg.DB, DataDir: cfg.DataDir})
 	river.AddWorker(workers, &FFProbeWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &ScanKeyframesWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &DetectLocalAssetsWorker{DB: cfg.DB, DataDir: cfg.DataDir, Hub: cfg.Hub, Progress: cfg.Progress})

@@ -175,7 +175,23 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 		log.Info().Str("poster", newPoster).Str("backdrop", newBackdrop).Int64("media_id", mediaItemID).Msg("local images copied to cache")
 	}
 
-	if pathsChanged || assetsCreated > 0 {
+	// Scanner rows used to remain unhashed until each individual image was
+	// requested by the UI. Reconcile the whole title now so local sidecars,
+	// resized provider copies, and already-cached remote art all participate in
+	// perceptual dedup immediately.
+	reconciled, reconcileErr := ReconcileMediaItemAssets(ctx, w.DB, mediaItemID, filepath.Join(w.DataDir, "images"))
+	if reconcileErr != nil {
+		log.Warn().Err(reconcileErr).Int64("media_item_id", mediaItemID).Msg("reconcile local artwork failed")
+	} else if reconciled.Deduplicated > 0 || reconciled.Failed > 0 {
+		log.Info().
+			Int64("media_item_id", mediaItemID).
+			Int("fingerprinted", reconciled.Fingerprinted).
+			Int("deduplicated", reconciled.Deduplicated).
+			Int("failed", reconciled.Failed).
+			Msg("reconciled local artwork")
+	}
+
+	if pathsChanged || assetsCreated > 0 || reconciled.Deduplicated > 0 {
 		emit(w.Hub, eventhub.EventMediaUpdated, eventhub.MediaPayload{
 			MediaItemID: mediaItemID,
 			LibraryID:   item.LibraryID,

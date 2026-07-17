@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/disintegration/imaging"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/config"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -264,10 +266,10 @@ func TestMaterializedBackdropsDeduplicateToBestResolution(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, deduped, err := worker.MaterializeMediaAsset(ctx, app.db, small, smallPath)
+	_, deduped, err := worker.MaterializeMediaAsset(ctx, app.db, small, smallPath, app.config.DataDir.Value)
 	require.NoError(t, err)
 	require.False(t, deduped)
-	winner, deduped, err := worker.MaterializeMediaAsset(ctx, app.db, large, largePath)
+	winner, deduped, err := worker.MaterializeMediaAsset(ctx, app.db, large, largePath, app.config.DataDir.Value)
 	require.NoError(t, err)
 	require.True(t, deduped)
 	require.Equal(t, large.ID, winner.ID)
@@ -319,7 +321,7 @@ func TestMaterializedBackdropsDeduplicateConcurrentWorkers(t *testing.T) {
 		go func() {
 			defer workers.Done()
 			<-start
-			_, _, materializeErr := worker.MaterializeMediaAsset(ctx, app.db, asset, path)
+			_, _, materializeErr := worker.MaterializeMediaAsset(ctx, app.db, asset, path, app.config.DataDir.Value)
 			errors <- materializeErr
 		}()
 	}
@@ -336,6 +338,143 @@ func TestMaterializedBackdropsDeduplicateConcurrentWorkers(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, backdrops, 1)
 	require.Equal(t, int32(0), backdrops[0].SortOrder)
+}
+
+func TestReconcileMediaItemAssetsDeduplicatesResizeAndRecompression(t *testing.T) {
+	app, q, lib, ctx := metadataEditorLibrary(t, sqlc.MediaTypeTv)
+	item, err := q.CreateMediaItem(ctx, sqlc.CreateMediaItemParams{
+		LibraryID: lib.ID, MediaType: lib.MediaType, Title: "Recompressed Backdrops", SortTitle: "recompressed backdrops", ProviderKind: "heya",
+	})
+	require.NoError(t, err)
+
+	base := image.NewRGBA(image.Rect(0, 0, 320, 180))
+	for y := 0; y < 180; y++ {
+		for x := 0; x < 320; x++ {
+			base.Set(x, y, color.RGBA{
+				R: uint8((x*7 + y*3) % 256),
+				G: uint8((x*2 + y*5) % 256),
+				B: uint8(40 + (x+y)%180),
+				A: 255,
+			})
+		}
+	}
+
+	cacheRoot := filepath.Join(app.config.DataDir.Value, "images")
+	require.NoError(t, os.MkdirAll(cacheRoot, 0o750))
+	writeJPEG := func(path string, img image.Image, quality int) {
+		t.Helper()
+		file, createErr := os.Create(path)
+		require.NoError(t, createErr)
+		require.NoError(t, jpeg.Encode(file, img, &jpeg.Options{Quality: quality}))
+		require.NoError(t, file.Close())
+	}
+
+	smallPath := filepath.Join(cacheRoot, "backdrop-small.jpg")
+	largePath := filepath.Join(cacheRoot, "backdrop-large.jpg")
+	writeJPEG(smallPath, imaging.Resize(base, 160, 90, imaging.Lanczos), 62)
+	writeJPEG(largePath, base, 94)
+
+	_, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+		MediaItemID: item.ID, AssetType: sqlc.AssetTypeBackdrop, Source: "remote",
+		LocalPath: smallPath, RemoteUrl: "https://metadata.invalid/small.jpg", SortOrder: 0,
+	})
+	require.NoError(t, err)
+	large, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+		MediaItemID: item.ID, AssetType: sqlc.AssetTypeBackdrop, Source: "remote",
+		LocalPath: largePath, RemoteUrl: "https://metadata.invalid/large.jpg", SortOrder: 1,
+	})
+	require.NoError(t, err)
+
+	stats, err := worker.ReconcileMediaItemAssets(ctx, app.db, item.ID, cacheRoot)
+	require.NoError(t, err)
+	require.Equal(t, 2, stats.Fingerprinted)
+	require.Equal(t, 1, stats.Deduplicated)
+	require.Zero(t, stats.Failed)
+
+	backdrops, err := q.ListMediaAssetsByType(ctx, sqlc.ListMediaAssetsByTypeParams{
+		MediaItemID: item.ID, AssetType: sqlc.AssetTypeBackdrop,
+	})
+	require.NoError(t, err)
+	require.Len(t, backdrops, 1)
+	require.Equal(t, large.ID, backdrops[0].ID)
+	require.Equal(t, int32(320), backdrops[0].Width)
+	require.Equal(t, int32(180), backdrops[0].Height)
+	require.NoFileExists(t, smallPath, "redundant managed-cache files should be removed")
+	require.FileExists(t, largePath)
+}
+
+func TestReconcileMediaItemAssetsNeverDeletesSourceSidecars(t *testing.T) {
+	app, q, lib, ctx := metadataEditorLibrary(t, sqlc.MediaTypeMovie)
+	item, err := q.CreateMediaItem(ctx, sqlc.CreateMediaItemParams{
+		LibraryID: lib.ID, MediaType: lib.MediaType, Title: "Source Backdrops", SortTitle: "source backdrops", ProviderKind: "heya",
+	})
+	require.NoError(t, err)
+
+	sourceDir := t.TempDir()
+	sourcePath := filepath.Join(sourceDir, "fanart.jpg")
+	cacheRoot := filepath.Join(app.config.DataDir.Value, "images")
+	cachePath := filepath.Join(cacheRoot, "backdrop.jpg")
+	require.NoError(t, os.MkdirAll(cacheRoot, 0o750))
+	img := image.NewRGBA(image.Rect(0, 0, 64, 36))
+	for y := 0; y < 36; y++ {
+		for x := 0; x < 64; x++ {
+			img.Set(x, y, color.RGBA{R: uint8(x * 3), G: uint8(y * 5), B: 90, A: 255})
+		}
+	}
+	for _, path := range []string{sourcePath, cachePath} {
+		file, createErr := os.Create(path)
+		require.NoError(t, createErr)
+		require.NoError(t, jpeg.Encode(file, img, &jpeg.Options{Quality: 90}))
+		require.NoError(t, file.Close())
+	}
+
+	_, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+		MediaItemID: item.ID, AssetType: sqlc.AssetTypeBackdrop, Source: "local", LocalPath: sourcePath, SortOrder: 1,
+	})
+	require.NoError(t, err)
+	_, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+		MediaItemID: item.ID, AssetType: sqlc.AssetTypeBackdrop, Source: "local", LocalPath: cachePath, SortOrder: 0,
+	})
+	require.NoError(t, err)
+
+	stats, err := worker.ReconcileMediaItemAssets(ctx, app.db, item.ID, cacheRoot)
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.Deduplicated)
+	require.FileExists(t, sourcePath, "library sidecars are source data, not disposable cache")
+}
+
+func TestMediaAssetIdentityConstraintsIgnoreBackdropOrder(t *testing.T) {
+	_, q, lib, ctx := metadataEditorLibrary(t, sqlc.MediaTypeTv)
+	item, err := q.CreateMediaItem(ctx, sqlc.CreateMediaItemParams{
+		LibraryID: lib.ID, MediaType: lib.MediaType, Title: "Identity Backdrops", SortTitle: "identity backdrops", ProviderKind: "heya",
+	})
+	require.NoError(t, err)
+
+	_, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+		MediaItemID: item.ID, AssetType: sqlc.AssetTypeBackdrop, Source: "local", LocalPath: "/library/fanart.jpg", SortOrder: 0,
+	})
+	require.NoError(t, err)
+	_, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+		MediaItemID: item.ID, AssetType: sqlc.AssetTypeBackdrop, Source: "local", LocalPath: "/library/fanart.jpg", SortOrder: 17,
+	})
+	require.Error(t, err, "the same local file must not be appended at a new carousel position")
+
+	_, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+		MediaItemID: item.ID, AssetType: sqlc.AssetTypeBackdrop, Source: "remote", RemoteUrl: "https://metadata.invalid/fanart", SortOrder: 1,
+	})
+	require.NoError(t, err)
+	_, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+		MediaItemID: item.ID, AssetType: sqlc.AssetTypeBackdrop, Source: "remote", RemoteUrl: "https://metadata.invalid/fanart", SortOrder: 99,
+	})
+	require.Error(t, err, "the same upstream image must not be appended at a new carousel position")
+
+	for i, label := range []string{"s01e01", "s01e02"} {
+		_, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+			MediaItemID: item.ID, AssetType: sqlc.AssetTypeStill, Source: "local",
+			LocalPath: "/library/shared-still.jpg", Label: label, SortOrder: int32(i),
+		})
+		require.NoError(t, err, "structural episode slots intentionally retain separate identities")
+	}
 }
 
 func TestMetadataEditorDeleteImageOnlyRemovesManagedCacheFiles(t *testing.T) {

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"path/filepath"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,7 +23,8 @@ import (
 // to a no-op.
 type WarmPendingImagesWorker struct {
 	river.WorkerDefaults[WarmPendingImagesArgs]
-	DB *pgxpool.Pool
+	DB      *pgxpool.Pool
+	DataDir string
 }
 
 const warmSweepPageSize = 500
@@ -30,6 +32,40 @@ const warmSweepPageSize = 500
 func (w *WarmPendingImagesWorker) Work(ctx context.Context, job *river.Job[WarmPendingImagesArgs]) error {
 	q := sqlc.New(w.DB)
 	client := river.ClientFromContext[pgx.Tx](ctx)
+
+	// Older local scanner rows and pre-fingerprint cache entries already have
+	// bytes, so the remote-only warm sweep could never heal them. Fingerprint
+	// those rows first; the reconciliation is idempotent and converges to an
+	// empty query after the initial backfill.
+	fingerprinted, deduplicated, failed := 0, 0, 0
+	var fingerprintCursor int64
+	for {
+		rows, err := q.ListUnfingerprintedMediaAssets(ctx, sqlc.ListUnfingerprintedMediaAssetsParams{
+			ID:    fingerprintCursor,
+			Limit: warmSweepPageSize,
+		})
+		if err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			break
+		}
+		for _, asset := range rows {
+			fingerprintCursor = asset.ID
+			_, wasDeduplicated, fingerprintErr := MaterializeMediaAsset(
+				ctx, w.DB, asset, asset.LocalPath, filepath.Join(w.DataDir, "images"),
+			)
+			if fingerprintErr != nil {
+				failed++
+				log.Debug().Err(fingerprintErr).Int64("asset_id", asset.ID).Str("path", asset.LocalPath).Msg("warm images: fingerprint failed")
+				continue
+			}
+			fingerprinted++
+			if wasDeduplicated {
+				deduplicated++
+			}
+		}
+	}
 
 	assets := 0
 	var cursor int64
@@ -91,8 +127,14 @@ func (w *WarmPendingImagesWorker) Work(ctx context.Context, job *river.Job[WarmP
 		}
 	}
 
-	if assets > 0 || covers > 0 {
-		log.Info().Int("assets", assets).Int("album_covers", covers).Msg("warm images: pending artwork downloads queued")
+	if fingerprinted > 0 || deduplicated > 0 || failed > 0 || assets > 0 || covers > 0 {
+		log.Info().
+			Int("fingerprinted", fingerprinted).
+			Int("deduplicated", deduplicated).
+			Int("fingerprint_failed", failed).
+			Int("assets", assets).
+			Int("album_covers", covers).
+			Msg("warm images: artwork reconciliation complete")
 	}
 	return nil
 }

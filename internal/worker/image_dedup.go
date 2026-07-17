@@ -3,11 +3,9 @@ package worker
 import (
 	"context"
 	"errors"
-	"math"
-	"math/bits"
 	"os"
+	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -22,7 +20,7 @@ var structuralImageLabel = regexp.MustCompile(`^(season-[0-9]+|s[0-9]+e[0-9]+)$`
 // and collapses exact or conservatively-matched visual duplicates. It returns
 // the representative row that remains after deduplication and whether rows
 // were removed.
-func MaterializeMediaAsset(ctx context.Context, db *pgxpool.Pool, pending sqlc.MediaAsset, localPath string) (sqlc.MediaAsset, bool, error) {
+func MaterializeMediaAsset(ctx context.Context, db *pgxpool.Pool, pending sqlc.MediaAsset, localPath, managedImageRoot string) (sqlc.MediaAsset, bool, error) {
 	fingerprint, err := images.FingerprintFile(localPath)
 	if err != nil {
 		return sqlc.MediaAsset{}, false, err
@@ -42,11 +40,69 @@ func MaterializeMediaAsset(ctx context.Context, db *pgxpool.Pool, pending sqlc.M
 		return sqlc.MediaAsset{}, false, err
 	}
 	txq := q.WithTx(tx)
-	asset, err := txq.UpdateMediaAssetMaterialization(ctx, sqlc.UpdateMediaAssetMaterializationParams{
-		ID: pending.ID, LocalPath: localPath,
-		ContentHash: fingerprint.ContentHash, VisualHash: fingerprint.VisualHash,
-		Width: int32(fingerprint.Width), Height: int32(fingerprint.Height), FileSize: fingerprint.ByteSize,
+	materializedPending := pending
+	materializedPending.LocalPath = localPath
+	materializedPending.ContentHash = fingerprint.ContentHash
+	materializedPending.VisualHash = fingerprint.VisualHash
+	materializedPending.Width = int32(fingerprint.Width)
+	materializedPending.Height = int32(fingerprint.Height)
+	materializedPending.FileSize = fingerprint.ByteSize
+
+	// A scanner row can already own this exact cache path while a pending
+	// remote row is materializing. Resolve that identity collision before the
+	// UPDATE so the local-path constraint never rejects the write.
+	identityDeduplicated := false
+	var asset sqlc.MediaAsset
+	pathCandidates, err := txq.ListMediaAssetsByType(ctx, sqlc.ListMediaAssetsByTypeParams{
+		MediaItemID: pending.MediaItemID, AssetType: pending.AssetType,
 	})
+	if err != nil {
+		return sqlc.MediaAsset{}, false, err
+	}
+	for _, candidate := range pathCandidates {
+		if candidate.ID == pending.ID || candidate.LocalPath != localPath || imageDedupScope(candidate) != imageDedupScope(materializedPending) {
+			continue
+		}
+		materializedCandidate := candidate
+		materializedCandidate.ContentHash = fingerprint.ContentHash
+		materializedCandidate.VisualHash = fingerprint.VisualHash
+		materializedCandidate.Width = int32(fingerprint.Width)
+		materializedCandidate.Height = int32(fingerprint.Height)
+		materializedCandidate.FileSize = fingerprint.ByteSize
+		if betterImageCandidate(materializedPending, materializedCandidate) {
+			if err := txq.DeleteMediaAsset(ctx, candidate.ID); err != nil {
+				return sqlc.MediaAsset{}, false, err
+			}
+			identityDeduplicated = true
+			break
+		}
+		asset, err = txq.UpdateMediaAssetMaterialization(ctx, sqlc.UpdateMediaAssetMaterializationParams{
+			ID: candidate.ID, LocalPath: localPath,
+			ContentHash: fingerprint.ContentHash, VisualHash: fingerprint.VisualHash,
+			Width: int32(fingerprint.Width), Height: int32(fingerprint.Height), FileSize: fingerprint.ByteSize,
+		})
+		if err != nil {
+			return sqlc.MediaAsset{}, false, err
+		}
+		if err := txq.DeleteMediaAsset(ctx, pending.ID); err != nil {
+			return sqlc.MediaAsset{}, false, err
+		}
+		if pending.SortOrder < asset.SortOrder {
+			if err := txq.SetAssetSortOrder(ctx, sqlc.SetAssetSortOrderParams{ID: asset.ID, SortOrder: pending.SortOrder}); err != nil {
+				return sqlc.MediaAsset{}, false, err
+			}
+			asset.SortOrder = pending.SortOrder
+		}
+		identityDeduplicated = true
+		break
+	}
+	if asset.ID == 0 {
+		asset, err = txq.UpdateMediaAssetMaterialization(ctx, sqlc.UpdateMediaAssetMaterializationParams{
+			ID: pending.ID, LocalPath: localPath,
+			ContentHash: fingerprint.ContentHash, VisualHash: fingerprint.VisualHash,
+			Width: int32(fingerprint.Width), Height: int32(fingerprint.Height), FileSize: fingerprint.ByteSize,
+		})
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		// A concurrent materialization may have already collapsed this row. Return
 		// its surviving visual equivalent so the caller still completes cleanly.
@@ -56,15 +112,8 @@ func MaterializeMediaAsset(ctx context.Context, db *pgxpool.Pool, pending sqlc.M
 		if listErr != nil {
 			return sqlc.MediaAsset{}, false, listErr
 		}
-		materialized := pending
-		materialized.LocalPath = localPath
-		materialized.ContentHash = fingerprint.ContentHash
-		materialized.VisualHash = fingerprint.VisualHash
-		materialized.Width = int32(fingerprint.Width)
-		materialized.Height = int32(fingerprint.Height)
-		materialized.FileSize = fingerprint.ByteSize
 		for _, candidate := range candidates {
-			if imageDedupScope(candidate) == imageDedupScope(materialized) && sameMaterializedImage(materialized, candidate) {
+			if imageDedupScope(candidate) == imageDedupScope(materializedPending) && sameMaterializedImage(materializedPending, candidate) {
 				if err := tx.Commit(ctx); err != nil {
 					return sqlc.MediaAsset{}, false, err
 				}
@@ -93,10 +142,15 @@ func MaterializeMediaAsset(ctx context.Context, db *pgxpool.Pool, pending sqlc.M
 		}
 	}
 	if len(duplicates) <= 1 {
+		if identityDeduplicated {
+			if err := normalizeMaterializedWinner(ctx, txq, asset, asset.SortOrder, scope); err != nil {
+				return asset, false, err
+			}
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return asset, false, err
 		}
-		return asset, false, nil
+		return asset, identityDeduplicated, nil
 	}
 
 	winner := duplicates[0]
@@ -118,38 +172,123 @@ func MaterializeMediaAsset(ctx context.Context, db *pgxpool.Pool, pending sqlc.M
 		if err := txq.DeleteMediaAsset(ctx, candidate.ID); err != nil {
 			return asset, false, err
 		}
-		if candidate.Source == "remote" && candidate.LocalPath != winner.LocalPath {
+		if candidate.LocalPath != winner.LocalPath && managedMediaAssetPath(candidate.LocalPath, managedImageRoot) {
 			loserPaths = append(loserPaths, candidate.LocalPath)
 		}
 	}
-	if asset.AssetType == sqlc.AssetTypeBackdrop {
-		if err := txq.StageMediaAssetsAfterDedup(ctx, sqlc.StageMediaAssetsAfterDedupParams{
-			MediaItemID: asset.MediaItemID, AssetType: asset.AssetType,
-			WinnerID: winner.ID, DesiredOrder: int64(desiredOrder),
-		}); err != nil {
-			return asset, false, err
-		}
-		if err := txq.FinalizeStagedMediaAssetOrder(ctx, sqlc.FinalizeStagedMediaAssetOrderParams{
-			MediaItemID: asset.MediaItemID, AssetType: asset.AssetType,
-		}); err != nil {
-			return asset, false, err
-		}
-		if desiredOrder == 0 {
-			if err := txq.UpdateMediaItemBackdropPath(ctx, sqlc.UpdateMediaItemBackdropPathParams{
-				ID: asset.MediaItemID, BackdropPath: winner.LocalPath,
-			}); err != nil {
-				return asset, false, err
-			}
-		}
+	if err := normalizeMaterializedWinner(ctx, txq, winner, desiredOrder, scope); err != nil {
+		return asset, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return asset, false, err
 	}
 	for _, path := range loserPaths {
-		_ = os.Remove(path)
+		removeUnreferencedManagedImage(ctx, db, path)
 	}
 	winner, err = q.GetMediaAssetByID(ctx, winner.ID)
 	return winner, true, err
+}
+
+func normalizeMaterializedWinner(ctx context.Context, q *sqlc.Queries, winner sqlc.MediaAsset, desiredOrder int32, scope string) error {
+	if winner.AssetType == sqlc.AssetTypeBackdrop {
+		if err := q.StageMediaAssetsAfterDedup(ctx, sqlc.StageMediaAssetsAfterDedupParams{
+			MediaItemID: winner.MediaItemID, AssetType: winner.AssetType,
+			WinnerID: winner.ID, DesiredOrder: int64(desiredOrder),
+		}); err != nil {
+			return err
+		}
+		if err := q.FinalizeStagedMediaAssetOrder(ctx, sqlc.FinalizeStagedMediaAssetOrderParams{
+			MediaItemID: winner.MediaItemID, AssetType: winner.AssetType,
+		}); err != nil {
+			return err
+		}
+		if desiredOrder == 0 {
+			return q.UpdateMediaItemBackdropPath(ctx, sqlc.UpdateMediaItemBackdropPathParams{
+				ID: winner.MediaItemID, BackdropPath: winner.LocalPath,
+			})
+		}
+	} else if winner.AssetType == sqlc.AssetTypePoster && scope == "" && desiredOrder == 0 {
+		return q.UpdateMediaItemPosterPath(ctx, sqlc.UpdateMediaItemPosterPathParams{
+			ID: winner.MediaItemID, PosterPath: winner.LocalPath,
+		})
+	}
+	return nil
+}
+
+// MediaAssetReconcileStats summarizes one scanner/backfill reconciliation.
+// Failed files remain unhashed so a later scan can retry transient mounts.
+type MediaAssetReconcileStats struct {
+	Fingerprinted int
+	Deduplicated  int
+	Failed        int
+}
+
+// ReconcileMediaItemAssets fingerprints every materialized visual asset for a
+// single title. Local scanner rows take this path immediately instead of
+// waiting for every carousel image to be requested by a browser.
+func ReconcileMediaItemAssets(ctx context.Context, db *pgxpool.Pool, mediaItemID int64, managedImageRoot string) (MediaAssetReconcileStats, error) {
+	assets, err := sqlc.New(db).ListMediaAssets(ctx, mediaItemID)
+	if err != nil {
+		return MediaAssetReconcileStats{}, err
+	}
+	stats := MediaAssetReconcileStats{}
+	for _, asset := range assets {
+		if asset.LocalPath == "" || asset.ContentHash != "" || !fingerprintableAssetType(asset.AssetType) {
+			continue
+		}
+		_, deduplicated, fingerprintErr := MaterializeMediaAsset(ctx, db, asset, asset.LocalPath, managedImageRoot)
+		if fingerprintErr != nil {
+			stats.Failed++
+			continue
+		}
+		stats.Fingerprinted++
+		if deduplicated {
+			stats.Deduplicated++
+		}
+	}
+	return stats, nil
+}
+
+func fingerprintableAssetType(assetType sqlc.AssetType) bool {
+	switch assetType {
+	case sqlc.AssetTypePoster, sqlc.AssetTypeBackdrop, sqlc.AssetTypeLogo,
+		sqlc.AssetTypeArt, sqlc.AssetTypeBanner, sqlc.AssetTypeThumb,
+		sqlc.AssetTypeDisc, sqlc.AssetTypeClearart, sqlc.AssetTypeStill:
+		return true
+	default:
+		return false
+	}
+}
+
+func managedMediaAssetPath(path, managedImageRoot string) bool {
+	if path == "" || managedImageRoot == "" {
+		return false
+	}
+	base, err := filepath.Abs(managedImageRoot)
+	if err != nil {
+		return false
+	}
+	candidate := path
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(base, candidate)
+	}
+	candidate, err = filepath.Abs(candidate)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(base, candidate)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func removeUnreferencedManagedImage(ctx context.Context, db *pgxpool.Pool, path string) {
+	var referenced bool
+	err := db.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM media_assets WHERE local_path = $1)
+		    OR EXISTS (SELECT 1 FROM media_item_profiles WHERE poster_path = $1 OR backdrop_path = $1)
+	`, path).Scan(&referenced)
+	if err == nil && !referenced {
+		_ = os.Remove(path)
+	}
 }
 
 func imageDedupScope(asset sqlc.MediaAsset) string {
@@ -160,51 +299,16 @@ func imageDedupScope(asset sqlc.MediaAsset) string {
 }
 
 func sameMaterializedImage(left, right sqlc.MediaAsset) bool {
-	if left.ContentHash != "" && left.ContentHash == right.ContentHash {
-		return true
-	}
-	if left.VisualHash == "" || right.VisualHash == "" || left.Width <= 0 || left.Height <= 0 || right.Width <= 0 || right.Height <= 0 {
-		return false
-	}
-	leftAspect := float64(left.Width) / float64(left.Height)
-	rightAspect := float64(right.Width) / float64(right.Height)
-	if math.Abs(leftAspect-rightAspect)/math.Max(leftAspect, rightAspect) > 0.02 {
-		return false
-	}
-	leftHash, leftRGB, ok := parseVisualHash(left.VisualHash)
-	if !ok {
-		return false
-	}
-	rightHash, rightRGB, ok := parseVisualHash(right.VisualHash)
-	if !ok || bits.OnesCount64(leftHash^rightHash) > 4 {
-		return false
-	}
-	for i := range leftRGB {
-		if absInt(int(leftRGB[i])-int(rightRGB[i])) > 12 {
-			return false
-		}
-	}
-	return true
-}
-
-func parseVisualHash(value string) (uint64, [3]uint8, bool) {
-	parts := strings.Split(value, ":")
-	if len(parts) != 2 || len(parts[1]) != 6 {
-		return 0, [3]uint8{}, false
-	}
-	hash, err := strconv.ParseUint(parts[0], 16, 64)
-	if err != nil {
-		return 0, [3]uint8{}, false
-	}
-	var rgb [3]uint8
-	for i := range rgb {
-		channel, err := strconv.ParseUint(parts[1][i*2:i*2+2], 16, 8)
-		if err != nil {
-			return 0, [3]uint8{}, false
-		}
-		rgb[i] = uint8(channel)
-	}
-	return hash, rgb, true
+	return images.VisuallyEquivalent(
+		images.Fingerprint{
+			ContentHash: left.ContentHash, VisualHash: left.VisualHash,
+			Width: int(left.Width), Height: int(left.Height), ByteSize: left.FileSize,
+		},
+		images.Fingerprint{
+			ContentHash: right.ContentHash, VisualHash: right.VisualHash,
+			Width: int(right.Width), Height: int(right.Height), ByteSize: right.FileSize,
+		},
+	)
 }
 
 func betterImageCandidate(candidate, current sqlc.MediaAsset) bool {
@@ -234,11 +338,4 @@ func candidateSourceRank(source string) int {
 	default:
 		return 1
 	}
-}
-
-func absInt(value int) int {
-	if value < 0 {
-		return -value
-	}
-	return value
 }

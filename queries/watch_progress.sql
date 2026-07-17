@@ -159,6 +159,18 @@ JOIN tv_episodes e ON e.id = wp.entity_id
 JOIN tv_seasons s ON s.id = e.season_id
 WHERE wp.user_id = $1 AND wp.entity_type = 'episode' AND s.series_id = $2;
 
+-- name: ListSeriesEpisodeRefs :many
+-- Every catalog episode for a series' media item with its season number —
+-- the shuffle pool source (filtered to held files in Go).
+SELECT e.id AS episode_id, e.episode_number, e.title, e.runtime_minutes,
+       s.id AS season_id, s.season_number,
+       ts.media_item_id
+FROM tv_episodes e
+JOIN tv_seasons s ON s.id = e.season_id
+JOIN tv_series ts ON ts.id = s.series_id
+WHERE ts.media_item_id = $1
+ORDER BY (CASE WHEN s.season_number = 0 THEN 1 ELSE 0 END), s.season_number ASC, e.episode_number ASC;
+
 -- Next unwatched episode for a series (ordered by season then episode number)
 -- name: GetNextUnwatchedEpisode :one
 SELECT e.id AS episode_id, e.episode_number, e.title, e.runtime_minutes,

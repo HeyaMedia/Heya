@@ -528,7 +528,16 @@ func registerMeRoutes(api huma.API, app *service.App) {
 		})
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/media/{id}/up-next", "get-up-next", "Next episode for a series", "Me")),
-		func(ctx context.Context, in *IDPath) (*JSONOutput[service.UpNextResult], error) {
+		func(ctx context.Context, in *struct {
+			IDPath
+			Shuffle bool  `query:"shuffle" doc:"Pick a random episode with a file instead of the next unwatched one"`
+			Exclude int64 `query:"exclude" doc:"Episode id to avoid repeating when shuffling"`
+		},
+		) (*JSONOutput[service.UpNextResult], error) {
+			if in.Shuffle {
+				result, _ := app.GetShuffleEpisode(ctx, in.ID, in.Exclude)
+				return noStoreJSON(result), nil
+			}
 			result, _ := app.GetUpNext(ctx, userFrom(ctx).ID, in.ID)
 			return noStoreJSON(result), nil
 		})

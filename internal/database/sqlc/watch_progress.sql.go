@@ -423,6 +423,57 @@ func (q *Queries) ListRecentlyWatchedEpisodes(ctx context.Context, arg ListRecen
 	return items, nil
 }
 
+const listSeriesEpisodeRefs = `-- name: ListSeriesEpisodeRefs :many
+SELECT e.id AS episode_id, e.episode_number, e.title, e.runtime_minutes,
+       s.id AS season_id, s.season_number,
+       ts.media_item_id
+FROM tv_episodes e
+JOIN tv_seasons s ON s.id = e.season_id
+JOIN tv_series ts ON ts.id = s.series_id
+WHERE ts.media_item_id = $1
+ORDER BY (CASE WHEN s.season_number = 0 THEN 1 ELSE 0 END), s.season_number ASC, e.episode_number ASC
+`
+
+type ListSeriesEpisodeRefsRow struct {
+	EpisodeID      int64  `json:"episode_id"`
+	EpisodeNumber  int32  `json:"episode_number"`
+	Title          string `json:"title"`
+	RuntimeMinutes int32  `json:"runtime_minutes"`
+	SeasonID       int64  `json:"season_id"`
+	SeasonNumber   int32  `json:"season_number"`
+	MediaItemID    int64  `json:"media_item_id"`
+}
+
+// Every catalog episode for a series' media item with its season number —
+// the shuffle pool source (filtered to held files in Go).
+func (q *Queries) ListSeriesEpisodeRefs(ctx context.Context, mediaItemID int64) ([]ListSeriesEpisodeRefsRow, error) {
+	rows, err := q.db.Query(ctx, listSeriesEpisodeRefs, mediaItemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSeriesEpisodeRefsRow{}
+	for rows.Next() {
+		var i ListSeriesEpisodeRefsRow
+		if err := rows.Scan(
+			&i.EpisodeID,
+			&i.EpisodeNumber,
+			&i.Title,
+			&i.RuntimeMinutes,
+			&i.SeasonID,
+			&i.SeasonNumber,
+			&i.MediaItemID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWatchedEpisodeNumbersForMediaItems = `-- name: ListWatchedEpisodeNumbersForMediaItems :many
 SELECT ts.media_item_id, s.season_number, e.episode_number
 FROM user_watch_progress wp

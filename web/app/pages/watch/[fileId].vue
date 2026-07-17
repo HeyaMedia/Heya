@@ -32,6 +32,11 @@ const entityId = computed(() => {
   return Number.isFinite(n) && n > 0 ? n : 0
 })
 
+// `?shuffle=1` — episode-shuffle session: the player picks a RANDOM held
+// episode as "up next" (and keeps forwarding the flag) instead of the
+// sequential next-unwatched.
+const shuffle = computed(() => route.query.shuffle === '1')
+
 function handleClose() {
   if (window.history.length > 1) {
     router.back()
@@ -50,6 +55,7 @@ function handleClose() {
     :start-time="startTime"
     :entity-type="entityType"
     :entity-id="entityId"
+    :shuffle="shuffle"
     @close="handleClose"
   />
 </template>

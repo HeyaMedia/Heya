@@ -337,6 +337,65 @@ func (q *Queries) ListPendingRemoteMediaAssets(ctx context.Context, arg ListPend
 	return items, nil
 }
 
+const listUnfingerprintedMediaAssets = `-- name: ListUnfingerprintedMediaAssets :many
+SELECT media_assets.id, media_assets.media_item_id, media_assets.asset_type, media_assets.source, media_assets.local_path, media_assets.remote_url, media_assets.language, media_assets.label, media_assets.sort_order, media_assets.width, media_assets.height, media_assets.file_size, media_assets.score, media_assets.likes, media_assets.aspect, media_assets.created_at, media_assets.content_hash, media_assets.visual_hash
+FROM media_assets
+WHERE media_assets.local_path <> ''
+  AND media_assets.content_hash = ''
+  AND media_assets.asset_type IN ('poster', 'backdrop', 'logo', 'art', 'banner', 'thumb', 'disc', 'clearart', 'still')
+  AND media_assets.id > $1
+ORDER BY media_assets.id
+LIMIT $2
+`
+
+type ListUnfingerprintedMediaAssetsParams struct {
+	ID    int64 `json:"id"`
+	Limit int32 `json:"limit"`
+}
+
+// Materialized artwork from older releases and scanner-discovered local
+// sidecars may predate image fingerprinting. The daily artwork reconciliation
+// pages these rows by id, computes their exact/perceptual hashes, and collapses
+// duplicates through the same path used by fresh downloads.
+func (q *Queries) ListUnfingerprintedMediaAssets(ctx context.Context, arg ListUnfingerprintedMediaAssetsParams) ([]MediaAsset, error) {
+	rows, err := q.db.Query(ctx, listUnfingerprintedMediaAssets, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MediaAsset{}
+	for rows.Next() {
+		var i MediaAsset
+		if err := rows.Scan(
+			&i.ID,
+			&i.MediaItemID,
+			&i.AssetType,
+			&i.Source,
+			&i.LocalPath,
+			&i.RemoteUrl,
+			&i.Language,
+			&i.Label,
+			&i.SortOrder,
+			&i.Width,
+			&i.Height,
+			&i.FileSize,
+			&i.Score,
+			&i.Likes,
+			&i.Aspect,
+			&i.CreatedAt,
+			&i.ContentHash,
+			&i.VisualHash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const promoteOrderedMediaAsset = `-- name: PromoteOrderedMediaAsset :exec
 WITH ranked AS (
     SELECT media_assets.id,

@@ -165,7 +165,7 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 	}
 	if assetErr == nil {
 		var deduped bool
-		storedAsset, deduped, assetErr = MaterializeMediaAsset(ctx, w.DB, storedAsset, localPath)
+		storedAsset, deduped, assetErr = MaterializeMediaAsset(ctx, w.DB, storedAsset, localPath, filepath.Join(w.Downloader.CacheDir(), "images"))
 		if assetErr != nil {
 			return fmt.Errorf("fingerprint downloaded %s: %w", job.Args.AssetType, assetErr)
 		}
@@ -325,7 +325,7 @@ func (w *DownloadImageWorker) materializePendingAsset(ctx context.Context, job *
 		return nil
 	}
 
-	representative, deduped, err := MaterializeMediaAsset(ctx, w.DB, asset, localPath)
+	representative, deduped, err := MaterializeMediaAsset(ctx, w.DB, asset, localPath, filepath.Join(w.Downloader.CacheDir(), "images"))
 	if err != nil {
 		log.Debug().Err(err).Int64("asset_id", asset.ID).Msg("image warm: fingerprint failed")
 		if updateErr := q.UpdateMediaAssetLocalPath(ctx, sqlc.UpdateMediaAssetLocalPathParams{

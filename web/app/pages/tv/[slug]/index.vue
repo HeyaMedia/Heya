@@ -71,11 +71,21 @@
           </p>
 
           <div class="actions">
-            <button v-if="firstEpisodeFileRef" class="btn-play" @click="playFirstEpisode">
-              <span class="tri" /> {{ episodeInProgress ? 'Resume' : 'Play' }}
+            <button v-if="playTarget" class="btn-play" @click="playFirstEpisode">
+              <span class="tri" /> {{ playLabel }}
               <small v-if="upNextSmall">{{ upNextSmall }}</small>
             </button>
             <button v-else class="btn-play" disabled><span class="tri" /> No Files</button>
+
+            <button
+              v-if="heldEpisodes.length > 1"
+              class="pill icon"
+              title="Shuffle episodes"
+              aria-label="Play random episodes"
+              @click="playShuffle"
+            >
+              <Icon name="shuffle" :size="16" />
+            </button>
 
             <button class="pill" @click="showListModal = true"><Icon name="plus" :size="15" /> My List</button>
 
@@ -628,20 +638,51 @@ interface UpNextData {
 }
 const upNext = ref<UpNextData | null>(null)
 
-const nextEpisodeKey = computed(() => {
-  if (upNext.value?.has_next && upNext.value.season_number && upNext.value.episode_number) {
-    return `s${upNext.value.season_number}e${upNext.value.episode_number}`
+// Every episode we actually hold a file for, in catalog order (specials
+// last, mirroring the up-next SQL). This — not the API's nomination — is
+// the ground truth for what the hero can play: the up-next endpoint works
+// against the full provider catalog, so a fully-watched series whose
+// catalog lists one more un-held episode (announced season, specials)
+// nominates a phantom we can't play.
+interface HeldEpisode { key: string; episodeId: number; fileRef: string | number; title: string }
+const heldEpisodes = computed<HeldEpisode[]>(() => {
+  const files = detail.value?.episode_files
+  if (!files) return []
+  const out: HeldEpisode[] = []
+  const seasons = [...(detail.value?.seasons || [])].sort((a: any, b: any) =>
+    (a.season_number === 0 ? 1 : 0) - (b.season_number === 0 ? 1 : 0) || a.season_number - b.season_number)
+  for (const s of seasons) {
+    for (const ep of (s.episodes || [])) {
+      const key = `s${s.season_number}e${ep.episode_number}`
+      const entry = files[key]
+      const fileRef = entry?.file_public_id || entry?.file_id
+      if (!fileRef) continue
+      out.push({ key, episodeId: ep.id, fileRef, title: ep.preferred_title || ep.title || '' })
+    }
   }
-  if (!detail.value?.episode_files) return null
-  const keys = Object.keys(detail.value.episode_files).sort()
-  return keys.length > 0 ? keys[0] : null
+  return out
 })
 
-const firstEpisodeFileRef = computed(() => {
-  if (!nextEpisodeKey.value || !detail.value?.episode_files) return null
-  const entry = detail.value.episode_files[nextEpisodeKey.value]
-  return entry?.file_public_id || entry?.file_id || null
+const firstUnwatchedHeld = computed(() =>
+  heldEpisodes.value.find(e => !watchedEpisodeIds.value.has(e.episodeId)) ?? null)
+const allHeldWatched = computed(() =>
+  heldEpisodes.value.length > 0 && watchedEpisodeIds.value.size > 0 && !firstUnwatchedHeld.value)
+
+// What the hero button plays: the API's nomination when we hold it,
+// else the first held unwatched episode, else (everything seen) the
+// first held episode as a replay.
+const playTarget = computed<HeldEpisode | null>(() => {
+  const held = heldEpisodes.value
+  if (!held.length) return null
+  const un = upNext.value
+  if (un?.has_next && un.season_number != null && un.episode_number != null) {
+    const hit = held.find(e => e.key === `s${un.season_number}e${un.episode_number}`)
+    if (hit) return hit
+  }
+  return firstUnwatchedHeld.value ?? held[0]!
 })
+
+const nextEpisodeKey = computed(() => playTarget.value?.key ?? null)
 
 const nextEpisodeLabel = computed(() => {
   if (!nextEpisodeKey.value) return ''
@@ -652,40 +693,56 @@ const nextEpisodeLabel = computed(() => {
   return `S${s.padStart(2, '0')}E${e.padStart(2, '0')}`
 })
 
-const nextEpisodeTitle = computed(() => {
-  const key = nextEpisodeKey.value
-  if (!key) return ''
-  const match = key.match(/^s(\d+)e(\d+)$/)
-  if (!match) return ''
-  const sNum = parseInt(match[1]!)
-  const eNum = parseInt(match[2]!)
-  const season = detail.value?.seasons?.find((s: any) => s.season_number === sNum)
-  const ep = season?.episodes?.find((e: any) => e.episode_number === eNum)
-  return ep?.preferred_title || ep?.title || upNext.value?.episode_title || ''
+const nextEpisodeTitle = computed(() =>
+  playTarget.value?.title || upNext.value?.episode_title || '')
+
+// Primary-button label: Resume beats everything; a fully-seen series reads
+// "Watched" and replays from the first held episode on click.
+const playLabel = computed(() => {
+  if (episodeInProgress.value) return 'Resume'
+  if (allHeldWatched.value) return 'Watched'
+  return 'Play'
 })
 
-// Primary-button subtitle: "S01E03 · TITLE" (S01E03 · 22M LEFT when resuming).
+// Primary-button subtitle: "S01E03 · TITLE" (Play again · S01E01 when the
+// whole series is seen).
 const upNextSmall = computed(() => {
   if (!nextEpisodeLabel.value) return ''
+  if (allHeldWatched.value && !episodeInProgress.value) return `Play again · ${nextEpisodeLabel.value}`
   const t = nextEpisodeTitle.value
   return t ? `${nextEpisodeLabel.value} · ${t}` : nextEpisodeLabel.value
 })
 
-function playFirstEpisode() {
-  if (!firstEpisodeFileRef.value || !detail.value || !nextEpisodeKey.value) return
+function watchParams(target: HeldEpisode, label: string, shuffle = false) {
   const params = new URLSearchParams({
-    media_item_id: String(detail.value.media_item.id),
-    title: `${detail.value.media_item.title} - ${nextEpisodeLabel.value}`,
+    media_item_id: String(detail.value!.media_item.id),
+    title: `${detail.value!.media_item.title} - ${label}`,
+    entity_type: 'episode',
+    entity_id: String(target.episodeId),
   })
-  if (upNext.value?.episode_id) {
-    params.set('entity_type', 'episode')
-    params.set('entity_id', String(upNext.value.episode_id))
-  }
-  navigateTo(`/watch/${firstEpisodeFileRef.value}?${params}`)
+  if (shuffle) params.set('shuffle', '1')
+  return params
 }
 
-const upNextEpisodeId = computed(() => upNext.value?.episode_id ?? 0)
-const { inProgress: episodeInProgress } = useWatchResume('episode', upNextEpisodeId)
+function playFirstEpisode() {
+  const target = playTarget.value
+  if (!target || !detail.value) return
+  navigateTo(`/watch/${target.fileRef}?${watchParams(target, nextEpisodeLabel.value)}`)
+}
+
+// Shuffle: a random held episode, watched or not — the player chains more
+// random picks via the up-next endpoint's shuffle mode.
+function playShuffle() {
+  const pool = heldEpisodes.value
+  if (!pool.length || !detail.value) return
+  const pick = pool[Math.floor(Math.random() * pool.length)]!
+  const match = pick.key.match(/^s(\d+)e(\d+)$/)
+  const label = match ? `S${match[1]!.padStart(2, '0')}E${match[2]!.padStart(2, '0')}` : pick.key
+  navigateTo(`/watch/${pick.fileRef}?${watchParams(pick, label, true)}`)
+}
+
+const playTargetEpisodeId = computed(() => playTarget.value?.episodeId ?? 0)
+const { inProgress: episodeInProgress } = useWatchResume('episode', playTargetEpisodeId)
 
 async function loadUpNext() {
   if (!detail.value) return
@@ -719,7 +776,8 @@ const ledgerCells = computed<LedgerCell[]>(() => {
   if (cert) cells.push({ k: 'Rated', v: cert })
   const networks: string[] = s?.networks || []
   if (networks[0]) cells.push({ k: 'Network', v: networks[0] })
-  if (nextEpisodeLabel.value) cells.push({ k: 'Next up', v: nextEpisodeLabel.value, tone: true, sub: nextEpisodeTitle.value || undefined })
+  if (allHeldWatched.value) cells.push({ k: 'Watched', v: 'ALL EPISODES', tone: true, sub: 'everything seen' })
+  else if (nextEpisodeLabel.value) cells.push({ k: 'Next up', v: nextEpisodeLabel.value, tone: true, sub: nextEpisodeTitle.value || undefined })
   return cells
 })
 
@@ -739,10 +797,14 @@ async function toggleFavorite() {
 async function loadState() {
   if (!detail.value) return
   try {
-    const st = await fetchUserState('seasons', detail.value.media_item.id)
+    const [st, epSt] = await Promise.all([
+      fetchUserState('seasons', detail.value.media_item.id),
+      fetchUserState('episodes', detail.value.media_item.id),
+    ])
     seasonStates.value = new Map((st.seasons || []).map(s => [s.season_id, s]))
     isFavorited.value = (st.favorited_media || []).includes(detail.value.media_item.id)
     seasonFavorites.value = new Set(st.favorited_seasons || [])
+    watchedEpisodeIds.value = new Set(epSt.watched_episode_ids || [])
   } catch { /* empty */ }
 }
 
@@ -763,6 +825,9 @@ async function toggleSeasonFavorite(s: any) {
 
 // Season watched tracking
 const seasonStates = ref<Map<number, { season_id: number; total_episodes: number; watched_episodes: number }>>(new Map())
+// Per-episode watched ids — drives the hero's play target (first held
+// unwatched episode) and the fully-seen "Watched" replay state.
+const watchedEpisodeIds = ref<Set<number>>(new Set())
 
 const showFullyWatched = computed(() => {
   const seasons = detail.value?.seasons || []

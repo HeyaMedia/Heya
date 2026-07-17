@@ -36158,6 +36158,27 @@
               "minimum": 1,
               "type": "integer"
             }
+          },
+          {
+            "description": "Pick a random episode with a file instead of the next unwatched one",
+            "explode": false,
+            "in": "query",
+            "name": "shuffle",
+            "schema": {
+              "description": "Pick a random episode with a file instead of the next unwatched one",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Episode id to avoid repeating when shuffling",
+            "explode": false,
+            "in": "query",
+            "name": "exclude",
+            "schema": {
+              "description": "Episode id to avoid repeating when shuffling",
+              "format": "int64",
+              "type": "integer"
+            }
           }
         ],
         "responses": {

@@ -15541,7 +15541,16 @@ export type GetUpNextData = {
          */
         id: number;
     };
-    query?: never;
+    query?: {
+        /**
+         * Pick a random episode with a file instead of the next unwatched one
+         */
+        shuffle?: boolean;
+        /**
+         * Episode id to avoid repeating when shuffling
+         */
+        exclude?: number;
+    };
     url: '/api/media/{id}/up-next';
 };
 

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -553,26 +554,7 @@ func (a *App) GetUpNext(ctx context.Context, userID, mediaItemID int64) (UpNextR
 		}
 	}
 
-	// Overlay the localized episode title using the series library's
-	// PreferredLanguage. Without this an anime up-next stays in Japanese
-	// even when the library is set to English.
-	title := ep.Title
-	var publicID string
-	if item, err := q.GetMediaItemByID(ctx, mediaItemID); err == nil {
-		publicID = item.PublicID.String()
-		if lib, err := q.GetLibraryByID(ctx, item.LibraryID); err == nil {
-			lang := metadata.ParseSettings(lib.Settings).PreferredLanguage
-			if lang != "" {
-				if t, err := q.GetEpisodeTitleByLanguage(ctx, sqlc.GetEpisodeTitleByLanguageParams{EpisodeID: ep.EpisodeID, Language: lang}); err == nil && t.Title != "" {
-					title = t.Title
-				} else if lang != "en" {
-					if t, err := q.GetEpisodeTitleByLanguage(ctx, sqlc.GetEpisodeTitleByLanguageParams{EpisodeID: ep.EpisodeID, Language: "en"}); err == nil && t.Title != "" {
-						title = t.Title
-					}
-				}
-			}
-		}
-	}
+	title, publicID := a.overlayEpisodeTitle(ctx, q, mediaItemID, ep.EpisodeID, ep.Title)
 
 	return UpNextResult{
 		HasNext:           true,
@@ -586,5 +568,93 @@ func (a *App) GetUpNext(ctx context.Context, userID, mediaItemID int64) (UpNextR
 		Runtime:           ep.RuntimeMinutes,
 		FileID:            fileID,
 		FilePublicID:      filePublicID,
+	}, nil
+}
+
+// overlayEpisodeTitle localizes an episode title using the series library's
+// PreferredLanguage (without it an anime up-next stays in Japanese even when
+// the library is set to English) and resolves the item's public id.
+func (a *App) overlayEpisodeTitle(ctx context.Context, q *sqlc.Queries, mediaItemID, episodeID int64, fallback string) (title, publicID string) {
+	title = fallback
+	item, err := q.GetMediaItemByID(ctx, mediaItemID)
+	if err != nil {
+		return title, ""
+	}
+	publicID = item.PublicID.String()
+	lib, err := q.GetLibraryByID(ctx, item.LibraryID)
+	if err != nil {
+		return title, publicID
+	}
+	lang := metadata.ParseSettings(lib.Settings).PreferredLanguage
+	if lang == "" {
+		return title, publicID
+	}
+	if t, err := q.GetEpisodeTitleByLanguage(ctx, sqlc.GetEpisodeTitleByLanguageParams{EpisodeID: episodeID, Language: lang}); err == nil && t.Title != "" {
+		return t.Title, publicID
+	}
+	if lang != "en" {
+		if t, err := q.GetEpisodeTitleByLanguage(ctx, sqlc.GetEpisodeTitleByLanguageParams{EpisodeID: episodeID, Language: "en"}); err == nil && t.Title != "" {
+			return t.Title, publicID
+		}
+	}
+	return title, publicID
+}
+
+// GetShuffleEpisode picks a RANDOM episode that actually has a file — the
+// rewatch-shuffle counterpart to GetUpNext, which only ever nominates the
+// next unwatched catalog episode. excludeEpisodeID avoids an immediate
+// repeat when the player chains shuffled episodes (0 = no exclusion); a
+// one-episode pool repeats rather than returning nothing.
+func (a *App) GetShuffleEpisode(ctx context.Context, mediaItemID, excludeEpisodeID int64) (UpNextResult, error) {
+	q := sqlc.New(a.db)
+	files, err := q.ListEpisodeFiles(ctx, pgtype.Int8{Int64: mediaItemID, Valid: true})
+	if err != nil {
+		return UpNextResult{HasNext: false}, nil
+	}
+	efMap := BuildEpisodeFileMap(files)
+	if len(efMap) == 0 {
+		return UpNextResult{HasNext: false}, nil
+	}
+	eps, err := q.ListSeriesEpisodeRefs(ctx, mediaItemID)
+	if err != nil {
+		return UpNextResult{HasNext: false}, nil
+	}
+	pool := make([]sqlc.ListSeriesEpisodeRefsRow, 0, len(eps))
+	for _, ep := range eps {
+		if _, held := efMap[fmt.Sprintf("s%de%d", ep.SeasonNumber, ep.EpisodeNumber)]; !held {
+			continue
+		}
+		if ep.EpisodeID == excludeEpisodeID {
+			continue
+		}
+		pool = append(pool, ep)
+	}
+	if len(pool) == 0 && excludeEpisodeID != 0 {
+		for _, ep := range eps {
+			if _, held := efMap[fmt.Sprintf("s%de%d", ep.SeasonNumber, ep.EpisodeNumber)]; held {
+				pool = append(pool, ep)
+			}
+		}
+	}
+	if len(pool) == 0 {
+		return UpNextResult{HasNext: false}, nil
+	}
+
+	pick := pool[rand.IntN(len(pool))] //nolint:gosec // shuffle pick, not a security decision
+	entry := efMap[fmt.Sprintf("s%de%d", pick.SeasonNumber, pick.EpisodeNumber)]
+	title, publicID := a.overlayEpisodeTitle(ctx, q, mediaItemID, pick.EpisodeID, pick.Title)
+
+	return UpNextResult{
+		HasNext:           true,
+		EpisodeID:         pick.EpisodeID,
+		EpisodeNumber:     pick.EpisodeNumber,
+		EpisodeTitle:      title,
+		SeasonNumber:      pick.SeasonNumber,
+		SeasonID:          pick.SeasonID,
+		MediaItemID:       pick.MediaItemID,
+		MediaItemPublicID: publicID,
+		Runtime:           pick.RuntimeMinutes,
+		FileID:            entry.FileID,
+		FilePublicID:      entry.FilePublicID,
 	}, nil
 }

@@ -5,7 +5,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
+	"github.com/karbowiak/heya/internal/images"
 	"github.com/rs/zerolog/log"
 )
 
@@ -23,6 +26,8 @@ var assetTypeToFilename = map[string]string{
 // any of these already sits in the release directory, the folder owns its
 // art and the export must not add a duplicate.
 var albumCoverSidecars = []string{"cover.jpg", "cover.png", "cover.jpeg", "folder.jpg", "folder.png", "folder.jpeg"}
+
+var backdropSidecarName = regexp.MustCompile(`^(fanart|backdrop)[0-9]*\.(jpg|jpeg|png|webp|gif)$`)
 
 // SaveAlbumCoverToDir copies a cached album cover into the release directory
 // as cover.<ext>, skipping when the folder already carries recognized cover
@@ -59,8 +64,38 @@ func SaveImageToMediaDir(mediaDir, cachedPath, assetType string, sortOrder int) 
 	if _, err := os.Stat(destPath); err == nil {
 		return nil
 	}
+	if assetType == "backdrop" {
+		duplicate, err := equivalentBackdropSidecarExists(mediaDir, cachedPath)
+		if err == nil && duplicate {
+			return nil
+		}
+	}
 
 	return copyFile(cachedPath, destPath)
+}
+
+// equivalentBackdropSidecarExists prevents save_images from writing another
+// fanartN/backdropN file when the folder already contains the same visual at a
+// different size or JPEG quality. Existing source sidecars are never modified.
+func equivalentBackdropSidecarExists(mediaDir, candidatePath string) (bool, error) {
+	candidate, err := images.FingerprintFile(candidatePath)
+	if err != nil {
+		return false, err
+	}
+	entries, err := os.ReadDir(mediaDir)
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !backdropSidecarName.MatchString(strings.ToLower(entry.Name())) {
+			continue
+		}
+		existing, fingerprintErr := images.FingerprintFile(filepath.Join(mediaDir, entry.Name()))
+		if fingerprintErr == nil && images.VisuallyEquivalent(candidate, existing) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func copyFile(src, dst string) error {

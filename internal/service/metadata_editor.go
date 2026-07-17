@@ -1115,6 +1115,16 @@ func (a *App) SetPrimaryAsset(ctx context.Context, mediaItemID, assetID int64) e
 	txq := q.WithTx(tx)
 
 	if worker.SingleAssetTypes[assetType] {
+		// An alternate row can carry the exact local/remote identity that is
+		// about to become primary. Remove that source row first so the identity
+		// constraints can follow the image into the singular primary slot.
+		selectedRemoved := false
+		if asset.Label != "" {
+			if err := txq.DeleteMediaAsset(ctx, asset.ID); err != nil {
+				return fmt.Errorf("remove promoted %s candidate: %w", assetType, err)
+			}
+			selectedRemoved = true
+		}
 		primary, err := txq.ReplacePrimaryMediaAsset(ctx, sqlc.ReplacePrimaryMediaAssetParams{
 			MediaItemID: mediaItemID, AssetType: asset.AssetType, Source: asset.Source,
 			LocalPath: asset.LocalPath, RemoteUrl: asset.RemoteUrl, Language: asset.Language,
@@ -1123,7 +1133,7 @@ func (a *App) SetPrimaryAsset(ctx context.Context, mediaItemID, assetID int64) e
 		if err != nil {
 			return fmt.Errorf("replace primary %s: %w", assetType, err)
 		}
-		if primary.ID != asset.ID {
+		if primary.ID != asset.ID && !selectedRemoved {
 			if err := txq.DeleteMediaAsset(ctx, asset.ID); err != nil {
 				return fmt.Errorf("remove replaced %s asset: %w", assetType, err)
 			}
@@ -1412,7 +1422,7 @@ func (a *App) UploadMediaAsset(ctx context.Context, mediaItemID int64, file io.R
 	if err != nil {
 		return UploadMediaAssetResult{Path: localPath}, fmt.Errorf("record uploaded image: %w", err)
 	}
-	if representative, _, fingerprintErr := worker.MaterializeMediaAsset(ctx, a.db, asset, localPath); fingerprintErr != nil {
+	if representative, _, fingerprintErr := worker.MaterializeMediaAsset(ctx, a.db, asset, localPath, filepath.Join(a.config.DataDir.Value, "images")); fingerprintErr != nil {
 		return UploadMediaAssetResult{Path: localPath}, fmt.Errorf("fingerprint uploaded image: %w", fingerprintErr)
 	} else {
 		asset = representative

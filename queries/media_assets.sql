@@ -87,6 +87,20 @@ WHERE media_assets.local_path = ''
 ORDER BY media_assets.id
 LIMIT $2;
 
+-- name: ListUnfingerprintedMediaAssets :many
+-- Materialized artwork from older releases and scanner-discovered local
+-- sidecars may predate image fingerprinting. The daily artwork reconciliation
+-- pages these rows by id, computes their exact/perceptual hashes, and collapses
+-- duplicates through the same path used by fresh downloads.
+SELECT media_assets.*
+FROM media_assets
+WHERE media_assets.local_path <> ''
+  AND media_assets.content_hash = ''
+  AND media_assets.asset_type IN ('poster', 'backdrop', 'logo', 'art', 'banner', 'thumb', 'disc', 'clearart', 'still')
+  AND media_assets.id > $1
+ORDER BY media_assets.id
+LIMIT $2;
+
 -- name: UpdateMediaAssetLocalPath :exec
 UPDATE media_assets
 SET local_path = $2
