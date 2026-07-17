@@ -22,7 +22,10 @@ const {
 const networkData = useQuery(adminNetworkStatusQuery())
 const network = computed(() => networkData.data.value ?? null)
 const listeners = computed(() => network.value?.ingress.listeners ?? [])
-const loadingNetwork = computed(() => networkData.isLoading.value)
+// Pinia Colada marks background refetches as loading too. Keep the existing
+// topology mounted while a fresh metrics sample is in flight so the listener
+// cards do not disappear and repaint every five seconds.
+const loadingNetwork = computed(() => networkData.isLoading.value && !network.value)
 const requestRateHistory = ref<number[]>([])
 let networkTimer: ReturnType<typeof setInterval> | null = null
 const saving = ref(false)
@@ -334,8 +337,10 @@ onBeforeUnmount(() => {
 
 watch(() => caddyHTTP.value?.requests_per_second, (rate) => {
   if (rate == null) return
-  requestRateHistory.value.push(rate)
-  if (requestRateHistory.value.length > 36) requestRateHistory.value.shift()
+  // Commit one new array per sample. Besides keeping the bounded history
+  // obvious, this avoids exposing Sparkline to the intermediate push/shift
+  // states once the window is full.
+  requestRateHistory.value = [...requestRateHistory.value, rate].slice(-36)
 })
 
 watch(cfg, (next) => {
@@ -419,7 +424,7 @@ watch(cfg, (next) => {
                 {{ !l.active ? 'inactive' : (l.public ? 'public' : (l.kind === 'tailscale' ? 'tailnet' : 'local')) }}
               </StatusBadge>
               <StatusBadge v-if="l.tls" state="ok">TLS</StatusBadge>
-              <StatusBadge v-for="protocol in l.protocols" :key="protocol" state="idle">{{ protocol.toUpperCase() }}</StatusBadge>
+              <StatusBadge v-for="protocol in l.protocols" :key="protocol" :state="l.active ? 'ok' : 'idle'">{{ protocol.toUpperCase() }}</StatusBadge>
             </div>
             <div class="lst-desc">{{ l.description }}</div>
             <div v-if="l.error" class="lst-error">{{ l.error }}</div>
