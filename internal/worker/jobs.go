@@ -243,12 +243,16 @@ func (SaveNFOArgs) InsertOpts() river.InsertOpts {
 }
 
 type SaveImagesArgs struct {
-	MediaItemID int64  `json:"media_item_id"`
-	FilePath    string `json:"file_path"`
-	CachedPath  string `json:"cached_path"`
-	AssetType   string `json:"asset_type"`
-	SortOrder   int    `json:"sort_order"`
-	Label       string `json:"label,omitempty"`
+	MediaItemID int64 `json:"media_item_id"`
+	// AlbumID switches the job to album-cover export: the cached cover is
+	// copied into the album's release directory as cover.<ext> (FilePath is
+	// unused — the worker resolves the release dir from the album's tracks).
+	AlbumID    int64  `json:"album_id,omitempty"`
+	FilePath   string `json:"file_path"`
+	CachedPath string `json:"cached_path"`
+	AssetType  string `json:"asset_type"`
+	SortOrder  int    `json:"sort_order"`
+	Label      string `json:"label,omitempty"`
 }
 
 func (SaveImagesArgs) Kind() string { return "save_images" }

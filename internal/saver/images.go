@@ -19,6 +19,27 @@ var assetTypeToFilename = map[string]string{
 	"disc":     "disc",
 }
 
+// albumCoverSidecars mirrors the scanner's recognized cover filenames — when
+// any of these already sits in the release directory, the folder owns its
+// art and the export must not add a duplicate.
+var albumCoverSidecars = []string{"cover.jpg", "cover.png", "cover.jpeg", "folder.jpg", "folder.png", "folder.jpeg"}
+
+// SaveAlbumCoverToDir copies a cached album cover into the release directory
+// as cover.<ext>, skipping when the folder already carries recognized cover
+// art (user-provided files always win).
+func SaveAlbumCoverToDir(albumDir, cachedPath string) error {
+	for _, name := range albumCoverSidecars {
+		if _, err := os.Stat(filepath.Join(albumDir, name)); err == nil {
+			return nil
+		}
+	}
+	ext := filepath.Ext(cachedPath)
+	if ext == "" {
+		ext = ".jpg"
+	}
+	return copyFile(cachedPath, filepath.Join(albumDir, "cover"+ext))
+}
+
 func SaveImageToMediaDir(mediaDir, cachedPath, assetType string, sortOrder int) error {
 	baseName, ok := assetTypeToFilename[assetType]
 	if !ok {
@@ -47,16 +68,16 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 
 	if _, err := io.Copy(out, in); err != nil {
-		os.Remove(dst)
+		_ = os.Remove(dst)
 		return err
 	}
 

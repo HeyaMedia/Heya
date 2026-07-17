@@ -1089,9 +1089,45 @@ func (a *App) GetAlbumCover(ctx context.Context, albumID int64) (path string, re
 		if err := q.UpdateAlbumCoverPath(ctx, sqlc.UpdateAlbumCoverPathParams{ID: album.ID, CoverPath: localPath}); err != nil {
 			log.Debug().Err(err).Int64("album_id", album.ID).Msg("image: update album cover path failed")
 		}
+		a.maybeQueueAlbumCoverSidecarWrite(ctx, q, album, localPath)
 		return localPath, false, true
 	}
 	return album.CoverPath, false, true
+}
+
+// maybeQueueAlbumCoverSidecarWrite is the album analogue of
+// maybeQueueImageSidecarWrite: save_images libraries get the freshly
+// materialized cover exported into the album's release directory.
+func (a *App) maybeQueueAlbumCoverSidecarWrite(ctx context.Context, q *sqlc.Queries, album sqlc.Album, localPath string) {
+	if a.river == nil || localPath == "" {
+		return
+	}
+	artist, err := q.GetArtistByID(ctx, album.ArtistID)
+	if err != nil {
+		return
+	}
+	item, err := q.GetMediaItemByID(ctx, artist.MediaItemID)
+	if err != nil {
+		return
+	}
+	lib, err := q.GetLibraryByID(ctx, item.LibraryID)
+	if err != nil {
+		return
+	}
+	if !metadata.ParseSettings(lib.Settings).SaveImages {
+		return
+	}
+
+	qctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if _, err := a.river.Insert(qctx, worker.SaveImagesArgs{
+		MediaItemID: item.ID,
+		AlbumID:     album.ID,
+		CachedPath:  localPath,
+		AssetType:   "cover",
+	}, nil); err != nil {
+		log.Debug().Err(err).Int64("album_id", album.ID).Msg("image: enqueue album cover sidecar failed")
+	}
 }
 
 // GetStudioLogoName resolves the production company name for logo lookup.

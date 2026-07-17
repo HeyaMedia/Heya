@@ -405,7 +405,43 @@ func (w *DownloadImageWorker) downloadAlbumCover(ctx context.Context, job *river
 			MediaType:   string(sqlc.MediaTypeMusic),
 		})
 	}
+
+	w.maybeSaveAlbumCoverSidecar(ctx, album, localPath)
 	return nil
+}
+
+// maybeSaveAlbumCoverSidecar queues a cover.<ext> export into the album's
+// release directory for save_images libraries — the album analogue of
+// maybeSaveToMediaDir.
+func (w *DownloadImageWorker) maybeSaveAlbumCoverSidecar(ctx context.Context, album sqlc.Album, localPath string) {
+	if localPath == "" {
+		return
+	}
+	q := sqlc.New(w.DB)
+	artist, err := q.GetArtistByID(ctx, album.ArtistID)
+	if err != nil {
+		return
+	}
+	item, err := q.GetMediaItemByID(ctx, artist.MediaItemID)
+	if err != nil {
+		return
+	}
+	lib, err := q.GetLibraryByID(ctx, item.LibraryID)
+	if err != nil {
+		return
+	}
+	if !metadata.ParseSettings(lib.Settings).SaveImages {
+		return
+	}
+	client := river.ClientFromContext[pgx.Tx](ctx)
+	if _, err := client.Insert(ctx, SaveImagesArgs{
+		MediaItemID: item.ID,
+		AlbumID:     album.ID,
+		CachedPath:  localPath,
+		AssetType:   "cover",
+	}, nil); err != nil {
+		log.Debug().Err(err).Int64("album_id", album.ID).Msg("enqueue album cover sidecar failed")
+	}
 }
 
 func (w *DownloadImageWorker) downloadPersonImage(ctx context.Context, job *river.Job[DownloadImageArgs]) error {
