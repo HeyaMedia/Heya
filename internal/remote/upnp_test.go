@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -16,9 +17,11 @@ type fakeIGD struct {
 	deletions []string
 }
 
-func (f *fakeIGD) GetExternalIPAddress() (string, error) { return "203.0.113.7", nil }
+func (f *fakeIGD) GetExternalIPAddressCtx(_ context.Context) (string, error) {
+	return "203.0.113.7", nil
+}
 
-func (f *fakeIGD) AddPortMapping(_ string, _ uint16, protocol string, _ uint16, _ string, _ bool, _ string, lease uint32) error {
+func (f *fakeIGD) AddPortMappingCtx(_ context.Context, _ string, _ uint16, protocol string, _ uint16, _ string, _ bool, _ string, lease uint32) error {
 	f.adds = append(f.adds, mappingCall{protocol: protocol, lease: lease})
 	if f.add != nil {
 		return f.add(protocol, lease)
@@ -26,7 +29,7 @@ func (f *fakeIGD) AddPortMapping(_ string, _ uint16, protocol string, _ uint16, 
 	return nil
 }
 
-func (f *fakeIGD) DeletePortMapping(_ string, _ uint16, protocol string) error {
+func (f *fakeIGD) DeletePortMappingCtx(_ context.Context, _ string, _ uint16, protocol string) error {
 	f.deletions = append(f.deletions, protocol)
 	return nil
 }
@@ -39,7 +42,7 @@ func TestUPnPMapsTCPAndUDPWithIndependentLeaseFallback(t *testing.T) {
 		return nil
 	}}
 	gateway := newUPnPGateway(client, "http://router.test/igd")
-	mappings, err := gateway.addMappings(44321, "192.168.1.12")
+	mappings, err := gateway.addMappings(context.Background(), 44321, "192.168.1.12")
 	if err != nil {
 		t.Fatalf("addMappings: %v", err)
 	}
@@ -57,7 +60,7 @@ func TestUPnPMapsTCPAndUDPWithIndependentLeaseFallback(t *testing.T) {
 	}
 
 	client.adds = nil
-	if _, err := gateway.addMappings(44321, "192.168.1.12"); err != nil {
+	if _, err := gateway.addMappings(context.Background(), 44321, "192.168.1.12"); err != nil {
 		t.Fatalf("renew mappings: %v", err)
 	}
 	if len(client.adds) != 2 || client.adds[1].lease != 0 {
@@ -73,7 +76,7 @@ func TestUPnPReportsOneTransportFailureWithoutHidingTheOther(t *testing.T) {
 		return nil
 	}}
 	gateway := newUPnPGateway(client, "router")
-	mappings, err := gateway.addMappings(44444, "192.168.1.20")
+	mappings, err := gateway.addMappings(context.Background(), 44444, "192.168.1.20")
 	if err == nil {
 		t.Fatal("expected aggregate mapping error")
 	}
@@ -83,7 +86,7 @@ func TestUPnPReportsOneTransportFailureWithoutHidingTheOther(t *testing.T) {
 	if !mappings[1].Active || mappings[1].Error != "" {
 		t.Fatalf("UDP success was lost: %+v", mappings[1])
 	}
-	if err := gateway.unmapMappings(44444); err != nil {
+	if err := gateway.unmapMappings(context.Background(), 44444); err != nil {
 		t.Fatalf("unmapMappings: %v", err)
 	}
 	if len(client.deletions) != 2 || client.deletions[0] != "TCP" || client.deletions[1] != "UDP" {

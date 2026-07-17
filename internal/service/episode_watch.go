@@ -11,15 +11,17 @@ import (
 	"github.com/karbowiak/heya/internal/metadata"
 )
 
-// emitWatched broadcasts a media.watched event for a watch-state change made
-// through one of the mark/unmark entry points below. Mirrors the hub access +
-// nil-guard in UpdateWatchProgress (watch.go) — Progress/Total are left zero
-// since these entry points are toggles, not the playback-progress path.
+// emitWatched emits a media.watched event for a watch-state change made
+// through one of the mark/unmark entry points below, scoped to the owning
+// user (plus internal bridges) — watch state is per-user data. Mirrors the
+// hub access + nil-guard in UpdateWatchProgress (watch.go) — Progress/Total
+// are left zero since these entry points are toggles, not the
+// playback-progress path.
 func (a *App) emitWatched(userID, mediaItemID int64, completed bool) {
 	if a.hub == nil {
 		return
 	}
-	a.hub.Emit(eventhub.EventMediaWatched, eventhub.WatchPayload{
+	a.hub.EmitToUserAndInternal(userID, eventhub.EventMediaWatched, eventhub.WatchPayload{
 		UserID:      userID,
 		MediaItemID: mediaItemID,
 		Completed:   completed,

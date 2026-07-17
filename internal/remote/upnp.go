@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,11 +13,24 @@ import (
 )
 
 // igdClient is the subset of the WANIPConnection SOAP surface we drive,
-// satisfied by all three generated goupnp client generations.
+// satisfied by all three generated goupnp client generations. Only the *Ctx
+// variants are acceptable here: the legacy methods hardcode
+// context.Background() over a zero-timeout http.Client, so a router whose
+// UPnP endpoint stops responding mid-call would hang the caller — and the
+// opMu-serialized Enable/Disable/Recheck surface with it — forever.
 type igdClient interface {
-	GetExternalIPAddress() (string, error)
-	AddPortMapping(remoteHost string, extPort uint16, protocol string, intPort uint16, intClient string, enabled bool, desc string, lease uint32) error
-	DeletePortMapping(remoteHost string, extPort uint16, protocol string) error
+	GetExternalIPAddressCtx(ctx context.Context) (string, error)
+	AddPortMappingCtx(ctx context.Context, remoteHost string, extPort uint16, protocol string, intPort uint16, intClient string, enabled bool, desc string, lease uint32) error
+	DeletePortMappingCtx(ctx context.Context, remoteHost string, extPort uint16, protocol string) error
+}
+
+// soapCallTimeout bounds a single SOAP round trip against the router. A LAN
+// router answers these in well under a second; anything slower is a wedged
+// UPnP stack we must not wait on.
+const soapCallTimeout = 10 * time.Second
+
+func soapCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, soapCallTimeout)
 }
 
 // upnpGateway wraps a discovered IGD. Discovery is slow (multicast SSDP,
@@ -37,15 +51,20 @@ const mappingDescription = "Heya remote access"
 var mappingProtocols = []string{"TCP", "UDP"}
 
 // discoverGateway finds the first WANIPConnection service on the LAN,
-// preferring IGDv2.
-func discoverGateway() (*upnpGateway, error) {
-	if clients, _, err := internetgateway2.NewWANIPConnection2Clients(); err == nil && len(clients) > 0 {
+// preferring IGDv2. Bounded as a whole: each generation is one multicast
+// SSDP search (fixed ~2s window inside goupnp) plus a description fetch per
+// responder, and a device that accepts the TCP connection but never serves
+// its description document must not stall Enable indefinitely.
+func discoverGateway(ctx context.Context) (*upnpGateway, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if clients, _, err := internetgateway2.NewWANIPConnection2ClientsCtx(ctx); err == nil && len(clients) > 0 {
 		return newUPnPGateway(clients[0], clients[0].Location.String()), nil
 	}
-	if clients, _, err := internetgateway2.NewWANIPConnection1Clients(); err == nil && len(clients) > 0 {
+	if clients, _, err := internetgateway2.NewWANIPConnection1ClientsCtx(ctx); err == nil && len(clients) > 0 {
 		return newUPnPGateway(clients[0], clients[0].Location.String()), nil
 	}
-	if clients, _, err := internetgateway1.NewWANIPConnection1Clients(); err == nil && len(clients) > 0 {
+	if clients, _, err := internetgateway1.NewWANIPConnection1ClientsCtx(ctx); err == nil && len(clients) > 0 {
 		return newUPnPGateway(clients[0], clients[0].Location.String()), nil
 	}
 	return nil, errors.New("no UPnP internet gateway found on this network (is UPnP enabled on the router?)")
@@ -64,15 +83,17 @@ func newUPnPGateway(client igdClient, location string) *upnpGateway {
 
 func (g *upnpGateway) location() string { return g.loc }
 
-func (g *upnpGateway) externalIP() (string, error) {
-	return g.client.GetExternalIPAddress()
+func (g *upnpGateway) externalIP(ctx context.Context) (string, error) {
+	ctx, cancel := soapCtx(ctx)
+	defer cancel()
+	return g.client.GetExternalIPAddressCtx(ctx)
 }
 
 // addMappings asserts extPort→lanIP:extPort for TCP (HTTP/1.1 + HTTP/2) and
 // UDP (HTTP/3). Same-port inside and out keeps the URL story simple. Each
 // transport is attempted independently so an UDP-hostile router cannot take
 // otherwise-working remote HTTPS down with it.
-func (g *upnpGateway) addMappings(port int, lanIP string) ([]PortMappingStatus, error) {
+func (g *upnpGateway) addMappings(ctx context.Context, port int, lanIP string) ([]PortMappingStatus, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -85,9 +106,9 @@ func (g *upnpGateway) addMappings(port int, lanIP string) ([]PortMappingStatus, 
 	var errs []error
 	for _, protocol := range mappingProtocols {
 		lease := g.leaseSeconds[protocol]
-		err := g.addMappingLocked(port, lanIP, protocol, lease)
+		err := g.addMappingLocked(ctx, port, lanIP, protocol, lease)
 		if err != nil && lease != 0 {
-			if permanentErr := g.addMappingLocked(port, lanIP, protocol, 0); permanentErr == nil {
+			if permanentErr := g.addMappingLocked(ctx, port, lanIP, protocol, 0); permanentErr == nil {
 				lease = 0
 				g.leaseSeconds[protocol] = 0
 				err = nil
@@ -111,9 +132,11 @@ func (g *upnpGateway) addMappings(port int, lanIP string) ([]PortMappingStatus, 
 	return mappings, errors.Join(errs...)
 }
 
-func (g *upnpGateway) addMappingLocked(port int, lanIP, protocol string, lease uint32) error {
+func (g *upnpGateway) addMappingLocked(ctx context.Context, port int, lanIP, protocol string, lease uint32) error {
+	callCtx, cancel := soapCtx(ctx)
+	defer cancel()
 	p := uint16(port)
-	if err := g.client.AddPortMapping("", p, protocol, p, lanIP, true, mappingDescription, lease); err != nil {
+	if err := g.client.AddPortMappingCtx(callCtx, "", p, protocol, p, lanIP, true, mappingDescription, lease); err != nil {
 		return fmt.Errorf("router rejected port mapping: %w", err)
 	}
 	return nil
@@ -130,13 +153,16 @@ func failedMappings(port int, lanIP string, err error) []PortMappingStatus {
 	return mappings
 }
 
-func (g *upnpGateway) unmapMappings(port int) error {
+func (g *upnpGateway) unmapMappings(ctx context.Context, port int) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
 	var errs []error
 	for _, protocol := range mappingProtocols {
-		if err := g.client.DeletePortMapping("", uint16(port), protocol); err != nil {
+		callCtx, cancel := soapCtx(ctx)
+		err := g.client.DeletePortMappingCtx(callCtx, "", uint16(port), protocol)
+		cancel()
+		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", strings.ToLower(protocol), err))
 		}
 	}

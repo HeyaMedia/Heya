@@ -112,6 +112,34 @@ func (h *Hub) EmitToUser(userID int64, t EventType, payload any) {
 	h.PublishToUser(userID, Event{Type: t, Timestamp: time.Now(), Payload: payload})
 }
 
+// PublishToUserAndInternal delivers an event to subscribers registered for
+// userID plus anonymous/internal subscribers (id 0). For per-user payloads
+// that protocol bridges must still observe: the Jellyfin socket bridge
+// subscribes anonymously and does its own per-user routing, so a plain
+// PublishToUser would starve it, while a global Publish would leak the
+// payload to every other user's browser socket (those always register with
+// their own user id via SubscribeUser, which is what keeps this safe).
+func (h *Hub) PublishToUserAndInternal(userID int64, event Event) {
+	if userID == 0 {
+		return
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for ch, uid := range h.subs {
+		if uid != userID && uid != 0 {
+			continue
+		}
+		select {
+		case ch <- event:
+		default:
+		}
+	}
+}
+
+func (h *Hub) EmitToUserAndInternal(userID int64, t EventType, payload any) {
+	h.PublishToUserAndInternal(userID, Event{Type: t, Timestamp: time.Now(), Payload: payload})
+}
+
 // Subscribe registers an anonymous consumer that receives every broadcast
 // (Publish/Emit) but no user-targeted events. For internal consumers not tied
 // to a single user (relay, periodic emitters, the Jellyfin socket bridge).

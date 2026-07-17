@@ -34,15 +34,11 @@ func (p *chromecastProvider) Browse(ctx context.Context, found func(Device)) err
 func (p *chromecastProvider) browseOnce(ctx context.Context, found func(Device)) error {
 	winCtx, cancel := context.WithTimeout(ctx, browseWindow)
 	defer cancel()
-	entries := make(chan *zeroconf.ServiceEntry, 8)
-	go func() {
-		for entry := range entries {
-			if dev, ok := chromecastDeviceFromEntry(entry); ok {
-				found(dev)
-			}
+	return browseService(winCtx, googleCastServiceType, func(entry *zeroconf.ServiceEntry) {
+		if dev, ok := chromecastDeviceFromEntry(entry); ok {
+			found(dev)
 		}
-	}()
-	return zeroconf.Browse(winCtx, googleCastServiceType, mdnsDomain, entries)
+	})
 }
 
 func chromecastDeviceFromEntry(entry *zeroconf.ServiceEntry) (Device, bool) {

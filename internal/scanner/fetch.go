@@ -372,11 +372,17 @@ func FetchMusicMetadataPreviews(ctx context.Context, search []MusicSearchMatch, 
 		}
 	}
 
+	// On cancellation we must still fall through to wg.Wait() — returning
+	// early would hand the caller a slice that in-flight goroutines are
+	// still writing into.
+fanout:
 	for i, match := range accepted {
-		if err := ctx.Err(); err != nil {
-			return previews, err
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			setErr(ctx.Err())
+			break fanout
 		}
-		sem <- struct{}{}
 		wg.Add(1)
 		go func(i int, match MusicSearchMatch) {
 			defer wg.Done()

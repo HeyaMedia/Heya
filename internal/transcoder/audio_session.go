@@ -33,13 +33,23 @@ type AudioSessionManager struct {
 	cache *CacheManager
 
 	mu       sync.Mutex
-	inflight map[string]chan error
+	inflight map[string]*audioEncode
+}
+
+// audioEncode is one in-flight ffmpeg run shared by every caller asking for
+// the same (track_file_id, profile). err is written exactly once, before done
+// is closed, so any number of waiters observe the same outcome — a single
+// buffered error value would hand the first waiter the failure and let the
+// rest read a closed channel as success.
+type audioEncode struct {
+	done chan struct{}
+	err  error
 }
 
 func NewAudioSessionManager(cache *CacheManager) *AudioSessionManager {
 	return &AudioSessionManager{
 		cache:    cache,
-		inflight: make(map[string]chan error),
+		inflight: make(map[string]*audioEncode),
 	}
 }
 
@@ -90,38 +100,40 @@ func (m *AudioSessionManager) EnsureAAC(ctx context.Context, trackFileID int64, 
 	}
 
 	m.mu.Lock()
-	if ch, ok := m.inflight[outPath]; ok {
+	if enc, ok := m.inflight[outPath]; ok {
 		m.mu.Unlock()
 		select {
-		case err, open := <-ch:
-			if !open {
-				err = nil
-			}
-			if err != nil {
-				return "", err
+		case <-enc.done:
+			if enc.err != nil {
+				return "", enc.err
 			}
 			return outPath, nil
 		case <-ctx.Done():
 			return "", ctx.Err()
 		}
 	}
-	done := make(chan error, 1)
-	m.inflight[outPath] = done
+	enc := &audioEncode{done: make(chan struct{})}
+	m.inflight[outPath] = enc
 	m.mu.Unlock()
 
+	var encErr error
 	defer func() {
 		m.mu.Lock()
 		delete(m.inflight, outPath)
 		m.mu.Unlock()
-		close(done)
+		enc.err = encErr
+		close(enc.done)
 	}()
 
-	if err := m.runFFmpegAAC(ctx, sourcePath, outPath, bitrateKbps); err != nil {
+	// The encode runs detached from the leader's request context: concurrent
+	// listeners share this one ffmpeg run, so the first caller's disconnect
+	// must not kill the encode for everyone else still waiting (mirrors the
+	// HLS heads in session.go). runFFmpegAAC caps wall clock at 10 minutes.
+	if err := m.runFFmpegAAC(context.WithoutCancel(ctx), sourcePath, outPath, bitrateKbps); err != nil {
 		_ = os.Remove(outPath)
-		done <- err
+		encErr = err
 		return "", err
 	}
-	done <- nil
 	return outPath, nil
 }
 

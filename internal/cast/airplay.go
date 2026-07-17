@@ -46,16 +46,59 @@ func (p *airplayProvider) Browse(ctx context.Context, found func(Device)) error 
 func (p *airplayProvider) browseOnce(ctx context.Context, found func(Device)) error {
 	winCtx, cancel := context.WithTimeout(ctx, browseWindow)
 	defer cancel()
+	return browseService(winCtx, airplayServiceType, func(e *zeroconf.ServiceEntry) {
+		if dev, ok := deviceFromEntry(e); ok {
+			found(dev)
+		}
+	})
+}
 
+// browseService runs one zeroconf browse window, invoking handle for every
+// discovered entry, and returns only after the drain goroutine has exited.
+//
+// The channel protocol is dictated by conditional ownership inside zeroconf:
+// its mainloop closes `entries` when it ran, but a setup failure (no
+// multicast-capable interface — real in container/CNI deployments) returns
+// from Browse before the mainloop ever starts, leaving the channel open and
+// senderless, so a bare `for range` drainer would leak once per browse
+// cycle. We never close the channel (the mainloop may already have) and
+// instead release the drainer via quit after Browse returns — at that point
+// no sender can exist (Browse joins its mainloop before returning), so
+// drain-then-exit cannot race a send. While Browse runs the drainer must
+// keep receiving unconditionally: the mainloop's entry send is blocking, and
+// abandoning the channel would wedge it.
+func browseService(ctx context.Context, serviceType string, handle func(*zeroconf.ServiceEntry)) error {
 	entries := make(chan *zeroconf.ServiceEntry, 8)
+	quit := make(chan struct{})
+	drained := make(chan struct{})
 	go func() {
-		for e := range entries {
-			if dev, ok := deviceFromEntry(e); ok {
-				found(dev)
+		defer close(drained)
+		for {
+			select {
+			case e, ok := <-entries:
+				if !ok {
+					return
+				}
+				handle(e)
+			case <-quit:
+				for {
+					select {
+					case e, ok := <-entries:
+						if !ok {
+							return
+						}
+						handle(e)
+					default:
+						return
+					}
+				}
 			}
 		}
 	}()
-	return zeroconf.Browse(winCtx, airplayServiceType, mdnsDomain, entries)
+	err := zeroconf.Browse(ctx, serviceType, mdnsDomain, entries)
+	close(quit)
+	<-drained
+	return err
 }
 
 func deviceFromEntry(e *zeroconf.ServiceEntry) (Device, bool) {

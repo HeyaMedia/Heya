@@ -24,6 +24,13 @@ const (
 	castV2ResponseTimeout    = 15 * time.Second
 	castV2StatusPollInterval = 5 * time.Second
 	castV2WriteTimeout       = 3 * time.Second
+	// castV2ReadIdleTimeout bounds how long readLoop waits for any inbound
+	// frame. A healthy receiver is never this quiet: it PINGs every ~5s and
+	// answers the 5s status poll. Without a deadline, a device that drops off
+	// the network without a FIN (sleep, Wi-Fi loss, power cut) blocks the
+	// read forever, leaking the goroutine + FD and freezing the session on
+	// stale "playing" state for the life of the process.
+	castV2ReadIdleTimeout = 30 * time.Second
 )
 
 type castV2Client struct {
@@ -100,6 +107,7 @@ func dialCastV2(ctx context.Context, addr string, port int) (*castV2Client, erro
 func (c *castV2Client) readLoop() {
 	defer c.closeDone()
 	for {
+		_ = c.conn.SetReadDeadline(time.Now().Add(castV2ReadIdleTimeout))
 		msg, err := readCastV2Frame(c.conn)
 		if err != nil {
 			c.mu.Lock()

@@ -96,7 +96,7 @@ func (a *App) UpdateWatchProgress(ctx context.Context, userID int64, entityType 
 	completed := total > 0 && progress >= total*9/10
 
 	if a.hub != nil {
-		a.hub.Emit(eventhub.EventMediaWatched, eventhub.WatchPayload{
+		a.hub.EmitToUserAndInternal(userID, eventhub.EventMediaWatched, eventhub.WatchPayload{
 			UserID:      userID,
 			MediaItemID: entityID,
 			Progress:    progress,

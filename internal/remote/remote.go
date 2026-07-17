@@ -314,7 +314,7 @@ func (m *Manager) Enable(ctx context.Context, cfg Config) error {
 	// UPnP mapping. Failure is not fatal: a manual port forward still makes
 	// the probe succeed, so we always continue to the check.
 	m.update(func(s *RemoteStatus) { s.Phase = PhaseMapping })
-	gw, gwErr := discoverGateway()
+	gw, gwErr := discoverGateway(ctx)
 	if gwErr != nil {
 		m.log.Warn().Err(gwErr).Msg("UPnP gateway discovery failed")
 		m.update(func(s *RemoteStatus) {
@@ -324,8 +324,8 @@ func (m *Manager) Enable(ctx context.Context, cfg Config) error {
 		m.stateMu.Lock()
 		m.upnp = gw
 		m.stateMu.Unlock()
-		routerIP, _ := gw.externalIP()
-		mappings, mappingErr := gw.addMappings(cfg.Port, lanIP)
+		routerIP, _ := gw.externalIP(ctx)
+		mappings, mappingErr := gw.addMappings(ctx, cfg.Port, lanIP)
 		if mappingErr != nil {
 			m.log.Warn().Err(mappingErr).Int("port", cfg.Port).Msg("UPnP port mapping failed")
 			m.update(func(s *RemoteStatus) {
@@ -407,9 +407,11 @@ func (m *Manager) stopLocked(unmap, removeListener bool) {
 		certs.close()
 	}
 	if unmap && gw != nil && port != 0 {
-		if err := gw.unmapMappings(port); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := gw.unmapMappings(ctx, port); err != nil {
 			m.log.Warn().Err(err).Int("port", port).Msg("UPnP unmap failed")
 		}
+		cancel()
 	}
 }
 
@@ -430,14 +432,14 @@ func (m *Manager) Recheck(ctx context.Context) (RemoteStatus, error) {
 		return m.Status(), errors.New("remote access is not enabled")
 	}
 	if gw != nil {
-		mappings, err := gw.addMappings(cfg.Port, lanIP)
+		mappings, err := gw.addMappings(ctx, cfg.Port, lanIP)
 		if err != nil {
 			m.update(func(s *RemoteStatus) { s.UPnP.Error = "mapping failed: " + err.Error() })
 		} else {
 			m.update(func(s *RemoteStatus) { s.UPnP.Error = ""; s.UPnP.MappedAt = nowRFC3339() })
 		}
 		m.update(func(s *RemoteStatus) { s.UPnP.Mappings = mappings })
-		if ip, err := gw.externalIP(); err == nil {
+		if ip, err := gw.externalIP(ctx); err == nil {
 			m.update(func(s *RemoteStatus) { s.RouterExternalIP = ip })
 		}
 	}
@@ -611,14 +613,14 @@ func (m *Manager) maintenanceLoop(ctx context.Context) {
 
 			ipChanged := false
 			if gw != nil {
-				mappings, err := gw.addMappings(cfg.Port, lanIP)
+				mappings, err := gw.addMappings(ctx, cfg.Port, lanIP)
 				if err != nil {
 					m.update(func(s *RemoteStatus) { s.UPnP.Error = "lease renewal failed: " + err.Error() })
 				} else {
 					m.update(func(s *RemoteStatus) { s.UPnP.Error = ""; s.UPnP.MappedAt = nowRFC3339() })
 				}
 				m.update(func(s *RemoteStatus) { s.UPnP.Mappings = mappings })
-				if ip, err := gw.externalIP(); err == nil && ip != lastRouterIP {
+				if ip, err := gw.externalIP(ctx); err == nil && ip != lastRouterIP {
 					ipChanged = true
 					m.update(func(s *RemoteStatus) { s.RouterExternalIP = ip })
 				}
