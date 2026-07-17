@@ -16,10 +16,17 @@ type Client struct {
 }
 
 func NewClient(baseURL, token string) *Client {
+	return NewClientWithHTTP(baseURL, token, &http.Client{Timeout: 5 * time.Second})
+}
+
+func NewClientWithHTTP(baseURL, token string, client *http.Client) *Client {
+	if client == nil {
+		client = &http.Client{Timeout: 5 * time.Second}
+	}
 	return &Client{
 		baseURL: baseURL,
 		token:   token,
-		http:    &http.Client{Timeout: 5 * time.Second},
+		http:    client,
 	}
 }
 

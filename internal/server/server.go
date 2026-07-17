@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/karbowiak/heya/internal/auth"
@@ -16,6 +17,22 @@ import (
 )
 
 func New(cfg *config.Config, app *service.App, opts ...Option) *http.Server {
+	srv := &http.Server{
+		Addr:              cfg.Addr(),
+		Handler:           NewHandler(cfg, app, opts...),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	if baseCtx := collectOptions(opts...).baseCtx; baseCtx != nil {
+		srv.BaseContext = func(_ net.Listener) context.Context { return baseCtx }
+	}
+	return srv
+}
+
+// NewHandler builds Heya's complete application handler without binding a
+// socket or owning an http.Server. Production passes this directly to the
+// embedded Caddy ingress module; tests and the OpenAPI CLI can still construct
+// the route tree without starting any network runtime.
+func NewHandler(cfg *config.Config, app *service.App, opts ...Option) http.Handler {
 	mux := http.NewServeMux()
 	BuildAPI(mux, app, cfg, opts...)
 
@@ -41,15 +58,7 @@ func New(cfg *config.Config, app *service.App, opts ...Option) *http.Server {
 	jf.SetNative(mux)
 	sub.SetNative(mux)
 
-	handler := withMiddleware(mux)
-	srv := &http.Server{
-		Addr:    cfg.Addr(),
-		Handler: handler,
-	}
-	if o.baseCtx != nil {
-		srv.BaseContext = func(_ net.Listener) context.Context { return o.baseCtx }
-	}
-	return srv
+	return withMiddleware(mux)
 }
 
 // BuildAPI registers every Heya operation against mux and returns the API. Use
@@ -80,6 +89,7 @@ func BuildAPI(mux *http.ServeMux, app *service.App, cfg *config.Config, opts ...
 	registerAuthRoutes(api, app)
 	registerAdminRoutes(api, app, o.logBuf)
 	registerAdminSystemRoutes(api, app, o.hub)
+	registerAdminNetworkRoutes(api, app, o.hub)
 	registerAdminDoctorRoutes(api, app, o.logBuf)
 	registerTailscaleRoutes(api, app, cfg)
 	registerRemoteRoutes(api, app, cfg)

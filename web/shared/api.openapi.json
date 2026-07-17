@@ -970,14 +970,35 @@
       "AdminListener": {
         "additionalProperties": false,
         "properties": {
+          "active": {
+            "type": "boolean"
+          },
           "address": {
             "type": "string"
           },
           "description": {
             "type": "string"
           },
+          "error": {
+            "type": "string"
+          },
           "kind": {
             "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "protocols": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "public": {
             "type": "boolean"
@@ -990,7 +1011,8 @@
           "kind",
           "address",
           "tls",
-          "public"
+          "public",
+          "active"
         ],
         "type": "object"
       },
@@ -1059,6 +1081,121 @@
           "level",
           "boot_level",
           "available"
+        ],
+        "type": "object"
+      },
+      "AdminNetworkGeneral": {
+        "additionalProperties": false,
+        "properties": {
+          "bind_address": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "https_required": {
+            "type": "boolean"
+          },
+          "interfaces": {
+            "items": {
+              "$ref": "#/components/schemas/AdminNetworkInterface"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "lan_ip": {
+            "type": "string"
+          },
+          "ws_subscribers": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hostname",
+          "bind_address",
+          "https_required",
+          "ws_subscribers",
+          "interfaces"
+        ],
+        "type": "object"
+      },
+      "AdminNetworkInterface": {
+        "additionalProperties": false,
+        "properties": {
+          "addresses": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "error": {
+            "type": "string"
+          },
+          "flags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "hardware_address": {
+            "type": "string"
+          },
+          "mtu": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "mtu"
+        ],
+        "type": "object"
+      },
+      "AdminNetworkStatusBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/AdminNetworkStatusBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "general": {
+            "$ref": "#/components/schemas/AdminNetworkGeneral"
+          },
+          "ingress": {
+            "$ref": "#/components/schemas/IngressStatus"
+          },
+          "remote": {
+            "$ref": "#/components/schemas/RemoteStatus"
+          },
+          "tailscale": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ingress",
+          "general",
+          "updated_at"
         ],
         "type": "object"
       },
@@ -2978,6 +3115,32 @@
         ],
         "type": "object"
       },
+      "CertificateStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "source",
+          "subject"
+        ],
+        "type": "object"
+      },
       "Change-passwordRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4799,6 +4962,31 @@
         },
         "type": "object"
       },
+      "Event": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "level",
+          "kind",
+          "message"
+        ],
+        "type": "object"
+      },
       "ExternalPlaylistSyncBody": {
         "additionalProperties": false,
         "properties": {
@@ -5633,6 +5821,67 @@
         ],
         "type": "object"
       },
+      "HTTPMetrics": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes_received": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "bytes_sent": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "errors_per_second": {
+            "format": "double",
+            "type": "number"
+          },
+          "errors_total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "p50_latency_ms": {
+            "format": "double",
+            "type": "number"
+          },
+          "p95_latency_ms": {
+            "format": "double",
+            "type": "number"
+          },
+          "protocols": {
+            "$ref": "#/components/schemas/ProtocolStats"
+          },
+          "requests_in_flight": {
+            "format": "double",
+            "type": "number"
+          },
+          "requests_per_second": {
+            "format": "double",
+            "type": "number"
+          },
+          "requests_total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "requests_total",
+          "requests_per_second",
+          "requests_in_flight",
+          "errors_total",
+          "errors_per_second",
+          "p50_latency_ms",
+          "p95_latency_ms",
+          "bytes_received",
+          "bytes_sent",
+          "protocols"
+        ],
+        "type": "object"
+      },
       "HealthBody": {
         "additionalProperties": false,
         "properties": {
@@ -5982,6 +6231,143 @@
           "devices",
           "artifacts",
           "download_bytes"
+        ],
+        "type": "object"
+      },
+      "IngressMetrics": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes_sent": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "errors_total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "p95_latency_ms": {
+            "format": "double",
+            "type": "number"
+          },
+          "protocols": {
+            "$ref": "#/components/schemas/ProtocolStats"
+          },
+          "requests_in_flight": {
+            "format": "double",
+            "type": "number"
+          },
+          "requests_per_second": {
+            "format": "double",
+            "type": "number"
+          },
+          "requests_total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "requests_total",
+          "requests_per_second",
+          "requests_in_flight",
+          "errors_total",
+          "p95_latency_ms",
+          "bytes_sent",
+          "protocols"
+        ],
+        "type": "object"
+      },
+      "IngressStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "by_ingress": {
+            "items": {
+              "$ref": "#/components/schemas/IngressMetrics"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "certificates": {
+            "items": {
+              "$ref": "#/components/schemas/CertificateStatus"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "generation": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "http": {
+            "$ref": "#/components/schemas/HTTPMetrics"
+          },
+          "last_reload_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_reload_error": {
+            "type": "string"
+          },
+          "listeners": {
+            "items": {
+              "$ref": "#/components/schemas/ListenerStatus"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "local_ca_root": {
+            "type": "string"
+          },
+          "recent_events": {
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "uptime_seconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "running",
+          "version",
+          "started_at",
+          "uptime_seconds",
+          "generation",
+          "listeners",
+          "http",
+          "updated_at"
         ],
         "type": "object"
       },
@@ -10647,6 +11033,58 @@
         ],
         "type": "object"
       },
+      "ListenerStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "address": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "network": {
+            "type": "string"
+          },
+          "protocols": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "public": {
+            "type": "boolean"
+          },
+          "tls": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "network",
+          "address",
+          "protocols",
+          "tls",
+          "public",
+          "active"
+        ],
+        "type": "object"
+      },
       "ListeningStats": {
         "additionalProperties": false,
         "properties": {
@@ -14178,6 +14616,47 @@
         ],
         "type": "object"
       },
+      "PortMappingStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "external_port": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "internal_ip": {
+            "type": "string"
+          },
+          "internal_port": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "lease_seconds": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mapped_at": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol",
+          "external_port",
+          "internal_port",
+          "active",
+          "lease_seconds"
+        ],
+        "type": "object"
+      },
       "ProbeBody": {
         "additionalProperties": false,
         "properties": {
@@ -14196,6 +14675,32 @@
         },
         "required": [
           "challenge"
+        ],
+        "type": "object"
+      },
+      "ProtocolStats": {
+        "additionalProperties": false,
+        "properties": {
+          "http1": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "http2": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "http3": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "http1",
+          "http2",
+          "http3"
         ],
         "type": "object"
       },
@@ -19698,6 +20203,15 @@
           },
           "mapped_at": {
             "type": "string"
+          },
+          "mappings": {
+            "items": {
+              "$ref": "#/components/schemas/PortMappingStatus"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
         "required": [
@@ -21225,6 +21739,49 @@
           }
         ],
         "summary": "Set the global log level at runtime",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/admin/network/status": {
+      "get": {
+        "operationId": "admin-network-status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminNetworkStatusBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Unified Caddy, UPnP, Tailscale and host network status",
         "tags": [
           "Admin"
         ]

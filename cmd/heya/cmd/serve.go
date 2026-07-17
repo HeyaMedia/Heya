@@ -2,10 +2,7 @@ package cmd
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
@@ -15,6 +12,7 @@ import (
 
 	"github.com/karbowiak/heya/internal/database"
 	"github.com/karbowiak/heya/internal/eventhub"
+	"github.com/karbowiak/heya/internal/ingress"
 	"github.com/karbowiak/heya/internal/logbuf"
 	"github.com/karbowiak/heya/internal/remote"
 	"github.com/karbowiak/heya/internal/scheduler"
@@ -25,13 +23,12 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
-	"golang.org/x/sys/unix"
 )
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "Start the HTTP server",
-	Long:  "Start the Heya HTTP API server and background workers. With tailscale.enabled, also exposes the same API on the tailnet.",
+	Short: "Start Heya with embedded Caddy",
+	Long:  "Start Heya's embedded Caddy ingress and background workers. With tailscale.enabled, also exposes the same application on the tailnet.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
@@ -112,25 +109,43 @@ var serveCmd = &cobra.Command{
 		taskTrigger := scheduler.NewTrigger(app.DBPool(), app.RiverClient())
 		app.SetScheduler(taskTrigger)
 
-		srv := server.New(cfg, app,
+		handler := server.NewHandler(cfg, app,
 			server.WithLogBuffer(logRing),
 			server.WithEventHub(app.EventHub()),
-			server.WithBaseContext(appCtx),
 		)
+		ingressLogger := log.With().Str("subsystem", "caddy").Logger()
+		ingressManager := ingress.New(handler, ingressLogger)
+		app.SetIngress(ingressManager)
+		if err := ingressManager.Start(appCtx, ingress.HostConfig{
+			Address: cfg.Addr(), HTTPS: !devBackend, DataDir: cfg.DataDir.Value,
+			LogLevel: cfg.LogLevel.Value,
+		}); err != nil {
+			return fmt.Errorf("starting embedded Caddy ingress: %w", err)
+		}
+		defer func() { _ = ingressManager.Close() }()
 
-		// Wire the network subsystems: Tailscale (in-process tsnet node) and
-		// remote access (UPnP + ACME + reachability). Both serve the same
-		// handler as the LAN listener and both are PRODUCTION-ONLY — under
+		// Wire the network control planes into Caddy: Tailscale supplies tsnet
+		// listeners/certificates; remote supplies UPnP, DNS, certificates and
+		// outside-in checks. Both are PRODUCTION-ONLY — under
 		// --dev-backend the managers stay nil and the API reports them as
 		// unavailable. The dev-proxy is a dumb reverse proxy on purpose.
 		if devBackend {
 			log.Info().Msg("dev-backend: tailscale + remote access are production-only, skipping")
 		} else {
 			tsLogger := log.With().Str("subsystem", "tailscale").Logger()
-			tsManager := tsnetwrap.New(srv.Handler, tsLogger, func(st tsnetwrap.Status) {
-				app.EventHub().Emit(eventhub.EventTailscale, st)
-			})
+			tsManager := tsnetwrap.New(
+				tsLogger,
+				func(st tsnetwrap.Status) { app.EventHub().Emit(eventhub.EventTailscale, st) },
+				func(ctx context.Context, tail tsnetwrap.IngressConfig) error {
+					return ingressManager.SetTailnet(ctx, ingress.TailnetConfig{
+						Address: tail.Address, CertDomain: tail.CertDomain,
+						HTTPS: tail.HTTPS, Funnel: tail.Funnel, Source: tail.Source,
+					})
+				},
+				ingressManager.ClearTailnet,
+			)
 			app.SetTailscale(tsManager)
+			defer func() { _ = tsManager.Close() }()
 
 			if cfg.Tailscale.Enabled.Value {
 				go func() {
@@ -148,10 +163,19 @@ var serveCmd = &cobra.Command{
 			}
 
 			remoteLogger := log.With().Str("subsystem", "remote").Logger()
-			remoteMgr := remote.NewManager(srv.Handler, remoteLogger, func(st remote.RemoteStatus) {
-				app.EventHub().Emit(eventhub.EventRemote, st)
-			})
+			remoteMgr := remote.NewManager(
+				remoteLogger,
+				func(st remote.RemoteStatus) { app.EventHub().Emit(eventhub.EventRemote, st) },
+				func(ctx context.Context, remoteCfg remote.IngressConfig) error {
+					return ingressManager.SetRemote(ctx, ingress.RemoteConfig{
+						Port: remoteCfg.Port, Names: remoteCfg.Names, DefaultSNI: remoteCfg.DefaultSNI,
+						CertificateMode: remoteCfg.CertificateMode, GetCertificate: remoteCfg.GetCertificate,
+					})
+				},
+				ingressManager.ClearRemote,
+			)
 			app.SetRemote(remoteMgr)
+			defer func() { _ = remoteMgr.Close() }()
 
 			if cfg.Remote.Enabled.Value {
 				go func() {
@@ -167,23 +191,13 @@ var serveCmd = &cobra.Command{
 			}
 		}
 
-		// Bring the HTTP listener up FIRST — before the (potentially slow,
+		// Embedded Caddy is already live — before the (potentially slow,
 		// SMB-bound) worker + watcher startup below — so :8080 answers health
 		// probes within a second instead of only after the recursive watch setup
 		// on a large library finishes. Everything past this point runs while the
 		// server is already accepting connections, so a slow StartWatchers can no
 		// longer hold the startup/readiness gate hostage and crash-loop the pod.
-		ln, err := reuseAddrListen(cfg.Addr())
-		if err != nil {
-			return err
-		}
-
-		go func() {
-			log.Info().Str("addr", cfg.Addr()).Msg("starting server")
-			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
-				log.Fatal().Err(err).Msg("server error")
-			}
-		}()
+		log.Info().Str("addr", cfg.Addr()).Bool("https", !devBackend).Msg("embedded Caddy ingress started")
 
 		// --- Background services. The listener is already live above, so a slow
 		// startup here only delays job processing / file watching, never the
@@ -268,8 +282,6 @@ var serveCmd = &cobra.Command{
 			os.Exit(1)
 		}()
 
-		_ = ln.Close()
-
 		// Cancel appCtx first so every derived context (workers,
 		// watchers, periodic emitters, task scheduler, bridgeLogToHub)
 		// observes cancellation before we touch their resources.
@@ -278,11 +290,11 @@ var serveCmd = &cobra.Command{
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 		defer cancel()
 
-		// Four independent shutdowns in parallel. The 6s budget covers
-		// the slowest one (tsnet); workers + http server + remote listener
-		// finish in well under a second.
+		// Workers can drain alongside the network teardown. Network owners are
+		// deliberately ordered: detach remote/tailnet from Caddy, close tsnet,
+		// then stop the remaining host ingress.
 		var wg sync.WaitGroup
-		wg.Add(4)
+		wg.Add(2)
 		go func() {
 			defer wg.Done()
 			// Workers were never started in passive mode; River's Stop on a
@@ -295,24 +307,13 @@ var serveCmd = &cobra.Command{
 		}()
 		go func() {
 			defer wg.Done()
-			if err := srv.Shutdown(shutdownCtx); err != nil {
-				log.Warn().Err(err).Msg("http shutdown error")
-			}
-		}()
-		go func() {
-			defer wg.Done()
-			// Close only tears down the TLS listener + loops; the UPnP
-			// mapping is left in place on purpose — a restart (air, deploy)
-			// must not drop remote users' ability to reconnect. Only an
-			// explicit user Disable unmaps.
+			// The UPnP mapping is left in place on restart; only explicit
+			// Disable unmaps it. The Caddy remote listener is still detached.
 			if rm := app.Remote(); rm != nil {
 				if err := rm.Close(); err != nil {
 					log.Warn().Err(err).Msg("remote access shutdown error")
 				}
 			}
-		}()
-		go func() {
-			defer wg.Done()
 			if ts := app.Tailscale(); ts != nil {
 				done := make(chan struct{})
 				go func() {
@@ -327,6 +328,9 @@ var serveCmd = &cobra.Command{
 				case <-shutdownCtx.Done():
 					log.Warn().Msg("tailscale shutdown timed out — state dir may be partial, next start may need extra time")
 				}
+			}
+			if err := ingressManager.Close(); err != nil {
+				log.Warn().Err(err).Msg("Caddy ingress shutdown error")
 			}
 		}()
 
@@ -346,7 +350,7 @@ var serveCmd = &cobra.Command{
 
 func init() {
 	serveCmd.Flags().Bool("dev-backend", false,
-		"Dev mode: serve the API on this port only and drive Tailscale via the `heya dev-proxy` control socket instead of an in-process node (used by `make dev`)")
+		"Dev mode: run plaintext Caddy on this port and skip production-only Tailscale/remote access (used by `make dev`)")
 }
 
 // waitWithDeadline returns when wg.Wait() completes or when the deadline
@@ -359,38 +363,6 @@ func waitWithDeadline(wg *sync.WaitGroup, d time.Duration) {
 	case <-done:
 	case <-time.After(d):
 	}
-}
-
-func reuseAddrListen(addr string) (net.Listener, error) {
-	lc := net.ListenConfig{
-		// SO_REUSEADDR alone lets us bind a port that's in TIME_WAIT,
-		// but on macOS/BSD it does NOT let us bind a port whose previous
-		// owner just exited with active connections still draining (the
-		// usual air-reload case: old proc has WS handlers + in-flight
-		// requests, kernel needs ~a second to FIN them all). Adding
-		// SO_REUSEPORT bypasses that wait: the new process can grab
-		// the listener even while the old socket is mid-teardown.
-		// Both flags are safe under Linux (REUSEPORT is the load-
-		// balancing flag there, but our use case never has two heya
-		// processes alive together).
-		Control: func(network, address string, c syscall.RawConn) error {
-			var opErr error
-			if err := c.Control(func(fd uintptr) {
-				if e := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); e != nil {
-					opErr = e
-					return
-				}
-				if e := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1); e != nil {
-					opErr = e
-					return
-				}
-			}); err != nil {
-				return err
-			}
-			return opErr
-		},
-	}
-	return lc.Listen(context.Background(), "tcp", addr)
 }
 
 // logRuntimeStatsPeriodically emits a single-line trend signal every 30s so

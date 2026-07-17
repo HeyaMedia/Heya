@@ -58,8 +58,12 @@ type dataMsg struct {
 }
 
 func New(serverURL, token string) Model {
+	return NewWithClient(NewClient(serverURL, token))
+}
+
+func NewWithClient(client *Client) Model {
 	return Model{
-		client:    NewClient(serverURL, token),
+		client:    client,
 		startTime: time.Now(),
 		fileStats: make(map[int64]map[string]int64),
 	}

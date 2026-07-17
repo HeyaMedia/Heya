@@ -3,6 +3,9 @@ package remote
 import (
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/huin/goupnp/dcps/internetgateway1"
 	"github.com/huin/goupnp/dcps/internetgateway2"
@@ -22,26 +25,41 @@ type igdClient interface {
 type upnpGateway struct {
 	client igdClient
 	loc    string
-	// leaseSeconds is what the router accepted: preferred 7200, falling back
-	// to 0 (permanent) for routers that reject timed leases.
-	leaseSeconds uint32
+	mu     sync.Mutex
+	// leaseSeconds records what the router accepted for each transport:
+	// preferred 7200, falling back to 0 (permanent) for routers that reject
+	// timed leases. Routers are allowed to behave differently for TCP/UDP.
+	leaseSeconds map[string]uint32
 }
 
 const mappingDescription = "Heya remote access"
+
+var mappingProtocols = []string{"TCP", "UDP"}
 
 // discoverGateway finds the first WANIPConnection service on the LAN,
 // preferring IGDv2.
 func discoverGateway() (*upnpGateway, error) {
 	if clients, _, err := internetgateway2.NewWANIPConnection2Clients(); err == nil && len(clients) > 0 {
-		return &upnpGateway{client: clients[0], loc: clients[0].Location.String(), leaseSeconds: 7200}, nil
+		return newUPnPGateway(clients[0], clients[0].Location.String()), nil
 	}
 	if clients, _, err := internetgateway2.NewWANIPConnection1Clients(); err == nil && len(clients) > 0 {
-		return &upnpGateway{client: clients[0], loc: clients[0].Location.String(), leaseSeconds: 7200}, nil
+		return newUPnPGateway(clients[0], clients[0].Location.String()), nil
 	}
 	if clients, _, err := internetgateway1.NewWANIPConnection1Clients(); err == nil && len(clients) > 0 {
-		return &upnpGateway{client: clients[0], loc: clients[0].Location.String(), leaseSeconds: 7200}, nil
+		return newUPnPGateway(clients[0], clients[0].Location.String()), nil
 	}
 	return nil, errors.New("no UPnP internet gateway found on this network (is UPnP enabled on the router?)")
+}
+
+func newUPnPGateway(client igdClient, location string) *upnpGateway {
+	return &upnpGateway{
+		client: client,
+		loc:    location,
+		leaseSeconds: map[string]uint32{
+			"TCP": 7200,
+			"UDP": 7200,
+		},
+	}
 }
 
 func (g *upnpGateway) location() string { return g.loc }
@@ -50,28 +68,77 @@ func (g *upnpGateway) externalIP() (string, error) {
 	return g.client.GetExternalIPAddress()
 }
 
-// addMapping asserts extPort→lanIP:extPort TCP. Same-port inside and out keeps the
-// URL story simple (one port in bookmarks, one listener). Timed lease first;
-// some routers (older FRITZ!Box, some TP-Link) only accept lease 0.
-func (g *upnpGateway) addMapping(port int, lanIP string) error {
+// addMappings asserts extPort→lanIP:extPort for TCP (HTTP/1.1 + HTTP/2) and
+// UDP (HTTP/3). Same-port inside and out keeps the URL story simple. Each
+// transport is attempted independently so an UDP-hostile router cannot take
+// otherwise-working remote HTTPS down with it.
+func (g *upnpGateway) addMappings(port int, lanIP string) ([]PortMappingStatus, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
 	if lanIP == "" {
-		return errors.New("no LAN IP detected")
+		err := errors.New("no LAN IP detected")
+		return failedMappings(port, lanIP, err), err
 	}
-	p := uint16(port)
-	err := g.client.AddPortMapping("", p, "TCP", p, lanIP, true, mappingDescription, g.leaseSeconds)
-	if err != nil && g.leaseSeconds != 0 {
-		if permErr := g.client.AddPortMapping("", p, "TCP", p, lanIP, true, mappingDescription, 0); permErr == nil {
-			g.leaseSeconds = 0
-			return nil
+
+	mappings := make([]PortMappingStatus, 0, len(mappingProtocols))
+	var errs []error
+	for _, protocol := range mappingProtocols {
+		lease := g.leaseSeconds[protocol]
+		err := g.addMappingLocked(port, lanIP, protocol, lease)
+		if err != nil && lease != 0 {
+			if permanentErr := g.addMappingLocked(port, lanIP, protocol, 0); permanentErr == nil {
+				lease = 0
+				g.leaseSeconds[protocol] = 0
+				err = nil
+			} else {
+				err = fmt.Errorf("timed lease failed: %v; permanent fallback failed: %w", err, permanentErr)
+			}
 		}
-		return fmt.Errorf("router rejected port mapping: %w", err)
+
+		mapping := PortMappingStatus{
+			Protocol: protocol, ExternalPort: port, InternalIP: lanIP,
+			InternalPort: port, LeaseSeconds: lease, Active: err == nil,
+		}
+		if err != nil {
+			mapping.Error = err.Error()
+			errs = append(errs, fmt.Errorf("%s: %w", strings.ToLower(protocol), err))
+		} else {
+			mapping.MappedAt = time.Now().UTC().Format(time.RFC3339)
+		}
+		mappings = append(mappings, mapping)
 	}
-	if err != nil {
+	return mappings, errors.Join(errs...)
+}
+
+func (g *upnpGateway) addMappingLocked(port int, lanIP, protocol string, lease uint32) error {
+	p := uint16(port)
+	if err := g.client.AddPortMapping("", p, protocol, p, lanIP, true, mappingDescription, lease); err != nil {
 		return fmt.Errorf("router rejected port mapping: %w", err)
 	}
 	return nil
 }
 
-func (g *upnpGateway) unmap(port int) error {
-	return g.client.DeletePortMapping("", uint16(port), "TCP")
+func failedMappings(port int, lanIP string, err error) []PortMappingStatus {
+	mappings := make([]PortMappingStatus, 0, len(mappingProtocols))
+	for _, protocol := range mappingProtocols {
+		mappings = append(mappings, PortMappingStatus{
+			Protocol: protocol, ExternalPort: port, InternalIP: lanIP,
+			InternalPort: port, Error: err.Error(),
+		})
+	}
+	return mappings
+}
+
+func (g *upnpGateway) unmapMappings(port int) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	var errs []error
+	for _, protocol := range mappingProtocols {
+		if err := g.client.DeletePortMapping("", uint16(port), protocol); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", strings.ToLower(protocol), err))
+		}
+	}
+	return errors.Join(errs...)
 }

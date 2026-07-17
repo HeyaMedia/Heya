@@ -323,9 +323,14 @@ export type AdminDbTable = {
 };
 
 export type AdminListener = {
+    active: boolean;
     address: string;
     description?: string;
+    error?: string;
     kind: string;
+    name?: string;
+    network?: string;
+    protocols?: Array<string> | null;
     public: boolean;
     tls: boolean;
 };
@@ -350,6 +355,36 @@ export type AdminLogLevelBody = {
      */
     boot_level: string;
     level: string;
+};
+
+export type AdminNetworkGeneral = {
+    bind_address: string;
+    hostname: string;
+    https_required: boolean;
+    interfaces: Array<AdminNetworkInterface> | null;
+    lan_ip?: string;
+    ws_subscribers: number;
+};
+
+export type AdminNetworkInterface = {
+    addresses?: Array<string> | null;
+    error?: string;
+    flags?: Array<string> | null;
+    hardware_address?: string;
+    mtu: number;
+    name: string;
+};
+
+export type AdminNetworkStatusBody = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    general: AdminNetworkGeneral;
+    ingress: IngressStatus;
+    remote?: RemoteStatus;
+    tailscale?: Status;
+    updated_at: string;
 };
 
 export type AdminSessionView = {
@@ -923,6 +958,14 @@ export type CertStatus = {
     sans?: Array<string> | null;
 };
 
+export type CertificateStatus = {
+    error?: string;
+    expires_at?: string;
+    name: string;
+    source: string;
+    subject: string;
+};
+
 export type ChangePasswordRequest = {
     /**
      * A URL to the JSON Schema for this object.
@@ -1475,6 +1518,13 @@ export type ErrorModel = {
     type?: string;
 };
 
+export type Event = {
+    at: string;
+    kind: string;
+    level: string;
+    message: string;
+};
+
 export type ExternalPlaylistSyncBody = {
     /**
      * A URL to the JSON Schema for this object.
@@ -1705,6 +1755,19 @@ export type GetMusicArtistBySlugRow = {
     wikipedia_links: string;
 };
 
+export type HttpMetrics = {
+    bytes_received: number;
+    bytes_sent: number;
+    errors_per_second: number;
+    errors_total: number;
+    p50_latency_ms: number;
+    p95_latency_ms: number;
+    protocols: ProtocolStats;
+    requests_in_flight: number;
+    requests_per_second: number;
+    requests_total: number;
+};
+
 export type HealthBody = {
     /**
      * A URL to the JSON Schema for this object.
@@ -1818,6 +1881,34 @@ export type ImageStatus = {
     model_present: boolean;
     progress?: ImageDownloadProgress;
     runtime_present: boolean;
+};
+
+export type IngressMetrics = {
+    bytes_sent: number;
+    errors_total: number;
+    name: string;
+    p95_latency_ms: number;
+    protocols: ProtocolStats;
+    requests_in_flight: number;
+    requests_per_second: number;
+    requests_total: number;
+};
+
+export type IngressStatus = {
+    by_ingress?: Array<IngressMetrics> | null;
+    certificates?: Array<CertificateStatus> | null;
+    generation: number;
+    http: HttpMetrics;
+    last_reload_at?: string;
+    last_reload_error?: string;
+    listeners: Array<ListenerStatus> | null;
+    local_ca_root?: string;
+    recent_events?: Array<Event> | null;
+    running: boolean;
+    started_at: string;
+    updated_at: string;
+    uptime_seconds: number;
+    version: string;
 };
 
 export type Int2 = {
@@ -2929,6 +3020,19 @@ export type ListUserRatedTracksRow = {
     track_title: string;
 };
 
+export type ListenerStatus = {
+    active: boolean;
+    address: string;
+    description?: string;
+    error?: string;
+    kind: string;
+    name: string;
+    network: string;
+    protocols: Array<string> | null;
+    public: boolean;
+    tls: boolean;
+};
+
 export type ListeningStats = {
     /**
      * A URL to the JSON Schema for this object.
@@ -3925,12 +4029,29 @@ export type PodcastsBody = {
     items: Array<Podcast> | null;
 };
 
+export type PortMappingStatus = {
+    active: boolean;
+    error?: string;
+    external_port: number;
+    internal_ip?: string;
+    internal_port: number;
+    lease_seconds: number;
+    mapped_at?: string;
+    protocol: string;
+};
+
 export type ProbeBody = {
     /**
      * A URL to the JSON Schema for this object.
      */
     readonly $schema?: string;
     challenge: string;
+};
+
+export type ProtocolStats = {
+    http1: number;
+    http2: number;
+    http3: number;
 };
 
 export type Provider = {
@@ -5583,6 +5704,7 @@ export type UPnPStatus = {
     error?: string;
     gateway?: string;
     mapped_at?: string;
+    mappings?: Array<PortMappingStatus> | null;
 };
 
 export type UnmatchedFile = {
@@ -6142,6 +6264,14 @@ export type AdminLogLevelBodyWritable = {
      */
     boot_level: string;
     level: string;
+};
+
+export type AdminNetworkStatusBodyWritable = {
+    general: AdminNetworkGeneral;
+    ingress: IngressStatus;
+    remote?: RemoteStatus;
+    tailscale?: Status;
+    updated_at: string;
 };
 
 export type AdminStorageBodyWritable = {
@@ -8284,6 +8414,31 @@ export type AdminSetLogLevelResponses = {
 };
 
 export type AdminSetLogLevelResponse = AdminSetLogLevelResponses[keyof AdminSetLogLevelResponses];
+
+export type AdminNetworkStatusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/admin/network/status';
+};
+
+export type AdminNetworkStatusErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type AdminNetworkStatusError = AdminNetworkStatusErrors[keyof AdminNetworkStatusErrors];
+
+export type AdminNetworkStatusResponses = {
+    /**
+     * OK
+     */
+    200: AdminNetworkStatusBody;
+};
+
+export type AdminNetworkStatusResponse = AdminNetworkStatusResponses[keyof AdminNetworkStatusResponses];
 
 export type RecommendationsMlBackfillData = {
     body?: never;

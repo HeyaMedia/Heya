@@ -1,7 +1,8 @@
 # Remote access — UPnP, certificates, reachability
 
 Plex-style direct remote access, production-only. The server maps a router
-port via UPnP, serves the full app on its own TLS listener, gets real
+port via UPnP for TCP and UDP, serves the full app through embedded Caddy
+(HTTP/1.1, HTTP/2 and HTTP/3), gets real
 certificates through ACME DNS-01 against a user-supplied DNS provider, and
 verifies reachability outside-in through the heya.media connectivity-check
 service. Everything lives in the single binary; heya.media's only role is
@@ -12,12 +13,13 @@ the probe (and, later, the paid `*.heya.direct` tier).
 ```
 internal/remote/            the subsystem (no service-layer deps)
   remote.go                 Manager, state machine, maintenance loop
-  upnp.go                   IGD discovery + port mapping (goupnp, IGDv2→v1)
+  upnp.go                   IGD discovery + TCP/UDP mappings (goupnp, IGDv2→v1)
   probe.go                  heya.media /v1/check + /v1/ip client (tcp4-pinned)
   dns.go                    libdns providers (deSEC/DuckDNS/Cloudflare),
                             zone-pinning adapter, lan./wan. record syncer
   certs.go                  certmagic (ACME DNS-01 wildcard) + persistent
-                            self-signed fallback + the TLS listener
+                            self-signed fallback, supplied to Caddy
+internal/ingress/           embedded Caddy listener/TLS/QUIC owner + metrics
 internal/service/remote_settings.go   DB-backed settings (system_settings
                             "remote.*"), env-lock provenance, port minting
 internal/server/remote_huma.go         /api/remote/* + public probe echo
@@ -46,8 +48,8 @@ on Settings → Network.
   port forwards and points at Tailscale.
 - UPnP failure is non-fatal: a manual port forward still probes fine.
 
-The maintenance loop (15 min) re-leases the mapping (7200s lease, falling
-back to permanent for routers that reject timed leases), watches for WAN IP
+The maintenance loop (15 min) independently re-leases TCP and UDP mappings
+(7200s lease, falling back to permanent per transport when required), watches for WAN IP
 changes (→ resync `wan.` record + re-probe), and re-checks hourly.
 
 ## DNS providers
@@ -101,6 +103,10 @@ map to distinct UI messages. `GET /v1/ip` returns the caller's IP for
 display + CGNAT detection. The media-server side serves the challenge only
 while a check it initiated is in flight.
 
+The heya.media check proves the TCP/TLS/application path. UDP mapping state is
+reported independently from the router and HTTP/3 is exercised by clients;
+the current probe contract does not perform a remote QUIC check.
+
 **Hairpin caveat:** when the check service egresses behind the *same
 router* as the target server (e.g. heya.media hosted on the same LAN), its
 probe of the WAN IP is a hairpin connection and fails on routers without
@@ -112,7 +118,9 @@ that to the `unverified` phase.
 
 ## Lifecycle notes
 
-- Shutdown (`Close`) keeps the router mapping — restarts must not strand
+- Caddy owns the listening sockets and TLS/QUIC termination. The remote
+  manager owns only certificates, DNS, mapping leases and reachability state.
+- Shutdown (`Close`) keeps the router mappings — restarts must not strand
   remote clients. Only explicit user Disable unmaps.
 - Enable is idempotent teardown-and-rebuild; that's also the config-apply
   path. Enable/Disable/Recheck serialize on one mutex, so a disable issued

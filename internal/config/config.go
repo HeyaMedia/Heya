@@ -101,7 +101,7 @@ type SubsonicConfig struct {
 type CastConfig struct {
 	Enabled Field[bool]
 	// BaseURL is the receiver-facing Heya origin used by URL-pull providers
-	// (Google Cast, DLNA, Yamaha, WiiM). Empty derives a plain HTTP origin
+	// (Google Cast, DLNA, Yamaha, WiiM). Empty derives an HTTPS origin
 	// from the server interface routed toward each receiver plus HEYA_PORT.
 	// Reverse-proxied/container deployments can set an explicit LAN-reachable
 	// origin such as https://heya.example.lan.

@@ -1,16 +1,16 @@
 # Dev supervisor for `make dev`. Three processes, one front door:
 #
 #   proxy  heya dev-proxy — STABLE front door on :8080. Reverse-proxies
-#          /api/* + /jellyfin/* → :3050 and /* → Nuxt :3000, and owns the Tailscale node.
-#          Never restarts on a code save, so the tailnet node + any WS/HMR
-#          socket survive air rebuilds. Press `r` on this pane to rebuild it
-#          after editing proxy / tailscale code.
+#          /api/* + /jellyfin/* → :3050 and /* → Nuxt :3000.
+#          Never restarts on a code save, so the stable origin and Vite HMR
+#          socket survive Air rebuilds. Press `r` on this pane to rebuild it
+#          after editing proxy code.
 #   api    air — hot-reloads `heya serve --dev-backend` on :3050 (API + WS
-#          only; drives Tailscale via the proxy's control socket).
+#          through plaintext embedded Caddy; no Tailscale/remote access).
 #   web    Nuxt/Vite dev server on :3000 (HMR).
 #
 # Open http://localhost:8080. Quit (q / Ctrl+C) tears all three down cleanly.
-# `exec` so SIGTERM reaches the binary → clean tsnet state-dir flush.
+# `exec` so SIGTERM reaches each child for a clean shutdown.
 procs:
   proxy:
     # mkdir -p tmp: it's gitignored, so on a clean checkout it may not exist

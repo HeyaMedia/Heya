@@ -19,6 +19,7 @@ import (
 	"github.com/karbowiak/heya/internal/imagegen"
 	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/imageserve"
+	"github.com/karbowiak/heya/internal/ingress"
 	"github.com/karbowiak/heya/internal/llm"
 	"github.com/karbowiak/heya/internal/matcher"
 	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
@@ -53,8 +54,10 @@ type App struct {
 	audioSessions  *transcoder.AudioSessionManager
 	hub            *eventhub.Hub
 	scheduler      *scheduler.Trigger
+	networkMu      sync.RWMutex
 	tailscale      tailscale.Manager
 	remote         *remote.Manager
+	ingress        *ingress.Manager
 	textSearcher   *sonicanalysis.TextSearcher
 	modelFetcher   *sonicanalysis.ModelFetcher
 	analyzer       *sonicanalysis.Analyzer
@@ -132,8 +135,26 @@ func (a *App) Sessions() *sessions.Store                      { return a.session
 
 func (a *App) SetScheduler(s *scheduler.Trigger) { a.scheduler = s }
 
-func (a *App) Tailscale() tailscale.Manager      { return a.tailscale }
-func (a *App) SetTailscale(ts tailscale.Manager) { a.tailscale = ts }
+func (a *App) Tailscale() tailscale.Manager {
+	a.networkMu.RLock()
+	defer a.networkMu.RUnlock()
+	return a.tailscale
+}
+func (a *App) SetTailscale(ts tailscale.Manager) {
+	a.networkMu.Lock()
+	a.tailscale = ts
+	a.networkMu.Unlock()
+}
+func (a *App) Ingress() *ingress.Manager {
+	a.networkMu.RLock()
+	defer a.networkMu.RUnlock()
+	return a.ingress
+}
+func (a *App) SetIngress(manager *ingress.Manager) {
+	a.networkMu.Lock()
+	a.ingress = manager
+	a.networkMu.Unlock()
+}
 
 func (a *App) TextSearcher() *sonicanalysis.TextSearcher { return a.textSearcher }
 func (a *App) ModelFetcher() *sonicanalysis.ModelFetcher { return a.modelFetcher }

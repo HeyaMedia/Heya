@@ -38,8 +38,16 @@ const (
 )
 
 // Remote returns the remote-access manager (nil until serve.go wires it).
-func (a *App) Remote() *remote.Manager     { return a.remote }
-func (a *App) SetRemote(m *remote.Manager) { a.remote = m }
+func (a *App) Remote() *remote.Manager {
+	a.networkMu.RLock()
+	defer a.networkMu.RUnlock()
+	return a.remote
+}
+func (a *App) SetRemote(m *remote.Manager) {
+	a.networkMu.Lock()
+	a.remote = m
+	a.networkMu.Unlock()
+}
 
 // SaveRemoteSettings persists the UI-editable remote fields, refusing any
 // field whose effective value is env-locked (validate-all-then-write-all).

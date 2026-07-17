@@ -32,7 +32,8 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "8080:8080/tcp"
+      - "8080:8080/udp"
     environment:
       HEYA_DATABASE_URL: postgres://heya:heya@postgres:5432/heya?sslmode=disable
       # Run HeyaMetadata separately. This default reaches a host-side dev

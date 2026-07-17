@@ -11,7 +11,7 @@ cp .env.example .env        # tweak the values you care about
 make db-up                  # start Postgres on :5440
 make build                  # frontend (bun) + Go binary → ./bin/heya
 ./bin/heya setup            # guided wizard — migrations, admin user, first library
-./bin/heya serve            # http://localhost:8080
+./bin/heya serve            # https://localhost:8080
 ```
 
 Configuration lives in `.env` (see `.env.example` for every supported key,
@@ -71,6 +71,10 @@ HEYA_DATABASE_URL="postgres://heya:heya@localhost:5440/heya?sslmode=disable" \
 HEYA_PORT=18080 HEYA_DATA_DIR=/tmp/heya-nettest ./bin/heya serve
 ```
 
+That production-mode listener is HTTPS-only and includes HTTP/3. Its local CA
+root is `/tmp/heya-nettest/caddy/pki/authorities/local/root.crt`; Heya's own
+CLI loads it automatically.
+
 Don't run `go build -o ./bin/heya ./cmd/heya` by hand during dev — `air` rebuilds on save. `go build ./...` is fine as a compile-check.
 
 ## Build for production
@@ -96,6 +100,7 @@ cache, re-logs in, and retries once.
 | Linux | `$XDG_CONFIG_HOME/heya/cli-token` (or `~/.config/heya/cli-token`)      |
 
 ```bash
+export HEYA_API_BASE_URL=http://localhost:8080  # make dev only
 ./bin/heya api get /api/health
 ./bin/heya api get /api/music/artists -q limit=5
 ./bin/heya api get /api/media/42                            # path interpolation isn't done — pass the resolved path
@@ -103,6 +108,10 @@ cache, re-logs in, and retries once.
 cat patch.json | ./bin/heya api patch /api/media/42 -
 ./bin/heya api get /api/tracks/123/stream --raw > out.flac  # binary endpoints need --raw
 ```
+
+The explicit HTTP base above is for `make dev`'s plaintext dev-proxy. Against a
+normal `heya serve`, the CLI defaults to `https://localhost:8080` and trusts
+the persisted Heya/Caddy root in `HEYA_DATA_DIR` in addition to system roots.
 
 Body sources: positional JSON literal, `@file`, or `-` for stdin. Query params
 via `-q key=value` (repeatable, URL-encoded). Pretty-prints JSON responses by

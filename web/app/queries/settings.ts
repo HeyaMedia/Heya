@@ -1,6 +1,7 @@
 import { defineQueryOptions } from '@pinia/colada'
 export type {
   AdminListenersBody as AdminListeners,
+  AdminNetworkStatusBody as AdminNetworkStatus,
   AdminSessionView as AdminSession,
   AdminStorageBody as AdminStorage,
   AdminUserView as AdminUser,
@@ -23,6 +24,7 @@ export type {
 
 import type {
   AdminListenersBody as AdminListeners,
+  AdminNetworkStatusBody as AdminNetworkStatus,
   AdminSessionView as AdminSession,
   AdminStorageBody as AdminStorage,
   AdminUserView as AdminUser,
@@ -180,6 +182,16 @@ export const adminListenersQuery = defineQueryOptions(() => ({
     return await $heya('/api/admin/listeners') as AdminListeners
   },
   staleTime: 1000 * 15,
+  meta: privateSettings,
+}))
+
+export const adminNetworkStatusQuery = defineQueryOptions(() => ({
+  key: ['admin', 'network', 'status'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/admin/network/status') as AdminNetworkStatus
+  },
+  staleTime: 1000 * 5,
   meta: privateSettings,
 }))
 

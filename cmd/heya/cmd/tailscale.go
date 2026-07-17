@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"time"
 
@@ -89,9 +88,7 @@ var tailscaleLogoutCmd = &cobra.Command{
 
 func newOneShotTailscale() *tsnetwrap.Server {
 	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
-	// One-shot CLI doesn't serve HTTP — pass a no-op handler.
-	noop := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
-	return tsnetwrap.New(noop, logger, nil)
+	return tsnetwrap.New(logger, nil, nil, nil)
 }
 
 func oneShotConfig() tsnetwrap.Config {

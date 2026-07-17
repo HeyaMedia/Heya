@@ -11,7 +11,7 @@ are global flags.
 
 | Command           | What it does                                                |
 | ----------------- | ----------------------------------------------------------- |
-| `heya serve`      | Start the HTTP server (default `:8080`, `HEYA_PORT` to override) |
+| `heya serve`      | Start embedded Caddy with HTTPS/H1-H3 (default `:8080`) |
 | `heya dev-proxy`  | Dev front-door reverse proxy on `:8080` (normally launched by `make dev`/mprocs, not run directly) |
 | `heya dashboard`  | Full-screen TUI: server status, queue, scans, watchers      |
 | `heya setup`      | Guided first-time config (writes `.env` and seeds admin)    |
@@ -135,7 +135,7 @@ cat patch.json | heya api patch /api/media/42 -
 
 | Flag       | Purpose                                                |
 | ---------- | ------------------------------------------------------ |
-| `--base`   | Server base URL (default `http://localhost:8080`)      |
+| `--base`   | Server base URL (default `https://localhost:8080`)     |
 | `--user`   | Login username (default `admin`)                       |
 | `--pass`   | Login password (default `admin`)                       |
 | `--token`  | Bearer token (skips login + cache)                     |

@@ -9,9 +9,9 @@ datastore — no Redis, no Mongo, no separate job queue daemon.
 │                        ./bin/heya  (one process)                    │
 │                                                                     │
 │   ┌─────────────┐  ┌──────────────┐  ┌─────────────────────────┐    │
-│   │ HTTP server │  │ Embedded SPA │  │ River workers           │    │
-│   │ (net/http,  │  │ //go:embed   │  │ scan / match / metadata │    │
-│   │  Go 1.22+)  │  │   dist/      │  │ assets / transcode      │    │
+│   │ Caddy edge  │  │ Embedded SPA │  │ River workers           │    │
+│   │ TLS + QUIC  │  │ //go:embed   │  │ scan / match / metadata │    │
+│   │ H1/H2/H3    │  │   dist/      │  │ assets / transcode      │    │
 │   └──────┬──────┘  └──────┬───────┘  └────────────┬────────────┘    │
 │          │                │                       │                 │
 │          └────────────────┼───────────────────────┘                 │
@@ -50,6 +50,7 @@ internal/
     sqlc/           # GENERATED — do not hand-edit
   eventhub/         # WebSocket event bus (real-time UI updates)
   images/           # poster/backdrop fetcher
+  ingress/          # embedded Caddy topology, custom handler/listeners, metrics
   matcher/          # filename → media-item matching
   metadata/         # HeyaMetadata V2 adapter + local NFO evidence
   nfo/              # NFO file parser

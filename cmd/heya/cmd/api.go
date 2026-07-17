@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/karbowiak/heya/internal/localtls"
 	"github.com/spf13/cobra"
 )
 
@@ -67,7 +68,7 @@ Non-2xx responses print status + body to stderr and exit non-zero.`,
 }
 
 func init() {
-	apiCmd.Flags().StringVar(&apiBaseURL, "base", envOr("HEYA_API_BASE_URL", "http://localhost:8080"), "Server base URL")
+	apiCmd.Flags().StringVar(&apiBaseURL, "base", envOr("HEYA_API_BASE_URL", "https://localhost:8080"), "Server base URL")
 	apiCmd.Flags().StringVar(&apiUser, "user", envOr("HEYA_API_USER", "admin"), "Login username")
 	apiCmd.Flags().StringVar(&apiPass, "pass", envOr("HEYA_API_PASS", "admin"), "Login password")
 	apiCmd.Flags().StringVar(&apiToken, "token", os.Getenv("HEYA_API_TOKEN"), "Bearer token (skips login + cache)")
@@ -240,7 +241,7 @@ func loginAndCacheAPI(ctx context.Context) (string, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := localtls.Client(cfg.DataDir.Value, 30*time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("login: %w", err)
@@ -288,7 +289,7 @@ func doAPIRequest(ctx context.Context, method, fullURL, token string, body []byt
 	// Long ceiling so heavy refresh endpoints (heya.media artist enrich
 	// can run 60-120s cold) don't time out from the CLI. The server has
 	// its own request timeouts; this is just a safety net.
-	client := &http.Client{Timeout: 5 * time.Minute}
+	client := localtls.Client(cfg.DataDir.Value, 5*time.Minute)
 	return client.Do(req)
 }
 

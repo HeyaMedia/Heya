@@ -14,6 +14,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/unix"
 )
 
 // dev-proxy is the stable dev front door. It does exactly one thing: own the
@@ -108,6 +109,28 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// reuseAddrListen is deliberately dev-proxy-only. Production listeners use
+// Caddy's reusable socket pool; the stable development proxy keeps this small
+// helper so rapid restarts can reclaim its port on macOS and Linux.
+func reuseAddrListen(addr string) (net.Listener, error) {
+	lc := net.ListenConfig{Control: func(network, address string, c syscall.RawConn) error {
+		var optionErr error
+		if err := c.Control(func(fd uintptr) {
+			if err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); err != nil {
+				optionErr = err
+				return
+			}
+			if err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1); err != nil {
+				optionErr = err
+			}
+		}); err != nil {
+			return err
+		}
+		return optionErr
+	}}
+	return lc.Listen(context.Background(), "tcp", addr)
 }
 
 func init() {

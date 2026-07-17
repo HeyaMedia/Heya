@@ -1,6 +1,6 @@
 // Package remote implements Plex-style direct remote access for the Heya
-// server: UPnP port mapping on the LAN router, a dedicated TLS listener
-// serving the same handler as the LAN listener, per-server certificates via
+// server: UPnP port mapping on the LAN router, an embedded-Caddy listener,
+// per-server certificates via
 // ACME DNS-01 against a user-supplied DNS provider (deSEC, DuckDNS,
 // Cloudflare), and outside-in reachability verification through the
 // heya.media connectivity-check service.
@@ -15,11 +15,11 @@ package remote
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"net/netip"
 	"strings"
 	"sync"
@@ -43,6 +43,20 @@ type Config struct {
 	Subdomain   string
 }
 
+// IngressConfig is the listener/certificate surface handed to the embedded
+// Caddy owner. The remote package continues to own DNS, certificate issuance,
+// UPnP and reachability state; it no longer owns an HTTP server or socket.
+type IngressConfig struct {
+	Port            int
+	Names           []string
+	DefaultSNI      string
+	CertificateMode string
+	GetCertificate  func(context.Context, *tls.ClientHelloInfo) (*tls.Certificate, error)
+}
+
+type ApplyIngressFn func(context.Context, IngressConfig) error
+type RemoveIngressFn func(context.Context) error
+
 // Phase is the primary reachability state. DNS and certificate state are
 // orthogonal and live in their own status blocks.
 type Phase string
@@ -62,10 +76,22 @@ const (
 )
 
 type UPnPStatus struct {
-	Available bool   `json:"available"`
-	Gateway   string `json:"gateway,omitempty"`
-	Error     string `json:"error,omitempty"`
-	MappedAt  string `json:"mapped_at,omitempty"`
+	Available bool                `json:"available"`
+	Gateway   string              `json:"gateway,omitempty"`
+	Error     string              `json:"error,omitempty"`
+	MappedAt  string              `json:"mapped_at,omitempty"`
+	Mappings  []PortMappingStatus `json:"mappings,omitempty"`
+}
+
+type PortMappingStatus struct {
+	Protocol     string `json:"protocol"`
+	ExternalPort int    `json:"external_port"`
+	InternalIP   string `json:"internal_ip,omitempty"`
+	InternalPort int    `json:"internal_port"`
+	Active       bool   `json:"active"`
+	LeaseSeconds uint32 `json:"lease_seconds"`
+	MappedAt     string `json:"mapped_at,omitempty"`
+	Error        string `json:"error,omitempty"`
 }
 
 type DNSStatus struct {
@@ -129,21 +155,22 @@ type StatusFn func(RemoteStatus)
 // serialized by opMu so a Disable can't interleave with a half-finished
 // Enable; status reads take only stateMu.
 type Manager struct {
-	handler  http.Handler
-	log      zerolog.Logger
-	onStatus StatusFn
+	log           zerolog.Logger
+	onStatus      StatusFn
+	applyIngress  ApplyIngressFn
+	removeIngress RemoveIngressFn
 
 	opMu sync.Mutex // serializes Enable/Disable/Close/Recheck bring-up work
 
-	stateMu  sync.Mutex
-	cfg      Config
-	status   RemoteStatus
-	names    dnsNames
-	upnp     *upnpGateway
-	certs    *certManager
-	records  *recordSyncer
-	probe    *probeClient
-	listener *tlsListener
+	stateMu       sync.Mutex
+	cfg           Config
+	status        RemoteStatus
+	names         dnsNames
+	upnp          *upnpGateway
+	certs         *certManager
+	records       *recordSyncer
+	probe         *probeClient
+	ingressActive bool
 
 	challengeMu  sync.Mutex
 	challenge    string
@@ -153,13 +180,15 @@ type Manager struct {
 	issueCancel context.CancelFunc
 }
 
-// NewManager builds a disabled manager. handler is the same root handler the
-// LAN listener serves — remote clients see the identical API + SPA.
-func NewManager(handler http.Handler, logger zerolog.Logger, onStatus StatusFn) *Manager {
+// NewManager builds a disabled manager. applyIngress/ removeIngress connect
+// the remote control plane to Caddy without either package importing the
+// other.
+func NewManager(logger zerolog.Logger, onStatus StatusFn, applyIngress ApplyIngressFn, removeIngress RemoveIngressFn) *Manager {
 	return &Manager{
-		handler:  handler,
-		log:      logger,
-		onStatus: onStatus,
+		log:           logger,
+		onStatus:      onStatus,
+		applyIngress:  applyIngress,
+		removeIngress: removeIngress,
 	}
 }
 
@@ -188,7 +217,9 @@ func (m *Manager) Enable(ctx context.Context, cfg Config) error {
 	m.opMu.Lock()
 	defer m.opMu.Unlock()
 
-	m.stopLocked(false)
+	// An explicit reconfigure owns the old mapping too. Only process Close
+	// deliberately preserves router state across a restart.
+	m.stopLocked(true, true)
 
 	if cfg.Port < 1024 || cfg.Port > 65535 {
 		err := fmt.Errorf("invalid remote port %d", cfg.Port)
@@ -219,7 +250,7 @@ func (m *Manager) Enable(ctx context.Context, cfg Config) error {
 	lanIP := detectLANIP()
 	m.update(func(s *RemoteStatus) { s.LANIP = lanIP })
 
-	// Certificates + TLS listener first: the listener must answer before the
+	// Certificates + Caddy listener first: the listener must answer before the
 	// probe fires, and it works LAN-only even when UPnP/probing fail below.
 	certs, err := newCertManager(cfg, names, m.log)
 	if err != nil {
@@ -231,13 +262,24 @@ func (m *Manager) Enable(ctx context.Context, cfg Config) error {
 	m.stateMu.Unlock()
 	m.update(func(s *RemoteStatus) { s.Cert = certs.snapshotStatus() })
 
-	lst, err := startTLSListener(cfg.Port, m.handler, certs)
-	if err != nil {
+	if m.applyIngress == nil {
+		err := errors.New("embedded Caddy ingress is unavailable")
+		m.update(func(s *RemoteStatus) { s.Phase = PhaseError; s.Detail = "listener: " + err.Error() })
+		return err
+	}
+	defaultSNI := "heya-remote.local"
+	if names.base != "" {
+		defaultSNI = names.base
+	}
+	if err := m.applyIngress(ctx, IngressConfig{
+		Port: cfg.Port, Names: append([]string(nil), names.sans...), DefaultSNI: defaultSNI,
+		CertificateMode: "certmagic", GetCertificate: certs.getCertificate,
+	}); err != nil {
 		m.update(func(s *RemoteStatus) { s.Phase = PhaseError; s.Detail = "listener: " + err.Error() })
 		return err
 	}
 	m.stateMu.Lock()
-	m.listener = lst
+	m.ingressActive = true
 	m.stateMu.Unlock()
 
 	// DNS provider + managed-cert issuance, fully async: issuance can take
@@ -261,7 +303,9 @@ func (m *Manager) Enable(ctx context.Context, cfg Config) error {
 					}
 				}
 			}
-			issueCtx, cancel := context.WithCancel(ctx)
+			// The request that enabled remote access may finish immediately;
+			// issuance is a manager-lifetime activity, not a request-lifetime one.
+			issueCtx, cancel := context.WithCancel(context.Background())
 			m.issueCancel = cancel
 			go m.issueLoop(issueCtx, certs)
 		}
@@ -281,16 +325,17 @@ func (m *Manager) Enable(ctx context.Context, cfg Config) error {
 		m.upnp = gw
 		m.stateMu.Unlock()
 		routerIP, _ := gw.externalIP()
-		if err := gw.addMapping(cfg.Port, lanIP); err != nil {
-			m.log.Warn().Err(err).Int("port", cfg.Port).Msg("UPnP port mapping failed")
+		mappings, mappingErr := gw.addMappings(cfg.Port, lanIP)
+		if mappingErr != nil {
+			m.log.Warn().Err(mappingErr).Int("port", cfg.Port).Msg("UPnP port mapping failed")
 			m.update(func(s *RemoteStatus) {
 				s.RouterExternalIP = routerIP
-				s.UPnP = UPnPStatus{Available: true, Gateway: gw.location(), Error: "mapping failed: " + err.Error()}
+				s.UPnP = UPnPStatus{Available: true, Gateway: gw.location(), Error: "mapping failed: " + mappingErr.Error(), Mappings: mappings}
 			})
 		} else {
 			m.update(func(s *RemoteStatus) {
 				s.RouterExternalIP = routerIP
-				s.UPnP = UPnPStatus{Available: true, Gateway: gw.location(), MappedAt: nowRFC3339()}
+				s.UPnP = UPnPStatus{Available: true, Gateway: gw.location(), MappedAt: nowRFC3339(), Mappings: mappings}
 			})
 		}
 	}
@@ -301,7 +346,9 @@ func (m *Manager) Enable(ctx context.Context, cfg Config) error {
 
 	m.runCheck(ctx)
 
-	loopCtx, cancel := context.WithCancel(ctx)
+	// Maintenance must survive the API request (or startup context child)
+	// that performed Enable. Disable/Close own the cancellation.
+	loopCtx, cancel := context.WithCancel(context.Background())
 	m.loopCancel = cancel
 	go m.maintenanceLoop(loopCtx)
 
@@ -312,23 +359,23 @@ func (m *Manager) Enable(ctx context.Context, cfg Config) error {
 func (m *Manager) Disable() error {
 	m.opMu.Lock()
 	defer m.opMu.Unlock()
-	m.stopLocked(true)
+	m.stopLocked(true, true)
 	m.update(func(s *RemoteStatus) { *s = RemoteStatus{Enabled: false, Phase: PhaseDisabled} })
 	return nil
 }
 
-// Close tears down listeners and loops but leaves the port mapping in place:
-// restarts (air, deploys) must not strand remote clients — the mapping is
-// re-asserted on the next Enable.
+// Close tears down the Caddy listener and loops but leaves the router mapping
+// in place: restarts (air, deploys) must not strand remote clients, and the
+// mapping is re-asserted on the next Enable.
 func (m *Manager) Close() error {
 	m.opMu.Lock()
 	defer m.opMu.Unlock()
-	m.stopLocked(false)
+	m.stopLocked(false, true)
 	return nil
 }
 
 // stopLocked tears down running components. Callers hold opMu.
-func (m *Manager) stopLocked(unmap bool) {
+func (m *Manager) stopLocked(unmap, removeListener bool) {
 	if m.loopCancel != nil {
 		m.loopCancel()
 		m.loopCancel = nil
@@ -338,25 +385,29 @@ func (m *Manager) stopLocked(unmap bool) {
 		m.issueCancel = nil
 	}
 	m.stateMu.Lock()
-	lst := m.listener
 	gw := m.upnp
 	certs := m.certs
 	port := m.cfg.Port
-	m.listener = nil
+	ingressActive := m.ingressActive
+	m.ingressActive = false
 	m.upnp = nil
 	m.certs = nil
 	m.records = nil
 	m.probe = nil
 	m.stateMu.Unlock()
 
-	if lst != nil {
-		lst.close()
+	if removeListener && ingressActive && m.removeIngress != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := m.removeIngress(ctx); err != nil {
+			m.log.Warn().Err(err).Msg("Caddy remote listener removal failed")
+		}
+		cancel()
 	}
 	if certs != nil {
 		certs.close()
 	}
 	if unmap && gw != nil && port != 0 {
-		if err := gw.unmap(port); err != nil {
+		if err := gw.unmapMappings(port); err != nil {
 			m.log.Warn().Err(err).Int("port", port).Msg("UPnP unmap failed")
 		}
 	}
@@ -379,11 +430,13 @@ func (m *Manager) Recheck(ctx context.Context) (RemoteStatus, error) {
 		return m.Status(), errors.New("remote access is not enabled")
 	}
 	if gw != nil {
-		if err := gw.addMapping(cfg.Port, lanIP); err != nil {
+		mappings, err := gw.addMappings(cfg.Port, lanIP)
+		if err != nil {
 			m.update(func(s *RemoteStatus) { s.UPnP.Error = "mapping failed: " + err.Error() })
 		} else {
 			m.update(func(s *RemoteStatus) { s.UPnP.Error = ""; s.UPnP.MappedAt = nowRFC3339() })
 		}
+		m.update(func(s *RemoteStatus) { s.UPnP.Mappings = mappings })
 		if ip, err := gw.externalIP(); err == nil {
 			m.update(func(s *RemoteStatus) { s.RouterExternalIP = ip })
 		}
@@ -503,17 +556,37 @@ func (m *Manager) runCheck(ctx context.Context) {
 // issueLoop runs managed-cert issuance and keeps cert status current. One
 // run per Enable; certmagic maintains renewals internally afterwards.
 func (m *Manager) issueLoop(ctx context.Context, certs *certManager) {
-	m.update(func(s *RemoteStatus) { s.Cert.Issuing = true })
+	if !m.updateCertIfCurrent(certs, func(s *RemoteStatus) { s.Cert.Issuing = true }) {
+		return
+	}
 	err := certs.issue(ctx)
 	if err != nil && ctx.Err() == nil {
 		m.log.Warn().Err(err).Msg("ACME issuance failed")
 	}
-	m.update(func(s *RemoteStatus) {
+	m.updateCertIfCurrent(certs, func(s *RemoteStatus) {
 		s.Cert = certs.snapshotStatus()
 		if err != nil && ctx.Err() == nil {
 			s.Cert.Error = err.Error()
 		}
 	})
+}
+
+// updateCertIfCurrent prevents a cancelled issuance from an older Enable
+// generation from overwriting the status of a disabled or reconfigured
+// manager after it eventually returns.
+func (m *Manager) updateCertIfCurrent(certs *certManager, fn func(*RemoteStatus)) bool {
+	m.stateMu.Lock()
+	if m.certs != certs {
+		m.stateMu.Unlock()
+		return false
+	}
+	fn(&m.status)
+	snap := m.status
+	m.stateMu.Unlock()
+	if m.onStatus != nil {
+		m.onStatus(snap)
+	}
+	return true
 }
 
 // maintenanceLoop re-leases the UPnP mapping every 15 minutes, watches for
@@ -538,11 +611,13 @@ func (m *Manager) maintenanceLoop(ctx context.Context) {
 
 			ipChanged := false
 			if gw != nil {
-				if err := gw.addMapping(cfg.Port, lanIP); err != nil {
+				mappings, err := gw.addMappings(cfg.Port, lanIP)
+				if err != nil {
 					m.update(func(s *RemoteStatus) { s.UPnP.Error = "lease renewal failed: " + err.Error() })
 				} else {
 					m.update(func(s *RemoteStatus) { s.UPnP.Error = ""; s.UPnP.MappedAt = nowRFC3339() })
 				}
+				m.update(func(s *RemoteStatus) { s.UPnP.Mappings = mappings })
 				if ip, err := gw.externalIP(); err == nil && ip != lastRouterIP {
 					ipChanged = true
 					m.update(func(s *RemoteStatus) { s.RouterExternalIP = ip })

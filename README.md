@@ -18,7 +18,7 @@ playback, and the UI. Community skip segments are fetched directly by Heya.
 
 ```bash
 mkdir -p "$HOME/heya-data"
-docker run -d --name heya -p 8080:8080 \
+docker run -d --name heya -p 8080:8080/tcp -p 8080:8080/udp \
   -v "$HOME/heya-data:/data" \
   -v "/path/to/your/media:/media:ro" \
   -e HEYA_METADATA_URL='https://your-heyametadata.example' \
@@ -35,14 +35,17 @@ and back up. A Docker named volume also works, but a normal host path is
 recommended. Or use the regular image against your own Postgres:
 
 ```bash
-docker run -p 8080:8080 -v $PWD/data:/data \
+docker run -p 8080:8080/tcp -p 8080:8080/udp -v $PWD/data:/data \
   -e HEYA_DATABASE_URL='postgres://heya:heya@db:5432/heya?sslmode=disable' \
   -e HEYA_METADATA_URL='https://your-heyametadata.example' \
   ghcr.io/heyamedia/heya:latest
 ```
 
-Open http://localhost:8080 and sign in with `admin` / `admin`, then change the
-password and add your libraries under Settings → Libraries. Hardware transcode
+Open https://localhost:8080 and sign in with `admin` / `admin`, then change the
+password and add your libraries under Settings → Libraries. Heya creates a
+private Caddy CA on first boot; install `data/caddy/pki/authorities/local/root.crt`
+in clients you want to trust, or accept the initial browser warning. UDP is
+published beside TCP so HTTP/3 works. Hardware transcode
 and the CUDA/OpenVINO image variants are covered in
 [docs/deployment.md](docs/deployment.md). Every operational knob is an env var
 — [`.env.example`](.env.example) documents them all.
@@ -57,7 +60,7 @@ cp .env.example .env
 make db-up                  # Postgres on :5440
 make build                  # Nuxt (bun) + Go → ./bin/heya
 ./bin/heya setup            # guided wizard: migrations, admin user, first library
-./bin/heya serve            # http://localhost:8080
+./bin/heya serve            # https://localhost:8080 (HTTP/1.1 + HTTP/2 + HTTP/3)
 ```
 
 Day-to-day development (hot reload via `make dev`, tests, hooks, CI) lives in

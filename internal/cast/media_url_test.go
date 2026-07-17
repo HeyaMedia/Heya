@@ -78,6 +78,18 @@ func TestScopedMediaURL(t *testing.T) {
 	}
 }
 
+func TestAutomaticMediaOriginUsesHTTPS(t *testing.T) {
+	m := New(t.TempDir())
+	m.SetMediaOrigin("", "8080")
+	origin, err := m.mediaOriginFor(Device{Name: "local", Addr: "127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if origin != "https://127.0.0.1:8080" {
+		t.Fatalf("automatic origin = %q", origin)
+	}
+}
+
 func TestScopedMediaURLAllowsOnlyOneHLSSubtree(t *testing.T) {
 	m := New(t.TempDir())
 	m.SetMediaOrigin("http://192.168.20.10:8080", "8080")

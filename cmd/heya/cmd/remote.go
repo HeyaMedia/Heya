@@ -57,7 +57,7 @@ var remoteDisableCmd = &cobra.Command{
 func init() {
 	remoteCmd.PersistentFlags().BoolVar(&remoteJSON, "json", false, "Print the raw JSON response")
 	// Shares apiBaseURL with `heya api` — same server-resolution story.
-	remoteCmd.PersistentFlags().StringVar(&apiBaseURL, "base", envOr("HEYA_API_BASE_URL", "http://localhost:8080"), "Server base URL")
+	remoteCmd.PersistentFlags().StringVar(&apiBaseURL, "base", envOr("HEYA_API_BASE_URL", "https://localhost:8080"), "Server base URL")
 	remoteCmd.AddCommand(remoteStatusCmd, remoteCheckCmd, remoteEnableCmd, remoteDisableCmd)
 	rootCmd.AddCommand(remoteCmd)
 }

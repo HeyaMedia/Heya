@@ -1,9 +1,6 @@
-// Package tailscale wraps tsnet.Server in a Heya-shaped lifecycle:
-// declarative Config, ergonomic listeners, and hot Enable/Disable so the
-// node can be brought up and torn down from the UI without restarting
-// the whole binary. The Server owns the full listener lifecycle — it
-// manages the tsnet node, the HTTP server(s) bound to it, and the
-// LocalClient status poller as a single unit.
+// Package tailscale wraps tsnet.Server in a Heya-shaped lifecycle. It owns
+// tailnet identity and supplies raw network listeners/certificates to Heya's
+// embedded Caddy ingress; it deliberately does not run an HTTP server.
 package tailscale
 
 import (
@@ -12,8 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
-	"net/url"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -86,32 +81,87 @@ func (s *Server) RawStatus(ctx context.Context) (*ipnstate.Status, error) {
 // event hub so the UI updates in real time without polling.
 type StatusFn func(Status)
 
-type Server struct {
-	handler  http.Handler
-	logger   zerolog.Logger
-	onStatus StatusFn
+// IngressSource is the stable capability object handed to embedded Caddy.
+// It intentionally contains no Server mutex: Caddy provisions listeners
+// synchronously while Server lifecycle methods hold that lock.
+type IngressSource struct {
+	ts *tsnet.Server
+	lc *local.Client
+}
 
-	mu          sync.Mutex
-	cfg         Config
-	ts          *tsnet.Server
-	httpServers []*http.Server
-	listeners   []net.Listener
-	watchCancel context.CancelFunc
+func (s *IngressSource) ListenTCP(address string) (net.Listener, error) {
+	listenAddress, err := unspecifiedAddress(address)
+	if err != nil {
+		return nil, err
+	}
+	return s.ts.Listen("tcp", listenAddress)
+}
+
+func (s *IngressSource) ListenPacket(address string) (net.PacketConn, error) {
+	return s.ts.ListenPacket("udp", address)
+}
+
+func (s *IngressSource) ListenFunnel(address string) (net.Listener, error) {
+	listenAddress, err := unspecifiedAddress(address)
+	if err != nil {
+		return nil, err
+	}
+	return s.ts.ListenFunnel("tcp", listenAddress)
+}
+
+func (s *IngressSource) GetCertificate(_ context.Context, hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	return s.lc.GetCertificate(hello)
+}
+
+func unspecifiedAddress(address string) (string, error) {
+	_, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return "", fmt.Errorf("tailscale listener address %q: %w", address, err)
+	}
+	return net.JoinHostPort("", port), nil
+}
+
+type IngressConfig struct {
+	Address    string
+	CertDomain string
+	HTTPS      bool
+	Funnel     bool
+	Source     *IngressSource
+}
+
+type ApplyIngressFn func(context.Context, IngressConfig) error
+type RemoveIngressFn func(context.Context) error
+
+type Server struct {
+	logger        zerolog.Logger
+	onStatus      StatusFn
+	applyIngress  ApplyIngressFn
+	removeIngress RemoveIngressFn
+
+	mu            sync.Mutex
+	cfg           Config
+	ts            *tsnet.Server
+	ingressSource *IngressSource
+	ingressActive bool
+	ingressError  string
+	watchCancel   context.CancelFunc
 
 	status atomic.Pointer[Status]
 	closed bool
 }
 
-func New(handler http.Handler, logger zerolog.Logger, onStatus StatusFn) *Server {
-	s := &Server{handler: handler, logger: logger, onStatus: onStatus}
+func New(logger zerolog.Logger, onStatus StatusFn, applyIngress ApplyIngressFn, removeIngress RemoveIngressFn) *Server {
+	s := &Server{
+		logger: logger, onStatus: onStatus,
+		applyIngress: applyIngress, removeIngress: removeIngress,
+	}
 	s.publish(Status{UpdatedAt: time.Now()})
 	return s
 }
 
-// Enable brings the tsnet node up under the given config and binds the
-// configured listeners. Safe to call when already enabled — it'll restart
-// the node only if hostname / state-dir actually changed, otherwise it just
-// rebuilds the listener set (cheaper).
+// Enable brings the tsnet node up under the given config and attaches it to
+// Caddy. Safe to call when already enabled — it restarts the node only if
+// identity settings changed; HTTPS/Funnel become atomic Caddy reloads.
 //
 // Returns nil immediately if cfg.Enabled is false (use Disable instead).
 func (s *Server) Enable(ctx context.Context, cfg Config) error {
@@ -138,17 +188,14 @@ func (s *Server) Enable(ctx context.Context, cfg Config) error {
 		(cfg.AuthKey != "" && prev.AuthKey != cfg.AuthKey)
 
 	if needNodeRestart {
-		s.teardownLocked()
+		s.teardownLocked(ctx)
 		if err := s.startNodeLocked(ctx); err != nil {
 			s.recordErrorLocked(err)
 			return err
 		}
-	} else {
-		s.closeListenersLocked()
 	}
 
-	s.openListenersLocked()
-	return nil
+	return s.applyIngressLocked(ctx)
 }
 
 // Disable closes the listeners and shuts the tsnet node down. The state dir
@@ -157,7 +204,7 @@ func (s *Server) Disable() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cfg.Enabled = false
-	s.teardownLocked()
+	s.teardownLocked(context.Background())
 	st := s.snapshotLocked()
 	st.Running = false
 	st.BackendState = ""
@@ -170,7 +217,7 @@ func (s *Server) Disable() error {
 	return nil
 }
 
-// SetFunnel flips Funnel on/off at runtime and rebinds the :443 listener.
+// SetFunnel flips Funnel on/off at runtime and reloads Caddy's tailnet edge.
 // No-op if the node isn't currently enabled.
 func (s *Server) SetFunnel(ctx context.Context, on bool) error {
 	s.mu.Lock()
@@ -181,9 +228,7 @@ func (s *Server) SetFunnel(ctx context.Context, on bool) error {
 		return nil
 	}
 	s.cfg.Funnel = on
-	s.closeListenersLocked()
-	s.openListenersLocked()
-	return nil
+	return s.applyIngressLocked(ctx)
 }
 
 // SetHTTPS flips HTTPS on/off and rebinds listeners.
@@ -196,9 +241,7 @@ func (s *Server) SetHTTPS(ctx context.Context, on bool) error {
 		return nil
 	}
 	s.cfg.HTTPS = on
-	s.closeListenersLocked()
-	s.openListenersLocked()
-	return nil
+	return s.applyIngressLocked(ctx)
 }
 
 // Status returns the most recent snapshot.
@@ -225,7 +268,7 @@ func (s *Server) Logout(ctx context.Context) error {
 	if err := lc.Logout(ctx); err != nil {
 		return err
 	}
-	s.teardownLocked()
+	s.teardownLocked(ctx)
 	s.cfg.Enabled = false
 	s.publishLocked(s.snapshotLocked())
 	return nil
@@ -240,7 +283,7 @@ func (s *Server) Close() error {
 		return nil
 	}
 	s.closed = true
-	s.teardownLocked()
+	s.teardownLocked(context.Background())
 	return nil
 }
 
@@ -267,6 +310,13 @@ func (s *Server) startNodeLocked(ctx context.Context) error {
 		s.ts = nil
 		return fmt.Errorf("tailscale Up: %w", err)
 	}
+	lc, err := s.ts.LocalClient()
+	if err != nil {
+		_ = s.ts.Close()
+		s.ts = nil
+		return fmt.Errorf("tailscale LocalClient: %w", err)
+	}
+	s.ingressSource = &IngressSource{ts: s.ts, lc: lc}
 
 	watchCtx, watchCancel := context.WithCancel(context.Background())
 	s.watchCancel = watchCancel
@@ -276,104 +326,67 @@ func (s *Server) startNodeLocked(ctx context.Context) error {
 	return nil
 }
 
-// openListenersLocked binds tailnet :80 / :443 / Funnel based on cfg and
-// kicks off http.Server goroutines for each. Caller must hold s.mu.
-//
-// Each addListener call returns whether the listener actually opened.
-// The :443 binding decides whether HTTPSActive / FunnelActive end up true.
-func (s *Server) openListenersLocked() {
-	if s.ts == nil {
-		return
+// applyIngressLocked gives Caddy the current tailnet capability and publishes
+// listener reality only after Caddy has accepted the complete config.
+func (s *Server) applyIngressLocked(ctx context.Context) error {
+	if s.ts == nil || s.ingressSource == nil {
+		return nil
+	}
+	cur := s.snapshotLocked()
+
+	// The one-shot CLI intentionally has no ingress runtime attached.
+	if s.applyIngress == nil {
+		s.publishLocked(cur)
+		return nil
+	}
+	address := cur.IPv4
+	if address == "" {
+		address = cur.IPv6
+	}
+	if address == "" {
+		err := errors.New("tailscale: node has no tailnet address")
+		s.recordIngressErrorLocked(cur, err)
+		return err
+	}
+	if (s.cfg.HTTPS || s.cfg.Funnel) && cur.CertDomain == "" {
+		err := errors.New("tailscale: HTTPS or Funnel is enabled but this tailnet has no certificate domain")
+		s.recordIngressErrorLocked(cur, err)
+		return err
 	}
 
-	// Reset listener-derived status before re-binding. LastError will be
-	// re-populated below if any listener fails; *Active flags start false
-	// and flip true only if the corresponding bind succeeded.
-	cur := s.snapshotLocked()
+	err := s.applyIngress(ctx, IngressConfig{
+		Address: address, CertDomain: cur.CertDomain, HTTPS: s.cfg.HTTPS,
+		Funnel: s.cfg.Funnel, Source: s.ingressSource,
+	})
+	if err != nil {
+		s.recordIngressErrorLocked(cur, err)
+		return err
+	}
+	s.ingressActive = true
+	s.ingressError = ""
 	cur.LastError = ""
 	cur.HTTPSActive = false
 	cur.HTTPSURL = ""
 	cur.FunnelActive = false
 	cur.FunnelURL = ""
+	cur.HTTPSActive = s.cfg.HTTPS || s.cfg.Funnel
+	if s.cfg.Funnel {
+		cur.FunnelActive = true
+		cur.FunnelURL = httpsURLFor(cur.CertDomain)
+	} else if s.cfg.HTTPS {
+		cur.HTTPSURL = httpsURLFor(cur.CertDomain)
+	}
+	cur.UpdatedAt = time.Now()
 	s.publishLocked(cur)
+	return nil
+}
 
-	addListener := func(label string, makeListener func() (net.Listener, error), handler http.Handler) bool {
-		ln, err := makeListener()
-		if err != nil {
-			s.logger.Warn().Err(err).Str("listener", label).Msg("listener failed to open")
-			// Surface to the UI. The most common cause is Funnel not being
-			// enabled for the tailnet, or HTTPS not being enabled in the
-			// admin console — both need user action in the Tailscale UI.
-			cur := s.snapshotLocked()
-			if cur.LastError == "" {
-				cur.LastError = label + ": " + err.Error()
-				cur.UpdatedAt = time.Now()
-				s.publishLocked(cur)
-			}
-			return false
-		}
-		srv := &http.Server{Handler: handler, ReadHeaderTimeout: 15 * time.Second}
-		s.listeners = append(s.listeners, ln)
-		s.httpServers = append(s.httpServers, srv)
-		go func() {
-			s.logger.Info().Str("listener", label).Msg("listener up")
-			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
-				s.logger.Warn().Err(err).Str("listener", label).Msg("listener stopped")
-			}
-		}()
-		return true
-	}
-
-	switch {
-	case s.cfg.Funnel:
-		ok := addListener("tailscale-funnel:443",
-			func() (net.Listener, error) { return s.ts.ListenFunnel("tcp", ":443") },
-			s.handler)
-		addListener("tailscale-redirect:80",
-			func() (net.Listener, error) { return s.ts.Listen("tcp", ":80") },
-			s.httpRedirectorLocked())
-		if ok {
-			cur := s.snapshotLocked()
-			cur.FunnelActive = true
-			cur.FunnelURL = httpsURLFor(cur.CertDomain)
-			// The Funnel listener also terminates TLS on :443 for tailnet
-			// members, so HTTPS is effectively up too. Don't set HTTPSURL
-			// though — FunnelURL is the same URL and covers both audiences.
-			cur.HTTPSActive = true
-			cur.UpdatedAt = time.Now()
-			s.publishLocked(cur)
-		}
-
-	case s.cfg.HTTPS:
-		ok := addListener("tailscale-https:443",
-			func() (net.Listener, error) {
-				lc, err := s.ts.LocalClient()
-				if err != nil {
-					return nil, err
-				}
-				raw, err := s.ts.Listen("tcp", ":443")
-				if err != nil {
-					return nil, err
-				}
-				return tls.NewListener(raw, &tls.Config{GetCertificate: lc.GetCertificate}), nil
-			},
-			s.handler)
-		addListener("tailscale-redirect:80",
-			func() (net.Listener, error) { return s.ts.Listen("tcp", ":80") },
-			s.httpRedirectorLocked())
-		if ok {
-			cur := s.snapshotLocked()
-			cur.HTTPSActive = true
-			cur.HTTPSURL = httpsURLFor(cur.CertDomain)
-			cur.UpdatedAt = time.Now()
-			s.publishLocked(cur)
-		}
-
-	default:
-		addListener("tailscale-http:80",
-			func() (net.Listener, error) { return s.ts.Listen("tcp", ":80") },
-			s.handler)
-	}
+func (s *Server) recordIngressErrorLocked(cur Status, err error) {
+	s.logger.Warn().Err(err).Msg("Caddy tailnet ingress update failed")
+	s.ingressError = "ingress: " + err.Error()
+	cur.LastError = s.ingressError
+	cur.UpdatedAt = time.Now()
+	s.publishLocked(cur)
 }
 
 func httpsURLFor(certDomain string) string {
@@ -383,10 +396,19 @@ func httpsURLFor(certDomain string) string {
 	return "https://" + certDomain
 }
 
-// teardownLocked tears down the listeners AND the tsnet node. Caller must
-// hold s.mu.
-func (s *Server) teardownLocked() {
-	s.closeListenersLocked()
+// teardownLocked detaches Caddy before closing the tsnet node, so no active
+// Caddy listener can retain a dead virtual-network socket.
+func (s *Server) teardownLocked(ctx context.Context) {
+	if s.ingressActive && s.removeIngress != nil {
+		removeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		if err := s.removeIngress(removeCtx); err != nil {
+			s.logger.Warn().Err(err).Msg("Caddy tailnet ingress removal failed")
+		}
+		cancel()
+	}
+	s.ingressActive = false
+	s.ingressError = ""
+	s.ingressSource = nil
 	if s.watchCancel != nil {
 		s.watchCancel()
 		s.watchCancel = nil
@@ -395,21 +417,6 @@ func (s *Server) teardownLocked() {
 		_ = s.ts.Close()
 		s.ts = nil
 	}
-}
-
-// closeListenersLocked closes the listeners + http.Servers but leaves the
-// tsnet node up. Caller must hold s.mu.
-func (s *Server) closeListenersLocked() {
-	for _, srv := range s.httpServers {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_ = srv.Shutdown(shutdownCtx)
-		cancel()
-	}
-	for _, ln := range s.listeners {
-		_ = ln.Close()
-	}
-	s.httpServers = nil
-	s.listeners = nil
 }
 
 // userLog catches lines from tsnet (e.g. "To authenticate, visit: https://...")
@@ -454,7 +461,13 @@ func (s *Server) watchStatus(ctx context.Context) {
 				continue
 			}
 			s.mu.Lock()
+			before := s.snapshotLocked()
 			s.refreshFromIPN(st)
+			after := s.snapshotLocked()
+			addressChanged := before.IPv4 != after.IPv4 || before.IPv6 != after.IPv6 || before.CertDomain != after.CertDomain
+			if s.cfg.Enabled && addressChanged {
+				_ = s.applyIngressLocked(ctx)
+			}
 			s.mu.Unlock()
 		}
 	}
@@ -488,7 +501,7 @@ func (s *Server) refreshFromIPN(st *ipnstate.Status) {
 		}
 	}
 	if cur.Running {
-		cur.LastError = ""
+		cur.LastError = s.ingressError
 		if s.ts != nil {
 			if domains := s.ts.CertDomains(); len(domains) > 0 {
 				cur.CertDomain = domains[0]
@@ -548,20 +561,6 @@ func (s *Server) LocalClient() (*local.Client, error) {
 		return nil, errors.New("tailscale: node not running")
 	}
 	return s.ts.LocalClient()
-}
-
-// httpRedirectorLocked returns a handler that bounces requests to the cert
-// domain on HTTPS. Caller must hold s.mu (reads s.ts indirectly via Status).
-func (s *Server) httpRedirectorLocked() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host := s.Status().CertDomain
-		if host == "" {
-			host = r.Host
-		}
-		// Build target from controlled host + path/query (gosec G710).
-		u := &url.URL{Scheme: "https", Host: host, Path: r.URL.Path, RawQuery: r.URL.RawQuery}
-		http.Redirect(w, r, u.String(), http.StatusMovedPermanently)
-	})
 }
 
 func indexOfLoginURL(s string) int {

@@ -28,11 +28,12 @@ run: build-go
 	./bin/heya serve
 
 # Dev: `heya dev-proxy` on :8080 is the stable front door — it fronts Nuxt
-# (:3000) + the air-run backend (:3050) and owns the Tailscale node, so air
-# rebuilds of the backend never drop the front door, the tailnet node, or the
-# browser's HMR/WS sockets. mprocs supervises all three and tears them down
-# cleanly on quit (q / Ctrl+C). The preflight reclaims :8080/:3050/:3000 from
-# anything a previous hard kill left orphaned. Open http://localhost:8080.
+# (:3000) + the air-run plaintext Caddy backend (:3050). Tailscale and remote
+# access are production-only; the proxy exists solely to give Nuxt HMR and the
+# reloading Go API one stable browser origin. mprocs supervises all three and
+# tears them down cleanly on quit (q / Ctrl+C). The preflight reclaims
+# :8080/:3050/:3000 from anything a previous hard kill left orphaned.
+# Open http://localhost:8080.
 #
 # mprocs is the prerequisite: `brew install mprocs`.
 dev:
@@ -187,7 +188,7 @@ docker-multiarch:
 # host. Bind-mounts ./data so the Tailscale state + transcode cache survive.
 docker-run:
 	docker run --rm -it \
-		-p 8080:8080 \
+		-p 8080:8080/tcp -p 8080:8080/udp \
 		-v $(PWD)/data:/data \
 		-e HEYA_DATABASE_URL='postgres://heya:heya@host.docker.internal:5440/heya?sslmode=disable' \
 		heya:base
@@ -196,7 +197,7 @@ docker-run:
 # Adds the render group so the non-root paths can reach the device too.
 docker-run-gpu:
 	docker run --rm -it \
-		-p 8080:8080 \
+		-p 8080:8080/tcp -p 8080:8080/udp \
 		-v $(PWD)/data:/data \
 		--device /dev/dri:/dev/dri \
 		--group-add "$$(getent group render | cut -d: -f3)" \

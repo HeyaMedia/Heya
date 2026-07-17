@@ -191,11 +191,10 @@ const interfaceList = computed(() => status.value?.interfaces ?? [])
         >Save</button>
       </div>
       <p class="cs-hint">
-        Leave empty to derive <code>http://&lt;server-LAN-IP&gt;:HEYA_PORT</code>
-        for each receiver. Set an explicit <code>http://</code> or
-        <code>https://</code> origin when Heya is behind a reverse proxy,
-        Kubernetes Service, or another address the receiver must use. Also
-        settable with <code>HEYA_CAST_BASE_URL=…</code>.
+		Leave empty to derive <code>https://&lt;server-LAN-IP&gt;:HEYA_PORT</code>
+		for each receiver. URL-pull receivers that cannot trust Heya’s local CA
+		need an explicit browser-trusted <code>https://</code> origin. Also
+		settable with <code>HEYA_CAST_BASE_URL=…</code>.
       </p>
     </SettingsSection>
 

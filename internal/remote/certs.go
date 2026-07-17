@@ -9,11 +9,9 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"math/big"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -37,6 +35,7 @@ type certManager struct {
 	names      dnsNames
 	selfSigned *tls.Certificate
 	magic      *certmagic.Config
+	managedTLS *tls.Config
 	cache      *certmagic.Cache
 	hasManaged atomic.Bool
 	log        zerolog.Logger
@@ -97,6 +96,7 @@ func newCertManager(cfg Config, names dnsNames, logger zerolog.Logger) (*certMan
 	})
 	magic.Issuers = []certmagic.Issuer{issuer}
 	cm.magic = magic
+	cm.managedTLS = magic.TLSConfig()
 	cm.cache = cache
 	return cm, nil
 }
@@ -131,26 +131,17 @@ func (c *certManager) snapshotStatus() CertStatus {
 	return st
 }
 
-// tlsConfig serves managed certs when present, self-signed otherwise. The
-// fallback also catches SNI-less connections (the heya.media prober dials
-// by bare IP) and any name outside the managed SAN set.
-func (c *certManager) tlsConfig() *tls.Config {
-	var magicTLS *tls.Config
-	if c.magic != nil {
-		magicTLS = c.magic.TLSConfig()
+// getCertificate is Caddy's handshake-time certificate source. Managed
+// certificates win when present; the persistent self-signed certificate
+// catches SNI-less heya.media probes and keeps HTTPS available while first
+// ACME issuance is still in flight.
+func (c *certManager) getCertificate(_ context.Context, hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	if c.managedTLS != nil && c.hasManaged.Load() && hello.ServerName != "" {
+		if crt, err := c.managedTLS.GetCertificate(hello); err == nil {
+			return crt, nil
+		}
 	}
-	return &tls.Config{
-		MinVersion: tls.VersionTLS12,
-		NextProtos: []string{"h2", "http/1.1"},
-		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-			if magicTLS != nil && c.hasManaged.Load() && hello.ServerName != "" {
-				if crt, err := magicTLS.GetCertificate(hello); err == nil {
-					return crt, nil
-				}
-			}
-			return c.selfSigned, nil
-		},
-	}
+	return c.selfSigned, nil
 }
 
 func (c *certManager) close() {
@@ -220,38 +211,4 @@ func loadOrCreateSelfSigned(certDir string) (*tls.Certificate, error) {
 		crt.Leaf = leaf
 	}
 	return &crt, nil
-}
-
-// tlsListener is the remote-access HTTPS listener: same handler tree as the
-// LAN listener, TLS via certManager, its own port (the UPnP-mapped one).
-type tlsListener struct {
-	srv *http.Server
-	ln  net.Listener
-}
-
-func startTLSListener(port int, handler http.Handler, certs *certManager) (*tlsListener, error) {
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-	if err != nil {
-		return nil, fmt.Errorf("binding :%d: %w", port, err)
-	}
-	srv := &http.Server{
-		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	tlsLn := tls.NewListener(ln, certs.tlsConfig())
-	go func() {
-		if err := srv.Serve(tlsLn); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
-			// Listener death outside shutdown is surfaced on the next
-			// status check — the port simply stops answering.
-			_ = err
-		}
-	}()
-	return &tlsListener{srv: srv, ln: ln}, nil
-}
-
-func (t *tlsListener) close() {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	_ = t.srv.Shutdown(ctx)
-	_ = t.ln.Close()
 }

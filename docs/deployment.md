@@ -26,7 +26,7 @@ of the corresponding completed regular image. All persistent state lives below
 ```bash
 mkdir -p "$HOME/heya-data"
 docker run -d --name heya \
-  -p 8080:8080 \
+  -p 8080:8080/tcp -p 8080:8080/udp \
   -v "$HOME/heya-data:/data" \
   -v "/path/to/your/media:/media:ro" \
   -e HEYA_ADMIN_USERNAME=admin \
@@ -59,6 +59,12 @@ does not already contain an administrator. Sign in and change that deliberately
 simple bootstrap password immediately; subsequent container restarts do not
 reset it.
 
+Heya's production edge is embedded Caddy and requires HTTPS on `HEYA_PORT`.
+Plain HTTP on that same port receives a permanent HTTPS redirect. First boot
+creates a private CA at `/data/caddy/pki/authorities/local/root.crt`; install
+that root on LAN clients you want to trust. Publish both TCP and UDP as shown
+above—TCP carries HTTP/1.1/HTTP/2 and UDP carries HTTP/3 (QUIC).
+
 The zero-configuration database credentials are internal-only `heya` / `heya`.
 They can be changed on first boot with `POSTGRES_USER`, `POSTGRES_PASSWORD`, and
 `POSTGRES_DB`, but a matching `HEYA_DATABASE_URL` must then also be provided.
@@ -68,13 +74,13 @@ GPU forms use the same host flags as their regular counterparts:
 
 ```bash
 # NVIDIA
-docker run -d --name heya --gpus all -p 8080:8080 \
+docker run -d --name heya --gpus all -p 8080:8080/tcp -p 8080:8080/udp \
   -v "$HOME/heya-data:/data" -v "/path/to/your/media:/media:ro" \
   -e HEYA_ADMIN_USERNAME=admin -e HEYA_ADMIN_PASSWORD=admin \
   ghcr.io/heyamedia/heya:latest-cuda-aio
 
 # Intel OpenVINO
-docker run -d --name heya -p 8080:8080 \
+docker run -d --name heya -p 8080:8080/tcp -p 8080:8080/udp \
   -v "$HOME/heya-data:/data" -v "/path/to/your/media:/media:ro" \
   -e HEYA_ADMIN_USERNAME=admin -e HEYA_ADMIN_PASSWORD=admin \
   --device /dev/dri:/dev/dri \
@@ -101,7 +107,7 @@ shares this file.)
 ## Base image — CPU + Intel/AMD transcode
 
 ```bash
-docker run -p 8080:8080 -v $PWD/data:/data \
+docker run -p 8080:8080/tcp -p 8080:8080/udp -v $PWD/data:/data \
   -e HEYA_DATABASE_URL='postgres://heya:heya@db:5432/heya?sslmode=disable' \
   ghcr.io/heyamedia/heya:latest
 ```
@@ -111,7 +117,7 @@ passed in — jellyfin-ffmpeg bundles the VAAPI/QSV drivers (incl. AMD Mesa and
 AV1 on Arc), so no extra packages:
 
 ```bash
-docker run -p 8080:8080 -v $PWD/data:/data \
+docker run -p 8080:8080/tcp -p 8080:8080/udp -v $PWD/data:/data \
   --device /dev/dri:/dev/dri \
   --group-add "$(getent group render | cut -d: -f3)" \
   -e HEYA_HWACCEL=vaapi \
@@ -135,7 +141,7 @@ the host; the CUDA *driver* libs are injected by `--gpus all`, while the CUDA
 *toolkit* runtime ships in the image.
 
 ```bash
-docker run --gpus all -p 8080:8080 -v $PWD/data:/data \
+docker run --gpus all -p 8080:8080/tcp -p 8080:8080/udp -v $PWD/data:/data \
   -e HEYA_DATABASE_URL=... \
   ghcr.io/heyamedia/heya:latest-cuda
 ```
@@ -151,7 +157,7 @@ GPU ONNX via the OpenVINO execution provider, plus QSV/VAAPI transcode. Pass
 the Intel render node:
 
 ```bash
-docker run -p 8080:8080 -v $PWD/data:/data \
+docker run -p 8080:8080/tcp -p 8080:8080/udp -v $PWD/data:/data \
   --device /dev/dri:/dev/dri \
   --group-add "$(getent group render | cut -d: -f3)" \
   -e HEYA_DATABASE_URL=... \
@@ -229,15 +235,17 @@ above.
 **Chromecast/DLNA media return path.** URL-pull receivers do not need Heya to
 be public on the internet. They do need to fetch media from Heya on their own
 LAN. By default Heya asks the kernel which local interface routes to each
-receiver and signs a URL under `http://<that-interface-IP>:HEYA_PORT`; Settings
+receiver and signs a URL under `https://<that-interface-IP>:HEYA_PORT`; Settings
 → Casting shows the selected media origin beside every discovered device. This
 automatically pairs a receiver on one VLAN with Heya's leg on that VLAN instead
 of leaking a loopback, Tailscale, or unrelated interface address.
 
 When the selected address is a container/pod IP the receiver cannot route to,
 set **Receiver media URL** in Settings → Casting (or
-`HEYA_CAST_BASE_URL=http://<LAN-reachable-Heya-address>:<port>`). This is an
-origin only—no path/query—and should normally remain private to the LAN. Cast
+`HEYA_CAST_BASE_URL=https://<LAN-reachable-Heya-address>:<port>`). This is an
+origin only—no path/query—and should normally remain private to the LAN. A
+URL-pull receiver that cannot trust Heya's private CA needs an explicit
+browser-trusted HTTPS origin here. Cast
 media URLs contain a short-lived token scoped to the exact resource and user;
 they never contain the user's normal Heya bearer token.
 

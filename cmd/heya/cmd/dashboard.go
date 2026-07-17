@@ -3,10 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"github.com/karbowiak/heya/internal/dashboard"
+	"github.com/karbowiak/heya/internal/localtls"
 	"github.com/karbowiak/heya/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -18,6 +20,7 @@ var dashboardCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		serverURL, _ := cmd.Flags().GetString("server")
 		token, _ := cmd.Flags().GetString("token")
+		var client *dashboard.Client
 
 		if token == "" {
 			if !ui.IsInteractive() {
@@ -45,15 +48,17 @@ var dashboardCmd = &cobra.Command{
 				return err
 			}
 
-			client := dashboard.NewClient(serverURL, "")
+			client = dashboard.NewClientWithHTTP(serverURL, "", localtls.Client(cfg.DataDir.Value, 5*time.Second))
 			if err := client.Login(context.Background(), username, password); err != nil {
 				ui.Error("Login failed: %v", err)
 				return err
 			}
 			token = client.GetToken()
+		} else {
+			client = dashboard.NewClientWithHTTP(serverURL, token, localtls.Client(cfg.DataDir.Value, 5*time.Second))
 		}
 
-		m := dashboard.New(serverURL, token)
+		m := dashboard.NewWithClient(client)
 		p := tea.NewProgram(m)
 		_, err := p.Run()
 		return err
@@ -61,7 +66,7 @@ var dashboardCmd = &cobra.Command{
 }
 
 func init() {
-	dashboardCmd.Flags().String("server", "http://localhost:8080", "Kura server URL")
+	dashboardCmd.Flags().String("server", "https://localhost:8080", "Heya server URL")
 	dashboardCmd.Flags().String("token", "", "Auth token (skip login prompt)")
 
 	rootCmd.AddCommand(dashboardCmd)

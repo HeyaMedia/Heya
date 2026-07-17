@@ -439,11 +439,16 @@ func collectAdminDB(ctx context.Context, app *service.App) adminDBBody {
 // --- /api/admin/listeners ---
 
 type adminListener struct {
-	Kind        string `json:"kind"` // "lan" | "tailscale"
-	Address     string `json:"address"`
-	TLS         bool   `json:"tls"`
-	Public      bool   `json:"public"`
-	Description string `json:"description,omitempty"`
+	Name        string   `json:"name,omitempty"`
+	Kind        string   `json:"kind"` // "lan" | "remote" | "tailscale" | "funnel"
+	Network     string   `json:"network,omitempty"`
+	Address     string   `json:"address"`
+	Protocols   []string `json:"protocols,omitempty"`
+	TLS         bool     `json:"tls"`
+	Public      bool     `json:"public"`
+	Active      bool     `json:"active"`
+	Description string   `json:"description,omitempty"`
+	Error       string   `json:"error,omitempty"`
 }
 
 type adminListenersBody struct {
@@ -457,12 +462,28 @@ func collectAdminListeners(app *service.App, hub *eventhub.Hub) adminListenersBo
 	if hub != nil {
 		body.WSSubscribers = hub.SubscriberCount()
 	}
+	if manager := app.Ingress(); manager != nil {
+		for _, listener := range manager.Status().Listeners {
+			kind := listener.Kind
+			if kind == "host" {
+				kind = "lan"
+			}
+			body.Listeners = append(body.Listeners, adminListener{
+				Name: listener.Name, Kind: kind, Network: listener.Network,
+				Address: listener.Address, Protocols: listener.Protocols,
+				TLS: listener.TLS, Public: listener.Public, Active: listener.Active,
+				Description: listener.Description, Error: listener.Error,
+			})
+		}
+		return body
+	}
 
 	body.Listeners = append(body.Listeners, adminListener{
 		Kind:        "lan",
 		Address:     cfg.Addr(),
 		TLS:         false,
 		Public:      false,
+		Active:      true,
 		Description: fmt.Sprintf("LAN listener bound on %s", cfg.Addr()),
 	})
 

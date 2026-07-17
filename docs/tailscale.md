@@ -32,15 +32,21 @@ Heya can join your tailnet directly via [tsnet](https://tailscale.com/docs/featu
 
 ## How it slots into `serve`
 
-`heya serve` starts the LAN listener on `${HOST}:${PORT}` (default `0.0.0.0:8080`) the way it always has. If `tailscale.enabled: true`, it *additionally* opens listeners on the tailnet:
+`heya serve` starts embedded Caddy on `${HOST}:${PORT}` (default
+`0.0.0.0:8080`) with mandatory HTTPS and HTTP/3. If Tailscale is enabled,
+tsnet supplies additional virtual-network listeners directly to that same
+Caddy runtime:
 
 | Mode               | Tailnet bindings                              |
 | ------------------ | --------------------------------------------- |
 | `https: false`     | tailnet `:80` → same handler                  |
-| `https: true`      | tailnet `:443` (Tailscale cert) + `:80` redirector |
-| `funnel: true`     | tailnet+public `:443` (Funnel) + `:80` redirector  |
+| `https: true`      | tailnet `:443` H1/H2/H3 (Tailscale cert) + `:80` redirector |
+| `funnel: true`     | tailnet+public `:443` H1/H2 (Funnel), direct tailnet H3 + `:80` redirector |
 
-All bindings share the same `http.Handler`, so every route — REST, the embedded SPA, the WebSocket event stream, HLS segments — works over both transports automatically.
+All bindings enter the same in-process Heya handler; there is no loopback
+reverse proxy and no tailnet-specific `http.Server`. Caddy owns routing,
+metrics and protocol negotiation, while tsnet owns identity, virtual sockets,
+Funnel termination and certificate retrieval.
 
 The LAN listener never goes away. If tsnet onboarding fails (no internet, bad auth key, tailnet admin paused you, etc.) the LAN listener keeps serving — tsnet is purely additive.
 
@@ -48,7 +54,7 @@ The LAN listener never goes away. If tsnet onboarding fails (no internet, bad au
 
 `https: true` (the default when Tailscale is enabled) uses Tailscale's built-in cert authority. The cert is issued for the node's MagicDNS name (e.g. `heya.tail-scale.ts.net`) and renewed automatically.
 
-Prereq: HTTPS must be enabled for your tailnet — one-time toggle at <https://login.tailscale.com/admin/dns/https>. Without it, `ListenTLS` fails and Heya falls back to plain HTTP on tailnet :80.
+Prereq: HTTPS must be enabled for your tailnet — one-time toggle at <https://login.tailscale.com/admin/dns/https>. Heya surfaces a failed certificate/listener attach in Settings → Network rather than silently claiming the listener is active.
 
 ## Funnel (public exposure)
 

@@ -55,7 +55,7 @@ func (m *Manager) mediaOriginFor(dev Device) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("cast: selecting Heya address for %s: %w", dev.Name, err)
 	}
-	return "http://" + net.JoinHostPort(ip.String(), port), nil
+	return "https://" + net.JoinHostPort(ip.String(), port), nil
 }
 
 // routedLocalIP asks the kernel routing table which source address it would

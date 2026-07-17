@@ -1,7 +1,7 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
-import { adminListenersQuery } from '~/queries/settings'
+import { adminNetworkStatusQuery } from '~/queries/settings'
 
 const { $heya } = useNuxtApp()
 const { confirm } = useConfirm()
@@ -19,9 +19,12 @@ const {
   subscribeToEvents: subscribeRemote,
 } = useRemoteAccess()
 
-const listenersData = useQuery(adminListenersQuery())
-const listeners = computed(() => listenersData.data.value ?? null)
-const loadingListeners = computed(() => listenersData.isLoading.value)
+const networkData = useQuery(adminNetworkStatusQuery())
+const network = computed(() => networkData.data.value ?? null)
+const listeners = computed(() => network.value?.ingress.listeners ?? [])
+const loadingNetwork = computed(() => networkData.isLoading.value)
+const requestRateHistory = ref<number[]>([])
+let networkTimer: ReturnType<typeof setInterval> | null = null
 const saving = ref(false)
 const loggingOut = ref(false)
 const hostnameDraft = ref('')
@@ -35,15 +38,15 @@ const { toast } = useToast()
 let unsubscribe: (() => void) | null = null
 let unsubscribeRemote: (() => void) | null = null
 
-async function loadListeners() {
-  try { await listenersData.refetch() } catch {}
+async function loadNetwork() {
+  try { await networkData.refetch() } catch {}
 }
 
 async function onMasterToggle(on: boolean) {
   saving.value = true
   try {
     await saveConfig({ enabled: on })
-    await loadListeners()
+    await loadNetwork()
     flash.value = { kind: 'ok', text: on ? 'Tailscale enabled.' : 'Tailscale disabled.' }
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Toggle failed.' }
@@ -90,7 +93,7 @@ async function onLogout() {
   loggingOut.value = true
   try {
     await logout()
-    await loadListeners()
+    await loadNetwork()
   } finally { loggingOut.value = false }
 }
 
@@ -119,6 +122,48 @@ async function copyRaw() {
 }
 
 const stateDirHint = computed(() => cfg.value?.state_dir || 'data/tailscale/')
+
+const caddy = computed(() => network.value?.ingress ?? null)
+const caddyHTTP = computed(() => caddy.value?.http ?? null)
+const protocolSummary = computed(() => {
+  const p = caddyHTTP.value?.protocols
+  if (!p) return 'No requests yet'
+  return `H1 ${p.http1.toLocaleString()} · H2 ${p.http2.toLocaleString()} · H3 ${p.http3.toLocaleString()}`
+})
+const hostRows = computed(() => {
+  const n = network.value
+  if (!n) return []
+  return [
+    { key: 'Hostname', value: n.general.hostname, mono: true, copy: true },
+    { key: 'LAN IP', value: n.general.lan_ip ?? '', mono: true, copy: true },
+    { key: 'Bind address', value: n.general.bind_address, mono: true },
+    { key: 'Transport policy', value: n.general.https_required ? 'HTTPS required · plaintext redirects on the same port' : 'Plain HTTP (development backend)' },
+    {
+      key: 'Local CA root',
+      value: n.ingress.local_ca_root ?? (n.general.https_required ? 'unavailable' : 'not used in development mode'),
+      mono: true,
+      copy: !!n.ingress.local_ca_root,
+    },
+  ]
+})
+const interfaceRows = computed(() => (network.value?.general.interfaces ?? [])
+  .filter(iface => iface.addresses?.length)
+  .map(iface => ({
+    key: iface.name,
+    value: (iface.addresses ?? []).join(' · '),
+    mono: true,
+    copy: false,
+  })))
+
+function fmtRate(value?: number): string {
+  if (!value) return '0/s'
+  return value >= 100 ? `${value.toFixed(0)}/s` : `${value.toFixed(1)}/s`
+}
+
+function fmtLatency(value?: number): string {
+  if (!value) return '—'
+  return value < 1 ? `${value.toFixed(2)} ms` : `${value.toFixed(1)} ms`
+}
 
 // ---- Remote access (UPnP + ACME + reachability) ----
 
@@ -264,20 +309,34 @@ watch(remoteCfg, () => {
 
 function listenerIcon(kind: string): string {
   switch (kind) {
+    case 'host':
     case 'lan':       return 'network'
     case 'tailscale': return 'cloud'
+    case 'funnel':    return 'globe'
+    case 'remote':    return 'globe'
     default:          return 'pulse'
   }
 }
 
 onMounted(async () => {
-  await Promise.all([refreshTS(), refreshRemote(), loadListeners(), ensureSources()])
+  await Promise.all([refreshTS(), refreshRemote(), loadNetwork(), ensureSources()])
   hostnameDraft.value = cfg.value?.hostname ?? 'heya'
   seedRemoteDrafts()
   unsubscribe = subscribeToEvents()
   unsubscribeRemote = subscribeRemote()
+  networkTimer = setInterval(loadNetwork, 5000)
 })
-onBeforeUnmount(() => { unsubscribe?.(); unsubscribeRemote?.() })
+onBeforeUnmount(() => {
+  unsubscribe?.()
+  unsubscribeRemote?.()
+  if (networkTimer) clearInterval(networkTimer)
+})
+
+watch(() => caddyHTTP.value?.requests_per_second, (rate) => {
+  if (rate == null) return
+  requestRateHistory.value.push(rate)
+  if (requestRateHistory.value.length > 36) requestRateHistory.value.shift()
+})
 
 watch(cfg, (next) => {
   if (next && hostnameDraft.value !== next.hostname && !saving.value) {
@@ -292,32 +351,93 @@ watch(cfg, (next) => {
       title="Network"
       icon="network"
       eyebrow="Server · Connectivity"
-      description="Understand every route into Heya—from the local listener to Tailscale and optional Funnel access—with authentication preserved throughout."
+      description="One ingress, every route: Caddy terminates HTTPS and HTTP/3 while Heya reports the real listener, certificate, UPnP and tailnet state here."
     />
+
+    <SettingsSection title="Caddy ingress" icon="pulse"
+      description="Live counters from the embedded edge. Rates are sampled while this page is open; totals reset when the ingress reloads or Heya restarts.">
+      <template #actions>
+        <LiveDot :connected="caddy?.running ?? false" :label="caddy?.running ? `Caddy ${caddy.version}` : 'stopped'" />
+      </template>
+
+      <div v-if="loadingNetwork && !caddy" class="loading-state"><Icon name="spinner" :size="14" /> Loading ingress…</div>
+      <div v-else class="tiles">
+        <MetricTile
+          label="Requests"
+          :value="caddyHTTP?.requests_total.toLocaleString() ?? '—'"
+          icon="pulse"
+          :sub="protocolSummary"
+        />
+        <MetricTile
+          label="Current rate"
+          :value="fmtRate(caddyHTTP?.requests_per_second)"
+          icon="pulse"
+          :sparkline="requestRateHistory"
+          sub="all ingress paths"
+        />
+        <MetricTile
+          label="P95 latency"
+          :value="fmtLatency(caddyHTTP?.p95_latency_ms)"
+          icon="clock"
+          :tone="(caddyHTTP?.p95_latency_ms ?? 0) > 500 ? 'warn' : 'neutral'"
+          :sub="`P50 ${fmtLatency(caddyHTTP?.p50_latency_ms)}`"
+        />
+        <MetricTile
+          label="Errors"
+          :value="caddyHTTP?.errors_total.toLocaleString() ?? '—'"
+          icon="warning"
+          :tone="(caddyHTTP?.errors_total ?? 0) > 0 ? 'bad' : 'good'"
+          :sub="`${fmtRate(caddyHTTP?.errors_per_second)} · ${fmtBytes(caddyHTTP?.bytes_sent)} sent`"
+        />
+      </div>
+      <div v-if="caddy?.by_ingress?.length" class="ingress-breakdown">
+        <div v-for="edge in caddy.by_ingress" :key="edge.name" class="ingress-row">
+          <span class="ingress-name mono">{{ edge.name }}</span>
+          <span>{{ edge.requests_total.toLocaleString() }} requests</span>
+          <span>{{ fmtRate(edge.requests_per_second) }}</span>
+          <span>P95 {{ fmtLatency(edge.p95_latency_ms) }}</span>
+          <span class="mono">H1 {{ edge.protocols.http1 }} · H2 {{ edge.protocols.http2 }} · H3 {{ edge.protocols.http3 }}</span>
+        </div>
+      </div>
+    </SettingsSection>
 
     <SettingsSection title="Active listeners" icon="network">
       <template #actions>
-        <LiveDot connected :label="`${listeners?.ws_subscribers ?? 0} WS clients`" />
+        <LiveDot :connected="caddy?.running ?? false" :label="`${network?.general.ws_subscribers ?? 0} WS clients`" />
       </template>
 
-      <div v-if="loadingListeners" class="loading-state"><Icon name="spinner" :size="14" /> Loading…</div>
-      <div v-else-if="listeners?.listeners?.length" class="lst-list">
-        <div v-for="l in listeners.listeners" :key="l.kind + l.address" class="lst-card" :class="l.kind">
+      <div v-if="loadingNetwork" class="loading-state"><Icon name="spinner" :size="14" /> Loading…</div>
+      <div v-else-if="listeners.length" class="lst-list">
+        <div v-for="l in listeners" :key="l.name + l.address" class="lst-card" :class="l.kind">
           <div class="lst-icon" :class="l.kind">
             <Icon :name="listenerIcon(l.kind)" :size="16" />
           </div>
           <div class="lst-body">
             <div class="lst-row">
               <span class="lst-addr mono">{{ l.address }}</span>
-              <StatusBadge :state="l.public ? 'warn' : 'ok'">
-                {{ l.public ? 'public' : (l.kind === 'tailscale' ? 'tailnet' : 'lan') }}
+              <StatusBadge :state="!l.active ? 'error' : (l.public ? 'warn' : 'ok')">
+                {{ !l.active ? 'inactive' : (l.public ? 'public' : (l.kind === 'tailscale' ? 'tailnet' : 'local')) }}
               </StatusBadge>
               <StatusBadge v-if="l.tls" state="ok">TLS</StatusBadge>
+              <StatusBadge v-for="protocol in l.protocols" :key="protocol" state="idle">{{ protocol.toUpperCase() }}</StatusBadge>
             </div>
             <div class="lst-desc">{{ l.description }}</div>
+            <div v-if="l.error" class="lst-error">{{ l.error }}</div>
           </div>
         </div>
       </div>
+    </SettingsSection>
+
+    <SettingsSection title="Host network" icon="network"
+      description="Addresses observed by this process. The local CA path is useful when you want a browser or native client to trust Heya’s LAN certificate.">
+      <KVTable :rows="hostRows" />
+      <details v-if="interfaceRows.length" class="interface-details">
+        <summary>
+          <span>Network interfaces</span>
+          <span class="interface-count">{{ interfaceRows.length }} observed</span>
+        </summary>
+        <div class="interface-table"><KVTable :rows="interfaceRows" /></div>
+      </details>
     </SettingsSection>
 
     <SettingsSection title="Remote access" icon="globe"
@@ -347,6 +467,25 @@ watch(cfg, (next) => {
         <div v-else-if="remoteStatus.detail" class="remote-detail" :class="remoteBadge.state">{{ remoteStatus.detail }}</div>
 
         <KVTable :rows="remoteRows" />
+
+        <div v-if="remoteStatus.upnp?.mappings?.length" class="mapping-grid">
+          <div v-for="mapping in remoteStatus.upnp.mappings" :key="mapping.protocol" class="mapping-card">
+            <div class="mapping-head">
+              <span class="mapping-protocol mono">{{ mapping.protocol }}</span>
+              <StatusBadge :state="mapping.active ? 'ok' : 'error'">
+                {{ mapping.active ? 'mapped' : 'failed' }}
+              </StatusBadge>
+            </div>
+            <div class="mapping-route mono">
+              :{{ mapping.external_port }} → {{ mapping.internal_ip }}:{{ mapping.internal_port }}
+            </div>
+            <div class="mapping-meta">
+              {{ mapping.protocol === 'UDP' ? 'HTTP/3 · QUIC' : 'HTTP/1.1 + HTTP/2' }}
+              <template v-if="mapping.active"> · {{ mapping.lease_seconds ? `${mapping.lease_seconds}s lease` : 'permanent lease' }}</template>
+            </div>
+            <div v-if="mapping.error" class="mapping-error">{{ mapping.error }}</div>
+          </div>
+        </div>
 
         <div v-if="remoteStatus.remote_url || remoteStatus.lan_url" class="urls">
           <a v-if="remoteStatus.remote_url" :href="remoteStatus.remote_url" target="_blank" rel="noopener" class="url-card">
@@ -607,6 +746,25 @@ watch(cfg, (next) => {
   border-radius: var(--r-md);
 }
 
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+.ingress-breakdown { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.ingress-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) repeat(4, auto);
+  gap: 14px;
+  align-items: center;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--fg-3);
+  font-size: 11px;
+}
+.ingress-name { color: var(--fg-1); font-weight: 650; }
+
 .lst-list { display: flex; flex-direction: column; gap: 8px; }
 .lst-card {
   display: flex; align-items: flex-start; gap: 14px;
@@ -616,6 +774,7 @@ watch(cfg, (next) => {
   border-radius: var(--r-md);
 }
 .lst-card.tailscale { border-color: rgba(140, 160, 255, 0.30); background: rgba(140, 160, 255, 0.04); }
+.lst-card.remote, .lst-card.funnel { border-color: color-mix(in srgb, var(--gold) 30%, transparent); background: var(--gold-soft); }
 .lst-icon {
   width: 36px; height: 36px;
   border-radius: var(--r-sm);
@@ -625,10 +784,52 @@ watch(cfg, (next) => {
   flex-shrink: 0;
 }
 .lst-icon.tailscale { color: rgb(140, 160, 255); }
+.lst-icon.remote, .lst-icon.funnel { color: var(--gold); }
 .lst-body { flex: 1; min-width: 0; }
 .lst-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .lst-addr { font-size: 14px; font-weight: 600; color: var(--fg-0); }
 .lst-desc { font-size: 12px; color: var(--fg-3); margin-top: 2px; }
+.lst-error { font-size: 11px; color: var(--bad); margin-top: 4px; }
+
+.mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.mapping-card {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-2);
+}
+.mapping-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.mapping-protocol { font-size: 12px; font-weight: 700; color: var(--fg-1); }
+.mapping-route { margin-top: 8px; font-size: 12px; color: var(--fg-0); overflow-wrap: anywhere; }
+.mapping-meta { margin-top: 3px; font-size: 11px; color: var(--fg-3); }
+.mapping-error { margin-top: 5px; font-size: 11px; color: var(--bad); }
+
+.interface-details {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-2);
+  overflow: hidden;
+}
+.interface-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+  color: var(--fg-2);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.interface-details[open] summary { border-bottom: 1px solid var(--border); }
+.interface-count { color: var(--fg-3); font-family: var(--font-mono); font-size: 10.5px; }
+.interface-table { padding: 8px; }
 
 .ts-switch {
   position: relative;
@@ -783,5 +984,7 @@ watch(cfg, (next) => {
 
 @media (max-width: 720px) {
   .sv2-input { min-width: 0; width: 100%; }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ingress-row { grid-template-columns: 1fr 1fr; gap: 5px 10px; }
 }
 </style>
