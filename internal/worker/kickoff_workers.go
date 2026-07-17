@@ -722,7 +722,9 @@ func (w *ApplyLibraryScanWorker) enqueueRichMetadataWork(ctx context.Context, rc
 	if rc == nil || metadataArtifactID == 0 {
 		return 0, 0
 	}
-	for _, target := range scannerRichMetadataTargets(lib, result) {
+	targets := scannerRichMetadataTargets(lib, result)
+	jobs := make([]river.InsertManyParams, 0, len(targets))
+	for _, target := range targets {
 		if target.mediaItemID == 0 {
 			continue
 		}
@@ -737,14 +739,17 @@ func (w *ApplyLibraryScanWorker) enqueueRichMetadataWork(ctx context.Context, rc
 		}
 		opts := args.InsertOpts()
 		opts.Priority = PriorityScan
-		if _, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, source)); err != nil {
-			log.Warn().Err(err).Int64("library_id", lib.ID).Int64("media_item_id", target.mediaItemID).Msg("apply_metadata: enqueue rich metadata failed")
-			failed++
-			continue
-		}
-		queued++
+		jobs = append(jobs, river.InsertManyParams{Args: args, InsertOpts: applyScheduledJobSource(opts, source)})
 	}
-	return queued, failed
+	if len(jobs) == 0 {
+		return 0, 0
+	}
+	results, err := rc.InsertMany(ctx, jobs)
+	if err != nil {
+		log.Warn().Err(err).Int64("library_id", lib.ID).Int("job_count", len(jobs)).Msg("apply_metadata: batch enqueue rich metadata failed")
+		return 0, len(jobs)
+	}
+	return len(results), 0
 }
 
 type scannerRichMetadataTarget struct {
@@ -1912,6 +1917,14 @@ type postApplyFanout struct {
 	Failed       int
 }
 
+// postApplyPendingJob tracks enough about an accumulated post-apply job to
+// reproduce the old per-kind counting once InsertMany's results come back
+// positionally, and to summarize a batch failure by kind.
+type postApplyPendingJob struct {
+	kind    string // human label for the job type, e.g. "extra thumbnail"
+	counter *int   // fanout field to bump when this job actually enqueues (not a duplicate)
+}
+
 func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sqlc.Queries, rc *river.Client[pgx.Tx], lib sqlc.Library, result scanner.Result, taskID string, source string) postApplyFanout {
 	var fanout postApplyFanout
 	if rc == nil {
@@ -1923,8 +1936,46 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 	saveMusicNFOQueued := map[int64]bool{}
 	trickplayQueued := map[int64]bool{}
 	segmentsQueued := map[int64]bool{}
+
+	// Every job below — across every file and, later, every media item — is
+	// accumulated here instead of inserted one row at a time; flush() does a
+	// single InsertMany for whatever has piled up. Kept as a closure so both
+	// the normal end-of-function flush and the ctx-cancellation bailout can
+	// share it without losing already-accumulated work.
+	var jobs []river.InsertManyParams
+	var pending []postApplyPendingJob
+	enqueue := func(args river.JobArgs, opts *river.InsertOpts, kind string, counter *int) {
+		jobs = append(jobs, river.InsertManyParams{Args: args, InsertOpts: opts})
+		pending = append(pending, postApplyPendingJob{kind: kind, counter: counter})
+	}
+	flush := func() {
+		if len(jobs) == 0 {
+			return
+		}
+		results, err := rc.InsertMany(ctx, jobs)
+		if err != nil {
+			byKind := make(map[string]int, len(pending))
+			for _, p := range pending {
+				byKind[p.kind]++
+			}
+			log.Warn().Err(err).Int("job_count", len(jobs)).Interface("by_kind", byKind).Msg("apply_metadata: batch enqueue post-apply work failed")
+			fanout.Failed += len(jobs)
+		} else {
+			for i, res := range results {
+				if res.UniqueSkippedAsDuplicate {
+					fanout.Skipped++
+				} else {
+					*pending[i].counter++
+				}
+			}
+		}
+		jobs = nil
+		pending = nil
+	}
+
 	for _, path := range scannerInventoryPostApplyPaths(result.Inventory) {
 		if err := ctx.Err(); err != nil {
+			flush()
 			return fanout
 		}
 		file, err := q.GetLibraryFileByPath(ctx, sqlc.GetLibraryFileByPathParams{
@@ -1954,31 +2005,17 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 			mediaItemIDs[link.MediaItemID] = true
 			if link.RelationType == "extra" {
 				if link.ThumbnailPath == "" {
-					if res, err := rc.Insert(ctx, ThumbnailExtraArgs{ExtraID: link.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
-						log.Warn().Err(err).Int64("extra_id", link.ID).Msg("apply_metadata: enqueue extra thumbnail failed")
-						fanout.Failed++
-					} else if res.UniqueSkippedAsDuplicate {
-						fanout.Skipped++
-					} else {
-						fanout.Thumbnails++
-					}
+					enqueue(ThumbnailExtraArgs{ExtraID: link.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source), "extra thumbnail", &fanout.Thumbnails)
 				}
 				continue
 			}
 			if settings.SaveNFO && scannerMediaTypeWritesVideoNFO(lib.MediaType) && !saveNFOQueued[link.MediaItemID] {
-				if res, err := rc.Insert(ctx, SaveNFOArgs{
+				enqueue(SaveNFOArgs{
 					MediaItemID:   link.MediaItemID,
 					LibraryFileID: file.ID,
 					FilePath:      file.Path,
 					MediaType:     string(lib.MediaType),
-				}, nil); err != nil {
-					log.Warn().Err(err).Int64("media_item_id", link.MediaItemID).Msg("apply_metadata: enqueue save nfo failed")
-					fanout.Failed++
-				} else if res.UniqueSkippedAsDuplicate {
-					fanout.Skipped++
-				} else {
-					fanout.SaveNFO++
-				}
+				}, nil, "save nfo", &fanout.SaveNFO)
 				saveNFOQueued[link.MediaItemID] = true
 			}
 		}
@@ -1986,40 +2023,19 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 		probeable := mediafile.IsProbeable(file.Path)
 		needsProbe := probeable && libraryFileNeedsProbe(file)
 		if needsProbe {
-			if res, err := rc.Insert(ctx, FFProbeArgs{
+			enqueue(FFProbeArgs{
 				LibraryFileID:   file.ID,
 				FilePath:        file.Path,
 				ScheduledTaskID: taskID,
-			}, scheduledJobInsertOpts(source)); err != nil {
-				log.Warn().Err(err).Int64("file_id", file.ID).Msg("apply_metadata: enqueue ffprobe failed")
-				fanout.Failed++
-			} else if res.UniqueSkippedAsDuplicate {
-				fanout.Skipped++
-			} else {
-				fanout.FFProbe++
-			}
+			}, scheduledJobInsertOpts(source), "ffprobe", &fanout.FFProbe)
 		}
 		if probeable && !needsProbe && libraryFileHasVideo(file) {
 			if settings.EnableTrickplay && !file.HasTrickplay && !trickplayQueued[file.ID] {
-				if res, err := rc.Insert(ctx, TrickplayFileArgs{LibraryFileID: file.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
-					log.Warn().Err(err).Int64("file_id", file.ID).Msg("apply_metadata: enqueue trickplay failed")
-					fanout.Failed++
-				} else if res.UniqueSkippedAsDuplicate {
-					fanout.Skipped++
-				} else {
-					fanout.Trickplay++
-				}
+				enqueue(TrickplayFileArgs{LibraryFileID: file.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source), "trickplay", &fanout.Trickplay)
 				trickplayQueued[file.ID] = true
 			}
 			if scannerMediaTypeScansSegments(lib.MediaType) && !file.SegmentsAnalyzedAt.Valid && !segmentsQueued[file.ID] && libraryFileHasPrimaryLink(links) {
-				if res, err := rc.Insert(ctx, ScanMediaSegmentsFileArgs{LibraryFileID: file.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
-					log.Warn().Err(err).Int64("file_id", file.ID).Msg("apply_metadata: enqueue media segments failed")
-					fanout.Failed++
-				} else if res.UniqueSkippedAsDuplicate {
-					fanout.Skipped++
-				} else {
-					fanout.Segments++
-				}
+				enqueue(ScanMediaSegmentsFileArgs{LibraryFileID: file.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source), "media segments", &fanout.Segments)
 				segmentsQueued[file.ID] = true
 			}
 		}
@@ -2034,14 +2050,7 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 			continue
 		}
 		if !trackFile.FingerprintedAt.Valid {
-			if res, err := rc.Insert(ctx, ScanTrackFingerprintArgs{TrackFileID: trackFile.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
-				log.Warn().Err(err).Int64("track_file_id", trackFile.ID).Msg("apply_metadata: enqueue chromaprint failed")
-				fanout.Failed++
-			} else if res.UniqueSkippedAsDuplicate {
-				fanout.Skipped++
-			} else {
-				fanout.Fingerprint++
-			}
+			enqueue(ScanTrackFingerprintArgs{TrackFileID: trackFile.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source), "chromaprint", &fanout.Fingerprint)
 		}
 		if trackFileNeedsLoudness(trackFile) {
 			enqueued, duplicate, err := enqueueTrackLoudnessIfNeeded(ctx, q, rc, ScanTrackLoudnessArgs{TrackFileID: trackFile.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source))
@@ -2055,26 +2064,12 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 			}
 		}
 		if w.sonicEnabled(ctx) && trackNeedsSonicAnalysis(ctx, q, trackFile.TrackID) {
-			if res, err := rc.Insert(ctx, AnalyzeTrackFacetsArgs{TrackID: trackFile.TrackID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source)); err != nil {
-				log.Warn().Err(err).Int64("track_id", trackFile.TrackID).Msg("apply_metadata: enqueue sonic analysis failed")
-				fanout.Failed++
-			} else if res.UniqueSkippedAsDuplicate {
-				fanout.Skipped++
-			} else {
-				fanout.Sonic++
-			}
+			enqueue(AnalyzeTrackFacetsArgs{TrackID: trackFile.TrackID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source), "sonic analysis", &fanout.Sonic)
 		}
 	}
 	for mediaItemID := range mediaItemIDs {
 		if scannerMediaTypeFetchesRatings(lib.MediaType) {
-			if res, err := rc.Insert(ctx, RatingsFetchArgs{MediaItemID: mediaItemID, LibraryID: lib.ID}, nil); err != nil {
-				log.Warn().Err(err).Int64("media_item_id", mediaItemID).Msg("apply_metadata: enqueue ratings failed")
-				fanout.Failed++
-			} else if res.UniqueSkippedAsDuplicate {
-				fanout.Skipped++
-			} else {
-				fanout.Ratings++
-			}
+			enqueue(RatingsFetchArgs{MediaItemID: mediaItemID, LibraryID: lib.ID}, nil, "ratings", &fanout.Ratings)
 		}
 		if settings.SaveNFO && lib.MediaType == sqlc.MediaTypeMusic && !saveMusicNFOQueued[mediaItemID] {
 			artist, err := q.GetArtistByMediaItemID(ctx, mediaItemID)
@@ -2086,17 +2081,11 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 				fanout.Failed++
 				continue
 			}
-			if res, err := rc.Insert(ctx, SaveMusicNFOArgs{ArtistID: artist.ID}, nil); err != nil {
-				log.Warn().Err(err).Int64("artist_id", artist.ID).Msg("apply_metadata: enqueue music nfo failed")
-				fanout.Failed++
-			} else if res.UniqueSkippedAsDuplicate {
-				fanout.Skipped++
-			} else {
-				fanout.SaveMusicNFO++
-			}
+			enqueue(SaveMusicNFOArgs{ArtistID: artist.ID}, nil, "music nfo", &fanout.SaveMusicNFO)
 			saveMusicNFOQueued[mediaItemID] = true
 		}
 	}
+	flush()
 	return fanout
 }
 
@@ -2355,25 +2344,32 @@ func enqueueReprobeUnprobed(ctx context.Context, q *sqlc.Queries, rc *river.Clie
 		log.Error().Err(err).Int64("library_id", libraryID).Msg("kickoff_library_scan: list unprobed failed")
 		return 0
 	}
-	n := 0
+	if err := ctx.Err(); err != nil {
+		return 0
+	}
+	jobs := make([]river.InsertManyParams, 0, len(files))
 	for _, f := range files {
-		if err := ctx.Err(); err != nil {
-			return n
-		}
 		if !mediafile.IsProbeable(f.Path) {
 			continue // sidecars (.nfo/.srt/...) legitimately have no media_info
 		}
-		if _, err := rc.Insert(ctx, FFProbeArgs{
-			LibraryFileID:   f.ID,
-			FilePath:        f.Path,
-			ScheduledTaskID: taskID,
-		}, scheduledJobInsertOpts(source)); err != nil {
-			log.Warn().Err(err).Int64("file_id", f.ID).Msg("kickoff_library_scan: enqueue reprobe failed")
-			continue
-		}
-		n++
+		jobs = append(jobs, river.InsertManyParams{
+			Args: FFProbeArgs{
+				LibraryFileID:   f.ID,
+				FilePath:        f.Path,
+				ScheduledTaskID: taskID,
+			},
+			InsertOpts: scheduledJobInsertOpts(source),
+		})
 	}
-	return n
+	if len(jobs) == 0 {
+		return 0
+	}
+	results, err := rc.InsertMany(ctx, jobs)
+	if err != nil {
+		log.Warn().Err(err).Int("file_count", len(jobs)).Msg("kickoff_library_scan: batch enqueue reprobe failed")
+		return 0
+	}
+	return len(results)
 }
 
 func emit(hub EventPublisher, t eventhub.EventType, p any) {
@@ -2747,23 +2743,34 @@ func (w *KickoffMusicLoudnessWorker) Work(ctx context.Context, job *river.Job[Ki
 				return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
 			}
 			albumsListed = len(rows)
-			for _, row := range rows {
+			if len(rows) > 0 {
 				if ctx.Err() != nil {
 					return pumpInterrupted(ctx, w.DB, job.ID, taskID, st)
 				}
-				w.Progress.Set("scan_music_loudness", "kickoff_music_loudness", row.Title)
-				res, err := rc.Insert(ctx, ScanAlbumLoudnessArgs{AlbumID: row.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(st.Source))
-				switch {
-				case err != nil:
-					log.Warn().Err(err).Int64("album_id", row.ID).Msg("kickoff_music_loudness: enqueue album failed")
-					st.Failed++
-					st.Skipped++
-				case res.UniqueSkippedAsDuplicate:
-					st.Skipped++
-				default:
-					st.Enqueued++
+				last := rows[len(rows)-1]
+				w.Progress.Set("scan_music_loudness", "kickoff_music_loudness", last.Title)
+				jobs := make([]river.InsertManyParams, len(rows))
+				for i, row := range rows {
+					jobs[i] = river.InsertManyParams{
+						Args:       ScanAlbumLoudnessArgs{AlbumID: row.ID, ScheduledTaskID: taskID},
+						InsertOpts: scheduledJobInsertOpts(st.Source),
+					}
 				}
-				st.AlbumCursor = row.ID
+				results, err := rc.InsertMany(ctx, jobs)
+				if err != nil {
+					log.Warn().Err(err).Int("album_count", len(rows)).Msg("kickoff_music_loudness: batch enqueue album failed")
+					st.Failed += len(rows)
+					st.Skipped += len(rows)
+				} else {
+					for _, res := range results {
+						if res.UniqueSkippedAsDuplicate {
+							st.Skipped++
+						} else {
+							st.Enqueued++
+						}
+					}
+				}
+				st.AlbumCursor = last.ID
 			}
 		}
 		if albumActive == 0 && albumsListed == 0 {

@@ -606,23 +606,34 @@ func (w *KickoffMediaSegmentsWorker) Work(ctx context.Context, job *river.Job[Ki
 			return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
 		}
 		filesListed = len(rows)
-		for _, row := range rows {
+		if len(rows) > 0 {
 			if ctx.Err() != nil {
 				return pumpInterrupted(ctx, w.DB, job.ID, taskID, st)
 			}
-			w.Progress.Set("scan_media_segments", "kickoff_media_segments", row.Path)
-			res, err := rc.Insert(ctx, ScanMediaSegmentsFileArgs{LibraryFileID: row.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(st.Source))
-			switch {
-			case err != nil:
-				log.Warn().Err(err).Int64("library_file_id", row.ID).Msg("kickoff_media_segments: enqueue failed")
-				st.Failed++
-				st.Skipped++
-			case res.UniqueSkippedAsDuplicate:
-				st.Skipped++
-			default:
-				st.Enqueued++
+			last := rows[len(rows)-1]
+			w.Progress.Set("scan_media_segments", "kickoff_media_segments", last.Path)
+			jobs := make([]river.InsertManyParams, len(rows))
+			for i, row := range rows {
+				jobs[i] = river.InsertManyParams{
+					Args:       ScanMediaSegmentsFileArgs{LibraryFileID: row.ID, ScheduledTaskID: taskID},
+					InsertOpts: scheduledJobInsertOpts(st.Source),
+				}
 			}
-			st.TrackCursor = row.ID
+			results, err := rc.InsertMany(ctx, jobs)
+			if err != nil {
+				log.Warn().Err(err).Int("file_count", len(rows)).Msg("kickoff_media_segments: batch enqueue failed")
+				st.Failed += len(rows)
+				st.Skipped += len(rows)
+			} else {
+				for _, res := range results {
+					if res.UniqueSkippedAsDuplicate {
+						st.Skipped++
+					} else {
+						st.Enqueued++
+					}
+				}
+			}
+			st.TrackCursor = last.ID
 		}
 	}
 

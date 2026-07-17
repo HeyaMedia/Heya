@@ -486,31 +486,45 @@ func (w *KickoffDetectSegmentsWorker) Work(ctx context.Context, job *river.Job[K
 			return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
 		}
 		seasonsListed = len(rows)
-		for _, row := range rows {
+		if len(rows) > 0 {
 			if ctx.Err() != nil {
 				return pumpInterrupted(ctx, w.DB, job.ID, taskID, st)
 			}
-			if !row.MediaItemID.Valid {
-				st.TrackCursor = row.CursorKey
-				continue
+			last := rows[len(rows)-1]
+			w.Progress.Set("detect_media_segments", "kickoff_detect_segments", fmt.Sprintf("season %d", last.Season))
+			// Rows with no resolved media item don't get a job (their cursor
+			// still advances below); only valid rows go into the batch.
+			jobs := make([]river.InsertManyParams, 0, len(rows))
+			for _, row := range rows {
+				if !row.MediaItemID.Valid {
+					continue
+				}
+				jobs = append(jobs, river.InsertManyParams{
+					Args: DetectSeasonSegmentsArgs{
+						MediaItemID:     row.MediaItemID.Int64,
+						Season:          int(row.Season),
+						ScheduledTaskID: taskID,
+					},
+					InsertOpts: scheduledJobInsertOpts(st.Source),
+				})
 			}
-			w.Progress.Set("detect_media_segments", "kickoff_detect_segments", fmt.Sprintf("season %d", row.Season))
-			res, err := rc.Insert(ctx, DetectSeasonSegmentsArgs{
-				MediaItemID:     row.MediaItemID.Int64,
-				Season:          int(row.Season),
-				ScheduledTaskID: taskID,
-			}, scheduledJobInsertOpts(st.Source))
-			switch {
-			case err != nil:
-				log.Warn().Err(err).Int64("media_item_id", row.MediaItemID.Int64).Int32("season", row.Season).Msg("kickoff_detect_segments: enqueue season failed")
-				st.Failed++
-				st.Skipped++
-			case res.UniqueSkippedAsDuplicate:
-				st.Skipped++
-			default:
-				st.Enqueued++
+			if len(jobs) > 0 {
+				results, err := rc.InsertMany(ctx, jobs)
+				if err != nil {
+					log.Warn().Err(err).Int("season_count", len(jobs)).Msg("kickoff_detect_segments: batch enqueue season failed")
+					st.Failed += len(jobs)
+					st.Skipped += len(jobs)
+				} else {
+					for _, res := range results {
+						if res.UniqueSkippedAsDuplicate {
+							st.Skipped++
+						} else {
+							st.Enqueued++
+						}
+					}
+				}
 			}
-			st.TrackCursor = row.CursorKey
+			st.TrackCursor = last.CursorKey
 		}
 	}
 	seasonsDone := seasonActive == 0 && seasonsListed == 0
@@ -532,23 +546,34 @@ func (w *KickoffDetectSegmentsWorker) Work(ctx context.Context, job *river.Job[K
 				return pumpTransientFailure(ctx, w.DB, q, job.ID, taskID, st, job.CreatedAt, err)
 			}
 			moviesListed = len(rows)
-			for _, row := range rows {
+			if len(rows) > 0 {
 				if ctx.Err() != nil {
 					return pumpInterrupted(ctx, w.DB, job.ID, taskID, st)
 				}
-				w.Progress.Set("detect_media_segments", "kickoff_detect_segments", filepath.Base(row.Path))
-				res, err := rc.Insert(ctx, DetectMovieCreditsArgs{LibraryFileID: row.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(st.Source))
-				switch {
-				case err != nil:
-					log.Warn().Err(err).Int64("library_file_id", row.ID).Msg("kickoff_detect_segments: enqueue movie failed")
-					st.Failed++
-					st.Skipped++
-				case res.UniqueSkippedAsDuplicate:
-					st.Skipped++
-				default:
-					st.Enqueued++
+				last := rows[len(rows)-1]
+				w.Progress.Set("detect_media_segments", "kickoff_detect_segments", filepath.Base(last.Path))
+				jobs := make([]river.InsertManyParams, len(rows))
+				for i, row := range rows {
+					jobs[i] = river.InsertManyParams{
+						Args:       DetectMovieCreditsArgs{LibraryFileID: row.ID, ScheduledTaskID: taskID},
+						InsertOpts: scheduledJobInsertOpts(st.Source),
+					}
 				}
-				st.AlbumCursor = row.ID
+				results, err := rc.InsertMany(ctx, jobs)
+				if err != nil {
+					log.Warn().Err(err).Int("movie_count", len(rows)).Msg("kickoff_detect_segments: batch enqueue movie failed")
+					st.Failed += len(rows)
+					st.Skipped += len(rows)
+				} else {
+					for _, res := range results {
+						if res.UniqueSkippedAsDuplicate {
+							st.Skipped++
+						} else {
+							st.Enqueued++
+						}
+					}
+				}
+				st.AlbumCursor = last.ID
 			}
 		}
 		if movieActive == 0 && moviesListed == 0 {

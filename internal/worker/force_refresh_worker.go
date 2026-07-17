@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
@@ -123,7 +124,11 @@ func enqueueForceForLibrary(ctx context.Context, db *pgxpool.Pool, libraryID int
 	}
 	defer rows.Close()
 
-	enqueued := 0
+	type forceRefreshTarget struct {
+		itemID    int64
+		mediaType sqlc.MediaType
+	}
+	var targets []forceRefreshTarget
 	skippedNoProvider := 0
 	skippedScanErr := 0
 	for rows.Next() {
@@ -144,12 +149,33 @@ func enqueueForceForLibrary(ctx context.Context, db *pgxpool.Pool, libraryID int
 			continue
 		}
 
-		if err := EnqueueEnrichForceTx(ctx, itemID, sqlc.MediaType(mediaType), EnrichSourceForced); err != nil {
-			log.Warn().Err(err).Int64("item_id", itemID).Msg("enqueue forced enrich failed")
-			continue
+		targets = append(targets, forceRefreshTarget{itemID: itemID, mediaType: sqlc.MediaType(mediaType)})
+	}
+	rowsErr := rows.Err()
+
+	// One InsertMany for the whole library instead of one round trip per
+	// item. rows.Err() is still surfaced below — an iteration error doesn't
+	// discard the batch already accumulated from rows read so far.
+	enqueued := 0
+	if len(targets) > 0 {
+		if rc := river.ClientFromContext[pgx.Tx](ctx); rc != nil {
+			jobs := make([]river.InsertManyParams, len(targets))
+			for i, t := range targets {
+				jobs[i] = river.InsertManyParams{
+					Args:       EnrichMediaItemArgs{ItemID: t.itemID, Source: string(EnrichSourceForced), Force: true},
+					InsertOpts: &river.InsertOpts{Priority: PriorityFor(EnrichSourceForced, t.mediaType)},
+				}
+			}
+			results, err := rc.InsertMany(ctx, jobs)
+			if err != nil {
+				log.Warn().Err(err).Int64("library_id", libraryID).Int("job_count", len(jobs)).Msg("force_refresh: batch enqueue forced enrich failed")
+			} else {
+				enqueued = len(results)
+			}
+		} else {
+			log.Warn().Int64("library_id", libraryID).Int("job_count", len(targets)).Msg("force_refresh: no river client in context, forced enrich not enqueued")
 		}
-		enqueued++
 	}
 	log.Debug().Int64("library_id", libraryID).Int("enqueued", enqueued).Int("skipped_no_provider_id", skippedNoProvider).Int("skipped_scan_error", skippedScanErr).Msg("force_refresh: item enumeration done")
-	return enqueued, rows.Err()
+	return enqueued, rowsErr
 }
