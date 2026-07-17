@@ -13309,6 +13309,12 @@
       "MusicMix": {
         "additionalProperties": false,
         "properties": {
+          "description": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -13329,6 +13335,9 @@
           "seed_artist_slug": {
             "type": "string"
           },
+          "slug": {
+            "type": "string"
+          },
           "tracks": {
             "items": {
               "$ref": "#/components/schemas/ListArtistTopTracksForMixRow"
@@ -13340,6 +13349,9 @@
           }
         },
         "required": [
+          "slug",
+          "kind",
+          "description",
           "seed_artist_id",
           "seed_artist_name",
           "seed_artist_slug",
@@ -13913,7 +13925,7 @@
             "type": "string"
           },
           "completed": {
-            "description": "Whether playback reached the end / scrobble threshold",
+            "description": "Whether playback reached its natural end",
             "type": "boolean"
           },
           "entity_id": {
@@ -13940,6 +13952,12 @@
             "description": "Origin label: queue | radio | album | playlist | search | browse | similar",
             "maxLength": 40,
             "type": "string"
+          },
+          "started_at_unix": {
+            "description": "UTC Unix time when this playback began (track completion only)",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
           },
           "total_seconds": {
             "description": "Total length (0 if unknown)",
@@ -37978,7 +37996,7 @@
             "schema": {
               "default": 6,
               "format": "int64",
-              "maximum": 20,
+              "maximum": 8,
               "minimum": 1,
               "type": "integer"
             }
@@ -38030,7 +38048,7 @@
             "bearer": null
           }
         ],
-        "summary": "Auto-generated mixes from recent listening",
+        "summary": "Personal mixes from taste, sonic similarity, and provider metadata",
         "tags": [
           "MusicHome"
         ]
@@ -38562,7 +38580,7 @@
             "bearer": null
           }
         ],
-        "summary": "Build an Instant Radio queue from a seed",
+        "summary": "Build seed radio with sonic and metadata fallbacks",
         "tags": [
           "Music"
         ]
@@ -38744,7 +38762,7 @@
             "bearer": null
           }
         ],
-        "summary": "Random tracks from across the library",
+        "summary": "Personalized radio from across the library",
         "tags": [
           "Music"
         ]

@@ -11,10 +11,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// scrobbleMinSeconds mirrors the FE threshold in usePlayer.ts — a track
-// counts as listened after 30s of actual play time.
-const scrobbleMinSeconds = 30
-
 // Session is one server-owned playback session against one device. The
 // server is the player: clients (web UI, CLI) only send commands here
 // and mirror state from the WS events the session emits. Phase 1 plays
@@ -38,9 +34,9 @@ type Session struct {
 	playedBase time.Duration
 	resumedAt  time.Time
 
-	// listened accumulates actual play time across seeks/replacements
-	// for the scrobble threshold.
-	listened time.Duration
+	// playbackStarted prevents seek/resume transport replacements from sending
+	// duplicate external now-playing notifications for the same track.
+	playbackStarted bool
 
 	retried bool // one respawn attempt per track on pre-commence failure
 	closed  bool
@@ -189,10 +185,21 @@ func (s *Session) consume(tr Transport) {
 			s.mu.Unlock()
 			continue
 		case TransportPlaying, TransportResumed:
+			reportStart := false
 			if s.state != StatePlaying {
 				s.state = StatePlaying
 				s.resumedAt = time.Now()
+				if s.track.MediaKind != "video" && !s.playbackStarted {
+					s.playbackStarted = true
+					reportStart = true
+				}
 			}
+			s.mu.Unlock()
+			if reportStart {
+				s.recordPlayback(false)
+			}
+			s.mgr.emitSession(s)
+			continue
 		case TransportPaused:
 			s.accumulateLocked()
 			s.state = StatePaused
@@ -237,31 +244,25 @@ func (s *Session) consume(tr Transport) {
 	}
 }
 
-// accumulateLocked folds the running play interval into playedBase and
-// the scrobble counter. Caller holds s.mu.
+// accumulateLocked folds the running play interval into playedBase. Caller
+// holds s.mu.
 func (s *Session) accumulateLocked() {
 	if s.state == StatePlaying && !s.resumedAt.IsZero() {
 		d := time.Since(s.resumedAt)
 		s.playedBase += d
-		s.listened += d
 		s.resumedAt = time.Time{}
 	}
 }
 
 func (s *Session) recordPlayback(completed bool) {
 	s.mu.Lock()
-	listened := s.listened
 	track := s.track
 	pos := s.positionLocked()
-	s.listened = 0
 	s.mu.Unlock()
 	if s.mgr.playbackSink == nil || (track.TrackID == 0 && track.EntityID == 0) {
 		return
 	}
 	if track.MediaKind == "video" && !completed && pos < time.Second {
-		return
-	}
-	if track.MediaKind != "video" && !completed && listened < scrobbleMinSeconds*time.Second {
 		return
 	}
 	if track.MediaKind == "video" && completed && track.Duration > 0 {
@@ -408,26 +409,31 @@ func (s *Session) Seek(seconds int) error {
 	return s.spawnTransport(track, volume)
 }
 
-// PlayTrack switches the session to a new track (records the previous
-// one first if it crossed the scrobble threshold).
+// PlayTrack switches the session to a new track. An interrupted audio track is
+// deliberately not recorded; the replacement sends its own now-playing event
+// once the receiver confirms playback.
 func (s *Session) PlayTrack(track TrackInfo) error {
 	s.mu.Lock()
 	old := s.transport
+	oldWasVideo := s.track.MediaKind == "video"
 	s.accumulateLocked()
 	s.mu.Unlock()
-	s.recordPlayback(false)
+	if oldWasVideo {
+		s.recordPlayback(false)
+	}
 
 	if old != nil {
 		_ = old.Stop()
 	}
 	s.mu.Lock()
 	s.retried = false
+	s.playbackStarted = false
 	s.mu.Unlock()
 	return s.spawnTransport(track, s.volume)
 }
 
-// Stop ends the session: scrobble-if-earned, graceful transport
-// teardown, removal from the manager.
+// Stop ends the session. Audio stops/skips are not history; video keeps its
+// ordinary resume-progress update.
 func (s *Session) Stop() error {
 	s.mu.Lock()
 	if s.closed {
@@ -438,9 +444,12 @@ func (s *Session) Stop() error {
 	s.accumulateLocked()
 	s.state = StateStopped
 	tr := s.transport
+	isVideo := s.track.MediaKind == "video"
 	s.mu.Unlock()
 
-	s.recordPlayback(false)
+	if isVideo {
+		s.recordPlayback(false)
+	}
 	var err error
 	if tr != nil {
 		err = tr.Stop()

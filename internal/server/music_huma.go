@@ -549,14 +549,14 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			return cachedJSON(tempoTracksBody{Items: rows, Total: total}, 60), nil
 		})
 
-	huma.Register(api, secured(op(http.MethodPost, "/api/music/radio", "build-music-radio", "Build an Instant Radio queue from a seed", "Music")),
+	huma.Register(api, secured(op(http.MethodPost, "/api/music/radio", "build-music-radio", "Build seed radio with sonic and metadata fallbacks", "Music")),
 		func(ctx context.Context, in *struct {
 			Body service.RadioRequest
 		}) (*JSONOutput[*service.RadioResponse], error) {
 			resp, err := app.BuildRadio(ctx, userFrom(ctx).ID, in.Body)
 			if err != nil {
 				if errors.Is(err, service.ErrNoRadioSeed) {
-					return nil, huma.Error404NotFound("no analyzed track available for that seed yet")
+					return nil, huma.Error404NotFound("no playable recommendation candidates are available for that seed")
 				}
 				if errors.Is(err, service.ErrNoFacets) {
 					return nil, huma.Error404NotFound("seed track has no facets")
@@ -611,11 +611,11 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 	// Library Radio / Deep Cuts / Time Travel / Random Album all return the
 	// same StationResponse shape so the FE renders them with one component.
 	// Every station is no-store: each tap should reroll fresh.
-	huma.Register(api, secured(op(http.MethodGet, "/api/music/stations/library-radio", "stations-library-radio", "Random tracks from across the library", "Music")),
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/stations/library-radio", "stations-library-radio", "Personalized radio from across the library", "Music")),
 		func(ctx context.Context, in *struct {
 			Limit int32 `query:"limit" minimum:"1" maximum:"100" default:"30"`
 		}) (*JSONOutput[*service.StationResponse], error) {
-			resp, err := app.LibraryRadio(ctx, in.Limit)
+			resp, err := app.LibraryRadio(ctx, userFrom(ctx).ID, in.Limit)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}

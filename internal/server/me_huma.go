@@ -28,10 +28,11 @@ type semanticSearchResult struct {
 func registerMeRoutes(api huma.API, app *service.App) {
 	// --- Unified playback emission ---
 	// One endpoint for video AND music. The server dispatches based on
-	// entity_type — movies/episodes upsert into user_watch_progress (resume
-	// state) and tracks append to play_events (history log). The two stores
-	// stay separate because their semantics genuinely differ (current state
-	// vs. event log); only the wire shape is unified.
+	// entity_type — movies/episodes upsert into user_watch_progress. A track
+	// start updates external now-playing presence without persistence; a track
+	// completion appends play_events history and external scrobbles. The stores
+	// stay separate because their semantics genuinely differ; only the wire
+	// shape is unified.
 	huma.Register(api, secured(op(http.MethodPost, "/api/me/playback", "record-playback", "Record a playback event (video progress / music scrobble)", "Me")),
 		func(ctx context.Context, in *struct {
 			Body service.PlaybackEvent

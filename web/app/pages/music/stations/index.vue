@@ -13,18 +13,18 @@
       title="Mixes for You"
       :card-size="200"
       :items="mixes"
-      :item-key="(mix, i) => `mix-${mix.seed_artist_id}`"
+      :item-key="(mix) => `mix-${mix.slug}`"
     >
       <template #default="{ item: mix }">
       <AppContextMenu
         :items="actions.forMix({ name: mix.name, seed_artist_slug: mix.seed_artist_slug, tracks: mix.tracks.map(mixTrackToEntity) })"
       >
       <NuxtLink
-        :to="`/music/mix/${mix.seed_artist_slug}`"
+        :to="`/music/mix/${mix.slug}`"
         class="ms-card-link"
       >
         <MusicCard
-          :src="usePosterUrl({ id: mix.seed_artist_media_item_id, public_id: mix.seed_artist_media_item_public_id }) ?? undefined"
+          :src="mixArt(mix)"
           :alt="mix.name"
           :title="mix.name"
           :subtitle="`${mix.tracks.length} tracks`"
@@ -114,6 +114,14 @@ const mixesQuery = useQuery(musicMixesQuery())
 await waitForQuery(mixesQuery)
 const mixes = computed<Mix[]>(() => (mixesQuery.data.value ?? []).slice(0, 8))
 const mixesLoading = computed(() => mixesQuery.isLoading.value)
+
+function mixArt(mix: Mix) {
+  if (mix.seed_artist_media_item_id) {
+    return usePosterUrl({ id: mix.seed_artist_media_item_id, public_id: mix.seed_artist_media_item_public_id }) ?? undefined
+  }
+  const first = mix.tracks[0]
+  return first ? (useAlbumCoverUrl(first.artist_slug, first.album_slug) ?? undefined) : undefined
+}
 
 // Quick Stations definitions. Slugs match the placeholder per-station pages
 // the user can browse to today; backend resolution lands as we build each one.

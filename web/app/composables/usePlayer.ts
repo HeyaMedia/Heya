@@ -39,11 +39,6 @@ export interface Track {
 // Track shape consumed by the player UI. `stream_url` is what the engine
 // actually hits — derived from the track row in the caller (Phase A list
 // endpoints set this to `/api/music/tracks/{id}/stream`).
-// Last.fm-style scrobble threshold: a track counts as "played" once the user
-// has *heard* at least this many seconds, OR the track has ended (whichever
-// comes first). We accumulate wall-clock listened time, not raw position, so
-// seeking forward past 30s never fakes a play.
-const SCROBBLE_MIN_SECONDS = 30
 
 // Volume + mute survive reloads via localStorage. useState seeds a default so
 // the slider has a value before the client restore runs; setVolume/toggleMute
@@ -74,6 +69,9 @@ let pendingPlan: TransitionPlan | null = null
 // Wall-clock seconds actually heard of the current track (pause/seek-aware).
 let listenedSeconds = 0
 let lastTickTime = 0
+// Start timestamp paired with the eventual completion scrobble. Last.fm
+// requires the time playback began, not the time the track finished.
+let trackStartedAtUnix = 0
 // Monotonic token bumped on each play(track). Captured before play()'s awaited
 // analysis fetch so a stale request that resolves late can detect it's been
 // superseded by a newer one and bail instead of clobbering the active deck.
@@ -303,19 +301,34 @@ export const usePlayerStore = defineStore('player', () => {
   let nativePreloadedTrackId: number | null = null
   let nativeLastStartedTrackId: number | null = null
   let nativeEndedHandled = false
+  const nowPlaying = useNowPlayingSession()
+
+  // Music sessions use the same Activity-page controls as video sessions.
+  // The session id check ensures only this player reacts when a user has more
+  // than one tab or device online.
+  if (import.meta.client) {
+    const { on, connect } = useEventBus()
+    connect()
+    const off = on('session.command', (event) => {
+      const payload = event.payload as { session_id?: string, action?: string, message?: string, by?: string }
+      if (!payload || payload.session_id !== nowPlaying.sessionId) return
+      if (payload.action === 'stop') {
+        stop()
+        useToast().toast.info(payload.by ? `Playback stopped by ${payload.by}` : 'Playback stopped remotely')
+      } else if (payload.action === 'message' && payload.message) {
+        useToast().toast.info(payload.by ? `${payload.by}: ${payload.message}` : payload.message)
+      }
+    })
+    onScopeDispose(off)
+  }
 
   function acceptLocalPosition(t: number) {
     position.value = t
     // Accumulate genuinely-heard time: only count small forward deltas, so
-    // seeks and track-boundary resets never inflate scrobbles.
+    // seeks and track-boundary resets never inflate completion telemetry.
     const dt = t - lastTickTime
     lastTickTime = t
     if (playing.value && dt > 0 && dt < 2) listenedSeconds += dt
-    const tr = currentTrack.value
-    if (tr && tr.id > 0 && scrobbledTrackId.value !== tr.id && listenedSeconds >= SCROBBLE_MIN_SECONDS) {
-      scrobbledTrackId.value = tr.id
-      void scrobbleTrack(tr, Math.floor(listenedSeconds), false)
-    }
   }
 
   // Engine creation touches AudioContext, which the browser refuses to
@@ -369,18 +382,55 @@ export const usePlayerStore = defineStore('player', () => {
     return e
   }
 
-  // Scrobble through the unified /api/me/playback endpoint. Music tracks land
-  // in the play_events history log server-side; videos go through the same
-  // helper but with entity_type 'movie'/'episode' (see useVideoPlayer).
-  async function scrobbleTrack(track: Track, listenedSecs: number, completed: boolean) {
+  function sessionPayload() {
+    const track = currentTrack.value
+    return {
+      fileId: '',
+      mediaItemId: null,
+      entityType: 'track',
+      entityId: track?.id ?? 0,
+      positionSeconds: position.value,
+      totalSeconds: duration.value || track?.duration || 0,
+      paused: !playing.value,
+      playbackAction: 'direct_play',
+    }
+  }
+
+  // Called only after a renderer has actually accepted the track. External
+  // services get their transient now-playing notification immediately; Heya's
+  // activity panel starts a live heartbeat, but no history row is written.
+  function beginTrack(track: Track) {
+    if (track.id <= 0 || track.isStream || playbackBackend.value === 'cast') return
+    trackStartedAtUnix = Math.floor(Date.now() / 1000)
+    scrobbledTrackId.value = null
+    alog('scrobble', `now playing "${track.title}"`)
+    void recordPlayback({
+      entity_type: 'track',
+      entity_id: track.id,
+      position_seconds: Math.floor(position.value),
+      total_seconds: track.duration || 0,
+      completed: false,
+      source: track.source ?? '',
+    })
+    nowPlaying.start(sessionPayload)
+  }
+
+  // A permanent play exists only for a natural track completion. Manual
+  // next/previous/stop never call this, so album-search skipping is not
+  // mistaken for taste feedback.
+  function completeTrack(track: Track) {
     if (track.id <= 0) return
-    alog('scrobble', `"${track.title}" — ${listenedSecs}s heard, completed=${completed}`)
-    await recordPlayback({
+    if (scrobbledTrackId.value === track.id) return
+    scrobbledTrackId.value = track.id
+    const listenedSecs = Math.floor(listenedSeconds || track.duration)
+    alog('scrobble', `completed "${track.title}" — ${listenedSecs}s heard`)
+    void recordPlayback({
       entity_type: 'track',
       entity_id: track.id,
       position_seconds: listenedSecs,
       total_seconds: track.duration || 0,
-      completed,
+      completed: true,
+      started_at_unix: trackStartedAtUnix,
       source: track.source ?? '',
     })
   }
@@ -569,10 +619,7 @@ export const usePlayerStore = defineStore('player', () => {
               : queue.value.find(track => track.id === trackId)
             if (!next) return
             const finished = currentTrack.value
-            if (finished && finished.id > 0 && scrobbledTrackId.value !== finished.id) {
-              scrobbledTrackId.value = finished.id
-              void scrobbleTrack(finished, Math.floor(listenedSeconds || finished.duration), true)
-            }
+            if (finished) completeTrack(finished)
             nativePreloadedTrackId = null
             advanceCurrentTo(next)
           })
@@ -747,18 +794,17 @@ export const usePlayerStore = defineStore('player', () => {
 
   async function handleNativeEnded() {
     const finished = currentTrack.value
-    if (finished && finished.id > 0 && scrobbledTrackId.value !== finished.id) {
-      scrobbledTrackId.value = finished.id
-      void scrobbleTrack(finished, Math.floor(listenedSeconds || finished.duration), true)
-    }
+    if (finished) completeTrack(finished)
     if (sleepAtTrackEnd.value) {
       sleepAtTrackEnd.value = false
       pause()
+      void nowPlaying.end()
       return
     }
     const next = peekNextTrack()
     if (!next) {
       playing.value = false
+      void nowPlaying.end()
       return
     }
     // Normally the Rust scheduler starts a preloaded deck before this path.
@@ -1000,10 +1046,7 @@ export const usePlayerStore = defineStore('player', () => {
     try {
       // The outgoing track is at ≈completion (it plays through the fade to its
       // real end). Scrobble it now — its deck `ended` won't fire post-swap.
-      if (cur.id > 0 && scrobbledTrackId.value !== cur.id) {
-        scrobbledTrackId.value = cur.id
-        void scrobbleTrack(cur, Math.floor(listenedSeconds || cur.duration), true)
-      }
+      completeTrack(cur)
 
       if (preloaded) {
         // 'timed' routes the pending deck through the signal chain so EQ/limiter
@@ -1042,6 +1085,7 @@ export const usePlayerStore = defineStore('player', () => {
     prefetchedTrackId = null
     if (next.duration && Number.isFinite(next.duration)) duration.value = next.duration
     playing.value = true
+    beginTrack(next)
     prepareTransition()
   }
 
@@ -1158,6 +1202,7 @@ export const usePlayerStore = defineStore('player', () => {
       scrobbledTrackId.value = null
       listenedSeconds = 0
       lastTickTime = startPositionSeconds
+      trackStartedAtUnix = 0
       if (track.duration && Number.isFinite(track.duration)) duration.value = track.duration
       alog('player', `play "${track.title}" #${track.id}${track.isStream ? ' (stream)' : ''}`)
       // Resume the AudioContext synchronously on the user gesture, BEFORE the
@@ -1174,6 +1219,7 @@ export const usePlayerStore = defineStore('player', () => {
       if (gen !== playGeneration) return
       if (!track.isStream && await playNativeTrack(track, startPositionSeconds)) {
         if (gen !== playGeneration) return
+        beginTrack(track)
         prepareTransition()
         return
       }
@@ -1192,8 +1238,11 @@ export const usePlayerStore = defineStore('player', () => {
         await e.play(playUrl || networkUrl, startPositionSeconds)
       } catch {
         if (gen === playGeneration) playing.value = false
+        return
       }
       if (gen !== playGeneration) return
+      playing.value = true
+      beginTrack(track)
       // Preload the next track onto the pending deck for a gap-free hand-off.
       prepareTransition()
       return
@@ -1214,6 +1263,8 @@ export const usePlayerStore = defineStore('player', () => {
     if (playbackBackend.value === 'native' && nativeAudioBackend.value) {
       try {
         await nativeAudioBackend.value.play()
+        playing.value = true
+        void nowPlaying.heartbeat(sessionPayload())
       } catch {
         playing.value = false
       }
@@ -1252,6 +1303,8 @@ export const usePlayerStore = defineStore('player', () => {
     const e = ensureEngine()
     try {
       await e.resume()
+      playing.value = true
+      void nowPlaying.heartbeat(sessionPayload())
     } catch {
       playing.value = false
     }
@@ -1260,6 +1313,7 @@ export const usePlayerStore = defineStore('player', () => {
   // The cast-mode half of play(): same queue bookkeeping, remote transport.
   async function playViaCast(track?: Track) {
     const cast = useCastStore()
+    void nowPlaying.end()
     if (playbackBackend.value === 'native') await disposeNativeAudio()
     playbackBackend.value = 'cast'
     if (track) {
@@ -1276,6 +1330,7 @@ export const usePlayerStore = defineStore('player', () => {
       scrobbledTrackId.value = null
       listenedSeconds = 0
       lastTickTime = 0
+      trackStartedAtUnix = 0
       if (track.duration && Number.isFinite(track.duration)) duration.value = track.duration
       playing.value = true // optimistic; the WS mirror confirms
       alog('player', `cast play "${track.title}" #${track.id} → ${cast.deviceName}`)
@@ -1314,10 +1369,13 @@ export const usePlayerStore = defineStore('player', () => {
     if (playbackBackend.value === 'native' && nativeAudioBackend.value) {
       playing.value = false
       void nativeAudioBackend.value.pause().catch(() => {})
+      void nowPlaying.heartbeat(sessionPayload())
       return
     }
     if (!engineWired.value) return
+    playing.value = false
     ensureEngine().pause()
+    void nowPlaying.heartbeat(sessionPayload())
   }
 
   async function togglePlay() {
@@ -1518,15 +1576,13 @@ export const usePlayerStore = defineStore('player', () => {
   async function handleEnded() {
     if (transitioning) return
     const finished = currentTrack.value
-    if (finished && finished.id > 0 && scrobbledTrackId.value !== finished.id) {
-      scrobbledTrackId.value = finished.id
-      void scrobbleTrack(finished, Math.floor(listenedSeconds || finished.duration), true)
-    }
+    if (finished) completeTrack(finished)
 
     // Sleep timer set to "end of track" — stop here instead of advancing.
     if (sleepAtTrackEnd.value) {
       sleepAtTrackEnd.value = false
       pause()
+      void nowPlaying.end()
       alog('player', 'sleep timer: stopped at end of track')
       return
     }
@@ -1535,6 +1591,7 @@ export const usePlayerStore = defineStore('player', () => {
     if (!next) {
       alog('player', `queue ended after "${finished?.title}"`)
       playing.value = false
+      void nowPlaying.end()
       return
     }
 
@@ -1741,6 +1798,8 @@ export const usePlayerStore = defineStore('player', () => {
     pendingNext = null
     listenedSeconds = 0
     lastTickTime = 0
+    trackStartedAtUnix = 0
+    void nowPlaying.end()
   }
 
   // --- Cast output orchestration (docs/cast-plan.md Phase 2) ----------------
@@ -1750,6 +1809,7 @@ export const usePlayerStore = defineStore('player', () => {
   // Engage a device and hand the current playback off to it mid-track.
   async function startCastTo(deviceId: string) {
     const cast = useCastStore()
+    void nowPlaying.end()
     if (deviceId.startsWith('client:')) {
       cast.engagedDeviceId = deviceId
       await qs.selectTarget(deviceId)

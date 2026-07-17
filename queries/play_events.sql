@@ -1,6 +1,6 @@
 -- name: RecordPlayEvent :one
--- Append a play event. The FE submits one of these per qualifying play
--- (>=30s heard or track-end, akin to Last.fm scrobble rules).
+-- Append one permanent listen after a natural track completion. Transient
+-- now-playing events never reach this query.
 INSERT INTO play_events (user_id, track_id, listened_seconds, completed, source)
 VALUES ($1, $2, $3, $4, $5)
 RETURNING *;

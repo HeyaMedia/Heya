@@ -77,7 +77,7 @@ WITH cand AS (
     FROM tracks t TABLESAMPLE SYSTEM (2)
     WHERE NOT EXISTS (
         SELECT 1 FROM play_events pe
-        WHERE pe.track_id = t.id AND pe.user_id = sqlc.arg(user_id)
+        WHERE pe.track_id = t.id AND pe.user_id = sqlc.arg(user_id) AND pe.completed
     )
     ORDER BY random()
     LIMIT sqlc.arg(track_limit)
@@ -128,7 +128,7 @@ JOIN libraries   l  ON l.id  = mi.library_id
 LEFT JOIN LATERAL (
     SELECT count(*) AS plays
     FROM play_events pe
-    WHERE pe.track_id = t.id AND pe.user_id = sqlc.arg(user_id)
+    WHERE pe.track_id = t.id AND pe.user_id = sqlc.arg(user_id) AND pe.completed
 ) up ON true
 WHERE l.media_type = 'music'
 ORDER BY coalesce(up.plays, 0) ASC, random()

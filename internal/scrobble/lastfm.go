@@ -235,6 +235,27 @@ func (c *LastFM) Unlove(ctx context.Context, artist, track string) error {
 	return c.call(ctx, "track.unlove", url.Values{"artist": {artist}, "track": {track}, "sk": {c.SessionKey}}, true, nil)
 }
 
+// UpdateNowPlaying tells Last.fm that playback of one track has just started.
+// Unlike Scrobble this is transient presence: it has no timestamp and does not
+// add a play to the user's history.
+func (c *LastFM) UpdateNowPlaying(ctx context.Context, listen Listen) error {
+	params := url.Values{
+		"artist": {listen.ArtistName},
+		"track":  {listen.TrackName},
+		"sk":     {c.SessionKey},
+	}
+	if listen.ReleaseName != "" {
+		params.Set("album", listen.ReleaseName)
+	}
+	if listen.DurationSec > 0 {
+		params.Set("duration", strconv.Itoa(listen.DurationSec))
+	}
+	if listen.RecordingMBID != "" {
+		params.Set("mbid", listen.RecordingMBID)
+	}
+	return c.call(ctx, "track.updateNowPlaying", params, true, nil)
+}
+
 // Scrobble submits up to 50 listens with the user's session key.
 func (c *LastFM) Scrobble(ctx context.Context, listens []Listen) error {
 	if len(listens) == 0 {

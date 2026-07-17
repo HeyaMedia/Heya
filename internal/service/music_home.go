@@ -25,6 +25,12 @@ import (
 // minutes is the user's stated cadence; the bucket index becomes the seed.
 const shelfBucketSize = 5 * time.Minute
 
+// The four profile archetypes plus at most four artist spotlights keep the
+// slate broad without turning one uncached request into dozens of sequential
+// HNSW queries. Callers may request fewer; requesting 20 is still bounded to
+// a useful eight-mix slate.
+const maxArtistMixesInSlate = 4
+
 // shelfSeed returns a string seed that's stable within the current 5-minute
 // window. Combined with the user_id in the query so the same seed produces
 // different picks for different users.
@@ -33,11 +39,14 @@ func shelfSeed(userID int64) string {
 	return fmt.Sprintf("%d:%d", userID, bucket)
 }
 
-// MusicMix is one row of the "Mixes for You" shelf — a seed artist + the
-// tracks the mix plays. The name is "Inspired by <seed>" so the FE can render
-// it without composing strings itself. SeedArtistMediaItemID lets the FE
-// fetch the artist's poster image via /api/media/{uuid}/image/poster.
+// MusicMix is one generated music product. Artist mixes retain their seed
+// fields; profile/discovery/rediscovery mixes leave them empty and describe
+// themselves through Kind/Description. Slug is the stable route identity and
+// is intentionally not coupled to an artist slug.
 type MusicMix struct {
+	Slug                        string                              `json:"slug"`
+	Kind                        string                              `json:"kind"`
+	Description                 string                              `json:"description"`
 	SeedArtistID                int64                               `json:"seed_artist_id"`
 	SeedArtistName              string                              `json:"seed_artist_name"`
 	SeedArtistSlug              string                              `json:"seed_artist_slug"`
@@ -47,32 +56,50 @@ type MusicMix struct {
 	Tracks                      []sqlc.ListArtistTopTracksForMixRow `json:"tracks"`
 }
 
-// GenerateMixesForUser builds up to `maxMixes` mixes seeded on the user's
-// top recently-played artists. Each mix combines the seed artist with its
-// sonic neighbors (via artist_centroids KNN) and pulls top-played tracks
-// from each. Tracks are diversified so the queue doesn't run back-to-back
-// from one artist.
-//
-// Empty result when:
-//   - User has no play history
-//   - User has play history but no artist has a centroid yet (cold-start)
-//
-// Either case the FE just hides the rail.
+// GenerateMixesForUser assembles one bounded slate from the shared music
+// recommendation pool: four profile archetypes followed by up to four
+// per-artist taste mixes. Provider/catalog popularity keeps cold-start users
+// useful; the legacy generator at the bottom is only a compatibility fallback
+// for installations with sparse older metadata.
 func (a *App) GenerateMixesForUser(ctx context.Context, userID int64, maxMixes, tracksPerMix int) ([]MusicMix, error) {
-	if maxMixes <= 0 || maxMixes > 20 {
+	if maxMixes <= 0 {
 		maxMixes = 6
+	} else if maxMixes > 8 {
+		maxMixes = 8
 	}
 	if tracksPerMix <= 0 || tracksPerMix > 100 {
 		tracksPerMix = 30
 	}
 
-	// Taste-driven path first: affinity-scored seeds, liked-track centroids,
-	// track-level KNN, exploration share (music_mixes_taste.go). Falls back
-	// to the legacy top-played/artist-centroid generator on cold start.
-	if mixes, err := a.generateTasteMixes(ctx, userID, maxMixes, tracksPerMix); err != nil {
-		log.Warn().Err(err).Msg("taste mixes failed — using legacy generator")
-	} else if len(mixes) > 0 {
+	// The shared recommendation core produces the non-artist archetypes first:
+	// For You, discovery, rediscovery, and deep cuts. These blend sonic KNN,
+	// explicit taste, completion signals, provider charts, and the external
+	// similar-artist graph. Cold users still get a provider-popularity mix.
+	mixes, err := a.generateRecommendationMixes(ctx, userID, maxMixes, tracksPerMix)
+	if err != nil {
+		log.Warn().Err(err).Msg("recommendation mixes failed — trying artist mixes")
+		mixes = nil
+	}
+
+	artistSlots := maxMixes - len(mixes)
+	artistSlots = min(artistSlots, maxArtistMixesInSlate)
+	if artistSlots > 0 {
+		artistMixes, artistErr := a.generateTasteMixes(ctx, userID, artistSlots, tracksPerMix)
+		if artistErr != nil {
+			log.Warn().Err(artistErr).Msg("taste mixes failed — using legacy generator")
+		} else if len(artistMixes) > 0 {
+			mixes = append(mixes, artistMixes...)
+			return mixes, nil
+		}
+	}
+	if len(mixes) > 0 {
 		return mixes, nil
+	}
+
+	// Last-resort compatibility path for installations whose older metadata
+	// has neither provider popularity nor usable explicit taste yet.
+	if _, err := a.generateTasteMixes(ctx, userID, maxMixes, tracksPerMix); err != nil {
+		log.Warn().Err(err).Msg("taste mixes failed — using legacy generator")
 	}
 
 	q := sqlc.New(a.db)
@@ -92,7 +119,7 @@ func (a *App) GenerateMixesForUser(ctx context.Context, userID int64, maxMixes, 
 		return []MusicMix{}, nil
 	}
 
-	mixes := make([]MusicMix, 0, len(seeds))
+	mixes = make([]MusicMix, 0, len(seeds))
 	for _, seed := range seeds {
 		// Pull sonic neighbors — up to 10 similar artists. ErrNoFacets
 		// (no centroid for the seed yet) → skip this seed rather than
@@ -129,10 +156,33 @@ func (a *App) GenerateMixesForUser(ctx context.Context, userID int64, maxMixes, 
 		if len(tracks) == 0 {
 			continue
 		}
+		ids := make([]int64, len(tracks))
+		for i, track := range tracks {
+			ids[i] = track.TrackID
+		}
+		vetoed, err := a.vetoedMusicTrackSet(ctx, userID, ids)
+		if err != nil {
+			return nil, fmt.Errorf("mix vetoes for seed %d: %w", seed.ArtistID, err)
+		}
+		if len(vetoed) > 0 {
+			filtered := tracks[:0]
+			for _, track := range tracks {
+				if !vetoed[track.TrackID] {
+					filtered = append(filtered, track)
+				}
+			}
+			tracks = filtered
+		}
+		if len(tracks) == 0 {
+			continue
+		}
 
 		tracks = diversifyMixByArtist(tracks, tracksPerMix)
 
 		mixes = append(mixes, MusicMix{
+			Slug:                        "artist-" + seed.ArtistSlug,
+			Kind:                        "artist",
+			Description:                 "A personal blend of this artist, sonic neighbors, and provider favorites.",
 			SeedArtistID:                seed.ArtistID,
 			SeedArtistName:              seed.ArtistName,
 			SeedArtistSlug:              seed.ArtistSlug,
@@ -157,13 +207,18 @@ func diversifyMixByArtist(rows []sqlc.ListArtistTopTracksForMixRow, limit int) [
 	}
 	out := make([]sqlc.ListArtistTopTracksForMixRow, 0, limit)
 	deferred := make([]sqlc.ListArtistTopTracksForMixRow, 0)
+	seen := make(map[int64]bool, limit)
 	prevArtist := int64(0)
 	for _, r := range rows {
+		if seen[r.TrackID] {
+			continue
+		}
 		if r.ArtistID == prevArtist && len(out) > 0 {
 			deferred = append(deferred, r)
 			continue
 		}
 		out = append(out, r)
+		seen[r.TrackID] = true
 		prevArtist = r.ArtistID
 		if len(out) >= limit {
 			break
@@ -173,17 +228,21 @@ func diversifyMixByArtist(rows []sqlc.ListArtistTopTracksForMixRow, limit int) [
 		if len(out) >= limit {
 			break
 		}
-		if len(out) > 0 && out[len(out)-1].ArtistID == r.ArtistID {
+		if seen[r.TrackID] || (len(out) > 0 && out[len(out)-1].ArtistID == r.ArtistID) {
 			continue
 		}
 		out = append(out, r)
+		seen[r.TrackID] = true
 	}
 	if len(out) < limit {
 		for _, r := range deferred {
 			if len(out) >= limit {
 				break
 			}
-			out = append(out, r)
+			if !seen[r.TrackID] {
+				out = append(out, r)
+				seen[r.TrackID] = true
+			}
 		}
 	}
 	return out

@@ -43,7 +43,7 @@
       :card-size="260"
       :phone-card-size="208"
       :items="mixes"
-      :item-key="(mix, i) => `mix-${mix.seed_artist_id}`"
+      :item-key="(mix) => `mix-${mix.slug}`"
       :pending="mixesQuery.isPending.value"
     >
       <template #default="{ item: mix }">
@@ -51,7 +51,7 @@
         :items="actions.forMix({ name: mix.name, seed_artist_slug: mix.seed_artist_slug, tracks: mix.tracks.map(mixTrackToEntity) })"
       >
       <NuxtLink
-        :to="`/music/mix/${mix.seed_artist_slug}`"
+        :to="`/music/mix/${mix.slug}`"
         class="mh-card-link"
       >
         <MusicMixCard

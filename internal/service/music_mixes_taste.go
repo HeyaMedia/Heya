@@ -18,8 +18,8 @@ import (
 // globally top-played tracks — rigid and blind to the user. This path:
 //
 //   - scores every track the user touched with an AFFINITY (completed plays
-//     up, skips down, 14-day half-life; reactions on top: heart +3, like
-//     +1.5, dislike = hard exclusion),
+//     are a weak, decaying positive; explicit track/album/artist reactions
+//     dominate; dislikes are hard exclusions),
 //   - seeds each mix from the user's top-affinity artists,
 //   - builds the seed vector as the centroid of the user's POSITIVE tracks
 //     by that artist (their taste within the artist, not the catalog blur),
@@ -36,37 +36,62 @@ import (
 const musicAffinityCTE = `
 	play_aff AS (
 		SELECT pe.track_id,
-		       SUM((CASE
-		            WHEN pe.completed THEN 1.0
-		            WHEN t.duration > 0 AND pe.listened_seconds >= t.duration * 3 / 10 THEN 0.4
-		            WHEN pe.listened_seconds < 30 THEN -0.6
-		            ELSE 0.1 END)
-		           * POWER(0.5, EXTRACT(EPOCH FROM (now() - pe.played_at)) / 1209600.0)) AS score
+		       LEAST(2.0, SUM(0.25
+		           * POWER(0.5, EXTRACT(EPOCH FROM (now() - pe.played_at)) / 2592000.0))) AS score
 		FROM play_events pe
-		JOIN tracks t ON t.id = pe.track_id
-		WHERE pe.user_id = $1
+		WHERE pe.user_id = $1 AND pe.completed
 		GROUP BY pe.track_id
 	),
 	rate_aff AS (
 		SELECT utr.track_id,
-		       CASE WHEN utr.rating >= 9 THEN 3.0
-		            WHEN utr.rating >= 6 THEN 1.5
-		            WHEN utr.rating <= 3 THEN -6.0
-		            ELSE 0.5 END::float8 AS score
+		       CASE WHEN utr.rating >= 9 THEN 8.0
+		            WHEN utr.rating >= 6 THEN 4.0
+		            WHEN utr.rating <= 3 THEN 0.0
+		            ELSE 0.75 END::float8 AS score
 		FROM user_track_ratings utr
 		WHERE utr.user_id = $1
 	),
+	album_aff AS (
+		SELECT t.id AS track_id,
+		       CASE WHEN uar.rating >= 9 THEN 3.0
+		            WHEN uar.rating >= 6 THEN 1.5
+		            WHEN uar.rating <= 3 THEN 0.0
+		            ELSE 0.25 END::float8 AS score
+		FROM user_album_ratings uar
+		JOIN tracks t ON t.album_id = uar.album_id
+		WHERE uar.user_id = $1
+	),
+	artist_aff AS (
+		SELECT uar.artist_id,
+		       CASE WHEN uar.rating >= 9 THEN 2.0
+		            WHEN uar.rating >= 6 THEN 1.0
+		            WHEN uar.rating <= 3 THEN 0.0
+		            ELSE 0.15 END::float8 AS score
+		FROM user_artist_ratings uar
+		WHERE uar.user_id = $1
+	),
 	aff AS (
 		SELECT track_id, SUM(score)::float8 AS score
-		FROM (SELECT * FROM play_aff UNION ALL SELECT * FROM rate_aff) u
+		FROM (
+			SELECT * FROM play_aff
+			UNION ALL SELECT * FROM rate_aff
+			UNION ALL SELECT * FROM album_aff
+		) u
 		GROUP BY track_id
 	)`
 
-// dislikedTrackFilter excludes hard-vetoed tracks; usable in any query that
-// has the user id as $1 and a tracks alias t.
-const dislikedTrackFilter = `NOT EXISTS (
+// musicVetoFilter excludes every explicit downvote, including inherited
+// album/artist downvotes. It is usable in queries with user id $1 and the
+// conventional tracks/albums aliases t + al.
+const musicVetoFilter = `NOT EXISTS (
 		SELECT 1 FROM user_track_ratings veto
-		WHERE veto.user_id = $1 AND veto.track_id = t.id AND veto.rating <= 3)`
+		WHERE veto.user_id = $1 AND veto.track_id = t.id AND veto.rating <= 3)
+	AND NOT EXISTS (
+		SELECT 1 FROM user_album_ratings veto
+		WHERE veto.user_id = $1 AND veto.album_id = al.id AND veto.rating <= 3)
+	AND NOT EXISTS (
+		SELECT 1 FROM user_artist_ratings veto
+		WHERE veto.user_id = $1 AND veto.artist_id = al.artist_id AND veto.rating <= 3)`
 
 type tasteMixSeed struct {
 	ArtistID          int64
@@ -79,18 +104,32 @@ type tasteMixSeed struct {
 
 // tasteMixSeeds ranks the user's artists by summed positive track affinity.
 func (a *App) tasteMixSeeds(ctx context.Context, userID int64, picks int) ([]tasteMixSeed, error) {
-	rows, err := a.db.Query(ctx, `WITH `+musicAffinityCTE+`
-		SELECT ar.id, ar.name, mi.id, mi.public_id, mi.slug, SUM(aff.score)::float8 AS total
-		FROM aff
-		JOIN tracks t ON t.id = aff.track_id
-		JOIN albums al ON al.id = t.album_id
-		JOIN artists ar ON ar.id = al.artist_id
+	rows, err := a.db.Query(ctx, `WITH `+musicAffinityCTE+`,
+		track_artist_aff AS (
+			SELECT al.artist_id, SUM(aff.score)::float8 AS score
+			FROM aff
+			JOIN tracks t ON t.id = aff.track_id
+			JOIN albums al ON al.id = t.album_id
+			WHERE aff.score > 0 AND `+musicVetoFilter+`
+			GROUP BY al.artist_id
+		),
+		artist_scores AS (
+			SELECT artist_id, score FROM track_artist_aff
+			UNION ALL
+			SELECT artist_id, score * 6.0 FROM artist_aff WHERE score > 0
+		),
+		ranked AS (
+			SELECT artist_id, SUM(score)::float8 AS total
+			FROM artist_scores
+			GROUP BY artist_id
+		)
+		SELECT ar.id, ar.name, mi.id, mi.public_id, mi.slug, ranked.total
+		FROM ranked
+		JOIN artists ar ON ar.id = ranked.artist_id
 		JOIN media_item_cards mi ON mi.id = ar.media_item_id
-		WHERE aff.score > 0
+		WHERE ranked.total > 0
 		  AND EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = ar.media_item_id AND lf.deleted_at IS NULL)
-		GROUP BY ar.id, ar.name, mi.id, mi.public_id, mi.slug
-		HAVING SUM(aff.score) > 0
-		ORDER BY total DESC
+		ORDER BY ranked.total DESC
 		LIMIT $2`, userID, picks)
 	if err != nil {
 		return nil, err
@@ -107,22 +146,37 @@ func (a *App) tasteMixSeeds(ctx context.Context, userID int64, picks int) ([]tas
 	return out, rows.Err()
 }
 
-// tasteCentroid averages the embeddings of the user's positive tracks by one
-// artist — the seed vector for the mix. ok=false when nothing is analyzed yet.
-func (a *App) tasteCentroid(ctx context.Context, userID, artistID int64) (pgvector.Vector, bool) {
-	var v pgvector.Vector
-	err := a.db.QueryRow(ctx, `WITH `+musicAffinityCTE+`
-		SELECT AVG(tf.track_embedding)
+// tasteCentroids batches the per-artist taste-vector lookup so a slate does
+// not pay one query merely to discover that each cold artist lacks facets.
+func (a *App) tasteCentroids(ctx context.Context, userID int64, artistIDs []int64) (map[int64]pgvector.Vector, error) {
+	out := make(map[int64]pgvector.Vector)
+	if len(artistIDs) == 0 {
+		return out, nil
+	}
+	rows, err := a.db.Query(ctx, `WITH `+musicAffinityCTE+`
+		SELECT al.artist_id, AVG(tf.track_embedding)
 		FROM aff
 		JOIN tracks t ON t.id = aff.track_id
 		JOIN albums al ON al.id = t.album_id
 		JOIN track_facets tf ON tf.track_id = t.id
-		WHERE al.artist_id = $2 AND aff.score > 0 AND tf.track_embedding IS NOT NULL`,
-		userID, artistID).Scan(&v)
-	if err != nil || len(v.Slice()) == 0 {
-		return pgvector.Vector{}, false
+		WHERE al.artist_id = ANY($2::bigint[])
+		  AND aff.score > 0
+		  AND tf.track_embedding IS NOT NULL
+		  AND `+musicVetoFilter+`
+		GROUP BY al.artist_id`, userID, artistIDs)
+	if err != nil {
+		return nil, err
 	}
-	return v, true
+	defer rows.Close()
+	for rows.Next() {
+		var artistID int64
+		var centroid pgvector.Vector
+		if err := rows.Scan(&artistID, &centroid); err != nil {
+			return nil, err
+		}
+		out[artistID] = centroid
+	}
+	return out, rows.Err()
 }
 
 // tasteSeedTracks returns the user's own positive tracks for the seed artist,
@@ -132,13 +186,14 @@ func (a *App) tasteSeedTracks(ctx context.Context, userID, artistID int64, limit
 		SELECT t.id, t.title, t.duration, t.disc_number, t.track_number,
 		       al.id, al.title, al.slug, al.cover_path, al.year,
 		       ar.id, ar.name, mi.slug,
-		       (SELECT count(*) FROM play_events pe WHERE pe.track_id = t.id) AS play_count
+		       (SELECT count(*) FROM play_events pe WHERE pe.track_id = t.id AND pe.completed) AS play_count
 		FROM aff
 		JOIN tracks t ON t.id = aff.track_id
 		JOIN albums al ON al.id = t.album_id
 		JOIN artists ar ON ar.id = al.artist_id
 		JOIN media_item_cards mi ON mi.id = ar.media_item_id
 		WHERE al.artist_id = $2 AND aff.score > 0
+		  AND `+musicVetoFilter+`
 		  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id
 		              WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 		ORDER BY aff.score DESC
@@ -153,14 +208,14 @@ func (a *App) tasteNeighborTracks(ctx context.Context, userID int64, centroid pg
 		SELECT t.id, t.title, t.duration, t.disc_number, t.track_number,
 		       al.id, al.title, al.slug, al.cover_path, al.year,
 		       ar.id, ar.name, mi.slug,
-		       (SELECT count(*) FROM play_events pe WHERE pe.track_id = t.id) AS play_count
+		       (SELECT count(*) FROM play_events pe WHERE pe.track_id = t.id AND pe.completed) AS play_count
 		FROM track_facets tf
 		JOIN tracks t ON t.id = tf.track_id
 		JOIN albums al ON al.id = t.album_id
 		JOIN artists ar ON ar.id = al.artist_id
 		JOIN media_item_cards mi ON mi.id = ar.media_item_id
 		WHERE tf.track_embedding IS NOT NULL
-		  AND `+dislikedTrackFilter+`
+		  AND `+musicVetoFilter+`
 		  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id
 		              WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
 		ORDER BY tf.track_embedding <=> $2
@@ -189,12 +244,23 @@ func (a *App) scanMixRows(ctx context.Context, query string, args ...any) ([]sql
 // generateTasteMixes is the affinity-driven path. Empty result (not an
 // error) means "no usable taste yet" — the caller falls back to legacy.
 func (a *App) generateTasteMixes(ctx context.Context, userID int64, maxMixes, tracksPerMix int) ([]MusicMix, error) {
-	seeds, err := a.tasteMixSeeds(ctx, userID, maxMixes)
+	// Over-fetch seeds because a top artist can legitimately have no analyzed
+	// tracks yet. Keep walking the ranked taste list until the requested mix
+	// slots are filled instead of letting one cold artist erase the rail.
+	seeds, err := a.tasteMixSeeds(ctx, userID, max(64, maxMixes*8))
 	if err != nil {
 		return nil, fmt.Errorf("taste seeds: %w", err)
 	}
 	if len(seeds) == 0 {
 		return nil, nil
+	}
+	artistIDs := make([]int64, len(seeds))
+	for i, seed := range seeds {
+		artistIDs[i] = seed.ArtistID
+	}
+	centroids, err := a.tasteCentroids(ctx, userID, artistIDs)
+	if err != nil {
+		return nil, fmt.Errorf("taste centroids: %w", err)
 	}
 
 	// Day-bucketed exploration seed: stable across a day per user, fresh
@@ -203,8 +269,11 @@ func (a *App) generateTasteMixes(ctx context.Context, userID int64, maxMixes, tr
 
 	mixes := make([]MusicMix, 0, len(seeds))
 	for _, seed := range seeds {
-		centroid, ok := a.tasteCentroid(ctx, userID, seed.ArtistID)
-		if !ok {
+		if len(mixes) >= maxMixes {
+			break
+		}
+		centroid, ok := centroids[seed.ArtistID]
+		if !ok || len(centroid.Slice()) == 0 {
 			continue // nothing analyzed for this artist yet
 		}
 
@@ -233,6 +302,9 @@ func (a *App) generateTasteMixes(ctx context.Context, userID int64, maxMixes, tr
 		}
 
 		mixes = append(mixes, MusicMix{
+			Slug:                        "artist-" + seed.ArtistSlug,
+			Kind:                        "artist",
+			Description:                 "Built from the tracks you like by this artist, then widened with sonic and catalog neighbors.",
 			SeedArtistID:                seed.ArtistID,
 			SeedArtistName:              seed.ArtistName,
 			SeedArtistSlug:              seed.ArtistSlug,

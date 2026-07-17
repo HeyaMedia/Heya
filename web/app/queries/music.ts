@@ -90,6 +90,9 @@ export interface MusicMixTrack {
 }
 
 export interface MusicMix {
+  slug: string
+  kind: 'for_you' | 'discovery' | 'rediscovery' | 'deep_cuts' | 'artist' | string
+  description: string
   seed_artist_id: number
   seed_artist_name: string
   seed_artist_slug: string
@@ -193,7 +196,7 @@ export const musicMixesQuery = defineQueryOptions(() => ({
   key: ['music', 'home', 'mixes-for-you'],
   query: async () => {
     const { $heya } = useNuxtApp()
-    return ((await $heya('/api/music/home/mixes-for-you', { query: { max: 20 } })) as { items: MusicMix[] }).items ?? []
+    return ((await $heya('/api/music/home/mixes-for-you', { query: { max: 8 } })) as { items: MusicMix[] }).items ?? []
   },
   staleTime: 1000 * 60 * 60,
   meta: {

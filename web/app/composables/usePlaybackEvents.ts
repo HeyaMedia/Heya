@@ -3,7 +3,8 @@
 // path covers "watch progress" and "music scrobble" semantics:
 //
 //   - entity_type 'movie' / 'episode' → UPSERTs user_watch_progress
-//   - entity_type 'track'             → appends to play_events
+//   - entity_type 'track', incomplete → external now-playing notification
+//   - entity_type 'track', completed  → appends to play_events + scrobbles
 //
 // Per-engine details (how often to fire, when to flag completed) stay in the
 // engine composables; this helper only handles the wire encoding.
@@ -16,6 +17,8 @@ export interface PlaybackEventInput {
   position_seconds: number
   total_seconds: number
   completed: boolean
+  /** UTC Unix time when this playback began. Used by completion scrobbles. */
+  started_at_unix?: number
   // Origin label — 'queue' | 'radio' | 'album' | 'playlist' | 'search' |
   // 'browse' | 'similar' | ''. Free-form; analytics on listening-stats can
   // group by this once we surface the data.
@@ -35,6 +38,7 @@ export async function recordPlayback(event: PlaybackEventInput): Promise<void> {
         position_seconds: Math.max(0, Math.round(event.position_seconds)),
         total_seconds: Math.max(0, Math.round(event.total_seconds)),
         completed: event.completed,
+        started_at_unix: Math.max(0, Math.round(event.started_at_unix ?? 0)),
         source: event.source ?? '',
       },
     })

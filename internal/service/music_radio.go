@@ -39,15 +39,12 @@ type RadioResponse struct {
 }
 
 // ErrNoRadioSeed is returned when none of the seed fields resolve to a
-// track with analyzed facets — typically because the user picked an
-// artist/album whose tracks haven't been analyzed yet.
-var ErrNoRadioSeed = errors.New("no analyzed track available for the given seed")
+// playable track, or when even the metadata/popularity fallback is empty.
+var ErrNoRadioSeed = errors.New("no playable track available for the given seed")
 
-// BuildRadio resolves seeds → starting track(s) → KNN expansion. In
-// multi-seed mode (req.Seeds populated) we average the sonic embeddings of
-// every resolved seed into one centroid and KNN around it — the queue then
-// reflects the joint space of every input. Diversifies the result so we
-// don't slam back-to-back tracks from the same artist.
+// BuildRadio resolves seeds, averages every available sonic embedding, and
+// asks the shared recommender for a diverse queue. Missing ML data falls back
+// to the seed artists' external graph/provider charts instead of failing.
 func (a *App) BuildRadio(ctx context.Context, userID int64, req RadioRequest) (*RadioResponse, error) {
 	if req.Limit <= 0 || req.Limit > 200 {
 		req.Limit = 50
@@ -59,7 +56,7 @@ func (a *App) BuildRadio(ctx context.Context, userID int64, req RadioRequest) (*
 	var seedIDs []int64
 	if len(req.Seeds) > 0 {
 		for _, s := range req.Seeds {
-			id, err := a.resolveRadioSeed(ctx, q, s)
+			id, err := a.resolveRadioSeed(ctx, s)
 			if err != nil {
 				// Skip a single bad seed rather than failing the whole build —
 				// otherwise one cold-start track wipes out the entire mix.
@@ -74,15 +71,16 @@ func (a *App) BuildRadio(ctx context.Context, userID int64, req RadioRequest) (*
 			return nil, ErrNoRadioSeed
 		}
 	} else {
-		id, err := a.resolveRadioSeed(ctx, q, req.Seed)
+		id, err := a.resolveRadioSeed(ctx, req.Seed)
 		if err != nil {
 			return nil, err
 		}
 		seedIDs = []int64{id}
 	}
 
-	// Pull facets for every seed, average their track_embeddings into the
-	// query centroid. With a single seed this reduces to that seed's vector.
+	// Pull every available seed embedding. Missing facets no longer kill the
+	// station: the external artist graph + provider chart path below can grow
+	// an entirely metadata-driven radio queue.
 	var embeddings []pgvector.Vector
 	for _, id := range seedIDs {
 		f, err := q.GetTrackFacets(ctx, id)
@@ -94,10 +92,10 @@ func (a *App) BuildRadio(ctx context.Context, userID int64, req RadioRequest) (*
 		}
 		embeddings = append(embeddings, f.TrackEmbedding)
 	}
-	if len(embeddings) == 0 {
-		return nil, ErrNoRadioSeed
+	centroid := pgvector.Vector{}
+	if len(embeddings) > 0 {
+		centroid = averageEmbeddings(embeddings)
 	}
-	centroid := averageEmbeddings(embeddings)
 
 	exclude := append(append([]int64{}, seedIDs...), req.ExcludeTrackIDs...)
 	// Dislikes are law: a thumbs-downed track never enters a generated queue.
@@ -105,24 +103,53 @@ func (a *App) BuildRadio(ctx context.Context, userID int64, req RadioRequest) (*
 		exclude = append(exclude, vetoed...)
 	}
 
-	// Over-fetch so diversification has room to drop same-artist runs.
-	// 2.5× is a heuristic; sonic-similar pools tend to cluster by artist.
-	fetch := req.Limit * 5 / 2
-	if fetch < req.Limit {
-		fetch = req.Limit
-	}
-
-	rows, err := q.SimilarTracksByTrackRich(ctx, sqlc.SimilarTracksByTrackRichParams{
-		TrackEmbedding: centroid,
-		ExcludeIds:     exclude,
-		TrackLimit:     fetch,
-	})
+	artistIDs, err := a.artistIDsForTracks(ctx, seedIDs)
 	if err != nil {
-		return nil, fmt.Errorf("knn: %w", err)
+		return nil, fmt.Errorf("seed artists: %w", err)
 	}
-
-	tracks := diversifyByArtist(rows, int(req.Limit))
+	rows, err := a.recommendMusicAround(ctx, userID, centroid, artistIDs, recommendRadio, int(req.Limit), exclude)
+	if err != nil {
+		return nil, fmt.Errorf("recommend radio: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, ErrNoRadioSeed
+	}
+	tracks := make([]sqlc.SimilarTracksByTrackRichRow, len(rows))
+	for i, row := range rows {
+		tracks[i] = mixRowToRadioTrack(row)
+	}
 	return &RadioResponse{SeedTrackID: seedIDs[0], Tracks: tracks}, nil
+}
+
+func (a *App) artistIDsForTracks(ctx context.Context, trackIDs []int64) ([]int64, error) {
+	rows, err := a.db.Query(ctx, `
+		SELECT DISTINCT al.artist_id
+		FROM tracks t
+		JOIN albums al ON al.id = t.album_id
+		WHERE t.id = ANY($1::bigint[])`, trackIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func mixRowToRadioTrack(row sqlc.ListArtistTopTracksForMixRow) sqlc.SimilarTracksByTrackRichRow {
+	return sqlc.SimilarTracksByTrackRichRow{
+		TrackID: row.TrackID, TrackTitle: row.TrackTitle, Duration: row.Duration,
+		DiscNumber: row.DiscNumber, TrackNumber: row.TrackNumber,
+		AlbumID: row.AlbumID, AlbumTitle: row.AlbumTitle, AlbumSlug: row.AlbumSlug,
+		AlbumCoverPath: row.AlbumCoverPath, AlbumYear: row.AlbumYear,
+		ArtistID: row.ArtistID, ArtistName: row.ArtistName, ArtistSlug: row.ArtistSlug,
+	}
 }
 
 // averageEmbeddings returns the element-wise mean of `vecs`. Caller must
@@ -154,18 +181,38 @@ func averageEmbeddings(vecs []pgvector.Vector) pgvector.Vector {
 	return pgvector.NewVector(out)
 }
 
-func (a *App) resolveRadioSeed(ctx context.Context, q *sqlc.Queries, seed RadioSeed) (int64, error) {
+func (a *App) resolveRadioSeed(ctx context.Context, seed RadioSeed) (int64, error) {
 	switch seed.Kind {
 	case "track":
 		if seed.TrackID <= 0 {
 			return 0, fmt.Errorf("seed.track_id required for kind=track")
 		}
-		return seed.TrackID, nil
+		var id int64
+		err := a.db.QueryRow(ctx, `SELECT t.id FROM tracks t
+			WHERE t.id = $1
+			  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id
+			              WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)`, seed.TrackID).Scan(&id)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return 0, ErrNoRadioSeed
+			}
+			return 0, fmt.Errorf("track seed: %w", err)
+		}
+		return id, nil
 
 	case "artist":
 		switch {
 		case seed.ArtistID > 0:
-			id, err := q.PickTrackWithFacetsByArtistID(ctx, seed.ArtistID)
+			var id int64
+			err := a.db.QueryRow(ctx, `SELECT t.id
+				FROM tracks t
+				JOIN albums al ON al.id = t.album_id
+				LEFT JOIN track_facets tf ON tf.track_id = t.id AND tf.track_embedding IS NOT NULL
+				WHERE al.artist_id = $1
+				  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id
+				              WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+				ORDER BY (tf.track_id IS NOT NULL) DESC, random()
+				LIMIT 1`, seed.ArtistID).Scan(&id)
 			if err != nil {
 				if errors.Is(err, pgx.ErrNoRows) {
 					return 0, ErrNoRadioSeed
@@ -174,7 +221,18 @@ func (a *App) resolveRadioSeed(ctx context.Context, q *sqlc.Queries, seed RadioS
 			}
 			return id, nil
 		case seed.ArtistSlug != "":
-			id, err := q.PickTrackWithFacetsByArtistSlug(ctx, seed.ArtistSlug)
+			var id int64
+			err := a.db.QueryRow(ctx, `SELECT t.id
+				FROM tracks t
+				JOIN albums al ON al.id = t.album_id
+				JOIN artists ar ON ar.id = al.artist_id
+				JOIN media_item_cards mi ON mi.id = ar.media_item_id
+				LEFT JOIN track_facets tf ON tf.track_id = t.id AND tf.track_embedding IS NOT NULL
+				WHERE mi.slug = $1
+				  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id
+				              WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+				ORDER BY (tf.track_id IS NOT NULL) DESC, random()
+				LIMIT 1`, seed.ArtistSlug).Scan(&id)
 			if err != nil {
 				if errors.Is(err, pgx.ErrNoRows) {
 					return 0, ErrNoRadioSeed
@@ -190,7 +248,15 @@ func (a *App) resolveRadioSeed(ctx context.Context, q *sqlc.Queries, seed RadioS
 		if seed.AlbumID <= 0 {
 			return 0, fmt.Errorf("seed.album_id required for kind=album")
 		}
-		id, err := q.PickTrackWithFacetsByAlbumID(ctx, seed.AlbumID)
+		var id int64
+		err := a.db.QueryRow(ctx, `SELECT t.id
+			FROM tracks t
+			LEFT JOIN track_facets tf ON tf.track_id = t.id AND tf.track_embedding IS NOT NULL
+			WHERE t.album_id = $1
+			  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id
+			              WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+			ORDER BY (tf.track_id IS NOT NULL) DESC, random()
+			LIMIT 1`, seed.AlbumID).Scan(&id)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return 0, ErrNoRadioSeed
@@ -215,62 +281,4 @@ func (a *App) resolveRadioSeed(ctx context.Context, q *sqlc.Queries, seed RadioS
 	default:
 		return 0, fmt.Errorf("unknown seed.kind %q (want track|artist|album|text)", seed.Kind)
 	}
-}
-
-// diversifyByArtist re-orders the KNN result so no two adjacent tracks share
-// an artist. Walks the list and defers same-artist runs to the back. Keeps
-// the cosine-ranked ordering otherwise — first slot is still the closest hit.
-func diversifyByArtist(rows []sqlc.SimilarTracksByTrackRichRow, limit int) []sqlc.SimilarTracksByTrackRichRow {
-	if len(rows) <= 1 {
-		return rows
-	}
-	out := make([]sqlc.SimilarTracksByTrackRichRow, 0, limit)
-	deferred := make([]sqlc.SimilarTracksByTrackRichRow, 0)
-	prevArtist := int64(0)
-	for _, r := range rows {
-		if r.ArtistID == prevArtist && len(out) > 0 {
-			deferred = append(deferred, r)
-			continue
-		}
-		out = append(out, r)
-		prevArtist = r.ArtistID
-		if len(out) >= limit {
-			break
-		}
-	}
-	// Fill the tail from the deferred bucket, still avoiding back-to-back
-	// where possible. prevArtist isn't read after this loop — the
-	// last-ditch pass below intentionally allows duplicates.
-	for _, r := range deferred {
-		if len(out) >= limit {
-			break
-		}
-		if len(out) > 0 && out[len(out)-1].ArtistID == r.ArtistID {
-			continue
-		}
-		out = append(out, r)
-	}
-	_ = prevArtist
-	// Last-ditch fill (if the library is dominated by one artist there's no
-	// way to keep the no-repeat invariant — better to deliver tracks than
-	// pad with nothing).
-	if len(out) < limit {
-		for _, r := range deferred {
-			if len(out) >= limit {
-				break
-			}
-			// Skip ones already added (cheap O(n) — limit is small).
-			seen := false
-			for _, o := range out {
-				if o.TrackID == r.TrackID {
-					seen = true
-					break
-				}
-			}
-			if !seen {
-				out = append(out, r)
-			}
-		}
-	}
-	return out
 }

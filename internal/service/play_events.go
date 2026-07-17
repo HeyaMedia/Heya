@@ -7,8 +7,9 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 )
 
-// RecordPlayEventInput is the body of POST /api/me/play-events. The FE fires
-// one of these per qualifying play (>=30s heard or track-end).
+// RecordPlayEventInput is one permanent listen-history row. Live
+// now-playing notifications never land here; callers create a row only after
+// a track naturally completes.
 type RecordPlayEventInput struct {
 	TrackID         int64  `json:"track_id"`
 	ListenedSeconds int32  `json:"listened_seconds"`

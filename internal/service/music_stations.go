@@ -40,8 +40,19 @@ type StationResponse struct {
 // Sample-first (TABLESAMPLE) with a mandatory full-scan fallback: on a small
 // library the 2% page sample can return fewer than limit rows (or none), and
 // the full query is cheap exactly there.
-func (a *App) LibraryRadio(ctx context.Context, limit int32) (*StationResponse, error) {
+func (a *App) LibraryRadio(ctx context.Context, userID int64, limit int32) (*StationResponse, error) {
 	limit = clampStationLimit(limit)
+	personal, personalErr := a.recommendMusicForUser(ctx, userID, recommendForYou, int(limit), nil)
+	if personalErr == nil && len(personal) >= min(5, int(limit)) {
+		tracks := make([]StationTrack, len(personal))
+		for i, row := range personal {
+			tracks[i] = mixRowToStationTrack(row)
+		}
+		return &StationResponse{Kind: "library_radio", Label: "Library Radio · For You", Tracks: tracks}, nil
+	}
+
+	// Truly cold/unenriched libraries retain the random station instead of
+	// failing. This path disappears naturally as metadata or taste arrives.
 	q := sqlc.New(a.db)
 	rows, err := q.ListRandomMusicTracks(ctx, limit)
 	if err != nil {
@@ -61,6 +72,10 @@ func (a *App) LibraryRadio(ctx context.Context, limit int32) (*StationResponse, 
 	for i, r := range rows {
 		tracks[i] = randomRowToStationTrack(r)
 	}
+	tracks, err = a.withoutVetoedStationTracks(ctx, userID, tracks)
+	if err != nil {
+		return nil, fmt.Errorf("library radio vetoes: %w", err)
+	}
 	return &StationResponse{Kind: "library_radio", Label: "Library Radio", Tracks: tracks}, nil
 }
 
@@ -70,6 +85,15 @@ func (a *App) LibraryRadio(ctx context.Context, limit int32) (*StationResponse, 
 // anti-join empties it) — the original fewest-plays-first query covers both.
 func (a *App) DeepCuts(ctx context.Context, userID int64, limit int32) (*StationResponse, error) {
 	limit = clampStationLimit(limit)
+	personal, personalErr := a.recommendMusicForUser(ctx, userID, recommendDeepCuts, int(limit), nil)
+	if personalErr == nil && len(personal) >= min(5, int(limit)) {
+		tracks := make([]StationTrack, len(personal))
+		for i, row := range personal {
+			tracks[i] = mixRowToStationTrack(row)
+		}
+		return &StationResponse{Kind: "deep_cuts", Label: "Deep Cuts · From artists you like", Tracks: tracks}, nil
+	}
+
 	q := sqlc.New(a.db)
 	rows, err := q.ListDeepCutsForUser(ctx, sqlc.ListDeepCutsForUserParams{
 		UserID:     userID,
@@ -94,6 +118,10 @@ func (a *App) DeepCuts(ctx context.Context, userID int64, limit int32) (*Station
 	tracks := make([]StationTrack, len(rows))
 	for i, r := range rows {
 		tracks[i] = deepCutsRowToStationTrack(r)
+	}
+	tracks, err = a.withoutVetoedStationTracks(ctx, userID, tracks)
+	if err != nil {
+		return nil, fmt.Errorf("deep cuts vetoes: %w", err)
 	}
 	return &StationResponse{Kind: "deep_cuts", Label: "Deep Cuts", Tracks: tracks}, nil
 }
@@ -191,4 +219,32 @@ func randomAlbumRowToStationTrack(r sqlc.PickRandomAlbumWithTracksRow) StationTr
 		AlbumCoverPath: r.AlbumCoverPath, AlbumYear: r.AlbumYear,
 		ArtistID: r.ArtistID, ArtistName: r.ArtistName, ArtistSlug: r.ArtistSlug,
 	}
+}
+
+func mixRowToStationTrack(r sqlc.ListArtistTopTracksForMixRow) StationTrack {
+	return StationTrack{
+		TrackID: r.TrackID, TrackTitle: r.TrackTitle, Duration: r.Duration,
+		DiscNumber: r.DiscNumber, TrackNumber: r.TrackNumber,
+		AlbumID: r.AlbumID, AlbumTitle: r.AlbumTitle, AlbumSlug: r.AlbumSlug,
+		AlbumCoverPath: r.AlbumCoverPath, AlbumYear: r.AlbumYear,
+		ArtistID: r.ArtistID, ArtistName: r.ArtistName, ArtistSlug: r.ArtistSlug,
+	}
+}
+
+func (a *App) withoutVetoedStationTracks(ctx context.Context, userID int64, tracks []StationTrack) ([]StationTrack, error) {
+	ids := make([]int64, len(tracks))
+	for i, track := range tracks {
+		ids[i] = track.TrackID
+	}
+	vetoed, err := a.vetoedMusicTrackSet(ctx, userID, ids)
+	if err != nil || len(vetoed) == 0 {
+		return tracks, err
+	}
+	out := tracks[:0]
+	for _, track := range tracks {
+		if !vetoed[track.TrackID] {
+			out = append(out, track)
+		}
+	}
+	return out, nil
 }

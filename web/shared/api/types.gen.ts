@@ -3635,12 +3635,15 @@ export type MusicListPageListUserRatedTracksRow = {
 };
 
 export type MusicMix = {
+    description: string;
+    kind: string;
     name: string;
     seed_artist_id: number;
     seed_artist_media_item_id: number;
     seed_artist_media_item_public_id?: string;
     seed_artist_name: string;
     seed_artist_slug: string;
+    slug: string;
     tracks: Array<ListArtistTopTracksForMixRow> | null;
 };
 
@@ -3818,7 +3821,7 @@ export type PlaybackEvent = {
      */
     readonly $schema?: string;
     /**
-     * Whether playback reached the end / scrobble threshold
+     * Whether playback reached its natural end
      */
     completed: boolean;
     /**
@@ -3837,6 +3840,10 @@ export type PlaybackEvent = {
      * Origin label: queue | radio | album | playlist | search | browse | similar
      */
     source?: string;
+    /**
+     * UTC Unix time when this playback began (track completion only)
+     */
+    started_at_unix?: number;
     /**
      * Total length (0 if unknown)
      */
@@ -7260,7 +7267,7 @@ export type PeopleMediaIdsRequestWritable = {
 
 export type PlaybackEventWritable = {
     /**
-     * Whether playback reached the end / scrobble threshold
+     * Whether playback reached its natural end
      */
     completed: boolean;
     /**
@@ -7279,6 +7286,10 @@ export type PlaybackEventWritable = {
      * Origin label: queue | radio | album | playlist | search | browse | similar
      */
     source?: string;
+    /**
+     * UTC Unix time when this playback began (track completion only)
+     */
+    started_at_unix?: number;
     /**
      * Total length (0 if unknown)
      */

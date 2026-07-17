@@ -550,17 +550,33 @@ func (s *Server) applyPlaystate(r *http.Request, u sqlc.User, report playbackRep
 			log.Warn().Err(err).Str("component", "jellyfin").Msg("watch progress upsert failed")
 		}
 	case "track":
+		if phase == playStart {
+			// Jellyfin's Playing report is the earliest confirmation that audio
+			// actually began. This becomes transient external now-playing only.
+			if err := s.app.RecordPlayback(ctx, u.ID, service.PlaybackEvent{
+				EntityType:   "track",
+				EntityID:     target.entityID,
+				TotalSeconds: target.trackDuration,
+				Source:       "jellyfin",
+			}); err != nil {
+				log.Warn().Err(err).Str("component", "jellyfin").Msg("now-playing submission failed")
+			}
+		}
 		if phase == playStopped {
 			completed := target.trackDuration > 0 && pos >= (target.trackDuration*9)/10
-			if err := s.app.RecordPlayback(ctx, u.ID, service.PlaybackEvent{
-				EntityType:      "track",
-				EntityID:        target.entityID,
-				PositionSeconds: pos,
-				TotalSeconds:    target.trackDuration,
-				Completed:       completed,
-				Source:          "jellyfin",
-			}); err != nil {
-				log.Warn().Err(err).Str("component", "jellyfin").Msg("scrobble failed")
+			// A stopped/skimmed track is not a taste event. Only a completed
+			// Jellyfin report becomes permanent Heya/external history.
+			if completed {
+				if err := s.app.RecordPlayback(ctx, u.ID, service.PlaybackEvent{
+					EntityType:      "track",
+					EntityID:        target.entityID,
+					PositionSeconds: pos,
+					TotalSeconds:    target.trackDuration,
+					Completed:       true,
+					Source:          "jellyfin",
+				}); err != nil {
+					log.Warn().Err(err).Str("component", "jellyfin").Msg("scrobble failed")
+				}
 			}
 		}
 	}

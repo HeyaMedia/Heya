@@ -17,7 +17,7 @@
     <div v-if="loading" class="m-loading">Loading…</div>
 
     <MusicEmptyState v-else-if="!stats || stats.total_plays === 0" icon="chart" title="No listening data yet">
-      Play a few tracks for at least 30 seconds each and this page will fill in. Stats refresh once a minute.
+      Let a few tracks finish and this page will fill in. Stats refresh once a minute.
     </MusicEmptyState>
 
     <div v-else class="ys-grid">

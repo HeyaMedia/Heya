@@ -321,6 +321,7 @@ WITH ranked AS (
     JOIN media_item_cards mi ON mi.id = a.media_item_id
     WHERE pe.user_id = sqlc.arg(user_id)
       AND pe.played_at >= sqlc.arg(since_at)
+      AND pe.completed
       AND EXISTS (SELECT 1 FROM library_files alf WHERE alf.media_item_id = a.media_item_id AND alf.deleted_at IS NULL)
     GROUP BY a.id, a.name, mi.id, mi.public_id, mi.slug
 )

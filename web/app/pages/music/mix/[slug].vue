@@ -1,8 +1,7 @@
 <template>
   <div v-if="loading" class="page-pad m-loading">Loading mix…</div>
   <div v-else-if="!mix" class="page-pad m-empty">
-    Mix not found. Mixes are seeded from your recent listening — play a few
-    tracks and check back in a minute.
+    Mix not found. Your generated mixes rotate as your taste and library change.
   </div>
   <div v-else class="mix-page">
     <header class="mix-hero">
@@ -26,14 +25,13 @@
         <div class="m-kind">Mix</div>
         <h1 class="m-title">{{ mix.name }}</h1>
         <p class="m-sub">
-          Sonic-similar tracks from the artists you've been listening to.
-          Refreshes every hour.
+          {{ mix.description }}
         </p>
         <div class="mix-hero-stats">
-          <NuxtLink :to="`/music/artist/${mix.seed_artist_slug}`" class="mix-seed-link">
+          <NuxtLink v-if="mix.seed_artist_slug" :to="`/music/artist/${mix.seed_artist_slug}`" class="mix-seed-link">
             Seeded from {{ mix.seed_artist_name }}
           </NuxtLink>
-          <span class="dot">·</span>
+          <span v-if="mix.seed_artist_slug" class="dot">·</span>
           <span>{{ mix.tracks.length }} tracks</span>
         </div>
         <div class="m-actions">
@@ -99,7 +97,7 @@ const actions = useMusicActions()
 // no refetch needed. The 1h staleTime matches the home shelf.
 const mixesQuery = useQuery(musicMixesQuery())
 await waitForQuery(mixesQuery)
-const mix = computed<Mix | null>(() => (mixesQuery.data.value ?? []).find(m => m.seed_artist_slug === slug.value) ?? null)
+const mix = computed<Mix | null>(() => (mixesQuery.data.value ?? []).find(m => m.slug === slug.value) ?? null)
 const loading = computed(() => mixesQuery.isPending.value)
 
 function mixTrackToTrack(t: MixTrack): Track {

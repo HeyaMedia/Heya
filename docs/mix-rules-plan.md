@@ -1,16 +1,18 @@
 # Mixes for You — Rule Engine Plan
 
-Status: **phases 1+2 shipped** (2026-07-12) — affinity CTE (plays w/
-completion/skip/decay + reaction bands, dislike = hard veto), liked-track
-taste centroids per artist, track-level KNN expansion, personal-affinity
-core, day-seeded exploration share, version dedup; dislike veto also
-enforced in instant radio + AI mix builder. Legacy generator remains the
-cold-start fallback. Remaining: archetype slate (phase 3), mood/BPM arcs +
-serving memory (phase 4), scrobble import UI polish.
+Status: **shared engine + core archetype slate shipped** (2026-07-17).
+Affinity, overall/per-artist taste centroids, track-level KNN, localized
+similar-artist edges, provider top-track ranks, catalog popularity, daily
+exploration, recording dedupe, artist caps, and track/album/artist vetoes now
+feed one candidate pipeline. It powers For You, New Discoveries, Time
+Capsule, Deep Cuts, artist mixes, Library Radio, and on-demand seed radio.
+An unanalysed seed falls back to metadata/provider candidates instead of
+failing. Remaining polish: genre/mood/BPM archetypes, arc sequencing, and
+durable serving memory.
 
-## Why mixes feel rigid today
+## What made the legacy mixes rigid
 
-`GenerateMixesForUser` (internal/service/music_home.go) does, per mix:
+The legacy fallback in `GenerateMixesForUser` did, per mix:
 top-played artist (30d raw play count) → artist-centroid KNN (10 neighbors)
 → top-3 tracks per artist by **global** play count → adjacency shuffle.
 
@@ -26,7 +28,7 @@ Four structural problems:
 3. **Determinism.** Same seeds → same neighbors → same tracks. The only
    "rotation" is a 1h cache TTL that regenerates the identical result.
    No exploration, no memory of what was served yesterday.
-4. **One archetype.** Every mix is "Inspired by <artist>". There are no
+4. **One archetype.** Every mix was "Inspired by <artist>". There were no
    genre, mood, discovery, or rediscovery mixes, even though `track_facets`
    already carries everything needed (per-track CLAP embedding, BPM, key,
    `top_genres`, `mood_tags`) and `play_events` carries `completed` +
@@ -35,21 +37,22 @@ Four structural problems:
 ## Layer 0 — the taste model (foundation for every rule)
 
 One concept powers everything: a per-user, per-track **affinity score**,
-computed live (CTE; the data volume makes this cheap for years) and cached
-~15 min:
+computed live inside the generated-slate request (whose response is cached
+for one hour):
 
 ```
 affinity(track) =
     Σ over play_events(user, track):
         weight(event) × decay(event)
-  + 3.0 if the track is loved (user_favorites)
-  + 1.0 if its album is loved, 0.5 if its artist is loved
+  + 8.0 if the track is loved, 4.0 if it is upvoted
+  + 3.0/1.5 if its album is loved/upvoted
+  + artist love/upvote boosts that artist as a seed (without pretending every
+    track in the catalog was individually heard)
 
 weight(event):
-    completed                        → 1.0
-    listened 30–80% of duration      → 0.4
-    listened < 25% and not completed → −0.6   ← the skip signal, free
-decay(event) = 0.5 ^ (age_days / 14)          ← half-life 14 days
+    completed                        → 0.25
+    incomplete / skipped             → ignored
+decay(event) = 0.5 ^ (age_days / 30), completed contribution capped at 2.0
 ```
 
 Everything downstream derives from affinity:
@@ -62,9 +65,9 @@ Everything downstream derives from affinity:
   hardstyle binge" falls out of the math for free.
 - **Mood/BPM affinity**: same aggregation over `mood_tags` / `bpm`.
 
-The skip signal costs no schema change (`listened_seconds`/`completed`
-already exist) and also slightly penalizes the skipped track's immediate
-KNN neighborhood during fill.
+Incomplete listens are deliberately not a taste signal. Album browsing and
+quickly seeking a wanted song make skips ambiguous; only a natural completion
+adds a weak positive. Explicit reactions remain the decisive signal.
 
 ## Layer 1 — mix archetypes (the rule block)
 
@@ -86,9 +89,9 @@ type MixArchetype struct {
 | 1 | **Artist mix** ("Ado Mix") | user's liked-track centroidS for a top artist — one seed vec per liked-track *cluster*, so an artist's ballads and bangers both survive | track-level KNN around each seed (HNSW on `track_facets.track_embedding` already exists); ~30% seed artist, 70% neighbors ranked by user affinity then distance | "seed from the tracks I like, not the artist as a whole" |
 | 2 | **Genre mix** ("Hardstyle Mix") | top 1–2 genres by *recent* genre affinity | high-affinity tracks tagged that genre + KNN-adjacent, with a 25% quota of never-played tracks in the genre | "I listen to a lot of hardstyle lately → make a mix from it" |
 | 3 | **Mood / energy mix** ("High Energy", "Late Night Chill") | dominant recent `mood_tags` bands + BPM band | filter taste neighborhood by mood/BPM window; time-of-day naming optional | sonic-criteria mixes |
-| 4 | **Discovery mix** ("New Discoveries") | overall taste centroid(s) | ONLY tracks with zero plays, biased toward artists with zero plays, ranked by embedding distance to taste | "doesn't really wanna branch out" — this one exists to branch out |
-| 5 | **Deep cuts** ("Deeper into Ado") | top artist | that artist's *unplayed* tracks ranked by similarity to the user's liked tracks of the artist | catalog exploration inside loved artists |
-| 6 | **Rediscovery** ("Time Capsule") | high lifetime affinity, not played in 60d+ | affinity rank with a wide artist spread | resurfaces shelved favorites |
+| 4 | **Discovery mix** ("New Discoveries") | overall taste centroid(s) + external graph | ONLY tracks with zero plays/affinity, biased toward artists with zero signals | **Shipped** |
+| 5 | **Deep cuts** ("Deep Cuts") | known artists | unplayed catalog ranked by sonic/provider relevance | **Shipped** |
+| 6 | **Rediscovery** ("Time Capsule") | high affinity, not played in 45d+ | affinity rank with a wide artist spread | **Shipped** |
 | 7 | **On Repeat+** ("Your Week") | last-7-day heavy rotation | half the heavy rotation itself, half fresh KNN neighbors of it | recency-forward mirror |
 
 Slate assembly rules: each archetype declares the signal tier it needs; a
@@ -107,13 +110,18 @@ rather than pad.
 - **Serving memory.** Remember the track ids served in the last K slates per
   archetype (one small table or a rolling hash); tracks served yesterday get
   a penalty today. Guarantees visible rotation even with unchanged listening.
-- **Personal fill.** Fill ranks by user affinity → distance → global count
-  (today it's global count only).
+- **Personal fill.** Shipped: fill ranks a blend of user affinity, sonic rank,
+  provider rank, graph relevance, catalog popularity, and daily exploration.
 - **Sequencing.** Reuse the deterministic arc sequencer from the AI mix
   builder (BPM rising/waves). `key_root`/`key_mode` exist per track —
   harmonic-adjacency (Camelot ±1) as a soft tiebreak is a cheap polish.
 
-## Cold-start ladder (prod reality: ~51 plays, 0 loves, 12% analyzed)
+## Cold-start ladder (production validation, 2026-07-17)
+
+Validation found 2,629 loved tracks (513 analyzed), 79,764 analyzed tracks
+out of 436,222, 13,846 provider top-track rows, and 88 locally resolved
+external similar-artist edges. That is enough for the rich path immediately;
+the cold ladder still matters for new installations and new users.
 
 | Tier | Signal | Slate |
 |------|--------|-------|
@@ -123,11 +131,12 @@ rather than pad.
 
 Two force multipliers outside this plan's scope but worth queueing:
 
-1. **Scrobble import** (ListenBrainz / last.fm / `.scrobbler.log`) — turns
-   years of external listening history into instant affinity. The single
-   biggest lever for mix quality given the sparse local history.
-2. **Sonic analysis coverage** — mixes can only draw from analyzed tracks
-   (12% today, alphabetical); every pump run widens the pool.
+1. **Scrobble import** (ListenBrainz / Last.fm) — already turns external
+   reactions/history into explicit affinity; completion lifecycle accuracy
+   keeps new local data trustworthy.
+2. **Sonic analysis coverage** — sonic candidates currently cover about 18%
+   of tracks; every pump run widens that pool, while provider/metadata
+   candidates keep the remaining catalog eligible.
 
 ## Non-goals
 
@@ -140,11 +149,11 @@ Two force multipliers outside this plan's scope but worth queueing:
 
 ## Phasing
 
-1. **Affinity CTE + personal fill + liked-track artist seeding** — fixes
+1. **Shipped:** affinity CTE + personal fill + liked-track artist seeding — fixes
    "seeded from the artist as a whole" and the global-count fill. Small.
-2. **Exploration share + serving memory + day-bucket seeding** — fixes
-   rigidity. Small.
-3. **Archetype table + genre/discovery/deep-cuts/rediscovery mixes** — the
-   visible feature. Medium.
+2. **Partially shipped:** exploration share + day-bucket seeding. Durable
+   serving memory remains.
+3. **Partially shipped:** shared archetype table + discovery/deep-cuts/
+   rediscovery mixes. Genre is next.
 4. **Mood/BPM archetypes + arc sequencing + key adjacency** — polish.
 5. (separate feature) Scrobble import.

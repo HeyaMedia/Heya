@@ -1,8 +1,7 @@
-// useNowPlayingSession — heartbeat the server every 10s while the video
-// player is mounted, so the activity panel can show "Karbowiak is watching
-// Nobody — direct play — 14:23/1:30:00".
+// useNowPlayingSession — heartbeat the server every 10s while a video or
+// music player is active, so the activity panel can show the live item.
 //
-// One composable per VideoPlayer instance. Mints a stable session_id on
+// One composable per player instance. Mints a stable session_id on
 // first heartbeat, beats every 10s, and tears down on unmount. The 30s
 // server-side purge handles ungraceful disconnects (closing tab without
 // a clean unmount).
@@ -13,7 +12,7 @@
 // authoritative but adds complexity for marginal benefit.
 
 export interface SessionHeartbeatPayload {
-  fileId: string | number
+  fileId?: string | number
   mediaItemId: number | null
   /** "movie" | "episode" | "track" — drives server-side display formatting. */
   entityType?: string
@@ -48,15 +47,17 @@ export function useNowPlayingSession() {
   let timer: ReturnType<typeof setInterval> | null = null
 
   async function send(payload: SessionHeartbeatPayload) {
-    if (!payload.mediaItemId) return // nothing to attribute the session to
+    // Movies resolve through media_item_id; episodes/tracks resolve through
+    // entity_id and legitimately have no media item on the heartbeat.
+    if (!payload.mediaItemId && !(payload.entityId && payload.entityId > 0)) return
     const { $heya } = useNuxtApp()
     try {
       await $heya('/api/me/sessions/heartbeat', {
         method: 'POST',
         body: {
           session_id: sessionId,
-          file_id: payload.fileId,
-          media_item_id: payload.mediaItemId,
+          file_id: payload.fileId ?? '',
+          media_item_id: payload.mediaItemId ?? 0,
           entity_type: payload.entityType ?? '',
           entity_id: payload.entityId ?? 0,
           position_seconds: Math.floor(payload.positionSeconds),

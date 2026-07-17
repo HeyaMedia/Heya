@@ -1,6 +1,6 @@
 <template>
   <div class="ms-mixes page-pad">
-    <MusicPageHead title="Mixes for You" subtitle="Auto-generated from your recent listening. Each mix is seeded on an artist and grown via sonic neighbors.">
+    <MusicPageHead title="Mixes for You" subtitle="Daily blends of your reactions and completed listens, sonic similarity, provider charts, and related artists.">
       <NuxtLink to="/music/stations/builder" class="ms-mixes-builder-cta steer-glass">
         <Icon name="sparkle" :size="14" />
         <span>Build your own</span>
@@ -20,12 +20,13 @@
     <section v-if="featured" class="ms-feat" :style="featTone">
       <AppContextMenu :items="actions.forMix({ name: featured.name, seed_artist_slug: featured.seed_artist_slug, tracks: featured.tracks.map(mixTrackToEntity) })">
         <div class="ms-feat-inner">
-          <NuxtLink :to="`/music/mix/${featured.seed_artist_slug}`" class="ms-feat-art" :aria-label="featured.name">
+          <NuxtLink :to="`/music/mix/${featured.slug}`" class="ms-feat-art" :aria-label="featured.name">
             <MixCollage :tracks="featured.tracks" :seed-src="seedArt(featured)" :alt="featured.name" />
           </NuxtLink>
           <div class="ms-feat-body">
-            <div class="ms-feat-kicker">Mix · seeded on {{ featured.seed_artist_name }}</div>
-            <NuxtLink :to="`/music/mix/${featured.seed_artist_slug}`" class="ms-feat-name">{{ featured.name }}</NuxtLink>
+            <div class="ms-feat-kicker">Mix<span v-if="featured.seed_artist_name"> · seeded on {{ featured.seed_artist_name }}</span></div>
+            <NuxtLink :to="`/music/mix/${featured.slug}`" class="ms-feat-name">{{ featured.name }}</NuxtLink>
+            <div class="ms-feat-description">{{ featured.description }}</div>
             <div class="ms-feat-meta">{{ featured.tracks.length }} tracks · {{ mixLength(featured) }}</div>
             <div class="ms-feat-actions">
               <button type="button" class="ms-feat-play" @click="playMix(featured)">
@@ -51,11 +52,11 @@
     <div v-if="rest.length" class="ms-mixes-grid">
       <AppContextMenu
         v-for="mix in rest"
-        :key="`mix-${mix.seed_artist_id}`"
+        :key="`mix-${mix.slug}`"
         :items="actions.forMix({ name: mix.name, seed_artist_slug: mix.seed_artist_slug, tracks: mix.tracks.map(mixTrackToEntity) })"
       >
       <NuxtLink
-        :to="`/music/mix/${mix.seed_artist_slug}`"
+        :to="`/music/mix/${mix.slug}`"
         class="ms-mix-card"
       >
         <MixCollage :tracks="mix.tracks" :seed-src="seedArt(mix)" :alt="mix.name">
@@ -121,6 +122,7 @@ const featured = computed(() => mixes.value[0] ?? null)
 const rest = computed(() => mixes.value.slice(1))
 
 function seedArt(mix: Mix) {
+  if (!mix.seed_artist_media_item_id) return undefined
   return usePosterUrl({ id: mix.seed_artist_media_item_id, public_id: mix.seed_artist_media_item_public_id })
 }
 
@@ -223,6 +225,13 @@ async function playMix(mix: Mix, opts: { shuffle?: boolean; startIdx?: number } 
   width: fit-content;
 }
 .ms-feat-name:hover { color: var(--gold); }
+.ms-feat-description {
+  max-width: 68ch;
+  margin-top: 5px;
+  color: var(--fg-1);
+  font-size: 12px;
+  line-height: 1.45;
+}
 .ms-feat-meta {
   margin-top: 4px;
   font-family: var(--font-mono);

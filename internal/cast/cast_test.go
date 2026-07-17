@@ -267,6 +267,65 @@ func TestSessionUsesNativePullControlsWithoutRespawn(t *testing.T) {
 	}
 }
 
+func TestAudioSessionReportsStartOnceAndNaturalCompletion(t *testing.T) {
+	m := New(t.TempDir())
+	var completed []bool
+	m.SetPlaybackSink(func(_ context.Context, _ int64, _ TrackInfo, _, _ int, done bool) {
+		completed = append(completed, done)
+	})
+	tr := &fakeTransport{events: make(chan TransportEvent, 4)}
+	s := &Session{
+		ID:        "cs-audio-lifecycle",
+		Device:    Device{ID: "fake:speaker", Name: "Speaker"},
+		UserID:    11,
+		mgr:       m,
+		state:     StateStarting,
+		track:     TrackInfo{TrackID: 101, MediaKind: "audio", Duration: 180},
+		transport: tr,
+	}
+	done := make(chan struct{})
+	go func() {
+		s.consume(tr)
+		close(done)
+	}()
+
+	tr.events <- TransportEvent{Kind: TransportPlaying}
+	tr.events <- TransportEvent{Kind: TransportPaused}
+	tr.events <- TransportEvent{Kind: TransportResumed}
+	tr.events <- TransportEvent{Kind: TransportEnded}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("session did not consume natural end")
+	}
+	if len(completed) != 2 || completed[0] || !completed[1] {
+		t.Fatalf("playback lifecycle = %v, want [start completion]", completed)
+	}
+}
+
+func TestAudioSessionStopDoesNotCreateHistory(t *testing.T) {
+	m := New(t.TempDir())
+	called := false
+	m.SetPlaybackSink(func(context.Context, int64, TrackInfo, int, int, bool) { called = true })
+	tr := &fakeTransport{events: make(chan TransportEvent)}
+	s := &Session{
+		ID:              "cs-audio-stop",
+		UserID:          11,
+		mgr:             m,
+		state:           StatePlaying,
+		track:           TrackInfo{TrackID: 101, MediaKind: "audio", Duration: 180},
+		transport:       tr,
+		resumedAt:       time.Now(),
+		playbackStarted: true,
+	}
+	if err := s.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if called {
+		t.Fatal("manual audio stop submitted a playback event")
+	}
+}
+
 func TestVideoSessionSnapshotAndProgressSink(t *testing.T) {
 	m := New(t.TempDir())
 	var gotItem TrackInfo

@@ -157,8 +157,20 @@ func (s *Server) handleScrobble(w http.ResponseWriter, r *http.Request) {
 				Completed:       true,
 				Source:          "subsonic",
 			})
+			if store := s.app.Sessions(); store != nil {
+				store.EndForUser("subsonic-"+strconv.FormatInt(u.ID, 10), u.ID)
+			}
 			continue
 		}
+		// submission=false is Subsonic's now-playing phase. Route it through
+		// the unified lifecycle so Last.fm/ListenBrainz are updated immediately,
+		// while RecordPlayback deliberately writes no local history row.
+		_ = s.app.RecordPlayback(ctx, u.ID, service.PlaybackEvent{
+			EntityType:   "track",
+			EntityID:     trackID,
+			TotalSeconds: tr.Duration,
+			Source:       "subsonic",
+		})
 		if store := s.app.Sessions(); store != nil {
 			store.Upsert(sessions.Session{
 				SessionID:       "subsonic-" + strconv.FormatInt(u.ID, 10),

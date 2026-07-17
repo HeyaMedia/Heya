@@ -31,14 +31,16 @@ type PlaybackEvent struct {
 	EntityID        int64  `json:"entity_id"                                 doc:"Movie media_item id, episode id, or track id"`
 	PositionSeconds int32  `json:"position_seconds" minimum:"0"              doc:"How far into the item the player is"`
 	TotalSeconds    int32  `json:"total_seconds"    minimum:"0"              doc:"Total length (0 if unknown)"`
-	Completed       bool   `json:"completed"                                 doc:"Whether playback reached the end / scrobble threshold"`
+	Completed       bool   `json:"completed"                                 doc:"Whether playback reached its natural end"`
 	Source          string `json:"source,omitempty" maxLength:"40"           doc:"Origin label: queue | radio | album | playlist | search | browse | similar"`
+	StartedAtUnix   int64  `json:"started_at_unix,omitempty" minimum:"0"     doc:"UTC Unix time when this playback began (track completion only)"`
 }
 
 // RecordPlayback dispatches one playback emission to the right backing store:
 //
 //   - movie / episode → upsert into user_watch_progress (resume state)
-//   - track            → append to play_events           (history log)
+//   - track incomplete → transient external now-playing notification
+//   - track completed  → append to play_events and submit external scrobble
 //
 // The dispatch lives here so the HTTP handler stays a thin pass-through and
 // the FE has exactly one endpoint + composable to call regardless of media.
@@ -48,16 +50,33 @@ func (a *App) RecordPlayback(ctx context.Context, userID int64, ev PlaybackEvent
 		_, err := a.UpdateWatchProgress(ctx, userID, ev.EntityType, ev.EntityID, ev.PositionSeconds, ev.TotalSeconds)
 		return err
 	case "track":
+		if ev.EntityID <= 0 {
+			return errors.New("track entity_id is required")
+		}
+		if !ev.Completed {
+			// A track-start event is deliberately not persisted. Its only jobs are
+			// updating Last.fm/ListenBrainz presence; the live Heya activity view
+			// is driven separately by the playback-session heartbeat.
+			a.NowPlayingOutbound(userID, ev.EntityID)
+			return nil
+		}
 		_, err := a.RecordPlayEvent(ctx, userID, RecordPlayEventInput{
 			TrackID:         ev.EntityID,
 			ListenedSeconds: ev.PositionSeconds,
 			Completed:       ev.Completed,
 			Source:          ev.Source,
 		})
-		if err == nil && ev.Completed {
+		if err == nil {
 			// Outbound scrobble to any linked ListenBrainz/Last.fm accounts —
 			// fire-and-forget, never blocks or fails the playback path.
-			a.ScrobbleOutbound(userID, ev.EntityID, time.Now())
+			startedAt := time.Unix(ev.StartedAtUnix, 0)
+			now := time.Now()
+			if ev.StartedAtUnix <= 0 || startedAt.After(now.Add(5*time.Minute)) {
+				// Older clients do not send a start timestamp. Position is the best
+				// available approximation and is exact for ordinary natural ends.
+				startedAt = now.Add(-time.Duration(ev.PositionSeconds) * time.Second)
+			}
+			a.ScrobbleOutbound(userID, ev.EntityID, startedAt)
 		}
 		return err
 	default:

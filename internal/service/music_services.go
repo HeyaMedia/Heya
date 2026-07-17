@@ -371,10 +371,24 @@ func (a *App) ReactionOutbound(userID, trackID int64, oldRating, newRating int16
 	}()
 }
 
-// ScrobbleOutbound pushes one completed Heya play to every service the user
-// has scrobbling enabled on. Fire-and-forget with one retry — a missed
-// scrobble must never fail the playback path.
+// NowPlayingOutbound tells every enabled service that one Heya track has just
+// started. This is transient presence only: ListenBrainz receives playing_now
+// and Last.fm receives track.updateNowPlaying. Neither call creates history.
+func (a *App) NowPlayingOutbound(userID, trackID int64) {
+	a.submitPlaybackOutbound(userID, trackID, time.Time{}, false)
+}
+
+// ScrobbleOutbound pushes one completed Heya play to every enabled service.
+// playedAt is the instant the track started, as required by Last.fm and used as
+// listened_at by ListenBrainz.
 func (a *App) ScrobbleOutbound(userID, trackID int64, playedAt time.Time) {
+	a.submitPlaybackOutbound(userID, trackID, playedAt, true)
+}
+
+// submitPlaybackOutbound shares metadata lookup, account selection, retry, and
+// logging between the transient start notification and permanent completion.
+// Fire-and-forget by design: an external outage must never break playback.
+func (a *App) submitPlaybackOutbound(userID, trackID int64, playedAt time.Time, completed bool) {
 	ctx := a.LifetimeContext()
 	go func() {
 		rows, err := a.db.Query(ctx, `
@@ -415,11 +429,17 @@ func (a *App) ScrobbleOutbound(userID, trackID int64, playedAt time.Time) {
 				switch s.service {
 				case "listenbrainz":
 					lb := &scrobble.ListenBrainz{Token: s.token}
+					if !completed {
+						return lb.Submit(ctx, "playing_now", []scrobble.Listen{l})
+					}
 					return lb.Submit(ctx, "single", []scrobble.Listen{l})
 				case "lastfm":
 					lf, err := a.lastfmClient(ctx, s.token)
 					if err != nil {
 						return err
+					}
+					if !completed {
+						return lf.UpdateNowPlaying(ctx, l)
 					}
 					return lf.Scrobble(ctx, []scrobble.Listen{l})
 				}
@@ -428,7 +448,11 @@ func (a *App) ScrobbleOutbound(userID, trackID int64, playedAt time.Time) {
 			if err := submit(); err != nil {
 				time.Sleep(5 * time.Second)
 				if err := submit(); err != nil {
-					log.Warn().Err(err).Str("service", s.service).Msg("outbound scrobble failed")
+					event := "now-playing"
+					if completed {
+						event = "scrobble"
+					}
+					log.Warn().Err(err).Str("service", s.service).Str("event", event).Msg("outbound playback submission failed")
 				}
 			}
 		}

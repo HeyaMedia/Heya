@@ -34,12 +34,12 @@ func registerMusicHomeRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(artistPlayQueueBody{Items: rows}), nil
 		})
 
-	// 1. Mixes for You — live-generated. Heaviest of the bunch (KNN against
-	// artist_centroids); a 1h cache amortizes the cost since the underlying
-	// signal (recent play history) doesn't shift faster than that.
-	huma.Register(api, secured(op(http.MethodGet, "/api/music/home/mixes-for-you", "music-home-mixes", "Auto-generated mixes from recent listening", "MusicHome")),
+	// 1. Mixes for You — live-generated from the shared music recommender. A
+	// 1h cache amortizes the candidate SQL while daily jitter keeps a stable
+	// listening session and naturally rotates tomorrow's slate.
+	huma.Register(api, secured(op(http.MethodGet, "/api/music/home/mixes-for-you", "music-home-mixes", "Personal mixes from taste, sonic similarity, and provider metadata", "MusicHome")),
 		func(ctx context.Context, in *struct {
-			MaxMixes     int `query:"max"            minimum:"1" maximum:"20"  default:"6"`
+			MaxMixes     int `query:"max"            minimum:"1" maximum:"8"   default:"6"`
 			TracksPerMix int `query:"tracks_per_mix" minimum:"5" maximum:"100" default:"30"`
 		}) (*JSONOutput[mixesBody], error) {
 			mixes, err := app.GenerateMixesForUser(ctx, userFrom(ctx).ID, in.MaxMixes, in.TracksPerMix)

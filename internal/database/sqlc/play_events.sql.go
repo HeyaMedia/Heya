@@ -130,8 +130,8 @@ type RecordPlayEventParams struct {
 	Source          string `json:"source"`
 }
 
-// Append a play event. The FE submits one of these per qualifying play
-// (>=30s heard or track-end, akin to Last.fm scrobble rules).
+// Append one permanent listen after a natural track completion. Transient
+// now-playing events never reach this query.
 func (q *Queries) RecordPlayEvent(ctx context.Context, arg RecordPlayEventParams) (PlayEvent, error) {
 	row := q.db.QueryRow(ctx, recordPlayEvent,
 		arg.UserID,

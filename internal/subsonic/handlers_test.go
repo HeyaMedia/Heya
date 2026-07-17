@@ -199,8 +199,8 @@ func TestScrobbleAndPlayQueue(t *testing.T) {
 		t.Fatalf("scrobble wrong: %+v", fake.scrobbles)
 	}
 	doJSON(t, s, "scrobble", "id=tr-101&submission=false")
-	if len(fake.scrobbles) != 1 {
-		t.Fatalf("now-playing report must not append a play event: %+v", fake.scrobbles)
+	if len(fake.scrobbles) != 2 || fake.scrobbles[1].Completed || fake.scrobbles[1].EntityID != 101 {
+		t.Fatalf("now-playing report must emit a transient start event: %+v", fake.scrobbles)
 	}
 
 	doJSON(t, s, "savePlayQueue", "id=tr-100&id=tr-101&current=tr-101&position=42000")
