@@ -369,6 +369,68 @@ WHERE (elem->>'name') = sqlc.arg(genre_name)::text
   AND (elem->>'score')::real >= sqlc.arg(min_score)::real
   AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL);
 
+-- name: ListMetadataGenreAlbumIDs :many
+-- Step 1 of the metadata-genre drilldown (see ListTracksByMetadataGenre):
+-- resolve which albums carry a genre/tag string, case-insensitively, either
+-- on the album itself or inherited from its artist. Both branches probe the
+-- immutable_lower_array GIN indexes (migration 00053); UNION dedupes the
+-- overlap. Kept separate from the track query so the planner sees a concrete
+-- (small) album-ID array there instead of guessing 50% selectivity for the
+-- tag match and hash-joining the full track_files table.
+SELECT al.id FROM albums al
+WHERE al.artist_id IN (
+    SELECT ar.id FROM artists ar
+    WHERE immutable_lower_array(ar.genres || ar.tags) @> ARRAY[lower(sqlc.arg(genre_name)::text)]
+)
+UNION
+SELECT al.id FROM albums al
+WHERE immutable_lower_array(al.genres || al.tags) @> ARRAY[lower(sqlc.arg(genre_name)::text)];
+
+-- name: ListTracksByMetadataGenre :many
+-- Metadata-vocabulary sibling of ListTracksByGenre: matches the genre/tag
+-- strings carried on artists and albums (upstream metadata folksonomy, e.g.
+-- "melodic metalcore") instead of the Discogs-400 classifier labels. Powers
+-- the artist-hero genre chips, which link into the browse drilldown with
+-- names the sonic vocabulary has never heard of. album_ids comes from
+-- ListMetadataGenreAlbumIDs. Deduped to one row per recording (see
+-- recording-identity note above); there's no score here, so it reads as a
+-- discography walk: artist, then release year, then track order.
+SELECT * FROM (
+    SELECT DISTINCT ON (a.id, lower(t.title), t.duration / 15)
+           t.id              AS track_id,
+           t.title           AS track_title,
+           t.duration        AS duration,
+           t.disc_number     AS disc_number,
+           t.track_number    AS track_number,
+           al.id             AS album_id,
+           al.title          AS album_title,
+           al.slug           AS album_slug,
+           al.cover_path     AS album_cover_path,
+           al.year           AS album_year,
+           a.id              AS artist_id,
+           a.name            AS artist_name,
+           mi.slug           AS artist_slug
+    FROM tracks t
+    JOIN albums      al ON al.id = t.album_id
+    JOIN artists     a  ON a.id  = al.artist_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
+    WHERE t.album_id = ANY(sqlc.arg(album_ids)::bigint[])
+      AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+    ORDER BY a.id, lower(t.title), t.duration / 15,
+             al.year ASC NULLS LAST, t.id ASC
+) dedup
+ORDER BY artist_name ASC, album_year ASC NULLS LAST, album_id ASC, disc_number ASC, track_number ASC, track_id ASC
+LIMIT sqlc.arg(track_limit) OFFSET sqlc.arg(track_offset);
+
+-- name: CountTracksByMetadataGenre :one
+-- Distinct-recording count matching ListTracksByMetadataGenre's WHERE —
+-- sizes the browse drilldown's virtual scroll track.
+SELECT count(DISTINCT (al.artist_id, lower(t.title), t.duration / 15))::bigint
+FROM tracks t
+JOIN albums al ON al.id = t.album_id
+WHERE t.album_id = ANY(sqlc.arg(album_ids)::bigint[])
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL);
+
 -- name: CountTracksByTempoBand :one
 -- Count tracks whose BPM falls in [min, max). Half-open so adjacent bands
 -- partition cleanly with no double-counting. Distinct-recording counting for

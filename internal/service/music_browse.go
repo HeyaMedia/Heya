@@ -154,10 +154,21 @@ func (a *App) CountTracksForGenre(ctx context.Context, genre string) (int64, err
 	if genre == "" {
 		return 0, fmt.Errorf("genre is required")
 	}
-	return sqlc.New(a.db).CountTracksByGenre(ctx, sqlc.CountTracksByGenreParams{
-		GenreName: genre,
-		MinScore:  genreScoreFloor,
-	})
+	q := sqlc.New(a.db)
+	if canonical, ok := sonicanalysis.CanonicalGenreName(genre); ok {
+		return q.CountTracksByGenre(ctx, sqlc.CountTracksByGenreParams{
+			GenreName: canonical,
+			MinScore:  genreScoreFloor,
+		})
+	}
+	albumIDs, err := q.ListMetadataGenreAlbumIDs(ctx, genre)
+	if err != nil {
+		return 0, fmt.Errorf("resolve albums for metadata genre %q: %w", genre, err)
+	}
+	if len(albumIDs) == 0 {
+		return 0, nil
+	}
+	return q.CountTracksByMetadataGenre(ctx, albumIDs)
 }
 
 // CountTracksForTempoBand is the total-count counterpart of ListTracksByTempoBand.
@@ -192,23 +203,66 @@ func (a *App) ListGenreBuckets(ctx context.Context) ([]GenreBucket, error) {
 	return out, nil
 }
 
-// ListTracksByGenre returns tracks scoring above genreScoreFloor for the
-// given hierarchical genre name, paginated by score (highest first).
+// ListTracksByGenre returns the tracks for one genre drilldown, paginated.
+// Two disjoint genre vocabularies feed this page: names in the Discogs-400
+// classifier vocabulary (the Browse > Genres tiles, "Electronic---Techno")
+// query track_facets.top_genres by score; anything else is treated as a
+// metadata genre/tag (the artist-hero chips, "melodic metalcore") and
+// matches the artists/albums tag arrays instead — those chips used to land
+// on a permanently-empty page because only the sonic bucket was consulted.
 func (a *App) ListTracksByGenre(ctx context.Context, genre string, limit, offset int32) ([]sqlc.ListTracksByGenreRow, error) {
 	if genre == "" {
 		return nil, fmt.Errorf("genre is required")
 	}
 	limit, offset = clampMusicPage(limit, offset)
-	rows, err := sqlc.New(a.db).ListTracksByGenre(ctx, sqlc.ListTracksByGenreParams{
-		GenreName:   genre,
-		MinScore:    genreScoreFloor,
+	q := sqlc.New(a.db)
+	if canonical, ok := sonicanalysis.CanonicalGenreName(genre); ok {
+		rows, err := q.ListTracksByGenre(ctx, sqlc.ListTracksByGenreParams{
+			GenreName:   canonical,
+			MinScore:    genreScoreFloor,
+			TrackLimit:  limit,
+			TrackOffset: offset,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list tracks for genre %q: %w", genre, err)
+		}
+		return rows, nil
+	}
+	albumIDs, err := q.ListMetadataGenreAlbumIDs(ctx, genre)
+	if err != nil {
+		return nil, fmt.Errorf("resolve albums for metadata genre %q: %w", genre, err)
+	}
+	if len(albumIDs) == 0 {
+		return []sqlc.ListTracksByGenreRow{}, nil
+	}
+	rows, err := q.ListTracksByMetadataGenre(ctx, sqlc.ListTracksByMetadataGenreParams{
+		AlbumIds:    albumIDs,
 		TrackLimit:  limit,
 		TrackOffset: offset,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("list tracks for genre %q: %w", genre, err)
+		return nil, fmt.Errorf("list tracks for metadata genre %q: %w", genre, err)
 	}
-	return rows, nil
+	out := make([]sqlc.ListTracksByGenreRow, len(rows))
+	for i, r := range rows {
+		out[i] = sqlc.ListTracksByGenreRow{
+			TrackID:        r.TrackID,
+			TrackTitle:     r.TrackTitle,
+			Duration:       r.Duration,
+			DiscNumber:     r.DiscNumber,
+			TrackNumber:    r.TrackNumber,
+			AlbumID:        r.AlbumID,
+			AlbumTitle:     r.AlbumTitle,
+			AlbumSlug:      r.AlbumSlug,
+			AlbumCoverPath: r.AlbumCoverPath,
+			AlbumYear:      r.AlbumYear,
+			ArtistID:       r.ArtistID,
+			ArtistName:     r.ArtistName,
+			ArtistSlug:     r.ArtistSlug,
+			Score:          1,
+		}
+	}
+	return out, nil
 }
 
 // ListTempoBuckets returns the fixed BPM partition with a live count per band.

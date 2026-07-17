@@ -76,6 +76,23 @@ func (q *Queries) CountTracksByGenre(ctx context.Context, arg CountTracksByGenre
 	return column_1, err
 }
 
+const countTracksByMetadataGenre = `-- name: CountTracksByMetadataGenre :one
+SELECT count(DISTINCT (al.artist_id, lower(t.title), t.duration / 15))::bigint
+FROM tracks t
+JOIN albums al ON al.id = t.album_id
+WHERE t.album_id = ANY($1::bigint[])
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+`
+
+// Distinct-recording count matching ListTracksByMetadataGenre's WHERE —
+// sizes the browse drilldown's virtual scroll track.
+func (q *Queries) CountTracksByMetadataGenre(ctx context.Context, albumIds []int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countTracksByMetadataGenre, albumIds)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countTracksByMood = `-- name: CountTracksByMood :one
 
 SELECT count(DISTINCT (al.artist_id, lower(t.title), t.duration / 15))::bigint
@@ -296,6 +313,44 @@ func (q *Queries) ListGenreBuckets(ctx context.Context, arg ListGenreBucketsPara
 	return items, nil
 }
 
+const listMetadataGenreAlbumIDs = `-- name: ListMetadataGenreAlbumIDs :many
+SELECT al.id FROM albums al
+WHERE al.artist_id IN (
+    SELECT ar.id FROM artists ar
+    WHERE immutable_lower_array(ar.genres || ar.tags) @> ARRAY[lower($1::text)]
+)
+UNION
+SELECT al.id FROM albums al
+WHERE immutable_lower_array(al.genres || al.tags) @> ARRAY[lower($1::text)]
+`
+
+// Step 1 of the metadata-genre drilldown (see ListTracksByMetadataGenre):
+// resolve which albums carry a genre/tag string, case-insensitively, either
+// on the album itself or inherited from its artist. Both branches probe the
+// immutable_lower_array GIN indexes (migration 00053); UNION dedupes the
+// overlap. Kept separate from the track query so the planner sees a concrete
+// (small) album-ID array there instead of guessing 50% selectivity for the
+// tag match and hash-joining the full track_files table.
+func (q *Queries) ListMetadataGenreAlbumIDs(ctx context.Context, genreName string) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listMetadataGenreAlbumIDs, genreName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingAnalysisTracks = `-- name: ListPendingAnalysisTracks :many
 SELECT t.id
 FROM tracks t
@@ -439,6 +494,99 @@ func (q *Queries) ListTracksByGenre(ctx context.Context, arg ListTracksByGenrePa
 			&i.ArtistName,
 			&i.ArtistSlug,
 			&i.Score,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTracksByMetadataGenre = `-- name: ListTracksByMetadataGenre :many
+SELECT track_id, track_title, duration, disc_number, track_number, album_id, album_title, album_slug, album_cover_path, album_year, artist_id, artist_name, artist_slug FROM (
+    SELECT DISTINCT ON (a.id, lower(t.title), t.duration / 15)
+           t.id              AS track_id,
+           t.title           AS track_title,
+           t.duration        AS duration,
+           t.disc_number     AS disc_number,
+           t.track_number    AS track_number,
+           al.id             AS album_id,
+           al.title          AS album_title,
+           al.slug           AS album_slug,
+           al.cover_path     AS album_cover_path,
+           al.year           AS album_year,
+           a.id              AS artist_id,
+           a.name            AS artist_name,
+           mi.slug           AS artist_slug
+    FROM tracks t
+    JOIN albums      al ON al.id = t.album_id
+    JOIN artists     a  ON a.id  = al.artist_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
+    WHERE t.album_id = ANY($1::bigint[])
+      AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+    ORDER BY a.id, lower(t.title), t.duration / 15,
+             al.year ASC NULLS LAST, t.id ASC
+) dedup
+ORDER BY artist_name ASC, album_year ASC NULLS LAST, album_id ASC, disc_number ASC, track_number ASC, track_id ASC
+LIMIT $3 OFFSET $2
+`
+
+type ListTracksByMetadataGenreParams struct {
+	AlbumIds    []int64 `json:"album_ids"`
+	TrackOffset int32   `json:"track_offset"`
+	TrackLimit  int32   `json:"track_limit"`
+}
+
+type ListTracksByMetadataGenreRow struct {
+	TrackID        int64  `json:"track_id"`
+	TrackTitle     string `json:"track_title"`
+	Duration       int32  `json:"duration"`
+	DiscNumber     int32  `json:"disc_number"`
+	TrackNumber    int32  `json:"track_number"`
+	AlbumID        int64  `json:"album_id"`
+	AlbumTitle     string `json:"album_title"`
+	AlbumSlug      string `json:"album_slug"`
+	AlbumCoverPath string `json:"album_cover_path"`
+	AlbumYear      string `json:"album_year"`
+	ArtistID       int64  `json:"artist_id"`
+	ArtistName     string `json:"artist_name"`
+	ArtistSlug     string `json:"artist_slug"`
+}
+
+// Metadata-vocabulary sibling of ListTracksByGenre: matches the genre/tag
+// strings carried on artists and albums (upstream metadata folksonomy, e.g.
+// "melodic metalcore") instead of the Discogs-400 classifier labels. Powers
+// the artist-hero genre chips, which link into the browse drilldown with
+// names the sonic vocabulary has never heard of. album_ids comes from
+// ListMetadataGenreAlbumIDs. Deduped to one row per recording (see
+// recording-identity note above); there's no score here, so it reads as a
+// discography walk: artist, then release year, then track order.
+func (q *Queries) ListTracksByMetadataGenre(ctx context.Context, arg ListTracksByMetadataGenreParams) ([]ListTracksByMetadataGenreRow, error) {
+	rows, err := q.db.Query(ctx, listTracksByMetadataGenre, arg.AlbumIds, arg.TrackOffset, arg.TrackLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTracksByMetadataGenreRow{}
+	for rows.Next() {
+		var i ListTracksByMetadataGenreRow
+		if err := rows.Scan(
+			&i.TrackID,
+			&i.TrackTitle,
+			&i.Duration,
+			&i.DiscNumber,
+			&i.TrackNumber,
+			&i.AlbumID,
+			&i.AlbumTitle,
+			&i.AlbumSlug,
+			&i.AlbumCoverPath,
+			&i.AlbumYear,
+			&i.ArtistID,
+			&i.ArtistName,
+			&i.ArtistSlug,
 		); err != nil {
 			return nil, err
 		}
