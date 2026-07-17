@@ -51,6 +51,19 @@ func TestPrimaryMediaAssetLocalPrecedenceAndBackdropOrdering(t *testing.T) {
 
 	require.NoError(t, upsertPoster("remote", "", "https://metadata.invalid/first.jpg"))
 	require.NoError(t, upsertPoster("local", "/library/folder.jpg", ""))
+	candidate, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+		MediaItemID: item.ID,
+		AssetType:   sqlc.AssetTypePoster,
+		Source:      "remote",
+		LocalPath:   "/cache/second.jpg",
+		RemoteUrl:   "https://metadata.invalid/second.jpg",
+		Label:       "legacy-candidate",
+		SortOrder:   10,
+		Width:       2000,
+		Height:      3000,
+		FileSize:    12345,
+	})
+	require.NoError(t, err)
 	require.ErrorIs(t, upsertPoster("remote", "", "https://metadata.invalid/second.jpg"), pgx.ErrNoRows,
 		"remote refresh must not displace local art while use_local_data is enabled")
 
@@ -59,10 +72,11 @@ func TestPrimaryMediaAssetLocalPrecedenceAndBackdropOrdering(t *testing.T) {
 		AssetType:   sqlc.AssetTypePoster,
 	})
 	require.NoError(t, err)
-	require.Len(t, posters, 1)
+	require.Len(t, posters, 2)
 	require.Equal(t, "local", posters[0].Source)
 	require.Equal(t, "/library/folder.jpg", posters[0].LocalPath)
 	require.Zero(t, posters[0].SortOrder)
+	require.Equal(t, candidate.ID, posters[1].ID, "rejected refresh must retain the alternate candidate")
 
 	_, err = q.UpdateLibrarySettings(ctx, sqlc.UpdateLibrarySettingsParams{
 		ID:       lib.ID,
@@ -80,6 +94,10 @@ func TestPrimaryMediaAssetLocalPrecedenceAndBackdropOrdering(t *testing.T) {
 	require.Len(t, posters, 1)
 	require.Equal(t, "remote", posters[0].Source)
 	require.Equal(t, "https://metadata.invalid/second.jpg", posters[0].RemoteUrl)
+	require.Equal(t, "/cache/second.jpg", posters[0].LocalPath, "promoting a remote identity must retain its materialized bytes")
+	require.Equal(t, int32(2000), posters[0].Width)
+	require.Equal(t, int32(3000), posters[0].Height)
+	require.Equal(t, int64(12345), posters[0].FileSize)
 
 	// Backdrops are the collection exception: retain every row and use the
 	// explicit sort order (with id as the stable final tie-breaker).

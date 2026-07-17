@@ -7,8 +7,110 @@ RETURNING *;
 -- name: UpsertPrimaryMediaAsset :one
 -- Primary visual slots are singular. A newly discovered local sidecar replaces
 -- the remote value, while a later remote refresh must not displace local data.
-INSERT INTO media_assets (media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size)
-VALUES ($1, $2, $3, $4, $5, $6, '', 0, $7, $8, $9)
+--
+-- A selected remote identity may already exist in a labeled legacy/alternate
+-- row. Remove that row before moving the identity into the primary slot, and
+-- carry over its materialized bytes so the cache file does not become
+-- orphaned. The delete is gated by the same local-data precedence rule as the
+-- upsert: a rejected remote refresh must leave both the local primary and its
+-- alternate candidate untouched.
+WITH current_primary AS MATERIALIZED (
+    SELECT media_assets.*
+    FROM media_assets
+    WHERE media_assets.media_item_id = sqlc.arg(media_item_id)
+      AND media_assets.asset_type = sqlc.arg(asset_type)::asset_type
+      AND media_assets.label = ''
+      AND media_assets.asset_type IN ('poster', 'logo', 'art', 'banner', 'thumb', 'disc', 'clearart')
+    FOR UPDATE
+),
+replacement_allowed AS MATERIALIZED (
+    SELECT NOT EXISTS (SELECT 1 FROM current_primary)
+        OR EXISTS (
+            SELECT 1
+            FROM current_primary
+            WHERE current_primary.source <> 'local'
+               OR sqlc.arg(source)::text = 'local'
+               OR NOT EXISTS (
+                    SELECT 1
+                    FROM media_items
+                    JOIN libraries ON libraries.id = media_items.library_id
+                    WHERE media_items.id = current_primary.media_item_id
+                      AND COALESCE((libraries.settings->>'use_local_data')::boolean, true)
+               )
+        ) AS allowed
+),
+preserved_remote AS MATERIALIZED (
+    SELECT media_assets.*
+    FROM media_assets
+    CROSS JOIN replacement_allowed
+    WHERE replacement_allowed.allowed
+      AND sqlc.arg(local_path)::text = ''
+      AND sqlc.arg(remote_url)::text <> ''
+      AND media_assets.media_item_id = sqlc.arg(media_item_id)
+      AND media_assets.asset_type = sqlc.arg(asset_type)::asset_type
+      AND media_assets.remote_url = sqlc.arg(remote_url)
+      AND CASE
+            WHEN media_assets.asset_type = 'still'
+              OR media_assets.label ~ '^season-[0-9]+$'
+              OR media_assets.label ~ '^s[0-9]+e[0-9]+$'
+                THEN media_assets.label
+            ELSE ''
+          END = ''
+    ORDER BY (media_assets.local_path <> '') DESC, media_assets.id
+    LIMIT 1
+    FOR UPDATE OF media_assets
+),
+removed_conflicts AS (
+    DELETE FROM media_assets
+    USING replacement_allowed,
+          (SELECT count(*) FROM preserved_remote) AS preservation_barrier
+    WHERE replacement_allowed.allowed
+      AND media_assets.media_item_id = sqlc.arg(media_item_id)
+      AND media_assets.asset_type = sqlc.arg(asset_type)::asset_type
+      AND media_assets.id <> COALESCE((SELECT id FROM current_primary), 0)
+      AND CASE
+            WHEN media_assets.asset_type = 'still'
+              OR media_assets.label ~ '^season-[0-9]+$'
+              OR media_assets.label ~ '^s[0-9]+e[0-9]+$'
+                THEN media_assets.label
+            ELSE ''
+          END = ''
+      AND (
+          (sqlc.arg(local_path)::text <> '' AND media_assets.local_path = sqlc.arg(local_path))
+          OR (sqlc.arg(remote_url)::text <> '' AND media_assets.remote_url = sqlc.arg(remote_url))
+      )
+    RETURNING media_assets.id
+)
+INSERT INTO media_assets (
+    media_item_id, asset_type, source, local_path, remote_url, language, label,
+    sort_order, width, height, file_size, score, likes, aspect, content_hash, visual_hash
+)
+SELECT
+    sqlc.arg(media_item_id),
+    sqlc.arg(asset_type)::asset_type,
+    sqlc.arg(source),
+    CASE
+        WHEN sqlc.arg(local_path)::text <> '' THEN sqlc.arg(local_path)
+        ELSE COALESCE((SELECT local_path FROM preserved_remote), '')
+    END,
+    sqlc.arg(remote_url),
+    CASE
+        WHEN sqlc.arg(language)::text <> '' THEN sqlc.arg(language)
+        ELSE COALESCE((SELECT language FROM preserved_remote), '')
+    END,
+    '',
+    0,
+    CASE WHEN sqlc.arg(width)::integer > 0 THEN sqlc.arg(width) ELSE COALESCE((SELECT width FROM preserved_remote), 0) END,
+    CASE WHEN sqlc.arg(height)::integer > 0 THEN sqlc.arg(height) ELSE COALESCE((SELECT height FROM preserved_remote), 0) END,
+    CASE WHEN sqlc.arg(file_size)::bigint > 0 THEN sqlc.arg(file_size) ELSE COALESCE((SELECT file_size FROM preserved_remote), 0) END,
+    COALESCE((SELECT score FROM preserved_remote), 0),
+    COALESCE((SELECT likes FROM preserved_remote), 0),
+    COALESCE((SELECT aspect FROM preserved_remote), ''),
+    COALESCE((SELECT content_hash FROM preserved_remote), ''),
+    COALESCE((SELECT visual_hash FROM preserved_remote), '')
+FROM replacement_allowed
+CROSS JOIN (SELECT count(*) FROM removed_conflicts) AS conflict_removal_barrier
+WHERE replacement_allowed.allowed
 ON CONFLICT (media_item_id, asset_type)
     WHERE label = '' AND asset_type IN ('poster', 'logo', 'art', 'banner', 'thumb', 'disc', 'clearart')
 DO UPDATE SET
@@ -19,16 +121,12 @@ DO UPDATE SET
     sort_order = 0,
     width = EXCLUDED.width,
     height = EXCLUDED.height,
-    file_size = EXCLUDED.file_size
-WHERE media_assets.source <> 'local'
-   OR EXCLUDED.source = 'local'
-   OR NOT EXISTS (
-        SELECT 1
-        FROM media_items
-        JOIN libraries ON libraries.id = media_items.library_id
-        WHERE media_items.id = media_assets.media_item_id
-          AND COALESCE((libraries.settings->>'use_local_data')::boolean, true)
-   )
+    file_size = EXCLUDED.file_size,
+    score = EXCLUDED.score,
+    likes = EXCLUDED.likes,
+    aspect = EXCLUDED.aspect,
+    content_hash = EXCLUDED.content_hash,
+    visual_hash = EXCLUDED.visual_hash
 RETURNING *;
 
 -- name: ReplacePrimaryMediaAsset :one

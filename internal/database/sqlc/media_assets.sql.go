@@ -646,8 +646,103 @@ func (q *Queries) UpdateMediaAssetMaterialization(ctx context.Context, arg Updat
 }
 
 const upsertPrimaryMediaAsset = `-- name: UpsertPrimaryMediaAsset :one
-INSERT INTO media_assets (media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size)
-VALUES ($1, $2, $3, $4, $5, $6, '', 0, $7, $8, $9)
+WITH current_primary AS MATERIALIZED (
+    SELECT media_assets.id, media_assets.media_item_id, media_assets.asset_type, media_assets.source, media_assets.local_path, media_assets.remote_url, media_assets.language, media_assets.label, media_assets.sort_order, media_assets.width, media_assets.height, media_assets.file_size, media_assets.score, media_assets.likes, media_assets.aspect, media_assets.created_at, media_assets.content_hash, media_assets.visual_hash
+    FROM media_assets
+    WHERE media_assets.media_item_id = $1
+      AND media_assets.asset_type = $2::asset_type
+      AND media_assets.label = ''
+      AND media_assets.asset_type IN ('poster', 'logo', 'art', 'banner', 'thumb', 'disc', 'clearart')
+    FOR UPDATE
+),
+replacement_allowed AS MATERIALIZED (
+    SELECT NOT EXISTS (SELECT 1 FROM current_primary)
+        OR EXISTS (
+            SELECT 1
+            FROM current_primary
+            WHERE current_primary.source <> 'local'
+               OR $3::text = 'local'
+               OR NOT EXISTS (
+                    SELECT 1
+                    FROM media_items
+                    JOIN libraries ON libraries.id = media_items.library_id
+                    WHERE media_items.id = current_primary.media_item_id
+                      AND COALESCE((libraries.settings->>'use_local_data')::boolean, true)
+               )
+        ) AS allowed
+),
+preserved_remote AS MATERIALIZED (
+    SELECT media_assets.id, media_assets.media_item_id, media_assets.asset_type, media_assets.source, media_assets.local_path, media_assets.remote_url, media_assets.language, media_assets.label, media_assets.sort_order, media_assets.width, media_assets.height, media_assets.file_size, media_assets.score, media_assets.likes, media_assets.aspect, media_assets.created_at, media_assets.content_hash, media_assets.visual_hash
+    FROM media_assets
+    CROSS JOIN replacement_allowed
+    WHERE replacement_allowed.allowed
+      AND $4::text = ''
+      AND $5::text <> ''
+      AND media_assets.media_item_id = $1
+      AND media_assets.asset_type = $2::asset_type
+      AND media_assets.remote_url = $5
+      AND CASE
+            WHEN media_assets.asset_type = 'still'
+              OR media_assets.label ~ '^season-[0-9]+$'
+              OR media_assets.label ~ '^s[0-9]+e[0-9]+$'
+                THEN media_assets.label
+            ELSE ''
+          END = ''
+    ORDER BY (media_assets.local_path <> '') DESC, media_assets.id
+    LIMIT 1
+    FOR UPDATE OF media_assets
+),
+removed_conflicts AS (
+    DELETE FROM media_assets
+    USING replacement_allowed,
+          (SELECT count(*) FROM preserved_remote) AS preservation_barrier
+    WHERE replacement_allowed.allowed
+      AND media_assets.media_item_id = $1
+      AND media_assets.asset_type = $2::asset_type
+      AND media_assets.id <> COALESCE((SELECT id FROM current_primary), 0)
+      AND CASE
+            WHEN media_assets.asset_type = 'still'
+              OR media_assets.label ~ '^season-[0-9]+$'
+              OR media_assets.label ~ '^s[0-9]+e[0-9]+$'
+                THEN media_assets.label
+            ELSE ''
+          END = ''
+      AND (
+          ($4::text <> '' AND media_assets.local_path = $4)
+          OR ($5::text <> '' AND media_assets.remote_url = $5)
+      )
+    RETURNING media_assets.id
+)
+INSERT INTO media_assets (
+    media_item_id, asset_type, source, local_path, remote_url, language, label,
+    sort_order, width, height, file_size, score, likes, aspect, content_hash, visual_hash
+)
+SELECT
+    $1,
+    $2::asset_type,
+    $3,
+    CASE
+        WHEN $4::text <> '' THEN $4
+        ELSE COALESCE((SELECT local_path FROM preserved_remote), '')
+    END,
+    $5,
+    CASE
+        WHEN $6::text <> '' THEN $6
+        ELSE COALESCE((SELECT language FROM preserved_remote), '')
+    END,
+    '',
+    0,
+    CASE WHEN $7::integer > 0 THEN $7 ELSE COALESCE((SELECT width FROM preserved_remote), 0) END,
+    CASE WHEN $8::integer > 0 THEN $8 ELSE COALESCE((SELECT height FROM preserved_remote), 0) END,
+    CASE WHEN $9::bigint > 0 THEN $9 ELSE COALESCE((SELECT file_size FROM preserved_remote), 0) END,
+    COALESCE((SELECT score FROM preserved_remote), 0),
+    COALESCE((SELECT likes FROM preserved_remote), 0),
+    COALESCE((SELECT aspect FROM preserved_remote), ''),
+    COALESCE((SELECT content_hash FROM preserved_remote), ''),
+    COALESCE((SELECT visual_hash FROM preserved_remote), '')
+FROM replacement_allowed
+CROSS JOIN (SELECT count(*) FROM removed_conflicts) AS conflict_removal_barrier
+WHERE replacement_allowed.allowed
 ON CONFLICT (media_item_id, asset_type)
     WHERE label = '' AND asset_type IN ('poster', 'logo', 'art', 'banner', 'thumb', 'disc', 'clearart')
 DO UPDATE SET
@@ -658,16 +753,12 @@ DO UPDATE SET
     sort_order = 0,
     width = EXCLUDED.width,
     height = EXCLUDED.height,
-    file_size = EXCLUDED.file_size
-WHERE media_assets.source <> 'local'
-   OR EXCLUDED.source = 'local'
-   OR NOT EXISTS (
-        SELECT 1
-        FROM media_items
-        JOIN libraries ON libraries.id = media_items.library_id
-        WHERE media_items.id = media_assets.media_item_id
-          AND COALESCE((libraries.settings->>'use_local_data')::boolean, true)
-   )
+    file_size = EXCLUDED.file_size,
+    score = EXCLUDED.score,
+    likes = EXCLUDED.likes,
+    aspect = EXCLUDED.aspect,
+    content_hash = EXCLUDED.content_hash,
+    visual_hash = EXCLUDED.visual_hash
 RETURNING id, media_item_id, asset_type, source, local_path, remote_url, language, label, sort_order, width, height, file_size, score, likes, aspect, created_at, content_hash, visual_hash
 `
 
@@ -685,6 +776,13 @@ type UpsertPrimaryMediaAssetParams struct {
 
 // Primary visual slots are singular. A newly discovered local sidecar replaces
 // the remote value, while a later remote refresh must not displace local data.
+//
+// A selected remote identity may already exist in a labeled legacy/alternate
+// row. Remove that row before moving the identity into the primary slot, and
+// carry over its materialized bytes so the cache file does not become
+// orphaned. The delete is gated by the same local-data precedence rule as the
+// upsert: a rejected remote refresh must leave both the local primary and its
+// alternate candidate untouched.
 func (q *Queries) UpsertPrimaryMediaAsset(ctx context.Context, arg UpsertPrimaryMediaAssetParams) (MediaAsset, error) {
 	row := q.db.QueryRow(ctx, upsertPrimaryMediaAsset,
 		arg.MediaItemID,
