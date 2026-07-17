@@ -798,6 +798,22 @@ type MetadataResolutionWorkflow struct {
 	CompletedAt        pgtype.Timestamptz `json:"completed_at"`
 }
 
+type MetadataWorkflowEventConsumer struct {
+	Consumer   string             `json:"consumer"`
+	NextCursor int64              `json:"next_cursor"`
+	StreamID   pgtype.UUID        `json:"stream_id"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MetadataWorkflowEventInbox struct {
+	WorkflowKind string             `json:"workflow_kind"`
+	WorkflowID   uuid.UUID          `json:"workflow_id"`
+	Sequence     int64              `json:"sequence"`
+	State        string             `json:"state"`
+	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Movie struct {
 	ID               int64          `json:"id"`
 	MediaItemID      int64          `json:"media_item_id"`
@@ -996,18 +1012,21 @@ type ScannerEntityArtifact struct {
 }
 
 type ScannerMetadataContinuation struct {
-	ID              int64              `json:"id"`
-	Kind            string             `json:"kind"`
-	LibraryID       int64              `json:"library_id"`
-	ScannerEntityID int64              `json:"scanner_entity_id"`
-	ArtifactID      int64              `json:"artifact_id"`
-	Args            []byte             `json:"args"`
-	Priority        int16              `json:"priority"`
-	Source          string             `json:"source"`
-	NextAttemptAt   pgtype.Timestamptz `json:"next_attempt_at"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	ScheduledTaskID string             `json:"scheduled_task_id"`
+	ID                    int64              `json:"id"`
+	Kind                  string             `json:"kind"`
+	LibraryID             int64              `json:"library_id"`
+	ScannerEntityID       int64              `json:"scanner_entity_id"`
+	ArtifactID            int64              `json:"artifact_id"`
+	Args                  []byte             `json:"args"`
+	Priority              int16              `json:"priority"`
+	Source                string             `json:"source"`
+	NextAttemptAt         pgtype.Timestamptz `json:"next_attempt_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	ScheduledTaskID       string             `json:"scheduled_task_id"`
+	WorkflowKind          string             `json:"workflow_kind"`
+	WorkflowID            pgtype.UUID        `json:"workflow_id"`
+	WorkflowEventSequence int64              `json:"workflow_event_sequence"`
 }
 
 type ScheduledTask struct {

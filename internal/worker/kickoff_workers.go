@@ -455,11 +455,18 @@ func (w *SearchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[S
 	outcome, result, searchScanRunID, err := w.scanLibrarySearchArtifact(scanCtx, lib, job.Args.ScopePaths, job.Args.AnalysisArtifactID)
 	if err != nil {
 		if retryAfter, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
-			retryAfter, waiting := w.Backoff.searchRetryAfter(retryAfter)
-			log.Debug().Bool("poll", job.Args.Poll).Dur("retry_after", retryAfter).Int64("waiting", waiting).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("search_metadata: metadata work deferred")
+			workflow := metadataContinuationWorkflow{}
+			waiting := int64(0)
+			if workflowKind, workflowID, eventDriven := metadata.DeferredWorkWorkflow(err); eventDriven && workflowKind == "discovery" {
+				workflow = metadataContinuationWorkflow{Kind: workflowKind, ID: workflowID}
+				retryAfter = metadataSearchReconcileAfter(workflowID, retryAfter)
+			} else {
+				retryAfter, waiting = w.Backoff.searchRetryAfter(retryAfter)
+			}
+			log.Debug().Bool("poll", job.Args.Poll).Bool("event_driven", workflow.ID != "").Dur("retry_after", retryAfter).Int64("waiting", waiting).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("search_metadata: metadata work deferred")
 			pollArgs := job.Args
 			pollArgs.Poll = true
-			return parkMetadataContinuation(ctx, w.DB, pollArgs.Kind(), pollArgs.LibraryID, pollArgs.ScannerEntityID, pollArgs.AnalysisArtifactID, pollArgs, PriorityScan, source, retryAfter)
+			return parkMetadataContinuation(ctx, w.DB, pollArgs.Kind(), pollArgs.LibraryID, pollArgs.ScannerEntityID, pollArgs.AnalysisArtifactID, pollArgs, PriorityScan, source, retryAfter, workflow)
 		}
 		deleteMetadataContinuation(ctx, w.DB, job.Args.Kind(), job.Args.ScannerEntityID, job.Args.AnalysisArtifactID)
 		if markErr := scanner.MarkScannerEntityFailed(ctx, w.DB, job.Args.ScannerEntityID, "error", err); markErr != nil {
@@ -553,7 +560,7 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 			log.Info().Bool("poll", job.Args.Poll).Dur("retry_after", retryAfter).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("fetch_metadata: metadata work deferred")
 			pollArgs := job.Args
 			pollArgs.Poll = true
-			return parkMetadataContinuation(ctx, w.DB, pollArgs.Kind(), pollArgs.LibraryID, pollArgs.ScannerEntityID, pollArgs.SearchArtifactID, pollArgs, PriorityScan, source, retryAfter)
+			return parkMetadataContinuation(ctx, w.DB, pollArgs.Kind(), pollArgs.LibraryID, pollArgs.ScannerEntityID, pollArgs.SearchArtifactID, pollArgs, PriorityScan, source, retryAfter, metadataContinuationWorkflow{})
 		} else {
 			deleteMetadataContinuation(ctx, w.DB, job.Args.Kind(), job.Args.ScannerEntityID, job.Args.SearchArtifactID)
 			if markErr := scanner.MarkScannerEntityFailed(ctx, w.DB, job.Args.ScannerEntityID, "metadata_error", err); markErr != nil {

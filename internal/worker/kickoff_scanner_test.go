@@ -280,8 +280,8 @@ func TestRemoteMetadataPollContinuationsAreParkedOutsideRiver(t *testing.T) {
 
 	searchArgs := SearchLibraryMetadataArgs{LibraryID: lib.ID, MediaType: lib.MediaType, ScannerEntityID: searchEntityID, AnalysisArtifactID: analysisArtifactID, Poll: true}
 	fetchArgs := FetchLibraryMetadataArgs{LibraryID: lib.ID, MediaType: lib.MediaType, ScannerEntityID: fetchEntityID, SearchArtifactID: searchArtifactID, Poll: true}
-	require.NoError(t, parkMetadataContinuation(ctx, pool, searchArgs.Kind(), lib.ID, searchEntityID, analysisArtifactID, searchArgs, PriorityScan, "manual", time.Minute))
-	require.NoError(t, parkMetadataContinuation(ctx, pool, fetchArgs.Kind(), lib.ID, fetchEntityID, searchArtifactID, fetchArgs, PriorityScan, "", time.Minute))
+	require.NoError(t, parkMetadataContinuation(ctx, pool, searchArgs.Kind(), lib.ID, searchEntityID, analysisArtifactID, searchArgs, PriorityScan, "manual", time.Minute, metadataContinuationWorkflow{}))
+	require.NoError(t, parkMetadataContinuation(ctx, pool, fetchArgs.Kind(), lib.ID, fetchEntityID, searchArtifactID, fetchArgs, PriorityScan, "", time.Minute, metadataContinuationWorkflow{}))
 
 	rows, err := pool.Query(ctx, `
 		SELECT kind, args->>'poll', source

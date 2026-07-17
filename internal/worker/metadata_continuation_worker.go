@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
+	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/riverqueue/river"
@@ -15,12 +19,14 @@ import (
 )
 
 const (
-	metadataContinuationBatch      = 256
+	metadataContinuationBatch      = 100
 	metadataContinuationAdoptBatch = 10_000
 	metadataContinuationLease      = 5 * time.Minute
 	metadataSearchRetryMinimum     = time.Minute
 	metadataSearchRetryStep        = 10 * time.Second
 	metadataSearchRetryMaximum     = 5 * time.Minute
+	metadataSearchReconcileMinimum = 30 * time.Minute
+	metadataSearchReconcileSpread  = 10 * time.Minute
 )
 
 // MetadataContinuationSweepArgs promotes a bounded number of due remote
@@ -45,6 +51,7 @@ type MetadataContinuationSweepWorker struct {
 // avoid a COUNT query for every deferred item.
 type metadataContinuationBackoff struct {
 	searchWaiting atomic.Int64
+	lastRefresh   atomic.Int64
 }
 
 func newMetadataContinuationBackoff() *metadataContinuationBackoff {
@@ -55,8 +62,21 @@ func (b *metadataContinuationBackoff) refresh(ctx context.Context, db queueops.D
 	if b == nil {
 		return nil
 	}
+	now := time.Now().UnixNano()
+	last := b.lastRefresh.Load()
+	if last > 0 && time.Duration(now-last) < time.Minute {
+		return nil
+	}
+	if !b.lastRefresh.CompareAndSwap(last, now) {
+		return nil
+	}
 	var waiting int64
-	if err := db.QueryRow(ctx, `SELECT count(*) FROM scanner_metadata_continuations WHERE kind = 'search_metadata'`).Scan(&waiting); err != nil {
+	if err := db.QueryRow(ctx, `
+		SELECT count(*)
+		FROM scanner_metadata_continuations
+		WHERE kind = 'search_metadata' AND workflow_id IS NULL
+	`).Scan(&waiting); err != nil {
+		b.lastRefresh.Store(last)
 		return err
 	}
 	b.searchWaiting.Store(waiting)
@@ -78,6 +98,28 @@ func (b *metadataContinuationBackoff) searchRetryAfter(providerDelay time.Durati
 	return adaptive, waiting
 }
 
+// metadataSearchReconcileAfter is the slow correctness backstop for a
+// discovery that should normally be woken by the workflow event feed. Stable
+// jitter keeps a bulk scan from making every fallback due in the same sweep.
+func metadataSearchReconcileAfter(workflowID string, providerDelay time.Duration) time.Duration {
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(workflowID))
+	spreadSeconds := uint32(metadataSearchReconcileSpread / time.Second)
+	delay := metadataSearchReconcileMinimum
+	if spreadSeconds > 0 {
+		delay += time.Duration(hash.Sum32()%spreadSeconds) * time.Second
+	}
+	if providerDelay > delay {
+		return providerDelay
+	}
+	return delay
+}
+
+type metadataContinuationWorkflow struct {
+	Kind string
+	ID   string
+}
+
 type metadataContinuationRow struct {
 	ID       int64
 	Kind     string
@@ -86,13 +128,28 @@ type metadataContinuationRow struct {
 	Source   string
 }
 
-func parkMetadataContinuation(ctx context.Context, db queueops.DB, kind string, libraryID, scannerEntityID, artifactID int64, args any, priority int, source string, retryAfter time.Duration) error {
+func parkMetadataContinuation(ctx context.Context, db queueops.DB, kind string, libraryID, scannerEntityID, artifactID int64, args any, priority int, source string, retryAfter time.Duration, workflow metadataContinuationWorkflow) error {
 	argsJSON, err := json.Marshal(args)
 	if err != nil {
 		return fmt.Errorf("marshal metadata continuation: %w", err)
 	}
 	if retryAfter < time.Second {
 		retryAfter = time.Second
+	}
+	workflow.Kind = strings.TrimSpace(workflow.Kind)
+	workflow.ID = strings.TrimSpace(workflow.ID)
+	var workflowUUID pgtype.UUID
+	if workflow.ID != "" {
+		parsed, parseErr := uuid.Parse(workflow.ID)
+		if parseErr != nil {
+			return fmt.Errorf("park metadata continuation: invalid workflow ID %q: %w", workflow.ID, parseErr)
+		}
+		if workflow.Kind == "" {
+			return fmt.Errorf("park metadata continuation: workflow kind is required with ID %s", workflow.ID)
+		}
+		workflowUUID = pgtype.UUID{Bytes: [16]byte(parsed), Valid: true}
+	} else {
+		workflow.Kind = ""
 	}
 	var scheduledTaskID string
 	switch typed := args.(type) {
@@ -103,17 +160,46 @@ func parkMetadataContinuation(ctx context.Context, db queueops.DB, kind string, 
 	}
 	_, err = db.Exec(ctx, `
 		INSERT INTO scanner_metadata_continuations
-			(kind, library_id, scanner_entity_id, artifact_id, args, priority, source, scheduled_task_id, next_attempt_at)
-		VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)
+			(kind, library_id, scanner_entity_id, artifact_id, args, priority, source, scheduled_task_id,
+			 next_attempt_at, workflow_kind, workflow_id, workflow_event_sequence)
+		VALUES (
+			$1, $2, $3, $4, $5::jsonb, $6, $7, $8,
+			CASE WHEN COALESCE((
+				SELECT sequence FROM metadata_workflow_event_inbox
+				WHERE workflow_kind = $10 AND workflow_id = $11
+			), 0) > 0 THEN now() ELSE $9 END,
+			$10, $11,
+			COALESCE((
+				SELECT sequence FROM metadata_workflow_event_inbox
+				WHERE workflow_kind = $10 AND workflow_id = $11
+			), 0)
+		)
 		ON CONFLICT (kind, scanner_entity_id, artifact_id) DO UPDATE
 		SET library_id = EXCLUDED.library_id,
 		    args = EXCLUDED.args,
 		    priority = EXCLUDED.priority,
 		    source = EXCLUDED.source,
 		    scheduled_task_id = EXCLUDED.scheduled_task_id,
-		    next_attempt_at = EXCLUDED.next_attempt_at,
+		    next_attempt_at = CASE
+		        WHEN scanner_metadata_continuations.workflow_kind = EXCLUDED.workflow_kind
+		         AND scanner_metadata_continuations.workflow_id IS NOT DISTINCT FROM EXCLUDED.workflow_id
+		         AND EXCLUDED.workflow_event_sequence > scanner_metadata_continuations.workflow_event_sequence
+		        THEN LEAST($9, now())
+		        WHEN scanner_metadata_continuations.workflow_kind <> EXCLUDED.workflow_kind
+		          OR scanner_metadata_continuations.workflow_id IS DISTINCT FROM EXCLUDED.workflow_id
+		        THEN EXCLUDED.next_attempt_at
+		        ELSE $9
+		    END,
+		    workflow_event_sequence = CASE
+		        WHEN scanner_metadata_continuations.workflow_kind = EXCLUDED.workflow_kind
+		         AND scanner_metadata_continuations.workflow_id IS NOT DISTINCT FROM EXCLUDED.workflow_id
+		        THEN GREATEST(scanner_metadata_continuations.workflow_event_sequence, EXCLUDED.workflow_event_sequence)
+		        ELSE EXCLUDED.workflow_event_sequence
+		    END,
+		    workflow_kind = EXCLUDED.workflow_kind,
+		    workflow_id = EXCLUDED.workflow_id,
 		    updated_at = now()
-	`, kind, libraryID, scannerEntityID, artifactID, argsJSON, priority, source, scheduledTaskID, time.Now().Add(retryAfter))
+	`, kind, libraryID, scannerEntityID, artifactID, argsJSON, priority, source, scheduledTaskID, time.Now().Add(retryAfter), workflow.Kind, workflowUUID)
 	if err != nil {
 		return fmt.Errorf("park metadata continuation: %w", err)
 	}
@@ -307,7 +393,8 @@ func (w *MetadataContinuationSweepWorker) Work(ctx context.Context, _ *river.Job
 		return fmt.Errorf("claim metadata continuations: %w", err)
 	}
 
-	enqueued := 0
+	inserts := make([]river.InsertManyParams, 0, len(claimed))
+	insertRows := make([]metadataContinuationRow, 0, len(claimed))
 	for _, row := range claimed {
 		var args river.JobArgs
 		var opts river.InsertOpts
@@ -336,12 +423,24 @@ func (w *MetadataContinuationSweepWorker) Work(ctx context.Context, _ *river.Job
 		}
 
 		opts.Priority = row.Priority
-		if _, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, row.Source)); err != nil {
-			w.retrySoon(ctx, row.ID)
-			log.Warn().Err(err).Int64("continuation_id", row.ID).Str("kind", row.Kind).Msg("enqueue metadata continuation failed")
-			continue
+		inserts = append(inserts, river.InsertManyParams{Args: args, InsertOpts: applyScheduledJobSource(opts, row.Source)})
+		insertRows = append(insertRows, row)
+	}
+
+	enqueued := 0
+	if len(inserts) > 0 {
+		results, insertErr := rc.InsertMany(ctx, inserts)
+		if insertErr != nil {
+			for _, row := range insertRows {
+				w.retrySoon(ctx, row.ID)
+			}
+			return fmt.Errorf("enqueue metadata continuation batch: %w", insertErr)
 		}
-		enqueued++
+		for _, result := range results {
+			if !result.UniqueSkippedAsDuplicate {
+				enqueued++
+			}
+		}
 	}
 
 	if adopted > 0 || enqueued > 0 {

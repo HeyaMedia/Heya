@@ -144,22 +144,24 @@ In `internal/worker/worker.go`:
 - **Durable remote hand-off.** HeyaMetadata `202` discovery and resolution
   identifiers are stored in `metadata_resolution_workflows`. The submission
   job parks one compact row in `scanner_metadata_continuations` and completes,
-  immediately freeing submission capacity for another entity. A single
-  five-second sweeper claims at most 256 due continuations and promotes those
-  checks onto `search_metadata_poll_*` / `fetch_metadata_poll_*`; another
-  `Retry-After` parks the row again instead of snoozing a River job. A
-  deferred `search_metadata` check waits at least 60 seconds; the interval adds
-  10 seconds per 100 waiting searches, capped at five minutes. A longer
-  provider `Retry-After` always wins. This keeps large discovery populations
-  from cycling through River and flooding production logs while preserving
-  fast first submissions. A five-minute lease plus River's active-args
-  uniqueness makes the hand-off
+  immediately freeing submission capacity for another entity. Discovery waits
+  are event-driven: once a minute `sync_metadata_workflow_events` reads the
+  gap-free HeyaMetadata completion feed, persists only IDs already known to
+  this server, and transactionally wakes their parked rows while advancing the
+  cursor. The small inbox closes the race where an event lands just before the
+  continuation is parked; repeated sequences and unknown workflow kinds/IDs
+  are harmless. Completed-at-submission discoveries are never parked.
+  A five-second sweeper promotes at most 100 ready continuations at a time via
+  one batched River insert onto `search_metadata_poll_*` /
+  `fetch_metadata_poll_*`. Search discoveries retain a jittered 30–40 minute
+  reconciliation check as a correctness backstop; transient submissions with
+  no workflow ID retain the adaptive one-to-five-minute retry, and longer
+  provider `Retry-After` values always win. Resolution jobs continue through
+  that bounded reconciliation path until their workflow family joins the feed.
+  A five-minute lease plus River's active-args uniqueness makes the hand-off
   crash-safe without stacking duplicates. During the rollout the same sweeper
   adopts at most 10,000 legacy scheduled poll jobs per tick, so an old backlog
-  drains out of River without one enormous migration transaction. HTTP
-  requests remain entity-scoped and upstream workflows can still be numerous,
-  but River's hot table now contains only bounded due/in-flight checks rather
-  than the entire waiting population.
+  drains out of River without one enormous migration transaction.
 - **Enrich pipeline** (`enrich_media_item`, `person_fetch`, `ratings_fetch`,
   `force_refresh_metadata`) is MaxWorkers=1 per kind for upstream rate-limit
   safety. The `enrich_media_item` queue keeps the priority-banded ordering:
@@ -299,7 +301,8 @@ attributed to a different dead `attempted_by` client.
   committed V2 contract snapshot and generated transport. Run
   `make gen-heyametadata-client`; `make check-heyametadata-client` proves drift.
 - **`internal/metadata/heyametadata/client.go`** wraps typed health, entity,
-  image, ratings, relations, top-track, release, and change-feed operations.
+  image, ratings, relations, top-track, release, change-feed, and workflow-event
+  operations.
 - **`workflow.go`** owns opaque selected IDs plus durable
   search → discovery → resolution/job polling state. Request-scoped provider
   credentials are headers only and never enter workflow rows or cache keys;
@@ -315,6 +318,10 @@ attributed to a different dead `attempted_by` client.
   500. River refresh inserts and cursor advancement share one pgx transaction.
   The same worker gradually binds pre-V2 local rows that still have only
   provider evidence.
+- **`metadata_workflow_events_worker.go`** consumes the independent workflow
+  cursor in pages of 500. It filters the global stream against locally known
+  discovery IDs and commits the inbox wake plus cursor in one transaction;
+  replay, stream resets, and repeated run IDs remain idempotent.
 
 ### Identity and auto-selection
 

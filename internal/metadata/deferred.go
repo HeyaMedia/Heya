@@ -31,8 +31,10 @@ func DeferredRemoteWorkDelay(ctx context.Context) (time.Duration, bool) {
 // resource. Callers should retry the same durable operation after RetryAfter;
 // the provider has already persisted the discovery or resolution identifier.
 type DeferredWorkError struct {
-	Operation  string
-	RetryAfter time.Duration
+	Operation    string
+	RetryAfter   time.Duration
+	WorkflowKind string
+	WorkflowID   string
 }
 
 func (e *DeferredWorkError) Error() string {
@@ -53,4 +55,16 @@ func DeferredWorkRetryAfter(err error) (time.Duration, bool) {
 		return 0, false
 	}
 	return deferred.RetryAfter, true
+}
+
+// DeferredWorkWorkflow returns the durable upstream workflow that can wake a
+// parked operation through a completion feed. Transient submission failures
+// and workflow families without a completion feed deliberately return false
+// and continue using the slow reconciliation schedule.
+func DeferredWorkWorkflow(err error) (kind, id string, ok bool) {
+	var deferred *DeferredWorkError
+	if !errors.As(err, &deferred) || deferred.WorkflowKind == "" || deferred.WorkflowID == "" {
+		return "", "", false
+	}
+	return deferred.WorkflowKind, deferred.WorkflowID, true
 }

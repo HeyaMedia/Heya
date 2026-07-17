@@ -1219,6 +1219,33 @@ components:
           format: uri
           type: string
       type: object
+    Event:
+      additionalProperties: false
+      properties:
+        completed_at:
+          type: string
+        id:
+          format: uuid
+          type: string
+        kind:
+          enum:
+            - discovery
+          type: string
+        sequence:
+          format: int64
+          type: integer
+        state:
+          enum:
+            - completed
+            - failed
+          type: string
+      required:
+        - sequence
+        - kind
+        - id
+        - state
+        - completed_at
+      type: object
     Evidence:
       additionalProperties: false
       properties:
@@ -2516,6 +2543,36 @@ components:
         - username
         - role
         - created_at
+      type: object
+    WorkflowEventsOutputBody:
+      additionalProperties: false
+      properties:
+        $schema:
+          description: A URL to the JSON Schema for this object.
+          example: http://localhost:3030/schemas/WorkflowEventsOutputBody.json
+          format: uri
+          readOnly: true
+          type: string
+        events:
+          items:
+            $ref: "#/components/schemas/Event"
+          type: array
+        head_cursor:
+          format: int64
+          minimum: 0
+          type: integer
+        next_cursor:
+          format: int64
+          minimum: 0
+          type: integer
+        stream_id:
+          format: uuid
+          type: string
+      required:
+        - stream_id
+        - head_cursor
+        - events
+        - next_cursor
       type: object
 info:
   description: Canonical, provenance-aware metadata for Heya media servers.
@@ -3991,6 +4048,9 @@ paths:
           description: OK
           headers:
             Server-Timing:
+              schema:
+                type: string
+            Vary:
               schema:
                 type: string
         default:
@@ -5598,6 +5658,66 @@ paths:
       summary: Get a canonical conventional TV show
       tags:
         - TV
+  /api/v2/workflow-events:
+    get:
+      description: Announces async workflows (discovery runs) reaching completed or failed, including completions that never touch a canonical entity and therefore never appear in /api/v2/changes. Consumers waiting on parked workflows should poll this feed with their cursor instead of polling each workflow, and must reset to cursor zero and replay idempotently after workflow_stream_changed or workflow_cursor_ahead.
+      operationId: workflow-events
+      parameters:
+        - explode: false
+          in: query
+          name: after
+          schema:
+            format: int64
+            minimum: 0
+            type: integer
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            default: 100
+            format: int64
+            maximum: 500
+            minimum: 1
+            type: integer
+        - description: Previously observed stream identity; a mismatch returns workflow_stream_changed
+          explode: false
+          in: query
+          name: stream_id
+          schema:
+            description: Previously observed stream identity; a mismatch returns workflow_stream_changed
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowEventsOutputBody"
+          description: OK
+          headers:
+            Server-Timing:
+              schema:
+                type: string
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: The supplied stream identity changed or the cursor is ahead of the available stream
+          headers:
+            Server-Timing:
+              description: Origin database/read-model phase duration
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      summary: Read the gap-free workflow completion feed
+      tags:
+        - Changes
   /v1/check:
     post:
       description: TLS-dials the caller's own public source IP and requested port, then verifies a short-lived challenge at /api/connectivity/probe. A caller sharing this service's public egress IP receives same_network without a misleading hairpin probe. The request can never select another target address.

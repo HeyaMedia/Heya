@@ -135,6 +135,39 @@ func (e EntityRelationResolutionState) Valid() bool {
 	}
 }
 
+// Defines values for EventKind.
+const (
+	Discovery EventKind = "discovery"
+)
+
+// Valid indicates whether the value is a known member of the EventKind enum.
+func (e EventKind) Valid() bool {
+	switch e {
+	case Discovery:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EventState.
+const (
+	EventStateCompleted EventState = "completed"
+	EventStateFailed    EventState = "failed"
+)
+
+// Valid indicates whether the value is a known member of the EventState enum.
+func (e EventState) Valid() bool {
+	switch e {
+	case EventStateCompleted:
+		return true
+	case EventStateFailed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for FingerprintMatchCreateInputBodyEncoding.
 const (
 	Acoustid               FingerprintMatchCreateInputBodyEncoding = "acoustid"
@@ -275,16 +308,16 @@ func (e ResolutionBodyState) Valid() bool {
 
 // Defines values for ResultStatus.
 const (
-	Completed      ResultStatus = "completed"
-	NeedsSelection ResultStatus = "needs_selection"
+	ResultStatusCompleted      ResultStatus = "completed"
+	ResultStatusNeedsSelection ResultStatus = "needs_selection"
 )
 
 // Valid indicates whether the value is a known member of the ResultStatus enum.
 func (e ResultStatus) Valid() bool {
 	switch e {
-	case Completed:
+	case ResultStatusCompleted:
 		return true
-	case NeedsSelection:
+	case ResultStatusNeedsSelection:
 		return true
 	default:
 		return false
@@ -965,6 +998,21 @@ type ErrorModel struct {
 	Type *string `json:"type,omitempty"`
 }
 
+// Event defines model for Event.
+type Event struct {
+	CompletedAt string             `json:"completed_at"`
+	Id          openapi_types.UUID `json:"id"`
+	Kind        EventKind          `json:"kind"`
+	Sequence    int64              `json:"sequence"`
+	State       EventState         `json:"state"`
+}
+
+// EventKind defines model for Event.Kind.
+type EventKind string
+
+// EventState defines model for Event.State.
+type EventState string
+
 // Evidence defines model for Evidence.
 type Evidence struct {
 	Detail  *string `json:"detail,omitempty"`
@@ -1487,6 +1535,16 @@ type User struct {
 
 // UserRole defines model for User.Role.
 type UserRole string
+
+// WorkflowEventsOutputBody defines model for WorkflowEventsOutputBody.
+type WorkflowEventsOutputBody struct {
+	// Schema A URL to the JSON Schema for this object.
+	Schema     *string            `json:"$schema,omitempty"`
+	Events     []Event            `json:"events"`
+	HeadCursor int64              `json:"head_cursor"`
+	NextCursor int64              `json:"next_cursor"`
+	StreamId   openapi_types.UUID `json:"stream_id"`
+}
 
 // AdminJobsParams defines parameters for AdminJobs.
 type AdminJobsParams struct {
@@ -2085,6 +2143,15 @@ type TvShowDetailParams struct {
 	AcceptLanguage *string `json:"Accept-Language,omitempty"`
 }
 
+// WorkflowEventsParams defines parameters for WorkflowEvents.
+type WorkflowEventsParams struct {
+	After *int64 `form:"after,omitempty" json:"after,omitempty"`
+	Limit *int64 `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// StreamId Previously observed stream identity; a mismatch returns workflow_stream_changed
+	StreamId *openapi_types.UUID `form:"stream_id,omitempty" json:"stream_id,omitempty"`
+}
+
 // AdminJobActionJSONRequestBody defines body for AdminJobAction for application/json ContentType.
 type AdminJobActionJSONRequestBody = AdminJobActionInputBody
 
@@ -2376,6 +2443,9 @@ type ClientInterface interface {
 
 	// TvShowDetail request
 	TvShowDetail(ctx context.Context, id openapi_types.UUID, params *TvShowDetailParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// WorkflowEvents request
+	WorkflowEvents(ctx context.Context, params *WorkflowEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ConnectivityCheckWithBody request with any body
 	ConnectivityCheckWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -3144,6 +3214,18 @@ func (c *Client) DiscoverTvShow(ctx context.Context, params *DiscoverTvShowParam
 
 func (c *Client) TvShowDetail(ctx context.Context, id openapi_types.UUID, params *TvShowDetailParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewTvShowDetailRequest(c.Server, id, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) WorkflowEvents(ctx context.Context, params *WorkflowEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewWorkflowEventsRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -7366,6 +7448,84 @@ func NewTvShowDetailRequest(server string, id openapi_types.UUID, params *TvShow
 	return req, nil
 }
 
+// NewWorkflowEventsRequest generates requests for WorkflowEvents
+func NewWorkflowEventsRequest(server string, params *WorkflowEventsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v2/workflow-events")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.After != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", false, "after", *params.After, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int64"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", false, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: "int64"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.StreamId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", false, "stream_id", *params.StreamId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "uuid"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewConnectivityCheckRequest calls the generic ConnectivityCheck builder with application/json body
 func NewConnectivityCheckRequest(server string, body ConnectivityCheckJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -7655,6 +7815,9 @@ type ClientWithResponsesInterface interface {
 
 	// TvShowDetailWithResponse request
 	TvShowDetailWithResponse(ctx context.Context, id openapi_types.UUID, params *TvShowDetailParams, reqEditors ...RequestEditorFn) (*TvShowDetailResponse, error)
+
+	// WorkflowEventsWithResponse request
+	WorkflowEventsWithResponse(ctx context.Context, params *WorkflowEventsParams, reqEditors ...RequestEditorFn) (*WorkflowEventsResponse, error)
 
 	// ConnectivityCheckWithBodyWithResponse request with any body
 	ConnectivityCheckWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ConnectivityCheckResponse, error)
@@ -9319,6 +9482,38 @@ func (r TvShowDetailResponse) ContentType() string {
 	return ""
 }
 
+type WorkflowEventsResponse struct {
+	Body                          []byte
+	HTTPResponse                  *http.Response
+	JSON200                       *WorkflowEventsOutputBody
+	ApplicationproblemJSON409     *ErrorModel
+	ApplicationproblemJSONDefault *ErrorModel
+}
+
+// Status returns HTTPResponse.Status
+func (r WorkflowEventsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r WorkflowEventsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r WorkflowEventsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ConnectivityCheckResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -9943,6 +10138,15 @@ func (c *ClientWithResponses) TvShowDetailWithResponse(ctx context.Context, id o
 		return nil, err
 	}
 	return ParseTvShowDetailResponse(rsp)
+}
+
+// WorkflowEventsWithResponse request returning *WorkflowEventsResponse
+func (c *ClientWithResponses) WorkflowEventsWithResponse(ctx context.Context, params *WorkflowEventsParams, reqEditors ...RequestEditorFn) (*WorkflowEventsResponse, error) {
+	rsp, err := c.WorkflowEvents(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseWorkflowEventsResponse(rsp)
 }
 
 // ConnectivityCheckWithBodyWithResponse request with arbitrary body returning *ConnectivityCheckResponse
@@ -11968,6 +12172,46 @@ func ParseTvShowDetailResponse(rsp *http.Response) (*TvShowDetailResponse, error
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseWorkflowEventsResponse parses an HTTP response from a WorkflowEventsWithResponse call
+func ParseWorkflowEventsResponse(rsp *http.Response) (*WorkflowEventsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &WorkflowEventsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest WorkflowEventsOutputBody
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON409 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest ErrorModel

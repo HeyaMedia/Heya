@@ -783,6 +783,9 @@ func TestAsyncDiscoveryIsDeferredForDurableScannerWork(t *testing.T) {
 	if retryAfter, ok := metadata.DeferredWorkRetryAfter(err); !ok || retryAfter != 30*time.Second {
 		t.Fatalf("initial deferred error = %v, retry_after = %s, ok = %v", err, retryAfter, ok)
 	}
+	if kind, id, ok := metadata.DeferredWorkWorkflow(err); !ok || kind != "discovery" || id != discoveryID {
+		t.Fatalf("initial deferred workflow = (%q, %q, %v), want discovery %s", kind, id, ok, discoveryID)
+	}
 	if discoveryPolls != 0 {
 		t.Fatalf("initial request polled %d times; durable caller should be released", discoveryPolls)
 	}
@@ -795,6 +798,9 @@ func TestAsyncDiscoveryIsDeferredForDurableScannerWork(t *testing.T) {
 	if retryAfter, ok := metadata.DeferredWorkRetryAfter(err); !ok || retryAfter != 30*time.Second {
 		t.Fatalf("working deferred error = %v, retry_after = %s, ok = %v", err, retryAfter, ok)
 	}
+	if kind, workflowID, ok := metadata.DeferredWorkWorkflow(err); !ok || kind != "discovery" || workflowID != discoveryID {
+		t.Fatalf("working deferred workflow = (%q, %q, %v), want discovery %s", kind, workflowID, ok, discoveryID)
+	}
 	if discoveryPolls != 1 {
 		t.Fatalf("deferred retry polls = %d, want exactly one", discoveryPolls)
 	}
@@ -805,6 +811,32 @@ func TestAsyncDiscoveryIsDeferredForDurableScannerWork(t *testing.T) {
 	}
 	if discoveryPolls != 2 {
 		t.Fatalf("completion retry polls = %d, want two total", discoveryPolls)
+	}
+}
+
+func TestCompletedDiscoveryAtSubmissionIsNeverParked(t *testing.T) {
+	const discoveryID = "99999999-9999-4999-8999-999999999999"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v2/discoveries" {
+			http.Error(w, "unexpected endpoint", http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"` + discoveryID + `","state":"completed","expires_at":"2099-01-01T00:00:00Z","result":{"kind":"movie","query":"The Matrix","recommendation":"no_match","status":"completed","schema_version":1,"observed_at":"2026-01-01T00:00:00Z","candidates":[]}}`))
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := metadata.WithDeferredRemoteWork(context.Background(), 30*time.Second)
+
+	discovery, err := client.Discover(ctx, gen.Request{Kind: "movie", Query: strPointer("The Matrix")}, ProviderCredentials{}, nil)
+	if err != nil || discovery == nil || discovery.State != gen.DiscoveryResourceStateCompleted {
+		t.Fatalf("completed submission = %#v, err = %v", discovery, err)
+	}
+	if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
+		t.Fatalf("completed submission was treated as deferred: %v", err)
 	}
 }
 

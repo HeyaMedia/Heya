@@ -195,7 +195,7 @@ func (c *Client) Discover(ctx context.Context, request gen.Request, credentials 
 		}
 		return resource, discoveryTerminalError(resource)
 	}
-	if err := deferredWorkError(ctx, "metadata discovery "+discoveryID.String(), response.HTTPResponse); err != nil {
+	if err := deferredWorkflowError(ctx, "metadata discovery "+discoveryID.String(), "discovery", discoveryID.String(), response.HTTPResponse); err != nil {
 		return nil, err
 	}
 	return c.pollDiscovery(ctx, discoveryID, credentials, pollDelay(200*time.Millisecond, response.HTTPResponse))
@@ -204,7 +204,7 @@ func (c *Client) Discover(ctx context.Context, request gen.Request, credentials 
 func (c *Client) checkDiscovery(ctx context.Context, id uuid.UUID, credentials ProviderCredentials) (*gen.DiscoveryResource, error) {
 	response, err := c.gen.GetDiscoveryWithResponse(ctx, id, c.credentialEditor(credentials))
 	if err != nil {
-		if deferred := transientDeferredWorkError(ctx, "retry metadata discovery "+id.String()+" after "+err.Error(), nil); deferred != nil {
+		if deferred := transientDeferredWorkflowError(ctx, "retry metadata discovery "+id.String()+" after "+err.Error(), "discovery", id.String(), nil); deferred != nil {
 			return nil, deferred
 		}
 		return nil, fmt.Errorf("poll metadata discovery: %w", err)
@@ -214,12 +214,12 @@ func (c *Client) checkDiscovery(ctx context.Context, id uuid.UUID, credentials P
 		return resource, discoveryTerminalError(resource)
 	}
 	if response.StatusCode() != http.StatusOK || response.JSON200 == nil {
-		if deferred := transientDeferredWorkError(ctx, "retry metadata discovery "+id.String(), response.HTTPResponse); deferred != nil {
+		if deferred := transientDeferredWorkflowError(ctx, "retry metadata discovery "+id.String(), "discovery", id.String(), response.HTTPResponse); deferred != nil {
 			return nil, deferred
 		}
 		return nil, responseError("poll metadata discovery", response.StatusCode(), response.Body)
 	}
-	return nil, deferredWorkError(ctx, "metadata discovery "+id.String(), response.HTTPResponse)
+	return nil, deferredWorkflowError(ctx, "metadata discovery "+id.String(), "discovery", id.String(), response.HTTPResponse)
 }
 
 func (c *Client) pollDiscovery(ctx context.Context, id uuid.UUID, credentials ProviderCredentials, delay time.Duration) (*gen.DiscoveryResource, error) {
@@ -473,6 +473,16 @@ func deferredWorkError(ctx context.Context, operation string, response *http.Res
 	return &metadata.DeferredWorkError{Operation: operation, RetryAfter: delay}
 }
 
+func deferredWorkflowError(ctx context.Context, operation, workflowKind, workflowID string, response *http.Response) error {
+	err := deferredWorkError(ctx, operation, response)
+	var deferred *metadata.DeferredWorkError
+	if errors.As(err, &deferred) {
+		deferred.WorkflowKind = workflowKind
+		deferred.WorkflowID = workflowID
+	}
+	return err
+}
+
 func transientDeferredWorkError(ctx context.Context, operation string, response *http.Response) error {
 	if _, deferred := metadata.DeferredRemoteWorkDelay(ctx); !deferred {
 		return nil
@@ -484,6 +494,16 @@ func transientDeferredWorkError(ctx context.Context, operation string, response 
 		}
 	}
 	return deferredWorkError(ctx, operation, response)
+}
+
+func transientDeferredWorkflowError(ctx context.Context, operation, workflowKind, workflowID string, response *http.Response) error {
+	err := transientDeferredWorkError(ctx, operation, response)
+	var deferred *metadata.DeferredWorkError
+	if errors.As(err, &deferred) {
+		deferred.WorkflowKind = workflowKind
+		deferred.WorkflowID = workflowID
+	}
+	return err
 }
 
 func randomDuration(max time.Duration) time.Duration {

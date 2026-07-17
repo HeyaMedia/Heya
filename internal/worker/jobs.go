@@ -52,6 +52,17 @@ func (SyncMetadataChangesArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
+type SyncMetadataWorkflowEventsArgs struct{}
+
+func (SyncMetadataWorkflowEventsArgs) Kind() string { return "sync_metadata_workflow_events" }
+func (SyncMetadataWorkflowEventsArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "sync_metadata_workflow_events",
+		MaxAttempts: 10,
+		UniqueOpts:  uniqueWhileActive(),
+	}
+}
+
 type DownloadImageArgs struct {
 	MediaItemID int64  `json:"media_item_id"`
 	PersonID    int64  `json:"person_id,omitempty"`

@@ -90,6 +90,21 @@ type ChangePage struct {
 	NextCursor int64
 }
 
+type WorkflowEvent struct {
+	Sequence    int64
+	Kind        string
+	ID          string
+	State       string
+	CompletedAt time.Time
+}
+
+type WorkflowEventPage struct {
+	Events     []WorkflowEvent
+	StreamID   string
+	HeadCursor int64
+	NextCursor int64
+}
+
 // ChangeStreamConflict tells a durable consumer that its saved cursor cannot
 // safely continue against the current HeyaMetadata database. The caller must
 // adopt StreamID, reset to cursor zero, and replay idempotently.
@@ -101,6 +116,19 @@ type ChangeStreamConflict struct {
 
 func (e *ChangeStreamConflict) Error() string {
 	return fmt.Sprintf("heyametadata change stream conflict %s (stream %s, head %d)", e.Code, e.StreamID, e.HeadCursor)
+}
+
+// WorkflowStreamConflict is the workflow completion feed equivalent of
+// ChangeStreamConflict. The consumer must clear stream-scoped wake state,
+// adopt StreamID, and replay from zero.
+type WorkflowStreamConflict struct {
+	Code       string
+	StreamID   string
+	HeadCursor int64
+}
+
+func (e *WorkflowStreamConflict) Error() string {
+	return fmt.Sprintf("heyametadata workflow stream conflict %s (stream %s, head %d)", e.Code, e.StreamID, e.HeadCursor)
 }
 
 // RecordingLyrics is the provider-transparent lyric evidence Heya needs for
@@ -160,6 +188,60 @@ func (c *Client) Changes(ctx context.Context, after, limit int64, streamID strin
 			Sequence: entry.Sequence, EntityID: entry.EntityId.String(), EntityKind: entry.EntityKind,
 			Slug: entry.Slug, ChangeType: entry.ChangeType, ChangedScopes: scopes,
 			ProjectionVersion: entry.ProjectionVersion,
+		})
+	}
+	return page, nil
+}
+
+// WorkflowEvents reads one page from HeyaMetadata's gap-free async workflow
+// completion feed. New workflow kinds are kept as strings so consumers can
+// ignore families they do not understand without requiring a client update.
+func (c *Client) WorkflowEvents(ctx context.Context, after, limit int64, streamID string) (WorkflowEventPage, error) {
+	params := &gen.WorkflowEventsParams{After: &after, Limit: &limit}
+	if strings.TrimSpace(streamID) != "" {
+		id, err := uuid.Parse(streamID)
+		if err != nil {
+			return WorkflowEventPage{}, fmt.Errorf("read metadata workflow events: invalid stream ID %q: %w", streamID, err)
+		}
+		params.StreamId = &id
+	}
+	response, err := c.gen.WorkflowEventsWithResponse(ctx, params)
+	if err != nil {
+		return WorkflowEventPage{}, fmt.Errorf("read metadata workflow events after %d: %w", after, err)
+	}
+	if response.StatusCode() == http.StatusConflict && response.ApplicationproblemJSON409 != nil {
+		problem := response.ApplicationproblemJSON409
+		code := ""
+		if problem.Code != nil {
+			code = *problem.Code
+		}
+		if code == "workflow_cursor_ahead" || code == "workflow_stream_changed" {
+			conflict := &WorkflowStreamConflict{Code: code}
+			if problem.StreamId != nil {
+				conflict.StreamID = problem.StreamId.String()
+			}
+			if problem.HeadCursor != nil {
+				conflict.HeadCursor = *problem.HeadCursor
+			}
+			return WorkflowEventPage{}, conflict
+		}
+	}
+	if response.StatusCode() != http.StatusOK || response.JSON200 == nil {
+		return WorkflowEventPage{}, responseError("read metadata workflow events", response.StatusCode(), response.Body)
+	}
+	page := WorkflowEventPage{
+		StreamID: response.JSON200.StreamId.String(), HeadCursor: response.JSON200.HeadCursor,
+		NextCursor: response.JSON200.NextCursor,
+		Events:     make([]WorkflowEvent, 0, len(response.JSON200.Events)),
+	}
+	for _, event := range response.JSON200.Events {
+		completedAt, err := time.Parse(time.RFC3339Nano, event.CompletedAt)
+		if err != nil {
+			return WorkflowEventPage{}, fmt.Errorf("workflow event %d has invalid completed_at %q: %w", event.Sequence, event.CompletedAt, err)
+		}
+		page.Events = append(page.Events, WorkflowEvent{
+			Sequence: event.Sequence, Kind: string(event.Kind), ID: event.Id.String(),
+			State: string(event.State), CompletedAt: completedAt,
 		})
 	}
 	return page, nil
