@@ -1,9 +1,42 @@
 # Daily dev:   make db-up                 → Postgres only (:5440)
-# Full stack:  docker compose up -d       → Postgres + released Heya on :8080
+# Full stack:  docker compose up -d       → Postgres + Heya API + worker
 #
-# The heya service runs the published image (ghcr.io, tag `latest`). Update it
-# with `docker compose pull heya && docker compose up -d heya`. Don't run it
-# alongside `make dev` — both want :8080.
+# Both application services run the same published image with different
+# commands. Update them together with `docker compose pull && docker compose
+# up -d`. Don't run the API service alongside `make dev` — both want :8080.
+x-heya-common: &heya-common
+  image: ghcr.io/heyamedia/heya:latest
+  depends_on:
+    postgres:
+      condition: service_healthy
+  environment:
+    HEYA_DATABASE_URL: postgres://heya:heya@postgres:5432/heya?sslmode=disable
+    # Run HeyaMetadata separately. This default reaches a host-side dev
+    # instance on :3030; override HEYA_METADATA_URL for another deployment.
+    HEYA_METADATA_URL: ${HEYA_METADATA_URL:-http://host.docker.internal:3030}
+    # First-boot admin bootstrap (ignored once an admin user exists):
+    # HEYA_ADMIN_USERNAME: admin
+    # HEYA_ADMIN_EMAIL: admin@example.com
+    # HEYA_ADMIN_PASSWORD: change-me
+    # Declare libraries from env. Keep these values and media mounts on BOTH
+    # API and worker by placing them in this shared block:
+    # HEYA_LIBRARY_0_NAME: Movies
+    # HEYA_LIBRARY_0_PATHS: /storage/Movies
+    # HEYA_LIBRARY_0_TYPE: movie
+    # Intel/AMD hardware transcode:
+    # HEYA_HWACCEL: vaapi
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  volumes:
+    # Shared state, images, caches, models, and persistent Tailscale identity.
+    - ./data/heya:/data
+    # The worker must see the same media paths recorded by the API.
+    # - /path/to/media:/storage/Movies:ro
+  # Hardware acceleration should also be shared by API + worker.
+  # devices:
+  #   - /dev/dri:/dev/dri
+  restart: unless-stopped
+
 services:
   postgres:
     image: pgvector/pgvector:pg17
@@ -26,40 +59,13 @@ services:
       retries: 12
 
   heya:
-    image: ghcr.io/heyamedia/heya:latest
+    <<: *heya-common
     container_name: heya
-    depends_on:
-      postgres:
-        condition: service_healthy
     ports:
       - "8080:8080/tcp"
       - "8080:8080/udp"
-    environment:
-      HEYA_DATABASE_URL: postgres://heya:heya@postgres:5432/heya?sslmode=disable
-      # Run HeyaMetadata separately. This default reaches a host-side dev
-      # instance on :3030; override HEYA_METADATA_URL for another deployment.
-      HEYA_METADATA_URL: ${HEYA_METADATA_URL:-http://host.docker.internal:3030}
-      # First-boot admin bootstrap (ignored once an admin user exists):
-      # HEYA_ADMIN_USERNAME: admin
-      # HEYA_ADMIN_EMAIL: admin@example.com
-      # HEYA_ADMIN_PASSWORD: change-me
-      # Declare libraries from env — name/paths/type lock in the UI, all other
-      # per-library tunables stay UI-editable (see .env.example):
-      # HEYA_LIBRARY_0_NAME: Movies
-      # HEYA_LIBRARY_0_PATHS: /storage/Movies
-      # HEYA_LIBRARY_0_TYPE: movie
-      # Intel/AMD hardware transcode (pair with the devices block below):
-      # HEYA_HWACCEL: vaapi
-    extra_hosts:
-      # Makes host.docker.internal work on Linux as well as Docker Desktop.
-      - "host.docker.internal:host-gateway"
-    volumes:
-      # Tailscale state, transcode cache, sonic models — keep this persistent.
-      - ./data/heya:/data
-      # Mount your media, then add it as a library (UI or HEYA_LIBRARY_* above):
-      # - /path/to/media:/storage/Movies:ro
-    # Intel/AMD hardware transcode — pass the render node through. NVIDIA and
-    # OpenVINO GPU image variants: see docs/deployment.md.
-    # devices:
-    #   - /dev/dri:/dev/dri
-    restart: unless-stopped
+
+  heya-worker:
+    <<: *heya-common
+    container_name: heya-worker
+    command: ["worker"]

@@ -17,24 +17,22 @@ type Config struct {
 	DatabaseURL      Field[string]
 	DatabaseMaxConns Field[int]
 	DatabaseMinConns Field[int]
-	// PassiveMode turns the server into a read-mostly guest on its database:
-	// no auto-migrate, no env bootstrap, no River workers, no filesystem
-	// watchers, no scheduler tick loop, no sonic-analysis fetcher, no startup
-	// orphan-rescue. It exists so local dev can point HEYA_DATABASE_URL at a
-	// production DB to build UI against real data without the worker pool
-	// stealing prod's queued jobs and scanning a /storage path that doesn't
-	// exist locally (which would soft-delete the whole library). The HTTP API
-	// and the read-only dashboard emitters still run. See docs/development.md.
+	// PassiveMode turns the API into a read-mostly guest on its database and
+	// prevents the dedicated worker runtime from starting: no auto-migrate, env
+	// bootstrap, River execution, filesystem watchers, schedules, model fetches,
+	// or orphan rescue. It exists so local dev can point HEYA_DATABASE_URL at a
+	// production DB without the mprocs worker stealing production jobs and
+	// scanning paths that do not exist locally. See docs/development.md.
 	PassiveMode Field[bool]
 	// AllowRemoteActive authorises ACTIVE mode (workers, watchers, scanner) to
 	// run against a NON-local database. Defaults false: a source/dev checkout
 	// pointed at a remote DB must stay PassiveMode=true, because active mode
-	// against (e.g.) prod's DB turns this process into a second worker pool on
-	// prod's queue and soft-deletes libraries when it scans paths that don't
-	// exist locally. The deployed container image sets
+	// against (e.g.) prod's DB lets local API actions enqueue into production
+	// and lets a separately launched worker consume that queue against missing
+	// paths. The deployed container image sets
 	// HEYA_ALLOW_REMOTE_ACTIVE=true — it legitimately owns its remote DB. The
-	// dev front-door (--dev-backend) can never satisfy it. Enforced in
-	// cmd/heya/cmd/serve.go before any worker starts.
+	// dev front-door (--dev-backend) can never satisfy it. Enforced by the
+	// shared serve/worker runtime guard.
 	AllowRemoteActive Field[bool]
 	// ImageProxyURL is the base URL of another Heya instance whose image bytes
 	// should be served in this one's place. Only consulted in passive mode,

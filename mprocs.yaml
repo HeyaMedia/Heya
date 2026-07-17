@@ -1,4 +1,4 @@
-# Dev supervisor for `make dev`. Three processes, one front door:
+# Dev supervisor for `make dev`. Four processes, one front door:
 #
 #   proxy  heya dev-proxy — STABLE front door on :8080. Reverse-proxies
 #          /api/* + /jellyfin/* → :3050 and /* → Nuxt :3000.
@@ -7,9 +7,11 @@
 #          after editing proxy code.
 #   api    air — hot-reloads `heya serve --dev-backend` on :3050 (API + WS
 #          through plaintext embedded Caddy; no Tailscale/remote access).
+#   worker air — independently hot-reloads `heya worker`; in passive mode it
+#          stays idle, while scripts/dev-local.sh activates it against heya_dev.
 #   web    Nuxt/Vite dev server on :3000 (HMR).
 #
-# Open http://localhost:8080. Quit (q / Ctrl+C) tears all three down cleanly.
+# Open http://localhost:8080. Quit (q / Ctrl+C) tears all four down cleanly.
 # `exec` so SIGTERM reaches each child for a clean shutdown.
 procs:
   proxy:
@@ -21,5 +23,7 @@ procs:
     # yet when air races the proxy to build into it. (.air.toml keeps
     # clean_on_exit=false so air never deletes this shared dir on exit.)
     shell: "mkdir -p tmp && go run github.com/air-verse/air@latest"
+  worker:
+    shell: "mkdir -p tmp && go run github.com/air-verse/air@latest -c .air.worker.toml"
   web:
     shell: "cd web && bun run dev"

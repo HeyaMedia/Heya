@@ -1,7 +1,8 @@
 # Heya
 
-Self-hosted media server for films, TV, music, and books — a single Go binary
-with the Nuxt SPA embedded, Postgres as the only datastore. Canonical metadata
+Self-hosted media server for films, TV, music, and books — one Go binary with
+separate serving and background-worker roles, the Nuxt SPA embedded, and
+Postgres as the only datastore. Canonical metadata
 comes from HeyaMetadata V2 (TMDB, TVDB, AniDB, MusicBrainz, and OpenLibrary
 reconciled behind one UUID-based contract), so Heya stays focused on libraries,
 playback, and the UI. Community skip segments are fetched directly by Heya.
@@ -41,6 +42,10 @@ docker run -p 8080:8080/tcp -p 8080:8080/udp -v $PWD/data:/data \
   ghcr.io/heyamedia/heya:latest
 ```
 
+The AIO image supervises Postgres, `heya serve`, and `heya worker` inside the
+single container. Regular-image deployments must run both Heya commands from
+the same image; the repository's Docker Compose file is the simplest example.
+
 Open https://localhost:8080 and sign in with `admin` / `admin`, then change the
 password and add your libraries under Settings → Libraries. Heya creates a
 private Caddy CA on first boot; install `data/caddy/pki/authorities/local/root.crt`
@@ -60,7 +65,8 @@ cp .env.example .env
 make db-up                  # Postgres on :5440
 make build                  # Nuxt (bun) + Go → ./bin/heya
 ./bin/heya setup            # guided wizard: migrations, admin user, first library
-./bin/heya serve            # https://localhost:8080 (HTTP/1.1 + HTTP/2 + HTTP/3)
+./bin/heya worker           # terminal 1: queue, scheduler, filesystem watchers
+./bin/heya serve            # terminal 2: HTTPS API/SPA (H1 + H2 + H3)
 ```
 
 Day-to-day development (hot reload via `make dev`, tests, hooks, CI) lives in

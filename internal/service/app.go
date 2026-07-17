@@ -188,7 +188,28 @@ func (a *App) UpdateTailscaleConfig(enabled, https, funnel bool, hostname string
 	}
 }
 
+type appRuntimeMode uint8
+
+const (
+	appRuntimeAPI appRuntimeMode = iota
+	appRuntimeWorker
+)
+
+// New constructs the API/CLI runtime. Its River client can insert and manage
+// jobs but owns no queues, worker goroutines, or River maintenance services.
+// Queue execution belongs exclusively to NewWorker.
 func New(ctx context.Context, cfg *config.Config) (*App, error) {
+	return newApp(ctx, cfg, appRuntimeAPI)
+}
+
+// NewWorker constructs the dedicated background runtime with the complete
+// River worker registry, queue migrations, filesystem watchers, and worker
+// events relayed to the API process through Postgres.
+func NewWorker(ctx context.Context, cfg *config.Config) (*App, error) {
+	return newApp(ctx, cfg, appRuntimeWorker)
+}
+
+func newApp(ctx context.Context, cfg *config.Config, runtimeMode appRuntimeMode) (*App, error) {
 	// Passive mode is a read-mostly guest on someone else's DB (typically a
 	// dev box pointed at production). Skip AutoMigrate so we never mutate the
 	// target's schema to match this binary's branch — if the schemas differ,
@@ -237,6 +258,10 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	hub := eventhub.New()
 
 	LoadJobWorkersFromDB(ctx, db, cfg)
+	var workerPublisher worker.EventPublisher = hub
+	if runtimeMode == appRuntimeWorker {
+		workerPublisher = eventhub.NewRelayPublisher(ctx, db)
+	}
 
 	m := matcher.New(db, matcher.DefaultOptions(), heya, worker.ProbeFile)
 
@@ -282,57 +307,65 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 
 	progress := worker.NewTaskProgressBroadcaster(hub)
 
-	riverClient, err := worker.Setup(ctx, worker.Config{
-		DB:             db,
-		DataDir:        cfg.DataDir.Value,
-		HeyaMetadata:   hm,
-		Heya:           heya,
-		Segments:       segmentService,
-		Matcher:        m,
-		Downloader:     dl,
-		TranscodeCache: tcCache,
-		HWAccel:        hwAccelProvider,
-		Hub:            hub,
-		SonicHolder:    sonicHolder,
-		SonicEnabled: func(ctx context.Context) bool {
-			if sonicEnabledFn == nil {
-				return false
-			}
-			return sonicEnabledFn(ctx)
-		},
-		EmbedBackfill: func(ctx context.Context, force bool) (int, int, error) {
-			if embedBackfillFn == nil {
-				return 0, 0, nil
-			}
-			return embedBackfillFn(ctx, force)
-		},
-		LastfmCreds: func(ctx context.Context) (string, string) {
-			if lastfmCredsFn == nil {
-				return "", ""
-			}
-			return lastfmCredsFn(ctx)
-		},
-		Watcher:      lazyWatcher{ptr: &watcherPauser},
-		Progress:     progress,
-		Passive:      cfg.PassiveMode.Value,
-		WorkerCounts: cfg.JobWorkerCounts(),
-	})
+	var riverClient *river.Client[pgx.Tx]
+	if runtimeMode == appRuntimeWorker {
+		riverClient, err = worker.Setup(ctx, worker.Config{
+			DB:             db,
+			DataDir:        cfg.DataDir.Value,
+			HeyaMetadata:   hm,
+			Heya:           heya,
+			Segments:       segmentService,
+			Matcher:        m,
+			Downloader:     dl,
+			TranscodeCache: tcCache,
+			HWAccel:        hwAccelProvider,
+			Hub:            workerPublisher,
+			SonicHolder:    sonicHolder,
+			SonicEnabled: func(ctx context.Context) bool {
+				if sonicEnabledFn == nil {
+					return false
+				}
+				return sonicEnabledFn(ctx)
+			},
+			EmbedBackfill: func(ctx context.Context, force bool) (int, int, error) {
+				if embedBackfillFn == nil {
+					return 0, 0, nil
+				}
+				return embedBackfillFn(ctx, force)
+			},
+			LastfmCreds: func(ctx context.Context) (string, string) {
+				if lastfmCredsFn == nil {
+					return "", ""
+				}
+				return lastfmCredsFn(ctx)
+			},
+			Watcher:      lazyWatcher{ptr: &watcherPauser},
+			Progress:     progress,
+			Passive:      cfg.PassiveMode.Value,
+			WorkerCounts: cfg.JobWorkerCounts(),
+		})
+	} else {
+		riverClient, err = worker.NewInsertClient(db)
+	}
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
 
-	wm := watcher.NewManager(db, riverClient, func(libraryID int64, force bool) {
-		_ = worker.EnqueueKickoffLibraryScan(ctx, riverClient, db, worker.KickoffLibraryScanArgs{
-			LibraryID: libraryID,
-			Force:     force,
+	var wm *watcher.Manager
+	if runtimeMode == appRuntimeWorker {
+		wm = watcher.NewManager(db, riverClient, func(libraryID int64, force bool) {
+			_ = worker.EnqueueKickoffLibraryScan(ctx, riverClient, db, worker.KickoffLibraryScanArgs{
+				LibraryID: libraryID,
+				Force:     force,
+			})
 		})
-	})
-	watcherPauser = wm
+		watcherPauser = wm
+	}
 
 	// Reverse-wire SonicEnabled now that we'll have an App with the
 	// system_settings accessor. Assignment happens before any worker
-	// fires (StartWorkers is called later from cmd/serve), so the
+	// fires (StartWorkers is called later from cmd/worker), so the
 	// kickoff sees a fully-initialised closure on first invocation.
 	_ = sonicEnabledFn // keep variable address stable while we capture it; assigned below
 
@@ -424,7 +457,7 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	// box that joins the tailnet under prod's identity — a node-name collision
 	// with the real server. In passive mode tailscale stays env-only; a dev who
 	// wants it sets HEYA_TAILSCALE_ENABLED with a distinct HEYA_TAILSCALE_HOSTNAME.
-	if !cfg.PassiveMode.Value {
+	if !cfg.PassiveMode.Value && runtimeMode == appRuntimeAPI {
 		app.LoadTailscaleFromDB(ctx)
 		// Same reasoning as tailscale: a borrowed prod DB's remote.enabled
 		// must not map ports / issue certs from a dev checkout.
@@ -438,17 +471,23 @@ func New(ctx context.Context, cfg *config.Config) (*App, error) {
 	// will reflect whatever actually got persisted. Skipped in passive mode:
 	// a dev box's local HEYA_ADMIN_* / HEYA_LIBRARY_* must never overwrite the
 	// users and library paths of the production DB it's borrowing.
-	if !cfg.PassiveMode.Value {
+	if !cfg.PassiveMode.Value && runtimeMode == appRuntimeAPI {
 		if err := app.BootstrapAdminFromEnv(ctx); err != nil {
 			log.Warn().Err(err).Msg("HEYA_ADMIN_* bootstrap failed")
 		}
 		if err := app.BootstrapLibrariesFromEnv(ctx); err != nil {
 			log.Warn().Err(err).Msg("HEYA_LIBRARY_* bootstrap failed")
 		}
-		go app.runPlaylistSyncLoop()
 	}
 
 	return app, nil
+}
+
+// StartPlaylistSync starts the periodic external-playlist reconciliation loop.
+// It belongs to the dedicated worker runtime so multiple API replicas cannot
+// perform the same sync concurrently.
+func (a *App) StartPlaylistSync() {
+	go a.runPlaylistSyncLoop()
 }
 
 // StartSonicAnalysis kicks the model fetcher off in the background
@@ -567,6 +606,9 @@ func (a *App) QueueCounts(ctx context.Context) (pending, running int) {
 }
 
 func (a *App) StartWatchers(ctx context.Context) error {
+	if a.watcher == nil {
+		return errors.New("filesystem watchers are only available in the worker runtime")
+	}
 	if err := a.watcher.StartAll(ctx); err != nil {
 		return err
 	}

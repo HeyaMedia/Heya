@@ -65,6 +65,7 @@ func init() {
 	rootCmd.PersistentFlags().Bool("no-color", false, "Disable colored output")
 
 	rootCmd.AddCommand(serveCmd)
+	rootCmd.AddCommand(workerCmd)
 	rootCmd.AddCommand(userCmd)
 	rootCmd.AddCommand(libraryCmd)
 	rootCmd.AddCommand(parseCmd)

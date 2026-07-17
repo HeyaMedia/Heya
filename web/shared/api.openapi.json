@@ -21417,6 +21417,11 @@
             "format": "int64",
             "type": "integer"
           },
+          "updated_at": {
+            "description": "Time of the most recent worker heartbeat",
+            "format": "date-time",
+            "type": "string"
+          },
           "watchers": {
             "items": {
               "$ref": "#/components/schemas/WatcherEntry"
@@ -21425,11 +21430,16 @@
               "array",
               "null"
             ]
+          },
+          "worker_online": {
+            "description": "Whether the dedicated worker heartbeat is current",
+            "type": "boolean"
           }
         },
         "required": [
           "watchers",
-          "count"
+          "count",
+          "worker_online"
         ],
         "type": "object"
       },

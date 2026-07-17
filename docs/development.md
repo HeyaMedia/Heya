@@ -11,7 +11,8 @@ cp .env.example .env        # tweak the values you care about
 make db-up                  # start Postgres on :5440
 make build                  # frontend (bun) + Go binary → ./bin/heya
 ./bin/heya setup            # guided wizard — migrations, admin user, first library
-./bin/heya serve            # https://localhost:8080
+./bin/heya worker           # terminal 1: background runtime
+./bin/heya serve            # terminal 2: https://localhost:8080
 ```
 
 Configuration lives in `.env` (see `.env.example` for every supported key,
@@ -25,30 +26,33 @@ Add libraries via the UI (Settings → Libraries) or CLI
 
 ```bash
 make db-up                 # start Postgres on :5440
-make dev                   # mprocs: dev-proxy :8080 + Go (air) :3050 + Nuxt :3000 — open :8080
+make dev                   # mprocs: proxy + API + worker + Nuxt — open :8080
 ```
 
 Prerequisite: `brew install mprocs`. `make dev` runs a preflight that reclaims
 ports `:8080`/`:3050`/`:3000` from any orphaned previous run, then launches
-mprocs (config in `mprocs.yaml`) with three procs: `proxy`, `api`, `web`.
-Quitting mprocs (`q` / Ctrl+C) tears all three down cleanly; press `r` on a
+mprocs (config in `mprocs.yaml`) with four procs: `proxy`, `api`, `worker`,
+`web`. Quitting mprocs (`q` / Ctrl+C) tears all four down cleanly; press `r` on a
 pane to restart just that process.
 
-Or split into three terminals for independent control:
+Or split into four terminals for independent control:
 
 ```bash
 make dev-front             # heya dev-proxy on :8080 (the front door)
 make dev-go                # air → heya serve --dev-backend on :3050
+make dev-worker            # second air → heya worker
 make dev-web               # bun run dev on :3000
 ```
 
-**Topology.** Three processes:
+**Topology.** Four processes:
 
 - `heya dev-proxy` — the stable front door on `:8080`. A stdlib
   `httputil.ReverseProxy` that forwards `/api/*` (HTTP + the `/api/ws`
   WebSocket, which upgrades natively) and `/jellyfin/*` to the backend on
   `:3050`, and everything else to Nuxt/Vite on `:3000`.
 - `heya serve --dev-backend` on `:3050` — API + WS only, hot-reloaded by air.
+- `heya worker` — River, scheduler, watchers, and background services,
+  independently hot-reloaded by a second Air process.
 - Nuxt/Vite on `:3000` — HMR.
 
 The front door is a **separate Go process on purpose**. Go has no in-process
@@ -81,10 +85,13 @@ Don't run `go build -o ./bin/heya ./cmd/heya` by hand during dev — `air` rebui
 
 ```bash
 make build                 # builds frontend (bun) → web/dist/ → Go binary
-./bin/heya serve
+./bin/heya worker           # background runtime
+./bin/heya serve            # Caddy + API + embedded SPA
 ```
 
-The single `./bin/heya` binary serves both the API and the SPA via `//go:embed dist/*` in `web/embed.go`. No separate frontend deploy.
+The single `./bin/heya` artifact serves both the API and SPA via
+`//go:embed dist/*` in `web/embed.go`, but production runs its `serve` and
+`worker` roles as separate processes. No separate frontend deploy is needed.
 
 ## Hitting the local API
 
@@ -156,17 +163,16 @@ HEYA_PASSIVE_MODE=true
 Then `make dev` as usual — open http://localhost:8080.
 
 **Why passive mode is mandatory here, not optional.** River's job queue lives
-*inside* the same Postgres. A normal backend connected to prod's DB becomes a
-second worker pool on prod's queue: it pulls prod's queued jobs and runs a disk
-scan against a `/storage/...` path that isn't mounted on your laptop — every
-file reads as missing and the library gets soft-deleted. Passive mode
-(`internal/config`, gated in `service.New` + `cmd/heya/cmd/serve.go`) disables
-everything that writes or touches disk:
+*inside* the same Postgres. `heya serve` never consumes it, but the normal dev
+supervisor also launches `heya worker`; without the passive guard that process
+would pull production jobs and scan `/storage/...` paths that are not mounted
+on the laptop. Passive mode (`internal/config`, enforced by the worker command
+and service bootstrap) disables everything that writes or touches disk:
 
 - auto-migrate — won't alter prod's schema to match your branch
 - `HEYA_ADMIN_*` / `HEYA_LIBRARY_*` env bootstrap — won't overwrite prod users/libraries
-- River workers, filesystem watchers, the scheduler tick loop, sonic-analysis,
-  and startup orphan-rescue
+- the dedicated worker stays alive for mprocs but does not initialize River,
+  filesystem watchers, schedules, sonic analysis, or orphan recovery
 
 What still runs: the HTTP/API/WS server and the read-only dashboard emitters, so
 the UI is live over real data.

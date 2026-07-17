@@ -12,6 +12,7 @@ const (
 	EventMediaUpdated   EventType = "media.updated"
 	EventMediaRemoved   EventType = "media.removed"
 	EventMediaWatched   EventType = "media.watched"
+	EventLibraryChanged EventType = "library.changed"
 	EventLibraryDeleted EventType = "library.deleted"
 	EventQueueStatus    EventType = "queue.status"
 	EventActiveJobs     EventType = "active_jobs"
@@ -124,10 +125,9 @@ type MediaPayload struct {
 	MediaType   string `json:"media_type,omitempty"`
 }
 
-// LibraryPayload is the body for library lifecycle events (currently just
-// library.deleted). Deleting a library cascades server-side across an entire
-// media type, so the FE uses this to blow away its cached catalog data;
-// MediaType is carried for consumers that want to scope the invalidation.
+// LibraryPayload is the body for library lifecycle events. The worker process
+// uses changed/deleted notifications to reconcile its filesystem watchers;
+// browsers use deletion to invalidate catalog data.
 type LibraryPayload struct {
 	LibraryID int64  `json:"library_id"`
 	Name      string `json:"name,omitempty"`

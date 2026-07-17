@@ -61,6 +61,7 @@ const librariesWithoutWatcher = computed(() => {
 })
 
 const coverageTone = computed<'good' | 'warn' | 'bad'>(() => {
+  if (status.value && !status.value.worker_online) return 'bad'
   const total = libraries.value.length
   if (total === 0) return 'warn'
   const watched = status.value?.watchers?.length ?? 0
@@ -91,6 +92,16 @@ function lastFetchedText(): string {
   if (s < 5) return 'just now'
   return `${s}s ago`
 }
+
+function workerHeartbeatText(): string {
+  void tickKey.value
+  if (!status.value?.updated_at) return 'never'
+  const heartbeatAt = Date.parse(status.value.updated_at)
+  if (!Number.isFinite(heartbeatAt)) return 'unknown'
+  const seconds = Math.max(0, Math.floor((Date.now() - heartbeatAt) / 1000))
+  if (seconds < 2) return 'just now'
+  return `${seconds}s ago`
+}
 </script>
 
 <template>
@@ -109,6 +120,13 @@ function lastFetchedText(): string {
     <template v-else>
       <div class="tiles">
         <MetricTile
+          label="Worker runtime"
+          :value="status?.worker_online ? 'online' : 'offline'"
+          icon="pulse"
+          :tone="status?.worker_online ? 'good' : 'bad'"
+          :sub="`heartbeat ${workerHeartbeatText()}`"
+        />
+        <MetricTile
           label="Watchers active"
           :value="status?.count ?? 0"
           icon="eye"
@@ -119,8 +137,8 @@ function lastFetchedText(): string {
           label="Unwatched libraries"
           :value="librariesWithoutWatcher.length"
           icon="warning"
-          :tone="librariesWithoutWatcher.length === 0 ? 'good' : 'warn'"
-          :sub="librariesWithoutWatcher.length === 0 ? 'full coverage' : 'falling back to periodic scan'"
+          :tone="!status?.worker_online ? 'bad' : librariesWithoutWatcher.length === 0 ? 'good' : 'warn'"
+          :sub="!status?.worker_online ? 'worker unavailable' : librariesWithoutWatcher.length === 0 ? 'full coverage' : 'falling back to periodic scan'"
         />
         <MetricTile
           label="Refreshed"
@@ -134,16 +152,23 @@ function lastFetchedText(): string {
       <SettingsSection title="Active watchers" icon="eye"
         description="Each row is a live fsnotify subscription. The path shown is the watched root — recursive notifications cover its entire subtree.">
         <template #actions>
-          <LiveDot connected :label="`Polling · ${lastFetchedText()}`" />
+          <LiveDot :connected="status?.worker_online ?? false" :label="`Worker · ${workerHeartbeatText()}`" />
         </template>
 
         <div v-if="error" class="sv2-flash err">
           <Icon name="warning" :size="13" /> {{ error }}
         </div>
 
+        <div v-if="status && !status.worker_online" class="sv2-flash err">
+          <Icon name="warning" :size="13" />
+          The dedicated worker is offline or has stopped reporting. Queue processing, scheduled tasks, and filesystem watching are paused.
+        </div>
+
         <div v-if="rows.length === 0" class="empty-state">
           <Icon name="info" :size="14" />
-          No watchers are currently active. Libraries fall back to the periodic rescan task.
+          {{ status?.worker_online
+            ? 'No watchers are currently active. Libraries fall back to the periodic rescan task.'
+            : 'Watcher state is unavailable until the dedicated worker is online.' }}
         </div>
 
         <div v-else class="watcher-grid">
@@ -167,7 +192,7 @@ function lastFetchedText(): string {
       </SettingsSection>
 
       <SettingsSection
-        v-if="librariesWithoutWatcher.length"
+        v-if="status?.worker_online && librariesWithoutWatcher.length"
         title="Libraries without a watcher"
         icon="warning"
         description="Likely the watcher failed to start (path missing, EMFILE, permission). These libraries only update during the periodic rescan."

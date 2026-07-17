@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
@@ -300,15 +301,22 @@ var libraryWatchCmd = &cobra.Command{
 	Short: "Show watcher status",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return withApp(func(ctx context.Context, app *service.App) error {
-			status := app.WatcherManager().Status()
-			if len(status) == 0 {
-				ui.Warn("No active watchers. Start the server with 'heya serve' to enable file watching.")
+			status, err := app.WorkerRuntimeStatus(ctx)
+			if err != nil {
+				return err
+			}
+			if !status.Online(time.Now()) {
+				ui.Warn("The dedicated worker is not running. Start it with 'heya worker'.")
+				return nil
+			}
+			if len(status.Watchers) == 0 {
+				ui.Warn("The worker is online but has no active filesystem watchers.")
 				return nil
 			}
 
 			t := ui.NewTable("LIBRARY", "PATH")
-			for id, path := range status {
-				t.AddRow(strconv.FormatInt(id, 10), path)
+			for _, watcher := range status.Watchers {
+				t.AddRow(strconv.FormatInt(watcher.LibraryID, 10), watcher.Path)
 			}
 			fmt.Println(t.Render())
 			return nil

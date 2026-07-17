@@ -83,6 +83,18 @@ type Config struct {
 	Passive bool
 }
 
+// NewInsertClient returns a River client that can insert/cancel/query jobs but
+// owns no queues and starts no maintenance services. The API process uses this
+// client so serving traffic cannot accidentally compete with the dedicated
+// worker process for jobs or run queue migrations during ingress startup.
+func NewInsertClient(db *pgxpool.Pool) (*river.Client[pgx.Tx], error) {
+	client, err := river.NewClient(riverpgxv5.New(db), &river.Config{})
+	if err != nil {
+		return nil, fmt.Errorf("river insert client: %w", err)
+	}
+	return client, nil
+}
+
 func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	if cfg.Passive {
 		log.Warn().Msg("passive mode: skipping river migrations + stale unique_states cleanup")
@@ -110,6 +122,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	}
 
 	workers := river.NewWorkers()
+	continuationBackoff := newMetadataContinuationBackoff()
 	river.AddWorker(workers, &EnrichMediaItemWorker{DB: cfg.DB, Matcher: cfg.Matcher, Heya: cfg.Heya, Hub: cfg.Hub, DataDir: cfg.DataDir, Progress: cfg.Progress})
 	river.AddWorker(workers, &DownloadImageWorker{DB: cfg.DB, Downloader: cfg.Downloader, Hub: cfg.Hub, Progress: cfg.Progress})
 	river.AddWorker(workers, &FFProbeWorker{DB: cfg.DB, Progress: cfg.Progress})
@@ -146,7 +159,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	kickoffLibraryWorker := &KickoffLibraryScanWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress}
 	river.AddWorker(workers, kickoffLibraryWorker)
 	river.AddWorker(workers, &ProcessLibraryScanWorker{DB: cfg.DB, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress})
-	river.AddWorker(workers, &SearchLibraryMetadataWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Progress: cfg.Progress})
+	river.AddWorker(workers, &SearchLibraryMetadataWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Progress: cfg.Progress, Backoff: continuationBackoff})
 	river.AddWorker(workers, &FetchLibraryMetadataWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress})
 	river.AddWorker(workers, &ApplyLibraryScanWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, SonicEnabled: cfg.SonicEnabled, Progress: cfg.Progress})
 	river.AddWorker(workers, &ApplyRichMetadataWorker{DB: cfg.DB, Matcher: cfg.Matcher, Hub: cfg.Hub, Progress: cfg.Progress})
@@ -168,7 +181,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	// Debounce sweep — owns its own queue and fires every 10s via the
 	// periodic-jobs entry below.
 	river.AddWorker(workers, &DebounceSweepWorker{DB: cfg.DB})
-	river.AddWorker(workers, &MetadataContinuationSweepWorker{DB: cfg.DB})
+	river.AddWorker(workers, &MetadataContinuationSweepWorker{DB: cfg.DB, Backoff: continuationBackoff})
 	river.AddWorker(workers, &SyncMetadataChangesWorker{DB: cfg.DB, Source: cfg.HeyaMetadata})
 
 	client, err := river.NewClient(riverpgxv5.New(cfg.DB), &river.Config{

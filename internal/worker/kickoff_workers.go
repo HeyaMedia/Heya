@@ -430,6 +430,7 @@ type SearchLibraryMetadataWorker struct {
 	Heya     *heyametadata.HeyaProvider
 	Hub      EventPublisher
 	Progress *TaskProgressBroadcaster
+	Backoff  *metadataContinuationBackoff
 }
 
 func (w *SearchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[SearchLibraryMetadataArgs]) error {
@@ -454,7 +455,8 @@ func (w *SearchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[S
 	outcome, result, searchScanRunID, err := w.scanLibrarySearchArtifact(scanCtx, lib, job.Args.ScopePaths, job.Args.AnalysisArtifactID)
 	if err != nil {
 		if retryAfter, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
-			log.Info().Bool("poll", job.Args.Poll).Dur("retry_after", retryAfter).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("search_metadata: metadata work deferred")
+			retryAfter, waiting := w.Backoff.searchRetryAfter(retryAfter)
+			log.Debug().Bool("poll", job.Args.Poll).Dur("retry_after", retryAfter).Int64("waiting", waiting).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("search_metadata: metadata work deferred")
 			pollArgs := job.Args
 			pollArgs.Poll = true
 			return parkMetadataContinuation(ctx, w.DB, pollArgs.Kind(), pollArgs.LibraryID, pollArgs.ScannerEntityID, pollArgs.AnalysisArtifactID, pollArgs, PriorityScan, source, retryAfter)
@@ -496,7 +498,7 @@ func (w *SearchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[S
 		}
 		enqueued++
 	}
-	log.Info().Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Bool("poll", job.Args.Poll).Int("selected", outcome.New).Int("parked", parked).Int("enqueued_fetch", enqueued).Dur("duration", time.Since(started)).Msg("search_metadata: library done")
+	log.Debug().Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Bool("poll", job.Args.Poll).Int("selected", outcome.New).Int("parked", parked).Int("enqueued_fetch", enqueued).Dur("duration", time.Since(started)).Msg("search_metadata: library done")
 	if enqueued == 0 {
 		emit(w.Hub, eventhub.EventScanCompleted, eventhub.ScanPayload{LibraryID: lib.ID, LibraryName: lib.Name, Discovered: outcome.Discovered, New: outcome.New})
 	}

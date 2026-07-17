@@ -28,7 +28,14 @@ var queueProcessCmd = &cobra.Command{
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
-		app, err := service.New(ctx, cfg)
+		if cfg.PassiveMode.Value {
+			return fmt.Errorf("queue processing is disabled with HEYA_PASSIVE_MODE=true")
+		}
+		if err := validateActiveRuntimeDatabase(cfg, false); err != nil {
+			return err
+		}
+
+		app, err := service.NewWorker(ctx, cfg)
 		if err != nil {
 			return err
 		}

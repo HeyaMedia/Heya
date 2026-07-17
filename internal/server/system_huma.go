@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/karbowiak/heya/internal/service"
@@ -21,9 +22,9 @@ func registerSystemRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(liveBody{Status: "ok"}), nil
 		})
 
-	// /api/health/ready — deep healthcheck. 200 only when every subsystem
-	// reports healthy. Returns per-component status so the dashboard can
-	// show which one is down. Suitable for readiness probes.
+	// /api/health/ready — deep health snapshot. Returns per-component status so
+	// the dashboard can show which subsystem is down while the API remains
+	// reachable for diagnosis.
 	huma.Register(api, op(http.MethodGet, "/api/health/ready", "health-ready", "Readiness probe with per-component status", "System"),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[readyBody], error) {
 			body := readyBody{
@@ -55,10 +56,19 @@ func registerSystemRoutes(api huma.API, app *service.App) {
 
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/watchers", "watcher-status", "Filesystem watcher status", "System")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[watcherStatusBody], error) {
-			status := app.WatcherManager().Status()
-			body := watcherStatusBody{Watchers: make([]watcherEntry, 0, len(status))}
-			for id, path := range status {
-				body.Watchers = append(body.Watchers, watcherEntry{LibraryID: id, Path: path})
+			status, err := app.WorkerRuntimeStatus(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError("failed to read worker status", err)
+			}
+			body := watcherStatusBody{
+				Watchers:     make([]watcherEntry, 0, len(status.Watchers)),
+				WorkerOnline: status.Online(time.Now()),
+			}
+			if !status.HeartbeatAt.IsZero() {
+				body.UpdatedAt = &status.HeartbeatAt
+			}
+			for _, watcher := range status.Watchers {
+				body.Watchers = append(body.Watchers, watcherEntry{LibraryID: watcher.LibraryID, Path: watcher.Path})
 			}
 			body.Count = len(body.Watchers)
 			return noStoreJSON(body), nil
@@ -71,8 +81,7 @@ func registerSystemRoutes(api huma.API, app *service.App) {
 func collectHealthComponents(ctx context.Context, app *service.App) []healthComponent {
 	components := []healthComponent{
 		dbComponent(ctx, app),
-		watcherComponent(app),
-		schedulerComponent(app),
+		workerComponent(ctx, app),
 		transcoderComponent(app),
 	}
 	// Tailscale only reported when enabled — keeps the response clean for
@@ -90,18 +99,18 @@ func dbComponent(ctx context.Context, app *service.App) healthComponent {
 	return healthComponent{Name: "database", OK: true}
 }
 
-func watcherComponent(app *service.App) healthComponent {
-	if app.WatcherManager() == nil {
-		return healthComponent{Name: "watcher", OK: false, Message: "not initialised"}
+func workerComponent(ctx context.Context, app *service.App) healthComponent {
+	status, err := app.WorkerRuntimeStatus(ctx)
+	if err != nil {
+		return healthComponent{Name: "worker", OK: false, Message: err.Error()}
 	}
-	return healthComponent{Name: "watcher", OK: true}
-}
-
-func schedulerComponent(app *service.App) healthComponent {
-	if app.TaskScheduler() == nil {
-		return healthComponent{Name: "scheduler", OK: false, Message: "not initialised"}
+	if !status.Online(time.Now()) {
+		if status.HeartbeatAt.IsZero() {
+			return healthComponent{Name: "worker", OK: false, Message: "no worker heartbeat received"}
+		}
+		return healthComponent{Name: "worker", OK: false, Message: "worker heartbeat is stale or stopped"}
 	}
-	return healthComponent{Name: "scheduler", OK: true}
+	return healthComponent{Name: "worker", OK: true}
 }
 
 func transcoderComponent(app *service.App) healthComponent {
@@ -153,6 +162,8 @@ type watcherEntry struct {
 }
 
 type watcherStatusBody struct {
-	Watchers []watcherEntry `json:"watchers"`
-	Count    int            `json:"count"`
+	Watchers     []watcherEntry `json:"watchers"`
+	Count        int            `json:"count"`
+	WorkerOnline bool           `json:"worker_online" doc:"Whether the dedicated worker heartbeat is current"`
+	UpdatedAt    *time.Time     `json:"updated_at,omitempty" doc:"Time of the most recent worker heartbeat"`
 }

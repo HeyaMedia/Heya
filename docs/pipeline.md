@@ -148,7 +148,12 @@ In `internal/worker/worker.go`:
   five-second sweeper claims at most 256 due continuations and promotes those
   checks onto `search_metadata_poll_*` / `fetch_metadata_poll_*`; another
   `Retry-After` parks the row again instead of snoozing a River job. A
-  five-minute lease plus River's active-args uniqueness makes the hand-off
+  deferred `search_metadata` check waits at least 60 seconds; the interval adds
+  10 seconds per 100 waiting searches, capped at five minutes. A longer
+  provider `Retry-After` always wins. This keeps large discovery populations
+  from cycling through River and flooding production logs while preserving
+  fast first submissions. A five-minute lease plus River's active-args
+  uniqueness makes the hand-off
   crash-safe without stacking duplicates. During the rollout the same sweeper
   adopts at most 10,000 legacy scheduled poll jobs per tick, so an old backlog
   drains out of River without one enormous migration transaction. HTTP

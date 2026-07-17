@@ -24,6 +24,7 @@ RUN mkdir -p /etc/postgresql-common && \
 
 COPY --chmod=0755 .docker/aio/entrypoint.sh /usr/local/bin/heya-aio-entrypoint
 COPY --chmod=0755 .docker/aio/start-heya.sh /usr/local/bin/heya-aio-start-heya
+COPY --chmod=0755 .docker/aio/start-worker.sh /usr/local/bin/heya-aio-start-worker
 COPY .docker/aio/supervisord.conf /etc/supervisor/conf.d/heya-aio.conf
 
 # Both Heya and PostgreSQL persist below the existing /data volume. PostgreSQL

@@ -1,7 +1,8 @@
 # Deployment — container images
 
-Heya ships as a single self-contained binary (embedded Nuxt SPA + API + WS).
-Production runs it from a container. There are three application flavours,
+Heya ships as a single self-contained binary with `serve` and `worker` runtime
+roles. Production runs both roles from the same image. There are three
+application flavours,
 plus an opt-in all-in-one (`-aio`) form of each, published to
 `ghcr.io/heyamedia/heya` on every `vX.Y.Z` tag:
 
@@ -18,8 +19,9 @@ everyone for transcode and CPU inference.
 
 Regular images use an external Postgres selected by `HEYA_DATABASE_URL`.
 All-in-one images add PostgreSQL 17, pgvector, and supervisord directly on top
-of the corresponding completed regular image. All persistent state lives below
-`/data`; always mount a volume there.
+of the corresponding completed regular image. Supervisor runs the database,
+API/ingress, and worker as independent processes. All persistent state lives
+below `/data`; always mount a volume there.
 
 ## One-command all-in-one
 
@@ -36,7 +38,7 @@ docker run -d --name heya \
 ```
 
 This initializes PostgreSQL on first boot, waits for it to become ready, then
-runs PostgreSQL and Heya under supervisord. Heya applies its own migrations,
+runs PostgreSQL, `heya serve`, and `heya worker` under supervisord. Heya applies its own migrations,
 including pgvector, as usual. PostgreSQL listens only on container loopback and
 port 5432 is not exposed; this image is intentionally a single-container unit.
 Use the regular image and external Postgres when the database must be shared,
@@ -91,11 +93,12 @@ docker run -d --name heya -p 8080:8080/tcp -p 8080:8080/udp \
 ## Docker Compose
 
 The repo's [`docker-compose.yml`](../docker-compose.yml) runs the full stack:
-pgvector Postgres plus the released base image on `:8080`.
+pgvector Postgres plus separate API and worker containers from the released
+base image. Only the API publishes `:8080` TCP+UDP.
 
 ```bash
-docker compose up -d                                  # Postgres + heya:latest
-docker compose pull heya && docker compose up -d heya # update to newest latest
+docker compose up -d                    # Postgres + API + worker
+docker compose pull && docker compose up -d # update both Heya roles together
 ```
 
 The compose file carries commented-out blocks for the common extras — admin
@@ -103,6 +106,27 @@ bootstrap, declarative `HEYA_LIBRARY_<N>_*` libraries, media mounts, and
 `/dev/dri` passthrough for hardware transcode. Uncomment what you need.
 (`make db-up` starts only the `postgres` service — that's the dev flow, and it
 shares this file.)
+
+## Production process topology
+
+Regular images do not supervise multiple processes. Every deployment must run:
+
+- one `heya serve` process for Caddy, API/SPA, WebSockets, Tailscale, UPnP, and
+  casting; and
+- exactly one `heya worker` process for River, filesystem watchers, schedules,
+  orphan recovery, and background model work.
+
+Both roles need the same release image, `HEYA_DATABASE_URL`, `/data`, media
+mount paths, and relevant GPU devices. Only `serve` binds ports or needs LAN
+multicast networking. Kubernetes should use `args: ["worker"]` for the worker
+container because the image entrypoint is already `/usr/local/bin/heya`.
+Settings → Watchers reports the worker heartbeat and active paths; readiness
+also reports a degraded `worker` component when that heartbeat is missing.
+
+The direct `docker run` examples below show the serving container. When using a
+regular image, launch a second container with the same environment, mounts,
+devices, and image, no published ports, and append `worker` to its command.
+Docker Compose already does this correctly.
 
 ## Base image — CPU + Intel/AMD transcode
 

@@ -44,6 +44,7 @@ const STACK = ['Go', 'Nuxt 4', 'PostgreSQL', 'River', 'sqlc', 'ffmpeg', 'Huma', 
 function componentIcon(name: string): string {
   switch (name) {
     case 'database':   return 'database'
+    case 'worker':     return 'pulse'
     case 'watcher':    return 'eye'
     case 'scheduler':  return 'timer'
     case 'transcoder': return 'film'

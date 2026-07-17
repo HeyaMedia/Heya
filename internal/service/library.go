@@ -71,7 +71,7 @@ func (a *App) CreateLibrary(ctx context.Context, name string, mediaType sqlc.Med
 	if err != nil {
 		return sqlc.Library{}, fmt.Errorf("creating library: %w", err)
 	}
-
+	a.notifyLibraryChanged(ctx, lib)
 	return lib, nil
 }
 
@@ -109,7 +109,7 @@ func (a *App) UpdateLibrary(ctx context.Context, id int64, name string, paths []
 	if err != nil {
 		return sqlc.Library{}, err
 	}
-	a.syncLibraryWatcher(lib)
+	a.notifyLibraryChanged(ctx, lib)
 	return lib, nil
 }
 
@@ -123,15 +123,18 @@ func (a *App) UpdateLibrarySettings(ctx context.Context, id int64, settings meta
 	if err != nil {
 		return sqlc.Library{}, err
 	}
-	a.syncLibraryWatcher(lib)
+	a.notifyLibraryChanged(ctx, lib)
 	return lib, nil
 }
 
-func (a *App) syncLibraryWatcher(lib sqlc.Library) {
-	if a.watcher == nil || a.lifetimeCtx == nil {
-		return
+func (a *App) notifyLibraryChanged(ctx context.Context, lib sqlc.Library) {
+	if err := eventhub.Notify(ctx, a.db, eventhub.EventLibraryChanged, eventhub.LibraryPayload{
+		LibraryID: lib.ID,
+		Name:      lib.Name,
+		MediaType: string(lib.MediaType),
+	}); err != nil {
+		log.Warn().Err(err).Int64("library_id", lib.ID).Msg("library watcher reconciliation notify failed")
 	}
-	a.watcher.SyncLibrary(a.lifetimeCtx, lib)
 }
 
 func (a *App) GetLibrarySettings(ctx context.Context, id int64) (metadata.LibrarySettings, error) {
@@ -173,20 +176,11 @@ func (a *App) DeleteLibrary(ctx context.Context, id int64) error {
 	return nil
 }
 
-// StartDeletedLibraryReaper tears down this process's in-memory state for
-// libraries deleted from *any* process. The file watcher lives in the
-// `heya serve` process, but a `heya library remove` CLI call deletes the DB
-// rows from its own short-lived process and can't reach the server's watcher —
-// so without this, the server keeps an fsnotify watcher running on a
-// now-deleted library's paths.
-//
-// We learn about deletions the same way browsers do: the library.deleted
-// event, bridged into this process by the cross-process relay (NOTIFY →
-// hub). The HTTP delete handler still unwatches synchronously (race-free for
-// the in-process path); Manager.Unwatch is idempotent, so this reaper is a
-// harmless no-op there and the real teardown for CLI deletes. Server-only —
-// started from serve.go alongside the relay.
-func (a *App) StartDeletedLibraryReaper(ctx context.Context) {
+// StartLibraryWatcherReconciler keeps the dedicated worker process's
+// filesystem watchers aligned with library mutations performed by the API or
+// a CLI process. Events arrive through Postgres LISTEN/NOTIFY; changes reload
+// the row and call SyncLibrary, while deletions tear the watcher down.
+func (a *App) StartLibraryWatcherReconciler(ctx context.Context) {
 	if a.hub == nil || a.watcher == nil {
 		return
 	}
@@ -201,11 +195,20 @@ func (a *App) StartDeletedLibraryReaper(ctx context.Context) {
 				if !ok {
 					return
 				}
-				if ev.Type != eventhub.EventLibraryDeleted {
+				id, ok := libraryIDFromEventPayload(ev.Payload)
+				if !ok {
 					continue
 				}
-				if id, ok := libraryIDFromEventPayload(ev.Payload); ok {
+				switch ev.Type {
+				case eventhub.EventLibraryDeleted:
 					a.watcher.Unwatch(id)
+				case eventhub.EventLibraryChanged:
+					lib, err := a.GetLibrary(ctx, id)
+					if err != nil {
+						log.Warn().Err(err).Int64("library_id", id).Msg("reload changed library for watcher failed")
+						continue
+					}
+					a.watcher.SyncLibrary(ctx, lib)
 				}
 			}
 		}
@@ -217,6 +220,9 @@ func (a *App) StartDeletedLibraryReaper(ctx context.Context) {
 // so the NOTIFY JSON round-trip decodes the body as a generic map with
 // float64 numbers) rather than a typed eventhub.LibraryPayload.
 func libraryIDFromEventPayload(payload any) (int64, bool) {
+	if typed, ok := payload.(eventhub.LibraryPayload); ok {
+		return typed.LibraryID, typed.LibraryID > 0
+	}
 	m, ok := payload.(map[string]any)
 	if !ok {
 		return 0, false

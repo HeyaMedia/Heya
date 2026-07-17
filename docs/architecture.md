@@ -1,34 +1,28 @@
 # Architecture
 
-Heya is a single Go process that owns everything: the HTTP API, the Nuxt SPA
-(embedded at build time), and the background workers. Postgres is the only
-datastore — no Redis, no Mongo, no separate job queue daemon.
+Heya ships one Go binary with two long-running roles. `heya serve` owns Caddy,
+the HTTP API, embedded Nuxt SPA, WebSockets, Tailscale, UPnP, and casting.
+`heya worker` independently owns River execution, the scheduler, filesystem
+watchers, queue recovery, and background models. Postgres remains the only
+datastore and coordinates both processes — no Redis or external queue daemon.
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        ./bin/heya  (one process)                    │
-│                                                                     │
-│   ┌─────────────┐  ┌──────────────┐  ┌─────────────────────────┐    │
-│   │ Caddy edge  │  │ Embedded SPA │  │ River workers           │    │
-│   │ TLS + QUIC  │  │ //go:embed   │  │ scan / match / metadata │    │
-│   │ H1/H2/H3    │  │   dist/      │  │ assets / transcode      │    │
-│   └──────┬──────┘  └──────┬───────┘  └────────────┬────────────┘    │
-│          │                │                       │                 │
-│          └────────────────┼───────────────────────┘                 │
-│                           ▼                                         │
-│              ┌──────────────────────────┐                           │
-│              │ internal/service/  (shared business layer for CLI    │
-│              │                    and HTTP — single source of       │
-│              │                    truth for every feature)          │
-│              └────────────┬─────────────┘                           │
-│                           ▼                                         │
-│              ┌──────────────────────────┐                           │
-│              │ internal/database/sqlc/  │  (generated query layer)  │
-│              └────────────┬─────────────┘                           │
-└───────────────────────────┼─────────────────────────────────────────┘
+                    one ./bin/heya artifact
+         ┌──────────────────┴──────────────────┐
+         │                                     │
+┌────────▼──────────────┐             ┌────────▼──────────────┐
+│ heya serve            │             │ heya worker           │
+│ Caddy TLS + H1/H2/H3  │             │ River queue execution │
+│ API + embedded SPA    │             │ scheduler + rescue    │
+│ WS + network managers │             │ watchers + models     │
+└────────┬──────────────┘             └────────┬──────────────┘
+         │        internal/service/            │
+         └──────────────────┬──────────────────┘
                             ▼
                   ┌───────────────────┐
-                  │   Postgres 17     │  ← data + River queue + sessions
+                  │   Postgres 17     │
+                  │ data + River queue│
+                  │ events + heartbeat│
                   └───────────────────┘
 
 External:
@@ -100,8 +94,9 @@ docs/               # This directory
 .env.example        # Catalogue of every supported env var (defaults + comments)
 docker-compose.yml  # Postgres 17 on :5440
 sqlc.yaml           # Codegen config
-.air.toml           # Hot-reload config for `make dev` (runs heya serve --dev-backend on :3050)
-mprocs.yaml         # Dev supervisor — runs heya dev-proxy (:8080 front door) + air backend + Nuxt
+.air.toml           # Hot-reload config for `heya serve --dev-backend` on :3050
+.air.worker.toml    # Independent hot-reload config for `heya worker`
+mprocs.yaml         # Dev supervisor — proxy + API + worker + Nuxt
 lefthook.yml        # Pre-commit hooks — see docs/development.md
 ```
 
@@ -119,9 +114,9 @@ it doesn't exist.
 
 The Nuxt frontend is built with `nuxi generate` (SPA mode, `ssr: false`),
 copied into `web/dist/`, and embedded into the Go binary via
-`//go:embed all:dist`. Deploying Heya is one binary — no Node process to run
-or babysit, no reverse proxy needed. The same pattern Jellyfin, Navidrome,
-Emby, and friends use.
+`//go:embed all:dist`. Deploying Heya uses one artifact in two roles — no Node
+process or external reverse proxy to run. The AIO image supervises both roles
+inside one container.
 
 ### Postgres for everything
 
@@ -173,7 +168,9 @@ fixtures under `internal/transcoder/testdata/`.
 
 River jobs cover anything that mustn't block an HTTP response: filesystem
 scans, metadata fetches, image downloads, trickplay/thumbnail generation,
-asset persistence. The scheduler (`internal/scheduler/`) is a 60 s trigger
+asset persistence. They execute only in `heya worker`, so queue recovery or a
+large backlog can never delay Caddy from accepting traffic. The scheduler
+(`internal/scheduler/`) is a 60 s trigger
 loop — when a `scheduled_tasks` row is enabled, in window, and due, it
 inserts a `kickoff_*` River job; the kickoff worker walks candidates and
 fans out one work job per item.
@@ -195,8 +192,10 @@ Concurrency rules of thumb (full table in [`pipeline.md`](./pipeline.md#queue-co
 - River caps priority at 1..4; need ≥5 bands → another queue, not another
   priority.
 
-Real-time progress for those jobs streams to the UI via the WebSocket event
-bus (`internal/eventhub/`). The full match → enrich pipeline (including
+Worker progress crosses Postgres `LISTEN`/`NOTIFY` to the serving process and
+then streams to the UI over the WebSocket event bus (`internal/eventhub/`). A
+durable heartbeat also exposes worker/watcher state after process restarts. The
+full match → enrich pipeline (including
 HeyaMetadata client structure, orphan-job rescue, and the progress event shape)
 is documented in [`pipeline.md`](./pipeline.md).
 

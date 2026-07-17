@@ -6066,7 +6066,15 @@ export type WatcherStatusBody = {
      */
     readonly $schema?: string;
     count: number;
+    /**
+     * Time of the most recent worker heartbeat
+     */
+    updated_at?: string;
     watchers: Array<WatcherEntry> | null;
+    /**
+     * Whether the dedicated worker heartbeat is current
+     */
+    worker_online: boolean;
 };
 
 export type WaveformBody = {
@@ -8258,7 +8266,15 @@ export type WatchedBodyWritable = {
 
 export type WatcherStatusBodyWritable = {
     count: number;
+    /**
+     * Time of the most recent worker heartbeat
+     */
+    updated_at?: string;
     watchers: Array<WatcherEntry> | null;
+    /**
+     * Whether the dedicated worker heartbeat is current
+     */
+    worker_online: boolean;
 };
 
 export type WaveformBodyWritable = {

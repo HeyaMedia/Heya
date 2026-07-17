@@ -11,15 +11,17 @@ are global flags.
 
 | Command           | What it does                                                |
 | ----------------- | ----------------------------------------------------------- |
-| `heya serve`      | Start embedded Caddy with HTTPS/H1-H3 (default `:8080`) |
+| `heya serve`      | Start embedded Caddy + API/SPA with HTTPS/H1-H3 (default `:8080`) |
+| `heya worker`     | Run River jobs, scheduler, recovery, models, and filesystem watchers |
 | `heya dev-proxy`  | Dev front-door reverse proxy on `:8080` (normally launched by `make dev`/mprocs, not run directly) |
 | `heya dashboard`  | Full-screen TUI: server status, queue, scans, watchers      |
 | `heya setup`      | Guided first-time config (writes `.env` and seeds admin)    |
 
-For local development use `make dev` (or `make dev-front` + `make dev-go`
-+ `make dev-web` in three terminals). It uses **mprocs** to start
+For local development use `make dev` (or `make dev-front` + `make dev-go` +
+`make dev-worker` + `make dev-web` in four terminals). It uses **mprocs** to start
 `heya dev-proxy` on `:8080` (the front door), the backend
-(`heya serve --dev-backend`) on `:3050` under air, and Nuxt on `:3000`.
+(`heya serve --dev-backend`) on `:3050`, the dedicated worker under a second
+Air instance, and Nuxt on `:3000`.
 Install with `brew install mprocs`. See [development.md](development.md) for
 the rationale.
 

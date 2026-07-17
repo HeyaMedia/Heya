@@ -65,6 +65,11 @@ fi
 echo "starting Heya: active mode, DB=heya_dev (localhost), libraries=Dev{Music,TV,Movies} -> fulldata/"
 case "${1:-dev}" in
   dev)   exec make dev ;;
-  serve) exec ./bin/heya serve ;;
+  serve)
+    ./bin/heya worker &
+    worker_pid=$!
+    trap 'kill "$worker_pid" 2>/dev/null || true; wait "$worker_pid" 2>/dev/null || true' EXIT INT TERM
+    ./bin/heya serve
+    ;;
   *)     echo "usage: $0 [dev|serve]" >&2; exit 2 ;;
 esac

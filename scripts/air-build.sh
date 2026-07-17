@@ -9,7 +9,8 @@ export GOCACHE="${HEYA_AIR_GOCACHE:-$repo_root/.cache/go-build-air}"
 export GOMODCACHE="${HEYA_GOMODCACHE:-$repo_root/.cache/go-mod}"
 
 mkdir -p "$repo_root/tmp" "$GOCACHE" "$GOMODCACHE"
-go build -o "$repo_root/tmp/heya" "$repo_root/cmd/heya"
+air_output="${HEYA_AIR_OUTPUT:-tmp/heya}"
+go build -o "$repo_root/$air_output" "$repo_root/cmd/heya"
 
 # Cache entries are disposable. Bound Air's cache instead of letting a long
 # dev session consume tens of gigabytes. Override in KiB if ever needed.

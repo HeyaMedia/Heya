@@ -36,26 +36,27 @@ For deeper context, see `docs/`:
 **Don't run `go build -o ./bin/heya …` during dev** — `air` handles rebuilds.
 `go build ./...` is fine as a compile-check.
 
-**Dev topology**: three processes supervised by **mprocs** (`mprocs.yaml`):
+**Dev topology**: four processes supervised by **mprocs** (`mprocs.yaml`):
 
 1. `heya dev-proxy` — the stable front door on `:8080`. A stdlib
    `httputil.ReverseProxy` that forwards `/api/*` (including the `/api/ws`
    WebSocket, which upgrades natively) to the backend on `:3050`, and
    everything else to Nuxt/Vite on `:3000`.
 2. `heya serve --dev-backend` on `:3050` (API + WS only), hot-reloaded by `air`.
-3. Nuxt/Vite dev server on `:3000` (HMR).
+3. `heya worker` under a second Air process (River, scheduler, watchers, models).
+4. Nuxt/Vite dev server on `:3000` (HMR).
 
 The front door is its own Go process *on purpose*: the backend restarts on
 every code save (air's job), but the browser-facing port must not flap with
 it — the HMR socket and any in-flight WS connection survive air rebuilds.
 The dev-proxy does exactly one thing (proxy); Tailscale and remote access
 are **production-only** subsystems that don't exist under `--dev-backend`. `make dev` reclaims ports `:8080`/`:3050`/`:3000` from any orphaned
-run, then launches mprocs; quitting mprocs (`q` / Ctrl+C) tears all three down,
+run, then launches mprocs; quitting mprocs (`q` / Ctrl+C) tears all four down,
 and pressing `r` on a pane restarts just that process. `make dev-front` /
-`make dev-go` / `make dev-web` split them into separate terminals. You open
-**http://localhost:8080** as before. Prod collapses back to a single binary
-(`heya serve`, no flag, on `:8080` serves the embedded SPA + API + WS) — no
-front door process.
+`make dev-go` / `make dev-worker` / `make dev-web` split them into separate
+terminals. You open **http://localhost:8080** as before. Production uses the
+same binary in two roles: `heya serve` owns Caddy/API/SPA/networking and
+`heya worker` owns River/scheduler/watchers/background services.
 
 ## Design principle
 
@@ -180,8 +181,9 @@ against the local docker DB on a scratch port with a distinct identity
 
 | Command                                    | Purpose                                              |
 | ------------------------------------------ | ---------------------------------------------------- |
-| `make dev`                                 | mprocs: dev-proxy :8080 + backend (air) :3050 + Nuxt :3000 — open :8080 |
+| `make dev`                                 | mprocs: dev-proxy :8080 + API :3050 + worker + Nuxt :3000 — open :8080 |
 | `heya serve`                               | Start the HTTP server (default `:8080`)              |
+| `heya worker`                              | Start queue, scheduler, watcher, and background runtime |
 | `heya dashboard`                           | TUI: server state, queue, watchers                   |
 | `heya api <method> <path> [body]`          | Auth'd HTTP client w/ token cache — see [docs/development.md](docs/development.md#hitting-the-local-api) |
 | `heya library scan <id>`                   | Trigger a library scan                               |

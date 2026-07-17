@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -48,14 +47,6 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			if err != nil {
 				return nil, huma.Error400BadRequest(err.Error())
 			}
-			settings := metadata.ParseSettings(lib.Settings)
-			if settings.Watch {
-				for _, p := range lib.Paths {
-					if !strings.HasPrefix(p, "smb://") {
-						app.WatcherManager().Watch(ctx, lib.ID, p)
-					}
-				}
-			}
 			app.EnqueueScanLibrary(lib.ID, false)
 			return &JSONOutput[libraryView]{Body: toLibraryView(lib, app.EnvManagedLibraries()[lib.ID])}, nil
 		})
@@ -92,7 +83,6 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			if env, ok := app.EnvManagedLibraries()[in.ID]; ok {
 				return nil, huma.Error409Conflict("library is locked by " + env.NameEnv + " — remove the env var to delete")
 			}
-			app.WatcherManager().Unwatch(in.ID)
 			if err := app.DeleteLibrary(ctx, in.ID); err != nil {
 				return nil, huma.Error500InternalServerError("failed to delete library")
 			}
@@ -119,20 +109,9 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			IDPath
 			Body metadata.LibrarySettings
 		}) (*JSONOutput[libraryView], error) {
-			oldSettings, _ := app.GetLibrarySettings(ctx, in.ID)
 			lib, err := app.UpdateLibrarySettings(ctx, in.ID, in.Body)
 			if err != nil {
 				return nil, huma.Error400BadRequest(err.Error())
-			}
-			switch {
-			case in.Body.Watch && !oldSettings.Watch:
-				for _, p := range lib.Paths {
-					if !strings.HasPrefix(p, "smb://") {
-						app.WatcherManager().Watch(ctx, lib.ID, p)
-					}
-				}
-			case !in.Body.Watch && oldSettings.Watch:
-				app.WatcherManager().Unwatch(lib.ID)
 			}
 			return &JSONOutput[libraryView]{Body: toLibraryView(lib, app.EnvManagedLibraries()[lib.ID])}, nil
 		})

@@ -1,0 +1,15 @@
+[build]
+  cmd = "HEYA_AIR_OUTPUT=tmp/heya-worker ./scripts/air-build.sh"
+  full_bin = "./tmp/heya-worker worker --idle-in-passive"
+  delay = 1000
+  exclude_dir = ["tmp", "web", "node_modules", "testdata", "fulldata", "data", "bin", ".git"]
+  exclude_regex = ["_test\\.go$", "^heya\\.yaml$", "(^|/)heya\\.yaml$"]
+  include_ext = ["go", "sql", "yaml"]
+  kill_delay = 5000
+  send_interrupt = true
+
+[log]
+  time = false
+
+[misc]
+  clean_on_exit = false

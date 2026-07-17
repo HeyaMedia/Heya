@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/karbowiak/heya/internal/database"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/ingress"
 	"github.com/karbowiak/heya/internal/logbuf"
@@ -68,21 +67,8 @@ var serveCmd = &cobra.Command{
 				_ = os.Setenv("HEYA_AI_USE_SYSTEM_AGENTS", "true")
 			}
 		}
-		if !passive {
-			// Classify the host pgx will ACTUALLY dial (via pgx's own parser), not
-			// a naive URL parse — otherwise a ?host=, DSN keyword form, PGHOST env,
-			// or multi-host fallback could point the real connection at prod while
-			// the URL authority reads localhost.
-			localDB, dbHost, perr := database.AllHostsLocal(cfg.DatabaseURL.Value)
-			if perr != nil {
-				return fmt.Errorf("refusing to start active mode: cannot parse HEYA_DATABASE_URL to verify the database host is local: %w", perr)
-			}
-			if !localDB && (devBackend || !cfg.AllowRemoteActive.Value) {
-				return fmt.Errorf("refusing to start active mode against non-local database host %q: "+
-					"set HEYA_PASSIVE_MODE=true to use it read-only, point HEYA_DATABASE_URL at a local DB, "+
-					"or set HEYA_ALLOW_REMOTE_ACTIVE=true if this instance is meant to own that DB "+
-					"(--dev-backend can never run active against a remote DB)", dbHost)
-			}
+		if err := validateActiveRuntimeDatabase(cfg, devBackend); err != nil {
+			return err
 		}
 
 		app, err := service.New(appCtx, cfg)
@@ -91,21 +77,16 @@ var serveCmd = &cobra.Command{
 		}
 		defer app.Close()
 
-		// Passive mode (HEYA_PASSIVE_MODE=true): the server is a read-mostly
-		// guest on its DB — typically local dev pointed at a production
-		// database to build UI against real data. We must NOT run any worker,
-		// watcher, scheduler, or startup job-rescue: River's queue lives in the
-		// same Postgres, so starting workers here turns this process into a
-		// second worker pool on prod's queue. It would pull prod's jobs and run
-		// a disk scan against a /storage path that doesn't exist locally,
-		// soft-deleting the whole library. See docs/development.md.
+		// Serve is always queue-passive now: it owns ingress, APIs, WebSockets,
+		// casting and network control planes, while `heya worker` owns River,
+		// filesystem watchers and scheduled background work. Passive mode also
+		// suppresses schema/bootstrap writes in service.New.
 		if passive {
-			log.Warn().Msg("passive mode: workers, watchers, scheduler, sonic-analysis and orphan-rescue are DISABLED — this process will not process jobs or touch the filesystem")
+			log.Warn().Msg("passive mode: serving read-mostly API without schema/bootstrap writes")
 		}
 
-		// Register the scheduler trigger up front so request handlers can resolve
-		// it (in passive mode too, to avoid a nil-deref); its 60s tick loop only
-		// starts with the other background services further down.
+		// The API-side trigger only inserts manual jobs. Its periodic scheduling
+		// loop is started exclusively by the dedicated worker process.
 		taskTrigger := scheduler.NewTrigger(app.DBPool(), app.RiverClient())
 		app.SetScheduler(taskTrigger)
 
@@ -191,52 +172,10 @@ var serveCmd = &cobra.Command{
 			}
 		}
 
-		// Embedded Caddy is already live — before the (potentially slow,
-		// SMB-bound) worker + watcher startup below — so :8080 answers health
-		// probes within a second instead of only after the recursive watch setup
-		// on a large library finishes. Everything past this point runs while the
-		// server is already accepting connections, so a slow StartWatchers can no
-		// longer hold the startup/readiness gate hostage and crash-loop the pod.
+		// No River queue, worker migration, or filesystem watcher is started in
+		// this process. Caddy therefore remains responsive even when the worker
+		// process is recovering a very large production backlog.
 		log.Info().Str("addr", cfg.Addr()).Bool("https", !devBackend).Msg("embedded Caddy ingress started")
-
-		// --- Background services. The listener is already live above, so a slow
-		// startup here only delays job processing / file watching, never the
-		// health gate. ---
-		if !passive {
-			// Rescue any jobs left in state='running' by a previous process
-			// (e.g. an `air` hot-reload killed the worker mid-job). Without
-			// this, those rows sit "running" until River's periodic rescuer
-			// catches them after RescueStuckJobsAfter (10min) — long enough
-			// to look like real concurrency violations in the UI.
-			if n, err := app.RescueOrphanedJobsAtStartup(appCtx); err != nil {
-				log.Warn().Err(err).Msg("startup orphan-rescue failed")
-			} else if n > 0 {
-				log.Info().Int64("rescued", n).Msg("released orphaned jobs from previous process")
-			}
-
-			if err := app.StartWorkers(appCtx); err != nil {
-				return err
-			}
-			log.Info().Msg("river workers started")
-
-			// One-time, self-limiting backfill: resolve absolute-numbered anime
-			// files whose parse_result predates the resolve-and-store logic (a
-			// series enriched on an older build has no re-enrich trigger). Async
-			// so a large library's sweep never delays job processing; idempotent,
-			// so a steady-state boot does no work.
-			go func() {
-				if _, err := app.BackfillAbsoluteEpisodes(appCtx); err != nil {
-					log.Warn().Err(err).Msg("startup absolute-episode backfill failed")
-				}
-			}()
-
-			// Recursive watch setup can take minutes on a large SMB-mounted
-			// library; it runs here, after the listener is live, so it never
-			// gates startup health.
-			if err := app.StartWatchers(appCtx); err != nil {
-				log.Warn().Err(err).Msg("failed to start watchers")
-			}
-		}
 
 		bridgeLogToHub(appCtx, logRing, app.EventHub())
 		app.EventHub().StartPeriodicEmitters(appCtx, app.DBPool())
@@ -244,20 +183,6 @@ var serveCmd = &cobra.Command{
 		// remove` CLI call) onto this process's live hub → WebSocket clients.
 		app.EventHub().StartCrossProcessRelay(appCtx, app.DBPool())
 		go logRuntimeStatsPeriodically(appCtx, app.EventHub())
-
-		if !passive {
-			// React to bridged delete events: a CLI delete must also tear down
-			// this process's file watcher for the removed library. Pointless
-			// when no watchers are running.
-			app.StartDeletedLibraryReaper(appCtx)
-			taskTrigger.Start(appCtx)
-
-			// Kick off the model fetcher in the background. No-op when
-			// sonic-analysis is disabled in config.
-			app.StartSonicAnalysis(appCtx)
-			// Same for the optional embedding recommendation engine.
-			app.StartRecommendationsML(appCtx)
-		}
 
 		// Cast discovery (mDNS browse + receiver sessions). Runs in
 		// passive mode too — casting streams local files and touches
@@ -282,29 +207,18 @@ var serveCmd = &cobra.Command{
 			os.Exit(1)
 		}()
 
-		// Cancel appCtx first so every derived context (workers,
-		// watchers, periodic emitters, task scheduler, bridgeLogToHub)
+		// Cancel appCtx first so every derived context (periodic emitters,
+		// network managers, bridgeLogToHub)
 		// observes cancellation before we touch their resources.
 		appCancel()
 
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 		defer cancel()
 
-		// Workers can drain alongside the network teardown. Network owners are
-		// deliberately ordered: detach remote/tailnet from Caddy, close tsnet,
-		// then stop the remaining host ingress.
+		// Network owners are deliberately ordered: detach remote/tailnet from
+		// Caddy, close tsnet, then stop the remaining host ingress.
 		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			// Workers were never started in passive mode; River's Stop on a
-			// never-started client has nothing to do, so skip it.
-			if !passive {
-				if err := app.StopWorkers(shutdownCtx); err != nil {
-					log.Warn().Err(err).Msg("worker shutdown error")
-				}
-			}
-		}()
+		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			// The UPnP mapping is left in place on restart; only explicit
@@ -338,10 +252,8 @@ var serveCmd = &cobra.Command{
 		// grace before we trust waitWithDeadline to give up.
 		waitWithDeadline(&wg, 6500*time.Millisecond)
 
-		// Bypass the defer chain entirely: pgxpool.Close in deferred
-		// app.Close has been observed to block when River goroutines
-		// retry queries against a closing pool. Explicit exit is the
-		// only reliable way out.
+		// Bypass the defer chain so a slow external runtime teardown cannot
+		// leave an orphan process holding the ingress port.
 		log.Info().Msg("clean shutdown complete")
 		os.Exit(0)
 		return nil

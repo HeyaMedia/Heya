@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -17,6 +18,9 @@ const (
 	metadataContinuationBatch      = 256
 	metadataContinuationAdoptBatch = 10_000
 	metadataContinuationLease      = 5 * time.Minute
+	metadataSearchRetryMinimum     = time.Minute
+	metadataSearchRetryStep        = 10 * time.Second
+	metadataSearchRetryMaximum     = 5 * time.Minute
 )
 
 // MetadataContinuationSweepArgs promotes a bounded number of due remote
@@ -31,7 +35,47 @@ func (MetadataContinuationSweepArgs) InsertOpts() river.InsertOpts {
 
 type MetadataContinuationSweepWorker struct {
 	river.WorkerDefaults[MetadataContinuationSweepArgs]
-	DB *pgxpool.Pool
+	DB      *pgxpool.Pool
+	Backoff *metadataContinuationBackoff
+}
+
+// metadataContinuationBackoff is shared by the search workers and the
+// continuation sweeper in one River runtime. The sweeper refreshes the compact
+// waiting population once per tick; search workers use that cached count to
+// avoid a COUNT query for every deferred item.
+type metadataContinuationBackoff struct {
+	searchWaiting atomic.Int64
+}
+
+func newMetadataContinuationBackoff() *metadataContinuationBackoff {
+	return &metadataContinuationBackoff{}
+}
+
+func (b *metadataContinuationBackoff) refresh(ctx context.Context, db queueops.DB) error {
+	if b == nil {
+		return nil
+	}
+	var waiting int64
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM scanner_metadata_continuations WHERE kind = 'search_metadata'`).Scan(&waiting); err != nil {
+		return err
+	}
+	b.searchWaiting.Store(waiting)
+	return nil
+}
+
+func (b *metadataContinuationBackoff) searchRetryAfter(providerDelay time.Duration) (time.Duration, int64) {
+	waiting := int64(0)
+	if b != nil {
+		waiting = max(b.searchWaiting.Load(), 0)
+	}
+	adaptive := metadataSearchRetryMinimum + time.Duration(waiting/100)*metadataSearchRetryStep
+	if adaptive > metadataSearchRetryMaximum {
+		adaptive = metadataSearchRetryMaximum
+	}
+	if providerDelay > adaptive {
+		adaptive = providerDelay
+	}
+	return adaptive, waiting
 }
 
 type metadataContinuationRow struct {
@@ -255,6 +299,9 @@ func (w *MetadataContinuationSweepWorker) Work(ctx context.Context, _ *river.Job
 	if err != nil {
 		return fmt.Errorf("adopt legacy metadata polls: %w", err)
 	}
+	if err := w.Backoff.refresh(ctx, w.DB); err != nil {
+		log.Debug().Err(err).Msg("metadata continuation backoff count unavailable")
+	}
 	claimed, err := w.claimDue(ctx)
 	if err != nil {
 		return fmt.Errorf("claim metadata continuations: %w", err)
@@ -298,7 +345,7 @@ func (w *MetadataContinuationSweepWorker) Work(ctx context.Context, _ *river.Job
 	}
 
 	if adopted > 0 || enqueued > 0 {
-		log.Info().Int("adopted", adopted).Int("enqueued", enqueued).Int("claimed", len(claimed)).Msg("metadata_continuation_sweep")
+		log.Debug().Int("adopted", adopted).Int("enqueued", enqueued).Int("claimed", len(claimed)).Msg("metadata_continuation_sweep")
 	}
 	return nil
 }

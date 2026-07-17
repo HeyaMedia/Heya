@@ -3,7 +3,7 @@ GO_CACHE_DIR ?= $(CURDIR)/.cache/go-build
 GO_MODCACHE_DIR ?= $(CURDIR)/.cache/go-mod
 GO := GOCACHE=$(GO_CACHE_DIR) GOMODCACHE=$(GO_MODCACHE_DIR) go
 
-.PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev dev-front dev-go dev-web gen-api-client gen-heyametadata-client check-heyametadata-client deadcode dead-components docker-runtime-cpu docker-runtime-cuda docker-runtime-openvino docker docker-cuda docker-openvino docker-multiarch docker-run docker-run-gpu
+.PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev dev-front dev-go dev-worker dev-web gen-api-client gen-heyametadata-client check-heyametadata-client deadcode dead-components docker-runtime-cpu docker-runtime-cuda docker-runtime-openvino docker docker-cuda docker-openvino docker-multiarch docker-run docker-run-gpu
 
 # Pinned at the same version HeyaMedia uses for its self-client; oapi-codegen
 # bumps occasionally break field shapes and we want clients to match.
@@ -30,7 +30,8 @@ run: build-go
 # Dev: `heya dev-proxy` on :8080 is the stable front door — it fronts Nuxt
 # (:3000) + the air-run plaintext Caddy backend (:3050). Tailscale and remote
 # access are production-only; the proxy exists solely to give Nuxt HMR and the
-# reloading Go API one stable browser origin. mprocs supervises all three and
+# reloading Go API one stable browser origin. A second Air process owns the
+# dedicated worker runtime. mprocs supervises all four and
 # tears them down cleanly on quit (q / Ctrl+C). The preflight reclaims
 # :8080/:3050/:3000 from anything a previous hard kill left orphaned.
 # Open http://localhost:8080.
@@ -42,12 +43,15 @@ dev:
 	@for p in 8080 3050 3000; do pids=$$(lsof -ti tcp:$$p 2>/dev/null); [ -n "$$pids" ] && kill $$pids 2>/dev/null || true; done
 	mprocs
 
-# Same trio as `make dev`, split across terminals if you want separate control.
+# Same processes as `make dev`, split across terminals if you want control.
 dev-front:
 	mkdir -p tmp && $(GO) build -o tmp/heya-dev ./cmd/heya && exec tmp/heya-dev dev-proxy
 
 dev-go:
 	mkdir -p tmp && $(GO) run github.com/air-verse/air@latest
+
+dev-worker:
+	mkdir -p tmp && $(GO) run github.com/air-verse/air@latest -c .air.worker.toml
 
 dev-web:
 	cd web && bun run dev
