@@ -231,10 +231,10 @@ func (a ProcessLibraryScanArgs) InsertOpts() river.InsertOpts {
 }
 
 // SearchLibraryMetadataArgs resumes one persisted local analysis artifact and
-// performs canonical index search/discovery. Poll jobs use a separate queue so
-// thousands of outstanding HeyaMetadata workflows cannot consume submission
-// capacity. Poll participates in uniqueness so the submit worker can insert
-// its one scheduled continuation while it is still running.
+// performs canonical index search/discovery. Deferred remote workflows are
+// parked in scanner_metadata_continuations; a bounded sweeper promotes only
+// due checks onto the poll queues. Poll participates in uniqueness so a lease
+// expiry cannot stack a duplicate while an earlier check is still active.
 type SearchLibraryMetadataArgs struct {
 	LibraryID          int64          `json:"library_id" river:"unique"`
 	MediaType          sqlc.MediaType `json:"media_type,omitempty"`
@@ -262,7 +262,8 @@ func (a SearchLibraryMetadataArgs) InsertOpts() river.InsertOpts {
 
 // FetchLibraryMetadataArgs resumes a persisted search result, fetches remote
 // metadata, and persists a fetch artifact for the apply phase. Asynchronous
-// resolution polling is moved to the corresponding fetch_metadata_poll queue.
+// waits are parked outside River and promoted to the corresponding
+// fetch_metadata_poll queue in bounded batches.
 type FetchLibraryMetadataArgs struct {
 	LibraryID        int64          `json:"library_id" river:"unique"`
 	MediaType        sqlc.MediaType `json:"media_type,omitempty"`

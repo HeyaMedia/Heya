@@ -102,6 +102,14 @@ type App struct {
 	missingCountMu sync.Mutex
 	missingCount   int
 	missingCountAt time.Time
+
+	// The Jobs page used to run three independent counts over river_job on
+	// every refresh. At large backlogs those were some of the most expensive
+	// queries in the application. Keep one grouped snapshot and derive all
+	// three API responses from it for a short period.
+	jobCountsMu sync.Mutex
+	jobCounts   []jobCountRow
+	jobCountsAt time.Time
 }
 
 // StartedAt returns the wall-clock time at which the App was constructed.

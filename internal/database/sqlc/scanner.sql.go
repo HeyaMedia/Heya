@@ -218,9 +218,14 @@ func (q *Queries) CleanupAppliedScannerEntityArtifactsOlderThan(ctx context.Cont
 const cleanupStaleInFlightScannerEntitiesOlderThan = `-- name: CleanupStaleInFlightScannerEntitiesOlderThan :one
 WITH target AS (
     SELECT entity.id
-    FROM scanner_entities entity
-    WHERE entity.status IN ('matched', 'fetching')
-      AND entity.updated_at < $1
+	FROM scanner_entities entity
+	WHERE entity.status IN ('matched', 'fetching')
+	  AND entity.updated_at < $1
+	  AND NOT EXISTS (
+	      SELECT 1
+	      FROM scanner_metadata_continuations continuation
+	      WHERE continuation.scanner_entity_id = entity.id
+	  )
 ),
 entity_artifacts_deleted AS (
     DELETE FROM scanner_entity_artifacts artifact

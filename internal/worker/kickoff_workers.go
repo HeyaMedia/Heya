@@ -91,13 +91,6 @@ func scheduledJobSource(metadata []byte) string {
 	return src.Source
 }
 
-func scheduledJobMetadata(source string) []byte {
-	if source == queueops.KickoffSourceManual {
-		return []byte(manualJobMetadata)
-	}
-	return nil
-}
-
 func scheduledJobInsertOpts(source string) *river.InsertOpts {
 	if source == queueops.KickoffSourceManual {
 		return &river.InsertOpts{Metadata: []byte(manualJobMetadata)}
@@ -450,6 +443,7 @@ func (w *SearchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[S
 	}
 	if !supportsScanner(lib.MediaType) {
 		log.Warn().Int64("library_id", lib.ID).Str("library", lib.Name).Str("media_type", string(lib.MediaType)).Msg("search_metadata: scanner does not support this library type")
+		deleteMetadataContinuation(ctx, w.DB, job.Args.Kind(), job.Args.ScannerEntityID, job.Args.AnalysisArtifactID)
 		return nil
 	}
 
@@ -461,19 +455,18 @@ func (w *SearchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[S
 	if err != nil {
 		if retryAfter, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
 			log.Info().Bool("poll", job.Args.Poll).Dur("retry_after", retryAfter).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("search_metadata: metadata work deferred")
-			if !job.Args.Poll {
-				pollArgs := job.Args
-				pollArgs.Poll = true
-				return enqueueSearchLibraryMetadataAfter(ctx, rc, pollArgs, PriorityScan, source, retryAfter)
-			}
-			return river.JobSnooze(retryAfter)
+			pollArgs := job.Args
+			pollArgs.Poll = true
+			return parkMetadataContinuation(ctx, w.DB, pollArgs.Kind(), pollArgs.LibraryID, pollArgs.ScannerEntityID, pollArgs.AnalysisArtifactID, pollArgs, PriorityScan, source, retryAfter)
 		}
+		deleteMetadataContinuation(ctx, w.DB, job.Args.Kind(), job.Args.ScannerEntityID, job.Args.AnalysisArtifactID)
 		if markErr := scanner.MarkScannerEntityFailed(ctx, w.DB, job.Args.ScannerEntityID, "error", err); markErr != nil {
 			log.Error().Err(markErr).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("search_metadata: failure state persistence failed")
 		}
 		logScannerPipelineFailure("search_metadata", job.ID, lib, job.Args.ScannerEntityID, job.Args.ScopePaths, err)
 		return scannerWorkerError(err)
 	}
+	deleteMetadataContinuation(ctx, w.DB, job.Args.Kind(), job.Args.ScannerEntityID, job.Args.AnalysisArtifactID)
 
 	entityOpts := scannerSearchOptions(w.DB, w.Heya)
 	entityOpts.ScopePaths = job.Args.ScopePaths
@@ -538,6 +531,7 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 			Str("library", lib.Name).
 			Str("media_type", string(lib.MediaType)).
 			Msg("fetch_metadata: scanner does not support this library type")
+		deleteMetadataContinuation(ctx, w.DB, job.Args.Kind(), job.Args.ScannerEntityID, job.Args.SearchArtifactID)
 		return nil
 	}
 
@@ -555,13 +549,11 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 	if err != nil {
 		if retryAfter, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
 			log.Info().Bool("poll", job.Args.Poll).Dur("retry_after", retryAfter).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("fetch_metadata: metadata work deferred")
-			if !job.Args.Poll {
-				pollArgs := job.Args
-				pollArgs.Poll = true
-				return enqueueFetchLibraryMetadataAfter(ctx, rc, pollArgs, PriorityScan, source, retryAfter)
-			}
-			return river.JobSnooze(retryAfter)
+			pollArgs := job.Args
+			pollArgs.Poll = true
+			return parkMetadataContinuation(ctx, w.DB, pollArgs.Kind(), pollArgs.LibraryID, pollArgs.ScannerEntityID, pollArgs.SearchArtifactID, pollArgs, PriorityScan, source, retryAfter)
 		} else {
+			deleteMetadataContinuation(ctx, w.DB, job.Args.Kind(), job.Args.ScannerEntityID, job.Args.SearchArtifactID)
 			if markErr := scanner.MarkScannerEntityFailed(ctx, w.DB, job.Args.ScannerEntityID, "metadata_error", err); markErr != nil {
 				log.Error().Err(markErr).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("fetch_metadata: failure state persistence failed")
 			}
@@ -569,6 +561,7 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 		}
 		return scannerWorkerError(err)
 	}
+	deleteMetadataContinuation(ctx, w.DB, job.Args.Kind(), job.Args.ScannerEntityID, job.Args.SearchArtifactID)
 	if result.New == 0 {
 		log.Info().
 			Int64("library_id", lib.ID).
@@ -1769,14 +1762,6 @@ func enqueueSearchLibraryMetadata(ctx context.Context, rc *river.Client[pgx.Tx],
 	return insertScanUnitWithBurst(ctx, rc, db, args.LibraryID, args, applyScheduledJobSource(opts, source))
 }
 
-func enqueueSearchLibraryMetadataAfter(ctx context.Context, rc *river.Client[pgx.Tx], args SearchLibraryMetadataArgs, priority int, source string, delay time.Duration) error {
-	opts := args.InsertOpts()
-	opts.Priority = priority
-	opts.ScheduledAt = time.Now().Add(delay)
-	_, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, source))
-	return err
-}
-
 func enqueueFetchLibraryMetadata(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, args FetchLibraryMetadataArgs, priority int, source string) error {
 	mediaType, err := resolveScannerQueueMediaType(ctx, db, args.LibraryID, args.MediaType)
 	if err != nil {
@@ -1786,14 +1771,6 @@ func enqueueFetchLibraryMetadata(ctx context.Context, rc *river.Client[pgx.Tx], 
 	opts := args.InsertOpts()
 	opts.Priority = priority
 	return insertScanUnitWithBurst(ctx, rc, db, args.LibraryID, args, applyScheduledJobSource(opts, source))
-}
-
-func enqueueFetchLibraryMetadataAfter(ctx context.Context, rc *river.Client[pgx.Tx], args FetchLibraryMetadataArgs, priority int, source string, delay time.Duration) error {
-	opts := args.InsertOpts()
-	opts.Priority = priority
-	opts.ScheduledAt = time.Now().Add(delay)
-	_, err := rc.Insert(ctx, args, applyScheduledJobSource(opts, source))
-	return err
 }
 
 func (w *ProcessLibraryScanWorker) scanLibraryAnalyze(ctx context.Context, lib sqlc.Library, scopePaths []string) (libraryScanOutcome, scanner.Result, error) {

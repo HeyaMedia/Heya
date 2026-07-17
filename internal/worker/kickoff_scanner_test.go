@@ -249,38 +249,110 @@ func TestScannerPipelineQueuesArePartitionedByMediaType(t *testing.T) {
 	require.Equal(t, "apply_metadata_tv", ApplyLibraryScanArgs{MediaType: sqlc.MediaTypeTv}.InsertOpts().Queue)
 }
 
-func TestRemoteMetadataPollContinuationsAreScheduledOnPollQueues(t *testing.T) {
+func TestRemoteMetadataPollContinuationsAreParkedOutsideRiver(t *testing.T) {
 	pool := testutil.SetupDB(t)
 	ctx := context.Background()
-	rc, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
-	require.NoError(t, err)
-
-	require.NoError(t, enqueueSearchLibraryMetadataAfter(ctx, rc, SearchLibraryMetadataArgs{
-		LibraryID: 901, MediaType: sqlc.MediaTypeAnime, ScannerEntityID: 902, AnalysisArtifactID: 903, Poll: true,
-	}, PriorityScan, "", time.Minute))
-	require.NoError(t, enqueueFetchLibraryMetadataAfter(ctx, rc, FetchLibraryMetadataArgs{
-		LibraryID: 904, MediaType: sqlc.MediaTypeMusic, ScannerEntityID: 905, SearchArtifactID: 906, Poll: true,
-	}, PriorityScan, "", time.Minute))
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE NULLIF(args->>'library_id', '')::bigint IN (901, 904)`)
+	q := sqlc.New(pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "parked-polls",
+		MediaType:    sqlc.MediaTypeAnime,
+		Paths:        []string{"/media/parked-polls"},
+		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy:    testutil.TestUserID(t, pool),
+		Settings:     []byte("{}"),
 	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	makeArtifact := func(identity, stage string) (int64, int64) {
+		var entityID, artifactID int64
+		require.NoError(t, pool.QueryRow(ctx, `
+			INSERT INTO scanner_entities (library_id, media_type, identity_key, title)
+			VALUES ($1, $2, $3, $3) RETURNING id
+		`, lib.ID, lib.MediaType, identity).Scan(&entityID))
+		require.NoError(t, pool.QueryRow(ctx, `
+			INSERT INTO scanner_entity_artifacts (entity_id, stage) VALUES ($1, $2) RETURNING id
+		`, entityID, stage).Scan(&artifactID))
+		return entityID, artifactID
+	}
+	searchEntityID, analysisArtifactID := makeArtifact("search", "analysis")
+	fetchEntityID, searchArtifactID := makeArtifact("fetch", "search")
+
+	searchArgs := SearchLibraryMetadataArgs{LibraryID: lib.ID, MediaType: lib.MediaType, ScannerEntityID: searchEntityID, AnalysisArtifactID: analysisArtifactID, Poll: true}
+	fetchArgs := FetchLibraryMetadataArgs{LibraryID: lib.ID, MediaType: lib.MediaType, ScannerEntityID: fetchEntityID, SearchArtifactID: searchArtifactID, Poll: true}
+	require.NoError(t, parkMetadataContinuation(ctx, pool, searchArgs.Kind(), lib.ID, searchEntityID, analysisArtifactID, searchArgs, PriorityScan, "manual", time.Minute))
+	require.NoError(t, parkMetadataContinuation(ctx, pool, fetchArgs.Kind(), lib.ID, fetchEntityID, searchArtifactID, fetchArgs, PriorityScan, "", time.Minute))
 
 	rows, err := pool.Query(ctx, `
-		SELECT kind, queue, state
-		FROM river_job
-		WHERE NULLIF(args->>'library_id', '')::bigint IN (901, 904)
-		ORDER BY kind`)
+		SELECT kind, args->>'poll', source
+		FROM scanner_metadata_continuations
+		WHERE library_id = $1
+		ORDER BY kind`, lib.ID)
 	require.NoError(t, err)
 	defer rows.Close()
 	got := map[string][2]string{}
 	for rows.Next() {
-		var kind, queue, state string
-		require.NoError(t, rows.Scan(&kind, &queue, &state))
-		got[kind] = [2]string{queue, state}
+		var kind, poll, source string
+		require.NoError(t, rows.Scan(&kind, &poll, &source))
+		got[kind] = [2]string{poll, source}
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, [2]string{"search_metadata_poll_anime", "scheduled"}, got["search_metadata"])
-	require.Equal(t, [2]string{"fetch_metadata_poll_music", "scheduled"}, got["fetch_metadata"])
+	require.Equal(t, [2]string{"true", "manual"}, got["search_metadata"])
+	require.Equal(t, [2]string{"true", ""}, got["fetch_metadata"])
+}
+
+func TestMetadataContinuationSweepAdoptsLegacyRiverPolls(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "legacy-polls",
+		MediaType:    sqlc.MediaTypeMovie,
+		Paths:        []string{"/media/legacy-polls"},
+		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy:    testutil.TestUserID(t, pool),
+		Settings:     []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	var entityID, artifactID int64
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO scanner_entities (library_id, media_type, identity_key, title)
+		VALUES ($1, $2, 'legacy-poll', 'legacy-poll') RETURNING id
+	`, lib.ID, lib.MediaType).Scan(&entityID))
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO scanner_entity_artifacts (entity_id, stage) VALUES ($1, 'analysis') RETURNING id
+	`, entityID).Scan(&artifactID))
+
+	rc, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
+	require.NoError(t, err)
+	legacyArgs := SearchLibraryMetadataArgs{
+		LibraryID:          lib.ID,
+		MediaType:          lib.MediaType,
+		ScannerEntityID:    entityID,
+		AnalysisArtifactID: artifactID,
+		Poll:               true,
+	}
+	legacyOpts := legacyArgs.InsertOpts()
+	legacyOpts.ScheduledAt = time.Now().Add(time.Hour)
+	inserted, err := rc.Insert(ctx, legacyArgs, &legacyOpts)
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE id = $1`, inserted.Job.ID) })
+
+	sweeper := MetadataContinuationSweepWorker{DB: pool}
+	adopted, err := sweeper.adoptLegacyPollJobs(ctx)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, adopted, 1)
+
+	var riverRows, continuations int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM river_job WHERE id = $1`, inserted.Job.ID).Scan(&riverRows))
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT count(*) FROM scanner_metadata_continuations
+		WHERE kind = 'search_metadata' AND scanner_entity_id = $1 AND artifact_id = $2
+	`, entityID, artifactID).Scan(&continuations))
+	require.Zero(t, riverRows)
+	require.Equal(t, 1, continuations)
 }
 
 func TestRenameLegacyScannerJobsRoutesActiveBacklogByMediaType(t *testing.T) {

@@ -1853,7 +1853,9 @@ export type JobListResult = {
      * A URL to the JSON Schema for this object.
      */
     readonly $schema?: string;
+    has_more: boolean;
     jobs: Array<JobRow> | null;
+    next_before_id?: number;
     total: number;
 };
 
@@ -6724,7 +6726,9 @@ export type JellyfinConfigBodyWritable = {
 };
 
 export type JobListResultWritable = {
+    has_more: boolean;
     jobs: Array<JobRow> | null;
+    next_before_id?: number;
     total: number;
 };
 
@@ -10266,7 +10270,10 @@ export type ListJobsData = {
          */
         kind?: string;
         limit?: number;
-        offset?: number;
+        /**
+         * Return jobs with IDs lower than this cursor
+         */
+        before_id?: number;
     };
     url: '/api/jobs';
 };

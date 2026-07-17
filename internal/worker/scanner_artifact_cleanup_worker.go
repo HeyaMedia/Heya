@@ -111,6 +111,11 @@ func listOrphanedInFlightScannerEntities(ctx context.Context, db *pgxpool.Pool, 
 		      AND job.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
 		      AND job.args ? 'scanner_entity_id'
 		      AND (job.args->>'scanner_entity_id')::bigint = entity.id
+		  )
+		  AND NOT EXISTS (
+		    SELECT 1
+		    FROM scanner_metadata_continuations continuation
+		    WHERE continuation.scanner_entity_id = entity.id
 		  )`, cutoff, libraryID)
 	if err != nil {
 		return nil, err

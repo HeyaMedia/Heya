@@ -30,9 +30,9 @@ func TestJobWorkerSettingsRouteReturnsJSON(t *testing.T) {
 		byKind[worker.Kind] = worker.Value
 	}
 	assert.Equal(t, 4, byKind["process_scan"])
-	assert.Equal(t, 50, byKind["search_metadata"])
-	assert.Equal(t, 50, byKind["search_metadata_poll"])
-	assert.Equal(t, 50, byKind["fetch_metadata"])
-	assert.Equal(t, 50, byKind["fetch_metadata_poll"])
+	assert.Equal(t, 4, byKind["search_metadata"])
+	assert.Equal(t, 4, byKind["search_metadata_poll"])
+	assert.Equal(t, 4, byKind["fetch_metadata"])
+	assert.Equal(t, 4, byKind["fetch_metadata_poll"])
 	assert.Equal(t, 4, byKind["apply_metadata"])
 }

@@ -6086,6 +6086,9 @@
             "readOnly": true,
             "type": "string"
           },
+          "has_more": {
+            "type": "boolean"
+          },
           "jobs": {
             "items": {
               "$ref": "#/components/schemas/JobRow"
@@ -6095,6 +6098,10 @@
               "null"
             ]
           },
+          "next_before_id": {
+            "format": "int64",
+            "type": "integer"
+          },
           "total": {
             "format": "int64",
             "type": "integer"
@@ -6102,7 +6109,8 @@
         },
         "required": [
           "jobs",
-          "total"
+          "total",
+          "has_more"
         ],
         "type": "object"
       },
@@ -24873,11 +24881,13 @@
             }
           },
           {
+            "description": "Return jobs with IDs lower than this cursor",
             "explode": false,
             "in": "query",
-            "name": "offset",
+            "name": "before_id",
             "schema": {
               "default": 0,
+              "description": "Return jobs with IDs lower than this cursor",
               "format": "int64",
               "minimum": 0,
               "type": "integer"

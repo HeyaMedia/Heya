@@ -995,6 +995,21 @@ type ScannerEntityArtifact struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type ScannerMetadataContinuation struct {
+	ID              int64              `json:"id"`
+	Kind            string             `json:"kind"`
+	LibraryID       int64              `json:"library_id"`
+	ScannerEntityID int64              `json:"scanner_entity_id"`
+	ArtifactID      int64              `json:"artifact_id"`
+	Args            []byte             `json:"args"`
+	Priority        int16              `json:"priority"`
+	Source          string             `json:"source"`
+	NextAttemptAt   pgtype.Timestamptz `json:"next_attempt_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	ScheduledTaskID string             `json:"scheduled_task_id"`
+}
+
 type ScheduledTask struct {
 	ID                    string             `json:"id"`
 	DisplayName           string             `json:"display_name"`

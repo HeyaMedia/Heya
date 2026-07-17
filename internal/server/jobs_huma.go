@@ -14,12 +14,12 @@ import (
 func registerJobRoutes(api huma.API, app *service.App) {
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/jobs", "list-jobs", "List background jobs", "Jobs")),
 		func(ctx context.Context, in *struct {
-			State  string `query:"state" enum:"available,running,scheduled,retryable,completed,cancelled,discarded" doc:"Filter by River state"`
-			Kind   string `query:"kind" maxLength:"64" doc:"Filter by job kind (River task name)"`
-			Limit  int    `query:"limit" minimum:"1" maximum:"200" default:"50"`
-			Offset int    `query:"offset" minimum:"0" default:"0"`
+			State    string `query:"state" enum:"available,running,scheduled,retryable,completed,cancelled,discarded" doc:"Filter by River state"`
+			Kind     string `query:"kind" maxLength:"64" doc:"Filter by job kind (River task name)"`
+			Limit    int    `query:"limit" minimum:"1" maximum:"200" default:"50"`
+			BeforeID int64  `query:"before_id" minimum:"0" default:"0" doc:"Return jobs with IDs lower than this cursor"`
 		}) (*JSONOutput[service.JobListResult], error) {
-			result, err := app.ListJobs(ctx, in.State, in.Kind, in.Limit, in.Offset)
+			result, err := app.ListJobs(ctx, in.State, in.Kind, in.Limit, in.BeforeID)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}

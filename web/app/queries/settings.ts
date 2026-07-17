@@ -297,11 +297,12 @@ export const adminLogsQuery = defineQueryOptions((limit: number) => ({
   meta: privateSettings,
 }))
 
-export const adminJobsQuery = defineQueryOptions((target: { state: string, kind: string, offset: number, limit: number }) => ({
-  key: ['admin', 'jobs', target.state || 'all', target.kind || 'all', target.offset, target.limit],
+export const adminJobsQuery = defineQueryOptions((target: { state: string, kind: string, beforeId: number, limit: number }) => ({
+  key: ['admin', 'jobs', target.state || 'all', target.kind || 'all', target.beforeId, target.limit],
   query: async () => {
     const { $heya } = useNuxtApp()
-    const query: Record<string, string | number> = { limit: target.limit, offset: target.offset }
+    const query: Record<string, string | number> = { limit: target.limit }
+    if (target.beforeId) query.before_id = target.beforeId
     if (target.state) query.state = target.state
     if (target.kind) query.kind = target.kind
     return await $heya('/api/jobs', { query }) as JobListResult

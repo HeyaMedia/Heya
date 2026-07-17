@@ -168,6 +168,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	// Debounce sweep — owns its own queue and fires every 10s via the
 	// periodic-jobs entry below.
 	river.AddWorker(workers, &DebounceSweepWorker{DB: cfg.DB})
+	river.AddWorker(workers, &MetadataContinuationSweepWorker{DB: cfg.DB})
 	river.AddWorker(workers, &SyncMetadataChangesWorker{DB: cfg.DB, Source: cfg.HeyaMetadata})
 
 	client, err := river.NewClient(riverpgxv5.New(cfg.DB), &river.Config{
@@ -177,14 +178,14 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 		// fallback for legacy or unknown media-type payloads.
 		Queues: map[string]river.QueueConfig{
 			// Scanner pipeline. Local disk analysis stays conservative; remote
-			// submission and polling are independent high-concurrency queues.
-			"kickoff_library_scan": {MaxWorkers: queueWorkers(cfg, "kickoff_library_scan", 1)},  // priority bands: P1=watcher, P2=scheduled/manual
-			"process_scan":         {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},          // local analysis only; scoped for watcher-triggered folders
-			"search_metadata":      {MaxWorkers: queueWorkers(cfg, "search_metadata", 50)},      // canonical search + discovery submission
-			"search_metadata_poll": {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 50)}, // scheduled discovery status checks
-			"fetch_metadata":       {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 50)},       // resolution submission + ready entity fetch
-			"fetch_metadata_poll":  {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 50)},  // scheduled resolution status checks
-			"apply_metadata":       {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},        // materialize + apply from persisted fetch artifact
+			// submission and due continuation checks use independent queues.
+			"kickoff_library_scan": {MaxWorkers: queueWorkers(cfg, "kickoff_library_scan", 1)}, // priority bands: P1=watcher, P2=scheduled/manual
+			"process_scan":         {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},         // local analysis only; scoped for watcher-triggered folders
+			"search_metadata":      {MaxWorkers: queueWorkers(cfg, "search_metadata", 4)},      // canonical search + discovery submission
+			"search_metadata_poll": {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 4)}, // scheduled discovery status checks
+			"fetch_metadata":       {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},       // resolution submission + ready entity fetch
+			"fetch_metadata_poll":  {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 4)},  // scheduled resolution status checks
+			"apply_metadata":       {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},       // materialize + apply from persisted fetch artifact
 
 			"kickoff_library_scan_movie":   {MaxWorkers: queueWorkers(cfg, "kickoff_library_scan", 1)},
 			"kickoff_library_scan_tv":      {MaxWorkers: queueWorkers(cfg, "kickoff_library_scan", 1)},
@@ -204,39 +205,39 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			"process_scan_podcast": {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},
 			"process_scan_radio":   {MaxWorkers: queueWorkers(cfg, "process_scan", 4)},
 
-			"search_metadata_movie":        {MaxWorkers: queueWorkers(cfg, "search_metadata", 50)},
-			"search_metadata_tv":           {MaxWorkers: queueWorkers(cfg, "search_metadata", 50)},
-			"search_metadata_anime":        {MaxWorkers: queueWorkers(cfg, "search_metadata", 50)},
-			"search_metadata_music":        {MaxWorkers: queueWorkers(cfg, "search_metadata", 50)},
-			"search_metadata_book":         {MaxWorkers: queueWorkers(cfg, "search_metadata", 50)},
-			"search_metadata_comic":        {MaxWorkers: queueWorkers(cfg, "search_metadata", 50)},
-			"search_metadata_podcast":      {MaxWorkers: queueWorkers(cfg, "search_metadata", 50)},
-			"search_metadata_radio":        {MaxWorkers: queueWorkers(cfg, "search_metadata", 50)},
-			"search_metadata_poll_movie":   {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 50)},
-			"search_metadata_poll_tv":      {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 50)},
-			"search_metadata_poll_anime":   {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 50)},
-			"search_metadata_poll_music":   {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 50)},
-			"search_metadata_poll_book":    {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 50)},
-			"search_metadata_poll_comic":   {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 50)},
-			"search_metadata_poll_podcast": {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 50)},
-			"search_metadata_poll_radio":   {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 50)},
+			"search_metadata_movie":        {MaxWorkers: queueWorkers(cfg, "search_metadata", 4)},
+			"search_metadata_tv":           {MaxWorkers: queueWorkers(cfg, "search_metadata", 4)},
+			"search_metadata_anime":        {MaxWorkers: queueWorkers(cfg, "search_metadata", 4)},
+			"search_metadata_music":        {MaxWorkers: queueWorkers(cfg, "search_metadata", 4)},
+			"search_metadata_book":         {MaxWorkers: queueWorkers(cfg, "search_metadata", 4)},
+			"search_metadata_comic":        {MaxWorkers: queueWorkers(cfg, "search_metadata", 4)},
+			"search_metadata_podcast":      {MaxWorkers: queueWorkers(cfg, "search_metadata", 4)},
+			"search_metadata_radio":        {MaxWorkers: queueWorkers(cfg, "search_metadata", 4)},
+			"search_metadata_poll_movie":   {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 4)},
+			"search_metadata_poll_tv":      {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 4)},
+			"search_metadata_poll_anime":   {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 4)},
+			"search_metadata_poll_music":   {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 4)},
+			"search_metadata_poll_book":    {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 4)},
+			"search_metadata_poll_comic":   {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 4)},
+			"search_metadata_poll_podcast": {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 4)},
+			"search_metadata_poll_radio":   {MaxWorkers: queueWorkers(cfg, "search_metadata_poll", 4)},
 
-			"fetch_metadata_movie":        {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 50)},
-			"fetch_metadata_tv":           {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 50)},
-			"fetch_metadata_anime":        {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 50)},
-			"fetch_metadata_music":        {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 50)},
-			"fetch_metadata_book":         {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 50)},
-			"fetch_metadata_comic":        {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 50)},
-			"fetch_metadata_podcast":      {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 50)},
-			"fetch_metadata_radio":        {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 50)},
-			"fetch_metadata_poll_movie":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 50)},
-			"fetch_metadata_poll_tv":      {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 50)},
-			"fetch_metadata_poll_anime":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 50)},
-			"fetch_metadata_poll_music":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 50)},
-			"fetch_metadata_poll_book":    {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 50)},
-			"fetch_metadata_poll_comic":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 50)},
-			"fetch_metadata_poll_podcast": {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 50)},
-			"fetch_metadata_poll_radio":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 50)},
+			"fetch_metadata_movie":        {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
+			"fetch_metadata_tv":           {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
+			"fetch_metadata_anime":        {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
+			"fetch_metadata_music":        {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
+			"fetch_metadata_book":         {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
+			"fetch_metadata_comic":        {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
+			"fetch_metadata_podcast":      {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
+			"fetch_metadata_radio":        {MaxWorkers: queueWorkers(cfg, "fetch_metadata", 4)},
+			"fetch_metadata_poll_movie":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 4)},
+			"fetch_metadata_poll_tv":      {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 4)},
+			"fetch_metadata_poll_anime":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 4)},
+			"fetch_metadata_poll_music":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 4)},
+			"fetch_metadata_poll_book":    {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 4)},
+			"fetch_metadata_poll_comic":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 4)},
+			"fetch_metadata_poll_podcast": {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 4)},
+			"fetch_metadata_poll_radio":   {MaxWorkers: queueWorkers(cfg, "fetch_metadata_poll", 4)},
 
 			"apply_metadata_movie":   {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},
 			"apply_metadata_tv":      {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},
@@ -320,10 +321,11 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			"sync_reactions_out":            {MaxWorkers: queueWorkers(cfg, "sync_reactions_out", 1)},
 
 			// Misc.
-			"soft_delete":           {MaxWorkers: queueWorkers(cfg, "soft_delete", 1)},
-			"debounce_sweep":        {MaxWorkers: queueWorkers(cfg, "debounce_sweep", 1)}, // periodic sweep; trailing-edge debounce of child-content enriches
-			"sync_metadata_changes": {MaxWorkers: queueWorkers(cfg, "sync_metadata_changes", 1)},
-			river.QueueDefault:      {MaxWorkers: queueWorkers(cfg, river.QueueDefault, 1)}, // fallback only; we shouldn't actually use it after the split
+			"soft_delete":                 {MaxWorkers: queueWorkers(cfg, "soft_delete", 1)},
+			"debounce_sweep":              {MaxWorkers: queueWorkers(cfg, "debounce_sweep", 1)}, // periodic sweep; trailing-edge debounce of child-content enriches
+			"metadata_continuation_sweep": {MaxWorkers: 1},                                      // promotes a bounded due batch; intentionally not user-tunable
+			"sync_metadata_changes":       {MaxWorkers: queueWorkers(cfg, "sync_metadata_changes", 1)},
+			river.QueueDefault:            {MaxWorkers: queueWorkers(cfg, river.QueueDefault, 1)}, // fallback only; we shouldn't actually use it after the split
 		},
 		// Periodic jobs — River-managed cron. The DebounceSweep fires
 		// every 10s so the trailing-edge debounce on child-content
@@ -335,6 +337,13 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 					return DebounceSweepArgs{}, nil
 				},
 				&river.PeriodicJobOpts{RunOnStart: false},
+			),
+			river.NewPeriodicJob(
+				river.PeriodicInterval(5*time.Second),
+				func() (river.JobArgs, *river.InsertOpts) {
+					return MetadataContinuationSweepArgs{}, nil
+				},
+				&river.PeriodicJobOpts{RunOnStart: true},
 			),
 			river.NewPeriodicJob(
 				river.PeriodicInterval(30*time.Second),

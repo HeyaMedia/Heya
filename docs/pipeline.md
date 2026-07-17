@@ -131,7 +131,8 @@ In `internal/worker/worker.go`:
   analysis artifact per owner entity. `search_metadata` resumes that artifact
   and submits canonical search/discovery without re-walking the library.
   Search submission, search polling, fetch/resolution submission, and fetch
-  polling each default to 50 workers; local analysis and apply default to 4.
+  polling each default to 4 workers per media-type queue; local analysis and
+  apply also default to 4.
   Every stage is partitioned by library media type
   (`*_movie`, `*_tv`, `*_anime`, `*_music`, `*_book`, etc.), and the configured
   worker count applies to every media-type queue. This prevents an older bulk
@@ -142,12 +143,18 @@ In `internal/worker/worker.go`:
   `process_scan` for changed scopes.
 - **Durable remote hand-off.** HeyaMetadata `202` discovery and resolution
   identifiers are stored in `metadata_resolution_workflows`. The submission
-  job inserts one scheduled continuation on `search_metadata_poll_*` or
-  `fetch_metadata_poll_*` and completes, immediately freeing submission
-  capacity for another entity. Poll jobs honor `Retry-After` (30 seconds by
-  default) and snooze on their separate queues. HTTP requests remain
-  entity-scoped rather than bulk, but the number of upstream workflows in
-  flight is not bounded by the local worker count.
+  job parks one compact row in `scanner_metadata_continuations` and completes,
+  immediately freeing submission capacity for another entity. A single
+  five-second sweeper claims at most 256 due continuations and promotes those
+  checks onto `search_metadata_poll_*` / `fetch_metadata_poll_*`; another
+  `Retry-After` parks the row again instead of snoozing a River job. A
+  five-minute lease plus River's active-args uniqueness makes the hand-off
+  crash-safe without stacking duplicates. During the rollout the same sweeper
+  adopts at most 1,000 legacy scheduled poll jobs per tick, so an old backlog
+  drains out of River without one enormous migration transaction. HTTP
+  requests remain entity-scoped and upstream workflows can still be numerous,
+  but River's hot table now contains only bounded due/in-flight checks rather
+  than the entire waiting population.
 - **Enrich pipeline** (`enrich_media_item`, `person_fetch`, `ratings_fetch`,
   `force_refresh_metadata`) is MaxWorkers=1 per kind for upstream rate-limit
   safety. The `enrich_media_item` queue keeps the priority-banded ordering:

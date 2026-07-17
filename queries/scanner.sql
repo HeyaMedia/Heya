@@ -62,9 +62,14 @@ SELECT count(*)::bigint AS deleted_count FROM deleted;
 -- name: CleanupStaleInFlightScannerEntitiesOlderThan :one
 WITH target AS (
     SELECT entity.id
-    FROM scanner_entities entity
-    WHERE entity.status IN ('matched', 'fetching')
-      AND entity.updated_at < sqlc.arg(cutoff_at)
+	FROM scanner_entities entity
+	WHERE entity.status IN ('matched', 'fetching')
+	  AND entity.updated_at < sqlc.arg(cutoff_at)
+	  AND NOT EXISTS (
+	      SELECT 1
+	      FROM scanner_metadata_continuations continuation
+	      WHERE continuation.scanner_entity_id = entity.id
+	  )
 ),
 entity_artifacts_deleted AS (
     DELETE FROM scanner_entity_artifacts artifact

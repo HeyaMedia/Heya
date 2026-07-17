@@ -30,18 +30,20 @@ const { confirm } = useConfirm()
 
 const filter = ref<string>('')
 const kindFilter = ref<string>('')
-const offset = ref(0)
+const page = ref(0)
+const pageCursors = ref<number[]>([0])
 const limit = 50
 const jobsData = useQuery(() => adminJobsQuery({
   state: filter.value,
   kind: kindFilter.value,
-  offset: offset.value,
+  beforeId: pageCursors.value[page.value] ?? 0,
   limit,
 }))
 const summaryData = useQuery(jobSummaryQuery())
 const kindsData = useQuery(adminJobKindsQuery())
 const jobs = computed<JobRow[]>(() => jobsData.data.value?.jobs ?? [])
 const total = computed(() => jobsData.data.value?.total ?? 0)
+const hasMore = computed(() => jobsData.data.value?.has_more ?? false)
 const summary = computed(() => summaryData.data.value ?? [])
 const kindSummary = computed(() => kindsData.data.value ?? [])
 const expanded = ref<number | null>(null)
@@ -71,10 +73,10 @@ const WORKER_PRESETS: WorkerPreset[] = [
 
 const SPEEDY_WORKERS: Record<string, number> = {
   process_scan: 6,
-  search_metadata: 56,
-  search_metadata_poll: 56,
-  fetch_metadata: 56,
-  fetch_metadata_poll: 56,
+  search_metadata: 6,
+  search_metadata_poll: 6,
+  fetch_metadata: 6,
+  fetch_metadata_poll: 6,
   apply_metadata: 5,
   ffprobe: 2,
   scan_keyframes: 2,
@@ -96,10 +98,10 @@ const SPEEDY_WORKERS: Record<string, number> = {
 
 const TURBO_WORKERS: Record<string, number> = {
   process_scan: 8,
-  search_metadata: 64,
-  search_metadata_poll: 64,
-  fetch_metadata: 64,
-  fetch_metadata_poll: 64,
+  search_metadata: 8,
+  search_metadata_poll: 8,
+  fetch_metadata: 8,
+  fetch_metadata_poll: 8,
   apply_metadata: 6,
   ffprobe: 3,
   scan_keyframes: 3,
@@ -313,8 +315,28 @@ async function flushKind() {
   }
 }
 
-watch(filter, () => { offset.value = 0; fetchJobs() })
-watch(kindFilter, () => { offset.value = 0; fetchJobs() })
+function resetJobPage() {
+  page.value = 0
+  pageCursors.value = [0]
+  void fetchJobs()
+}
+
+function nextJobPage() {
+  const cursor = jobsData.data.value?.next_before_id
+  if (!jobsData.data.value?.has_more || !cursor) return
+  pageCursors.value[page.value + 1] = cursor
+  page.value++
+  void fetchJobs()
+}
+
+function previousJobPage() {
+  if (page.value === 0) return
+  page.value--
+  void fetchJobs()
+}
+
+watch(filter, resetJobPage)
+watch(kindFilter, resetJobPage)
 
 function summaryCount(state: string): number {
   return summary.value.find(s => s.state === state)?.count ?? 0
@@ -373,38 +395,26 @@ const displayWorkerGroups = computed(() => {
   return groups
 })
 
-const startIdx = computed(() => total.value === 0 ? 0 : offset.value + 1)
-const endIdx   = computed(() => Math.min(offset.value + limit, total.value))
+const startIdx = computed(() => total.value === 0 ? 0 : page.value * limit + 1)
+const endIdx = computed(() => Math.min(page.value * limit + jobs.value.length, total.value))
 
-let debounce: ReturnType<typeof setTimeout> | null = null
-function debouncedRefresh() {
-  if (debounce) clearTimeout(debounce)
-  debounce = setTimeout(refresh, 400)
-}
-
-// Hoist the subscription out of onMounted: lifecycle hooks must register
-// during synchronous setup, not inside an async-or-not onMounted body.
-const { on } = useEventBus()
-const unsubs = [
-  on('queue.status',   debouncedRefresh),
-  on('scan.started',   debouncedRefresh),
-  on('scan.completed', debouncedRefresh),
-]
+let refreshTimer: ReturnType<typeof setInterval> | null = null
 onUnmounted(() => {
-  unsubs.forEach(fn => fn())
-  if (debounce) clearTimeout(debounce)
   if (tickTimer) clearInterval(tickTimer)
+  if (refreshTimer) clearInterval(refreshTimer)
 })
 
-// Polling fallback for WS drops + reconnect catchup. immediate=false because
-// onMounted below already does the first fetch and toggles `loading`.
+// Keep the connection indicator and reconnect catch-up, but do not turn every
+// queue event into three database scans. A fixed 15-second refresh is enough
+// for an administrative view and lines up with the server-side count cache.
 const { connected: wsConnected } = useLiveFallback(refresh, {
-  pollWhileOffline: 5000,
+  pollWhileOffline: 0,
   immediate: false,
 })
 
 onMounted(() => {
   tickTimer = setInterval(() => { tick.value++ }, 1000)
+  refreshTimer = setInterval(refresh, 15000)
   void refresh()
 })
 </script>
@@ -429,7 +439,7 @@ onMounted(() => {
 
     <SettingsSection title="Queue" icon="list">
       <template #actions>
-        <LiveDot :connected="wsConnected" :label="wsConnected ? 'Live' : 'Polling · WS offline'" />
+        <LiveDot :connected="wsConnected" :label="wsConnected ? 'Refreshes every 15s' : '15s refresh · WS offline'" />
         <button class="sv2-btn ghost" @click="openWorkerSettings">
           <Icon name="settings" :size="12" />
           Workers
@@ -576,9 +586,9 @@ onMounted(() => {
       </div>
 
       <div v-if="total > limit" class="pager">
-        <button class="sv2-btn ghost" :disabled="offset === 0" @click="offset -= limit; fetchJobs()">Previous</button>
+        <button class="sv2-btn ghost" :disabled="page === 0" @click="previousJobPage">Previous</button>
         <span class="page-info">{{ startIdx }}–{{ endIdx }} of {{ total }}</span>
-        <button class="sv2-btn ghost" :disabled="offset + limit >= total" @click="offset += limit; fetchJobs()">Next</button>
+        <button class="sv2-btn ghost" :disabled="!hasMore" @click="nextJobPage">Next</button>
       </div>
     </SettingsSection>
 

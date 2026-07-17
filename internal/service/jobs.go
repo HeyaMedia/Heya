@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strconv"
 	"time"
 
@@ -56,8 +57,10 @@ type JobRow struct {
 
 // JobListResult holds a page of jobs together with the total count.
 type JobListResult struct {
-	Jobs  []JobRow `json:"jobs"`
-	Total int      `json:"total"`
+	Jobs         []JobRow `json:"jobs"`
+	Total        int      `json:"total"`
+	HasMore      bool     `json:"has_more"`
+	NextBeforeID int64    `json:"next_before_id,omitempty"`
 }
 
 // JobSummaryRow holds a per-state job count.
@@ -73,15 +76,86 @@ type JobKindSummaryRow struct {
 	Count int    `json:"count"`
 }
 
-// hiddenJobKind is River-managed periodic noise (fires every 30s forever)
-// that would drown out real work in the Jobs UI. Excluded from the default
-// list and both summaries; an explicit kind=debounce_sweep filter still
-// returns the rows. The WS activity ticker excludes it independently
-// (eventhub/periodic.go).
+// Periodic maintenance rows would drown out real work in the Jobs UI. They
+// stay queryable by explicit kind but are excluded from the default list,
+// summaries, and WebSocket queue status.
 const hiddenJobKind = "debounce_sweep"
+const metadataContinuationSweepKind = "metadata_continuation_sweep"
 
-// ListJobs returns a filtered, ordered page of river jobs.
-func (a *App) ListJobs(ctx context.Context, state string, kind string, limit, offset int) (JobListResult, error) {
+func isHiddenJobKind(kind string) bool {
+	return kind == hiddenJobKind || kind == metadataContinuationSweepKind
+}
+
+const jobCountsTTL = 15 * time.Second
+
+type jobCountRow struct {
+	State string
+	Kind  string
+	Count int
+}
+
+// cachedJobCounts turns the state summary, kind summary, and filtered list
+// total into views over one grouped scan. Holding the mutex while refreshing
+// also coalesces the three parallel requests made by the Jobs page.
+func (a *App) cachedJobCounts(ctx context.Context) ([]jobCountRow, error) {
+	a.jobCountsMu.Lock()
+	defer a.jobCountsMu.Unlock()
+
+	if !a.jobCountsAt.IsZero() && time.Since(a.jobCountsAt) < jobCountsTTL {
+		return a.jobCounts, nil
+	}
+
+	rows, err := a.db.Query(ctx, `SELECT state, kind, count(*) FROM river_job GROUP BY state, kind`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := make([]jobCountRow, 0, 64)
+	for rows.Next() {
+		var row jobCountRow
+		if err := rows.Scan(&row.State, &row.Kind, &row.Count); err != nil {
+			return nil, err
+		}
+		counts = append(counts, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	a.jobCounts = counts
+	a.jobCountsAt = time.Now()
+	return a.jobCounts, nil
+}
+
+func (a *App) invalidateJobCounts() {
+	a.jobCountsMu.Lock()
+	a.jobCountsAt = time.Time{}
+	a.jobCountsMu.Unlock()
+}
+
+func filteredJobTotal(counts []jobCountRow, state, kind string) int {
+	total := 0
+	for _, row := range counts {
+		if state != "" && row.State != state {
+			continue
+		}
+		if kind != "" {
+			if row.Kind != kind {
+				continue
+			}
+		} else if isHiddenJobKind(row.Kind) {
+			continue
+		}
+		total += row.Count
+	}
+	return total
+}
+
+// ListJobs returns a filtered page newest-first. ID keyset paging lets
+// Postgres walk river_job's primary key instead of sorting and skipping an
+// ever-growing offset through the entire queue.
+func (a *App) ListJobs(ctx context.Context, state string, kind string, limit int, beforeID int64) (JobListResult, error) {
 	where := "WHERE 1=1"
 	args := []any{}
 	argIdx := 1
@@ -96,19 +170,23 @@ func (a *App) ListJobs(ctx context.Context, state string, kind string, limit, of
 		args = append(args, kind)
 		argIdx++
 	} else {
-		where += " AND kind <> '" + hiddenJobKind + "'"
+		where += " AND kind NOT IN ('" + hiddenJobKind + "', '" + metadataContinuationSweepKind + "')"
+	}
+	if beforeID > 0 {
+		where += " AND id < $" + strconv.Itoa(argIdx)
+		args = append(args, beforeID)
+		argIdx++
 	}
 
-	var total int
-	countQuery := "SELECT count(*) FROM river_job " + where
-	if err := a.db.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+	counts, err := a.cachedJobCounts(ctx)
+	if err != nil {
 		return JobListResult{}, err
 	}
+	total := filteredJobTotal(counts, state, kind)
 
 	query := "SELECT id, state, kind, queue, args::text, attempt, max_attempts, created_at, attempted_at, finalized_at, COALESCE(errors::text, '') FROM river_job " + where +
-		" ORDER BY CASE state WHEN 'running' THEN 0 WHEN 'available' THEN 1 WHEN 'retryable' THEN 2 WHEN 'scheduled' THEN 3 WHEN 'cancelled' THEN 4 WHEN 'discarded' THEN 5 WHEN 'completed' THEN 6 END, created_at DESC" +
-		" LIMIT $" + strconv.Itoa(argIdx) + " OFFSET $" + strconv.Itoa(argIdx+1)
-	args = append(args, limit, offset)
+		" ORDER BY id DESC LIMIT $" + strconv.Itoa(argIdx)
+	args = append(args, limit+1)
 
 	rows, err := a.db.Query(ctx, query, args...)
 	if err != nil {
@@ -116,7 +194,7 @@ func (a *App) ListJobs(ctx context.Context, state string, kind string, limit, of
 	}
 	defer rows.Close()
 
-	jobs := []JobRow{}
+	jobs := make([]JobRow, 0, limit+1)
 	for rows.Next() {
 		var j JobRow
 		var attemptedAt, finalizedAt *time.Time
@@ -127,8 +205,20 @@ func (a *App) ListJobs(ctx context.Context, state string, kind string, limit, of
 		j.FinalizedAt = finalizedAt
 		jobs = append(jobs, j)
 	}
+	if err := rows.Err(); err != nil {
+		return JobListResult{}, err
+	}
 
-	return JobListResult{Jobs: jobs, Total: total}, nil
+	hasMore := len(jobs) > limit
+	if hasMore {
+		jobs = jobs[:limit]
+	}
+	var nextBeforeID int64
+	if hasMore && len(jobs) > 0 {
+		nextBeforeID = jobs[len(jobs)-1].ID
+	}
+
+	return JobListResult{Jobs: jobs, Total: total, HasMore: hasMore, NextBeforeID: nextBeforeID}, nil
 }
 
 // MetadataQueueStatus is a snapshot of the `enrich_media_item` queue:
@@ -262,38 +352,50 @@ func (a *App) MetadataQueueStatus(ctx context.Context) (MetadataQueueStatus, err
 
 // JobSummary returns per-state job counts.
 func (a *App) JobSummary(ctx context.Context) ([]JobSummaryRow, error) {
-	rows, err := a.db.Query(ctx, "SELECT state, count(*) FROM river_job WHERE kind <> '"+hiddenJobKind+"' GROUP BY state ORDER BY state")
+	counts, err := a.cachedJobCounts(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	summary := []JobSummaryRow{}
-	for rows.Next() {
-		var s JobSummaryRow
-		if err := rows.Scan(&s.State, &s.Count); err != nil {
+	byState := make(map[string]int)
+	for _, row := range counts {
+		if isHiddenJobKind(row.Kind) {
 			continue
 		}
-		summary = append(summary, s)
+		byState[row.State] += row.Count
+	}
+	states := make([]string, 0, len(byState))
+	for state := range byState {
+		states = append(states, state)
+	}
+	sort.Strings(states)
+	summary := make([]JobSummaryRow, 0, len(states))
+	for _, state := range states {
+		summary = append(summary, JobSummaryRow{State: state, Count: byState[state]})
 	}
 	return summary, nil
 }
 
 // JobKindSummary returns per-kind job counts, ordered by kind.
 func (a *App) JobKindSummary(ctx context.Context) ([]JobKindSummaryRow, error) {
-	rows, err := a.db.Query(ctx, "SELECT kind, count(*) FROM river_job WHERE kind <> '"+hiddenJobKind+"' GROUP BY kind ORDER BY kind")
+	counts, err := a.cachedJobCounts(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	summary := []JobKindSummaryRow{}
-	for rows.Next() {
-		var s JobKindSummaryRow
-		if err := rows.Scan(&s.Kind, &s.Count); err != nil {
+	byKind := make(map[string]int)
+	for _, row := range counts {
+		if isHiddenJobKind(row.Kind) {
 			continue
 		}
-		summary = append(summary, s)
+		byKind[row.Kind] += row.Count
+	}
+	kinds := make([]string, 0, len(byKind))
+	for kind := range byKind {
+		kinds = append(kinds, kind)
+	}
+	sort.Strings(kinds)
+	summary := make([]JobKindSummaryRow, 0, len(kinds))
+	for _, kind := range kinds {
+		summary = append(summary, JobKindSummaryRow{Kind: kind, Count: byKind[kind]})
 	}
 	return summary, nil
 }
@@ -307,6 +409,7 @@ func (a *App) RetryJob(ctx context.Context, id int64) error {
 	if rows == 0 {
 		return ErrJobNotRetryable
 	}
+	a.invalidateJobCounts()
 	return nil
 }
 
@@ -319,6 +422,10 @@ func (a *App) CancelJob(ctx context.Context, id int64) error {
 	if rows == 0 {
 		return ErrJobNotCancellable
 	}
+	if err := worker.DeleteMetadataContinuationForRiverJob(ctx, a.db, id); err != nil {
+		return err
+	}
+	a.invalidateJobCounts()
 	return nil
 }
 
@@ -346,26 +453,50 @@ func (a *App) RescueOrphanedJobsAtStartup(ctx context.Context) (int64, error) {
 // rescued jobs and the number whose retry counts were reset because they had
 // exhausted their max attempts.
 func (a *App) RescueStuckJobs(ctx context.Context) (rescued, retriesReset int64, err error) {
-	return queueops.RescueStuckRunning(ctx, a.db)
+	rescued, retriesReset, err = queueops.RescueStuckRunning(ctx, a.db)
+	if err == nil && (rescued > 0 || retriesReset > 0) {
+		a.invalidateJobCounts()
+	}
+	return rescued, retriesReset, err
 }
 
 // ClearCompletedJobs deletes all completed, discarded, and cancelled jobs.
 // It returns the number of deleted rows.
 func (a *App) ClearCompletedJobs(ctx context.Context) (int64, error) {
-	return queueops.ClearCompleted(ctx, a.db)
+	n, err := queueops.ClearCompleted(ctx, a.db)
+	if err == nil && n > 0 {
+		a.invalidateJobCounts()
+	}
+	return n, err
 }
 
 // ClearAllJobs deletes every row from the river_job table.
 // It returns the number of deleted rows.
 func (a *App) ClearAllJobs(ctx context.Context) (int64, error) {
-	return queueops.ClearAll(ctx, a.db)
+	continuations, err := worker.DeleteMetadataContinuations(ctx, a.db, 0)
+	if err != nil {
+		return 0, err
+	}
+	n, err := queueops.ClearAll(ctx, a.db)
+	if err == nil && n > 0 {
+		a.invalidateJobCounts()
+	}
+	return n + continuations, err
 }
 
 // ClearJobsByKind deletes every job of the given kind, optionally scoped to a
 // single state. Returns the number of deleted rows. An empty kind deletes
 // nothing (queueops.ClearByKind guards it).
 func (a *App) ClearJobsByKind(ctx context.Context, kind, state string) (int64, error) {
-	return queueops.ClearByKind(ctx, a.db, kind, state)
+	continuations, err := worker.DeleteMetadataContinuationsByKind(ctx, a.db, kind, state)
+	if err != nil {
+		return 0, err
+	}
+	n, err := queueops.ClearByKind(ctx, a.db, kind, state)
+	if err == nil && n > 0 {
+		a.invalidateJobCounts()
+	}
+	return n + continuations, err
 }
 
 func (a *App) CancelScheduledTaskJobs(ctx context.Context, taskID string, kinds []string) (int64, error) {
@@ -422,6 +553,12 @@ func (a *App) cancelScanJobs(ctx context.Context, kinds []string, libraryID int6
 	signalled := map[int64]bool{}
 	deadline := time.Now().Add(10 * time.Second)
 	for {
+		parked, err := worker.DeleteMetadataContinuations(ctx, a.db, libraryID)
+		if err != nil {
+			return cancelled, err
+		}
+		cancelled += parked
+
 		n, err := queueops.CancelPendingByKinds(ctx, a.db, kinds, libraryID)
 		if err != nil {
 			return cancelled, err

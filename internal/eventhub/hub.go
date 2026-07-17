@@ -14,6 +14,10 @@ type Hub struct {
 	// user id via SubscribeUser so PublishToUser can reach only them.
 	subs    map[chan Event]int64
 	devices map[int64]map[string]ClientDevice
+	// queueStatus is the last lower-cadence river_job snapshot. Both the live
+	// queue events and stats emitter consume it so they never run independent
+	// full-table counts over a large backlog.
+	queueStatus QueueStatusPayload
 }
 
 type ClientDevice struct {
@@ -141,6 +145,18 @@ func (h *Hub) HasSubscribers() bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.subs) > 0
+}
+
+func (h *Hub) setQueueStatus(status QueueStatusPayload) {
+	h.mu.Lock()
+	h.queueStatus = status
+	h.mu.Unlock()
+}
+
+func (h *Hub) queueStatusSnapshot() QueueStatusPayload {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.queueStatus
 }
 
 // SubscriberCount returns the live subscriber count — useful for the debug

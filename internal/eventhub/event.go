@@ -214,8 +214,8 @@ type LibraryScanProgress struct {
 //     trickplay_file, etc.) carry CurrentItem + ItemKind. State is
 //     "running". Counts are zero (the UI keeps the last counts it
 //     saw).
-//  2. The activity ticker in periodic.go emits one event per task
-//     every 2 seconds with Pending + Running counts, no CurrentItem.
+//  2. The queue telemetry ticker in periodic.go emits one event per task
+//     every 10 seconds with Pending + Running counts, no CurrentItem.
 //     State is "running" when either count > 0; "idle" otherwise.
 //
 // The frontend merges into a per-task state dict keyed by TaskID:

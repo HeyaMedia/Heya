@@ -136,7 +136,15 @@ func MarkScheduledTaskJobsManual(ctx context.Context, db DB, taskID string) (int
 	if err != nil {
 		return 0, err
 	}
-	return tag.RowsAffected(), nil
+	continuations, err := db.Exec(ctx, `
+		UPDATE scanner_metadata_continuations
+		SET source = $2, updated_at = now()
+		WHERE scheduled_task_id = $1
+	`, taskID, KickoffSourceManual)
+	if err != nil {
+		return tag.RowsAffected(), err
+	}
+	return tag.RowsAffected() + continuations.RowsAffected(), nil
 }
 
 // ClaimKickoffFinish atomically stamps the kickoff row as finishing and
@@ -230,8 +238,12 @@ func CountByKinds(ctx context.Context, db DB, kinds []string) (RuntimeCounts, er
 type TaskKindCounts struct {
 	Kind            string
 	ScheduledTaskID string
-	Pending         int
-	Running         int
+	// LibraryID is populated only for scanner pipeline jobs. Keeping it in
+	// this same grouped snapshot lets the event hub derive per-library active
+	// counts without making a second pass over river_job.
+	LibraryID int64
+	Pending   int
+	Running   int
 }
 
 // CountLiveByKindAndTask returns live job counts for every (kind,
@@ -244,11 +256,16 @@ func CountLiveByKindAndTask(ctx context.Context, db DB) ([]TaskKindCounts, error
 	rows, err := db.Query(ctx, `
 		SELECT kind,
 		       COALESCE(args->>'scheduled_task_id', '') AS scheduled_task_id,
+		       CASE
+		         WHEN kind IN ('kickoff_library_scan', 'process_scan', 'search_metadata', 'fetch_metadata', 'apply_metadata')
+		         THEN COALESCE(NULLIF(args->>'library_id', '')::bigint, 0)
+		         ELSE 0
+		       END AS library_id,
 		       count(*) FILTER (WHERE state IN ('available', 'scheduled', 'retryable')) AS pending,
 		       count(*) FILTER (WHERE state = 'running') AS running
 		FROM river_job
 		WHERE state IN ('available', 'scheduled', 'retryable', 'running')
-		GROUP BY 1, 2
+		GROUP BY 1, 2, 3
 	`)
 	if err != nil {
 		return nil, err
@@ -257,7 +274,7 @@ func CountLiveByKindAndTask(ctx context.Context, db DB) ([]TaskKindCounts, error
 	var out []TaskKindCounts
 	for rows.Next() {
 		var c TaskKindCounts
-		if err := rows.Scan(&c.Kind, &c.ScheduledTaskID, &c.Pending, &c.Running); err != nil {
+		if err := rows.Scan(&c.Kind, &c.ScheduledTaskID, &c.LibraryID, &c.Pending, &c.Running); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -290,12 +307,20 @@ func CountScheduledTask(ctx context.Context, db DB, taskID string, kinds []strin
 	}
 	var counts RuntimeCounts
 	err := db.QueryRow(ctx, `
-		SELECT
-			count(*) FILTER (WHERE state IN ('available', 'scheduled', 'retryable')),
-			count(*) FILTER (WHERE state = 'running')
-		FROM river_job
-		WHERE kind = ANY($1::text[])
-		  AND args->>'scheduled_task_id' = $2
+		SELECT COALESCE(sum(pending), 0), COALESCE(sum(running), 0)
+		FROM (
+			SELECT
+				count(*) FILTER (WHERE state IN ('available', 'scheduled', 'retryable')) AS pending,
+				count(*) FILTER (WHERE state = 'running') AS running
+			FROM river_job
+			WHERE kind = ANY($1::text[])
+			  AND args->>'scheduled_task_id' = $2
+			UNION ALL
+			SELECT count(*) AS pending, 0 AS running
+			FROM scanner_metadata_continuations
+			WHERE kind = ANY($1::text[])
+			  AND scheduled_task_id = $2
+		) counts
 	`, pgx.QueryExecModeExec, kinds, taskID).Scan(&counts.Pending, &counts.Running)
 	return counts, err
 }
@@ -313,6 +338,12 @@ func ScheduledTaskExceededRuntime(ctx context.Context, db DB, taskID string, kin
 			  AND args->>'scheduled_task_id' = $2
 			  AND created_at < now() - ($3::int * interval '1 minute')
 			  AND COALESCE(metadata->>'source', '') <> $4
+		) OR EXISTS (
+			SELECT 1 FROM scanner_metadata_continuations
+			WHERE kind = ANY($1::text[])
+			  AND scheduled_task_id = $2
+			  AND created_at < now() - ($3::int * interval '1 minute')
+			  AND source <> $4
 		)
 	`, pgx.QueryExecModeExec, kinds, taskID, minutes, KickoffSourceManual).Scan(&exceeded)
 	return exceeded, err
@@ -441,7 +472,15 @@ func CancelPendingByScheduledTask(ctx context.Context, db DB, taskID string, kin
 	if err != nil {
 		return 0, err
 	}
-	return tag.RowsAffected(), nil
+	continuations, err := db.Exec(ctx, `
+		DELETE FROM scanner_metadata_continuations
+		WHERE kind = ANY($1::text[])
+		  AND scheduled_task_id = $2
+	`, kinds, taskID)
+	if err != nil {
+		return tag.RowsAffected(), err
+	}
+	return tag.RowsAffected() + continuations.RowsAffected(), nil
 }
 
 func CancelJob(ctx context.Context, db DB, id int64) (int64, error) {
@@ -629,13 +668,22 @@ func CancelPendingByKinds(ctx context.Context, db DB, kinds []string, libraryID 
 // between them).
 func CountActiveScanJobs(ctx context.Context, db DB, kinds []string, libraryID int64) (pending, running int64, err error) {
 	err = db.QueryRow(ctx, `
-		SELECT
-			count(*) FILTER (WHERE state IN ('available', 'pending', 'retryable', 'scheduled')),
-			count(*) FILTER (WHERE state = 'running')
-		FROM river_job
-		WHERE state IN ('available', 'pending', 'retryable', 'scheduled', 'running')
-		  AND kind = ANY($1)
-		  AND ($2::bigint = 0 OR NULLIF(args->>'library_id', '')::bigint = $2)
+		WITH river_counts AS (
+			SELECT
+				count(*) FILTER (WHERE state IN ('available', 'pending', 'retryable', 'scheduled')) AS pending,
+				count(*) FILTER (WHERE state = 'running') AS running
+			FROM river_job
+			WHERE state IN ('available', 'pending', 'retryable', 'scheduled', 'running')
+			  AND kind = ANY($1)
+			  AND ($2::bigint = 0 OR NULLIF(args->>'library_id', '')::bigint = $2)
+		), continuation_counts AS (
+			SELECT count(*) AS pending
+			FROM scanner_metadata_continuations
+			WHERE kind = ANY($1)
+			  AND ($2::bigint = 0 OR library_id = $2)
+		)
+		SELECT river_counts.pending + continuation_counts.pending, river_counts.running
+		FROM river_counts, continuation_counts
 	`, kinds, libraryID).Scan(&pending, &running)
 	return pending, running, err
 }

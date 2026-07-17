@@ -2,6 +2,7 @@ package eventhub
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -10,23 +11,18 @@ import (
 )
 
 func (h *Hub) StartPeriodicEmitters(ctx context.Context, db *pgxpool.Pool) {
-	go h.activityTicker(ctx, db)
+	go h.queueTelemetryTicker(ctx, db)
 	go h.statsTicker(ctx, db)
-	go h.taskProgressTicker(ctx, db)
 }
 
-// taskProgressTicker runs every 2s and emits one task.progress event
-// per scheduled task — carrying the latest pending+running counts
-// from river_job. The per-worker emits (from worker.TaskProgress
-// Broadcaster) carry CurrentItem; this carries counts. The FE merges
-// both into one per-task state.
-//
-// When a task has zero pending and zero running, the emit carries
-// state="idle" so the FE clears its current_item display for that
-// task.
-func (h *Hub) taskProgressTicker(ctx context.Context, db *pgxpool.Pool) {
-	ticker := time.NewTicker(2 * time.Second)
+// queueTelemetryTicker makes one grouped pass over live River rows every ten
+// seconds and fans that snapshot out to queue status, scheduled-task progress,
+// active jobs, scan progress, and the stats ticker. A 650k-row parked backlog
+// must not turn each UI surface into its own two-second full-table scan.
+func (h *Hub) queueTelemetryTicker(ctx context.Context, db *pgxpool.Pool) {
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
+	wasScanning := false
 	for {
 		select {
 		case <-ctx.Done():
@@ -35,15 +31,15 @@ func (h *Hub) taskProgressTicker(ctx context.Context, db *pgxpool.Pool) {
 			if !h.HasSubscribers() {
 				continue
 			}
-			// One grouped river_job pass per tick, folded per definition in
-			// Go. Counting per definition here costs a full-table scan each
-			// when a backlog is parked (a metadata-service stall leaves 650k+
-			// live rows), and 18 definitions every 2s was enough to keep two
-			// Postgres cores busy on counts alone.
 			live, err := queueops.CountLiveByKindAndTask(ctx, db)
 			if err != nil {
 				continue
 			}
+
+			status, activeUnits, activeKickoffs, globalKickoff := queueSnapshotCounts(live)
+			h.setQueueStatus(status)
+			h.Emit(EventQueueStatus, status)
+
 			for _, def := range taskdefs.All() {
 				taskID := def.ID
 				if def.Synthetic {
@@ -61,45 +57,16 @@ func (h *Hub) taskProgressTicker(ctx context.Context, db *pgxpool.Pool) {
 					Running: counts.Running,
 				})
 			}
-		}
-	}
-}
 
-func (h *Hub) activityTicker(ctx context.Context, db *pgxpool.Pool) {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	// wasScanning lets the scan-progress emit turn off cleanly: while scan
-	// jobs are active we emit real numbers; on the first tick after they
-	// finish we emit once more (empty) so the FE clears, then stay silent —
-	// the progress query isn't free and shouldn't run on an idle box.
-	wasScanning := false
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if !h.HasSubscribers() {
-				continue
-			}
-
-			counts, err := queueops.CountActiveExcludingKind(ctx, db, "debounce_sweep")
-			if err != nil {
-				continue
-			}
-			h.Emit(EventQueueStatus, QueueStatusPayload{Pending: counts.Pending, Running: counts.Running})
-
-			// 50 is enough to cover every queue running at once
-			// (~28 distinct queues today, each MaxWorkers=1 except
-			// download_image at 4) with headroom. The UI lists them
-			// grouped by kind, so a high cap is cheap. library_name is
-			// resolved here so the UI never renders a raw "library id N".
+			// Active rows are a tiny subset of the backlog. Keep this detail
+			// query separate from the grouped snapshot so its LIMIT stays cheap.
 			rows, err := db.Query(ctx, `
 				SELECT rj.id, rj.kind, rj.queue, rj.attempted_at, rj.args::text,
 				       COALESCE(l.name, '') AS library_name
 				FROM river_job rj
 				LEFT JOIN libraries l ON l.id = NULLIF(rj.args->>'library_id', '')::bigint
 				WHERE rj.state = 'running'
-				  AND rj.kind <> 'debounce_sweep'
+				  AND rj.kind NOT IN ('debounce_sweep', 'metadata_continuation_sweep')
 				ORDER BY rj.attempted_at DESC
 				LIMIT 50
 			`)
@@ -121,26 +88,43 @@ func (h *Hub) activityTicker(ctx context.Context, db *pgxpool.Pool) {
 			rows.Close()
 			h.Emit(EventActiveJobs, ActiveJobsPayload{Jobs: jobs})
 
-			scanning := scanJobsActive(ctx, db)
+			scanning := globalKickoff || len(activeUnits) > 0 || len(activeKickoffs) > 0
 			if scanning || wasScanning {
-				h.emitScanProgress(ctx, db)
+				h.emitScanProgress(ctx, db, activeUnits, activeKickoffs, globalKickoff)
 			}
 			wasScanning = scanning
 		}
 	}
 }
 
-// scanJobsActive is the cheap gate in front of emitScanProgress: one
-// indexed river_job existence probe.
-func scanJobsActive(ctx context.Context, db *pgxpool.Pool) bool {
-	var active bool
-	err := db.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM river_job
-			WHERE state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
-			  AND kind IN ('kickoff_library_scan', 'process_scan', 'search_metadata', 'fetch_metadata', 'apply_metadata')
-		)`).Scan(&active)
-	return err == nil && active
+func queueSnapshotCounts(live []queueops.TaskKindCounts) (QueueStatusPayload, map[int64]int, map[int64]struct{}, bool) {
+	status := QueueStatusPayload{}
+	activeUnits := make(map[int64]int)
+	activeKickoffs := make(map[int64]struct{})
+	globalKickoff := false
+	for _, row := range live {
+		if row.Kind != "debounce_sweep" && row.Kind != "metadata_continuation_sweep" {
+			status.Pending += row.Pending
+			status.Running += row.Running
+		}
+		active := row.Pending + row.Running
+		if active == 0 {
+			continue
+		}
+		switch row.Kind {
+		case "process_scan", "search_metadata", "fetch_metadata", "apply_metadata":
+			if row.LibraryID != 0 {
+				activeUnits[row.LibraryID] += active
+			}
+		case "kickoff_library_scan":
+			if row.LibraryID == 0 {
+				globalKickoff = true
+			} else {
+				activeKickoffs[row.LibraryID] = struct{}{}
+			}
+		}
+	}
+	return status, activeUnits, activeKickoffs, globalKickoff
 }
 
 // emitScanProgress reports per-library scan state for libraries with scan
@@ -161,31 +145,26 @@ func scanJobsActive(ctx context.Context, db *pgxpool.Pool) bool {
 // identity classified by its LATEST entity row only (chunk-era duplicate
 // rows counted in-flight rescans as done). Migration 00014 backs that
 // scan with a matching index.
-func (h *Hub) emitScanProgress(ctx context.Context, db *pgxpool.Pool) {
+func (h *Hub) emitScanProgress(ctx context.Context, db *pgxpool.Pool, activeUnits map[int64]int, activeKickoffs map[int64]struct{}, globalKickoff bool) {
+	activeLibrarySet := make(map[int64]struct{}, len(activeUnits)+len(activeKickoffs))
+	for libraryID := range activeUnits {
+		activeLibrarySet[libraryID] = struct{}{}
+	}
+	for libraryID := range activeKickoffs {
+		activeLibrarySet[libraryID] = struct{}{}
+	}
+	activeLibraryIDs := make([]int64, 0, len(activeLibrarySet))
+	for libraryID := range activeLibrarySet {
+		activeLibraryIDs = append(activeLibraryIDs, libraryID)
+	}
+	sort.Slice(activeLibraryIDs, func(i, j int) bool { return activeLibraryIDs[i] < activeLibraryIDs[j] })
+
 	rows, err := db.Query(ctx, `
-		WITH active_units AS (
-			SELECT NULLIF(rj.args->>'library_id', '')::bigint AS library_id, count(*) AS cnt
-			FROM river_job rj
-			WHERE rj.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
-			  AND rj.kind IN ('process_scan', 'search_metadata', 'fetch_metadata', 'apply_metadata')
-			GROUP BY 1
-		),
-		active_kickoffs AS (
-			SELECT DISTINCT NULLIF(rj.args->>'library_id', '')::bigint AS library_id
-			FROM river_job rj
-			WHERE rj.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
-			  AND rj.kind = 'kickoff_library_scan'
-		),
-		latest AS (
+		WITH latest AS (
 			SELECT DISTINCT ON (se.library_id, se.identity_key)
 				se.library_id, se.identity_key, se.status
 			FROM scanner_entities se
-			WHERE EXISTS (SELECT 1 FROM active_kickoffs WHERE library_id IS NULL)
-			   OR se.library_id IN (
-					SELECT library_id FROM active_units WHERE library_id IS NOT NULL
-					UNION
-					SELECT library_id FROM active_kickoffs WHERE library_id IS NOT NULL
-			   )
+			WHERE $2::boolean OR se.library_id = ANY($1::bigint[])
 			ORDER BY se.library_id, se.identity_key, se.updated_at DESC, se.id DESC
 		),
 		buckets AS (
@@ -198,18 +177,14 @@ func (h *Hub) emitScanProgress(ctx context.Context, db *pgxpool.Pool) {
 		)
 		SELECT l.id, l.name,
 			COALESCE(b.units_total, 0) AS total,
-			COALESCE(au.cnt, 0) AS active,
 			COALESCE(buckets.matched, 0) AS matched,
 			COALESCE(buckets.unmatched, 0) AS unmatched,
 			COALESCE(buckets.errors, 0) AS errors
 		FROM libraries l
 		LEFT JOIN library_scan_bursts b ON b.library_id = l.id
-		LEFT JOIN active_units au ON au.library_id = l.id
 		LEFT JOIN buckets ON buckets.library_id = l.id
-		WHERE l.id IN (SELECT library_id FROM active_units WHERE library_id IS NOT NULL)
-		   OR l.id IN (SELECT library_id FROM active_kickoffs WHERE library_id IS NOT NULL)
-		   OR EXISTS (SELECT 1 FROM active_kickoffs WHERE library_id IS NULL)
-	`)
+		WHERE $2::boolean OR l.id = ANY($1::bigint[])
+	`, activeLibraryIDs, globalKickoff)
 	if err != nil {
 		return
 	}
@@ -219,9 +194,10 @@ func (h *Hub) emitScanProgress(ctx context.Context, db *pgxpool.Pool) {
 	for rows.Next() {
 		var lp LibraryScanProgress
 		var total, active int
-		if err := rows.Scan(&lp.LibraryID, &lp.Name, &total, &active, &lp.Matched, &lp.Unmatched, &lp.Errors); err != nil {
+		if err := rows.Scan(&lp.LibraryID, &lp.Name, &total, &lp.Matched, &lp.Unmatched, &lp.Errors); err != nil {
 			continue
 		}
+		active = activeUnits[lp.LibraryID]
 		if active == 0 {
 			// Discovery (kickoff walking, nothing enqueued yet): totals are
 			// unknown; a stale burst row must not read as instantly done.
@@ -266,10 +242,9 @@ func (h *Hub) statsTicker(ctx context.Context, db *pgxpool.Pool) {
 			s.TotalPeople = estimatedRows(ctx, db, "public.people")
 			s.TotalFiles = estimatedRows(ctx, db, "public.library_files")
 
-			if counts, err := queueops.CountActive(ctx, db); err == nil {
-				s.QueuePending = counts.Pending
-				s.QueueRunning = counts.Running
-			}
+			status := h.queueStatusSnapshot()
+			s.QueuePending = status.Pending
+			s.QueueRunning = status.Running
 
 			h.Emit(EventStatsUpdated, s)
 		}
