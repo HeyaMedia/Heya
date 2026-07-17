@@ -205,6 +205,207 @@ export const musicMixesQuery = defineQueryOptions(() => ({
   },
 }))
 
+// ── Music-home shelves ──────────────────────────────────────────────────────
+// One options definition per shelf so MusicHome, the persistence layer, and
+// the navigation-prefetch section warmer all share a single source of truth.
+// Every shelf persists to device: the home surface is what a cold app-open
+// paints first, so it hydrates from the last-known snapshot and revalidates
+// in place. Play-history shelves are private; library/rotation shelves normal.
+// staleTime mirrors the server Cache-Control; rotating shelves autoRefetch at
+// the server's 5-minute seed rotation.
+
+const shelfMeta = { prefetch: 'none', persistence: 'device', sensitivity: 'normal' } as const
+const shelfMetaPrivate = { ...shelfMeta, sensitivity: 'private' } as const
+
+/** Row of /api/music/home/recently-played-artists. */
+export interface RecentPlayedArtistRow {
+  artist_id: number
+  artist_name: string
+  artist_slug: string
+  media_item_id: number
+  media_item_public_id?: string
+  album_count: number
+  track_count: number
+  available?: boolean
+}
+
+/** Row of /api/music/home/on-this-day. */
+export interface OnThisDayRow {
+  id: number
+  title: string
+  slug: string
+  artist_name: string
+  artist_slug: string
+  release_year: number
+}
+
+/** Row of /api/music/home/recent-playlists. */
+export interface HomePlaylistRow {
+  id: number
+  slug: string
+  name: string
+  cover_path: string
+  track_count: number
+  has_cover?: boolean
+  updated_at?: string
+  auto_artist_slug?: string
+  auto_album_slug?: string
+}
+
+export interface ShelfAlbum {
+  id: number
+  slug: string
+  title: string
+  year: string
+  album_type: string
+}
+export interface MoreByEntry {
+  artist_id: number
+  artist_name: string
+  artist_slug: string
+  albums: ShelfAlbum[]
+}
+
+export interface GenreArtist {
+  artist_id: number
+  artist_name: string
+  artist_slug: string
+  album_count: number
+  track_count: number
+}
+export interface GenreShelf {
+  enabled: boolean
+  genre: string
+  artists: GenreArtist[]
+}
+
+export interface MostPlayedAlbum {
+  album_id: number
+  album_title: string
+  album_slug: string
+  artist_name: string
+  artist_slug: string
+  play_count: number
+}
+export interface MostPlayedShelf {
+  enabled: boolean
+  window_label: string
+  albums: MostPlayedAlbum[]
+}
+
+export interface LapsedAlbum {
+  id: number
+  slug: string
+  title: string
+  year: string
+}
+export interface LapsedArtist {
+  artist_id: number
+  artist_name: string
+  artist_slug: string
+  last_played_at: string
+  months_lapsed: number
+  albums: LapsedAlbum[]
+}
+export interface LapsedShelf {
+  enabled: boolean
+  since_label: string
+  artists: LapsedArtist[]
+}
+
+export interface LabelAlbum {
+  album_id: number
+  album_title: string
+  album_slug: string
+  album_year: string
+  artist_name: string
+  artist_slug: string
+}
+export interface LabelShelf {
+  enabled: boolean
+  label: string
+  albums: LabelAlbum[]
+}
+
+/** Every shelf endpoint returns the common { items: T[] } envelope. */
+async function fetchShelfItems<T>(path: string): Promise<T[]> {
+  const { $heya } = useNuxtApp()
+  const res = await $heya(path as never) as { items: T[] }
+  return res.items ?? []
+}
+
+export const musicRecentArtistsQuery = defineQueryOptions(() => ({
+  key: ['music', 'home', 'recently-played-artists'],
+  query: () => fetchShelfItems<RecentPlayedArtistRow>('/api/music/home/recently-played-artists'),
+  staleTime: 1000 * 30,
+  meta: shelfMetaPrivate,
+}))
+
+export const musicOnThisDayQuery = defineQueryOptions(() => ({
+  key: ['music', 'home', 'on-this-day'],
+  query: () => fetchShelfItems<OnThisDayRow>('/api/music/home/on-this-day'),
+  staleTime: 1000 * 60 * 60 * 6,
+  meta: shelfMeta,
+}))
+
+export const musicRecentPlaylistsQuery = defineQueryOptions(() => ({
+  key: ['music', 'home', 'recent-playlists'],
+  query: () => fetchShelfItems<HomePlaylistRow>('/api/music/home/recent-playlists'),
+  staleTime: 1000 * 30,
+  meta: shelfMetaPrivate,
+}))
+
+export const musicMoreByArtistsQuery = defineQueryOptions(() => ({
+  key: ['music', 'home', 'more-by-artists'],
+  query: () => fetchShelfItems<MoreByEntry>('/api/music/home/more-by-artists'),
+  staleTime: 1000 * 60 * 5,
+  autoRefetch: 1000 * 60 * 5,
+  meta: shelfMeta,
+}))
+
+export const musicGenreShelfQuery = defineQueryOptions(() => ({
+  key: ['music', 'home', 'more-in-genre'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return (await $heya('/api/music/home/more-in-genre')) as GenreShelf
+  },
+  staleTime: 1000 * 60 * 5,
+  autoRefetch: 1000 * 60 * 5,
+  meta: shelfMeta,
+}))
+
+export const musicMostPlayedShelfQuery = defineQueryOptions(() => ({
+  key: ['music', 'home', 'most-played-last-month'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return (await $heya('/api/music/home/most-played-last-month')) as MostPlayedShelf
+  },
+  staleTime: 1000 * 60 * 5,
+  meta: shelfMetaPrivate,
+}))
+
+export const musicLapsedShelfQuery = defineQueryOptions(() => ({
+  key: ['music', 'home', 'lapsed-artists'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return (await $heya('/api/music/home/lapsed-artists')) as LapsedShelf
+  },
+  staleTime: 1000 * 60 * 5,
+  autoRefetch: 1000 * 60 * 5,
+  meta: shelfMetaPrivate,
+}))
+
+export const musicLabelShelfQuery = defineQueryOptions(() => ({
+  key: ['music', 'home', 'more-from-label'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return (await $heya('/api/music/home/more-from-label')) as LabelShelf
+  },
+  staleTime: 1000 * 60 * 5,
+  autoRefetch: 1000 * 60 * 5,
+  meta: shelfMeta,
+}))
+
 export const musicAlbumsQuery = defineQueryOptions(() => ({
   key: ['music', 'albums', 'list', { limit: 500 }],
   query: async () => {

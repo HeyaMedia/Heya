@@ -8,8 +8,15 @@
 // pages already register (['media','recent','movie'], ['for-you', section],
 // ['me','watch','recent'], …) keep matching. On invalidation Pinia Colada
 // refetches every loaded page of an active infinite entry in order.
-import { defineInfiniteQueryOptions } from '@pinia/colada'
+import { defineInfiniteQueryOptions, defineQueryOptions } from '@pinia/colada'
 import type { MediaItem } from '~~/shared/types'
+
+// Home rails are the first thing a cold app-open renders, so every one of
+// them persists to the device cache (colada-persistence hydrates them at
+// boot → last-known shelf paints instantly, then revalidates in place).
+// Play-history-derived rails are marked private; library-derived stay normal.
+const railMeta = { prefetch: 'none', persistence: 'device', sensitivity: 'normal' } as const
+const railMetaPrivate = { ...railMeta, sensitivity: 'private' } as const
 
 /** Page size for the flat recently-added/watched rails. */
 export const RAIL_PAGE = 40
@@ -74,6 +81,22 @@ export interface RecentAlbumRow {
   available?: boolean
 }
 
+/** Grouped new/updated artist event from /api/music/home (finite rail). */
+export interface RecentArtistEntry {
+  id: number
+  media_item_id: number
+  media_item_public_id?: string
+  name: string
+  slug: string
+  album_count: number
+  track_count: number
+  kind: 'new' | 'updated'
+  new_album_count: number
+  latest_album_title?: string
+  latest_album_slug?: string
+  added_at: string
+}
+
 /** Row of /api/me/watch/recent. */
 export interface RecentWatchedRow {
   media_item_id: number
@@ -126,6 +149,7 @@ export const recentMediaInfinite = defineInfiniteQueryOptions((type: 'movie' | '
   getNextPageParam: (last: MediaItem[], _all: MediaItem[][], lastParam: number) =>
     nextOffset(last.length, RAIL_PAGE, lastParam),
   staleTime: 1000 * 60,
+  meta: railMeta,
 }))
 
 /** Recently-added TV — grouped events, offset in entry space. */
@@ -141,6 +165,7 @@ export const recentTVInfinite = defineInfiniteQueryOptions(() => ({
   getNextPageParam: (last: RecentTVEntry[], _all: RecentTVEntry[][], lastParam: number) =>
     nextOffset(last.length, RAIL_PAGE, lastParam),
   staleTime: 1000 * 60,
+  meta: railMeta,
 }))
 
 /** Recently-added albums — insert-order pages from the music home shelf. */
@@ -157,6 +182,7 @@ export const recentAlbumsInfinite = defineInfiniteQueryOptions(() => ({
   getNextPageParam: (last: RecentAlbumRow[], _all: RecentAlbumRow[][], lastParam: number) =>
     nextOffset(last.length, RAIL_PAGE, lastParam),
   staleTime: 1000 * 60,
+  meta: railMeta,
 }))
 
 /** Recently watched, deduped to one row per title (movies + shows). */
@@ -172,6 +198,7 @@ export const recentWatchedInfinite = defineInfiniteQueryOptions(() => ({
   getNextPageParam: (last: RecentWatchedRow[], _all: RecentWatchedRow[][], lastParam: number) =>
     nextOffset(last.length, RAIL_PAGE, lastParam),
   staleTime: 1000 * 30,
+  meta: railMetaPrivate,
 }))
 
 /** Recently watched EPISODES — one row per episode, for the TV landing. */
@@ -187,6 +214,22 @@ export const recentEpisodesInfinite = defineInfiniteQueryOptions(() => ({
   getNextPageParam: (last: RecentEpisodeRow[], _all: RecentEpisodeRow[][], lastParam: number) =>
     nextOffset(last.length, RAIL_PAGE, lastParam),
   staleTime: 1000 * 30,
+  meta: railMetaPrivate,
+}))
+
+// Artists ride /api/music/home — the grouped new/updated events have no
+// offset semantics, so this one stays a plain finite query.
+export const homeRecentArtistsQuery = defineQueryOptions(() => ({
+  key: ['home', 'recent-artists'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    const home = await $heya('/api/music/home', { query: { limit: 20 } }) as {
+      recent_artists: RecentArtistEntry[]
+    }
+    return home.recent_artists ?? []
+  },
+  staleTime: 1000 * 60,
+  meta: railMeta,
 }))
 
 export interface ForYouParams {
@@ -219,6 +262,7 @@ export const forYouInfinite = defineInfiniteQueryOptions((p: ForYouParams) => ({
     return last.items.length === FORYOU_PAGE && next + FORYOU_PAGE <= FORYOU_DEPTH_CAP ? next : null
   },
   staleTime: 1000 * 60 * 5,
+  meta: railMetaPrivate,
 }))
 
 /** RecRail.key values the pager endpoint accepts (mirrors the huma enum). */

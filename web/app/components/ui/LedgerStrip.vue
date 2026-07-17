@@ -26,8 +26,14 @@ withDefaults(
      * theme keeps contrast, and drop the dark scrim + blur.
      */
     canvas?: boolean
+    /**
+     * Cold-cache shell: with no cells yet, render ghost cells at the strip's
+     * final height so the page doesn't reflow when the queries land. Never
+     * shown once any real cell exists.
+     */
+    pending?: boolean
   }>(),
-  { cells: () => [], canvas: false },
+  { cells: () => [], canvas: false, pending: false },
 )
 </script>
 
@@ -40,6 +46,12 @@ withDefaults(
           }}<span v-if="c.unit" class="ls-u"> {{ c.unit }}</span
           ><small v-if="c.sub">{{ c.sub }}</small></span>
       </div>
+      <template v-if="!cells.length && pending">
+        <div v-for="i in 3" :key="`ghost-${i}`" class="ls-cell ls-skel" aria-hidden="true">
+          <span class="ls-k"><span class="ls-ghost" :style="{ width: `${38 + i * 14}px`, height: '12px' }" /></span>
+          <span class="ls-v"><span class="ls-ghost" :style="{ width: `${56 + i * 24}px`, height: '20px' }" /></span>
+        </div>
+      </template>
     </slot>
   </div>
 </template>
@@ -105,6 +117,22 @@ withDefaults(
   color: rgb(var(--lk) / 0.45);
 }
 .ls-v .ls-u { font-size: 11.5px; color: rgb(var(--lk) / 0.6); }
+
+/* Cold-cache ghosts — same cell box, shimmer bars sized to the k/v line
+   heights so the strip claims its settled height before any query lands. */
+.ls-skel .ls-v { display: block; }
+.ls-ghost {
+  display: block;
+  border-radius: 3px;
+  background: rgb(var(--lk) / 0.12);
+  animation: ls-ghost-pulse 1.4s ease-in-out infinite;
+}
+@keyframes ls-ghost-pulse {
+  50% { opacity: 0.45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ls-ghost { animation: none; }
+}
 
 /* Phone: a horizontal scroll strip, cells never wrap (heya2.css ≤760 block,
    folded onto the app's 720px breakpoint). */

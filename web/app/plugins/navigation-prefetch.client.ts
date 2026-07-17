@@ -1,40 +1,118 @@
-import { useQueryCache, type UseQueryOptions } from '@pinia/colada'
+import { setInfiniteQueryData, useQueryCache, type EntryKey, type UseQueryOptions } from '@pinia/colada'
 import { collectionDetailQuery, personDetailQuery } from '~/queries/discovery'
 import { mediaDetailQuery } from '~/queries/media'
-import { musicAlbumDetailQuery, musicArtistDetailQuery, musicMixesQuery, playlistDetailQuery } from '~/queries/music'
+import { continueWatchingQuery, recentWatchedQuery } from '~/queries/activity'
+import { meSettingsQuery } from '~/queries/user'
+import {
+  musicAlbumDetailQuery,
+  musicArtistDetailQuery,
+  musicGenreShelfQuery,
+  musicLabelShelfQuery,
+  musicLapsedShelfQuery,
+  musicMixesQuery,
+  musicMoreByArtistsQuery,
+  musicMostPlayedShelfQuery,
+  musicOnThisDayQuery,
+  musicRecentArtistsQuery,
+  musicRecentPlaylistsQuery,
+  playlistDetailQuery,
+} from '~/queries/music'
 import { enrichedCatalogQuery } from '~/queries/catalog'
+import {
+  forYouInfinite,
+  homeRecentArtistsQuery,
+  recentAlbumsInfinite,
+  recentMediaInfinite,
+  recentTVInfinite,
+} from '~/queries/rails'
 import { toValue } from 'vue'
 
 // Central route → data-query registry. NuxtLink already preloads route code;
 // this plugin adds the critical API payload when pointer/focus intent is
 // visible. New domains can join without every poster knowing cache details.
-function queryForPath(pathname: string): UseQueryOptions<unknown> | null {
+// Section roots (/, /music, /movies, /tv) map to their full landing sets so
+// intent warming and the idle cross-section pump below can make switching
+// sections seamless.
+function queriesForPath(pathname: string): UseQueryOptions<unknown>[] {
   const parts = pathname.split('/').filter(Boolean)
+  if (!parts.length) {
+    // Home: hero/ledger feeders + every finite rail (infinite rails are
+    // listed separately in infiniteRailsForPath).
+    return [
+      continueWatchingQuery(),
+      recentWatchedQuery(),
+      homeRecentArtistsQuery(),
+      meSettingsQuery(),
+    ]
+  }
+  if (parts[0] === 'music' && !parts[1]) {
+    return [
+      musicMixesQuery(),
+      musicRecentArtistsQuery(),
+      musicOnThisDayQuery(),
+      musicRecentPlaylistsQuery(),
+      musicMoreByArtistsQuery(),
+      musicGenreShelfQuery(),
+      musicMostPlayedShelfQuery(),
+      musicLapsedShelfQuery(),
+      musicLabelShelfQuery(),
+    ]
+  }
   const movieCatalogRoutes = new Set(['all', 'loved', 'library', 'list', 'franchises'])
   const tvCatalogRoutes = new Set(['all', 'loved', 'library', 'list'])
-  if (parts[0] === 'movies' && parts[1] && movieCatalogRoutes.has(parts[1])) return enrichedCatalogQuery('movie')
-  if (parts[0] === 'tv' && parts[1] && tvCatalogRoutes.has(parts[1])) return enrichedCatalogQuery('tv')
-  if (parts[0] === 'movies' && ['recommendations', 'roulette', 'collection'].includes(parts[1] ?? '')) return null
-  if (parts[0] === 'tv' && parts[1] === 'recommendations') return null
-  if (parts[0] === 'movies' && parts[1]) return mediaDetailQuery(decodeURIComponent(parts[1]))
-  if (parts[0] === 'tv' && parts[1]) return mediaDetailQuery(decodeURIComponent(parts[1]))
-  if (parts[0] === 'books' && parts[1]) return mediaDetailQuery(decodeURIComponent(parts[1]))
-  if (parts[0] === 'person' && parts[1]) return personDetailQuery(decodeURIComponent(parts[1]))
+  if (parts[0] === 'movies' && !parts[1]) return [enrichedCatalogQuery('movie')]
+  if (parts[0] === 'tv' && !parts[1]) return [enrichedCatalogQuery('tv')]
+  if (parts[0] === 'movies' && parts[1] && movieCatalogRoutes.has(parts[1])) return [enrichedCatalogQuery('movie')]
+  if (parts[0] === 'tv' && parts[1] && tvCatalogRoutes.has(parts[1])) return [enrichedCatalogQuery('tv')]
+  if (parts[0] === 'movies' && ['recommendations', 'roulette', 'collection'].includes(parts[1] ?? '')) return []
+  if (parts[0] === 'tv' && parts[1] === 'recommendations') return []
+  if (parts[0] === 'movies' && parts[1]) return [mediaDetailQuery(decodeURIComponent(parts[1]))]
+  if (parts[0] === 'tv' && parts[1]) return [mediaDetailQuery(decodeURIComponent(parts[1]))]
+  if (parts[0] === 'books' && parts[1]) return [mediaDetailQuery(decodeURIComponent(parts[1]))]
+  if (parts[0] === 'person' && parts[1]) return [personDetailQuery(decodeURIComponent(parts[1]))]
   if (parts[0] === 'collection' && parts[1]) {
     const id = Number(parts[1])
-    return Number.isFinite(id) ? collectionDetailQuery(id) : null
+    return Number.isFinite(id) ? [collectionDetailQuery(id)] : []
   }
   if (parts[0] === 'music' && parts[1] === 'artist' && parts[2]) {
     const artist = decodeURIComponent(parts[2])
-    if (parts[3] && parts[3] !== 'top-tracks') return musicAlbumDetailQuery({ artistSlug: artist, albumSlug: decodeURIComponent(parts[3]) })
-    return musicArtistDetailQuery(artist)
+    if (parts[3] && parts[3] !== 'top-tracks') return [musicAlbumDetailQuery({ artistSlug: artist, albumSlug: decodeURIComponent(parts[3]) })]
+    return [musicArtistDetailQuery(artist)]
   }
   if (parts[0] === 'music' && parts[1] === 'playlist' && parts[2]) {
     const id = Number(parts[2])
-    return Number.isFinite(id) ? playlistDetailQuery(id) : null
+    return Number.isFinite(id) ? [playlistDetailQuery(id)] : []
   }
-  if (parts[0] === 'music' && parts[1] === 'mix' && parts[2]) return musicMixesQuery()
-  return null
+  if (parts[0] === 'music' && parts[1] === 'mix' && parts[2]) return [musicMixesQuery()]
+  return []
+}
+
+// Infinite rails can't be warmed by a plain ensure+refresh — their query fn
+// needs a pageParam — so the section sets list them separately. The warmer
+// fetches page 0 with the options' own query fn and seeds the cache in the
+// { pages, pageParams } shape via setInfiniteQueryData.
+interface WarmableInfiniteRail {
+  key: EntryKey
+  initialPageParam: unknown
+  query: (context: { pageParam: unknown }) => Promise<unknown>
+  meta?: Record<string, unknown>
+}
+
+function infiniteRailsForPath(pathname: string): WarmableInfiniteRail[] {
+  const parts = pathname.split('/').filter(Boolean)
+  if (!parts.length) {
+    return [
+      recentMediaInfinite('movie'),
+      recentTVInfinite(),
+      recentAlbumsInfinite(),
+      recentMediaInfinite('book'),
+      forYouInfinite({ section: 'all' }),
+    ] as unknown as WarmableInfiniteRail[]
+  }
+  if (parts[0] === 'music' && !parts[1]) {
+    return [recentAlbumsInfinite()] as unknown as WarmableInfiniteRail[]
+  }
+  return []
 }
 
 export default defineNuxtPlugin((nuxtApp) => {
@@ -66,26 +144,59 @@ export default defineNuxtPlugin((nuxtApp) => {
     return target.dataset.prefetchTo ?? ''
   }
 
+  /** All-success across a path's mapped queries; null when nothing maps. */
+  function pathWarmState(pathname: string): boolean | null {
+    const queries = queriesForPath(pathname)
+    const rails = infiniteRailsForPath(pathname)
+    if (!queries.length && !rails.length) return null
+    return queries.every(options => queryCache.get(toValue(options.key))?.state.value.status === 'success')
+      && rails.every(rail => queryCache.get(toValue(rail.key))?.state.value.status === 'success')
+  }
+
+  async function warmInfiniteRail(rail: WarmableInfiniteRail) {
+    const key = toValue(rail.key)
+    if (queryCache.get(key)?.state.value.data !== undefined) return
+    try {
+      const pageParam = toValue(rail.initialPageParam)
+      const page = await rail.query({ pageParam })
+      if (queryCache.get(key)?.state.value.data !== undefined) return
+      setInfiniteQueryData(queryCache, key, { pages: [page], pageParams: [pageParam] })
+      // setQueryData-created entries carry no options meta, and a later
+      // ensure() never backfills meta on an existing entry — stamp the
+      // rail's own meta so the persistence layer treats the seeded page
+      // exactly like a mounted fetch.
+      const seeded = queryCache.get(key)
+      if (seeded && rail.meta) Object.assign(seeded.meta, rail.meta)
+    } catch { /* speculative warm — never surface */ }
+  }
+
+  function warmPath(pathname: string) {
+    void preloadRouteComponents(pathname)
+    const queries = queriesForPath(pathname)
+    const rails = infiniteRailsForPath(pathname)
+    if (!queries.length && !rails.length) return
+    if (warmedPaths.has(pathname)) return
+    const alreadyCached = pathWarmState(pathname) === true
+    metrics.recordPrefetch(alreadyCached)
+    for (const options of queries) {
+      const entry = queryCache.ensure(options)
+      void queryCache.refresh(entry).catch(() => {})
+    }
+    for (const rail of rails) void warmInfiniteRail(rail)
+    const wasteTimer = alreadyCached ? null : setTimeout(() => {
+      if (!warmedPaths.has(pathname)) return
+      warmedPaths.delete(pathname)
+      metrics.recordPrefetchWasted()
+    }, 30_000)
+    warmedPaths.set(pathname, wasteTimer)
+  }
+
   function warm(target: HTMLElement) {
     const href = hrefFor(target)
     if (!href) return
     const url = new URL(href, location.href)
     if (url.origin !== location.origin) return
-    void preloadRouteComponents(url.pathname)
-    const options = queryForPath(url.pathname)
-    if (!options) return
-    if (warmedPaths.has(url.pathname)) return
-    const existing = queryCache.get(toValue(options.key))
-    const alreadyCached = existing?.state.value.status === 'success'
-    metrics.recordPrefetch(alreadyCached)
-    const entry = queryCache.ensure(options)
-    void queryCache.refresh(entry).catch(() => {})
-    const wasteTimer = alreadyCached ? null : setTimeout(() => {
-      if (!warmedPaths.has(url.pathname)) return
-      warmedPaths.delete(url.pathname)
-      metrics.recordPrefetchWasted()
-    }, 30_000)
-    warmedPaths.set(url.pathname, wasteTimer)
+    warmPath(url.pathname)
   }
 
   // Touch devices do not have hover time. Warm only the first few detail
@@ -112,8 +223,41 @@ export default defineNuxtPlugin((nuxtApp) => {
       const href = hrefFor(target)
       if (!href || visiblyWarmed.has(href)) continue
       const url = new URL(href, location.href)
-      if (url.origin === location.origin && queryForPath(url.pathname)) visibleObserver.observe(target)
+      if (url.origin !== location.origin) continue
+      if (queriesForPath(url.pathname).length || infiniteRailsForPath(url.pathname).length) {
+        visibleObserver.observe(target)
+      }
     }
+  }
+
+  // ── Idle cross-section pump ───────────────────────────────────────────────
+  // After a navigation settles, warm the OTHER main sections' landing sets —
+  // one section per idle period — so the first tap on Movies/Music/TV paints
+  // from a warm cache even before persistence has a snapshot this session.
+  // Each section warms once per app session; hover/press intent still
+  // freshens on demand. Save-Data and 2G skip it entirely (canSpeculate).
+  const IDLE_SECTIONS = ['/', '/music', '/movies', '/tv']
+  const idleWarmed = new Set<string>()
+
+  function sectionOf(pathname: string): string {
+    const first = pathname.split('/').filter(Boolean)[0]
+    return first ? `/${first}` : '/'
+  }
+
+  // Safari has no requestIdleCallback — fall back to a settle delay.
+  const requestIdle: (cb: () => void) => void
+    = 'requestIdleCallback' in window
+      ? cb => void window.requestIdleCallback(() => cb(), { timeout: 4000 })
+      : cb => void setTimeout(cb, 2500)
+
+  function pumpIdleSections() {
+    if (!canSpeculate) return
+    const current = sectionOf(router.currentRoute.value.path)
+    const next = IDLE_SECTIONS.find(s => s !== current && !idleWarmed.has(s))
+    if (!next) return
+    idleWarmed.add(next)
+    warmPath(next)
+    requestIdle(pumpIdleSections)
   }
 
   router.beforeEach((to) => {
@@ -124,16 +268,8 @@ export default defineNuxtPlugin((nuxtApp) => {
       if (warmed) clearTimeout(warmed)
       warmedPaths.delete(to.path)
       metrics.recordPrefetchUsed()
-      const options = queryForPath(to.path)
-      navigationWarm = options
-        ? queryCache.get(toValue(options.key))?.state.value.status === 'success'
-        : null
-      return
     }
-    const options = queryForPath(to.path)
-    navigationWarm = options
-      ? queryCache.get(toValue(options.key))?.state.value.status === 'success'
-      : null
+    navigationWarm = pathWarmState(to.path)
   })
 
   nuxtApp.hook('page:finish', () => {
@@ -145,6 +281,7 @@ export default defineNuxtPlugin((nuxtApp) => {
     visibleBudget = 4
     visiblyWarmed.clear()
     requestAnimationFrame(observeVisibleTargets)
+    requestIdle(pumpIdleSections)
   })
 
   function cancel() {

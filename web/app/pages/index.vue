@@ -27,8 +27,9 @@
          from queries the page already made; no server/ops telemetry, no new
          endpoints (PLAN cardinal rule 2). -->
     <LedgerStrip
-      v-if="showSection('hero') && ledgerCells.length"
+      v-if="showSection('hero') && (ledgerCells.length || pulsePending)"
       :cells="ledgerCells"
+      :pending="pulsePending"
     />
 
     <!-- Sections render in user-configured order (Settings → Appearance)
@@ -49,7 +50,7 @@
       />
 
       <ContentRow
-        v-if="recommendedItems.length && showSection('for-you')"
+        v-if="(recommendedItems.length || forYouQuery.isPending.value) && showSection('for-you')"
         :style="sectionStyle('for-you')"
         title="For You"
         subtitle="From what you've watched & loved"
@@ -57,6 +58,7 @@
         :context-items="homeMediaContextItems"
         :has-more="forYouQuery.hasNextPage.value"
         :loading-more="forYouQuery.asyncStatus.value === 'loading'"
+        :pending="forYouQuery.isPending.value"
         more="Show all"
         @tile="(item) => navigateTo(mediaUrl(item))"
         @intent="prefetchMediaIntent"
@@ -175,13 +177,15 @@ import { useInfiniteQuery, useQuery, useQueryCache } from '@pinia/colada'
 import { meSettingsQuery, type UserSettingsBlob } from '~/queries/user'
 import { mediaUserStateQuery, movieUserStateQuery, seriesUserStateQuery, userListsQuery as userListsOptions } from '~/queries/catalog'
 import { mediaDetailQuery, mediaDetailTarget } from '~/queries/media'
-import { continueWatchingQuery as continueWatchingOptions } from '~/queries/activity'
+import { continueWatchingQuery as continueWatchingOptions, recentWatchedQuery as recentWatchedOptions } from '~/queries/activity'
 import {
   forYouInfinite,
+  homeRecentArtistsQuery,
   recentAlbumsInfinite,
   recentMediaInfinite,
   recentTVInfinite,
   type RecentAlbumRow,
+  type RecentArtistEntry,
   type RecentTVEntry,
 } from '~/queries/rails'
 
@@ -208,21 +212,6 @@ type ArtistRowItem = MediaItem & { artist_id: number }
 // formats subtitles. (RecentTVEntry lives in queries/rails.ts, shared with
 // the TV browse landing.)
 
-interface RecentArtistEntry {
-  id: number
-  media_item_id: number
-  media_item_public_id?: string
-  name: string
-  slug: string
-  album_count: number
-  track_count: number
-  kind: 'new' | 'updated'
-  new_album_count: number
-  latest_album_title?: string
-  latest_album_slug?: string
-  added_at: string
-}
-
 // One Pinia Colada per rail — infinite where the backend pages (the rail
 // keeps loading as you scroll right), plain where it doesn't (artists, whose
 // grouped events are window-bound). Each caches independently so cross-page
@@ -237,25 +226,11 @@ const loadMoreBooks = railLoadMore(booksQuery)
 const loadMoreAlbums = railLoadMore(albumsQuery)
 
 // Artists still ride /api/music/home — the grouped new/updated events have
-// no offset semantics (finite rail).
-const musicHomeQuery = useQuery({
-  key: ['home', 'recent-artists'],
-  query: async () => {
-    const home = await $heya('/api/music/home', { query: { limit: 20 } }) as {
-      recent_artists: RecentArtistEntry[]
-    }
-    return (home.recent_artists ?? []).map(artistToRowItem)
-  },
-  staleTime: 1000 * 60,
-})
+// no offset semantics (finite rail). The cache holds the raw entries (that's
+// what persists to disk); the MediaItem-ish mapping happens in the computed.
+const musicHomeQuery = useQuery(homeRecentArtistsQuery())
 const continueWatchingQuery = useQuery(continueWatchingOptions())
-const recentWatchedQuery = useQuery({
-  key: ['me', 'watch', 'recent'],
-  query: async () => (await $heya('/api/me/watch/recent')) as Array<{
-    media_item_id: number; title: string; poster_path: string; slug: string; media_type: string
-  }>,
-  staleTime: 1000 * 30,
-})
+const recentWatchedQuery = useQuery(recentWatchedOptions())
 // Personalized "For You" — the taste-vector + TMDB-graph engine. Excludes
 // seeds (hearts / watched) server-side, so no client-side filtering needed.
 const forYouQuery = useInfiniteQuery(() => forYouInfinite({ section: 'all' }))
@@ -269,7 +244,7 @@ const mediaStateQuery = useQuery(mediaUserStateQuery())
 const recentMovies = computed<MediaItem[]>(() => (moviesQuery.data.value?.pages ?? []).flat())
 const recentBooks = computed<MediaItem[]>(() => (booksQuery.data.value?.pages ?? []).flat())
 const recentAlbums = computed<AlbumRowItem[]>(() => (albumsQuery.data.value?.pages ?? []).flat().map(albumToRowItem))
-const recentArtists = computed<ArtistRowItem[]>(() => musicHomeQuery.data.value ?? [])
+const recentArtists = computed<ArtistRowItem[]>(() => (musicHomeQuery.data.value ?? []).map(artistToRowItem))
 
 // Flattened grouped-TV events across loaded pages — rail, hero and chips all
 // derive from this one list.
@@ -350,6 +325,13 @@ const recommendedItems = computed<MediaItem[]>(() =>
 const loading = computed(() =>
   moviesQuery.isPending.value || tvQuery.isPending.value || booksQuery.isPending.value
   || albumsQuery.isPending.value || musicHomeQuery.isPending.value
+)
+
+// Ledger shell: while the cell-feeding queries are still pending on a truly
+// cold cache, the strip renders ghost cells at its final height instead of
+// popping in later and shoving every rail down. Hydrated boots never see it.
+const pulsePending = computed(() =>
+  loading.value || continueWatchingQuery.isPending.value || recentWatchedQuery.isPending.value,
 )
 
 // Chip per TV show: what the newest grouped event for that show was, so the

@@ -27,7 +27,7 @@
          this page already runs (no totals endpoint, no ops telemetry). Cells
          self-omit when their shelf is empty/disabled. Sits on plain themed
          canvas (no hero seam here), so `canvas` gives it theme-aware ink. ── -->
-    <LedgerStrip v-if="ledgerCells.length" :cells="ledgerCells" canvas />
+    <LedgerStrip v-if="ledgerCells.length || pulsePending" :cells="ledgerCells" canvas :pending="pulsePending" />
 
     <div class="page-pad mh-body">
 
@@ -364,9 +364,9 @@
       </template>
     </MusicScrollRow>
 
-    <!-- Empty fallback — first-launch state when nothing has loaded yet. -->
+    <!-- Empty fallback — first-launch state, only once the shelves settled. -->
     <div
-      v-if="!hasAnyContent"
+      v-if="!hasAnyContent && !pulsePending"
       class="mh-empty"
     >
       No music yet — add a music library and let the scanner run.
@@ -382,142 +382,43 @@ import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
 import type { StationTrack } from '~/components/music/StationResults.vue'
 import { useInfiniteQuery, useQuery } from '@pinia/colada'
 import { recentAlbumsInfinite, type RecentAlbumRow } from '~/queries/rails'
-import { musicAlbumDetailQuery, musicMixesQuery, type MusicMix as Mix, type MusicMixTrack as MixTrack } from '~/queries/music'
-
-// Inline row shape declarations — these mirror the sqlc-generated Go types
-// 1:1, but kept local since they're only used in this file and the OpenAPI
-// types are wider (carry pgtype shapes etc.) than we want to bind against.
-interface RecentArtistRow {
-  artist_id: number
-  artist_name: string
-  artist_slug: string
-  media_item_id: number
-  media_item_public_id?: string
-  album_count: number
-  track_count: number
-  available?: boolean
-}
-
-interface OnThisDayRow {
-  id: number
-  title: string
-  slug: string
-  artist_name: string
-  artist_slug: string
-  release_year: number
-}
-
-interface PlaylistRow {
-  id: number
-  slug: string
-  name: string
-  cover_path: string
-  track_count: number
-  has_cover?: boolean
-  updated_at?: string
-  auto_artist_slug?: string
-  auto_album_slug?: string
-}
-
-interface ShelfAlbum {
-  id: number
-  slug: string
-  title: string
-  year: string
-  album_type: string
-}
-interface MoreByEntry {
-  artist_id: number
-  artist_name: string
-  artist_slug: string
-  albums: ShelfAlbum[]
-}
-
-interface GenreArtist {
-  artist_id: number
-  artist_name: string
-  artist_slug: string
-  album_count: number
-  track_count: number
-}
-interface GenreShelf {
-  enabled: boolean
-  genre: string
-  artists: GenreArtist[]
-}
-
-interface MostPlayedAlbum {
-  album_id: number
-  album_title: string
-  album_slug: string
-  artist_name: string
-  artist_slug: string
-  play_count: number
-}
-interface MostPlayedShelf {
-  enabled: boolean
-  window_label: string
-  albums: MostPlayedAlbum[]
-}
-
-interface LapsedAlbum {
-  id: number
-  slug: string
-  title: string
-  year: string
-}
-interface LapsedArtist {
-  artist_id: number
-  artist_name: string
-  artist_slug: string
-  last_played_at: string
-  months_lapsed: number
-  albums: LapsedAlbum[]
-}
-interface LapsedShelf {
-  enabled: boolean
-  since_label: string
-  artists: LapsedArtist[]
-}
-
-interface LabelAlbum {
-  album_id: number
-  album_title: string
-  album_slug: string
-  album_year: string
-  artist_name: string
-  artist_slug: string
-}
-interface LabelShelf {
-  enabled: boolean
-  label: string
-  albums: LabelAlbum[]
-}
+import {
+  musicAlbumDetailQuery,
+  musicGenreShelfQuery,
+  musicLabelShelfQuery,
+  musicLapsedShelfQuery,
+  musicMixesQuery,
+  musicMoreByArtistsQuery,
+  musicMostPlayedShelfQuery,
+  musicOnThisDayQuery,
+  musicRecentArtistsQuery,
+  musicRecentPlaylistsQuery,
+  type GenreShelf,
+  type HomePlaylistRow as PlaylistRow,
+  type LabelAlbum,
+  type LabelShelf,
+  type LapsedArtist,
+  type LapsedShelf,
+  type MoreByEntry,
+  type MostPlayedAlbum,
+  type MostPlayedShelf,
+  type MusicMix as Mix,
+  type MusicMixTrack as MixTrack,
+  type OnThisDayRow,
+  type RecentPlayedArtistRow as RecentArtistRow,
+  type ShelfAlbum,
+} from '~/queries/music'
 
 defineEmits<{ 'see-artists': []; 'see-albums': [] }>()
 
 const { $heya } = useNuxtApp()
 const loadQuery = useQueryLoader()
 
-// All home shelves are cached by Pinia Colada — the query cache (registered in
-// plugins/Pinia Colada.client.ts) is module-scoped, so navigating to an
-// album/artist page and back is a no-op against the cache: the second
-// mount reads each query's cached payload synchronously, no flash.
-//
-// staleTime per shelf reflects the server-side Cache-Control:
-//   - 30s for "fresh data" shelves (recently added, recently played etc.)
-//   - 5min (300s) for the rotating shelves; autoRefetch also fires at
-//     the same cadence so the seed-bucket rotation surfaces automatically.
-//   - 1h for mixes-for-you since the underlying KNN computation is heavy.
-//   - 6h for on-this-day since the input is the calendar date.
-//
-// Each query is independent so a slow one doesn't gate the others.
-
-// Helper for our common envelope shape — every endpoint returns { items: T[] }.
-async function fetchItems<T>(path: string): Promise<T[]> {
-  const res = await $heya(path as never) as { items: T[] }
-  return res.items ?? []
-}
+// All home shelves are cached by Pinia Colada AND persisted to the device
+// cache (their options in queries/music.ts carry persistence meta), so both
+// an in-session revisit and a cold app-open paint the last-known shelf
+// synchronously and revalidate in place. Each query is independent so a slow
+// one doesn't gate the others; staleTime/autoRefetch live with the options.
 
 const mixesQuery = useQuery(musicMixesQuery())
 const mixes = computed<Mix[]>(() => (mixesQuery.data.value ?? []).slice(0, 10))
@@ -529,11 +430,7 @@ const recentAlbumsQuery = useInfiniteQuery(() => recentAlbumsInfinite())
 const recentAlbums = computed<RecentAlbumRow[]>(() => (recentAlbumsQuery.data.value?.pages ?? []).flat())
 const loadMoreRecentAlbums = railLoadMore(recentAlbumsQuery)
 
-const recentArtistsQuery = useQuery({
-  key: ['music', 'home', 'recently-played-artists'],
-  query: () => fetchItems<RecentArtistRow>('/api/music/home/recently-played-artists'),
-  staleTime: 1000 * 30,
-})
+const recentArtistsQuery = useQuery(musicRecentArtistsQuery())
 const recentArtists = computed<RecentArtistRow[]>(() => recentArtistsQuery.data.value ?? [])
 
 const albumRatings = useRatings('album')
@@ -543,60 +440,27 @@ const artistRatingValues = artistRatings.ratings
 watch(recentAlbums, items => { if (items.length) void albumRatings.primeBulk(items.map(al => al.id)) }, { immediate: true })
 watch(recentArtists, items => { if (items.length) void artistRatings.primeBulk(items.map(a => a.artist_id)) }, { immediate: true })
 
-const onThisDayQuery = useQuery({
-  key: ['music', 'home', 'on-this-day'],
-  query: () => fetchItems<OnThisDayRow>('/api/music/home/on-this-day'),
-  staleTime: 1000 * 60 * 60 * 6,
-})
+const onThisDayQuery = useQuery(musicOnThisDayQuery())
 const onThisDay = computed<OnThisDayRow[]>(() => onThisDayQuery.data.value ?? [])
 
-const recentPlaylistsQuery = useQuery({
-  key: ['music', 'home', 'recent-playlists'],
-  query: () => fetchItems<PlaylistRow>('/api/music/home/recent-playlists'),
-  staleTime: 1000 * 30,
-})
+const recentPlaylistsQuery = useQuery(musicRecentPlaylistsQuery())
 const recentPlaylists = computed<PlaylistRow[]>(() => recentPlaylistsQuery.data.value ?? [])
 
-// Rotating shelves — server rotates the seed every 5 minutes, so we
-// autoRefetch at the same cadence. Each query refreshes independently,
-// no shared setInterval to clean up on unmount (Pinia Colada handles it).
-const moreByArtistsQuery = useQuery({
-  key: ['music', 'home', 'more-by-artists'],
-  query: () => fetchItems<MoreByEntry>('/api/music/home/more-by-artists'),
-  staleTime: 1000 * 60 * 5,
-  autoRefetch: 1000 * 60 * 5,
-})
+// Rotating shelves — server rotates the seed every 5 minutes; their options
+// autoRefetch at the same cadence so the rotation surfaces automatically.
+const moreByArtistsQuery = useQuery(musicMoreByArtistsQuery())
 const moreByArtists = computed<MoreByEntry[]>(() => moreByArtistsQuery.data.value ?? [])
 
-const genreShelfQuery = useQuery({
-  key: ['music', 'home', 'more-in-genre'],
-  query: async () => (await $heya('/api/music/home/more-in-genre')) as GenreShelf,
-  staleTime: 1000 * 60 * 5,
-  autoRefetch: 1000 * 60 * 5,
-})
+const genreShelfQuery = useQuery(musicGenreShelfQuery())
 const genreShelf = computed<GenreShelf | null>(() => genreShelfQuery.data.value ?? null)
 
-const mostPlayedShelfQuery = useQuery({
-  key: ['music', 'home', 'most-played-last-month'],
-  query: async () => (await $heya('/api/music/home/most-played-last-month')) as MostPlayedShelf,
-  staleTime: 1000 * 60 * 5,
-})
+const mostPlayedShelfQuery = useQuery(musicMostPlayedShelfQuery())
 const mostPlayedShelf = computed<MostPlayedShelf | null>(() => mostPlayedShelfQuery.data.value ?? null)
 
-const lapsedShelfQuery = useQuery({
-  key: ['music', 'home', 'lapsed-artists'],
-  query: async () => (await $heya('/api/music/home/lapsed-artists')) as LapsedShelf,
-  staleTime: 1000 * 60 * 5,
-  autoRefetch: 1000 * 60 * 5,
-})
+const lapsedShelfQuery = useQuery(musicLapsedShelfQuery())
 const lapsedShelf = computed<LapsedShelf | null>(() => lapsedShelfQuery.data.value ?? null)
 
-const labelShelfQuery = useQuery({
-  key: ['music', 'home', 'more-from-label'],
-  query: async () => (await $heya('/api/music/home/more-from-label')) as LabelShelf,
-  staleTime: 1000 * 60 * 5,
-  autoRefetch: 1000 * 60 * 5,
-})
+const labelShelfQuery = useQuery(musicLabelShelfQuery())
 const labelShelf = computed<LabelShelf | null>(() => labelShelfQuery.data.value ?? null)
 
 // Live refresh: a track/album file match (media.added) or the discography
@@ -673,6 +537,15 @@ const ledgerCells = computed<LedgerCell[]>(() => {
   }
   return cells
 })
+
+// Ledger shell: hold the strip's height with ghost cells while the
+// cell-feeding shelves are still pending on a truly cold cache, so the rails
+// below don't shove down when the first cells land. Hydrated boots skip it.
+const pulsePending = computed(() =>
+  mixesQuery.isPending.value || recentAlbumsQuery.isPending.value
+  || onThisDayQuery.isPending.value || genreShelfQuery.isPending.value
+  || mostPlayedShelfQuery.isPending.value,
+)
 
 const hasAnyContent = computed(() => {
   return mixes.value.length || recentAlbums.value.length || recentArtists.value.length
