@@ -212,9 +212,20 @@ func classifyModelFile(name string) string {
 // in a background goroutine at server startup; tracks state via
 // State()/Progress()/LastError().
 func (f *ModelFetcher) Run(ctx context.Context) error {
-	if !f.state.CompareAndSwap(int32(FetcherIdle), int32(FetcherChecking)) {
-		return fmt.Errorf("sonicanalysis: fetcher not idle (state=%s)", f.State())
+	for {
+		state := f.State()
+		switch state {
+		case FetcherIdle, FetcherReady, FetcherFailed:
+			if !f.state.CompareAndSwap(int32(state), int32(FetcherChecking)) {
+				continue
+			}
+		default:
+			return fmt.Errorf("sonicanalysis: fetcher already running (state=%s)", state)
+		}
+		break
 	}
+	f.progress.Store(nil)
+	f.lastErr.Store(nil)
 
 	if err := os.MkdirAll(f.targetDir, 0o750); err != nil {
 		f.fail(fmt.Errorf("mkdir target: %w", err))
@@ -286,13 +297,14 @@ func (f *ModelFetcher) fail(err error) {
 	log.Err(err).Msg("sonicanalysis: model fetch failed")
 }
 
-// fetchOne downloads one manifest file to a `.tmp` sibling and
-// atomically renames on success. Verifies SHA256 before renaming.
+// fetchOne downloads one manifest file to a uniquely named temporary sibling
+// and atomically renames on success. The unique name matters when the API and
+// worker processes share a model directory and both start the same download.
+// Verifies SHA256 before renaming.
 func (f *ModelFetcher) fetchOne(ctx context.Context, m ModelFile, finalPath string) error {
 	if err := os.MkdirAll(filepath.Dir(finalPath), 0o750); err != nil {
 		return fmt.Errorf("mkdir parent: %w", err)
 	}
-	tmpPath := finalPath + ".tmp"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.URL, nil)
 	if err != nil {
@@ -307,28 +319,31 @@ func (f *ModelFetcher) fetchOne(ctx context.Context, m ModelFile, finalPath stri
 		return fmt.Errorf("HTTP %d for %s", resp.StatusCode, m.URL)
 	}
 
-	// G304: tmpPath is built from f.targetDir (env-derived) + the model's
-	// declared filename, both server-controlled. No user-supplied path.
-	dst, err := os.Create(tmpPath) //nolint:gosec // G304: server-built path
+	// G304: the directory and filename pattern are built from f.targetDir
+	// (env-derived) + the server-controlled model manifest.
+	dst, err := os.CreateTemp(
+		filepath.Dir(finalPath),
+		filepath.Base(finalPath)+".tmp-*",
+	) //nolint:gosec // G304: server-built path
 	if err != nil {
 		return err
 	}
+	tmpPath := dst.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+
 	hasher := sha256.New()
 	written, err := io.Copy(io.MultiWriter(dst, hasher), resp.Body)
 	closeErr := dst.Close()
 	if err != nil {
-		_ = os.Remove(tmpPath)
 		return fmt.Errorf("download body: %w", err)
 	}
 	if closeErr != nil {
-		_ = os.Remove(tmpPath)
 		return fmt.Errorf("close tmp: %w", closeErr)
 	}
 
 	if m.SHA256 != "" {
 		got := hex.EncodeToString(hasher.Sum(nil))
 		if got != m.SHA256 {
-			_ = os.Remove(tmpPath)
 			return fmt.Errorf("sha256 mismatch: got %s, want %s", got, m.SHA256)
 		}
 	}
@@ -340,7 +355,22 @@ func (f *ModelFetcher) fetchOne(ctx context.Context, m ModelFile, finalPath stri
 		f.progress.Store(&next)
 	}
 
-	return os.Rename(tmpPath, finalPath)
+	// Another Heya process may have completed the same download while this one
+	// was in flight. Prefer its already-verified artifact and discard our temp
+	// file instead of replacing it or failing on platforms where Rename cannot
+	// overwrite an existing destination.
+	if ok, verifyErr := verifyFile(finalPath, m); verifyErr == nil && ok {
+		return nil
+	}
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		// Close the final race between the check and Rename: if a peer won it,
+		// its valid file means this fetch succeeded too.
+		if ok, verifyErr := verifyFile(finalPath, m); verifyErr == nil && ok {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // verifyFile reports whether `path` exists and matches the manifest
