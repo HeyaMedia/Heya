@@ -15,7 +15,7 @@ import (
 
 const (
 	metadataContinuationBatch      = 256
-	metadataContinuationAdoptBatch = 1000
+	metadataContinuationAdoptBatch = 10_000
 	metadataContinuationLease      = 5 * time.Minute
 )
 

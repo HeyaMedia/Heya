@@ -150,7 +150,7 @@ In `internal/worker/worker.go`:
   `Retry-After` parks the row again instead of snoozing a River job. A
   five-minute lease plus River's active-args uniqueness makes the hand-off
   crash-safe without stacking duplicates. During the rollout the same sweeper
-  adopts at most 1,000 legacy scheduled poll jobs per tick, so an old backlog
+  adopts at most 10,000 legacy scheduled poll jobs per tick, so an old backlog
   drains out of River without one enormous migration transaction. HTTP
   requests remain entity-scoped and upstream workflows can still be numerous,
   but River's hot table now contains only bounded due/in-flight checks rather
