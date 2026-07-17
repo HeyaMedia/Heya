@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -35,7 +37,7 @@ func (w *DownloadImageWorker) Timeout(*river.Job[DownloadImageArgs]) time.Durati
 }
 
 func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadImageArgs]) error {
-	if job.Args.URL == "" {
+	if job.Args.URL == "" && job.Args.AssetID == 0 && job.Args.AlbumID == 0 {
 		log.Debug().Int64("item_id", job.Args.MediaItemID).Str("asset_type", job.Args.AssetType).Msg("image: empty url, skipping")
 		return nil
 	}
@@ -48,6 +50,12 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 
 	if job.Args.EntityType == "person" {
 		return w.downloadPersonImage(ctx, job)
+	}
+	if job.Args.AlbumID > 0 {
+		return w.downloadAlbumCover(ctx, job)
+	}
+	if job.Args.AssetID > 0 {
+		return w.materializePendingAsset(ctx, job)
 	}
 
 	q := sqlc.New(w.DB)
@@ -207,12 +215,16 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 }
 
 func (w *DownloadImageWorker) maybeSaveToMediaDir(ctx context.Context, job *river.Job[DownloadImageArgs], localPath string) {
-	if !ShouldSaveImageSidecar(job.Args.AssetType, job.Args.SortOrder, job.Args.Label) {
+	w.maybeSaveToMediaDirFor(ctx, job.Args.MediaItemID, job.Args.AssetType, job.Args.SortOrder, job.Args.Label, localPath)
+}
+
+func (w *DownloadImageWorker) maybeSaveToMediaDirFor(ctx context.Context, mediaItemID int64, assetType string, sortOrder int, label, localPath string) {
+	if !ShouldSaveImageSidecar(assetType, sortOrder, label) {
 		return
 	}
 
 	q := sqlc.New(w.DB)
-	item, err := q.GetMediaItemByID(ctx, job.Args.MediaItemID)
+	item, err := q.GetMediaItemByID(ctx, mediaItemID)
 	if err != nil {
 		return
 	}
@@ -225,20 +237,175 @@ func (w *DownloadImageWorker) maybeSaveToMediaDir(ctx context.Context, job *rive
 		return
 	}
 
-	files, err := q.ListLibraryFilesByMediaItem(ctx, pgtype.Int8{Int64: job.Args.MediaItemID, Valid: true})
+	files, err := q.ListLibraryFilesByMediaItem(ctx, pgtype.Int8{Int64: mediaItemID, Valid: true})
 	if err != nil || len(files) == 0 {
 		return
 	}
 
 	client := river.ClientFromContext[pgx.Tx](ctx)
 	client.Insert(ctx, SaveImagesArgs{
-		MediaItemID: job.Args.MediaItemID,
+		MediaItemID: mediaItemID,
 		FilePath:    files[0].Path,
 		CachedPath:  localPath,
-		AssetType:   job.Args.AssetType,
-		SortOrder:   job.Args.SortOrder,
-		Label:       job.Args.Label,
+		AssetType:   assetType,
+		SortOrder:   sortOrder,
+		Label:       label,
 	}, nil)
+}
+
+// materializePendingAsset is the eager-warm path: the media_assets row
+// already exists (pending, remote_url only) and this job's sole task is to
+// land the bytes onto it — the exact update-in-place recipe the on-demand
+// serve path uses (service.GetMediaImagePath), so the two stay
+// interchangeable. Creating rows here instead would duplicate label-less
+// backdrop slots and clobber whole "extra" label groups.
+func (w *DownloadImageWorker) materializePendingAsset(ctx context.Context, job *river.Job[DownloadImageArgs]) error {
+	q := sqlc.New(w.DB)
+	asset, err := q.GetMediaAssetByID(ctx, job.Args.AssetID)
+	if err != nil {
+		// Row deleted or replaced since enqueue (re-enrich, dedup, user edit).
+		return nil
+	}
+	if asset.LocalPath != "" {
+		return nil // already materialized — sidecar detection or a first view won
+	}
+	url := asset.RemoteUrl
+	if url == "" {
+		url = job.Args.URL
+	}
+	if url == "" {
+		return nil
+	}
+
+	item, err := q.GetMediaItemByID(ctx, asset.MediaItemID)
+	if err != nil {
+		return nil
+	}
+	dirName := strconv.FormatInt(item.ID, 10)
+	if item.Slug != "" {
+		dirName = item.Slug
+	}
+	// Same cache filename the on-demand path derives (imageCacheFilename):
+	// "<assetType>[<sortOrder>].<ext>" — shared slot, so whichever path runs
+	// first turns the other into a cheap stat.
+	ext := filepath.Ext(url)
+	if ext == "" {
+		ext = ".jpg"
+	}
+	filename := string(asset.AssetType)
+	if asset.SortOrder > 0 {
+		filename = fmt.Sprintf("%s%d", asset.AssetType, asset.SortOrder)
+	}
+	filename += ext
+
+	localPath, err := w.Downloader.Download(ctx, url, string(item.MediaType), dirName, filename)
+	if err != nil {
+		if imageUnavailable(err) {
+			// Upstream says the image doesn't exist. Drop the dead pointer so
+			// first views stop stalling on it and warm sweeps converge; a
+			// later refresh re-records the URL if it ever reappears.
+			_ = q.DeleteMediaAsset(ctx, asset.ID)
+			log.Debug().
+				Int64("item_id", asset.MediaItemID).
+				Int64("asset_id", asset.ID).
+				Str("asset_type", string(asset.AssetType)).
+				Str("url", url).
+				Msg("image unavailable upstream, pending row dropped")
+			return nil
+		}
+		log.Warn().Err(err).
+			Int64("item_id", asset.MediaItemID).
+			Int64("asset_id", asset.ID).
+			Str("asset_type", string(asset.AssetType)).
+			Str("url", url).
+			Msg("image warm download failed")
+		return err
+	}
+	if localPath == "" {
+		return nil
+	}
+
+	representative, deduped, err := MaterializeMediaAsset(ctx, w.DB, asset, localPath)
+	if err != nil {
+		log.Debug().Err(err).Int64("asset_id", asset.ID).Msg("image warm: fingerprint failed")
+		if updateErr := q.UpdateMediaAssetLocalPath(ctx, sqlc.UpdateMediaAssetLocalPathParams{
+			ID: asset.ID, LocalPath: localPath,
+		}); updateErr != nil {
+			log.Debug().Err(updateErr).Int64("asset_id", asset.ID).Msg("image warm: update local path failed")
+		}
+	} else {
+		localPath = representative.LocalPath
+		if deduped {
+			log.Debug().Int64("item_id", asset.MediaItemID).Int64("kept_asset_id", representative.ID).Msg("image warm: deduplicated against existing artwork")
+		}
+	}
+
+	if asset.Label == "" && asset.SortOrder == 0 {
+		switch asset.AssetType {
+		case sqlc.AssetTypePoster:
+			updateArtworkPathColumns(ctx, q, item, localPath, item.BackdropPath)
+		case sqlc.AssetTypeBackdrop:
+			updateArtworkPathColumns(ctx, q, item, item.PosterPath, localPath)
+		}
+	}
+
+	if w.Hub != nil {
+		w.Hub.Emit(eventhub.EventMediaUpdated, eventhub.MediaPayload{
+			MediaItemID: item.ID,
+			MediaType:   string(item.MediaType),
+		})
+	}
+
+	w.maybeSaveToMediaDirFor(ctx, item.ID, string(asset.AssetType), int(asset.SortOrder), asset.Label, localPath)
+	return nil
+}
+
+// downloadAlbumCover warms albums.cover_path — albums aren't media items, so
+// their art is a bare column, not a media_assets row. Mirrors
+// service.GetAlbumCover's cache slot ("music"/album-<id>/cover.<ext>) so the
+// lazy path and the warm path share bytes.
+func (w *DownloadImageWorker) downloadAlbumCover(ctx context.Context, job *river.Job[DownloadImageArgs]) error {
+	q := sqlc.New(w.DB)
+	album, err := q.GetAlbumByID(ctx, job.Args.AlbumID)
+	if err != nil {
+		return nil
+	}
+	if !strings.HasPrefix(album.CoverPath, "http://") && !strings.HasPrefix(album.CoverPath, "https://") {
+		return nil // already local — sidecar detection, embedded art, or an earlier warm won
+	}
+
+	url := album.CoverPath
+	ext := filepath.Ext(url)
+	if ext == "" {
+		ext = ".jpg"
+	}
+	dirName := "album-" + strconv.FormatInt(album.ID, 10)
+	localPath, err := w.Downloader.Download(ctx, url, "music", dirName, "cover"+ext)
+	if err != nil {
+		if imageUnavailable(err) {
+			// Keep the URL: album covers on heya.media materialize behind 202s
+			// and can appear later; the lazy path (and the next sweep) retries.
+			log.Debug().Int64("album_id", album.ID).Str("url", url).Msg("album cover unavailable upstream")
+			return nil
+		}
+		log.Warn().Err(err).Int64("album_id", album.ID).Str("url", url).Msg("album cover warm download failed")
+		return err
+	}
+	if localPath == "" {
+		return nil
+	}
+
+	if err := q.UpdateAlbumCoverPath(ctx, sqlc.UpdateAlbumCoverPathParams{ID: album.ID, CoverPath: localPath}); err != nil {
+		log.Debug().Err(err).Int64("album_id", album.ID).Msg("album cover warm: update cover path failed")
+	}
+
+	if w.Hub != nil && job.Args.MediaItemID > 0 {
+		w.Hub.Emit(eventhub.EventMediaUpdated, eventhub.MediaPayload{
+			MediaItemID: job.Args.MediaItemID,
+			MediaType:   string(sqlc.MediaTypeMusic),
+		})
+	}
+	return nil
 }
 
 func (w *DownloadImageWorker) downloadPersonImage(ctx context.Context, job *river.Job[DownloadImageArgs]) error {

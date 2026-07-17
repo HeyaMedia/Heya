@@ -207,6 +207,24 @@ LIMIT 1;
 -- name: ListAlbumsByArtist :many
 SELECT * FROM albums WHERE artist_id = $1 ORDER BY year ASC, title ASC;
 
+-- name: ListArtistAlbumsWithRemoteCovers :many
+-- Albums still pointing at an upstream cover URL — enrich warms these so the
+-- first grid view never blocks on a synchronous download.
+SELECT id, cover_path FROM albums
+WHERE artist_id = $1 AND cover_path LIKE 'http%'
+ORDER BY id;
+
+-- name: ListAlbumsWithRemoteCovers :many
+-- Sweep variant: pages every album whose cover was never materialized
+-- locally, joined to the owning artist's media item for event payloads.
+SELECT albums.id, albums.cover_path, artists.media_item_id
+FROM albums
+JOIN artists ON artists.id = albums.artist_id
+WHERE albums.cover_path LIKE 'http%'
+  AND albums.id > $1
+ORDER BY albums.id
+LIMIT $2;
+
 -- name: AlbumHasFileOutsideFolder :one
 -- True when the album has at least one track file NOT under `folder` — i.e. it's
 -- "mixed" and a whole-album move would drag foreign-folder files along, so the

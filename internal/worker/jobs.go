@@ -72,6 +72,18 @@ type DownloadImageArgs struct {
 	MediaType   string `json:"media_type"`
 	Label       string `json:"label"`
 	SortOrder   int    `json:"sort_order"`
+	// AssetID targets an EXISTING pending media_assets row: the worker
+	// downloads the bytes and materializes them onto that row in place
+	// instead of creating a new one. This is the eager-warm path — creating
+	// rows blind would duplicate label-less backdrops and clobber whole
+	// "extra" label groups (DeleteMediaAssetsByTypeLabel). A permanently
+	// missing upstream image (4xx) deletes the dead row so warm sweeps
+	// converge instead of retrying it forever.
+	AssetID int64 `json:"asset_id,omitempty"`
+	// AlbumID warms an albums.cover_path upstream URL (EntityType "album").
+	// Albums aren't media items — the cover lands next to GetAlbumCover's
+	// cache slot and the column is rewritten to the local path.
+	AlbumID int64 `json:"album_id,omitempty"`
 	// ReplacePrimary is only set by an explicit metadata-editor choice. Scanner
 	// and refresh jobs keep the normal local-first precedence rules.
 	ReplacePrimary bool `json:"replace_primary,omitempty"`
@@ -79,7 +91,21 @@ type DownloadImageArgs struct {
 
 func (DownloadImageArgs) Kind() string { return "download_image" }
 func (DownloadImageArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{Queue: "download_image", MaxAttempts: 5, Priority: PriorityEnrichment}
+	// Unique-while-active: the enrich-time warm and the periodic sweep can
+	// race to enqueue the same asset; identical in-flight downloads coalesce.
+	return river.InsertOpts{Queue: "download_image", MaxAttempts: 5, Priority: PriorityEnrichment, UniqueOpts: uniqueWhileActive()}
+}
+
+// WarmPendingImagesArgs sweeps media_assets rows (and album covers) whose
+// bytes were never materialized locally and enqueues download_image jobs for
+// them. Runs at startup and daily — new enrichment warms eagerly inline, so
+// this only mops up items enriched before eager warming existed plus any
+// downloads that failed transiently.
+type WarmPendingImagesArgs struct{}
+
+func (WarmPendingImagesArgs) Kind() string { return "warm_pending_images" }
+func (WarmPendingImagesArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: "warm_pending_images", MaxAttempts: 1, UniqueOpts: uniqueWhileActive()}
 }
 
 type FFProbeArgs struct {

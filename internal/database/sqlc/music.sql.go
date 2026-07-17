@@ -2323,6 +2323,82 @@ func (q *Queries) ListAlbumsPendingLoudness(ctx context.Context, arg ListAlbumsP
 	return items, nil
 }
 
+const listAlbumsWithRemoteCovers = `-- name: ListAlbumsWithRemoteCovers :many
+SELECT albums.id, albums.cover_path, artists.media_item_id
+FROM albums
+JOIN artists ON artists.id = albums.artist_id
+WHERE albums.cover_path LIKE 'http%'
+  AND albums.id > $1
+ORDER BY albums.id
+LIMIT $2
+`
+
+type ListAlbumsWithRemoteCoversParams struct {
+	ID    int64 `json:"id"`
+	Limit int32 `json:"limit"`
+}
+
+type ListAlbumsWithRemoteCoversRow struct {
+	ID          int64  `json:"id"`
+	CoverPath   string `json:"cover_path"`
+	MediaItemID int64  `json:"media_item_id"`
+}
+
+// Sweep variant: pages every album whose cover was never materialized
+// locally, joined to the owning artist's media item for event payloads.
+func (q *Queries) ListAlbumsWithRemoteCovers(ctx context.Context, arg ListAlbumsWithRemoteCoversParams) ([]ListAlbumsWithRemoteCoversRow, error) {
+	rows, err := q.db.Query(ctx, listAlbumsWithRemoteCovers, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAlbumsWithRemoteCoversRow{}
+	for rows.Next() {
+		var i ListAlbumsWithRemoteCoversRow
+		if err := rows.Scan(&i.ID, &i.CoverPath, &i.MediaItemID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listArtistAlbumsWithRemoteCovers = `-- name: ListArtistAlbumsWithRemoteCovers :many
+SELECT id, cover_path FROM albums
+WHERE artist_id = $1 AND cover_path LIKE 'http%'
+ORDER BY id
+`
+
+type ListArtistAlbumsWithRemoteCoversRow struct {
+	ID        int64  `json:"id"`
+	CoverPath string `json:"cover_path"`
+}
+
+// Albums still pointing at an upstream cover URL — enrich warms these so the
+// first grid view never blocks on a synchronous download.
+func (q *Queries) ListArtistAlbumsWithRemoteCovers(ctx context.Context, artistID int64) ([]ListArtistAlbumsWithRemoteCoversRow, error) {
+	rows, err := q.db.Query(ctx, listArtistAlbumsWithRemoteCovers, artistID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListArtistAlbumsWithRemoteCoversRow{}
+	for rows.Next() {
+		var i ListArtistAlbumsWithRemoteCoversRow
+		if err := rows.Scan(&i.ID, &i.CoverPath); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listArtistSimilarLocalArtistsByArtistID = `-- name: ListArtistSimilarLocalArtistsByArtistID :many
 SELECT
     asa.rank,

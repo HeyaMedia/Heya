@@ -125,6 +125,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	continuationBackoff := newMetadataContinuationBackoff()
 	river.AddWorker(workers, &EnrichMediaItemWorker{DB: cfg.DB, Matcher: cfg.Matcher, Heya: cfg.Heya, Hub: cfg.Hub, DataDir: cfg.DataDir, Progress: cfg.Progress})
 	river.AddWorker(workers, &DownloadImageWorker{DB: cfg.DB, Downloader: cfg.Downloader, Hub: cfg.Hub, Progress: cfg.Progress})
+	river.AddWorker(workers, &WarmPendingImagesWorker{DB: cfg.DB})
 	river.AddWorker(workers, &FFProbeWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &ScanKeyframesWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &DetectLocalAssetsWorker{DB: cfg.DB, DataDir: cfg.DataDir, Hub: cfg.Hub, Progress: cfg.Progress})
@@ -277,6 +278,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			"download_image":       {MaxWorkers: queueWorkers(cfg, "download_image", 4)}, // hits CDN/heya.media, not source FS
 			"save_images":          {MaxWorkers: queueWorkers(cfg, "save_images", 1)},
 			"force_refresh_images": {MaxWorkers: queueWorkers(cfg, "force_refresh_images", 1)},
+			"warm_pending_images":  {MaxWorkers: 1}, // enqueue-only sweep; the downloads run on download_image
 
 			// NFOs.
 			"save_nfo":       {MaxWorkers: queueWorkers(cfg, "save_nfo", 1)},
@@ -371,6 +373,18 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 				river.PeriodicInterval(time.Minute),
 				func() (river.JobArgs, *river.InsertOpts) {
 					return SyncMetadataWorkflowEventsArgs{}, nil
+				},
+				&river.PeriodicJobOpts{RunOnStart: true},
+			),
+			// Artwork warm sweep: backfills bytes for pending asset rows that
+			// predate eager warming and mops up transiently failed downloads.
+			// RunOnStart so a fresh deploy heals the library without waiting a
+			// day; converges to a no-op (successes materialize rows, permanent
+			// 404s delete them).
+			river.NewPeriodicJob(
+				river.PeriodicInterval(24*time.Hour),
+				func() (river.JobArgs, *river.InsertOpts) {
+					return WarmPendingImagesArgs{}, nil
 				},
 				&river.PeriodicJobOpts{RunOnStart: true},
 			),

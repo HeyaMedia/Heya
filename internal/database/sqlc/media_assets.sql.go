@@ -277,6 +277,66 @@ func (q *Queries) ListMediaAssetsByType(ctx context.Context, arg ListMediaAssets
 	return items, nil
 }
 
+const listPendingRemoteMediaAssets = `-- name: ListPendingRemoteMediaAssets :many
+SELECT media_assets.id, media_assets.media_item_id, media_assets.asset_type,
+       media_assets.remote_url, media_assets.label, media_assets.sort_order,
+       media_items.media_type
+FROM media_assets
+JOIN media_items ON media_items.id = media_assets.media_item_id
+WHERE media_assets.local_path = ''
+  AND media_assets.remote_url <> ''
+  AND media_assets.asset_type IN ('poster', 'backdrop', 'logo', 'art', 'banner', 'thumb', 'disc', 'clearart', 'still')
+  AND media_assets.id > $1
+ORDER BY media_assets.id
+LIMIT $2
+`
+
+type ListPendingRemoteMediaAssetsParams struct {
+	ID    int64 `json:"id"`
+	Limit int32 `json:"limit"`
+}
+
+type ListPendingRemoteMediaAssetsRow struct {
+	ID          int64     `json:"id"`
+	MediaItemID int64     `json:"media_item_id"`
+	AssetType   AssetType `json:"asset_type"`
+	RemoteUrl   string    `json:"remote_url"`
+	Label       string    `json:"label"`
+	SortOrder   int32     `json:"sort_order"`
+	MediaType   MediaType `json:"media_type"`
+}
+
+// Visual asset rows whose bytes were never materialized locally — the warm
+// sweep pages these by id and enqueues downloads. Non-visual sidecar types
+// (subtitle/lyrics/nfo) never have remote bytes to warm.
+func (q *Queries) ListPendingRemoteMediaAssets(ctx context.Context, arg ListPendingRemoteMediaAssetsParams) ([]ListPendingRemoteMediaAssetsRow, error) {
+	rows, err := q.db.Query(ctx, listPendingRemoteMediaAssets, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPendingRemoteMediaAssetsRow{}
+	for rows.Next() {
+		var i ListPendingRemoteMediaAssetsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MediaItemID,
+			&i.AssetType,
+			&i.RemoteUrl,
+			&i.Label,
+			&i.SortOrder,
+			&i.MediaType,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const promoteOrderedMediaAsset = `-- name: PromoteOrderedMediaAsset :exec
 WITH ranked AS (
     SELECT media_assets.id,

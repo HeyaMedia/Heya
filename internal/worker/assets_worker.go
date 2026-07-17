@@ -194,12 +194,12 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 		hasAsset[key] = true
 	}
 
-	// Libraries that export Kodi-style sidecar art still need the primary
-	// poster/backdrop bytes on disk to copy next to the media file, so keep the
-	// eager download for those. Everyone else records a pending remote asset row
-	// and the serve path pulls the bytes on first view (images on-demand).
-	saveImages := settings.SaveImages
-
+	// Record every remote image as a pending media_assets row (the serve path
+	// can always fall back to remote_url), then warm the bytes eagerly through
+	// download_image so first view is a local stat, not a synchronous fetch.
+	// The row is created first and the job targets it by AssetID — see
+	// DownloadImageArgs.AssetID for why creating rows at store time instead
+	// would corrupt label groups.
 	client := river.ClientFromContext[pgx.Tx](ctx)
 	for _, img := range job.Args.PendingImages {
 		key := img.AssetType
@@ -216,31 +216,17 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 			continue
 		}
 
-		if saveImages && img.SortOrder == 0 && (img.AssetType == "poster" || img.AssetType == "backdrop") {
-			if _, err := client.Insert(ctx, DownloadImageArgs{
-				MediaItemID: mediaItemID,
-				EntityType:  "media",
-				URL:         img.URL,
-				AssetType:   img.AssetType,
-				MediaType:   mediaType,
-				Label:       img.Label,
-				SortOrder:   img.SortOrder,
-			}, &river.InsertOpts{Priority: img.Priority}); err != nil {
-				return fmt.Errorf("enqueue download image: %w", err)
-			}
-			continue
-		}
-
+		var asset sqlc.MediaAsset
 		var err error
 		if SingleAssetTypes[img.AssetType] && img.Label == "" {
-			_, err = q.UpsertPrimaryMediaAsset(ctx, sqlc.UpsertPrimaryMediaAssetParams{
+			asset, err = q.UpsertPrimaryMediaAsset(ctx, sqlc.UpsertPrimaryMediaAssetParams{
 				MediaItemID: mediaItemID,
 				AssetType:   sqlc.AssetType(img.AssetType),
 				Source:      "remote",
 				RemoteUrl:   img.URL,
 			})
 		} else {
-			_, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+			asset, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: mediaItemID,
 				AssetType:   sqlc.AssetType(img.AssetType),
 				Source:      "remote",
@@ -249,8 +235,28 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 				SortOrder:   int32(img.SortOrder),
 			})
 		}
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			log.Debug().Err(err).Int64("media_item_id", mediaItemID).Str("asset_type", img.AssetType).Msg("pending image row insert skipped")
+		if err != nil {
+			// ErrNoRows = the local-wins upsert guard (or a conflict) kept the
+			// existing row — nothing to warm.
+			if !errors.Is(err, pgx.ErrNoRows) {
+				log.Debug().Err(err).Int64("media_item_id", mediaItemID).Str("asset_type", img.AssetType).Msg("pending image row insert skipped")
+			}
+			continue
+		}
+		if asset.LocalPath != "" {
+			continue // upsert returned an already-local row
+		}
+		if _, err := client.Insert(ctx, DownloadImageArgs{
+			MediaItemID: mediaItemID,
+			EntityType:  "media",
+			AssetID:     asset.ID,
+			URL:         img.URL,
+			AssetType:   img.AssetType,
+			MediaType:   mediaType,
+			Label:       img.Label,
+			SortOrder:   img.SortOrder,
+		}, &river.InsertOpts{Priority: img.Priority}); err != nil {
+			return fmt.Errorf("enqueue download image: %w", err)
 		}
 	}
 

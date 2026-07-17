@@ -88,6 +88,7 @@ func (w *FetchArtworkWorker) Work(ctx context.Context, job *river.Job[FetchArtwo
 	}
 	log.Debug().Int64("media_item_id", item.ID).Int("returned", len(artworks)).Msg("artwork: heya.media returned candidates")
 
+	client := river.ClientFromContext[pgx.Tx](ctx)
 	sortOrder := 1
 	skippedCap := 0
 	for _, art := range artworks {
@@ -103,12 +104,13 @@ func (w *FetchArtworkWorker) Work(ctx context.Context, job *river.Job[FetchArtwo
 			continue
 		}
 		countPerType[art.AssetType]++
-		// On-demand images: record the secondary artwork as a pending remote
-		// asset row (keeps the carousel + alternate-art picker populated) instead
-		// of downloading it now. The serve path fetches bytes on first view.
+		// Record the artwork as a pending remote row (keeps the carousel +
+		// alternate-art picker populated even if the download fails), then
+		// warm the bytes through download_image targeting that row.
+		var asset sqlc.MediaAsset
 		var err error
 		if SingleAssetTypes[art.AssetType] {
-			_, err = q.UpsertPrimaryMediaAsset(ctx, sqlc.UpsertPrimaryMediaAssetParams{
+			asset, err = q.UpsertPrimaryMediaAsset(ctx, sqlc.UpsertPrimaryMediaAssetParams{
 				MediaItemID: job.Args.MediaItemID,
 				AssetType:   sqlc.AssetType(art.AssetType),
 				Source:      "remote",
@@ -116,7 +118,7 @@ func (w *FetchArtworkWorker) Work(ctx context.Context, job *river.Job[FetchArtwo
 				Language:    art.Language,
 			})
 		} else {
-			_, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+			asset, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: job.Args.MediaItemID,
 				AssetType:   sqlc.AssetType(art.AssetType),
 				Source:      "remote",
@@ -126,10 +128,29 @@ func (w *FetchArtworkWorker) Work(ctx context.Context, job *river.Job[FetchArtwo
 				SortOrder:   int32(sortOrder),
 			})
 		}
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			log.Debug().Err(err).Int64("media_item_id", job.Args.MediaItemID).Str("asset_type", art.AssetType).Msg("pending artwork row insert skipped")
+		if err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				log.Debug().Err(err).Int64("media_item_id", job.Args.MediaItemID).Str("asset_type", art.AssetType).Msg("pending artwork row insert skipped")
+			}
+			sortOrder++
+			continue
 		}
 		sortOrder++
+		if asset.LocalPath != "" {
+			continue
+		}
+		if _, err := client.Insert(ctx, DownloadImageArgs{
+			MediaItemID: job.Args.MediaItemID,
+			EntityType:  "media",
+			AssetID:     asset.ID,
+			URL:         art.URL,
+			AssetType:   art.AssetType,
+			MediaType:   job.Args.MediaType,
+			Label:       asset.Label,
+			SortOrder:   int(asset.SortOrder),
+		}, &river.InsertOpts{Priority: PriorityEnrichment}); err != nil {
+			log.Debug().Err(err).Int64("media_item_id", job.Args.MediaItemID).Str("asset_type", art.AssetType).Msg("enqueue artwork warm failed")
+		}
 	}
 
 	log.Debug().Int64("media_item_id", job.Args.MediaItemID).Int("skipped_cap", skippedCap).Dur("duration", time.Since(start)).Msg("artwork: fan-out summary")

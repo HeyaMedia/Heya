@@ -71,6 +71,22 @@ GROUP BY asset_type;
 -- name: GetMediaAssetByID :one
 SELECT * FROM media_assets WHERE id = $1;
 
+-- name: ListPendingRemoteMediaAssets :many
+-- Visual asset rows whose bytes were never materialized locally — the warm
+-- sweep pages these by id and enqueues downloads. Non-visual sidecar types
+-- (subtitle/lyrics/nfo) never have remote bytes to warm.
+SELECT media_assets.id, media_assets.media_item_id, media_assets.asset_type,
+       media_assets.remote_url, media_assets.label, media_assets.sort_order,
+       media_items.media_type
+FROM media_assets
+JOIN media_items ON media_items.id = media_assets.media_item_id
+WHERE media_assets.local_path = ''
+  AND media_assets.remote_url <> ''
+  AND media_assets.asset_type IN ('poster', 'backdrop', 'logo', 'art', 'banner', 'thumb', 'disc', 'clearart', 'still')
+  AND media_assets.id > $1
+ORDER BY media_assets.id
+LIMIT $2;
+
 -- name: UpdateMediaAssetLocalPath :exec
 UPDATE media_assets
 SET local_path = $2

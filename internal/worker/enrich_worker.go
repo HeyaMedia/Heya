@@ -234,7 +234,7 @@ func (w *EnrichMediaItemWorker) enrichGeneric(ctx context.Context, q *sqlc.Queri
 	// Secondary artwork (extra backdrops for the carousel, logos, banners, ...)
 	// comes from the SAME detail response we already fetched — record it as
 	// pending rows here instead of firing a second heya.media call for it.
-	writeSecondaryArtwork(ctx, q, item.ID, detail)
+	writeSecondaryArtwork(ctx, q, client, item.ID, string(item.MediaType), detail)
 
 	// Person deep-fetch is LAZY. The cast/crew LIST (name, role, tmdb id,
 	// profile URL) is already persisted in-process by StoreRichMetadata above —
@@ -344,6 +344,27 @@ func (w *EnrichMediaItemWorker) enrichMusic(ctx context.Context, q *sqlc.Queries
 	}
 	client := river.ClientFromContext[pgx.Tx](ctx)
 	queueArtistArtworkGaps(ctx, client, item, string(item.MediaType), local, remote)
+
+	// Album covers: the matcher records upstream cover URLs on albums the
+	// local scan didn't fill. Warm those now so the discography grid's first
+	// paint is a local stat, not one synchronous fetch per album.
+	if covers, err := q.ListArtistAlbumsWithRemoteCovers(ctx, artist.ID); err == nil {
+		for _, cover := range covers {
+			if _, err := client.Insert(ctx, DownloadImageArgs{
+				MediaItemID: item.ID,
+				EntityType:  "album",
+				AlbumID:     cover.ID,
+				URL:         cover.CoverPath,
+				AssetType:   "cover",
+				MediaType:   string(sqlc.MediaTypeMusic),
+			}, &river.InsertOpts{Priority: PriorityEnrichment}); err != nil {
+				log.Debug().Err(err).Int64("album_id", cover.ID).Msg("enqueue album cover warm failed")
+			}
+		}
+		if len(covers) > 0 {
+			log.Debug().Int64("item_id", item.ID).Int("albums", len(covers)).Msg("enrich music: album cover warms queued")
+		}
+	}
 	_ = q.MarkEnrichImagesDone(ctx, item.ID)
 
 	// SaveMusicNFO is the music-specific analogue of SaveNFO. Mirror the
@@ -442,14 +463,15 @@ func buildPendingImages(detail *metadata.MediaDetail) []PendingImage {
 // writeSecondaryArtwork records the alternate/secondary artwork carried by the
 // enrich detail response (extra backdrops for the carousel, logos, banners,
 // clearart, thumbs, disc art) as pending media_assets rows — using the artwork
-// the initial GetDetail already returned, so there's no second heya.media call.
-// The serve path pulls the bytes on first view.
+// the initial GetDetail already returned, so there's no second heya.media call —
+// then warms each row's bytes through download_image so the carousel and
+// alternate-art picker never stall on a first-view fetch.
 //
 // The primary poster/backdrop are skipped by URL (they're emitted at sort 0 by
 // buildPendingImages and held in media_items columns). Secondary rows always
 // carry a non-empty label, so a bare/primary image request (which matches the
 // empty-label rows) never resolves to one of them.
-func writeSecondaryArtwork(ctx context.Context, q *sqlc.Queries, itemID int64, detail *metadata.MediaDetail) {
+func writeSecondaryArtwork(ctx context.Context, q *sqlc.Queries, client *river.Client[pgx.Tx], itemID int64, mediaType string, detail *metadata.MediaDetail) {
 	if len(detail.Artwork) == 0 {
 		return
 	}
@@ -483,9 +505,11 @@ func writeSecondaryArtwork(ctx context.Context, q *sqlc.Queries, itemID int64, d
 			continue
 		}
 		count[art.AssetType]++
+		var asset sqlc.MediaAsset
 		var err error
+		label := ""
 		if SingleAssetTypes[art.AssetType] {
-			_, err = q.UpsertPrimaryMediaAsset(ctx, sqlc.UpsertPrimaryMediaAssetParams{
+			asset, err = q.UpsertPrimaryMediaAsset(ctx, sqlc.UpsertPrimaryMediaAssetParams{
 				MediaItemID: itemID,
 				AssetType:   sqlc.AssetType(art.AssetType),
 				Source:      "remote",
@@ -493,11 +517,11 @@ func writeSecondaryArtwork(ctx context.Context, q *sqlc.Queries, itemID int64, d
 				Language:    art.Language,
 			})
 		} else {
-			label := art.Language
+			label = art.Language
 			if label == "" {
 				label = "extra"
 			}
-			_, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+			asset, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: itemID,
 				AssetType:   sqlc.AssetType(art.AssetType),
 				Source:      "remote",
@@ -507,9 +531,28 @@ func writeSecondaryArtwork(ctx context.Context, q *sqlc.Queries, itemID int64, d
 				SortOrder:   int32(sortOrder),
 			})
 		}
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			log.Debug().Err(err).Int64("item_id", itemID).Str("asset_type", art.AssetType).Msg("pending artwork row insert skipped")
+		if err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				log.Debug().Err(err).Int64("item_id", itemID).Str("asset_type", art.AssetType).Msg("pending artwork row insert skipped")
+			}
+			sortOrder++
+			continue
 		}
 		sortOrder++
+		if asset.LocalPath != "" || client == nil {
+			continue
+		}
+		if _, err := client.Insert(ctx, DownloadImageArgs{
+			MediaItemID: itemID,
+			EntityType:  "media",
+			AssetID:     asset.ID,
+			URL:         art.URL,
+			AssetType:   art.AssetType,
+			MediaType:   mediaType,
+			Label:       label,
+			SortOrder:   int(asset.SortOrder),
+		}, &river.InsertOpts{Priority: PriorityEnrichment}); err != nil {
+			log.Debug().Err(err).Int64("item_id", itemID).Str("asset_type", art.AssetType).Msg("enqueue secondary artwork warm failed")
+		}
 	}
 }
