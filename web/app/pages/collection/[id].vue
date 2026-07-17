@@ -271,8 +271,13 @@ const bdIdx = ref(0)
 const cycleKey = ref(0)
 const carouselPaused = ref(false)
 
+// Render the EXACT variant AmbientBackdrop loads (w=1920 q=70) instead of
+// the raw original — shares one cache entry with the blurred underlay and
+// avoids pulling a full-size backdrop for a CSS background. Hoisted at
+// setup (factory touches useImage() — docs/ui.md gotcha #1).
+const bgImg = useBackgroundImageTools()
 function bdStyle(url: string | null) {
-  return url ? { backgroundImage: `url("${url}")` } : {}
+  return url ? { backgroundImage: `url("${bgImg.variant(url)}")` } : {}
 }
 // The clock is CycleControls' ring (BACKDROP_INTERVAL): its animationend
 // calls advance(); every move re-keys the ring for a fresh window. Pausing

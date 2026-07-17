@@ -9,9 +9,7 @@
       <div class="hero-bg" :class="{ 'ambient-extended': ambientEnabled }">
         <LoadingImage
           v-if="backdropA"
-          :src="backdropA"
-          :width="1920"
-          :quality="80"
+          :src="bgImg.variant(backdropA)"
           alt=""
           class="hero-bg-img"
           :class="{ visible: showA }"
@@ -19,9 +17,7 @@
         />
         <LoadingImage
           v-if="backdropB"
-          :src="backdropB"
-          :width="1920"
-          :quality="80"
+          :src="bgImg.variant(backdropB)"
           alt=""
           class="hero-bg-img"
           :class="{ visible: !showA }"
@@ -417,6 +413,10 @@ const {
 // hero, untouched.
 const { ambientEnabled } = useAppearance()
 const background = useBackground()
+// Local hero copies render the EXACT variant AmbientBackdrop loads (w=1920
+// q=70, pre-resolved, no width/quality props → no srcset) so both layers
+// share one cache entry and paint together — see HeroCanvas.vue.
+const bgImg = useBackgroundImageTools()
 const currentHeroBackdrop = computed(() => (showA.value ? backdropA.value : backdropB.value) || null)
 watch([currentHeroBackdrop, ambientEnabled], ([url, on]) => {
   if (on && url) background.set(url)

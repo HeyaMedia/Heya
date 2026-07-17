@@ -16,18 +16,14 @@
         <LoadingImage
           v-if="bgUrl"
           :key="bgUrl"
-          :src="bgUrl"
-          :width="1920"
-          :quality="75"
+          :src="bgImg.variant(bgUrl)"
           class="music-bg-img"
           alt=""
         />
         <LoadingImage
           v-else-if="bgFallback"
           :key="`blur:${bgFallback}`"
-          :src="bgFallback"
-          :width="1280"
-          :quality="80"
+          :src="bgImg.variant(bgFallback)"
           class="music-bg-blur"
           alt=""
         />
@@ -311,6 +307,10 @@ const bgFallback = computed(() => (bgUrl.value ? null : spotlight.value?.art || 
 // follows the carousel through this watcher.
 const { ambientEnabled } = useAppearance()
 const background = useBackground()
+// Local copies render the EXACT variant AmbientBackdrop loads (w=1920 q=70,
+// pre-resolved, no width/quality props → no srcset) so sharp hero and blurred
+// underlay share one cache entry and paint together — see HeroCanvas.vue.
+const bgImg = useBackgroundImageTools()
 watch([bgUrl, bgFallback, ambientEnabled], ([bg, fb, on]) => {
   const url = bg ?? fb
   if (on && url) background.set(url, { grade: 'v2' })
@@ -320,7 +320,7 @@ watch([bgUrl, bgFallback, ambientEnabled], ([bg, fb, on]) => {
 // CTA wears the spotlight art's dominant tone (falls back to theme gold).
 const tone = ref<ImageTone | null>(null)
 watch(() => spotlight.value?.art ?? null, async (url) => {
-  tone.value = url ? await sampleImageTone(url) : null
+  tone.value = url ? await sampleImageTone(bgImg.thumb(url)) : null
 }, { immediate: true })
 const ctaStyle = computed(() =>
   tone.value ? { background: tone.value.main, color: tone.value.ink } : undefined)

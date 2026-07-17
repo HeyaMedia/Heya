@@ -7,9 +7,21 @@
         <button class="scroll-btn" aria-label="Scroll right" @click="rail?.scrollByDir(1)"><Icon name="chevright" :size="16" /></button>
       </template>
     </SectionHeader>
+    <!-- Cold-cache skeleton: ghost tiles at the exact tile size, so the row
+         claims its final height immediately and the page doesn't reflow when
+         the query lands. Cached revisits never see it. -->
+    <div
+      v-if="pending && !items.length"
+      class="cr-skel"
+      aria-hidden="true"
+      :style="{ '--cr-skel-w': `${tileWidth || 168}px`, '--cr-skel-aspect': (aspect || '2/3').replace('/', ' / ') }"
+    >
+      <div v-for="i in 8" :key="i" class="cr-skel-tile" />
+    </div>
     <!-- AppRail owns the virtualization: fixed-stride tiles, honest scrollbar,
          tail spinner, load-ahead. This component is just the media-card skin. -->
     <AppRail
+      v-else
       ref="rail"
       :items="items"
       :tile-width="tileWidth || 168"
@@ -82,6 +94,8 @@ const props = defineProps<{
   hasMore?: boolean
   /** A page fetch is in flight; suppresses further load-more emits. */
   loadingMore?: boolean
+  /** Cold-cache fetch in flight — renders ghost tiles instead of collapsing. */
+  pending?: boolean
   /** Paint a "3d ago" chip (added_at ?? created_at) on each poster. */
   showAdded?: boolean
 }>()
@@ -127,6 +141,25 @@ function contextMenuItems(item: RowItem): ContextMenuItem[] {
 
 .card-tile { width: 100%; }
 .unavailable { opacity: 0.4; cursor: default !important; }
+
+.cr-skel {
+  display: flex;
+  gap: 14px;
+  overflow: hidden;
+}
+.cr-skel-tile {
+  flex: 0 0 var(--cr-skel-w, 168px);
+  aspect-ratio: var(--cr-skel-aspect, 2 / 3);
+  border-radius: var(--r-md);
+  background: rgb(var(--ink) / 0.05);
+  animation: cr-skel-pulse 1.4s ease-in-out infinite;
+}
+@keyframes cr-skel-pulse {
+  50% { background: rgb(var(--ink) / 0.09); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cr-skel-tile { animation: none; }
+}
 
 .scroll-btn {
   width: 32px;

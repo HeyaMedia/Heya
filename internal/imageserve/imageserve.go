@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 
 	"github.com/disintegration/imaging"
@@ -36,13 +37,21 @@ const (
 type Resizer struct {
 	cacheDir string
 	sf       singleflight.Group
+	// Bounds concurrent decode/Lanczos/encode across DIFFERENT variants
+	// (singleflight only dedups identical ones). A cold grid of 40 posters
+	// used to fire 40 concurrent resizes and starve the API of CPU.
+	sem chan struct{}
 }
 
 func New(cacheDir string) (*Resizer, error) {
 	if err := os.MkdirAll(cacheDir, 0o750); err != nil {
 		return nil, fmt.Errorf("imageserve: mkdir %s: %w", cacheDir, err)
 	}
-	return &Resizer{cacheDir: cacheDir}, nil
+	slots := runtime.GOMAXPROCS(0) / 2
+	if slots < 2 {
+		slots = 2
+	}
+	return &Resizer{cacheDir: cacheDir, sem: make(chan struct{}, slots)}, nil
 }
 
 type Params struct {
@@ -117,6 +126,8 @@ func (r *Resizer) Serve(w http.ResponseWriter, req *http.Request, srcPath string
 		if _, err := os.Stat(cachePath); err == nil {
 			return nil, nil
 		}
+		r.sem <- struct{}{}
+		defer func() { <-r.sem }()
 		return nil, r.generate(srcPath, cachePath, params)
 	})
 	if err != nil {

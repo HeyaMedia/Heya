@@ -65,7 +65,7 @@
       />
 
       <ContentRow
-        v-if="recentMovies.length && showSection('recent-movies')"
+        v-if="(recentMovies.length || moviesQuery.isPending.value) && showSection('recent-movies')"
         :style="sectionStyle('recent-movies')"
         title="Recently Added Films"
         subtitle="Across all libraries"
@@ -73,6 +73,7 @@
         :context-items="homeMediaContextItems"
         :has-more="moviesQuery.hasNextPage.value"
         :loading-more="moviesQuery.asyncStatus.value === 'loading'"
+        :pending="moviesQuery.isPending.value"
         show-added
         more="Show all"
         @tile="(item) => navigateTo(mediaUrl(item))"
@@ -82,7 +83,7 @@
       />
 
       <ContentRow
-        v-if="recentTVItems.length && showSection('recent-tv')"
+        v-if="(recentTVItems.length || tvQuery.isPending.value) && showSection('recent-tv')"
         :style="sectionStyle('recent-tv')"
         title="Recently Added TV"
         subtitle="New shows, seasons & episodes"
@@ -90,6 +91,7 @@
         :context-items="homeMediaContextItems"
         :has-more="tvQuery.hasNextPage.value"
         :loading-more="tvQuery.asyncStatus.value === 'loading'"
+        :pending="tvQuery.isPending.value"
         show-added
         more="Show all"
         @tile="(item) => navigateTo(mediaUrl(item))"
@@ -99,7 +101,7 @@
       />
 
       <ContentRow
-        v-if="recentAlbums.length && showSection('recent-albums')"
+        v-if="(recentAlbums.length || albumsQuery.isPending.value) && showSection('recent-albums')"
         :style="sectionStyle('recent-albums')"
         title="Recently Added Albums"
         subtitle="Across all libraries"
@@ -109,6 +111,7 @@
         :tile-width="168"
         :has-more="albumsQuery.hasNextPage.value"
         :loading-more="albumsQuery.asyncStatus.value === 'loading'"
+        :pending="albumsQuery.isPending.value"
         show-added
         more="Show all"
         @tile="(item) => navigateTo(albumUrl(item))"
@@ -117,7 +120,7 @@
       />
 
       <ContentRow
-        v-if="recentArtists.length && showSection('recent-artists')"
+        v-if="(recentArtists.length || musicHomeQuery.isPending.value) && showSection('recent-artists')"
         :style="sectionStyle('recent-artists')"
         title="Recently Added Artists"
         subtitle="New & updated artists"
@@ -125,6 +128,7 @@
         :context-items="homeArtistContextItems"
         :aspect="'1/1'"
         :tile-width="168"
+        :pending="musicHomeQuery.isPending.value"
         show-added
         more="Show all"
         @tile="(item) => navigateTo(mediaUrl(item))"
@@ -655,14 +659,16 @@ async function addHomeItemToList(listId: number, mediaId: number) {
 
 // Hero details — resolves movie/tv detail for each hero tile so the
 // HeroA component can render genres/rating/play button. Recomputed when
-// the underlying movie/tv lists refresh.
+// the underlying movie/tv lists refresh. All slides resolve concurrently
+// (the first slide's data still lands as fast as it can); each slide's
+// reactive write happens as its own fetch settles.
 async function rebuildHeroDetails() {
-  for (const item of heroItems.value) {
-    if (movieDetails.value[item.id]) continue // already fetched in this session
+  await Promise.allSettled(heroItems.value.map(async (item) => {
+    if (movieDetails.value[item.id]) return // already fetched in this session
     try {
       const entry = queryClient.ensure(mediaDetailQuery(mediaDetailTarget(item)))
       const detail = (await queryClient.refresh(entry)).data
-      if (!detail) continue
+      if (!detail) return
       // Local trailer file → hero trailer takeover for this slide.
       const trailer = detail.extras?.find(x => x.extra_type === 'trailer' && x.file_path)
       if (trailer) heroTrailers.value[item.id] = trailer.id
@@ -693,7 +699,7 @@ async function rebuildHeroDetails() {
         } catch { /* empty */ }
       }
     } catch { /* empty */ }
-  }
+  }))
 }
 watch(heroItems, rebuildHeroDetails, { immediate: true })
 

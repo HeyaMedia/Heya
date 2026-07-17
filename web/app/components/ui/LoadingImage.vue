@@ -128,6 +128,7 @@ onBeforeUnmount(() => { generation++; controller?.abort(); releaseObjectURL() })
   <NuxtImg
     v-if="renderedSource"
     :key="renderedSource"
+    decoding="async"
     v-bind="forwardedAttrs"
     :src="renderedSource"
     :class="[attrs.class, 'heya-loading-image', { 'is-loading': loading, 'is-failed': failed }]"
@@ -152,10 +153,34 @@ onBeforeUnmount(() => { generation++; controller?.abort(); releaseObjectURL() })
   background-position: center;
   background-repeat: no-repeat;
   background-size: 30px 30px;
-  animation: heya-image-spinner 0.85s linear infinite;
+  /* Grace period before the spinner shows: cache hits and fast responses
+     resolve inside it, so virtualized rails don't strobe spinners while
+     scrolling — only genuinely slow images ever surface one. */
+  opacity: 0;
+  animation:
+    heya-image-spinner-appear 0.2s ease 0.35s forwards,
+    heya-image-spinner 0.85s linear infinite;
+}
+
+/* Loaded pixels ease in instead of snapping over the spinner. `from`-only
+   keyframes interpolate to the element's own computed opacity, so parents
+   that keep the image hidden (crossfade layers at opacity 0) stay hidden. */
+.heya-loading-image:not(.is-loading) {
+  animation: heya-image-fade-in 0.22s ease;
 }
 
 @keyframes heya-image-spinner {
   to { --heya-image-spinner-angle: 360deg; }
+}
+@keyframes heya-image-spinner-appear {
+  to { opacity: 1; }
+}
+@keyframes heya-image-fade-in {
+  from { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .heya-loading-image.is-loading { animation: heya-image-spinner-appear 0s 0.35s forwards; }
+  .heya-loading-image:not(.is-loading) { animation: none; }
 }
 </style>

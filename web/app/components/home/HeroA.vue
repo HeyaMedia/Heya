@@ -13,19 +13,15 @@
          hide-local behaviour is retired: the sharp hero is always visible). -->
     <div class="hero-bg">
       <LoadingImage
-        v-if="bgA"
-        :src="bgA"
-        :width="1920"
-        :quality="80"
+        v-if="displayA"
+        :src="displayA"
         class="hero-bg-img"
         :class="{ visible: showA && !trailerVisible }"
         @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
       />
       <LoadingImage
-        v-if="bgB"
-        :src="bgB"
-        :width="1920"
-        :quality="80"
+        v-if="displayB"
+        :src="displayB"
         class="hero-bg-img"
         :class="{ visible: !showA && !trailerVisible }"
         @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
@@ -180,6 +176,12 @@ watch(() => currentIdx.value + props.items.length, () => {
   if (url) bgImg.warm(url)
 }, { immediate: true })
 const currentBg = computed(() => (showA.value ? bgA.value : bgB.value) || null)
+// Render the EXACT variant AmbientBackdrop loads (w=1920 q=70), pre-resolved
+// through the provider and passed to NuxtImg untouched (no width/quality →
+// no densities srcset). Sharp hero + blurred underlay then share one
+// browser-cache entry and paint together — see HeroCanvas.vue.
+const displayA = computed(() => (bgA.value ? bgImg.variant(bgA.value) : ''))
+const displayB = computed(() => (bgB.value ? bgImg.variant(bgB.value) : ''))
 watch([currentBg, ambientEnabled], ([url, on]) => {
   if (on && url) background.set(url, { grade: 'v2' })
   else background.clear()

@@ -14,9 +14,7 @@
     <div class="newin-bg">
       <LoadingImage
         v-if="bgUrl"
-        :src="bgUrl"
-        :width="1920"
-        :quality="75"
+        :src="bgImg.variant(bgUrl)"
         alt=""
         class="newin-bg-img"
         @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
@@ -344,6 +342,10 @@ const bgUrl = computed(() => spotlight.value?.backdrop ?? null)
 // AmbientBackdrop layer follows the carousel through this watcher.
 const { ambientEnabled } = useAppearance()
 const background = useBackground()
+// Local copy renders the EXACT variant AmbientBackdrop loads (w=1920 q=70,
+// pre-resolved, no width/quality props → no srcset) so sharp hero and blurred
+// underlay share one cache entry and paint together — see HeroCanvas.vue.
+const bgImg = useBackgroundImageTools()
 watch([bgUrl, ambientEnabled], ([url, on]) => {
   if (on && url) background.set(url, { grade: 'v2' })
   else background.clear()
@@ -352,7 +354,7 @@ watch([bgUrl, ambientEnabled], ([url, on]) => {
 // CTA wears the spotlight backdrop's dominant tone (falls back to theme gold).
 const tone = ref<ImageTone | null>(null)
 watch(bgUrl, async (url) => {
-  tone.value = url ? await sampleImageTone(url) : null
+  tone.value = url ? await sampleImageTone(bgImg.thumb(url)) : null
 }, { immediate: true })
 const ctaStyle = computed(() =>
   tone.value ? { background: tone.value.main, color: tone.value.ink } : undefined)

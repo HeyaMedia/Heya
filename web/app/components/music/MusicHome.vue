@@ -31,9 +31,11 @@
 
     <div class="page-pad mh-body">
 
-    <!-- 1. Mixes for You — Heya 2.0 gradient .mix-card tiles. -->
+    <!-- 1. Mixes for You — Heya 2.0 gradient .mix-card tiles. The first three
+         shelves are above the fold, so they hold their height with skeleton
+         tiles on a cold cache instead of popping in and shoving the page. -->
     <MusicScrollRow
-      v-if="mixes.length"
+      v-if="mixes.length || mixesQuery.isPending.value"
       class="mh-mix-rail"
       title="Mixes for You"
       aside="rotates daily"
@@ -42,6 +44,7 @@
       :phone-card-size="208"
       :items="mixes"
       :item-key="(mix, i) => `mix-${mix.seed_artist_id}`"
+      :pending="mixesQuery.isPending.value"
     >
       <template #default="{ item: mix }">
       <AppContextMenu
@@ -66,7 +69,7 @@
 
     <!-- 2. Recently Added — album_type as a chip when EP/single/etc. -->
     <MusicScrollRow
-      v-if="recentAlbums.length"
+      v-if="recentAlbums.length || recentAlbumsQuery.isPending.value"
       title="Recently Added"
       :aside="addedThisWeek ? `${addedThisWeek} this week` : undefined"
       title-href="/music/albums"
@@ -75,6 +78,7 @@
       :item-key="(al, i) => `ra-${al.id}`"
       :has-more="recentAlbumsQuery.hasNextPage.value"
       :loading-more="recentAlbumsQuery.asyncStatus.value === 'loading'"
+      :pending="recentAlbumsQuery.isPending.value"
       @load-more="loadMoreRecentAlbums"
     >
       <template #default="{ item: al }">
@@ -103,15 +107,16 @@
       </template>
     </MusicScrollRow>
 
-    <!-- 3. Recently Played Artists — circular portraits with the name + count
-         caption below (heya2.css .artist-card), the mockup's artist idiom. -->
+    <!-- 3. Recently Played Artists — square art with the name inlaid on the
+         image, same idiom as the /music/artists grid. -->
     <MusicScrollRow
-      v-if="recentArtists.length"
+      v-if="recentArtists.length || recentArtistsQuery.isPending.value"
       title="Recently Played"
       title-href="/music/artists"
       :card-size="150"
       :items="recentArtists"
       :item-key="(a, i) => `artist-${a.artist_id}`"
+      :pending="recentArtistsQuery.isPending.value"
     >
       <template #default="{ item: a }">
       <AppContextMenu
@@ -122,8 +127,7 @@
         class="mh-card-link"
       >
         <MusicCard
-          variant="circle"
-          captioned
+          variant="square"
           :src="usePosterUrl({ id: a.media_item_id, public_id: a.media_item_public_id })"
           :alt="a.artist_name"
           :title="a.artist_name"

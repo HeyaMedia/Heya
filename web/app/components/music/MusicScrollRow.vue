@@ -38,10 +38,23 @@
       </button>
     </header>
 
+    <!-- Cold-cache skeleton: ghost tiles at the exact card size, so the shelf
+         claims its final height immediately and the page doesn't reflow when
+         the query lands. Only shown while pending with nothing to render —
+         cached revisits and settled-empty shelves never see it. -->
+    <div
+      v-if="pending && !items.length"
+      class="msr-skel"
+      aria-hidden="true"
+      :style="{ '--msr-skel-size': `${cardSize}px` }"
+    >
+      <div v-for="i in 8" :key="i" class="msr-skel-tile" />
+    </div>
+
     <!-- Expanded: wrap into a grid (bounded — it renders every loaded item).
          Default: the shared AppRail virtualized endless sidescroller. -->
     <div
-      v-if="expanded"
+      v-else-if="expanded"
       class="msr-grid"
       :style="{ gridTemplateColumns: `repeat(auto-fill, minmax(${cardSize}px, 1fr))` }"
     >
@@ -91,6 +104,8 @@ const props = withDefaults(defineProps<{
   /** More pages exist — AppRail shows its tail spinner and emits load-more. */
   hasMore?: boolean
   loadingMore?: boolean
+  /** Cold-cache fetch in flight — renders ghost tiles instead of collapsing. */
+  pending?: boolean
   onPlayAll?: () => void
   onShuffleAll?: () => void
 }>(), {
@@ -197,6 +212,25 @@ provide('msr:cardSize', props.cardSize)
 .msr-grid {
   display: grid;
   gap: 16px;
+}
+
+.msr-skel {
+  display: flex;
+  gap: 16px;
+  overflow: hidden;
+}
+.msr-skel-tile {
+  flex: 0 0 var(--msr-skel-size, 170px);
+  aspect-ratio: 1 / 1;
+  border-radius: var(--r-md);
+  background: rgb(var(--ink) / 0.05);
+  animation: msr-skel-pulse 1.4s ease-in-out infinite;
+}
+@keyframes msr-skel-pulse {
+  50% { background: rgb(var(--ink) / 0.09); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msr-skel-tile { animation: none; }
 }
 
 /* Touch: swipe replaces the mouse-only scroll arrows. The expand-to-grid

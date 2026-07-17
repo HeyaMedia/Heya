@@ -81,23 +81,58 @@ export function toneStyleVars(t: ImageTone): Record<string, string> {
 // retry rewrite.
 const toneCache = new Map<string, Promise<ImageTone | null>>()
 
+// A 24×24 average needs nothing bigger than a w=64 thumb — resize
+// server-side instead of decoding whatever full-size URL the caller has in
+// hand. Same query shape the heya nuxt-image provider emits, so callers that
+// already pass a rendered variant (…?w=64) are left untouched.
+function toneThumbUrl(url: string): string {
+  if (!url.startsWith('/api/')) return url
+  const qIdx = url.indexOf('?')
+  if (qIdx >= 0 && /(^|&)w=/.test(url.slice(qIdx + 1))) return url
+  return url + (qIdx >= 0 ? '&' : '?') + 'w=64'
+}
+
+// Decode + canvas readback is main-thread work, and a rail of covers landing
+// at once used to fire dozens of samples in the very frames their <img>s
+// paint. Funnel every sample through a small semaphore so tone-follow trails
+// first paint instead of competing with it.
+const MAX_CONCURRENT_SAMPLES = 3
+let activeSamples = 0
+const sampleWaiters: (() => void)[] = []
+async function acquireSampleSlot() {
+  if (activeSamples < MAX_CONCURRENT_SAMPLES) { activeSamples++; return }
+  await new Promise<void>(resolve => sampleWaiters.push(resolve))
+  activeSamples++
+}
+function releaseSampleSlot() {
+  activeSamples--
+  sampleWaiters.shift()?.()
+}
+
 /** Resolves to null on any failure (missing image, tainted canvas, …). */
 export function sampleImageTone(url: string): Promise<ImageTone | null> {
   if (!import.meta.client) return Promise.resolve(null)
   const cached = toneCache.get(url)
   if (cached) return cached
-  const p = sampleOnce(url).then((tone) => {
-    if (tone || !url.startsWith('/api/')) return tone
-    // Same-origin endpoints can 302 to third-party CDNs (album covers still
-    // pointing at provider art) — those hosts send no ACAO header, so the
-    // CORS-mode <img> load fails before the canvas ever sees pixels. Retry
-    // through the server-side byte proxy (?proxy=1, honored by the album
-    // cover endpoint; harmless no-op where bytes are already local), using
-    // fetch→blob→ImageBitmap instead of a crossorigin <img> so no-cors
-    // cache entries from regular <img> renders can't clash with it.
-    const sep = url.includes('?') ? '&' : '?'
-    return sampleBytes(`${url}${sep}proxy=1`)
-  })
+  const fetchUrl = toneThumbUrl(url)
+  const p = (async () => {
+    await acquireSampleSlot()
+    try {
+      const tone = await sampleOnce(fetchUrl)
+      if (tone || !url.startsWith('/api/')) return tone
+      // Same-origin endpoints can 302 to third-party CDNs (album covers still
+      // pointing at provider art) — those hosts send no ACAO header, so the
+      // CORS-mode <img> load fails before the canvas ever sees pixels. Retry
+      // through the server-side byte proxy (?proxy=1, honored by the album
+      // cover endpoint; harmless no-op where bytes are already local), using
+      // fetch→blob→ImageBitmap instead of a crossorigin <img> so no-cors
+      // cache entries from regular <img> renders can't clash with it.
+      const sep = fetchUrl.includes('?') ? '&' : '?'
+      return await sampleBytes(`${fetchUrl}${sep}proxy=1`)
+    } finally {
+      releaseSampleSlot()
+    }
+  })()
   toneCache.set(url, p)
   return p
 }

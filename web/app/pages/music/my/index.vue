@@ -68,13 +68,12 @@
         class="ms-card-link"
       >
         <MusicCard
-          variant="circle"
+          variant="square"
           :src="usePosterUrl({ id: ar.media_item_id, public_id: ar.media_item_public_id }) ?? undefined"
           :alt="ar.name"
           :title="ar.name"
           no-play
         />
-        <div class="ms-circle-label">{{ ar.name }}</div>
       </NuxtLink>
       </AppContextMenu>
       </template>
@@ -330,18 +329,6 @@ async function playLovedTracks(startIdx: number) {
 }
 
 .ms-card-link { text-decoration: none; color: inherit; display: block; }
-.ms-circle-label {
-  text-align: center;
-  margin-top: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--fg-0);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  /* Sits bare on the ambient pool — needs the halo like every caption. */
-  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
-}
 
 .ms-section { margin-bottom: 40px; }
 .ms-see-all {
