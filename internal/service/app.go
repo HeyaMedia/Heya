@@ -24,6 +24,7 @@ import (
 	"github.com/karbowiak/heya/internal/matcher"
 	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/karbowiak/heya/internal/playbackgrant"
+	"github.com/karbowiak/heya/internal/playlistsync"
 	"github.com/karbowiak/heya/internal/podcastindex"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/radiobrowser"
@@ -98,6 +99,10 @@ type App struct {
 	// Wall-clock start time, captured once in New. Drives the uptime metric
 	// surfaced via /api/admin/system.
 	startedAt time.Time
+
+	// Test seam: substitutes the credential-backed playlist provider so sync
+	// flows can run against a fake without network access. Nil in production.
+	playlistProviderOverride func(userID int64, service string) playlistsync.Provider
 
 	// TTL cache for the dashboard missing_count — the three-bucket anti-join
 	// costs ~750ms at prod scale and only changes on scan/cleanup, so the

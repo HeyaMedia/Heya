@@ -29,8 +29,19 @@ imports provider-side changes; users can also request a pass from either UI.
 Provider-owned collections use `pull_only` links. ListenBrainz “Created for
 You” playlists are listed separately in settings: users can import selected
 playlists or enable a collection policy which discovers and imports future
-generated playlists automatically. Their title and track sequence always flow
-from ListenBrainz to Heya and are never written back.
+generated playlists automatically. Their track sequence always flows from
+ListenBrainz to Heya and is never written back.
+
+Recurring generated series (Weekly Jams, Weekly Exploration, Daily Jams —
+identified by the JSPF `source_patch` field) behave like Spotify’s Discover
+Weekly: Heya keeps a single local playlist per series, named after the series
+(“Weekly Jams”, without the per-edition “for user, week of …” decoration).
+Each new edition is a brand-new ListenBrainz playlist; the reconciler
+re-points the existing link (`user_playlist_syncs.series`) at the newest
+edition and refills the same local playlist instead of importing another
+copy. Per-edition mirrors imported before series tracking are claimed (newest
+becomes the series playlist) and the rest are deleted. One-off generated
+playlists (yearly discoveries, missed tracks) still import individually.
 
 ## Adding a provider
 

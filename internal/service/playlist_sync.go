@@ -63,6 +63,7 @@ type playlistSyncLink struct {
 	PlaylistID   int64
 	Service      string
 	ExternalID   string
+	Series       string
 	Snapshot     []string
 	Unmatched    []string
 	SyncMode     string
@@ -87,6 +88,9 @@ func playlistSyncCapabilities(service string) playlistsync.Capabilities {
 // registering its constructor here; merge, persistence, APIs and UI remain
 // provider-neutral.
 func (a *App) playlistSyncProvider(ctx context.Context, userID int64, service string) (playlistsync.Provider, error) {
+	if a.playlistProviderOverride != nil {
+		return a.playlistProviderOverride(userID, service), nil
+	}
 	if service == "lastfm" {
 		return playlistsync.Unsupported{Name: service, Reason: lastFMPlaylistUnavailable}, nil
 	}
@@ -248,12 +252,145 @@ func (a *App) reconcilePlaylistCollection(ctx context.Context, userID int64, ser
 	if err != nil {
 		return err
 	}
+	editions := map[string][]playlistsync.Playlist{}
 	for _, playlist := range remote {
+		if playlist.SeriesKey != "" {
+			editions[playlist.SeriesKey] = append(editions[playlist.SeriesKey], playlist)
+			continue
+		}
 		if _, err := a.EnableExternalPlaylistSync(ctx, userID, service, playlist.ExternalID, true, playlistSyncPullOnly); err != nil {
 			return err
 		}
 	}
+	for seriesKey, series := range editions {
+		if err := a.adoptSeriesEdition(ctx, userID, provider, service, seriesKey, series); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func seriesEditionTime(playlist playlistsync.Playlist) time.Time {
+	if !playlist.CreatedAt.IsZero() {
+		return playlist.CreatedAt
+	}
+	return playlist.UpdatedAt
+}
+
+// adoptSeriesEdition keeps exactly one local playlist per recurring provider
+// series (Weekly Jams, Weekly Exploration, Daily Jams, …). Providers publish
+// every edition as a brand-new remote playlist; instead of importing each one,
+// the stable local playlist is re-pointed at the newest edition and refilled —
+// Spotify Discover Weekly semantics.
+func (a *App) adoptSeriesEdition(ctx context.Context, userID int64, provider playlistsync.Provider, service, seriesKey string, editions []playlistsync.Playlist) error {
+	newest := editions[0]
+	for _, candidate := range editions[1:] {
+		if seriesEditionTime(candidate).After(seriesEditionTime(newest)) {
+			newest = candidate
+		}
+	}
+	var playlistID int64
+	var linkedExternalID string
+	err := a.db.QueryRow(ctx, `
+		SELECT playlist_id, external_id FROM user_playlist_syncs
+		WHERE user_id = $1 AND service = $2 AND series = $3`, userID, service, seriesKey).
+		Scan(&playlistID, &linkedExternalID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		playlistID, linkedExternalID, err = a.claimLegacySeriesLink(ctx, userID, service, seriesKey, editions)
+	}
+	if err != nil {
+		return err
+	}
+	a.cleanupSeriesDuplicates(ctx, userID, service, seriesKey, playlistID, editions)
+	if playlistID == 0 {
+		_, err := a.importExternalPlaylist(ctx, userID, service, provider, newest.ExternalID, playlistsync.SeriesDisplayName(seriesKey), seriesKey, playlistSyncPullOnly)
+		return err
+	}
+	if linkedExternalID == newest.ExternalID {
+		return nil
+	}
+	// A fresh edition replaced the linked one: re-point the link and pull the
+	// new content into the same local playlist. The snapshot resets so the
+	// merge treats the new edition as the authoritative track list.
+	if _, err := a.db.Exec(ctx, `
+		UPDATE user_playlist_syncs
+		SET external_id = $4, snapshot_track_ids = '[]', unmatched_track_ids = '[]',
+			last_error = '', updated_at = now()
+		WHERE user_id = $1 AND service = $2 AND series = $3`, userID, service, seriesKey, newest.ExternalID); err != nil {
+		return err
+	}
+	return a.SyncPlaylist(ctx, userID, playlistID, service)
+}
+
+// claimLegacySeriesLink upgrades per-edition links created before series
+// tracking existed: the most recently linked edition becomes the series
+// playlist and is renamed to the stable series name.
+func (a *App) claimLegacySeriesLink(ctx context.Context, userID int64, service, seriesKey string, editions []playlistsync.Playlist) (int64, string, error) {
+	ids := make([]string, 0, len(editions))
+	for _, edition := range editions {
+		ids = append(ids, edition.ExternalID)
+	}
+	var playlistID int64
+	var externalID string
+	err := a.db.QueryRow(ctx, `
+		SELECT playlist_id, external_id FROM user_playlist_syncs
+		WHERE user_id = $1 AND service = $2 AND series = '' AND external_id = ANY($3)
+		ORDER BY created_at DESC LIMIT 1`, userID, service, ids).Scan(&playlistID, &externalID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, "", nil
+	}
+	if err != nil {
+		return 0, "", err
+	}
+	name := playlistsync.SeriesDisplayName(seriesKey)
+	newSlug := slug.GenerateUnique(ctx, name, "", playlistID, userPlaylistSlugExists(sqlc.New(a.db), userID))
+	if _, err := a.db.Exec(ctx, `
+		UPDATE user_playlists SET name = $3, slug = $4, updated_at = now()
+		WHERE id = $1 AND user_id = $2`, playlistID, userID, name, newSlug); err != nil {
+		return 0, "", err
+	}
+	if _, err := a.db.Exec(ctx, `
+		UPDATE user_playlist_syncs SET series = $4, updated_at = now()
+		WHERE user_id = $1 AND service = $2 AND external_id = $3`, userID, service, externalID, seriesKey); err != nil {
+		return 0, "", err
+	}
+	return playlistID, externalID, nil
+}
+
+// cleanupSeriesDuplicates deletes the extra per-edition mirrors a series
+// accumulated before series tracking (one local "Weekly Jams for …" playlist
+// per week). Only auto-imported pull-only links are candidates — two-way
+// links are user-created and never touched. Editions whose remote playlist
+// already expired are caught by the per-edition title pattern.
+func (a *App) cleanupSeriesDuplicates(ctx context.Context, userID int64, service, seriesKey string, keepPlaylistID int64, editions []playlistsync.Playlist) {
+	ids := make([]string, 0, len(editions))
+	for _, edition := range editions {
+		ids = append(ids, edition.ExternalID)
+	}
+	namePattern := playlistsync.SeriesDisplayName(seriesKey) + " for %"
+	rows, err := a.db.Query(ctx, `
+		SELECT s.playlist_id FROM user_playlist_syncs s
+		JOIN user_playlists p ON p.id = s.playlist_id
+		WHERE s.user_id = $1 AND s.service = $2 AND s.series = '' AND s.sync_mode = 'pull_only'
+			AND s.playlist_id <> $3
+			AND (s.external_id = ANY($4) OR p.name LIKE $5)`,
+		userID, service, keepPlaylistID, ids, namePattern)
+	if err != nil {
+		return
+	}
+	var stale []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			stale = append(stale, id)
+		}
+	}
+	rows.Close()
+	for _, id := range stale {
+		if err := a.DeleteUserPlaylist(ctx, userID, id); err != nil {
+			log.Warn().Err(err).Int64("playlist", id).Str("series", seriesKey).Msg("stale series playlist cleanup failed")
+		}
+	}
 }
 
 func (a *App) reconcileEnabledPlaylistCollections(ctx context.Context) {
@@ -360,12 +497,22 @@ func (a *App) EnableExternalPlaylistSync(ctx context.Context, userID int64, serv
 	if err != nil {
 		return 0, err
 	}
+	return a.importExternalPlaylist(ctx, userID, service, provider, externalID, "", "", mode)
+}
+
+// importExternalPlaylist creates the local playlist plus its sync link for a
+// freshly linked remote playlist. An empty name keeps the remote title; series
+// is empty for ordinary one-off playlists.
+func (a *App) importExternalPlaylist(ctx context.Context, userID int64, service string, provider playlistsync.Provider, externalID, name, series, mode string) (int64, error) {
 	remote, err := provider.Get(ctx, externalID)
 	if err != nil {
 		return 0, err
 	}
+	if name == "" {
+		name = remote.Name
+	}
 	q := sqlc.New(a.db)
-	newSlug := slug.GenerateUnique(ctx, remote.Name, "", 0, userPlaylistSlugExists(q, userID))
+	newSlug := slug.GenerateUnique(ctx, name, "", 0, userPlaylistSlugExists(q, userID))
 	tx, err := a.db.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -374,7 +521,7 @@ func (a *App) EnableExternalPlaylistSync(ctx context.Context, userID int64, serv
 	var playlistID int64
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO user_playlists (user_id, name, description, cover_path, slug)
-		VALUES ($1, $2, $3, '', $4) RETURNING id`, userID, remote.Name, remote.Description, newSlug).Scan(&playlistID); err != nil {
+		VALUES ($1, $2, $3, '', $4) RETURNING id`, userID, name, remote.Description, newSlug).Scan(&playlistID); err != nil {
 		return 0, err
 	}
 	trackIDs, matched, err := a.resolveProviderTracks(ctx, provider, remote.Tracks)
@@ -388,8 +535,8 @@ func (a *App) EnableExternalPlaylistSync(ctx context.Context, userID int64, serv
 	unmatched, _ := json.Marshal(unmatchedTrackIDs(remote.Tracks, matched))
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO user_playlist_syncs
-			(user_id, playlist_id, service, external_id, snapshot_track_ids, unmatched_track_ids, sync_mode, last_synced_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, now())`, userID, playlistID, service, externalID, snapshot, unmatched, mode); err != nil {
+			(user_id, playlist_id, service, external_id, series, snapshot_track_ids, unmatched_track_ids, sync_mode, last_synced_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())`, userID, playlistID, service, externalID, series, snapshot, unmatched, mode); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -402,10 +549,10 @@ func (a *App) loadPlaylistSyncLink(ctx context.Context, userID, playlistID int64
 	var link playlistSyncLink
 	var raw, unmatchedRaw []byte
 	err := a.db.QueryRow(ctx, `
-		SELECT user_id, playlist_id, service, external_id, snapshot_track_ids, unmatched_track_ids, sync_mode, last_synced_at
+		SELECT user_id, playlist_id, service, external_id, series, snapshot_track_ids, unmatched_track_ids, sync_mode, last_synced_at
 		FROM user_playlist_syncs
 		WHERE user_id = $1 AND playlist_id = $2 AND service = $3`, userID, playlistID, service).
-		Scan(&link.UserID, &link.PlaylistID, &link.Service, &link.ExternalID, &raw, &unmatchedRaw, &link.SyncMode, &link.LastSyncedAt)
+		Scan(&link.UserID, &link.PlaylistID, &link.Service, &link.ExternalID, &link.Series, &raw, &unmatchedRaw, &link.SyncMode, &link.LastSyncedAt)
 	if err != nil {
 		return link, fmt.Errorf("playlist is not synced to %s", service)
 	}
@@ -459,6 +606,16 @@ func (a *App) SyncPlaylist(ctx context.Context, userID, playlistID int64, servic
 			if err := provider.Replace(ctx, link.ExternalID, merged); err != nil {
 				return a.recordPlaylistSyncError(ctx, link, err)
 			}
+		}
+	}
+	if link.Series != "" {
+		// Series playlists keep their stable local identity ("Weekly Jams",
+		// not "Weekly Jams for alice, week of …") — only the content follows
+		// the provider's newest edition.
+		if err := a.db.QueryRow(ctx, `
+			SELECT name, description FROM user_playlists
+			WHERE id = $1 AND user_id = $2`, playlistID, userID).Scan(&mergedName, &mergedDescription); err != nil {
+			return a.recordPlaylistSyncError(ctx, link, err)
 		}
 	}
 	resolved, matched, err := a.resolveProviderTracks(ctx, provider, merged.Tracks)

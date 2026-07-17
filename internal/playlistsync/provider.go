@@ -5,6 +5,7 @@ package playlistsync
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -35,7 +36,27 @@ type Playlist struct {
 	Description string    `json:"description,omitempty"`
 	URL         string    `json:"url,omitempty"`
 	UpdatedAt   time.Time `json:"updated_at,omitempty"`
+	CreatedAt   time.Time `json:"created_at,omitempty"`
 	Tracks      []Track   `json:"tracks,omitempty"`
+
+	// SeriesKey identifies a provider-generated recurring playlist series
+	// (e.g. ListenBrainz "weekly-jams"). Providers publish each edition as a
+	// brand-new playlist; the key is what stays stable across editions. Empty
+	// for ordinary one-off playlists.
+	SeriesKey string `json:"series_key,omitempty"`
+}
+
+// SeriesDisplayName renders a series key as a stable local playlist name:
+// "weekly-jams" → "Weekly Jams". Deliberately drops the provider's per-edition
+// title decorations ("… for alice, week of 2026-07-13 Mon").
+func SeriesDisplayName(key string) string {
+	words := strings.Split(key, "-")
+	for i, word := range words {
+		if word != "" {
+			words[i] = strings.ToUpper(word[:1]) + word[1:]
+		}
+	}
+	return strings.Join(words, " ")
 }
 
 type Provider interface {

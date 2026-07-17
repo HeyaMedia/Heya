@@ -1337,6 +1337,7 @@ type UserPlaylistSync struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 	SyncMode          string             `json:"sync_mode"`
+	Series            string             `json:"series"`
 }
 
 type UserPlaylistSyncPolicy struct {

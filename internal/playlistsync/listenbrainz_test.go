@@ -30,7 +30,15 @@ func TestListenBrainzListAndCreate(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"playlist_count": 1,
 			"playlists": []any{map[string]any{"playlist": map[string]any{
-				"title": "Weekly Jams", "identifier": playlistURI + "weekly-id",
+				"title":      "Weekly Jams for alice, week of 2026-07-13 Mon",
+				"identifier": playlistURI + "weekly-id",
+				"date":       "2026-07-12T22:05:40Z",
+				"extension": map[string]any{jspfPlaylistExtension: map[string]any{
+					"public": true,
+					"additional_metadata": map[string]any{
+						"algorithm_metadata": map[string]any{"source_patch": "weekly-jams"},
+					},
+				}},
 			}}},
 		})
 	})
@@ -64,6 +72,12 @@ func TestListenBrainzListAndCreate(t *testing.T) {
 	}
 	if len(generated) != 1 || generated[0].ExternalID != "weekly-id" {
 		t.Fatalf("generated playlists = %+v", generated)
+	}
+	if generated[0].SeriesKey != "weekly-jams" {
+		t.Fatalf("series key = %q, want weekly-jams", generated[0].SeriesKey)
+	}
+	if generated[0].CreatedAt.IsZero() {
+		t.Fatalf("created at not parsed: %+v", generated[0])
 	}
 	id, err := client.Create(context.Background(), Playlist{Name: "New", Tracks: []Track{{ProviderID: "recording-id"}}})
 	if err != nil {

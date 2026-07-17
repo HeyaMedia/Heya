@@ -5,6 +5,20 @@ import (
 	"testing"
 )
 
+func TestSeriesDisplayName(t *testing.T) {
+	tests := map[string]string{
+		"weekly-jams":        "Weekly Jams",
+		"weekly-exploration": "Weekly Exploration",
+		"daily-jams":         "Daily Jams",
+		"top-discoveries":    "Top Discoveries",
+	}
+	for key, want := range tests {
+		if got := SeriesDisplayName(key); got != want {
+			t.Fatalf("SeriesDisplayName(%q) = %q, want %q", key, got, want)
+		}
+	}
+}
+
 func TestMergeTrackIDs(t *testing.T) {
 	tests := []struct {
 		name                string
