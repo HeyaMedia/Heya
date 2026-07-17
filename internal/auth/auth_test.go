@@ -48,18 +48,18 @@ type mockSessionLookup struct {
 	err     error
 }
 
-func (m *mockSessionLookup) GetSessionByToken(_ context.Context, token string) (sqlc.Session, error) {
+func (m *mockSessionLookup) GetSessionWithUserByToken(_ context.Context, token string) (sqlc.GetSessionWithUserByTokenRow, error) {
 	if m.err != nil {
-		return sqlc.Session{}, m.err
+		return sqlc.GetSessionWithUserByTokenRow{}, m.err
 	}
-	if token == m.session.TokenHash {
-		return m.session, nil
+	if token == m.session.TokenHash && m.session.UserID == m.user.ID {
+		return sqlc.GetSessionWithUserByTokenRow{Session: m.session, User: m.user}, nil
 	}
 	// Mirror sqlc's actual behaviour: a `:one` query that returns no rows
 	// surfaces as pgx.ErrNoRows, not a generic error. The middleware uses
 	// errors.Is(err, pgx.ErrNoRows) to distinguish "session not found"
 	// (401) from "DB unreachable" (503), so the mock has to be honest.
-	return sqlc.Session{}, pgx.ErrNoRows
+	return sqlc.GetSessionWithUserByTokenRow{}, pgx.ErrNoRows
 }
 
 func (m *mockSessionLookup) GetUserByID(_ context.Context, id int64) (sqlc.User, error) {

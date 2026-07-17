@@ -21,14 +21,21 @@ import (
 // it to 401 the same way it would in production.
 type fakeSessions struct{}
 
-func (fakeSessions) GetSessionByToken(ctx context.Context, tokenHash string) (sqlc.Session, error) {
+func (f fakeSessions) GetSessionWithUserByToken(ctx context.Context, tokenHash string) (sqlc.GetSessionWithUserByTokenRow, error) {
+	var session sqlc.Session
 	switch tokenHash {
 	case auth.TokenHash("admin-token"):
-		return sqlc.Session{ID: 1, UserID: 1, TokenHash: tokenHash, Kind: "session"}, nil
+		session = sqlc.Session{ID: 1, UserID: 1, TokenHash: tokenHash, Kind: "session"}
 	case auth.TokenHash("user-token"):
-		return sqlc.Session{ID: 2, UserID: 2, TokenHash: tokenHash, Kind: "session"}, nil
+		session = sqlc.Session{ID: 2, UserID: 2, TokenHash: tokenHash, Kind: "session"}
+	default:
+		return sqlc.GetSessionWithUserByTokenRow{}, pgx.ErrNoRows
 	}
-	return sqlc.Session{}, pgx.ErrNoRows
+	user, err := f.GetUserByID(ctx, session.UserID)
+	if err != nil {
+		return sqlc.GetSessionWithUserByTokenRow{}, err
+	}
+	return sqlc.GetSessionWithUserByTokenRow{Session: session, User: user}, nil
 }
 
 func (fakeSessions) GetUserByID(ctx context.Context, id int64) (sqlc.User, error) {

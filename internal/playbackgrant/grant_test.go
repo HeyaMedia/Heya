@@ -16,11 +16,11 @@ type fakeSessions struct {
 	revoked bool
 }
 
-func (f *fakeSessions) GetSessionByToken(_ context.Context, tokenHash string) (sqlc.Session, error) {
+func (f *fakeSessions) GetSessionWithUserByToken(_ context.Context, tokenHash string) (sqlc.GetSessionWithUserByTokenRow, error) {
 	if f.revoked || tokenHash != f.session.TokenHash {
-		return sqlc.Session{}, pgx.ErrNoRows
+		return sqlc.GetSessionWithUserByTokenRow{}, pgx.ErrNoRows
 	}
-	return f.session, nil
+	return sqlc.GetSessionWithUserByTokenRow{Session: f.session, User: f.user}, nil
 }
 
 func (f *fakeSessions) GetUserByID(_ context.Context, id int64) (sqlc.User, error) {

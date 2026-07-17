@@ -8,6 +8,16 @@ SELECT * FROM sessions
 WHERE token_hash = $1
   AND (expires_at IS NULL OR expires_at > now());
 
+-- name: GetSessionWithUserByToken :one
+-- Auth-middleware hot path: session + owning user in one round trip.
+-- Nearly every API request pays this lookup, so the two dependent queries
+-- it replaces doubled the fixed per-request latency floor.
+SELECT sqlc.embed(sessions), sqlc.embed(users)
+FROM sessions
+JOIN users ON users.id = sessions.user_id
+WHERE sessions.token_hash = $1
+  AND (sessions.expires_at IS NULL OR sessions.expires_at > now());
+
 -- name: TouchSession :exec
 -- Bump last_seen_at on the session backing a request. Throttle is in SQL
 -- (no-op UPDATE when the row was touched in the last minute) so the

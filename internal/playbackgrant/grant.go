@@ -94,11 +94,11 @@ func (m *Manager) Validate(ctx context.Context, sessions auth.SessionLookup, tok
 		return 0, ErrInvalidGrant
 	}
 
-	session, err := sessions.GetSessionByToken(ctx, rec.sessionTokenHash)
-	if err != nil || session.UserID != rec.userID {
-		return 0, ErrInvalidGrant
-	}
-	if _, err := sessions.GetUserByID(ctx, rec.userID); err != nil {
+	// The joined lookup checks both conditions in one round trip: a session
+	// that no longer exists and a user that was deleted both surface as
+	// no-rows through the JOIN.
+	row, err := sessions.GetSessionWithUserByToken(ctx, rec.sessionTokenHash)
+	if err != nil || row.Session.UserID != rec.userID {
 		return 0, ErrInvalidGrant
 	}
 	return rec.userID, nil

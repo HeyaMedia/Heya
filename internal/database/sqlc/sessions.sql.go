@@ -151,6 +151,49 @@ func (q *Queries) GetSessionByToken(ctx context.Context, tokenHash string) (Sess
 	return i, err
 }
 
+const getSessionWithUserByToken = `-- name: GetSessionWithUserByToken :one
+SELECT sessions.id, sessions.user_id, sessions.token_hash, sessions.expires_at, sessions.created_at, sessions.kind, sessions.name, sessions.last_seen_at, sessions.user_agent, sessions.ip, users.id, users.username, users.email, users.password_hash, users.is_admin, users.settings, users.created_at, users.updated_at, users.favorites_threshold
+FROM sessions
+JOIN users ON users.id = sessions.user_id
+WHERE sessions.token_hash = $1
+  AND (sessions.expires_at IS NULL OR sessions.expires_at > now())
+`
+
+type GetSessionWithUserByTokenRow struct {
+	Session Session `json:"session"`
+	User    User    `json:"user"`
+}
+
+// Auth-middleware hot path: session + owning user in one round trip.
+// Nearly every API request pays this lookup, so the two dependent queries
+// it replaces doubled the fixed per-request latency floor.
+func (q *Queries) GetSessionWithUserByToken(ctx context.Context, tokenHash string) (GetSessionWithUserByTokenRow, error) {
+	row := q.db.QueryRow(ctx, getSessionWithUserByToken, tokenHash)
+	var i GetSessionWithUserByTokenRow
+	err := row.Scan(
+		&i.Session.ID,
+		&i.Session.UserID,
+		&i.Session.TokenHash,
+		&i.Session.ExpiresAt,
+		&i.Session.CreatedAt,
+		&i.Session.Kind,
+		&i.Session.Name,
+		&i.Session.LastSeenAt,
+		&i.Session.UserAgent,
+		&i.Session.Ip,
+		&i.User.ID,
+		&i.User.Username,
+		&i.User.Email,
+		&i.User.PasswordHash,
+		&i.User.IsAdmin,
+		&i.User.Settings,
+		&i.User.CreatedAt,
+		&i.User.UpdatedAt,
+		&i.User.FavoritesThreshold,
+	)
+	return i, err
+}
+
 const listAllSessionsForAdmin = `-- name: ListAllSessionsForAdmin :many
 SELECT s.id, s.user_id, s.kind, s.name, s.expires_at, s.created_at,
        s.last_seen_at, s.user_agent, s.ip,

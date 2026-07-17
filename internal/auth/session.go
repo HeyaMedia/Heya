@@ -13,7 +13,7 @@ import (
 var ErrInvalidSession = errors.New("invalid session")
 
 type SessionLookup interface {
-	GetSessionByToken(ctx context.Context, tokenHash string) (sqlc.Session, error)
+	GetSessionWithUserByToken(ctx context.Context, tokenHash string) (sqlc.GetSessionWithUserByTokenRow, error)
 	GetUserByID(ctx context.Context, id int64) (sqlc.User, error)
 	TouchSession(ctx context.Context, tokenHash string) error
 }
@@ -28,21 +28,17 @@ func ResolveSession(ctx context.Context, db SessionLookup, token string) (Sessio
 	if token == "" || db == nil {
 		return SessionResolution{}, ErrInvalidSession
 	}
-	session, err := db.GetSessionByToken(ctx, TokenHash(token))
+	// One joined round trip: this runs on nearly every API request, and a
+	// dangling-session row (user deleted) surfaces as no-rows via the JOIN,
+	// same as an unknown token.
+	row, err := db.GetSessionWithUserByToken(ctx, TokenHash(token))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return SessionResolution{}, ErrInvalidSession
 		}
 		return SessionResolution{}, fmt.Errorf("session lookup failed: %w", err)
 	}
-	user, err := db.GetUserByID(ctx, session.UserID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return SessionResolution{}, ErrInvalidSession
-		}
-		return SessionResolution{}, fmt.Errorf("user lookup failed: %w", err)
-	}
-	return SessionResolution{Session: session, User: user, Token: token}, nil
+	return SessionResolution{Session: row.Session, User: row.User, Token: token}, nil
 }
 
 func TouchSessionAsync(db SessionLookup, token string) {
