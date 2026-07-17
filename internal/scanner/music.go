@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/karbowiak/heya/internal/audiotags"
@@ -21,6 +22,14 @@ import (
 )
 
 const musicProbeTimeout = 90 * time.Second
+
+// musicProbeConcurrency bounds the parallel tag probes in
+// AnalyzeMusicWithOptions. Each probe is one short ffprobe subprocess whose
+// cost is dominated by media round trips (libraries typically live on SMB),
+// so a small fan-out hides the network latency without stampeding the share
+// or the local CPU. Matches the musicFetchConcurrency scale used elsewhere
+// in this package.
+const musicProbeConcurrency = 4
 
 type MusicProbeFunc func(ctx context.Context, path string) (*mediaprobe.MediaInfo, error)
 
@@ -125,21 +134,50 @@ func AnalyzeMusicWithOptions(ctx context.Context, inv Inventory, emit Emitter, o
 			file InventoryFile
 			tags audiotags.Tags
 		}
-		byReleaseDir := map[string][]probedFile{}
-		var releaseDirs []string
+		var audioFiles []InventoryFile
 		for _, file := range root.Files {
-			if err := ctx.Err(); err != nil {
-				return tracks, nil, nil, err
-			}
 			if file.Class != ClassPrimaryMedia || !mediafile.IsAudioExt(file.Ext) {
 				continue
 			}
-			tags := probeMusicTags(ctx, file, opts, emit)
-			dir := musicReleaseDir(file.RelPath)
+			audioFiles = append(audioFiles, file)
+		}
+
+		// Probe tags with bounded parallelism: on a fresh import each probe
+		// is an ffprobe round trip against the (typically SMB-backed) share,
+		// and probing serially made this the dominant cost of a first music
+		// scan. Results land at their input index so grouping below sees the
+		// same order the serial loop produced. On cancellation we still
+		// wg.Wait() before returning — the workers write into probed.
+		probed := make([]probedFile, len(audioFiles))
+		sem := make(chan struct{}, musicProbeConcurrency)
+		var wg sync.WaitGroup
+	probeFanout:
+		for i, file := range audioFiles {
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				break probeFanout
+			}
+			wg.Add(1)
+			go func(i int, file InventoryFile) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				probed[i] = probedFile{file: file, tags: probeMusicTags(ctx, file, opts, emit)}
+			}(i, file)
+		}
+		wg.Wait()
+		if err := ctx.Err(); err != nil {
+			return tracks, nil, nil, err
+		}
+
+		byReleaseDir := map[string][]probedFile{}
+		var releaseDirs []string
+		for _, item := range probed {
+			dir := musicReleaseDir(item.file.RelPath)
 			if _, seen := byReleaseDir[dir]; !seen {
 				releaseDirs = append(releaseDirs, dir)
 			}
-			byReleaseDir[dir] = append(byReleaseDir[dir], probedFile{file: file, tags: tags})
+			byReleaseDir[dir] = append(byReleaseDir[dir], item)
 		}
 		for _, dir := range releaseDirs {
 			probed := byReleaseDir[dir]
