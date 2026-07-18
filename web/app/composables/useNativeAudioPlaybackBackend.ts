@@ -7,6 +7,7 @@ import type {
   NativeAudioProcessingSettings,
   NativeAudioState,
   NativeAudioStateEvent,
+  NativeAudioTrackAnalysisUpdate,
   NativeAudioTrackRequest,
   NativeAudioVisualizerEvent,
 } from '~/types/native-audio'
@@ -69,6 +70,7 @@ export interface NativeAudioPlaybackBackend {
   setVolume(volume: number): Promise<void>
   setMuted(muted: boolean): Promise<void>
   updateProcessing(settings: NativeAudioProcessingSettings): Promise<void>
+  updateTrackAnalysis(update: NativeAudioTrackAnalysisUpdate): Promise<void>
   stop(): Promise<void>
   dispose(): Promise<void>
 }
@@ -180,6 +182,7 @@ export function useNativeAudioPlaybackBackend(
     setVolume: volume => send({ type: 'setVolume', volume: Math.max(0, Math.min(1, volume)) }),
     setMuted: muted => send({ type: 'setMuted', muted }),
     updateProcessing: settings => send({ type: 'updateProcessing', settings }),
+    updateTrackAnalysis: update => send({ type: 'updateTrackAnalysis', ...update }),
     stop: () => send({ type: 'stop' }),
     async dispose() {
       loadGeneration++

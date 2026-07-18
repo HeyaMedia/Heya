@@ -155,17 +155,28 @@ function draw() {
     return
   }
 
-  const barWPx = Math.max(1, Math.floor((c.width / peaks.length) - dpr))
-  const gapPx = Math.max(0, Math.floor(c.width / peaks.length) - barWPx)
+  // Never map one source peak directly to one device pixel: when the stored
+  // peak count exceeds the canvas width that would render only the beginning
+  // of the track and shift every visible feature later in time. Aggregate the
+  // complete source array into the number of bars the canvas can display.
+  const barCount = Math.min(peaks.length, Math.max(1, Math.floor(c.width / (2 * dpr))))
+  const gapPx = Math.max(1, Math.round(dpr))
   const mid = c.height / 2
   const playedX = c.width * Math.max(0, Math.min(1, props.progress))
   const ref = normRef.value
   const maxH = (c.height - 2 * dpr) * WF_HEADROOM
 
-  for (let i = 0; i < peaks.length; i++) {
-    const x = i * (barWPx + gapPx)
-    if (x >= c.width) break
-    const norm = Math.min(1, Math.max(0, peaks[i] ?? 0) / ref)
+  for (let i = 0; i < barCount; i++) {
+    const sourceStart = Math.floor((i * peaks.length) / barCount)
+    const sourceEnd = Math.max(sourceStart + 1, Math.floor(((i + 1) * peaks.length) / barCount))
+    let peak = 0
+    for (let sourceIndex = sourceStart; sourceIndex < sourceEnd; sourceIndex++) {
+      peak = Math.max(peak, peaks[sourceIndex] ?? 0)
+    }
+    const x = Math.floor((i * c.width) / barCount)
+    const nextX = Math.floor(((i + 1) * c.width) / barCount)
+    const barWPx = Math.max(1, nextX - x - gapPx)
+    const norm = Math.min(1, Math.max(0, peak) / ref)
     const h = Math.max(dpr, Math.pow(norm, WF_GAMMA) * maxH)
     const y = mid - h / 2
     ctx.fillStyle = x < playedX ? fillColor : baseColor

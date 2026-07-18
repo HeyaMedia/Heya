@@ -11,6 +11,7 @@ import { computeNormalizationGain } from '~/engine/dsp/normalization'
 import type { NativeAudioPlaybackBackend } from '~/composables/useNativeAudioPlaybackBackend'
 import type {
   NativeAudioProcessingSettings,
+  NativeAudioTrackAnalysisUpdate,
   NativeAudioTrackRequest,
 } from '~/types/native-audio'
 import { acceptHMRUpdate, defineStore, storeToRefs } from 'pinia'
@@ -552,6 +553,28 @@ export const usePlayerStore = defineStore('player', () => {
     return Number.isFinite(gain) && gain > 0 ? 20 * Math.log10(gain) : undefined
   }
 
+  function nativeTrackAnalysisUpdate(track: Track): NativeAudioTrackAnalysisUpdate {
+    const data = playbackOf(track)
+    return {
+      trackId: track.id,
+      gainDb: normalizationGainDb(track) ?? null,
+      introEndMs: data.intro_end_ms,
+      outroStartMs: data.outro_start_ms,
+      fadeStartMs: data.fade_start_ms,
+      silenceStartMs: data.silence_start_ms,
+    }
+  }
+
+  async function syncNativeTrackAnalysis(trackId: number) {
+    const backend = nativeAudioBackend.value
+    if (!backend || playbackBackend.value !== 'native') return
+    const track = currentTrack.value?.id === trackId
+      ? currentTrack.value
+      : queue.value.find(candidate => candidate.id === trackId)
+    if (!track || !playbackDataCache.has(trackId)) return
+    await backend.updateTrackAnalysis(nativeTrackAnalysisUpdate(track))
+  }
+
   interface NativePlaybackGrantResponse {
     media_path: string
     playback_grant: string
@@ -593,6 +616,10 @@ export const usePlayerStore = defineStore('player', () => {
       channels: data.channels ?? undefined,
       lossless: !!format && ['flac', 'alac', 'wav', 'wave', 'aiff', 'aif', 'ape'].includes(format),
       gainDb: normalizationGainDb(track),
+      introEndMs: data.intro_end_ms ?? undefined,
+      outroStartMs: data.outro_start_ms ?? undefined,
+      fadeStartMs: data.fade_start_ms ?? undefined,
+      silenceStartMs: data.silence_start_ms ?? undefined,
       media: {
         mediaUrl: new URL(grant.media_path, window.location.origin).href,
         playbackGrant: grant.playback_grant,
@@ -700,6 +727,8 @@ export const usePlayerStore = defineStore('player', () => {
         if (playbackBackend.value === 'native'
           && backend.state.outputMode === 'processed') {
           void backend.updateProcessing(nativeProcessingSettings()).catch(() => {})
+          const activeTrack = currentTrack.value
+          if (activeTrack) void backend.updateTrackAnalysis(nativeTrackAnalysisUpdate(activeTrack)).catch(() => {})
           prepareTransition()
         }
       })
@@ -880,7 +909,13 @@ export const usePlayerStore = defineStore('player', () => {
         playbackAnalysisRetries.set(trackId, attempt + 1)
         setTimeout(() => {
           playbackDataCache.delete(trackId)
-          void ensureAnalysisAndArm()
+          if (playbackBackend.value === 'native') {
+            void ensurePlaybackData(trackId)
+              .then(() => syncNativeTrackAnalysis(trackId))
+              .catch(() => {})
+          } else {
+            void ensureAnalysisAndArm()
+          }
         }, 1000)
       }
     } else if (data?.boundaries_ready) {

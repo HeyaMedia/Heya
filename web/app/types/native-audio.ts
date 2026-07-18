@@ -39,6 +39,13 @@ export interface NativeAudioTrackRequest {
   channels?: number
   lossless?: boolean
   gainDb?: number
+  skipCrossfade?: boolean
+  startRamp?: string
+  endRamp?: string
+  introEndMs?: number
+  outroStartMs?: number
+  fadeStartMs?: number
+  silenceStartMs?: number
   media: NativeAudioMediaRequest
 }
 
@@ -52,6 +59,15 @@ export interface NativeAudioPreloadRequest {
   rendererSessionId: string
   commandId: string
   track: NativeAudioTrackRequest
+}
+
+export interface NativeAudioTrackAnalysisUpdate {
+  trackId: number
+  gainDb: number | null
+  introEndMs: number | null
+  outroStartMs: number | null
+  fadeStartMs: number | null
+  silenceStartMs: number | null
 }
 
 export interface NativeAudioCapabilities {
@@ -137,6 +153,7 @@ export type NativeAudioCommand = {
   | { type: 'setVolume', volume: number }
   | { type: 'setMuted', muted: boolean }
   | { type: 'updateProcessing', settings: NativeAudioProcessingSettings }
+  | ({ type: 'updateTrackAnalysis' } & NativeAudioTrackAnalysisUpdate)
   | { type: 'stop' }
 )
 
