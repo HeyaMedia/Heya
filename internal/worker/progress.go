@@ -1,6 +1,8 @@
 package worker
 
 import (
+	"sync"
+
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/taskdefs"
 )
@@ -17,6 +19,13 @@ import (
 type TaskProgressBroadcaster struct {
 	hub        EventPublisher
 	workToTask map[string]string
+
+	// Last emitted payload per task, so pollers (the sonic runtime
+	// heartbeat, dashboards) can snapshot "currently working on X"
+	// without waiting for the next event. Events are fire-and-forget;
+	// this is the only retained state.
+	mu      sync.Mutex
+	current map[string]eventhub.TaskProgressPayload
 }
 
 // NewTaskProgressBroadcaster returns a broadcaster wired to the event
@@ -26,7 +35,27 @@ func NewTaskProgressBroadcaster(hub EventPublisher) *TaskProgressBroadcaster {
 	return &TaskProgressBroadcaster{
 		hub:        hub,
 		workToTask: buildWorkToTaskMap(),
+		current:    make(map[string]eventhub.TaskProgressPayload),
 	}
+}
+
+// Current returns the most recent payload emitted for taskID, if any.
+// Safe on a nil broadcaster.
+func (b *TaskProgressBroadcaster) Current(taskID string) (eventhub.TaskProgressPayload, bool) {
+	if b == nil {
+		return eventhub.TaskProgressPayload{}, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	p, ok := b.current[taskID]
+	return p, ok
+}
+
+func (b *TaskProgressBroadcaster) emit(p eventhub.TaskProgressPayload) {
+	b.mu.Lock()
+	b.current[p.TaskID] = p
+	b.mu.Unlock()
+	b.hub.Emit(eventhub.EventTaskProgress, p)
 }
 
 // SetCurrentByKind emits a task.progress event with CurrentItem set,
@@ -47,7 +76,7 @@ func (b *TaskProgressBroadcaster) SetCurrent(kind, scheduledTaskID, item string)
 	if !ok {
 		return
 	}
-	b.hub.Emit(eventhub.EventTaskProgress, eventhub.TaskProgressPayload{
+	b.emit(eventhub.TaskProgressPayload{
 		TaskID:      taskID,
 		State:       "running",
 		CurrentItem: item,
@@ -62,7 +91,7 @@ func (b *TaskProgressBroadcaster) Set(taskID, kind, item string) {
 	if b == nil || b.hub == nil {
 		return
 	}
-	b.hub.Emit(eventhub.EventTaskProgress, eventhub.TaskProgressPayload{
+	b.emit(eventhub.TaskProgressPayload{
 		TaskID:      taskID,
 		State:       "running",
 		CurrentItem: item,
@@ -88,7 +117,7 @@ func (b *TaskProgressBroadcaster) SetStage(kind, scheduledTaskID, item, stage st
 	if !ok {
 		return
 	}
-	b.hub.Emit(eventhub.EventTaskProgress, eventhub.TaskProgressPayload{
+	b.emit(eventhub.TaskProgressPayload{
 		TaskID:       taskID,
 		State:        "running",
 		CurrentItem:  item,

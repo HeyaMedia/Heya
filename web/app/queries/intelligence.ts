@@ -47,7 +47,12 @@ export const recommendationsSettingsQuery = defineQueryOptions(() => ({
 }))
 
 export type SonicManifestFile = { name: string, present: boolean, expected_size: number, actual_size: number, category: string }
-export type SonicHolder = { state: string, accelerator?: string, refs?: number, idle_timeout_sec?: number, total_borrows?: number, loaded_at?: string, idle_unload_at?: string, last_borrow_at?: string }
+// source tells which process's Holder the snapshot came from: 'worker' is the
+// dedicated worker's published heartbeat (the one that actually loads the
+// model); 'local' is the API process's own instance (dev/CLI fallback).
+export type SonicHolder = { state: string, accelerator?: string, refs?: number, idle_timeout_sec?: number, total_borrows?: number, loaded_at?: string, idle_unload_at?: string, last_borrow_at?: string, source?: 'worker' | 'local' }
+export type SonicThroughputBucket = { hour: string, count: number }
+export type SonicThroughput = { last_hour: number, last_24h: number, buckets: SonicThroughputBucket[] }
 export type SonicStatus = {
   fetcher?: {
     state: string
@@ -65,6 +70,10 @@ export type SonicStatus = {
   accelerators?: AcceleratorAvailability[]
   analyzer_version?: number
   coverage?: { analyzed: number, pending: number }
+  throughput?: SonicThroughput
+  worker_online?: boolean
+  current_item?: string
+  current_stage?: string
 }
 export type SonicSettings = { enabled: boolean, accelerator: string }
 

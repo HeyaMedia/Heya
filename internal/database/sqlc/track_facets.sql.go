@@ -1422,6 +1422,43 @@ func (q *Queries) SimilarTracksByTrackRich(ctx context.Context, arg SimilarTrack
 	return items, nil
 }
 
+const sonicAnalysisThroughput = `-- name: SonicAnalysisThroughput :many
+SELECT date_trunc('hour', analyzed_at)::timestamptz AS bucket,
+       count(*)::int AS analyzed
+  FROM track_facets
+ WHERE analyzed_at >= now() - make_interval(hours => $1::int)
+ GROUP BY 1
+ ORDER BY 1
+`
+
+type SonicAnalysisThroughputRow struct {
+	Bucket   pgtype.Timestamptz `json:"bucket"`
+	Analyzed int32              `json:"analyzed"`
+}
+
+// Hourly analyzed-track counts feeding the intelligence dashboard's
+// throughput graph. Hours with zero analyses come back absent; the API
+// layer fills the gaps.
+func (q *Queries) SonicAnalysisThroughput(ctx context.Context, hours int32) ([]SonicAnalysisThroughputRow, error) {
+	rows, err := q.db.Query(ctx, sonicAnalysisThroughput, hours)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SonicAnalysisThroughputRow{}
+	for rows.Next() {
+		var i SonicAnalysisThroughputRow
+		if err := rows.Scan(&i.Bucket, &i.Analyzed); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertTrackFacets = `-- name: UpsertTrackFacets :exec
 INSERT INTO track_facets (
     track_id,

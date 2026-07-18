@@ -63,6 +63,7 @@ more "heya serve" API/ingress processes.`,
 			return err
 		}
 		app.StartWorkerRuntimeHeartbeat(ctx)
+		app.StartSonicRuntimeHeartbeat(ctx)
 		log.Info().Msg("dedicated River worker started")
 
 		// Watch discovery may be slow on a large or unavailable SMB mount. It is

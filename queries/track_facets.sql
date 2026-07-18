@@ -619,3 +619,14 @@ SELECT * FROM artist_centroids WHERE artist_id = $1;
 
 -- name: GetAlbumCentroid :one
 SELECT * FROM album_centroids WHERE album_id = $1;
+
+-- name: SonicAnalysisThroughput :many
+-- Hourly analyzed-track counts feeding the intelligence dashboard's
+-- throughput graph. Hours with zero analyses come back absent; the API
+-- layer fills the gaps.
+SELECT date_trunc('hour', analyzed_at)::timestamptz AS bucket,
+       count(*)::int AS analyzed
+  FROM track_facets
+ WHERE analyzed_at >= now() - make_interval(hours => sqlc.arg(hours)::int)
+ GROUP BY 1
+ ORDER BY 1;

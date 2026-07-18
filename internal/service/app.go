@@ -63,6 +63,7 @@ type App struct {
 	modelFetcher   *sonicanalysis.ModelFetcher
 	analyzer       *sonicanalysis.Analyzer
 	sonicHolder    *sonicanalysis.Holder
+	taskProgress   *worker.TaskProgressBroadcaster
 
 	// Optional embedding recommendation engine (HEYA_RECOMMENDATIONS_ML_ENABLED).
 	// recEmbedder is lazy-loaded on first use when enabled; recModelsDir holds the
@@ -310,7 +311,12 @@ func newApp(ctx context.Context, cfg *config.Config, runtimeMode appRuntimeMode)
 	var embedBackfillFn worker.EmbedBackfillFn    // assigned after App construction
 	var lastfmCredsFn worker.LastfmCredsFn        // assigned after App construction
 
-	progress := worker.NewTaskProgressBroadcaster(hub)
+	// Progress events must go through workerPublisher, not the raw local
+	// hub: in the dedicated-worker process the local hub has no WS
+	// subscribers, so per-item progress ("analyzing track X") would never
+	// reach the API process. workerPublisher relays via pg_notify there
+	// and degrades to the in-process hub in API/CLI mode.
+	progress := worker.NewTaskProgressBroadcaster(workerPublisher)
 
 	var riverClient *river.Client[pgx.Tx]
 	if runtimeMode == appRuntimeWorker {
@@ -424,6 +430,7 @@ func newApp(ctx context.Context, cfg *config.Config, runtimeMode appRuntimeMode)
 		modelFetcher:     modelFetcher,
 		analyzer:         analyzer,
 		sonicHolder:      sonicHolder,
+		taskProgress:     progress,
 		recFetcher:       recFetcher,
 		recModelsDir:     recModelsDir,
 		imageResizer:     resizer,

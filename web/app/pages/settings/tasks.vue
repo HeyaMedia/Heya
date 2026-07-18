@@ -100,6 +100,7 @@ function taskIcon(id: string): string {
     case 'scan_media_segments': return 'scissors'
     case 'detect_media_segments': return 'wand'
     case 'analyze_music_facets': return 'eq'
+    case 'embed_recommendations': return 'sparkle'
     case 'cleanup_scanner_artifacts': return 'database'
     default:                    return 'timer'
   }
@@ -182,6 +183,8 @@ const WORKER_LABELS: Record<string, string> = {
   kickoff_trickplay:      'Trickplay',
   kickoff_thumbnails:     'Thumbnails',
   kickoff_sonic_analysis: 'Sonic',
+  kickoff_embed_recommendations: 'Embeddings',
+  embed_recommendations:  'Embedding',
 }
 function workerLabel(kind?: string): string {
   if (!kind) return ''

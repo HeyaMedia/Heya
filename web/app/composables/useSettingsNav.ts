@@ -68,8 +68,9 @@ const ALL_GROUPS: SettingsNavGroup[] = [
       },
       { to: '/settings/transcoding', label: 'Transcoding', icon: 'film' },
       {
-        to: '/settings/recommendations', label: 'Intelligence', icon: 'sparkle',
+        to: '/settings/intelligence', label: 'Intelligence', icon: 'sparkle',
         tabs: [
+          { to: '/settings/intelligence', label: 'Overview' },
           { to: '/settings/recommendations', label: 'Recommendations' },
           { to: '/settings/sonic', label: 'Sonic analysis' },
           { to: '/settings/ai', label: 'AI providers' },

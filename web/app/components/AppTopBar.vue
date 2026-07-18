@@ -319,6 +319,9 @@ const KIND_LABELS: Record<string, { label: string, icon: string }> = {
   analyze_track_facets:    { label: 'Analyzing track',       icon: 'eq' },
   refresh_artist_centroids:{ label: 'Refresh artist centroid', icon: 'users' },
   refresh_album_centroids: { label: 'Refresh album centroid',  icon: 'list' },
+  // Recommendations
+  kickoff_embed_recommendations: { label: 'Embeddings kickoff',     icon: 'sparkle' },
+  embed_recommendations:         { label: 'Embedding recommendations', icon: 'sparkle' },
   // Misc
   transcode:               { label: 'Transcoding',           icon: 'film' },
   soft_delete:             { label: 'Cleaning up',           icon: 'trash' },
@@ -473,6 +476,7 @@ const TASK_LABELS: Record<string, { label: string, icon: string }> = {
   scan_music_loudness:  { label: 'Loudness Scan',    icon: 'eq' },
   scan_music_fingerprint: { label: 'Fingerprint Scan', icon: 'eq' },
   analyze_music_facets: { label: 'Sonic Analysis',   icon: 'eq' },
+  embed_recommendations: { label: 'Recommendations', icon: 'sparkle' },
   // Synthetic buckets.
   transcoding:          { label: 'Transcoding',      icon: 'film' },
   artwork:              { label: 'Artwork',          icon: 'image' },
@@ -506,6 +510,7 @@ const TASK_KINDS_BY_TASK: Record<string, string[]> = {
   generate_trickplay:   ['kickoff_trickplay', 'trickplay_file'],
   generate_thumbnails:  ['kickoff_thumbnails', 'thumbnail_extra'],
   analyze_music_facets: ['kickoff_sonic_analysis', 'analyze_track_facets', 'refresh_artist_centroids', 'refresh_album_centroids'],
+  embed_recommendations: ['kickoff_embed_recommendations', 'embed_recommendations'],
   // Synthetic.
   transcoding:          ['transcode'],
   artwork:              ['download_image', 'fetch_artwork', 'save_images'],
