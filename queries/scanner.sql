@@ -137,9 +137,10 @@ WHERE entity_id = $1
 ORDER BY id DESC
 LIMIT 1;
 
--- name: ListMusicScannerReviewsForRematch :many
--- Manual matcher-upgrade replay: reuse the retained local analysis artifact,
--- bypassing inventory/analyze and enqueueing only the normal search stage.
+-- name: ListScannerReviewsForRematch :many
+-- Matcher-upgrade replay for any scanner-backed library: reuse the retained
+-- local analysis artifact, bypassing inventory/analyze and enqueueing only
+-- the normal search stage.
 SELECT
     entity.id AS scanner_entity_id,
     entity.library_id,
@@ -155,7 +156,7 @@ JOIN LATERAL (
     LIMIT 1
 ) artifact ON true
 WHERE entity.library_id = sqlc.arg(library_id)
-  AND entity.media_type = 'music'
+  AND entity.media_type = sqlc.arg(media_type)
   AND entity.status = 'needs_review'
 ORDER BY entity.id
 LIMIT sqlc.arg(row_limit);

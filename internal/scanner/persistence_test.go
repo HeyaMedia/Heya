@@ -367,7 +367,11 @@ func TestMusicReviewRematchReusesRetainedAnalysisArtifact(t *testing.T) {
 	require.Len(t, searchRefs, 1)
 	require.Equal(t, "needs_review", searchRefs[0].Entity.Status)
 
-	rows, err := q.ListMusicScannerReviewsForRematch(ctx, sqlc.ListMusicScannerReviewsForRematchParams{LibraryID: lib.ID, RowLimit: 10})
+	rows, err := q.ListScannerReviewsForRematch(ctx, sqlc.ListScannerReviewsForRematchParams{
+		LibraryID: lib.ID,
+		MediaType: sqlc.MediaTypeMusic,
+		RowLimit:  10,
+	})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, searchRefs[0].Entity.ID, rows[0].ScannerEntityID)

@@ -14,6 +14,7 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/transcoder"
+	"github.com/rs/zerolog/log"
 )
 
 // registerMediaRoutes covers the broad /api/media + discovery surface:
@@ -145,7 +146,8 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[deletedCountBody], error) {
 			count, err := app.CleanupMissingMedia(ctx)
 			if err != nil {
-				return nil, huma.Error500InternalServerError("failed to find missing items")
+				log.Error().Err(err).Msg("cleanup missing media failed")
+				return nil, huma.Error500InternalServerError("failed to clean up missing items")
 			}
 			return &JSONOutput[deletedCountBody]{Body: deletedCountBody{Deleted: count}}, nil
 		})

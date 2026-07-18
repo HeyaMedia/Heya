@@ -174,6 +174,48 @@ func TestSearchBookPlansSelectsAndRejects(t *testing.T) {
 	}
 }
 
+func TestSearchBookPlansUsesAuthorEvidenceToDisambiguateExactTitles(t *testing.T) {
+	provider := &fakeBookSearchProvider{results: map[string][]metadata.SearchResult{
+		"Artemis|Andy Weir||audiobook": {
+			{
+				ProviderID:     "heya:book:wrong-artemis",
+				ProviderName:   "heya",
+				Title:          "Artemis",
+				Confidence:     0.80,
+				RequiresReview: true,
+				Evidence: []metadata.SearchEvidence{
+					{Field: "title", Outcome: "exact", Detail: "Artemis"},
+					{Field: "authors", Outcome: "0_of_1", Detail: "Julian Stockwin"},
+				},
+			},
+			{
+				ProviderID:     "heya:book:andy-weir-artemis",
+				ProviderName:   "heya",
+				Title:          "Artemis",
+				Confidence:     0.75,
+				RequiresReview: false,
+				Evidence: []metadata.SearchEvidence{
+					{Field: "title", Outcome: "exact", Detail: "Artemis"},
+					{Field: "authors", Outcome: "1_of_1", Detail: "Andy Weir"},
+				},
+			},
+		},
+	}}
+	plan := BookPlan{
+		Key:   bookIdentityKey("Andy Weir", "Artemis", "", "audiobook"),
+		Title: "Artemis", Author: "Andy Weir", Format: "audiobook", Confidence: 0.72,
+	}
+
+	search, err := SearchBookPlans(context.Background(), []BookPlan{plan}, provider, &captureEmitter{}, 0)
+	require.NoError(t, err)
+	require.Len(t, search, 1)
+	require.True(t, search[0].Accepted)
+	require.Equal(t, "heya:book:andy-weir-artemis", search[0].ProviderID)
+	require.Equal(t, "Andy Weir", search[0].Author)
+	require.Equal(t, "Andy Weir", search[0].Candidates[0].Author)
+	require.Greater(t, search[0].Candidates[0].Confidence, search[0].Candidates[1].Confidence)
+}
+
 func TestBookDatabaseFormatKeepsAudiobooksLogical(t *testing.T) {
 	if got := bookDatabaseFormat(BookMaterializePreview{Format: "audiobook", FileFormat: "mp3"}); got != "audiobook" {
 		t.Fatalf("audiobook database format: got %q, want audiobook", got)

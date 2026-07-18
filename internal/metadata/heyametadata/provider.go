@@ -593,9 +593,11 @@ func discoveryAutoMatchAllowed(recommendation, kind string, query metadata.Searc
 	case "likely_match":
 		// V2 explicitly requires multiple structured corroborating hints before
 		// a likely match may be automatic. The free-text query is not a hint.
-		// Audiobooks remain manual until audiobook-specific corroboration exists.
+		// Audiobooks have no Audible identity spine yet, but an exact title plus
+		// a complete author match is still independent canonical-work evidence.
+		// Keep every weaker/partial audiobook result review-only.
 		if strings.EqualFold(query.Format, "audiobook") {
-			return false
+			return discoveryEvidenceIsExact(evidence, "title") && discoveryEvidenceHasCompleteAuthors(evidence)
 		}
 		if discoveryHintCount(query) >= 2 {
 			return true
@@ -623,6 +625,16 @@ func discoveryEvidenceIsExact(evidence []metadata.SearchEvidence, field string) 
 	for _, item := range evidence {
 		if strings.EqualFold(item.Field, field) &&
 			(strings.EqualFold(item.Outcome, "exact") || strings.EqualFold(item.Outcome, "exact_alias")) {
+			return true
+		}
+	}
+	return false
+}
+
+func discoveryEvidenceHasCompleteAuthors(evidence []metadata.SearchEvidence) bool {
+	for _, item := range evidence {
+		if (strings.EqualFold(item.Field, "author") || strings.EqualFold(item.Field, "authors")) &&
+			(strings.EqualFold(item.Outcome, "exact") || strings.EqualFold(item.Outcome, "exact_alias") || strings.EqualFold(item.Outcome, "1_of_1")) {
 			return true
 		}
 	}

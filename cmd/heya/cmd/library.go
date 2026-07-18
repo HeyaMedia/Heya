@@ -221,10 +221,11 @@ var libraryRemoveCmd = &cobra.Command{
 	},
 }
 
-var libraryRematchMusicReviewsCmd = &cobra.Command{
-	Use:   "rematch-music-reviews",
-	Short: "Replay retained music review rows through the current matcher",
-	Long: "Enqueues only the normal metadata-search stage for music entities currently in Needs Review. " +
+var libraryRematchReviewsCmd = &cobra.Command{
+	Use:     "rematch-reviews",
+	Aliases: []string{"rematch-music-reviews"},
+	Short:   "Replay retained review rows through the current matcher",
+	Long: "Enqueues only the normal metadata-search stage for entities currently in Needs Review. " +
 		"It reuses retained local analysis artifacts, so it does not walk or re-analyze the library.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id, _ := cmd.Flags().GetInt64("id")
@@ -241,11 +242,14 @@ var libraryRematchMusicReviewsCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
-			if lib.MediaType != sqlc.MediaTypeMusic {
-				return fmt.Errorf("library %d is %s, not music", id, lib.MediaType)
+			switch lib.MediaType {
+			case sqlc.MediaTypeMovie, sqlc.MediaTypeTv, sqlc.MediaTypeAnime, sqlc.MediaTypeMusic, sqlc.MediaTypeBook:
+			default:
+				return fmt.Errorf("library %d has unsupported scanner media type %s", id, lib.MediaType)
 			}
-			rows, err := q.ListMusicScannerReviewsForRematch(ctx, sqlc.ListMusicScannerReviewsForRematchParams{
+			rows, err := q.ListScannerReviewsForRematch(ctx, sqlc.ListScannerReviewsForRematchParams{
 				LibraryID: id,
+				MediaType: lib.MediaType,
 				RowLimit:  limit,
 			})
 			if err != nil {
@@ -255,7 +259,7 @@ var libraryRematchMusicReviewsCmd = &cobra.Command{
 			for _, row := range rows {
 				if err := worker.EnqueueSearchLibraryMetadata(ctx, app.RiverClient(), app.DBPool(), worker.SearchLibraryMetadataArgs{
 					LibraryID:          row.LibraryID,
-					MediaType:          sqlc.MediaTypeMusic,
+					MediaType:          lib.MediaType,
 					ScopePaths:         row.ScopePaths,
 					ScannerEntityID:    row.ScannerEntityID,
 					AnalysisArtifactID: row.AnalysisArtifactID,
@@ -265,7 +269,7 @@ var libraryRematchMusicReviewsCmd = &cobra.Command{
 				}
 				enqueued++
 			}
-			ui.Success("Enqueued %d music review rematches for %s", enqueued, lib.Name)
+			ui.Success("Enqueued %d review rematches for %s", enqueued, lib.Name)
 			return nil
 		})
 	},
@@ -493,8 +497,8 @@ func init() {
 	libraryScanCmd.Flags().Bool("search", false, "Search HeyaMetadata for candidate matches without fetching metadata")
 
 	libraryRemoveCmd.Flags().Int64("id", 0, "Library ID to remove")
-	libraryRematchMusicReviewsCmd.Flags().Int64("id", 0, "Music library ID")
-	libraryRematchMusicReviewsCmd.Flags().Int32("limit", 10000, "Maximum review rows to enqueue")
+	libraryRematchReviewsCmd.Flags().Int64("id", 0, "Library ID")
+	libraryRematchReviewsCmd.Flags().Int32("limit", 10000, "Maximum review rows to enqueue")
 
 	libraryFilesCmd.Flags().Int64("id", 0, "Library ID")
 	libraryFilesCmd.Flags().String("media", "", "Filter by media type")
@@ -513,7 +517,7 @@ func init() {
 	libraryCmd.AddCommand(libraryListCmd)
 	libraryCmd.AddCommand(libraryScanCmd)
 	libraryCmd.AddCommand(libraryRemoveCmd)
-	libraryCmd.AddCommand(libraryRematchMusicReviewsCmd)
+	libraryCmd.AddCommand(libraryRematchReviewsCmd)
 	libraryCmd.AddCommand(libraryFilesCmd)
 	libraryCmd.AddCommand(libraryStatsCmd)
 	libraryCmd.AddCommand(libraryWatchCmd)

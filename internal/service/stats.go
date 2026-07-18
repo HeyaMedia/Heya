@@ -91,21 +91,22 @@ func (a *App) missingCountCached(ctx context.Context) int {
 		return a.missingCount
 	}
 
-	// Missing = user-facing units with no file left on disk. For music the
-	// media_item is the artist, which stays present while it has *any* live
-	// file — so missing albums (every track's file gone) and orphan tracks
-	// (gone, but their album still has live tracks) must be counted too, or
-	// the count reads 0 and the cleanup button greys out. See
-	// CleanupMissingMedia for the matching deletes.
+	// Missing = user-facing units which had a local file and now have none.
+	// Metadata-only catalog rows are not missing. For music the media_item is
+	// the artist, which stays present while it has *any* live file — so missing
+	// albums (every track's file gone) and orphan tracks (gone, but their album
+	// still has live tracks) must be counted too. See CleanupMissingMedia for
+	// the matching deletes.
 	//
-	// The music buckets drive from the ~dozens of soft-deleted rows (via the
-	// idx_library_files_deleted partial index) instead of joining all of
-	// library_files: track_files.library_file_id is NOT NULL + FK CASCADE, so
-	// "file is live" ≡ "file is not in the soft-deleted set". The old
-	// join-everything shape wasn't just slow (~2.3s) — under default
-	// parallelism its hash join overflowed the k8s pod's /dev/shm and the
-	// query ERRORED, silently zeroing the count. NOT EXISTS (not NOT IN):
-	// a NULL in the anti-join side would silently zero a bucket again.
+	// Music has two valid file-link models: tracks.library_file_id (legacy)
+	// and track_files (multi-file). Both must participate or a large upgraded
+	// library appears to have tens of thousands of missing tracks. Drive the
+	// candidates from the small soft-deleted set, then reject any candidate
+	// which still has a live link through either model. The old join-everything
+	// shape wasn't just slow (~2.3s) — under default parallelism its hash join
+	// overflowed the k8s pod's /dev/shm and the query ERRORED, silently zeroing
+	// the count. NOT EXISTS (not NOT IN): a NULL in the anti-join side would
+	// silently zero a bucket again.
 	// Serial execution on purpose: parallel workers allocate DSM segments in
 	// the postgres pod's /dev/shm (64Mi k8s default), and under concurrent
 	// shm pressure even a small resize fails with SQLSTATE 53100 — observed
@@ -124,27 +125,66 @@ func (a *App) missingCountCached(ctx context.Context) int {
 
 	var count int
 	err = tx.QueryRow(ctx, `
-		WITH live_albums AS MATERIALIZED (
-		  SELECT DISTINCT t.album_id
-		  FROM track_files tf JOIN tracks t ON t.id = tf.track_id
-		  WHERE NOT EXISTS (SELECT 1 FROM library_files d
-		                    WHERE d.id = tf.library_file_id AND d.deleted_at IS NOT NULL)
+		WITH deleted_files AS MATERIALIZED (
+		  SELECT id, media_item_id
+		  FROM library_files
+		  WHERE deleted_at IS NOT NULL
 		),
-		live_tracks AS MATERIALIZED (
-		  SELECT DISTINCT tf.track_id
+		candidate_tracks AS MATERIALIZED (
+		  SELECT t.id AS track_id, t.album_id
+		  FROM tracks t JOIN deleted_files d ON d.id = t.library_file_id
+		  UNION
+		  SELECT tf.track_id, t.album_id
 		  FROM track_files tf
-		  WHERE NOT EXISTS (SELECT 1 FROM library_files d
-		                    WHERE d.id = tf.library_file_id AND d.deleted_at IS NOT NULL)
+		  JOIN deleted_files d ON d.id = tf.library_file_id
+		  JOIN tracks t ON t.id = tf.track_id
+		),
+		missing_tracks AS MATERIALIZED (
+		  SELECT candidate.track_id, candidate.album_id
+		  FROM candidate_tracks candidate
+		  WHERE NOT EXISTS (
+		          SELECT 1
+		          FROM tracks direct
+		          JOIN library_files lf ON lf.id = direct.library_file_id
+		          WHERE direct.id = candidate.track_id AND lf.deleted_at IS NULL
+		        )
+		    AND NOT EXISTS (
+		          SELECT 1
+		          FROM track_files tf
+		          JOIN library_files lf ON lf.id = tf.library_file_id
+		          WHERE tf.track_id = candidate.track_id AND lf.deleted_at IS NULL
+		        )
+		),
+		live_albums AS MATERIALIZED (
+		  SELECT DISTINCT t.album_id
+		  FROM tracks t
+		  JOIN library_files lf ON lf.id = t.library_file_id
+		  WHERE lf.deleted_at IS NULL
+		  UNION
+		  SELECT DISTINCT t.album_id
+		  FROM track_files tf
+		  JOIN tracks t ON t.id = tf.track_id
+		  JOIN library_files lf ON lf.id = tf.library_file_id
+		  WHERE lf.deleted_at IS NULL
 		)
 		SELECT
-		  (SELECT count(*) FROM media_item_cards mi WHERE NOT EXISTS (
-		      SELECT 1 FROM library_files lf
-		      WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL))
-		+ (SELECT count(*) FROM albums a
-		   WHERE NOT EXISTS (SELECT 1 FROM live_albums la WHERE la.album_id = a.id))
-		+ (SELECT count(*) FROM tracks t
-		   WHERE NOT EXISTS (SELECT 1 FROM live_tracks lt WHERE lt.track_id = t.id)
-		     AND EXISTS (SELECT 1 FROM live_albums la WHERE la.album_id = t.album_id))
+		  (SELECT count(DISTINCT d.media_item_id)
+		   FROM deleted_files d
+		   WHERE d.media_item_id IS NOT NULL
+		     AND NOT EXISTS (
+		       SELECT 1 FROM library_files live
+		       WHERE live.media_item_id = d.media_item_id AND live.deleted_at IS NULL
+		     ))
+		+ (SELECT count(DISTINCT missing.album_id)
+		   FROM missing_tracks missing
+		   WHERE NOT EXISTS (
+		     SELECT 1 FROM live_albums live WHERE live.album_id = missing.album_id
+		   ))
+		+ (SELECT count(*)
+		   FROM missing_tracks missing
+		   WHERE EXISTS (
+		     SELECT 1 FROM live_albums live WHERE live.album_id = missing.album_id
+		   ))
 	`).Scan(&count)
 	if err != nil {
 		log.Warn().Err(err).Msg("dashboard missing_count query failed")
@@ -157,18 +197,18 @@ func (a *App) missingCountCached(ctx context.Context) int {
 	return count
 }
 
-// ListMissingMedia returns the user-facing units with no file left on disk:
-// media_items (movies/tv/books, plus fully-gone music artists) and missing
-// albums (every track's file removed but the artist still has other live
-// content). Album rows carry media_type "album" so the FE can key/route them
-// apart from media_items, whose id space overlaps. Orphan tracks inside
-// otherwise-present albums are cleaned but not listed individually.
+// ListMissingMedia returns the user-facing units which previously had a file
+// and now have none: media_items (movies/tv/books, plus fully-gone music
+// artists) and missing albums (every local track file removed but the artist
+// still has other live content). Metadata-only catalog rows are excluded.
+// Album rows carry media_type "album" so the FE can key/route them apart from
+// media_items, whose id space overlaps. Orphan tracks inside otherwise-present
+// albums are cleaned but not listed individually.
 func (a *App) ListMissingMedia(ctx context.Context) ([]MissingMediaItem, error) {
-	// The albums arm drives from the soft-deleted set like missingCountCached
-	// (same live_albums shape — keep the two consistent so the dashboard count
-	// and this list never diverge). Serial execution for the same reason as
-	// missingCountCached: parallel DSM segments intermittently fail against
-	// the pod's tiny /dev/shm.
+	// Keep the candidate/live-link CTEs aligned with missingCountCached and
+	// CleanupMissingMedia so the dashboard, list, and delete always agree.
+	// Serial execution for the same reason as missingCountCached: parallel DSM
+	// segments intermittently fail against the pod's tiny /dev/shm.
 	tx, err := a.db.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -179,24 +219,68 @@ func (a *App) ListMissingMedia(ctx context.Context) ([]MissingMediaItem, error) 
 	}
 
 	rows, err := tx.Query(ctx, `
-		WITH live_albums AS MATERIALIZED (
+		WITH deleted_files AS MATERIALIZED (
+		  SELECT id, media_item_id
+		  FROM library_files
+		  WHERE deleted_at IS NOT NULL
+		),
+		candidate_tracks AS MATERIALIZED (
+		  SELECT t.id AS track_id, t.album_id
+		  FROM tracks t JOIN deleted_files d ON d.id = t.library_file_id
+		  UNION
+		  SELECT tf.track_id, t.album_id
+		  FROM track_files tf
+		  JOIN deleted_files d ON d.id = tf.library_file_id
+		  JOIN tracks t ON t.id = tf.track_id
+		),
+		missing_tracks AS MATERIALIZED (
+		  SELECT candidate.track_id, candidate.album_id
+		  FROM candidate_tracks candidate
+		  WHERE NOT EXISTS (
+		          SELECT 1
+		          FROM tracks direct
+		          JOIN library_files lf ON lf.id = direct.library_file_id
+		          WHERE direct.id = candidate.track_id AND lf.deleted_at IS NULL
+		        )
+		    AND NOT EXISTS (
+		          SELECT 1
+		          FROM track_files tf
+		          JOIN library_files lf ON lf.id = tf.library_file_id
+		          WHERE tf.track_id = candidate.track_id AND lf.deleted_at IS NULL
+		        )
+		),
+		live_albums AS MATERIALIZED (
 		  SELECT DISTINCT t.album_id
-		  FROM track_files tf JOIN tracks t ON t.id = tf.track_id
-		  WHERE NOT EXISTS (SELECT 1 FROM library_files d
-		                    WHERE d.id = tf.library_file_id AND d.deleted_at IS NOT NULL)
+		  FROM tracks t
+		  JOIN library_files lf ON lf.id = t.library_file_id
+		  WHERE lf.deleted_at IS NULL
+		  UNION
+		  SELECT DISTINCT t.album_id
+		  FROM track_files tf
+		  JOIN tracks t ON t.id = tf.track_id
+		  JOIN library_files lf ON lf.id = tf.library_file_id
+		  WHERE lf.deleted_at IS NULL
+		),
+		missing_albums AS MATERIALIZED (
+		  SELECT DISTINCT missing.album_id
+		  FROM missing_tracks missing
+		  WHERE NOT EXISTS (
+		    SELECT 1 FROM live_albums live WHERE live.album_id = missing.album_id
+		  )
 		)
 		SELECT mi.id, mi.title, mi.year, mi.media_type::text, mi.poster_path, mi.slug
 		FROM media_item_cards mi
-		WHERE NOT EXISTS (
+		WHERE EXISTS (
+			SELECT 1 FROM deleted_files deleted WHERE deleted.media_item_id = mi.id
+		)
+		AND NOT EXISTS (
 			SELECT 1 FROM library_files lf
 			WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL
 		)
 		UNION ALL
 		SELECT a.id, a.title, a.year, 'album', '', a.slug
 		FROM albums a
-		WHERE NOT EXISTS (
-			SELECT 1 FROM live_albums la WHERE la.album_id = a.id
-		)
+		JOIN missing_albums missing ON missing.album_id = a.id
 		ORDER BY 2
 		LIMIT 50
 	`)
@@ -220,11 +304,11 @@ func (a *App) ListMissingMedia(ctx context.Context) ([]MissingMediaItem, error) 
 // CleanupMissingMedia removes everything with no file left on disk, in one
 // transaction, and returns the total rows removed:
 //
-//  1. music tracks whose every file is gone (no live library_file via
-//     track_files),
-//  2. albums left with no tracks as a result, and
-//  3. media_items (movies/tv/books and fully-gone music artists) with no live
-//     library_file.
+//  1. file-backed music tracks whose every file is gone across both the
+//     legacy direct link and the multi-file table,
+//  2. affected albums left with no tracks as a result, and
+//  3. previously file-backed media_items (movies/tv/books and fully-gone
+//     music artists) with no live library_file.
 //
 // The track/album passes are what the old media_item-only version missed:
 // library_files.media_item_id points at the *artist* media_item, so a
@@ -246,36 +330,95 @@ func (a *App) CleanupMissingMedia(ctx context.Context) (int, error) {
 
 	total := 0
 
-	// 1. Tracks whose every file is gone. Cascades track_files, facets,
-	//    play_events, playlist entries, and ratings off the track.
-	ct, err := tx.Exec(ctx, `
-		DELETE FROM tracks t
-		WHERE NOT EXISTS (
-			SELECT 1 FROM track_files tf
-			JOIN library_files lf ON lf.id = tf.library_file_id
-			WHERE tf.track_id = t.id AND lf.deleted_at IS NULL
-		)`)
+	// 1. Tracks which had a local file and now have no live link. Starting
+	//    from deleted files excludes metadata-only catalog rows. Deleting a
+	//    track cascades track_files, facets, play events, playlist entries,
+	//    and ratings. Retain the affected album IDs so step 2 never sweeps an
+	//    unrelated metadata-only empty album.
+	trackRows, err := tx.Query(ctx, `
+		WITH deleted_files AS MATERIALIZED (
+		  SELECT id FROM library_files WHERE deleted_at IS NOT NULL
+		),
+		candidate_tracks AS MATERIALIZED (
+		  SELECT t.id AS track_id, t.album_id
+		  FROM tracks t JOIN deleted_files d ON d.id = t.library_file_id
+		  UNION
+		  SELECT tf.track_id, t.album_id
+		  FROM track_files tf
+		  JOIN deleted_files d ON d.id = tf.library_file_id
+		  JOIN tracks t ON t.id = tf.track_id
+		),
+		missing_tracks AS MATERIALIZED (
+		  SELECT candidate.track_id, candidate.album_id
+		  FROM candidate_tracks candidate
+		  WHERE NOT EXISTS (
+		          SELECT 1
+		          FROM tracks direct
+		          JOIN library_files lf ON lf.id = direct.library_file_id
+		          WHERE direct.id = candidate.track_id AND lf.deleted_at IS NULL
+		        )
+		    AND NOT EXISTS (
+		          SELECT 1
+		          FROM track_files tf
+		          JOIN library_files lf ON lf.id = tf.library_file_id
+		          WHERE tf.track_id = candidate.track_id AND lf.deleted_at IS NULL
+		        )
+		)
+		DELETE FROM tracks target
+		USING missing_tracks missing
+		WHERE target.id = missing.track_id
+		RETURNING target.album_id
+	`)
 	if err != nil {
 		return 0, err
 	}
-	total += int(ct.RowsAffected())
-
-	// 2. Albums left with no tracks. Cascades album facets and ratings.
-	ca, err := tx.Exec(ctx, `
-		DELETE FROM albums a
-		WHERE NOT EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = a.id)`)
-	if err != nil {
+	affectedAlbumSet := make(map[int64]struct{})
+	deletedTracks := 0
+	for trackRows.Next() {
+		var albumID int64
+		if scanErr := trackRows.Scan(&albumID); scanErr != nil {
+			trackRows.Close()
+			return 0, scanErr
+		}
+		affectedAlbumSet[albumID] = struct{}{}
+		deletedTracks++
+	}
+	trackRows.Close()
+	if err := trackRows.Err(); err != nil {
 		return 0, err
 	}
-	total += int(ca.RowsAffected())
+	total += deletedTracks
 
-	// 3. media_items with no live library_file. library_files.media_item_id
-	//    is ON DELETE SET NULL, so the soft-deleted file rows are removed
-	//    explicitly; the rest of the graph (movies/tv_series/artists/books/
-	//    cast/assets/...) is ON DELETE CASCADE from media_items.
+	// 2. Only albums touched above may be removed. This is the guard that
+	//    preserves metadata-only catalog albums which never represented a
+	//    local file.
+	if len(affectedAlbumSet) > 0 {
+		affectedAlbumIDs := make([]int64, 0, len(affectedAlbumSet))
+		for albumID := range affectedAlbumSet {
+			affectedAlbumIDs = append(affectedAlbumIDs, albumID)
+		}
+		ca, err := tx.Exec(ctx, `
+			DELETE FROM albums a
+			WHERE a.id = ANY($1::bigint[])
+			  AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = a.id)`, affectedAlbumIDs)
+		if err != nil {
+			return 0, err
+		}
+		total += int(ca.RowsAffected())
+	}
+
+	// 3. Previously file-backed media_items with no live library_file.
+	//    library_files.media_item_id is ON DELETE SET NULL, so the soft-deleted
+	//    file rows are removed explicitly; the rest of the graph
+	//    (movies/tv_series/artists/books/cast/assets/...) is ON DELETE CASCADE
+	//    from media_items. The EXISTS clause preserves metadata-only rows.
 	rows, err := tx.Query(ctx, `
 		SELECT mi.id FROM media_item_cards mi
-		WHERE NOT EXISTS (
+		WHERE EXISTS (
+			SELECT 1 FROM library_files deleted
+			WHERE deleted.media_item_id = mi.id AND deleted.deleted_at IS NOT NULL
+		)
+		AND NOT EXISTS (
 			SELECT 1 FROM library_files lf
 			WHERE lf.media_item_id = mi.id AND lf.deleted_at IS NULL
 		)

@@ -50,9 +50,11 @@ hints, but the first cutover has no audiobook-specific/Audible identity spine.
 Consequently:
 
 - `format=audiobook` is sent as a hint;
-- a `likely_match` audiobook remains manual even when ordinary title/author
-  similarity is high;
-- only V2 `strong_match` may auto-select;
+- a `likely_match` audiobook may auto-select only when V2 reports both an
+  exact title and a complete author match (`1_of_1` or exact equivalent);
+- fuzzy titles, partial/missing authors, and multiple-author uncertainty remain
+  manual even when the aggregate confidence is high;
+- V2 `strong_match` remains directly auto-selectable;
 - ambiguous candidates are persisted with recommendation and evidence for
   review.
 

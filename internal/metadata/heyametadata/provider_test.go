@@ -91,7 +91,20 @@ func TestMapDiscoveryPreservesRecommendationEvidenceAndReviewGate(t *testing.T) 
 		t.Fatal(err)
 	}
 	if !results[0].RequiresReview {
-		t.Fatal("audiobook-specific likely match must remain manual")
+		t.Fatal("audiobook likely match without complete author evidence was auto-selectable")
+	}
+	audiobookEvidence := []gen.Evidence{
+		{Field: "title", Outcome: "exact", Weight: .45},
+		{Field: "authors", Outcome: "1_of_1", Weight: .18, Detail: strPointer("Frank Herbert")},
+	}
+	candidates[0].Evidence = &audiobookEvidence
+	resource.Result.Candidates = &candidates
+	results, err = mapDiscovery(resource, metadata.SearchQuery{Title: "Dune", Author: "Frank Herbert", Format: "audiobook"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if results[0].RequiresReview {
+		t.Fatal("audiobook likely match with exact title and complete author evidence remained review-only")
 	}
 }
 

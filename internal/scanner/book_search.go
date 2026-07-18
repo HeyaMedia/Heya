@@ -141,7 +141,7 @@ func SearchBookPlans(ctx context.Context, plans []BookPlan, provider BookSearchP
 				ProviderID:     candidate.ProviderID,
 				Provider:       candidate.ProviderName,
 				Title:          candidate.Title,
-				Author:         candidate.Description,
+				Author:         bookCandidateAuthor(candidate),
 				Year:           candidate.Year,
 				Description:    candidate.Description,
 				PosterURL:      candidate.PosterURL,
@@ -179,7 +179,7 @@ func SearchBookPlans(ctx context.Context, plans []BookPlan, provider BookSearchP
 			search.ProviderID = top.ProviderID
 			search.Provider = top.ProviderName
 			search.Title = top.Title
-			search.Author = firstNonEmpty(top.Description, plan.Author)
+			search.Author = firstNonEmpty(bookCandidateAuthor(top), plan.Author)
 			search.Year = top.Year
 			search.Confidence = top.Confidence
 			search.ExternalIDs = top.ExternalIDs
@@ -353,8 +353,9 @@ func scoreBookSearchCandidate(plan BookPlan, candidate metadata.SearchResult) fl
 			score -= 0.25
 		}
 	}
-	if plan.Author != "" && candidate.Description != "" {
-		if strings.Contains(normalizeSearchTitle(candidate.Description), normalizeSearchTitle(plan.Author)) {
+	candidateAuthor := bookCandidateAuthor(candidate)
+	if plan.Author != "" && candidateAuthor != "" {
+		if strings.Contains(normalizeSearchTitle(candidateAuthor), normalizeSearchTitle(plan.Author)) {
 			score += 0.03
 		} else {
 			score -= 0.25
@@ -370,6 +371,15 @@ func scoreBookSearchCandidate(plan BookPlan, candidate metadata.SearchResult) fl
 		score = 0
 	}
 	return score
+}
+
+func bookCandidateAuthor(candidate metadata.SearchResult) string {
+	for _, evidence := range candidate.Evidence {
+		if (strings.EqualFold(evidence.Field, "author") || strings.EqualFold(evidence.Field, "authors")) && strings.TrimSpace(evidence.Detail) != "" {
+			return strings.TrimSpace(evidence.Detail)
+		}
+	}
+	return strings.TrimSpace(candidate.Description)
 }
 
 func bookTitleAcceptable(localTitle, remoteTitle string) bool {
