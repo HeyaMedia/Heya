@@ -190,9 +190,10 @@ None are optional.
       that read-time map. (This is the verified-correct grain; minting local
       episode rows collides with the non-idempotent enrich writer and has no
       column to persist the file link.)
-    - **Music:** the full `artist→album→track→track_file` chain (it has real
-      per-file FKs — `tracks.library_file_id`, `track_files`, `00010`). See the
-      track-collapse guards below.
+    - **Music:** the full `artist→album→track→track_file` chain. Physical
+      ownership is exclusively `track_files.library_file_id` (migration 00057
+      removed the former direct edge from `tracks`). See the track-collapse
+      guards below.
 - **Phase 2 — Enrichment + reconciliation, with edits-win enforced at the
   writers.** Queue an upstream fetch per local entity. Confident remote hit →
   upgrade-in-place via the Phase-0 upserts (fill `local`/empty fields, add remote

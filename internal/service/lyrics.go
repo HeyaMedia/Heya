@@ -53,14 +53,6 @@ func (a *App) localTrackLyrics(ctx context.Context, trackID int64) ([]byte, erro
 		}
 	}
 
-	// Retain the pre-track_files compatibility path while old libraries are
-	// still being rescanned into the normalized file table.
-	track, err := sqlc.New(a.db).GetTrackByID(ctx, trackID)
-	if err == nil && strings.TrimSpace(track.LyricsPath) != "" {
-		if body, readErr := readTrackLyricsFile(track.LyricsPath); readErr == nil {
-			return body, nil
-		}
-	}
 	return nil, ErrTrackLyricsUnavailable
 }
 

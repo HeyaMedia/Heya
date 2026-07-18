@@ -94,8 +94,7 @@ FROM (
            (row_number() OVER (ORDER BY t.disc_number, t.track_number))::int AS natural_rank
     FROM tracks t
     WHERE t.album_id = sqlc.arg(album_id)
-      AND (EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
-           OR EXISTS (SELECT 1 FROM library_files lf2 WHERE lf2.id = t.library_file_id AND lf2.deleted_at IS NULL))
+      AND EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
     ORDER BY CASE WHEN sqlc.arg(shuffle)::boolean THEN random() END NULLS LAST, 2
     LIMIT sqlc.arg(max_items)
 ) x;
@@ -112,8 +111,7 @@ FROM (
     FROM tracks t
     JOIN albums al ON al.id = t.album_id
     WHERE al.artist_id = sqlc.arg(artist_id)
-      AND (EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
-           OR EXISTS (SELECT 1 FROM library_files lf2 WHERE lf2.id = t.library_file_id AND lf2.deleted_at IS NULL))
+      AND EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
     ORDER BY CASE WHEN sqlc.arg(shuffle)::boolean THEN random() END NULLS LAST, 2
     LIMIT sqlc.arg(max_items)
 ) x;
@@ -130,8 +128,7 @@ FROM (
     FROM user_playlist_tracks pt
     JOIN tracks t ON t.id = pt.track_id
     WHERE pt.playlist_id = sqlc.arg(playlist_id)
-      AND (EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
-           OR EXISTS (SELECT 1 FROM library_files lf2 WHERE lf2.id = t.library_file_id AND lf2.deleted_at IS NULL))
+      AND EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
     ORDER BY CASE WHEN sqlc.arg(shuffle)::boolean THEN random() END NULLS LAST, 2
     LIMIT sqlc.arg(max_items)
 ) x;
@@ -149,8 +146,7 @@ FROM (
     FROM tracks t
     JOIN albums al ON al.id = t.album_id
     WHERE sqlc.arg(genre)::text ILIKE ANY(al.genres)
-      AND (EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
-           OR EXISTS (SELECT 1 FROM library_files lf2 WHERE lf2.id = t.library_file_id AND lf2.deleted_at IS NULL))
+      AND EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
     ORDER BY CASE WHEN sqlc.arg(shuffle)::boolean THEN random() END NULLS LAST, 2
     LIMIT sqlc.arg(max_items)
 ) x;
@@ -167,8 +163,7 @@ FROM (
     SELECT t.id, u.ordinality::int AS natural_rank
     FROM unnest(sqlc.arg(track_ids)::bigint[]) WITH ORDINALITY AS u(track_id, ordinality)
     JOIN tracks t ON t.id = u.track_id
-    WHERE (EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
-           OR EXISTS (SELECT 1 FROM library_files lf2 WHERE lf2.id = t.library_file_id AND lf2.deleted_at IS NULL))
+    WHERE EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
     ORDER BY CASE WHEN sqlc.arg(shuffle)::boolean THEN random() END NULLS LAST, 2
     LIMIT sqlc.arg(max_items)
 ) x;
@@ -184,8 +179,7 @@ FROM (
     SELECT t.id,
            (row_number() OVER (ORDER BY t.id))::int AS natural_rank
     FROM tracks t
-    WHERE (EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
-           OR EXISTS (SELECT 1 FROM library_files lf2 WHERE lf2.id = t.library_file_id AND lf2.deleted_at IS NULL))
+    WHERE EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
     ORDER BY CASE WHEN sqlc.arg(shuffle)::boolean THEN random() END NULLS LAST, 2
     LIMIT sqlc.arg(max_items)
 ) x;
@@ -201,8 +195,7 @@ SELECT sqlc.arg(queue_id),
        sqlc.arg(base_src)::int + u.ordinality::int
 FROM unnest(sqlc.arg(track_ids)::bigint[]) WITH ORDINALITY AS u(track_id, ordinality)
 JOIN tracks t ON t.id = u.track_id
-WHERE (EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
-           OR EXISTS (SELECT 1 FROM library_files lf2 WHERE lf2.id = t.library_file_id AND lf2.deleted_at IS NULL));
+WHERE EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL);
 
 -- Rewrite the tail after after_ord into a fresh range above max(ord):
 -- shuffle=true orders randomly, shuffle=false restores the source's

@@ -98,11 +98,9 @@ func (a *App) missingCountCached(ctx context.Context) int {
 	// still has live tracks) must be counted too. See CleanupMissingMedia for
 	// the matching deletes.
 	//
-	// Music has two valid file-link models: tracks.library_file_id (legacy)
-	// and track_files (multi-file). Both must participate or a large upgraded
-	// library appears to have tens of thousands of missing tracks. Drive the
-	// candidates from the small soft-deleted set, then reject any candidate
-	// which still has a live link through either model. The old join-everything
+	// track_files is the sole music ownership edge. Drive candidates from the
+	// small soft-deleted set, then reject any track which still has a live file.
+	// The old join-everything
 	// shape wasn't just slow (~2.3s) — under default parallelism its hash join
 	// overflowed the k8s pod's /dev/shm and the query ERRORED, silently zeroing
 	// the count. NOT EXISTS (not NOT IN): a NULL in the anti-join side would
@@ -131,9 +129,6 @@ func (a *App) missingCountCached(ctx context.Context) int {
 		  WHERE deleted_at IS NOT NULL
 		),
 		candidate_tracks AS MATERIALIZED (
-		  SELECT t.id AS track_id, t.album_id
-		  FROM tracks t JOIN deleted_files d ON d.id = t.library_file_id
-		  UNION
 		  SELECT tf.track_id, t.album_id
 		  FROM track_files tf
 		  JOIN deleted_files d ON d.id = tf.library_file_id
@@ -144,23 +139,12 @@ func (a *App) missingCountCached(ctx context.Context) int {
 		  FROM candidate_tracks candidate
 		  WHERE NOT EXISTS (
 		          SELECT 1
-		          FROM tracks direct
-		          JOIN library_files lf ON lf.id = direct.library_file_id
-		          WHERE direct.id = candidate.track_id AND lf.deleted_at IS NULL
-		        )
-		    AND NOT EXISTS (
-		          SELECT 1
 		          FROM track_files tf
 		          JOIN library_files lf ON lf.id = tf.library_file_id
 		          WHERE tf.track_id = candidate.track_id AND lf.deleted_at IS NULL
 		        )
 		),
 		live_albums AS MATERIALIZED (
-		  SELECT DISTINCT t.album_id
-		  FROM tracks t
-		  JOIN library_files lf ON lf.id = t.library_file_id
-		  WHERE lf.deleted_at IS NULL
-		  UNION
 		  SELECT DISTINCT t.album_id
 		  FROM track_files tf
 		  JOIN tracks t ON t.id = tf.track_id
@@ -225,9 +209,6 @@ func (a *App) ListMissingMedia(ctx context.Context) ([]MissingMediaItem, error) 
 		  WHERE deleted_at IS NOT NULL
 		),
 		candidate_tracks AS MATERIALIZED (
-		  SELECT t.id AS track_id, t.album_id
-		  FROM tracks t JOIN deleted_files d ON d.id = t.library_file_id
-		  UNION
 		  SELECT tf.track_id, t.album_id
 		  FROM track_files tf
 		  JOIN deleted_files d ON d.id = tf.library_file_id
@@ -238,23 +219,12 @@ func (a *App) ListMissingMedia(ctx context.Context) ([]MissingMediaItem, error) 
 		  FROM candidate_tracks candidate
 		  WHERE NOT EXISTS (
 		          SELECT 1
-		          FROM tracks direct
-		          JOIN library_files lf ON lf.id = direct.library_file_id
-		          WHERE direct.id = candidate.track_id AND lf.deleted_at IS NULL
-		        )
-		    AND NOT EXISTS (
-		          SELECT 1
 		          FROM track_files tf
 		          JOIN library_files lf ON lf.id = tf.library_file_id
 		          WHERE tf.track_id = candidate.track_id AND lf.deleted_at IS NULL
 		        )
 		),
 		live_albums AS MATERIALIZED (
-		  SELECT DISTINCT t.album_id
-		  FROM tracks t
-		  JOIN library_files lf ON lf.id = t.library_file_id
-		  WHERE lf.deleted_at IS NULL
-		  UNION
 		  SELECT DISTINCT t.album_id
 		  FROM track_files tf
 		  JOIN tracks t ON t.id = tf.track_id
@@ -304,8 +274,7 @@ func (a *App) ListMissingMedia(ctx context.Context) ([]MissingMediaItem, error) 
 // CleanupMissingMedia removes everything with no file left on disk, in one
 // transaction, and returns the total rows removed:
 //
-//  1. file-backed music tracks whose every file is gone across both the
-//     legacy direct link and the multi-file table,
+//  1. file-backed music tracks whose every canonical file is gone,
 //  2. affected albums left with no tracks as a result, and
 //  3. previously file-backed media_items (movies/tv/books and fully-gone
 //     music artists) with no live library_file.
@@ -340,9 +309,6 @@ func (a *App) CleanupMissingMedia(ctx context.Context) (int, error) {
 		  SELECT id FROM library_files WHERE deleted_at IS NOT NULL
 		),
 		candidate_tracks AS MATERIALIZED (
-		  SELECT t.id AS track_id, t.album_id
-		  FROM tracks t JOIN deleted_files d ON d.id = t.library_file_id
-		  UNION
 		  SELECT tf.track_id, t.album_id
 		  FROM track_files tf
 		  JOIN deleted_files d ON d.id = tf.library_file_id
@@ -352,12 +318,6 @@ func (a *App) CleanupMissingMedia(ctx context.Context) (int, error) {
 		  SELECT candidate.track_id, candidate.album_id
 		  FROM candidate_tracks candidate
 		  WHERE NOT EXISTS (
-		          SELECT 1
-		          FROM tracks direct
-		          JOIN library_files lf ON lf.id = direct.library_file_id
-		          WHERE direct.id = candidate.track_id AND lf.deleted_at IS NULL
-		        )
-		    AND NOT EXISTS (
 		          SELECT 1
 		          FROM track_files tf
 		          JOIN library_files lf ON lf.id = tf.library_file_id

@@ -582,7 +582,7 @@ func (q *Queries) SearchPeopleCount(ctx context.Context, query string) (int64, e
 }
 
 const searchTracks = `-- name: SearchTracks :many
-SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.file_path, t.lyrics_path, t.search_vector, t.library_file_id, t.external_ids, t.isrc, t.recording_mbid, t.preview_url, t.explicit, t.artist_credits, t.lyrics_available, t.sort_artist, t.sort_album_year, t.sort_album, t.credits,
+SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.search_vector, t.external_ids, t.isrc, t.recording_mbid, t.preview_url, t.explicit, t.artist_credits, t.lyrics_available, t.sort_artist, t.sort_album_year, t.sort_album, t.credits,
        a.title AS album_title,
        a.slug AS album_slug,
        a.cover_path AS album_cover_path,
@@ -592,7 +592,7 @@ SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.f
        mi.slug AS artist_slug,
        EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL) AS available
 FROM (
-  SELECT tr.id, tr.album_id, tr.disc_number, tr.track_number, tr.title, tr.duration, tr.file_path, tr.lyrics_path, tr.search_vector, tr.library_file_id, tr.external_ids, tr.isrc, tr.recording_mbid, tr.preview_url, tr.explicit, tr.artist_credits, tr.lyrics_available, tr.sort_artist, tr.sort_album_year, tr.sort_album, tr.credits
+  SELECT tr.id, tr.album_id, tr.disc_number, tr.track_number, tr.title, tr.duration, tr.search_vector, tr.external_ids, tr.isrc, tr.recording_mbid, tr.preview_url, tr.explicit, tr.artist_credits, tr.lyrics_available, tr.sort_artist, tr.sort_album_year, tr.sort_album, tr.credits
   FROM tracks tr
   WHERE (
       tr.search_vector @@ websearch_to_tsquery('simple', $1)
@@ -630,10 +630,7 @@ type SearchTracksRow struct {
 	TrackNumber             int32       `json:"track_number"`
 	Title                   string      `json:"title"`
 	Duration                int32       `json:"duration"`
-	FilePath                string      `json:"file_path"`
-	LyricsPath              string      `json:"lyrics_path"`
 	SearchVector            interface{} `json:"search_vector"`
-	LibraryFileID           pgtype.Int8 `json:"library_file_id"`
 	ExternalIds             []byte      `json:"external_ids"`
 	Isrc                    string      `json:"isrc"`
 	RecordingMbid           string      `json:"recording_mbid"`
@@ -680,10 +677,7 @@ func (q *Queries) SearchTracks(ctx context.Context, arg SearchTracksParams) ([]S
 			&i.TrackNumber,
 			&i.Title,
 			&i.Duration,
-			&i.FilePath,
-			&i.LyricsPath,
 			&i.SearchVector,
-			&i.LibraryFileID,
 			&i.ExternalIds,
 			&i.Isrc,
 			&i.RecordingMbid,

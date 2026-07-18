@@ -56,11 +56,10 @@ func (w *SaveImagesWorker) Work(ctx context.Context, job *river.Job[SaveImagesAr
 
 func (w *SaveImagesWorker) saveAlbumCover(ctx context.Context, job *river.Job[SaveImagesArgs]) error {
 	q := sqlc.New(w.DB)
-	raw, err := q.GetAlbumReleaseDir(ctx, job.Args.AlbumID)
+	samplePath, err := q.GetAlbumReleaseDir(ctx, job.Args.AlbumID)
 	if err != nil {
 		return nil
 	}
-	samplePath, _ := raw.(string)
 	if samplePath == "" {
 		return nil // no on-disk files (soft-deleted) — nowhere to export
 	}

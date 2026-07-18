@@ -19608,12 +19608,6 @@
             "format": "int32",
             "type": "integer"
           },
-          "chromaprint_algorithm": {
-            "$ref": "#/components/schemas/Int2"
-          },
-          "chromaprint_duration_secs": {
-            "$ref": "#/components/schemas/Int4"
-          },
           "created_at": {
             "$ref": "#/components/schemas/Timestamptz"
           },
@@ -19623,9 +19617,6 @@
           },
           "fade_start_ms": {
             "$ref": "#/components/schemas/Int4"
-          },
-          "fingerprinted_at": {
-            "$ref": "#/components/schemas/Timestamptz"
           },
           "format": {
             "type": "string"
@@ -19705,10 +19696,7 @@
           "outro_start_ms",
           "fade_start_ms",
           "silence_start_ms",
-          "boundaries_analyzed_at",
-          "chromaprint_algorithm",
-          "chromaprint_duration_secs",
-          "fingerprinted_at"
+          "boundaries_analyzed_at"
         ],
         "type": "object"
       },
@@ -19830,9 +19818,6 @@
             "contentEncoding": "base64",
             "type": "string"
           },
-          "file_path": {
-            "type": "string"
-          },
           "files": {
             "items": {
               "$ref": "#/components/schemas/TrackFile"
@@ -19849,14 +19834,8 @@
           "isrc": {
             "type": "string"
           },
-          "library_file_id": {
-            "$ref": "#/components/schemas/Int8"
-          },
           "lyrics_available": {
             "type": "boolean"
-          },
-          "lyrics_path": {
-            "type": "string"
           },
           "preview_url": {
             "type": "string"
@@ -19890,10 +19869,7 @@
           "track_number",
           "title",
           "duration",
-          "file_path",
-          "lyrics_path",
           "search_vector",
-          "library_file_id",
           "external_ids",
           "isrc",
           "recording_mbid",

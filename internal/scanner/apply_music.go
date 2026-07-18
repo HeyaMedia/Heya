@@ -846,7 +846,7 @@ func applyMusicTrackFile(ctx context.Context, q *sqlc.Queries, libraryID, mediaI
 	if local.Format != "" {
 		format = strings.ToLower(local.Format)
 	}
-	trackFile, err := q.UpsertTrackFile(ctx, sqlc.UpsertTrackFileParams{
+	_, err = q.UpsertTrackFile(ctx, sqlc.UpsertTrackFileParams{
 		TrackID:       trackID,
 		LibraryFileID: fileID,
 		Format:        format,
@@ -856,7 +856,7 @@ func applyMusicTrackFile(ctx context.Context, q *sqlc.Queries, libraryID, mediaI
 	if err != nil {
 		return counts, err
 	}
-	// The upsert resets loudness/chromaprint when the bytes changed; the
+	// The upsert resets loudness when the bytes changed; the
 	// sonic facets are keyed by track and need the same invalidation so the
 	// analysis pump re-measures instead of settling on data computed from
 	// the old audio.
@@ -872,30 +872,7 @@ func applyMusicTrackFile(ctx context.Context, q *sqlc.Queries, libraryID, mediaI
 	} else {
 		counts.trackFilesCreated++
 	}
-	if err := refreshMusicTrackPrimary(ctx, q, trackID, trackFile); err != nil {
-		return counts, err
-	}
 	return counts, nil
-}
-
-func refreshMusicTrackPrimary(ctx context.Context, q *sqlc.Queries, trackID int64, fallback sqlc.TrackFile) error {
-	primary, err := q.GetPrimaryTrackFile(ctx, trackID)
-	if err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		primary = fallback
-	}
-	file, err := q.GetLibraryFileByID(ctx, primary.LibraryFileID)
-	if err != nil {
-		return err
-	}
-	return q.UpdateTrackPrimary(ctx, sqlc.UpdateTrackPrimaryParams{
-		ID:            trackID,
-		FilePath:      file.Path,
-		LibraryFileID: pgInt8(file.ID),
-		LyricsPath:    primary.LyricsPath,
-	})
 }
 
 func musicLibraryFileParseResult(local MusicTrackPlan) []byte {

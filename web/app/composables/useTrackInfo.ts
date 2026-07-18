@@ -7,12 +7,8 @@ import type { RecordingCredit, TrackFile } from '~~/shared/types'
 // pushes a "Track info" item that calls open(id); the dialog then fetches
 // /api/music/tracks/{id} (MusicTrackDetail) for the universal shape.
 //
-// Some fields the dialog wants to show are NOT on MusicTrackDetail today
-// (filesystem path, recording MBID, ISRC, explicit flag). Pages that already
-// hold a richer row — the album detail TrackView embeds the full sqlc.Track,
-// so it carries all of those in its JSON — can `prime()` them keyed by track
-// id, so a bare open(id) from any menu still surfaces the path/MBIDs without a
-// backend change or a bespoke per-page menu.
+// Pages that already hold a rich album row can `prime()` its metadata keyed by
+// track id. MusicTrackDetail remains authoritative for physical file paths.
 export interface TrackInfoPrefetch {
   file_path?: string
   recording_mbid?: string
@@ -47,8 +43,8 @@ export function useTrackInfo() {
     state.value = { ...state.value, open: false }
   }
 
-  // Register richer rows (album page) so the central open(id) can still show
-  // the filesystem path / MBIDs those payloads carry.
+  // Register richer rows (album page) so the central open(id) can reuse their
+  // MBIDs/files while the detail request is in flight.
   function prime(rows: Array<{ id: number } & TrackInfoPrefetch>) {
     for (const r of rows) {
       primed.set(r.id, {

@@ -172,12 +172,18 @@ func (a *App) QueryTaskStats(ctx context.Context) map[string]TaskStats {
 
 	var fpTotal, fpDone int
 	row = a.db.QueryRow(ctx, `
-		SELECT
-			count(*),
-			count(*) FILTER (WHERE tf.fingerprinted_at IS NOT NULL)
-		FROM track_files tf
-		JOIN library_files lf ON lf.id = tf.library_file_id
-		WHERE lf.deleted_at IS NULL
+		WITH files AS (
+			SELECT fp.library_file_id IS NOT NULL
+			       AND fp.source_size = lf.size
+			       AND fp.source_mtime IS NOT DISTINCT FROM lf.mtime AS complete
+			FROM library_files lf
+			JOIN libraries l ON l.id = lf.library_id
+			LEFT JOIN library_file_fingerprints fp ON fp.library_file_id = lf.id
+			WHERE l.media_type = 'music'
+			  AND lf.deleted_at IS NULL
+			  AND lower(lf.path) ~ '\\.(flac|mp3|m4a|aac|ogg|opus|wav|wma|ape|wv|alac|aiff|aif)$'
+		)
+		SELECT count(*), count(*) FILTER (WHERE complete) FROM files
 	`)
 	if row.Scan(&fpTotal, &fpDone) == nil {
 		stats["scan_music_fingerprint"] = TaskStats{
@@ -614,17 +620,24 @@ func (a *App) QueryLoudnessItems(ctx context.Context, status string, limit, offs
 	}, nil
 }
 
-// QueryFingerprintItems returns track_files paginated by chromaprint state.
-// "complete" rows have fingerprinted_at stamped; "pending" rows are still
-// waiting on the fingerprint queue.
+// QueryFingerprintItems returns physical music files paginated by canonical
+// fingerprint state. Source size/mtime are part of completion so a file
+// overwritten in place becomes pending again immediately.
 func (a *App) QueryFingerprintItems(ctx context.Context, status string, limit, offset int) (*TaskItemsResult, error) {
 	var total, complete int
 	err := a.db.QueryRow(ctx, `
-		SELECT count(*),
-		       count(*) FILTER (WHERE tf.fingerprinted_at IS NOT NULL)
-		FROM track_files tf
-		JOIN library_files lf ON lf.id = tf.library_file_id
-		WHERE lf.deleted_at IS NULL
+		WITH files AS (
+			SELECT fp.library_file_id IS NOT NULL
+			       AND fp.source_size = lf.size
+			       AND fp.source_mtime IS NOT DISTINCT FROM lf.mtime AS complete
+			FROM library_files lf
+			JOIN libraries l ON l.id = lf.library_id
+			LEFT JOIN library_file_fingerprints fp ON fp.library_file_id = lf.id
+			WHERE l.media_type = 'music'
+			  AND lf.deleted_at IS NULL
+			  AND lower(lf.path) ~ '\\.(flac|mp3|m4a|aac|ogg|opus|wav|wma|ape|wv|alac|aiff|aif)$'
+		)
+		SELECT count(*), count(*) FILTER (WHERE complete) FROM files
 	`).Scan(&total, &complete)
 	if err != nil {
 		return nil, err
@@ -633,18 +646,29 @@ func (a *App) QueryFingerprintItems(ctx context.Context, status string, limit, o
 	statusFilter := ""
 	switch status {
 	case "complete":
-		statusFilter = "AND tf.fingerprinted_at IS NOT NULL"
+		statusFilter = "WHERE complete"
 	case "pending":
-		statusFilter = "AND tf.fingerprinted_at IS NULL"
+		statusFilter = "WHERE NOT complete"
 	}
 
 	rows, err := a.db.Query(ctx, `
-		SELECT tf.id, lf.path, tf.fingerprinted_at IS NOT NULL, tf.chromaprint_duration_secs
-		FROM track_files tf
-		JOIN library_files lf ON lf.id = tf.library_file_id
-		WHERE lf.deleted_at IS NULL
-		  `+statusFilter+`
-		ORDER BY tf.fingerprinted_at IS NOT NULL, lf.path ASC
+		WITH files AS (
+			SELECT lf.id, lf.path,
+			       fp.library_file_id IS NOT NULL
+			       AND fp.source_size = lf.size
+			       AND fp.source_mtime IS NOT DISTINCT FROM lf.mtime AS complete,
+			       fp.fingerprint_duration_secs
+			FROM library_files lf
+			JOIN libraries l ON l.id = lf.library_id
+			LEFT JOIN library_file_fingerprints fp ON fp.library_file_id = lf.id
+			WHERE l.media_type = 'music'
+			  AND lf.deleted_at IS NULL
+			  AND lower(lf.path) ~ '\\.(flac|mp3|m4a|aac|ogg|opus|wav|wma|ape|wv|alac|aiff|aif)$'
+		)
+		SELECT id, path, complete, fingerprint_duration_secs
+		FROM files
+		`+statusFilter+`
+		ORDER BY complete, path ASC
 		LIMIT $1 OFFSET $2
 	`, limit, offset)
 	if err != nil {

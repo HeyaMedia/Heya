@@ -95,7 +95,7 @@ func seedPumpMusicTree(t *testing.T, ctx context.Context, qtx *sqlc.Queries) (li
 func seedPumpTrackFile(t *testing.T, ctx context.Context, qtx *sqlc.Queries, libID, albumID int64, num int32, path string) (trackID, trackFileID int64) {
 	t.Helper()
 	track, err := qtx.CreateTrack(ctx, sqlc.CreateTrackParams{
-		AlbumID: albumID, DiscNumber: 1, TrackNumber: num, Title: path, FilePath: path,
+		AlbumID: albumID, DiscNumber: 1, TrackNumber: num, Title: path,
 	})
 	require.NoError(t, err)
 	lf, err := qtx.UpsertLibraryFile(ctx, sqlc.UpsertLibraryFileParams{

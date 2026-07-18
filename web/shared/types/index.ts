@@ -323,9 +323,6 @@ export interface Track {
   track_number: number
   title: string
   duration: number
-  file_path: string
-  lyrics_path: string
-  library_file_id: number | null
 }
 
 export interface TrackFile {

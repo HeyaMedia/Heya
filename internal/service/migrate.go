@@ -1,13 +1,21 @@
 package service
 
 import (
+	"context"
 	"database/sql"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/karbowiak/heya/migrations"
 	"github.com/pressly/goose/v3"
 	"github.com/rs/zerolog/log"
 )
+
+// All Heya processes auto-migrate on boot. A session-level advisory lock
+// serializes goose across the API and worker deployments; without it both can
+// execute the same DDL after reading the same version, which is how migration
+// 00056 raced on CREATE TABLE's implicit composite type.
+const migrationAdvisoryLockID int64 = 0x484559414d494752 // "HEYAMIGR"
 
 func AutoMigrate(databaseURL string) error {
 	db, err := sql.Open("pgx", databaseURL)
@@ -22,6 +30,20 @@ func AutoMigrate(databaseURL string) error {
 	}
 
 	goose.SetLogger(goose.NopLogger())
+
+	lockCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	lockConn, err := db.Conn(lockCtx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lockConn.Close() }()
+	if _, err := lockConn.ExecContext(lockCtx, "SELECT pg_advisory_lock($1)", migrationAdvisoryLockID); err != nil {
+		return err
+	}
+	defer func() {
+		_, _ = lockConn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", migrationAdvisoryLockID)
+	}()
 
 	current, _ := goose.GetDBVersion(db)
 

@@ -14,7 +14,7 @@
         "_doc_discNumber": "int, default 1 when track file is matched; 0/omitted at release/artist scope",
         "_doc_trackNumber": "int; 0 is allowed (real fixtures use '00 - …' for single-track releases)",
         "_doc_trackTitle": "track title from the filename portion after 'NN - '",
-        "_doc_lyrics_handling": ".lrc files are tracked as lyrics sidecars (NOT tracks). Parser still extracts release context. Matcher pairs each .lrc with its same-basename audio sibling and stores the path on the track row (tracks.lyrics_path, Phase 2 schema).",
+        "_doc_lyrics_handling": ".lrc files are tracked as lyrics sidecars (NOT tracks). Parser still extracts release context. Matcher pairs each .lrc with its same-basename audio sibling and stores the path on the physical track_files row.",
         "_doc_nfo_handling": "album.nfo and artist.nfo are read by internal/nfo (Phase 2 extends ParsedNFO with music fields) and override path-derived data. NFO MBIDs feed the matcher's NFO-first lookup just like movies/TV. This fixture only asserts that the parser extracts release/artist context from the NFO's path; NFO content parsing is tested separately in internal/nfo/nfo_test.go."
       }
     }

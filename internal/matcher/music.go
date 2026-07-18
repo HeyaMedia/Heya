@@ -594,10 +594,6 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 			}
 		}
 
-		if err := m.refreshTrackPrimary(ctx, track.ID); err != nil {
-			log.Warn().Err(err).Int64("track_id", track.ID).Msg("refresh primary file failed")
-		}
-
 		m.markFile(ctx, trackFile.ID, sqlc.FileStatusMatched, "", artist.MediaItemID)
 		matched++
 	}
@@ -1319,30 +1315,6 @@ func (m *Matcher) musicFileProbe(ctx context.Context, file sqlc.LibraryFile) *me
 		}
 	}
 	return info
-}
-
-// refreshTrackPrimary picks the highest-quality non-deleted file backing the
-// track and denormalizes its path / library_file_id / lyrics onto the track
-// row, so playback URLs don't need an extra join.
-func (m *Matcher) refreshTrackPrimary(ctx context.Context, trackID int64) error {
-	files, err := m.q.ListTrackFilesByTrack(ctx, trackID)
-	if err != nil {
-		return fmt.Errorf("list track files: %w", err)
-	}
-	if len(files) == 0 {
-		return nil
-	}
-	primary := files[0]
-	lf, err := m.q.GetLibraryFileByID(ctx, primary.LibraryFileID)
-	if err != nil {
-		return fmt.Errorf("get primary library file: %w", err)
-	}
-	return m.q.UpdateTrackPrimary(ctx, sqlc.UpdateTrackPrimaryParams{
-		ID:            trackID,
-		FilePath:      lf.Path,
-		LibraryFileID: pgInt8(lf.ID),
-		LyricsPath:    primary.LyricsPath,
-	})
 }
 
 func findLyricsForTrack(track sqlc.LibraryFile, lyrics []sqlc.LibraryFile) string {

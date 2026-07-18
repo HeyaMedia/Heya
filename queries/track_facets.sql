@@ -77,7 +77,7 @@ ON CONFLICT (track_id) DO UPDATE SET
 -- name: NextTrackForAnalysis :one
 -- Pick the next track that either has no facets row yet, or whose facets row
 -- is older than the configured analyzer_version. Tracks must have a usable
--- primary file (file_path != '') so the analyzer can actually read audio.
+-- primary live file so the analyzer can actually read audio.
 -- Skip tracks longer than sqlc.arg(max_duration_seconds) — long-form content
 -- (DJ sets, podcasts, lectures) blows the analysis budget for noisy facets.
 -- Duration is checked against BOTH sources we have: tracks.duration (from
@@ -87,12 +87,19 @@ ON CONFLICT (track_id) DO UPDATE SET
 -- evidence the track is over the cap, so missing metadata never silently
 -- kills a song-length track.
 -- Deterministic order (id ASC) so the scheduler resumes predictably.
-SELECT t.id, t.title, t.album_id, a.artist_id, t.file_path
+SELECT t.id, t.title, t.album_id, a.artist_id, primary_file.file_path
 FROM tracks t
 JOIN albums a ON a.id = t.album_id
+JOIN LATERAL (
+  SELECT lf.path::text AS file_path
+  FROM track_files tfile
+  JOIN library_files lf ON lf.id = tfile.library_file_id
+  WHERE tfile.track_id = t.id AND lf.deleted_at IS NULL
+  ORDER BY tfile.quality_score DESC, tfile.id ASC
+  LIMIT 1
+) primary_file ON true
 LEFT JOIN track_facets tf ON tf.track_id = t.id
-WHERE t.file_path != ''
-  AND t.duration <= sqlc.arg(max_duration_seconds)::int
+WHERE t.duration <= sqlc.arg(max_duration_seconds)::int
   AND NOT EXISTS (
     SELECT 1 FROM track_files tfile
     WHERE tfile.track_id = t.id
@@ -106,11 +113,20 @@ LIMIT 1;
 -- Resolve a specific track for the analyze_track_facets River worker.
 -- Same shape as NextTrackForAnalysis plus the resolved artist name so
 -- the progress label can read "Artist - Track" instead of a bare title.
--- No eligibility filter — the worker bails on empty file_path itself.
-SELECT t.id, t.title, t.album_id, a.artist_id, ar.name AS artist_name, t.file_path
+-- A missing live file produces an empty path and the worker exits cleanly.
+SELECT t.id, t.title, t.album_id, a.artist_id, ar.name AS artist_name,
+       COALESCE(primary_file.file_path, '')::text AS file_path
 FROM tracks t
 JOIN albums  a  ON a.id = t.album_id
 JOIN artists ar ON ar.id = a.artist_id
+LEFT JOIN LATERAL (
+  SELECT lf.path::text AS file_path
+  FROM track_files tfile
+  JOIN library_files lf ON lf.id = tfile.library_file_id
+  WHERE tfile.track_id = t.id AND lf.deleted_at IS NULL
+  ORDER BY tfile.quality_score DESC, tfile.id ASC
+  LIMIT 1
+) primary_file ON true
 WHERE t.id = $1;
 
 -- name: ListPendingAnalysisTracks :many
@@ -122,8 +138,13 @@ WHERE t.id = $1;
 SELECT t.id
 FROM tracks t
 LEFT JOIN track_facets tf ON tf.track_id = t.id
-WHERE t.file_path != ''
-  AND t.id > sqlc.arg(after_id)::bigint
+WHERE t.id > sqlc.arg(after_id)::bigint
+  AND EXISTS (
+    SELECT 1
+    FROM track_files tfile
+    JOIN library_files lf ON lf.id = tfile.library_file_id
+    WHERE tfile.track_id = t.id AND lf.deleted_at IS NULL
+  )
   AND t.duration <= sqlc.arg(max_duration_seconds)::int
   AND NOT EXISTS (
     SELECT 1 FROM track_files tfile
@@ -139,8 +160,13 @@ LIMIT sqlc.arg(limit_count)::int;
 -- agrees with what the scheduler will actually pick up.
 SELECT count(*)::int FROM tracks t
 LEFT JOIN track_facets tf ON tf.track_id = t.id
-WHERE t.file_path != ''
-  AND t.duration <= sqlc.arg(max_duration_seconds)::int
+WHERE t.duration <= sqlc.arg(max_duration_seconds)::int
+  AND EXISTS (
+    SELECT 1
+    FROM track_files tfile
+    JOIN library_files lf ON lf.id = tfile.library_file_id
+    WHERE tfile.track_id = t.id AND lf.deleted_at IS NULL
+  )
   AND NOT EXISTS (
     SELECT 1 FROM track_files tfile
     WHERE tfile.track_id = t.id

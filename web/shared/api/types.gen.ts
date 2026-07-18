@@ -5552,12 +5552,9 @@ export type TrackFile = {
     bitrate_kbps: number;
     boundaries_analyzed_at: Timestamptz;
     channels: number;
-    chromaprint_algorithm: Int2;
-    chromaprint_duration_secs: Int4;
     created_at: Timestamptz;
     duration: number;
     fade_start_ms: Int4;
-    fingerprinted_at: Timestamptz;
     format: string;
     id: number;
     integrated_lufs: Numeric;
@@ -5611,13 +5608,10 @@ export type TrackView = {
     duration: number;
     explicit: boolean;
     external_ids: string;
-    file_path: string;
     files: Array<TrackFile> | null;
     id: number;
     isrc: string;
-    library_file_id: Int8;
     lyrics_available: boolean;
-    lyrics_path: string;
     preview_url: string;
     recording_mbid: string;
     search_vector: unknown;

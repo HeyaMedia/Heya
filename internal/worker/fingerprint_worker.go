@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/queueops"
@@ -45,7 +44,7 @@ const (
 
 // ScanTrackFingerprintWorker computes a chromaprint for one audio file and
 // stores it against library_files so matching can consume it before a track
-// exists. The track_files columns remain a compatibility mirror.
+// exists. Fingerprints are physical-file evidence and have one canonical row.
 type ScanTrackFingerprintWorker struct {
 	river.WorkerDefaults[ScanTrackFingerprintArgs]
 	DB       *pgxpool.Pool
@@ -72,39 +71,19 @@ func (w *ScanTrackFingerprintWorker) Work(ctx context.Context, job *river.Job[Sc
 
 	w.Progress.SetCurrent(ScanTrackFingerprintArgs{}.Kind(), job.Args.ScheduledTaskID, filepath.Base(lf.Path))
 
-	// A valid file-level row is authoritative. Mirror it to a newly-created
-	// track_files row without decoding the audio again.
+	// A valid file-level row is authoritative; no decode is needed.
 	if stored, storedErr := q.GetLibraryFileFingerprint(ctx, lf.ID); storedErr == nil && libraryFingerprintCurrent(stored, lf) {
-		return mirrorTrackFingerprint(ctx, q, lf.ID, stored.Fingerprint, stored.Algorithm, stored.FingerprintDurationSecs)
+		return nil
 	} else if storedErr != nil && !errors.Is(storedErr, pgx.ErrNoRows) {
 		return fmt.Errorf("get library_file fingerprint %d: %w", lf.ID, storedErr)
-	}
-
-	// Rolling-deploy compatibility: an old track job may already have written
-	// the historical columns before the file-level migration became visible.
-	if hasTrack && tf.FingerprintedAt.Valid && tf.Chromaprint.Valid && tf.Chromaprint.String != "" &&
-		tf.ChromaprintAlgorithm.Valid && tf.ChromaprintDurationSecs.Valid && tf.SizeBytes == lf.Size {
-		sourceDuration := max(tf.Duration, tf.ChromaprintDurationSecs.Int32, 1)
-		stored, upsertErr := q.UpsertLibraryFileFingerprint(ctx, sqlc.UpsertLibraryFileFingerprintParams{
-			LibraryFileID: lf.ID, Algorithm: tf.ChromaprintAlgorithm.Int16,
-			Fingerprint: tf.Chromaprint.String, FingerprintDurationSecs: tf.ChromaprintDurationSecs.Int32,
-			SourceDurationSecs: sourceDuration, SourceSize: lf.Size, SourceMtime: lf.Mtime,
-		})
-		if upsertErr != nil {
-			return fmt.Errorf("backfill library_file fingerprint: %w", upsertErr)
-		}
-		return mirrorTrackFingerprint(ctx, q, lf.ID, stored.Fingerprint, stored.Algorithm, stored.FingerprintDurationSecs)
 	}
 
 	sourceDuration := int32(0)
 	if hasTrack {
 		sourceDuration = tf.Duration
 	}
-	stored, err := ensureLibraryFileFingerprint(ctx, q, lf, sourceDuration)
-	if err != nil {
-		return err
-	}
-	return mirrorTrackFingerprint(ctx, q, lf.ID, stored.Fingerprint, stored.Algorithm, stored.FingerprintDurationSecs)
+	_, err = ensureLibraryFileFingerprint(ctx, q, lf, sourceDuration)
+	return err
 }
 
 func fingerprintJobFile(ctx context.Context, q *sqlc.Queries, args ScanTrackFingerprintArgs) (sqlc.LibraryFile, sqlc.TrackFile, bool, error) {
@@ -196,18 +175,6 @@ func ensureLibraryFileFingerprint(ctx context.Context, q *sqlc.Queries, lf sqlc.
 		return sqlc.LibraryFileFingerprint{}, fmt.Errorf("update library_file fingerprint: %w", err)
 	}
 	return stored, nil
-}
-
-func mirrorTrackFingerprint(ctx context.Context, q *sqlc.Queries, libraryFileID int64, fingerprint string, algorithm int16, duration int32) error {
-	if err := q.UpdateTrackFileFingerprintByLibraryFile(ctx, sqlc.UpdateTrackFileFingerprintByLibraryFileParams{
-		LibraryFileID:           libraryFileID,
-		Chromaprint:             pgtype.Text{String: fingerprint, Valid: fingerprint != ""},
-		ChromaprintAlgorithm:    pgtype.Int2{Int16: algorithm, Valid: true},
-		ChromaprintDurationSecs: pgtype.Int4{Int32: duration, Valid: true},
-	}); err != nil {
-		return fmt.Errorf("mirror track_file fingerprint: %w", err)
-	}
-	return nil
 }
 
 // fpMethod is how this host can compute chromaprints. Detected once per

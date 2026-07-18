@@ -1171,10 +1171,7 @@ type Track struct {
 	TrackNumber     int32       `json:"track_number"`
 	Title           string      `json:"title"`
 	Duration        int32       `json:"duration"`
-	FilePath        string      `json:"file_path"`
-	LyricsPath      string      `json:"lyrics_path"`
 	SearchVector    interface{} `json:"search_vector"`
-	LibraryFileID   pgtype.Int8 `json:"library_file_id"`
 	ExternalIds     []byte      `json:"external_ids"`
 	Isrc            string      `json:"isrc"`
 	RecordingMbid   string      `json:"recording_mbid"`
@@ -1207,33 +1204,29 @@ type TrackFacet struct {
 }
 
 type TrackFile struct {
-	ID                      int64              `json:"id"`
-	TrackID                 int64              `json:"track_id"`
-	LibraryFileID           int64              `json:"library_file_id"`
-	Format                  string             `json:"format"`
-	QualityScore            int32              `json:"quality_score"`
-	BitrateKbps             int32              `json:"bitrate_kbps"`
-	SampleRateHz            int32              `json:"sample_rate_hz"`
-	BitDepth                int32              `json:"bit_depth"`
-	Channels                int32              `json:"channels"`
-	Duration                int32              `json:"duration"`
-	SizeBytes               int64              `json:"size_bytes"`
-	LyricsPath              string             `json:"lyrics_path"`
-	IntegratedLufs          pgtype.Numeric     `json:"integrated_lufs"`
-	TruePeakDb              pgtype.Numeric     `json:"true_peak_db"`
-	LoudnessRangeDb         pgtype.Numeric     `json:"loudness_range_db"`
-	SamplePeakDb            pgtype.Numeric     `json:"sample_peak_db"`
-	LoudnessAnalyzedAt      pgtype.Timestamptz `json:"loudness_analyzed_at"`
-	CreatedAt               pgtype.Timestamptz `json:"created_at"`
-	IntroEndMs              pgtype.Int4        `json:"intro_end_ms"`
-	OutroStartMs            pgtype.Int4        `json:"outro_start_ms"`
-	FadeStartMs             pgtype.Int4        `json:"fade_start_ms"`
-	SilenceStartMs          pgtype.Int4        `json:"silence_start_ms"`
-	BoundariesAnalyzedAt    pgtype.Timestamptz `json:"boundaries_analyzed_at"`
-	Chromaprint             pgtype.Text        `json:"-"`
-	ChromaprintAlgorithm    pgtype.Int2        `json:"chromaprint_algorithm"`
-	ChromaprintDurationSecs pgtype.Int4        `json:"chromaprint_duration_secs"`
-	FingerprintedAt         pgtype.Timestamptz `json:"fingerprinted_at"`
+	ID                   int64              `json:"id"`
+	TrackID              int64              `json:"track_id"`
+	LibraryFileID        int64              `json:"library_file_id"`
+	Format               string             `json:"format"`
+	QualityScore         int32              `json:"quality_score"`
+	BitrateKbps          int32              `json:"bitrate_kbps"`
+	SampleRateHz         int32              `json:"sample_rate_hz"`
+	BitDepth             int32              `json:"bit_depth"`
+	Channels             int32              `json:"channels"`
+	Duration             int32              `json:"duration"`
+	SizeBytes            int64              `json:"size_bytes"`
+	LyricsPath           string             `json:"lyrics_path"`
+	IntegratedLufs       pgtype.Numeric     `json:"integrated_lufs"`
+	TruePeakDb           pgtype.Numeric     `json:"true_peak_db"`
+	LoudnessRangeDb      pgtype.Numeric     `json:"loudness_range_db"`
+	SamplePeakDb         pgtype.Numeric     `json:"sample_peak_db"`
+	LoudnessAnalyzedAt   pgtype.Timestamptz `json:"loudness_analyzed_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	IntroEndMs           pgtype.Int4        `json:"intro_end_ms"`
+	OutroStartMs         pgtype.Int4        `json:"outro_start_ms"`
+	FadeStartMs          pgtype.Int4        `json:"fade_start_ms"`
+	SilenceStartMs       pgtype.Int4        `json:"silence_start_ms"`
+	BoundariesAnalyzedAt pgtype.Timestamptz `json:"boundaries_analyzed_at"`
 }
 
 type TrickplayEligibleFile struct {

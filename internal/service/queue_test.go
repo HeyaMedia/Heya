@@ -52,18 +52,9 @@ func setupQueueFixture(t *testing.T, pool *pgxpool.Pool, userID int64, tag strin
 			`INSERT INTO library_files (library_id, path, media_item_id)
 			 VALUES ($1, $2, $3) RETURNING id`,
 			f.libraryID, fmt.Sprintf("/music/%s/%02d.flac", tag, i), itemID).Scan(&fileID))
-		// Both file-link styles must count as playable: odd tracks get a
-		// track_files row (multi-file model), even tracks only the legacy
-		// tracks.library_file_id link (most of a pre-existing library).
-		if i%2 == 1 {
-			_, err := pool.Exec(ctx,
-				`INSERT INTO track_files (track_id, library_file_id) VALUES ($1, $2)`, trackID, fileID)
-			require.NoError(t, err)
-		} else {
-			_, err := pool.Exec(ctx,
-				`UPDATE tracks SET library_file_id = $2 WHERE id = $1`, trackID, fileID)
-			require.NoError(t, err)
-		}
+		_, err := pool.Exec(ctx,
+			`INSERT INTO track_files (track_id, library_file_id) VALUES ($1, $2)`, trackID, fileID)
+		require.NoError(t, err)
 		f.trackIDs = append(f.trackIDs, trackID)
 	}
 	// library_files cascade via CleanupLibrary; the rest cascades from the

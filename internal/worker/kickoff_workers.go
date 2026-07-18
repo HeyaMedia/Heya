@@ -2061,8 +2061,12 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 			fanout.Failed++
 			continue
 		}
-		if !trackFile.FingerprintedAt.Valid {
-			enqueue(ScanTrackFingerprintArgs{TrackFileID: trackFile.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source), "chromaprint", &fanout.Fingerprint)
+		fingerprint, fpErr := q.GetLibraryFileFingerprint(ctx, file.ID)
+		if errors.Is(fpErr, pgx.ErrNoRows) || (fpErr == nil && !libraryFingerprintCurrent(fingerprint, file)) {
+			enqueue(ScanTrackFingerprintArgs{LibraryFileID: file.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source), "chromaprint", &fanout.Fingerprint)
+		} else if fpErr != nil {
+			log.Warn().Err(fpErr).Int64("file_id", file.ID).Msg("apply_metadata: fingerprint lookup failed")
+			fanout.Failed++
 		}
 		if trackFileNeedsLoudness(trackFile) {
 			enqueued, duplicate, err := enqueueTrackLoudnessIfNeeded(ctx, q, rc, ScanTrackLoudnessArgs{TrackFileID: trackFile.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source))

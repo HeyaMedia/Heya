@@ -11,11 +11,6 @@ sql:
         emit_json_tags: true
         emit_empty_slices: true
         overrides:
-          # The fingerprint blob (~3.7KB/file) is worker-internal: keep it
-          # off every JSON surface (track_files rows are embedded verbatim in
-          # album/artist detail responses) without forking slim row types.
-          - column: "track_files.chromaprint"
-            go_struct_tag: 'json:"-"'
           # Raw franchise-membership JSON blob. Kept off the wire (as []byte it
           # would base64-encode anyway) — the collection service unmarshals it,
           # resolves each part to a local movie, and returns a typed view.

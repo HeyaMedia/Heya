@@ -51,10 +51,16 @@ func TestSaveImagesWorkerWritesAlbumCoverSidecar(t *testing.T) {
 		ArtistID: artist.ID, Title: "First Album", Year: "2026", Genres: []string{}, Tags: []string{},
 	})
 	require.NoError(t, err)
-	_, err = q.CreateTrack(ctx, sqlc.CreateTrackParams{
+	track, err := q.CreateTrack(ctx, sqlc.CreateTrackParams{
 		AlbumID: album.ID, DiscNumber: 1, TrackNumber: 1, Title: "One",
-		FilePath: filepath.Join(albumDir, "01.flac"),
 	})
+	require.NoError(t, err)
+	file, err := q.UpsertLibraryFile(ctx, sqlc.UpsertLibraryFileParams{
+		LibraryID: lib.ID, Path: filepath.Join(albumDir, "01.flac"),
+		ParseResult: []byte("{}"), Status: sqlc.FileStatusMatched,
+	})
+	require.NoError(t, err)
+	_, err = q.UpsertTrackFile(ctx, sqlc.UpsertTrackFileParams{TrackID: track.ID, LibraryFileID: file.ID})
 	require.NoError(t, err)
 
 	w := &SaveImagesWorker{DB: pool, Progress: NewTaskProgressBroadcaster(nil)}

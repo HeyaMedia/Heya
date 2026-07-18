@@ -349,8 +349,8 @@ func ensureDir(path string) error {
 // log line — best-effort throughout, individual failures are logged at
 // debug and ignored.
 //
-// Lyrics are NOT copied — `tracks.lyrics_path` points at the original
-// sidecar next to the audio file (tiny text, no upside to duplicating into
+// Lyrics are NOT copied — `track_files.lyrics_path` points at the original
+// sidecar next to each audio file (tiny text, no upside to duplicating into
 // the data dir).
 func scanAlbumAssets(ctx context.Context, q *sqlc.Queries, dataDir, artistSlug string, mediaItemID int64, useLocalArtwork bool) (int, int, int) {
 	artist, err := q.GetArtistByMediaItemID(ctx, mediaItemID)
@@ -366,8 +366,8 @@ func scanAlbumAssets(ctx context.Context, q *sqlc.Queries, dataDir, artistSlug s
 	for _, album := range albums {
 		albumsScanned++
 
-		tracks, err := q.ListTracksByAlbum(ctx, album.ID)
-		if err != nil || len(tracks) == 0 {
+		files, err := q.ListTrackFilePathsByAlbum(ctx, album.ID)
+		if err != nil || len(files) == 0 {
 			continue
 		}
 
@@ -376,7 +376,7 @@ func scanAlbumAssets(ctx context.Context, q *sqlc.Queries, dataDir, artistSlug s
 		// quality dupes) only get a cover if we scan *all* of them —
 		// looking at just the first track's parent misses cover.jpg
 		// when a sibling folder is the one carrying it.
-		albumDirs := resolveAlbumDirs(tracks)
+		albumDirs := resolveAlbumDirs(files)
 		if len(albumDirs) == 0 {
 			continue
 		}
@@ -400,7 +400,7 @@ func scanAlbumAssets(ctx context.Context, q *sqlc.Queries, dataDir, artistSlug s
 			// itself, not as a sidecar. Pull the first attached picture out
 			// via ffmpeg when no folder image was found.
 			if coverPath == "" {
-				coverPath = extractEmbeddedCover(ctx, tracks, coverCacheDir)
+				coverPath = extractEmbeddedCover(ctx, files, coverCacheDir)
 			}
 
 			if coverPath != "" {
@@ -424,18 +424,18 @@ func scanAlbumAssets(ctx context.Context, q *sqlc.Queries, dataDir, artistSlug s
 			}
 		}
 
-		// Per-track lyrics binding. For each track with a file_path,
+		// Per-file lyrics binding. For each physical audio file,
 		// look for a sibling lyrics sidecar matching the audio basename.
-		for _, t := range tracks {
-			if t.FilePath == "" {
+		for _, file := range files {
+			if file.FilePath == "" {
 				continue
 			}
-			lrc := findLyricsSidecar(t.FilePath)
-			if lrc == "" || lrc == t.LyricsPath {
+			lrc := findLyricsSidecar(file.FilePath)
+			if lrc == "" || lrc == file.LyricsPath {
 				continue
 			}
-			if err := q.UpdateTrackLyricsPath(ctx, sqlc.UpdateTrackLyricsPathParams{
-				ID:         t.ID,
+			if err := q.UpdateTrackFileLyricsPath(ctx, sqlc.UpdateTrackFileLyricsPathParams{
+				ID:         file.ID,
 				LyricsPath: lrc,
 			}); err == nil {
 				lyricsBound++
@@ -451,14 +451,14 @@ func scanAlbumAssets(ctx context.Context, q *sqlc.Queries, dataDir, artistSlug s
 // folder — albums whose tracks live in multiple sibling directories
 // (e.g. user re-ripped at a different quality and kept both) still get
 // a cover when only one of the folders carries the image.
-func resolveAlbumDirs(tracks []sqlc.Track) []string {
+func resolveAlbumDirs(files []sqlc.ListTrackFilePathsByAlbumRow) []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, t := range tracks {
-		if t.FilePath == "" {
+	for _, file := range files {
+		if file.FilePath == "" {
 			continue
 		}
-		dir := vfs.Dir(t.FilePath)
+		dir := vfs.Dir(file.FilePath)
 		base := vfs.Base(dir)
 		lower := strings.ToLower(base)
 		if strings.HasPrefix(lower, "disc ") || strings.HasPrefix(lower, "disc-") || strings.HasPrefix(lower, "cd ") || strings.HasPrefix(lower, "cd-") {
@@ -491,16 +491,16 @@ func resolveAlbumDirs(tracks []sqlc.Track) []string {
 // ever touching the (wrong) decoder, so the true bytes land in cover.jpg.
 // The loudness/analysis pipelines need explicit -vn guards for those files;
 // this path deliberately does not.
-func extractEmbeddedCover(ctx context.Context, tracks []sqlc.Track, cacheDir string) string {
+func extractEmbeddedCover(ctx context.Context, files []sqlc.ListTrackFilePathsByAlbumRow, cacheDir string) string {
 	if err := os.MkdirAll(cacheDir, 0o750); err != nil {
 		return ""
 	}
 	dst := filepath.Join(cacheDir, "cover.jpg")
-	for _, t := range tracks {
-		if t.FilePath == "" {
+	for _, file := range files {
+		if file.FilePath == "" {
 			continue
 		}
-		inputPath, cleanup, err := localFileForFFmpeg(t.FilePath)
+		inputPath, cleanup, err := localFileForFFmpeg(file.FilePath)
 		if err != nil {
 			continue
 		}

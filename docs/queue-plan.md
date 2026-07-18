@@ -102,17 +102,16 @@ Built as planned (migration 00025, `queries/play_queue.sql`,
 `internal/service/queue.go`, `/api/me/queue` routes, per-user
 `queue.changed` events) with two field notes:
 
-- **Playability is two-headed**: most of an existing library links files
-  via the legacy `tracks.library_file_id`, not `track_files` rows — the
-  materializers accept either (the narrow predicate silently emptied
-  every source against prod data).
+- **Historical note:** the first release temporarily accepted both
+  `tracks.library_file_id` and `track_files`. Migration 00057 redirected and
+  removed the stale direct links; materializers now use `track_files` only.
 - **The CLI is `heya player`** (`show/play/add/next/skip/shuffle/
   repeat/clear`) — `heya queue` was already taken by the River job queue.
 - `src_ord` (rank in the source's natural order, captured at
   materialization) is what makes shuffle-off restore the original order
   without re-querying the source.
 
-Verified: 7 integration tests over a real DB (advance idempotency +
+Originally verified with 7 integration tests over a real DB (advance idempotency +
 repeat modes, shuffle/unshuffle restore, play-next gap math + dedupe,
 move-around-pointer, claim/heartbeat rejection, history pruning at
 exactly 200), plus a live smoke against the dev server: shuffled album

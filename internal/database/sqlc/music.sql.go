@@ -473,20 +473,17 @@ func (q *Queries) CreateArtistSimilarArtist(ctx context.Context, arg CreateArtis
 }
 
 const createTrack = `-- name: CreateTrack :one
-INSERT INTO tracks (album_id, disc_number, track_number, title, duration, file_path, lyrics_path, library_file_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits
+INSERT INTO tracks (album_id, disc_number, track_number, title, duration)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits
 `
 
 type CreateTrackParams struct {
-	AlbumID       int64       `json:"album_id"`
-	DiscNumber    int32       `json:"disc_number"`
-	TrackNumber   int32       `json:"track_number"`
-	Title         string      `json:"title"`
-	Duration      int32       `json:"duration"`
-	FilePath      string      `json:"file_path"`
-	LyricsPath    string      `json:"lyrics_path"`
-	LibraryFileID pgtype.Int8 `json:"library_file_id"`
+	AlbumID     int64  `json:"album_id"`
+	DiscNumber  int32  `json:"disc_number"`
+	TrackNumber int32  `json:"track_number"`
+	Title       string `json:"title"`
+	Duration    int32  `json:"duration"`
 }
 
 func (q *Queries) CreateTrack(ctx context.Context, arg CreateTrackParams) (Track, error) {
@@ -496,9 +493,6 @@ func (q *Queries) CreateTrack(ctx context.Context, arg CreateTrackParams) (Track
 		arg.TrackNumber,
 		arg.Title,
 		arg.Duration,
-		arg.FilePath,
-		arg.LyricsPath,
-		arg.LibraryFileID,
 	)
 	var i Track
 	err := row.Scan(
@@ -508,10 +502,7 @@ func (q *Queries) CreateTrack(ctx context.Context, arg CreateTrackParams) (Track
 		&i.TrackNumber,
 		&i.Title,
 		&i.Duration,
-		&i.FilePath,
-		&i.LyricsPath,
 		&i.SearchVector,
-		&i.LibraryFileID,
 		&i.ExternalIds,
 		&i.Isrc,
 		&i.RecordingMbid,
@@ -956,15 +947,23 @@ func (q *Queries) GetAlbumByMusicBrainzID(ctx context.Context, musicbrainzID str
 }
 
 const getAlbumReleaseDir = `-- name: GetAlbumReleaseDir :one
-SELECT COALESCE(MAX(file_path), '') AS file_path FROM tracks WHERE album_id = $1
+SELECT COALESCE((
+  SELECT lf.path
+  FROM tracks t
+  JOIN track_files tf ON tf.track_id = t.id
+  JOIN library_files lf ON lf.id = tf.library_file_id
+  WHERE t.album_id = $1 AND lf.deleted_at IS NULL
+  ORDER BY tf.quality_score DESC, tf.id ASC
+  LIMIT 1
+), '')::text AS file_path
 `
 
 // Returns the on-disk release directory for an album (parent dir of any of
 // its tracks). Used by the music NFO writer to know where to drop album.nfo.
 // Empty string if the album has no files (e.g. tracks all soft-deleted).
-func (q *Queries) GetAlbumReleaseDir(ctx context.Context, albumID int64) (interface{}, error) {
+func (q *Queries) GetAlbumReleaseDir(ctx context.Context, albumID int64) (string, error) {
 	row := q.db.QueryRow(ctx, getAlbumReleaseDir, albumID)
-	var file_path interface{}
+	var file_path string
 	err := row.Scan(&file_path)
 	return file_path, err
 }
@@ -1486,7 +1485,7 @@ VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (album_id, disc_number, track_number) DO UPDATE
     SET title = CASE WHEN tracks.title = '' THEN EXCLUDED.title ELSE tracks.title END,
         duration = CASE WHEN tracks.duration = 0 THEN EXCLUDED.duration ELSE tracks.duration END
-RETURNING id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits
+RETURNING id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits
 `
 
 type GetOrCreateTrackParams struct {
@@ -1498,8 +1497,7 @@ type GetOrCreateTrackParams struct {
 }
 
 // Idempotent track creation: on conflict, return the existing row unchanged.
-// Per-file data (file_path / library_file_id / lyrics_path) lives in
-// track_files now and is recomputed when the primary file changes.
+// Physical file identity and sidecars live exclusively in track_files.
 func (q *Queries) GetOrCreateTrack(ctx context.Context, arg GetOrCreateTrackParams) (Track, error) {
 	row := q.db.QueryRow(ctx, getOrCreateTrack,
 		arg.AlbumID,
@@ -1516,10 +1514,7 @@ func (q *Queries) GetOrCreateTrack(ctx context.Context, arg GetOrCreateTrackPara
 		&i.TrackNumber,
 		&i.Title,
 		&i.Duration,
-		&i.FilePath,
-		&i.LyricsPath,
 		&i.SearchVector,
-		&i.LibraryFileID,
 		&i.ExternalIds,
 		&i.Isrc,
 		&i.RecordingMbid,
@@ -1536,7 +1531,7 @@ func (q *Queries) GetOrCreateTrack(ctx context.Context, arg GetOrCreateTrackPara
 }
 
 const getPrimaryTrackFile = `-- name: GetPrimaryTrackFile :one
-SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at, tf.chromaprint, tf.chromaprint_algorithm, tf.chromaprint_duration_secs, tf.fingerprinted_at
+SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at
 FROM track_files tf
 JOIN library_files lf ON lf.id = tf.library_file_id
 WHERE tf.track_id = $1 AND lf.deleted_at IS NULL
@@ -1574,16 +1569,12 @@ func (q *Queries) GetPrimaryTrackFile(ctx context.Context, trackID int64) (Track
 		&i.FadeStartMs,
 		&i.SilenceStartMs,
 		&i.BoundariesAnalyzedAt,
-		&i.Chromaprint,
-		&i.ChromaprintAlgorithm,
-		&i.ChromaprintDurationSecs,
-		&i.FingerprintedAt,
 	)
 	return i, err
 }
 
 const getTrackByAlbumDiscTrack = `-- name: GetTrackByAlbumDiscTrack :one
-SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits FROM tracks
+SELECT id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits FROM tracks
 WHERE album_id = $1
   AND disc_number = $2
   AND track_number = $3
@@ -1605,10 +1596,7 @@ func (q *Queries) GetTrackByAlbumDiscTrack(ctx context.Context, arg GetTrackByAl
 		&i.TrackNumber,
 		&i.Title,
 		&i.Duration,
-		&i.FilePath,
-		&i.LyricsPath,
 		&i.SearchVector,
-		&i.LibraryFileID,
 		&i.ExternalIds,
 		&i.Isrc,
 		&i.RecordingMbid,
@@ -1625,7 +1613,7 @@ func (q *Queries) GetTrackByAlbumDiscTrack(ctx context.Context, arg GetTrackByAl
 }
 
 const getTrackByID = `-- name: GetTrackByID :one
-SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits FROM tracks WHERE id = $1
+SELECT id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits FROM tracks WHERE id = $1
 `
 
 func (q *Queries) GetTrackByID(ctx context.Context, id int64) (Track, error) {
@@ -1638,43 +1626,7 @@ func (q *Queries) GetTrackByID(ctx context.Context, id int64) (Track, error) {
 		&i.TrackNumber,
 		&i.Title,
 		&i.Duration,
-		&i.FilePath,
-		&i.LyricsPath,
 		&i.SearchVector,
-		&i.LibraryFileID,
-		&i.ExternalIds,
-		&i.Isrc,
-		&i.RecordingMbid,
-		&i.PreviewUrl,
-		&i.Explicit,
-		&i.ArtistCredits,
-		&i.LyricsAvailable,
-		&i.SortArtist,
-		&i.SortAlbumYear,
-		&i.SortAlbum,
-		&i.Credits,
-	)
-	return i, err
-}
-
-const getTrackByLibraryFileID = `-- name: GetTrackByLibraryFileID :one
-SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits FROM tracks WHERE library_file_id = $1
-`
-
-func (q *Queries) GetTrackByLibraryFileID(ctx context.Context, libraryFileID pgtype.Int8) (Track, error) {
-	row := q.db.QueryRow(ctx, getTrackByLibraryFileID, libraryFileID)
-	var i Track
-	err := row.Scan(
-		&i.ID,
-		&i.AlbumID,
-		&i.DiscNumber,
-		&i.TrackNumber,
-		&i.Title,
-		&i.Duration,
-		&i.FilePath,
-		&i.LyricsPath,
-		&i.SearchVector,
-		&i.LibraryFileID,
 		&i.ExternalIds,
 		&i.Isrc,
 		&i.RecordingMbid,
@@ -1697,21 +1649,14 @@ SELECT t.id,
        t.track_number,
        t.title,
        t.duration,
-       t.lyrics_path,
+       COALESCE(primary_file.lyrics_path, '')::text AS lyrics_path,
        t.lyrics_available,
        t.recording_mbid,
        t.isrc,
        t.explicit,
        -- Primary (best-quality) file's on-disk path for the track-info
        -- dialog; ordering mirrors ListTrackFilesByTrack's [0] pick.
-       COALESCE((
-         SELECT lf.path
-         FROM track_files tf
-         JOIN library_files lf ON lf.id = tf.library_file_id
-         WHERE tf.track_id = t.id AND lf.deleted_at IS NULL
-         ORDER BY tf.quality_score DESC, tf.id ASC
-         LIMIT 1
-       ), '')::text AS file_path,
+       COALESCE(primary_file.path, '')::text AS file_path,
        al.title          AS album_title,
        al.slug           AS album_slug,
        al.year           AS album_year,
@@ -1725,6 +1670,14 @@ FROM tracks t
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
+LEFT JOIN LATERAL (
+  SELECT lf.path, tf.lyrics_path
+  FROM track_files tf
+  JOIN library_files lf ON lf.id = tf.library_file_id
+  WHERE tf.track_id = t.id AND lf.deleted_at IS NULL
+  ORDER BY tf.quality_score DESC, tf.id ASC
+  LIMIT 1
+) primary_file ON true
 WHERE t.id = $1
 LIMIT 1
 `
@@ -1785,7 +1738,7 @@ func (q *Queries) GetTrackDetailByID(ctx context.Context, id int64) (GetTrackDet
 }
 
 const getTrackFileByID = `-- name: GetTrackFileByID :one
-SELECT id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, integrated_lufs, true_peak_db, loudness_range_db, sample_peak_db, loudness_analyzed_at, created_at, intro_end_ms, outro_start_ms, fade_start_ms, silence_start_ms, boundaries_analyzed_at, chromaprint, chromaprint_algorithm, chromaprint_duration_secs, fingerprinted_at FROM track_files WHERE id = $1
+SELECT id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, integrated_lufs, true_peak_db, loudness_range_db, sample_peak_db, loudness_analyzed_at, created_at, intro_end_ms, outro_start_ms, fade_start_ms, silence_start_ms, boundaries_analyzed_at FROM track_files WHERE id = $1
 `
 
 func (q *Queries) GetTrackFileByID(ctx context.Context, id int64) (TrackFile, error) {
@@ -1815,16 +1768,12 @@ func (q *Queries) GetTrackFileByID(ctx context.Context, id int64) (TrackFile, er
 		&i.FadeStartMs,
 		&i.SilenceStartMs,
 		&i.BoundariesAnalyzedAt,
-		&i.Chromaprint,
-		&i.ChromaprintAlgorithm,
-		&i.ChromaprintDurationSecs,
-		&i.FingerprintedAt,
 	)
 	return i, err
 }
 
 const getTrackFileByLibraryFileID = `-- name: GetTrackFileByLibraryFileID :one
-SELECT id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, integrated_lufs, true_peak_db, loudness_range_db, sample_peak_db, loudness_analyzed_at, created_at, intro_end_ms, outro_start_ms, fade_start_ms, silence_start_ms, boundaries_analyzed_at, chromaprint, chromaprint_algorithm, chromaprint_duration_secs, fingerprinted_at FROM track_files WHERE library_file_id = $1
+SELECT id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, integrated_lufs, true_peak_db, loudness_range_db, sample_peak_db, loudness_analyzed_at, created_at, intro_end_ms, outro_start_ms, fade_start_ms, silence_start_ms, boundaries_analyzed_at FROM track_files WHERE library_file_id = $1
 `
 
 func (q *Queries) GetTrackFileByLibraryFileID(ctx context.Context, libraryFileID int64) (TrackFile, error) {
@@ -1854,10 +1803,6 @@ func (q *Queries) GetTrackFileByLibraryFileID(ctx context.Context, libraryFileID
 		&i.FadeStartMs,
 		&i.SilenceStartMs,
 		&i.BoundariesAnalyzedAt,
-		&i.Chromaprint,
-		&i.ChromaprintAlgorithm,
-		&i.ChromaprintDurationSecs,
-		&i.FingerprintedAt,
 	)
 	return i, err
 }
@@ -2956,9 +2901,9 @@ type ListMusicLibraryFilesPendingFingerprintRow struct {
 	Path string `json:"path"`
 }
 
-// Unlike the legacy track_files sweep, this includes unmatched audio. The
-// source size/mtime comparison invalidates evidence if a path is overwritten
-// in place while retaining its library_files identity.
+// Includes matched and unmatched audio because fingerprint evidence belongs
+// to the physical file. Source size/mtime invalidates evidence when a path is
+// overwritten in place while retaining its library_files identity.
 func (q *Queries) ListMusicLibraryFilesPendingFingerprint(ctx context.Context, arg ListMusicLibraryFilesPendingFingerprintParams) ([]ListMusicLibraryFilesPendingFingerprintRow, error) {
 	rows, err := q.db.Query(ctx, listMusicLibraryFilesPendingFingerprint, arg.AfterID, arg.RowLimit)
 	if err != nil {
@@ -3425,8 +3370,51 @@ func (q *Queries) ListStaleArtistsByLibrary(ctx context.Context, arg ListStaleAr
 	return items, nil
 }
 
+const listTrackFilePathsByAlbum = `-- name: ListTrackFilePathsByAlbum :many
+SELECT tf.id, tf.track_id, lf.path AS file_path, tf.lyrics_path
+FROM track_files tf
+JOIN tracks t ON t.id = tf.track_id
+JOIN library_files lf ON lf.id = tf.library_file_id
+WHERE t.album_id = $1 AND lf.deleted_at IS NULL
+ORDER BY t.disc_number, t.track_number, tf.quality_score DESC, tf.id ASC
+`
+
+type ListTrackFilePathsByAlbumRow struct {
+	ID         int64  `json:"id"`
+	TrackID    int64  `json:"track_id"`
+	FilePath   string `json:"file_path"`
+	LyricsPath string `json:"lyrics_path"`
+}
+
+// Physical-file view for local artwork/lyrics discovery. A track may have
+// several encodings in different directories; scan every live file.
+func (q *Queries) ListTrackFilePathsByAlbum(ctx context.Context, albumID int64) ([]ListTrackFilePathsByAlbumRow, error) {
+	rows, err := q.db.Query(ctx, listTrackFilePathsByAlbum, albumID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTrackFilePathsByAlbumRow{}
+	for rows.Next() {
+		var i ListTrackFilePathsByAlbumRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TrackID,
+			&i.FilePath,
+			&i.LyricsPath,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTrackFilesByAlbum = `-- name: ListTrackFilesByAlbum :many
-SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at, tf.chromaprint, tf.chromaprint_algorithm, tf.chromaprint_duration_secs, tf.fingerprinted_at
+SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at
 FROM track_files tf
 JOIN tracks t ON t.id = tf.track_id
 JOIN library_files lf ON lf.id = tf.library_file_id
@@ -3471,10 +3459,6 @@ func (q *Queries) ListTrackFilesByAlbum(ctx context.Context, albumID int64) ([]T
 			&i.FadeStartMs,
 			&i.SilenceStartMs,
 			&i.BoundariesAnalyzedAt,
-			&i.Chromaprint,
-			&i.ChromaprintAlgorithm,
-			&i.ChromaprintDurationSecs,
-			&i.FingerprintedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -3487,7 +3471,7 @@ func (q *Queries) ListTrackFilesByAlbum(ctx context.Context, albumID int64) ([]T
 }
 
 const listTrackFilesByArtist = `-- name: ListTrackFilesByArtist :many
-SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at, tf.chromaprint, tf.chromaprint_algorithm, tf.chromaprint_duration_secs, tf.fingerprinted_at
+SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at
 FROM track_files tf
 JOIN library_files lf ON lf.id = tf.library_file_id
 JOIN tracks t ON t.id = tf.track_id
@@ -3531,10 +3515,6 @@ func (q *Queries) ListTrackFilesByArtist(ctx context.Context, artistID int64) ([
 			&i.FadeStartMs,
 			&i.SilenceStartMs,
 			&i.BoundariesAnalyzedAt,
-			&i.Chromaprint,
-			&i.ChromaprintAlgorithm,
-			&i.ChromaprintDurationSecs,
-			&i.FingerprintedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -3547,7 +3527,7 @@ func (q *Queries) ListTrackFilesByArtist(ctx context.Context, artistID int64) ([
 }
 
 const listTrackFilesByTrack = `-- name: ListTrackFilesByTrack :many
-SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at, tf.chromaprint, tf.chromaprint_algorithm, tf.chromaprint_duration_secs, tf.fingerprinted_at
+SELECT tf.id, tf.track_id, tf.library_file_id, tf.format, tf.quality_score, tf.bitrate_kbps, tf.sample_rate_hz, tf.bit_depth, tf.channels, tf.duration, tf.size_bytes, tf.lyrics_path, tf.integrated_lufs, tf.true_peak_db, tf.loudness_range_db, tf.sample_peak_db, tf.loudness_analyzed_at, tf.created_at, tf.intro_end_ms, tf.outro_start_ms, tf.fade_start_ms, tf.silence_start_ms, tf.boundaries_analyzed_at
 FROM track_files tf
 JOIN library_files lf ON lf.id = tf.library_file_id
 WHERE tf.track_id = $1 AND lf.deleted_at IS NULL
@@ -3588,68 +3568,6 @@ func (q *Queries) ListTrackFilesByTrack(ctx context.Context, trackID int64) ([]T
 			&i.FadeStartMs,
 			&i.SilenceStartMs,
 			&i.BoundariesAnalyzedAt,
-			&i.Chromaprint,
-			&i.ChromaprintAlgorithm,
-			&i.ChromaprintDurationSecs,
-			&i.FingerprintedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listTrackFilesPendingFingerprint = `-- name: ListTrackFilesPendingFingerprint :many
-SELECT tf.id, tf.library_file_id, tf.track_id, lf.path
-FROM track_files tf
-JOIN library_files lf ON lf.id = tf.library_file_id
-JOIN tracks t  ON t.id  = tf.track_id
-JOIN albums al ON al.id = t.album_id
-JOIN artists a ON a.id  = al.artist_id
-JOIN media_item_cards mi ON mi.id = a.media_item_id
-JOIN libraries   l  ON l.id  = mi.library_id
-WHERE l.media_type = 'music'
-  AND lf.deleted_at IS NULL
-  AND tf.id > $1::bigint
-  AND tf.fingerprinted_at IS NULL
-ORDER BY tf.id
-LIMIT $2::int
-`
-
-type ListTrackFilesPendingFingerprintParams struct {
-	AfterID  int64 `json:"after_id"`
-	RowLimit int32 `json:"row_limit"`
-}
-
-type ListTrackFilesPendingFingerprintRow struct {
-	ID            int64  `json:"id"`
-	LibraryFileID int64  `json:"library_file_id"`
-	TrackID       int64  `json:"track_id"`
-	Path          string `json:"path"`
-}
-
-// Files in music libraries missing a chromaprint (and not soft-deleted).
-// The kickoff pump sweeps this with an id cursor (after_id) so one run visits
-// each candidate exactly once — a file whose fingerprint job failed
-// permanently is passed over instead of being re-enqueued in a loop.
-func (q *Queries) ListTrackFilesPendingFingerprint(ctx context.Context, arg ListTrackFilesPendingFingerprintParams) ([]ListTrackFilesPendingFingerprintRow, error) {
-	rows, err := q.db.Query(ctx, listTrackFilesPendingFingerprint, arg.AfterID, arg.RowLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListTrackFilesPendingFingerprintRow{}
-	for rows.Next() {
-		var i ListTrackFilesPendingFingerprintRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.LibraryFileID,
-			&i.TrackID,
-			&i.Path,
 		); err != nil {
 			return nil, err
 		}
@@ -3722,7 +3640,7 @@ func (q *Queries) ListTrackFilesPendingLoudness(ctx context.Context, arg ListTra
 }
 
 const listTracksByAlbum = `-- name: ListTracksByAlbum :many
-SELECT id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits FROM tracks WHERE album_id = $1 ORDER BY disc_number ASC, track_number ASC
+SELECT id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits FROM tracks WHERE album_id = $1 ORDER BY disc_number ASC, track_number ASC
 `
 
 func (q *Queries) ListTracksByAlbum(ctx context.Context, albumID int64) ([]Track, error) {
@@ -3741,10 +3659,7 @@ func (q *Queries) ListTracksByAlbum(ctx context.Context, albumID int64) ([]Track
 			&i.TrackNumber,
 			&i.Title,
 			&i.Duration,
-			&i.FilePath,
-			&i.LyricsPath,
 			&i.SearchVector,
-			&i.LibraryFileID,
 			&i.ExternalIds,
 			&i.Isrc,
 			&i.RecordingMbid,
@@ -3768,7 +3683,7 @@ func (q *Queries) ListTracksByAlbum(ctx context.Context, albumID int64) ([]Track
 }
 
 const listTracksByArtist = `-- name: ListTracksByArtist :many
-SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.file_path, t.lyrics_path, t.search_vector, t.library_file_id, t.external_ids, t.isrc, t.recording_mbid, t.preview_url, t.explicit, t.artist_credits, t.lyrics_available, t.sort_artist, t.sort_album_year, t.sort_album, t.credits FROM tracks t
+SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.search_vector, t.external_ids, t.isrc, t.recording_mbid, t.preview_url, t.explicit, t.artist_credits, t.lyrics_available, t.sort_artist, t.sort_album_year, t.sort_album, t.credits FROM tracks t
 JOIN albums al ON al.id = t.album_id
 WHERE al.artist_id = $1
 ORDER BY t.album_id ASC, t.disc_number ASC, t.track_number ASC
@@ -3792,10 +3707,7 @@ func (q *Queries) ListTracksByArtist(ctx context.Context, artistID int64) ([]Tra
 			&i.TrackNumber,
 			&i.Title,
 			&i.Duration,
-			&i.FilePath,
-			&i.LyricsPath,
 			&i.SearchVector,
-			&i.LibraryFileID,
 			&i.ExternalIds,
 			&i.Isrc,
 			&i.RecordingMbid,
@@ -4975,7 +4887,7 @@ type UpdateTrackExtendedMetadataParams struct {
 }
 
 // The post-00019 track columns. external_ids / isrc / recording_mbid remain
-// compatibility evidence; lyrics_available comes from HeyaMetadata's batched
+// indexed matching evidence; lyrics_available comes from HeyaMetadata's batched
 // canonical release projection and must not trigger per-track probes.
 // preview_url is the iTunes/Deezer 30-second sample for hover previews.
 func (q *Queries) UpdateTrackExtendedMetadata(ctx context.Context, arg UpdateTrackExtendedMetadataParams) error {
@@ -5025,64 +4937,6 @@ func (q *Queries) UpdateTrackFileBoundaries(ctx context.Context, arg UpdateTrack
 	return err
 }
 
-const updateTrackFileFingerprint = `-- name: UpdateTrackFileFingerprint :exec
-UPDATE track_files
-   SET chromaprint               = $2,
-       chromaprint_algorithm     = $3,
-       chromaprint_duration_secs = $4,
-       fingerprinted_at          = now()
- WHERE id = $1
-`
-
-type UpdateTrackFileFingerprintParams struct {
-	ID                      int64       `json:"id"`
-	Chromaprint             pgtype.Text `json:"-"`
-	ChromaprintAlgorithm    pgtype.Int2 `json:"chromaprint_algorithm"`
-	ChromaprintDurationSecs pgtype.Int4 `json:"chromaprint_duration_secs"`
-}
-
-// Called by ScanTrackFingerprintWorker once chromaprint extraction finishes.
-// Only written on success — a failed extraction leaves the row pending so the
-// next pump run retries it (same convention as loudness).
-func (q *Queries) UpdateTrackFileFingerprint(ctx context.Context, arg UpdateTrackFileFingerprintParams) error {
-	_, err := q.db.Exec(ctx, updateTrackFileFingerprint,
-		arg.ID,
-		arg.Chromaprint,
-		arg.ChromaprintAlgorithm,
-		arg.ChromaprintDurationSecs,
-	)
-	return err
-}
-
-const updateTrackFileFingerprintByLibraryFile = `-- name: UpdateTrackFileFingerprintByLibraryFile :exec
-UPDATE track_files
-   SET chromaprint               = $1,
-       chromaprint_algorithm     = $2,
-       chromaprint_duration_secs = $3,
-       fingerprinted_at          = now()
- WHERE library_file_id = $4
-`
-
-type UpdateTrackFileFingerprintByLibraryFileParams struct {
-	Chromaprint             pgtype.Text `json:"-"`
-	ChromaprintAlgorithm    pgtype.Int2 `json:"chromaprint_algorithm"`
-	ChromaprintDurationSecs pgtype.Int4 `json:"chromaprint_duration_secs"`
-	LibraryFileID           int64       `json:"library_file_id"`
-}
-
-// Compatibility mirror while playback/duplicate detection still reads the
-// historical track_files columns. A pre-match file has no track_files row and
-// simply updates zero rows here.
-func (q *Queries) UpdateTrackFileFingerprintByLibraryFile(ctx context.Context, arg UpdateTrackFileFingerprintByLibraryFileParams) error {
-	_, err := q.db.Exec(ctx, updateTrackFileFingerprintByLibraryFile,
-		arg.Chromaprint,
-		arg.ChromaprintAlgorithm,
-		arg.ChromaprintDurationSecs,
-		arg.LibraryFileID,
-	)
-	return err
-}
-
 const updateTrackFileLoudness = `-- name: UpdateTrackFileLoudness :exec
 UPDATE track_files
    SET integrated_lufs      = $2,
@@ -5110,6 +4964,20 @@ func (q *Queries) UpdateTrackFileLoudness(ctx context.Context, arg UpdateTrackFi
 		arg.LoudnessRangeDb,
 		arg.SamplePeakDb,
 	)
+	return err
+}
+
+const updateTrackFileLyricsPath = `-- name: UpdateTrackFileLyricsPath :exec
+UPDATE track_files SET lyrics_path = $2 WHERE id = $1
+`
+
+type UpdateTrackFileLyricsPathParams struct {
+	ID         int64  `json:"id"`
+	LyricsPath string `json:"lyrics_path"`
+}
+
+func (q *Queries) UpdateTrackFileLyricsPath(ctx context.Context, arg UpdateTrackFileLyricsPathParams) error {
+	_, err := q.db.Exec(ctx, updateTrackFileLyricsPath, arg.ID, arg.LyricsPath)
 	return err
 }
 
@@ -5181,46 +5049,8 @@ func (q *Queries) UpdateTrackFromEnrichment(ctx context.Context, arg UpdateTrack
 	return err
 }
 
-const updateTrackLyricsPath = `-- name: UpdateTrackLyricsPath :exec
-UPDATE tracks SET lyrics_path = $2 WHERE id = $1
-`
-
-type UpdateTrackLyricsPathParams struct {
-	ID         int64  `json:"id"`
-	LyricsPath string `json:"lyrics_path"`
-}
-
-func (q *Queries) UpdateTrackLyricsPath(ctx context.Context, arg UpdateTrackLyricsPathParams) error {
-	_, err := q.db.Exec(ctx, updateTrackLyricsPath, arg.ID, arg.LyricsPath)
-	return err
-}
-
-const updateTrackPrimary = `-- name: UpdateTrackPrimary :exec
-UPDATE tracks
-   SET file_path = $2, library_file_id = $3, lyrics_path = $4
- WHERE id = $1
-`
-
-type UpdateTrackPrimaryParams struct {
-	ID            int64       `json:"id"`
-	FilePath      string      `json:"file_path"`
-	LibraryFileID pgtype.Int8 `json:"library_file_id"`
-	LyricsPath    string      `json:"lyrics_path"`
-}
-
-// Denormalize the chosen primary file onto the track row for fast playback.
-func (q *Queries) UpdateTrackPrimary(ctx context.Context, arg UpdateTrackPrimaryParams) error {
-	_, err := q.db.Exec(ctx, updateTrackPrimary,
-		arg.ID,
-		arg.FilePath,
-		arg.LibraryFileID,
-		arg.LyricsPath,
-	)
-	return err
-}
-
 const updateTrackTitleAndDuration = `-- name: UpdateTrackTitleAndDuration :one
-UPDATE tracks SET title = $2, duration = $3 WHERE id = $1 RETURNING id, album_id, disc_number, track_number, title, duration, file_path, lyrics_path, search_vector, library_file_id, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits
+UPDATE tracks SET title = $2, duration = $3 WHERE id = $1 RETURNING id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits
 `
 
 type UpdateTrackTitleAndDurationParams struct {
@@ -5241,10 +5071,7 @@ func (q *Queries) UpdateTrackTitleAndDuration(ctx context.Context, arg UpdateTra
 		&i.TrackNumber,
 		&i.Title,
 		&i.Duration,
-		&i.FilePath,
-		&i.LyricsPath,
 		&i.SearchVector,
-		&i.LibraryFileID,
 		&i.ExternalIds,
 		&i.Isrc,
 		&i.RecordingMbid,
@@ -5396,20 +5223,22 @@ ON CONFLICT (library_file_id) DO UPDATE
     SET track_id = EXCLUDED.track_id,
         format = EXCLUDED.format,
         quality_score = EXCLUDED.quality_score,
-        lyrics_path = EXCLUDED.lyrics_path,
+        -- A scanner plan without a lyrics sidecar must not erase a path found
+        -- by the local-assets pass (or migrated from the old track column).
+        lyrics_path = CASE
+            WHEN EXCLUDED.lyrics_path <> '' THEN EXCLUDED.lyrics_path
+            ELSE track_files.lyrics_path
+        END,
         -- Audio-derived data is only valid for the bytes it was computed
-        -- from: when the file changed in place, reset loudness and the
-        -- chromaprint so the pumps re-measure instead of settling stale.
+        -- from: when the file changed in place, reset loudness so the pump
+        -- re-measures instead of settling stale. Fingerprints are owned by
+        -- library_file_fingerprints and invalidate against source size/mtime.
         integrated_lufs = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.integrated_lufs ELSE NULL END,
         loudness_range_db = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.loudness_range_db ELSE NULL END,
         loudness_analyzed_at = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.loudness_analyzed_at ELSE NULL END,
         boundaries_analyzed_at = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.boundaries_analyzed_at ELSE NULL END,
-        fingerprinted_at = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.fingerprinted_at ELSE NULL END,
-        chromaprint = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.chromaprint ELSE NULL END,
-        chromaprint_algorithm = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.chromaprint_algorithm ELSE NULL END,
-        chromaprint_duration_secs = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.chromaprint_duration_secs ELSE NULL END,
         size_bytes = EXCLUDED.size_bytes
-RETURNING id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, integrated_lufs, true_peak_db, loudness_range_db, sample_peak_db, loudness_analyzed_at, created_at, intro_end_ms, outro_start_ms, fade_start_ms, silence_start_ms, boundaries_analyzed_at, chromaprint, chromaprint_algorithm, chromaprint_duration_secs, fingerprinted_at
+RETURNING id, track_id, library_file_id, format, quality_score, bitrate_kbps, sample_rate_hz, bit_depth, channels, duration, size_bytes, lyrics_path, integrated_lufs, true_peak_db, loudness_range_db, sample_peak_db, loudness_analyzed_at, created_at, intro_end_ms, outro_start_ms, fade_start_ms, silence_start_ms, boundaries_analyzed_at
 `
 
 type UpsertTrackFileParams struct {
@@ -5459,10 +5288,6 @@ func (q *Queries) UpsertTrackFile(ctx context.Context, arg UpsertTrackFileParams
 		&i.FadeStartMs,
 		&i.SilenceStartMs,
 		&i.BoundariesAnalyzedAt,
-		&i.Chromaprint,
-		&i.ChromaprintAlgorithm,
-		&i.ChromaprintDurationSecs,
-		&i.FingerprintedAt,
 	)
 	return i, err
 }

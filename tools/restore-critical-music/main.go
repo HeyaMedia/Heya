@@ -619,7 +619,7 @@ func restoreTrackFiles(
 	var err error
 	if opts.apply {
 		tx, err = beginStage(ctx, conn, `CREATE TEMP TABLE restore_track_files (
-			track_file_id bigint, integrated_lufs numeric, true_peak_db numeric,
+			library_file_id bigint, track_file_id bigint, integrated_lufs numeric, true_peak_db numeric,
 			loudness_range_db numeric, sample_peak_db numeric, loudness_analyzed_at timestamptz,
 			intro_end_ms integer, outro_start_ms integer, fade_start_ms integer,
 			silence_start_ms integer, boundaries_analyzed_at timestamptz, chromaprint text,
@@ -664,13 +664,13 @@ func restoreTrackFiles(
 			return nil
 		}
 		r := row.TrackFile
-		rows = append(rows, []any{ref.TrackFileID, r.IntegratedLUFS, r.TruePeakDB, r.LoudnessRangeDB,
+		rows = append(rows, []any{ref.LibraryFileID, ref.TrackFileID, r.IntegratedLUFS, r.TruePeakDB, r.LoudnessRangeDB,
 			r.SamplePeakDB, r.LoudnessAnalyzedAt, r.IntroEndMS, r.OutroStartMS, r.FadeStartMS,
 			r.SilenceStartMS, r.BoundariesAnalyzedAt, r.Chromaprint, r.ChromaprintAlgorithm,
 			r.ChromaprintDurationSecs, r.FingerprintedAt})
 		if len(rows) == cap(rows) {
 			return flush(ctx, tx, pgx.Identifier{"restore_track_files"}, []string{
-				"track_file_id", "integrated_lufs", "true_peak_db", "loudness_range_db", "sample_peak_db",
+				"library_file_id", "track_file_id", "integrated_lufs", "true_peak_db", "loudness_range_db", "sample_peak_db",
 				"loudness_analyzed_at", "intro_end_ms", "outro_start_ms", "fade_start_ms", "silence_start_ms",
 				"boundaries_analyzed_at", "chromaprint", "chromaprint_algorithm", "chromaprint_duration_secs", "fingerprinted_at"}, &rows)
 		}
@@ -680,7 +680,7 @@ func restoreTrackFiles(
 		return out, err
 	}
 	if err = flush(ctx, tx, pgx.Identifier{"restore_track_files"}, []string{
-		"track_file_id", "integrated_lufs", "true_peak_db", "loudness_range_db", "sample_peak_db",
+		"library_file_id", "track_file_id", "integrated_lufs", "true_peak_db", "loudness_range_db", "sample_peak_db",
 		"loudness_analyzed_at", "intro_end_ms", "outro_start_ms", "fade_start_ms", "silence_start_ms",
 		"boundaries_analyzed_at", "chromaprint", "chromaprint_algorithm", "chromaprint_duration_secs", "fingerprinted_at"}, &rows); err != nil {
 		return out, err
@@ -695,11 +695,7 @@ func restoreTrackFiles(
 		outro_start_ms=COALESCE(tf.outro_start_ms,s.outro_start_ms),
 		fade_start_ms=COALESCE(tf.fade_start_ms,s.fade_start_ms),
 		silence_start_ms=COALESCE(tf.silence_start_ms,s.silence_start_ms),
-		boundaries_analyzed_at=COALESCE(tf.boundaries_analyzed_at,s.boundaries_analyzed_at),
-		chromaprint=COALESCE(tf.chromaprint,s.chromaprint),
-		chromaprint_algorithm=COALESCE(tf.chromaprint_algorithm,s.chromaprint_algorithm),
-		chromaprint_duration_secs=COALESCE(tf.chromaprint_duration_secs,s.chromaprint_duration_secs),
-		fingerprinted_at=COALESCE(tf.fingerprinted_at,s.fingerprinted_at)
+		boundaries_analyzed_at=COALESCE(tf.boundaries_analyzed_at,s.boundaries_analyzed_at)
 	FROM restore_track_files s WHERE tf.id=s.track_file_id AND (
 		(tf.integrated_lufs IS NULL AND s.integrated_lufs IS NOT NULL) OR
 		(tf.true_peak_db IS NULL AND s.true_peak_db IS NOT NULL) OR
@@ -710,16 +706,32 @@ func restoreTrackFiles(
 		(tf.outro_start_ms IS NULL AND s.outro_start_ms IS NOT NULL) OR
 		(tf.fade_start_ms IS NULL AND s.fade_start_ms IS NOT NULL) OR
 		(tf.silence_start_ms IS NULL AND s.silence_start_ms IS NOT NULL) OR
-		(tf.boundaries_analyzed_at IS NULL AND s.boundaries_analyzed_at IS NOT NULL) OR
-		(tf.chromaprint IS NULL AND s.chromaprint IS NOT NULL) OR
-		(tf.chromaprint_algorithm IS NULL AND s.chromaprint_algorithm IS NOT NULL) OR
-		(tf.chromaprint_duration_secs IS NULL AND s.chromaprint_duration_secs IS NOT NULL) OR
-		(tf.fingerprinted_at IS NULL AND s.fingerprinted_at IS NOT NULL)
+		(tf.boundaries_analyzed_at IS NULL AND s.boundaries_analyzed_at IS NOT NULL)
 	)`)
 	if err != nil {
 		return out, err
 	}
 	out.Applied = int(result.RowsAffected())
+
+	// v1 exports carried fingerprints inside track_file. Import that historical
+	// shape into the canonical physical-file table; existing rows always win.
+	result, err = tx.Exec(ctx, `INSERT INTO library_file_fingerprints (
+		library_file_id, algorithm, fingerprint, fingerprint_duration_secs,
+		source_duration_secs, source_size, source_mtime, fingerprinted_at
+	)
+	SELECT s.library_file_id, s.chromaprint_algorithm, s.chromaprint,
+		s.chromaprint_duration_secs, s.chromaprint_duration_secs,
+		lf.size, lf.mtime, COALESCE(s.fingerprinted_at, now())
+	FROM restore_track_files s
+	JOIN library_files lf ON lf.id = s.library_file_id
+	WHERE s.chromaprint IS NOT NULL AND s.chromaprint <> ''
+	  AND s.chromaprint_algorithm IS NOT NULL
+	  AND s.chromaprint_duration_secs > 0
+	ON CONFLICT (library_file_id) DO NOTHING`)
+	if err != nil {
+		return out, err
+	}
+	out.Applied += int(result.RowsAffected())
 	return out, tx.Commit(ctx)
 }
 

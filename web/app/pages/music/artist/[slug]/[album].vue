@@ -52,15 +52,14 @@ const tracks = computed<TrackView[]>(() => {
   })
 })
 
-// Prime the per-track rating cache + register the richer TrackView rows so the
-// shared Track-info dialog (opened by id from any menu) can still surface the
-// filesystem path / MBIDs this payload carries but MusicTrackDetail omits.
+// Prime the per-track rating cache + register metadata already present in the
+// album response. Physical paths are resolved by MusicTrackDetail on demand.
 watch(tracks, (list) => {
   if (!list.length) return
   trackRatings.primeBulk(list.map((t) => t.id)).catch(() => 0)
   trackInfo.prime(list.map((t) => {
     const rt = t as TrackView & { recording_mbid?: string; isrc?: string; explicit?: boolean }
-    return { id: t.id, file_path: t.file_path, recording_mbid: rt.recording_mbid, isrc: rt.isrc, explicit: rt.explicit, files: t.files, credits: t.credits }
+    return { id: t.id, recording_mbid: rt.recording_mbid, isrc: rt.isrc, explicit: rt.explicit, files: t.files, credits: t.credits }
   }))
 }, { immediate: true })
 

@@ -263,8 +263,7 @@ SELECT $1,
        $4::int + u.ordinality::int
 FROM unnest($5::bigint[]) WITH ORDINALITY AS u(track_id, ordinality)
 JOIN tracks t ON t.id = u.track_id
-WHERE (EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
-           OR EXISTS (SELECT 1 FROM library_files lf2 WHERE lf2.id = t.library_file_id AND lf2.deleted_at IS NULL))
+WHERE EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
 `
 
 type InsertQueueItemsAtParams struct {
@@ -304,8 +303,7 @@ FROM (
            (row_number() OVER (ORDER BY t.disc_number, t.track_number))::int AS natural_rank
     FROM tracks t
     WHERE t.album_id = $3
-      AND (EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
-           OR EXISTS (SELECT 1 FROM library_files lf2 WHERE lf2.id = t.library_file_id AND lf2.deleted_at IS NULL))
+      AND EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
     ORDER BY CASE WHEN $2::boolean THEN random() END NULLS LAST, 2
     LIMIT $4
 ) x
@@ -349,8 +347,7 @@ FROM (
     FROM tracks t
     JOIN albums al ON al.id = t.album_id
     WHERE al.artist_id = $3
-      AND (EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
-           OR EXISTS (SELECT 1 FROM library_files lf2 WHERE lf2.id = t.library_file_id AND lf2.deleted_at IS NULL))
+      AND EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
     ORDER BY CASE WHEN $2::boolean THEN random() END NULLS LAST, 2
     LIMIT $4
 ) x
@@ -388,8 +385,7 @@ FROM (
     FROM tracks t
     JOIN albums al ON al.id = t.album_id
     WHERE $3::text ILIKE ANY(al.genres)
-      AND (EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
-           OR EXISTS (SELECT 1 FROM library_files lf2 WHERE lf2.id = t.library_file_id AND lf2.deleted_at IS NULL))
+      AND EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
     ORDER BY CASE WHEN $2::boolean THEN random() END NULLS LAST, 2
     LIMIT $4
 ) x
@@ -426,8 +422,7 @@ FROM (
     SELECT t.id,
            (row_number() OVER (ORDER BY t.id))::int AS natural_rank
     FROM tracks t
-    WHERE (EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
-           OR EXISTS (SELECT 1 FROM library_files lf2 WHERE lf2.id = t.library_file_id AND lf2.deleted_at IS NULL))
+    WHERE EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
     ORDER BY CASE WHEN $2::boolean THEN random() END NULLS LAST, 2
     LIMIT $3
 ) x
@@ -460,8 +455,7 @@ FROM (
     FROM user_playlist_tracks pt
     JOIN tracks t ON t.id = pt.track_id
     WHERE pt.playlist_id = $3
-      AND (EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
-           OR EXISTS (SELECT 1 FROM library_files lf2 WHERE lf2.id = t.library_file_id AND lf2.deleted_at IS NULL))
+      AND EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
     ORDER BY CASE WHEN $2::boolean THEN random() END NULLS LAST, 2
     LIMIT $4
 ) x
@@ -497,8 +491,7 @@ FROM (
     SELECT t.id, u.ordinality::int AS natural_rank
     FROM unnest($3::bigint[]) WITH ORDINALITY AS u(track_id, ordinality)
     JOIN tracks t ON t.id = u.track_id
-    WHERE (EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
-           OR EXISTS (SELECT 1 FROM library_files lf2 WHERE lf2.id = t.library_file_id AND lf2.deleted_at IS NULL))
+    WHERE EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL)
     ORDER BY CASE WHEN $2::boolean THEN random() END NULLS LAST, 2
     LIMIT $4
 ) x

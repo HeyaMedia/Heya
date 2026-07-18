@@ -365,14 +365,13 @@ WHERE id = $1
 RETURNING *;
 
 -- name: CreateTrack :one
-INSERT INTO tracks (album_id, disc_number, track_number, title, duration, file_path, lyrics_path, library_file_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO tracks (album_id, disc_number, track_number, title, duration)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: GetOrCreateTrack :one
 -- Idempotent track creation: on conflict, return the existing row unchanged.
--- Per-file data (file_path / library_file_id / lyrics_path) lives in
--- track_files now and is recomputed when the primary file changes.
+-- Physical file identity and sidecars live exclusively in track_files.
 INSERT INTO tracks (album_id, disc_number, track_number, title, duration)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (album_id, disc_number, track_number) DO UPDATE
@@ -385,14 +384,8 @@ RETURNING *;
 -- heya.media canonical values once they're known.
 UPDATE tracks SET title = $2, duration = $3 WHERE id = $1 RETURNING *;
 
--- name: UpdateTrackPrimary :exec
--- Denormalize the chosen primary file onto the track row for fast playback.
-UPDATE tracks
-   SET file_path = $2, library_file_id = $3, lyrics_path = $4
- WHERE id = $1;
-
--- name: UpdateTrackLyricsPath :exec
-UPDATE tracks SET lyrics_path = $2 WHERE id = $1;
+-- name: UpdateTrackFileLyricsPath :exec
+UPDATE track_files SET lyrics_path = $2 WHERE id = $1;
 
 -- name: UpdateAlbumCoverPath :exec
 -- Writes a local cover-art path detected from the album folder
@@ -511,7 +504,7 @@ UPDATE tracks SET credits = $2 WHERE id = $1;
 
 -- name: UpdateTrackExtendedMetadata :exec
 -- The post-00019 track columns. external_ids / isrc / recording_mbid remain
--- compatibility evidence; lyrics_available comes from HeyaMetadata's batched
+-- indexed matching evidence; lyrics_available comes from HeyaMetadata's batched
 -- canonical release projection and must not trigger per-track probes.
 -- preview_url is the iTunes/Deezer 30-second sample for hover previews.
 UPDATE tracks SET
@@ -531,7 +524,15 @@ SELECT * FROM tracks WHERE album_id = $1 ORDER BY disc_number ASC, track_number 
 -- Returns the on-disk release directory for an album (parent dir of any of
 -- its tracks). Used by the music NFO writer to know where to drop album.nfo.
 -- Empty string if the album has no files (e.g. tracks all soft-deleted).
-SELECT COALESCE(MAX(file_path), '') AS file_path FROM tracks WHERE album_id = $1;
+SELECT COALESCE((
+  SELECT lf.path
+  FROM tracks t
+  JOIN track_files tf ON tf.track_id = t.id
+  JOIN library_files lf ON lf.id = tf.library_file_id
+  WHERE t.album_id = $1 AND lf.deleted_at IS NULL
+  ORDER BY tf.quality_score DESC, tf.id ASC
+  LIMIT 1
+), '')::text AS file_path;
 
 -- name: GetTrackByID :one
 SELECT * FROM tracks WHERE id = $1;
@@ -545,21 +546,14 @@ SELECT t.id,
        t.track_number,
        t.title,
        t.duration,
-       t.lyrics_path,
+       COALESCE(primary_file.lyrics_path, '')::text AS lyrics_path,
        t.lyrics_available,
        t.recording_mbid,
        t.isrc,
        t.explicit,
        -- Primary (best-quality) file's on-disk path for the track-info
        -- dialog; ordering mirrors ListTrackFilesByTrack's [0] pick.
-       COALESCE((
-         SELECT lf.path
-         FROM track_files tf
-         JOIN library_files lf ON lf.id = tf.library_file_id
-         WHERE tf.track_id = t.id AND lf.deleted_at IS NULL
-         ORDER BY tf.quality_score DESC, tf.id ASC
-         LIMIT 1
-       ), '')::text AS file_path,
+       COALESCE(primary_file.path, '')::text AS file_path,
        al.title          AS album_title,
        al.slug           AS album_slug,
        al.year           AS album_year,
@@ -573,11 +567,16 @@ FROM tracks t
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
+LEFT JOIN LATERAL (
+  SELECT lf.path, tf.lyrics_path
+  FROM track_files tf
+  JOIN library_files lf ON lf.id = tf.library_file_id
+  WHERE tf.track_id = t.id AND lf.deleted_at IS NULL
+  ORDER BY tf.quality_score DESC, tf.id ASC
+  LIMIT 1
+) primary_file ON true
 WHERE t.id = $1
 LIMIT 1;
-
--- name: GetTrackByLibraryFileID :one
-SELECT * FROM tracks WHERE library_file_id = $1;
 
 -- name: UpsertTrackFile :one
 -- One row per physical audio file. UNIQUE(library_file_id) means a file can
@@ -590,18 +589,20 @@ ON CONFLICT (library_file_id) DO UPDATE
     SET track_id = EXCLUDED.track_id,
         format = EXCLUDED.format,
         quality_score = EXCLUDED.quality_score,
-        lyrics_path = EXCLUDED.lyrics_path,
+        -- A scanner plan without a lyrics sidecar must not erase a path found
+        -- by the local-assets pass (or migrated from the old track column).
+        lyrics_path = CASE
+            WHEN EXCLUDED.lyrics_path <> '' THEN EXCLUDED.lyrics_path
+            ELSE track_files.lyrics_path
+        END,
         -- Audio-derived data is only valid for the bytes it was computed
-        -- from: when the file changed in place, reset loudness and the
-        -- chromaprint so the pumps re-measure instead of settling stale.
+        -- from: when the file changed in place, reset loudness so the pump
+        -- re-measures instead of settling stale. Fingerprints are owned by
+        -- library_file_fingerprints and invalidate against source size/mtime.
         integrated_lufs = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.integrated_lufs ELSE NULL END,
         loudness_range_db = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.loudness_range_db ELSE NULL END,
         loudness_analyzed_at = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.loudness_analyzed_at ELSE NULL END,
         boundaries_analyzed_at = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.boundaries_analyzed_at ELSE NULL END,
-        fingerprinted_at = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.fingerprinted_at ELSE NULL END,
-        chromaprint = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.chromaprint ELSE NULL END,
-        chromaprint_algorithm = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.chromaprint_algorithm ELSE NULL END,
-        chromaprint_duration_secs = CASE WHEN track_files.size_bytes = EXCLUDED.size_bytes THEN track_files.chromaprint_duration_secs ELSE NULL END,
         size_bytes = EXCLUDED.size_bytes
 RETURNING *;
 
@@ -624,6 +625,16 @@ JOIN tracks t ON t.id = tf.track_id
 JOIN library_files lf ON lf.id = tf.library_file_id
 WHERE t.album_id = $1 AND lf.deleted_at IS NULL
 ORDER BY tf.track_id ASC, tf.quality_score DESC, tf.id ASC;
+
+-- name: ListTrackFilePathsByAlbum :many
+-- Physical-file view for local artwork/lyrics discovery. A track may have
+-- several encodings in different directories; scan every live file.
+SELECT tf.id, tf.track_id, lf.path AS file_path, tf.lyrics_path
+FROM track_files tf
+JOIN tracks t ON t.id = tf.track_id
+JOIN library_files lf ON lf.id = tf.library_file_id
+WHERE t.album_id = $1 AND lf.deleted_at IS NULL
+ORDER BY t.disc_number, t.track_number, tf.quality_score DESC, tf.id ASC;
 
 -- name: GetTrackFileByLibraryFileID :one
 SELECT * FROM track_files WHERE library_file_id = $1;
@@ -945,28 +956,6 @@ WHERE l.media_type = 'music'
 ORDER BY tf.id
 LIMIT sqlc.arg(row_limit)::int;
 
--- name: UpdateTrackFileFingerprint :exec
--- Called by ScanTrackFingerprintWorker once chromaprint extraction finishes.
--- Only written on success — a failed extraction leaves the row pending so the
--- next pump run retries it (same convention as loudness).
-UPDATE track_files
-   SET chromaprint               = $2,
-       chromaprint_algorithm     = $3,
-       chromaprint_duration_secs = $4,
-       fingerprinted_at          = now()
- WHERE id = $1;
-
--- name: UpdateTrackFileFingerprintByLibraryFile :exec
--- Compatibility mirror while playback/duplicate detection still reads the
--- historical track_files columns. A pre-match file has no track_files row and
--- simply updates zero rows here.
-UPDATE track_files
-   SET chromaprint               = sqlc.arg(chromaprint),
-       chromaprint_algorithm     = sqlc.arg(chromaprint_algorithm),
-       chromaprint_duration_secs = sqlc.arg(chromaprint_duration_secs),
-       fingerprinted_at          = now()
- WHERE library_file_id = sqlc.arg(library_file_id);
-
 -- name: GetLibraryFileFingerprint :one
 SELECT *
 FROM library_file_fingerprints
@@ -1035,30 +1024,10 @@ SET algorithm                 = EXCLUDED.algorithm,
     updated_at                = now()
 RETURNING *;
 
--- name: ListTrackFilesPendingFingerprint :many
--- Files in music libraries missing a chromaprint (and not soft-deleted).
--- The kickoff pump sweeps this with an id cursor (after_id) so one run visits
--- each candidate exactly once — a file whose fingerprint job failed
--- permanently is passed over instead of being re-enqueued in a loop.
-SELECT tf.id, tf.library_file_id, tf.track_id, lf.path
-FROM track_files tf
-JOIN library_files lf ON lf.id = tf.library_file_id
-JOIN tracks t  ON t.id  = tf.track_id
-JOIN albums al ON al.id = t.album_id
-JOIN artists a ON a.id  = al.artist_id
-JOIN media_item_cards mi ON mi.id = a.media_item_id
-JOIN libraries   l  ON l.id  = mi.library_id
-WHERE l.media_type = 'music'
-  AND lf.deleted_at IS NULL
-  AND tf.id > sqlc.arg(after_id)::bigint
-  AND tf.fingerprinted_at IS NULL
-ORDER BY tf.id
-LIMIT sqlc.arg(row_limit)::int;
-
 -- name: ListMusicLibraryFilesPendingFingerprint :many
--- Unlike the legacy track_files sweep, this includes unmatched audio. The
--- source size/mtime comparison invalidates evidence if a path is overwritten
--- in place while retaining its library_files identity.
+-- Includes matched and unmatched audio because fingerprint evidence belongs
+-- to the physical file. Source size/mtime invalidates evidence when a path is
+-- overwritten in place while retaining its library_files identity.
 SELECT lf.id, lf.path
 FROM library_files lf
 JOIN libraries l ON l.id = lf.library_id

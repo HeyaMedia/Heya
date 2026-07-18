@@ -61,14 +61,10 @@ func (w *SaveMusicNFOWorker) Work(ctx context.Context, job *river.Job[SaveMusicN
 		if err != nil || len(tracks) == 0 {
 			continue
 		}
-		// Pick the first track with a non-empty file_path (some may be empty
-		// if the file was soft-deleted and the primary refresh hasn't fired).
-		samplePath := ""
-		for _, t := range tracks {
-			if t.FilePath != "" {
-				samplePath = t.FilePath
-				break
-			}
+		// Resolve the release directory from the canonical physical-file join.
+		samplePath, err := q.GetAlbumReleaseDir(ctx, al.ID)
+		if err != nil {
+			continue
 		}
 		if samplePath == "" {
 			continue

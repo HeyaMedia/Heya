@@ -469,7 +469,7 @@ func TestPostApplySonicDeduplicatesTracksWithMultipleFiles(t *testing.T) {
 		"/media/post-apply-sonic-dedupe/01 Track.mp3",
 	}
 	track, err := q.CreateTrack(ctx, sqlc.CreateTrackParams{
-		AlbumID: album.ID, DiscNumber: 1, TrackNumber: 1, Title: "Track", FilePath: paths[0],
+		AlbumID: album.ID, DiscNumber: 1, TrackNumber: 1, Title: "Track",
 	})
 	require.NoError(t, err)
 	fileIDs := make([]int64, 0, len(paths))
@@ -493,8 +493,16 @@ func TestPostApplySonicDeduplicatesTracksWithMultipleFiles(t *testing.T) {
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
 		UPDATE track_files
-		SET integrated_lufs = -14, boundaries_analyzed_at = now(), fingerprinted_at = now()
+		SET integrated_lufs = -14, boundaries_analyzed_at = now()
 		WHERE id = ANY($1::bigint[])`, trackFileIDs)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+		INSERT INTO library_file_fingerprints (
+			library_file_id, algorithm, fingerprint, fingerprint_duration_secs,
+			source_duration_secs, source_size, source_mtime
+		)
+		SELECT id, 1, 'test-fingerprint-' || id, 1, 1, size, mtime
+		FROM library_files WHERE id = ANY($1::bigint[])`, fileIDs)
 	require.NoError(t, err)
 
 	rc, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
