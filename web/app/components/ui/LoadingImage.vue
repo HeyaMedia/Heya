@@ -17,9 +17,17 @@ const transparentPixel = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAAC
 const resolvedSource = ref('')
 const loading = ref(false)
 const failed = ref(false)
+const eased = ref(false)
 let generation = 0
 let objectURL = ''
 let controller: AbortController | null = null
+let startedAt = 0
+
+// Loads that resolve within this window (HTTP cache hits, same-tick decodes)
+// appear together with the surrounding page paint — easing them in would make
+// every remounted rail "flicker into existence" on each navigation. Only
+// genuinely late arrivals fade over the spinner background.
+const FAST_LOAD_MS = 100
 
 const forwardedAttrs = computed(() => {
   const { class: _class, ...rest } = attrs
@@ -70,6 +78,7 @@ async function materialize(source: string, current: number) {
         releaseObjectURL()
         objectURL = URL.createObjectURL(blob)
         resolvedSource.value = objectURL
+        eased.value = true
         loading.value = false
         failed.value = false
         return
@@ -101,13 +110,16 @@ function begin() {
   releaseObjectURL()
   resolvedSource.value = fetchPersistentSource.value ? '' : canonicalSource.value
   failed.value = false
+  eased.value = false
   loading.value = !!props.src
+  startedAt = performance.now()
   if (props.src && fetchPersistentSource.value && import.meta.client) void materialize(props.src, current)
 }
 
 function onLoad(event: Event | string) {
   // The transparent pixel is only a stable layout surface while fetch polling.
   if (fetchPersistentSource.value && loading.value) return
+  eased.value = performance.now() - startedAt > FAST_LOAD_MS
   loading.value = false
   failed.value = false
   emit('load', event)
@@ -131,7 +143,7 @@ onBeforeUnmount(() => { generation++; controller?.abort(); releaseObjectURL() })
     decoding="async"
     v-bind="forwardedAttrs"
     :src="renderedSource"
-    :class="[attrs.class, 'heya-loading-image', { 'is-loading': loading, 'is-failed': failed }]"
+    :class="[attrs.class, 'heya-loading-image', { 'is-loading': loading, 'is-failed': failed, 'is-eased': eased }]"
     @load="onLoad"
     @error="onError"
   />
@@ -162,10 +174,11 @@ onBeforeUnmount(() => { generation++; controller?.abort(); releaseObjectURL() })
     heya-image-spinner 0.85s linear infinite;
 }
 
-/* Loaded pixels ease in instead of snapping over the spinner. `from`-only
+/* Slow-loaded pixels ease in instead of snapping over the spinner. Fast loads
+   (cache hits) skip the ease entirely — see FAST_LOAD_MS. `from`-only
    keyframes interpolate to the element's own computed opacity, so parents
    that keep the image hidden (crossfade layers at opacity 0) stay hidden. */
-.heya-loading-image:not(.is-loading) {
+.heya-loading-image.is-eased:not(.is-loading) {
   animation: heya-image-fade-in 0.22s ease;
 }
 

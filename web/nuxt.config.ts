@@ -212,7 +212,13 @@ export default defineNuxtConfig({
   experimental: {
     renderJsonPayloads: true, // Faster SSR JSON payloads via native JSON.parse
     writeEarlyHints: false, // No-op on nitro's bun preset (node-only feature)
-    viewTransition: true, // Smooth page transitions via View Transitions API
+    // View Transitions run the browser's default ~250ms full-root crossfade on
+    // every client-side nav: the old page visibly fades away, then the new
+    // page (snapshotted before its images decode) fades in. With home surfaces
+    // painting synchronously from the persisted query cache, that crossfade IS
+    // the perceived flicker — an instant swap reads as native. Re-enable only
+    // together with custom ::view-transition CSS for targeted shared elements.
+    viewTransition: false,
     payloadExtraction: false, // Disabled — conflicts with dynamic route caching on disk
   },
 

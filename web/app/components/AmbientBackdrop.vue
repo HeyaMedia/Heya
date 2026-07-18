@@ -10,19 +10,25 @@
          showImage) — no width/quality props, so NuxtImg passes the src
          through untouched and the rendered file is byte-identical to the
          preloaded one. With modifier props here, NuxtImg's densities srcset
-         could pick a w=3840 file the preloader never warmed. -->
+         could pick a w=3840 file the preloader never warmed.
+
+         Each layer carries its OWN grade class (grade-pool/art/v2), stamped
+         when its image lands. Grading from the container restyled BOTH
+         layers the instant the winning claim changed: leaving a v2 detail
+         page stripped brightness(0.4) off the still-visible art — a bright
+         flash — before the incoming pool image darkened it back. -->
     <LoadingImage
       v-if="srcA"
       :src="srcA"
       class="ambient-img"
-      :class="{ visible: showA, drift: !reducedMotion && !overrideUrl }"
+      :class="[`grade-${gradeA}`, { visible: showA, drift: !reducedMotion && gradeA === 'pool' }]"
       alt=""
     />
     <LoadingImage
       v-if="srcB"
       :src="srcB"
       class="ambient-img"
-      :class="{ visible: !showA, drift: !reducedMotion && !overrideUrl }"
+      :class="[`grade-${gradeB}`, { visible: !showA, drift: !reducedMotion && gradeB === 'pool' }]"
       alt=""
     />
     <!-- All three scrim looks stay mounted and opacity-crossfade on mode
@@ -131,6 +137,16 @@ const srcA = ref<string | null>(null)
 const srcB = ref<string | null>(null)
 const showA = ref(true)
 const shown = ref<string | null>(null)
+
+// Per-layer grade — the look each image was shown under. An outgoing image
+// keeps its grade while fading out; only the incoming layer (or the visible
+// one when the SAME image is re-claimed, e.g. list → detail sharing art)
+// takes the current claim's grade.
+type ImgGrade = 'pool' | 'art' | 'v2'
+const gradeA = ref<ImgGrade>('pool')
+const gradeB = ref<ImgGrade>('pool')
+const claimGrade = computed<ImgGrade>(() =>
+  overrideUrl.value ? (overrideGrade.value === 'v2' ? 'v2' : 'art') : 'pool')
 let cursor = 0
 let timer: ReturnType<typeof setTimeout> | null = null
 
@@ -172,7 +188,14 @@ function showImage(url: string, then?: (ok: boolean) => void) {
   // already shown" must still cancel a pending switch, or A → (B loading)
   // → A leaves B current and it lands late anyway.
   const seq = ++loadSeq
-  if (shown.value === url) { then?.(true); return }
+  if (shown.value === url) {
+    // Same image, possibly a new claim grade (list → detail whose art is the
+    // current pool pick): re-coat the visible layer in place — a deliberate,
+    // smooth transition on one layer, not a swap.
+    ;(showA.value ? gradeA : gradeB).value = claimGrade.value
+    then?.(true)
+    return
+  }
   const variant = bgImg.variant(url)
   const img = new Image()
   img.onload = async () => {
@@ -180,8 +203,13 @@ function showImage(url: string, then?: (ok: boolean) => void) {
     // stall on a main-thread decode (the visible "stutter" at fade start).
     try { await img.decode() } catch { /* decodable enough to paint */ }
     if (seq !== loadSeq) return
-    if (showA.value) srcB.value = variant
-    else srcA.value = variant
+    if (showA.value) {
+      srcB.value = variant
+      gradeB.value = claimGrade.value
+    } else {
+      srcA.value = variant
+      gradeA.value = claimGrade.value
+    }
     showA.value = !showA.value
     shown.value = url
     then?.(true)
@@ -368,7 +396,7 @@ onBeforeUnmount(() => {
   opacity: min(calc(var(--ambient-opacity, 0.3) * 1.9), 0.9);
 }
 /* Owner-driven artwork switches with its hero — snappier fade only. */
-.override-mode .ambient-img {
+.ambient-img.grade-art {
   transition: opacity 1.2s ease;
 }
 
@@ -376,15 +404,19 @@ onBeforeUnmount(() => {
    heavier blur, dimmer, richer, and pushed to full opacity so below-hero
    content reads on a deliberate dark wash rather than the legacy ~0.5
    presence coat. Non-v2 art claims and every pool page are untouched. Kept
-   ABOVE the .reveal rules so a reveal still clears the blur cleanly. */
-.override-v2 .ambient-img {
+   ABOVE the .reveal rules so a reveal still clears the blur cleanly.
+
+   Grades live on each layer, NOT the container: an outgoing image must fade
+   out under the coat it was shown with, or leaving a v2 page brightens the
+   still-visible art (brightness 0.4 → none) before the next image lands. */
+.ambient-img.grade-v2 {
   filter: blur(72px) brightness(0.4) saturate(1.2);
   transform: scale(1.08);
   /* Match HeroCanvas's fade so the blur underlay and the sharp hero art
      arrive together instead of the blur trailing a beat behind. */
   transition: opacity 0.6s ease;
 }
-.override-v2 .ambient-img.visible {
+.ambient-img.grade-v2.visible {
   opacity: 1;
 }
 
