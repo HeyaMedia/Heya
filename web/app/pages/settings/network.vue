@@ -29,6 +29,7 @@ const loadingNetwork = computed(() => networkData.isLoading.value && !network.va
 const requestRateHistory = ref<number[]>([])
 let networkTimer: ReturnType<typeof setInterval> | null = null
 const saving = ref(false)
+const funnelApplying = ref(false)
 const loggingOut = ref(false)
 const hostnameDraft = ref('')
 const rawOpen = ref(false)
@@ -78,11 +79,20 @@ async function saveHTTPS(on: boolean) {
 
 async function saveFunnel(on: boolean) {
   saving.value = true
+  funnelApplying.value = true
   try {
     await setFunnel(on)
+    await loadNetwork()
+    flash.value = {
+      kind: 'ok',
+      text: on ? 'Funnel is live on the public internet.' : 'Funnel disabled — tailnet access remains private.',
+    }
   } catch (e: any) {
-    flash.value = { kind: 'err', text: e?.message ?? 'Funnel toggle failed.' }
-  } finally { saving.value = false }
+    flash.value = { kind: 'err', text: e?.data?.detail ?? e?.message ?? 'Funnel toggle failed.' }
+  } finally {
+    saving.value = false
+    funnelApplying.value = false
+  }
 }
 
 async function onLogout() {
@@ -125,6 +135,70 @@ async function copyRaw() {
 }
 
 const stateDirHint = computed(() => cfg.value?.state_dir || 'data/tailscale/')
+
+const tailscaleError = computed(() => (status.value?.last_error ?? '')
+  .replace(/^ingress:\s*/i, '')
+  .replace(/^tailscale:\s*/i, ''))
+
+const tailscaleBadge = computed((): { state: 'ok' | 'warn' | 'error' | 'idle', label: string } => {
+  if (!enabled.value) return { state: 'idle', label: 'Off' }
+  if (status.value?.last_error) return { state: 'error', label: 'Needs attention' }
+  if (status.value?.login_url) return { state: 'warn', label: 'Authorize' }
+  if (!status.value?.running) return { state: 'warn', label: 'Connecting…' }
+  if (cfg.value?.funnel && !status.value?.funnel_active) return { state: 'warn', label: 'Publishing…' }
+  return { state: 'ok', label: status.value?.funnel_active ? 'Public' : 'Connected' }
+})
+
+const tailscaleDescription = computed(() => {
+  if (!enabled.value) return 'Off — Heya only answers on the LAN.'
+  if (status.value?.funnel_active) return 'Connected to your tailnet and published securely to the public internet through Funnel.'
+  if (status.value?.running) return 'Connected privately — every device on your tailnet can reach this Heya.'
+  return 'Starting the embedded Tailscale node…'
+})
+
+const funnelPanel = computed((): { tone: 'ok' | 'warn' | 'error', title: string, detail: string } => {
+  if (funnelApplying.value) {
+    return {
+      tone: 'warn',
+      title: cfg.value?.funnel ? 'Publishing Funnel…' : 'Removing public access…',
+      detail: 'Tailscale and Caddy are replacing the :443 listener. Private LAN access stays online.',
+    }
+  }
+  if (status.value?.funnel_active) {
+    return {
+      tone: 'ok',
+      title: 'Funnel is live',
+      detail: 'The public URL is using a trusted Tailscale certificate. Heya authentication still protects the app.',
+    }
+  }
+  const error = tailscaleError.value.toLowerCase()
+  if (error) {
+    if (error.includes('https must be enabled') || error.includes('certificate domain')) {
+      return {
+        tone: 'error',
+        title: 'Enable tailnet HTTPS first',
+        detail: 'MagicDNS and HTTPS must be enabled in the Tailscale admin DNS page before Funnel can issue a certificate.',
+      }
+    }
+    if (error.includes('node attribute') || error.includes('not allowed for funnel')) {
+      return {
+        tone: 'error',
+        title: 'Funnel is not allowed by this tailnet',
+        detail: 'Allow Funnel for this node in the tailnet policy, then switch Funnel off and on to retry.',
+      }
+    }
+    return {
+      tone: 'error',
+      title: 'Funnel could not start',
+      detail: 'The previous private tailnet listener has been restored. Review the error below, then retry.',
+    }
+  }
+  return {
+    tone: 'warn',
+    title: 'Waiting for Funnel',
+    detail: 'Tailscale is still preparing the public listener. This page will update when it is reachable.',
+  }
+})
 
 const caddy = computed(() => network.value?.ingress ?? null)
 const caddyHTTP = computed(() => caddy.value?.http ?? null)
@@ -603,19 +677,18 @@ watch(cfg, (next) => {
     </SettingsSection>
 
     <SettingsSection title="Tailscale" icon="cloud"
-      :description="enabled ? 'Joined to your tailnet — every tailnet device can reach this Heya at the address below.' : 'Off — Heya only answers on the LAN.'"
+      :description="tailscaleDescription"
       :lockedBy="isLocked('tailscale.enabled') ? lockTooltip('tailscale.enabled') : undefined">
       <template #actions>
-        <label class="ts-switch" :title="lockTooltip('tailscale.enabled')">
-          <input
-            type="checkbox"
-            aria-label="Enable Tailscale"
-            :checked="enabled"
-            :disabled="saving || isLocked('tailscale.enabled')"
-            @change="onMasterToggle(($event.target as HTMLInputElement).checked)"
-          />
-          <span class="ts-slider" />
-        </label>
+        <StatusBadge :state="tailscaleBadge.state">{{ tailscaleBadge.label }}</StatusBadge>
+        <AppSwitch
+          :model-value="enabled"
+          size="md"
+          aria-label="Enable Tailscale"
+          :title="lockTooltip('tailscale.enabled')"
+          :disabled="saving || isLocked('tailscale.enabled')"
+          @update:model-value="onMasterToggle"
+        />
       </template>
 
       <a v-if="enabled && status?.login_url" :href="status.login_url" target="_blank" rel="noopener" class="login-cta">
@@ -635,8 +708,15 @@ watch(cfg, (next) => {
           { key: 'Tailnet IPv4', value: status.ipv4 ?? '', mono: true, copy: true },
           { key: 'Tailnet IPv6', value: status.ipv6 ?? '', mono: true, copy: true },
           { key: 'HTTPS cert',  value: status.cert_domain ?? '' },
-          { key: 'Last error',  value: status.last_error ?? '' },
         ]" />
+
+        <div v-if="status.last_error" class="tailscale-alert error">
+          <Icon name="warning" :size="16" />
+          <div>
+            <strong>Tailscale needs attention</strong>
+            <p>{{ tailscaleError }}</p>
+          </div>
+        </div>
 
         <div v-if="status.https_url || status.funnel_url" class="urls">
           <a v-if="status.https_url" :href="status.https_url" target="_blank" rel="noopener" class="url-card">
@@ -677,16 +757,14 @@ watch(cfg, (next) => {
         description="Serve TLS on tailnet :443 using a Tailscale-issued cert. Requires HTTPS to be enabled for your tailnet."
         :lockedBy="isLocked('tailscale.https') ? lockTooltip('tailscale.https') : undefined"
         v-slot="{ fieldId }">
-        <label class="ts-switch sm">
-          <input
-            :id="fieldId"
-            type="checkbox"
-            :checked="cfg?.https ?? true"
-            :disabled="saving || isLocked('tailscale.https')"
-            @change="saveHTTPS(($event.target as HTMLInputElement).checked)"
-          />
-          <span class="ts-slider" />
-        </label>
+        <AppSwitch
+          :id="fieldId"
+          :model-value="cfg?.https ?? true"
+          size="md"
+          aria-label="HTTPS on port 443"
+          :disabled="saving || isLocked('tailscale.https')"
+          @update:model-value="saveHTTPS"
+        />
         <span v-if="cfg?.https && !status?.https_active" class="hint-warn">requested · not yet active</span>
       </SettingsField>
 
@@ -694,18 +772,29 @@ watch(cfg, (next) => {
         description="Publish Heya to the open internet via Tailscale Funnel. Requires Funnel to be allowed for your tailnet."
         :lockedBy="isLocked('tailscale.funnel') ? lockTooltip('tailscale.funnel') : undefined"
         v-slot="{ fieldId }">
-        <label class="ts-switch sm">
-          <input
-            :id="fieldId"
-            type="checkbox"
-            :checked="cfg?.funnel ?? false"
-            :disabled="saving || isLocked('tailscale.funnel')"
-            @change="saveFunnel(($event.target as HTMLInputElement).checked)"
-          />
-          <span class="ts-slider" />
-        </label>
-        <span v-if="cfg?.funnel && !status?.funnel_active" class="hint-warn">requested · not yet active</span>
+        <AppSwitch
+          :id="fieldId"
+          :model-value="cfg?.funnel ?? false"
+          size="md"
+          aria-label="Publish Heya through Tailscale Funnel"
+          :disabled="saving || isLocked('tailscale.funnel')"
+          @update:model-value="saveFunnel"
+        />
+        <span v-if="funnelApplying" class="hint-warn"><Icon name="spinner" :size="11" /> applying…</span>
       </SettingsField>
+
+      <div v-if="cfg?.funnel" class="funnel-panel" :class="funnelPanel.tone">
+        <Icon :name="funnelPanel.tone === 'ok' ? 'check' : (funnelPanel.tone === 'error' ? 'warning' : 'spinner')" :size="18" />
+        <div class="funnel-panel-body">
+          <strong>{{ funnelPanel.title }}</strong>
+          <p>{{ funnelPanel.detail }}</p>
+          <code v-if="funnelPanel.tone === 'error' && tailscaleError">{{ tailscaleError }}</code>
+          <div v-if="funnelPanel.tone !== 'ok'" class="funnel-links">
+            <a href="https://tailscale.com/s/https" target="_blank" rel="noopener">HTTPS settings <Icon name="chevright" :size="11" /></a>
+            <a href="https://tailscale.com/s/no-funnel" target="_blank" rel="noopener">Funnel policy <Icon name="chevright" :size="11" /></a>
+          </div>
+        </div>
+      </div>
     </SettingsSection>
 
     <SettingsSection v-if="enabled" title="Identity" icon="key">
@@ -836,35 +925,6 @@ watch(cfg, (next) => {
 .interface-count { color: var(--fg-3); font-family: var(--font-mono); font-size: 10.5px; }
 .interface-table { padding: 8px; }
 
-.ts-switch {
-  position: relative;
-  width: 44px; height: 24px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.ts-switch.sm { width: 36px; height: 20px; }
-.ts-switch input { opacity: 0; width: 0; height: 0; }
-.ts-slider {
-  position: absolute; inset: 0;
-  background: rgb(var(--ink) / 0.08);
-  border-radius: 12px;
-  transition: background 0.2s;
-}
-.ts-slider::before {
-  content: '';
-  position: absolute;
-  top: 3px; left: 3px;
-  width: 18px; height: 18px;
-  border-radius: 50%;
-  background: #fff;
-  transition: transform 0.2s;
-  box-shadow: 0 1px 3px rgb(var(--shade) / 0.4);
-}
-.ts-switch.sm .ts-slider::before { top: 3px; left: 3px; width: 14px; height: 14px; }
-.ts-switch input:checked + .ts-slider { background: var(--good); }
-.ts-switch input:checked + .ts-slider::before { transform: translateX(20px); }
-.ts-switch.sm input:checked + .ts-slider::before { transform: translateX(16px); }
-
 .login-cta {
   display: flex; align-items: center; gap: 14px;
   padding: 16px 18px;
@@ -936,6 +996,66 @@ watch(cfg, (next) => {
 .hint { font-size: 12px; color: var(--fg-3); line-height: 1.5; margin: 0 0 10px; }
 .hint code { font-family: var(--font-mono); color: var(--fg-1); }
 .hint-warn { font-size: 11px; color: var(--gold); margin-left: 8px; }
+.hint-warn :deep(svg) { vertical-align: -2px; }
+
+.tailscale-alert,
+.funnel-panel {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-2);
+}
+.tailscale-alert > :deep(svg),
+.funnel-panel > :deep(svg) { flex-shrink: 0; margin-top: 1px; }
+.tailscale-alert strong,
+.funnel-panel strong { display: block; color: var(--fg-0); font-size: 12.5px; }
+.tailscale-alert p,
+.funnel-panel p { margin: 3px 0 0; color: var(--fg-2); font-size: 11.5px; line-height: 1.5; }
+.tailscale-alert.error,
+.funnel-panel.error {
+  border-color: color-mix(in srgb, var(--bad) 30%, transparent);
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
+}
+.tailscale-alert.error > :deep(svg),
+.funnel-panel.error > :deep(svg) { color: var(--bad); }
+.funnel-panel.ok {
+  border-color: color-mix(in srgb, var(--good) 30%, transparent);
+  background: color-mix(in srgb, var(--good) 8%, transparent);
+}
+.funnel-panel.ok > :deep(svg) { color: var(--good); }
+.funnel-panel.warn {
+  border-color: color-mix(in srgb, var(--gold) 28%, transparent);
+  background: var(--gold-soft);
+}
+.funnel-panel.warn > :deep(svg) { color: var(--gold); }
+.funnel-panel-body { min-width: 0; }
+.funnel-panel code {
+  display: block;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border-radius: var(--r-sm);
+  background: rgb(var(--shade) / 0.08);
+  color: var(--bad);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.funnel-links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 9px; }
+.funnel-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--gold);
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.funnel-links a:hover { text-decoration: underline; }
 
 .cgnat-banner {
   display: flex; align-items: flex-start; gap: 10px;

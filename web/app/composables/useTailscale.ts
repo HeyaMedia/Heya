@@ -71,12 +71,31 @@ export function useTailscale() {
   }
 
   async function setFunnel(on: boolean) {
+    const baseline = Date.parse(status.value?.updated_at ?? '') || Date.now()
     const { $heya } = useNuxtApp()
     await $heya('/api/tailscale/funnel', {
       method: 'POST',
       body: { enabled: on } as any,
     })
-    await refresh()
+
+    // The server applies this in the background because the request itself
+    // may be travelling over the listener that Caddy needs to replace. Wait
+    // for a newer status snapshot so callers get the real listener result,
+    // not merely the persisted preference returned by the POST.
+    const deadline = Date.now() + 20_000
+    while (Date.now() < deadline) {
+      await refresh()
+      const current = status.value
+      const updated = Date.parse(current?.updated_at ?? '')
+      if (current && Number.isFinite(updated) && updated > baseline) {
+        if (on && current.funnel_active) return
+        if (!on && !current.funnel && !current.funnel_active) return
+        if (current.last_error) throw new Error(current.last_error)
+      }
+      await new Promise(resolve => setTimeout(resolve, 400))
+    }
+
+    throw new Error(status.value?.last_error || 'Tailscale did not finish applying the Funnel change in time.')
   }
 
   async function logout() {

@@ -207,6 +207,46 @@ func (m *Manager) SetTailnet(ctx context.Context, cfg TailnetConfig) error {
 	previous := m.tailnet
 	previousEpoch := m.tailEpoch
 	copyCfg := cfg
+	// A direct tsnet TCP listener and ListenFunnel cannot both own :443.
+	// Caddy normally provisions a replacement config before retiring the old
+	// one, which is exactly the wrong ordering for this particular transition:
+	// tsnet rejects the Funnel bind while the direct listener is still open (or
+	// vice versa). Detach the tailnet edge first, then attach the new mode. The
+	// LAN/host listener remains live through both reloads.
+	changingFunnelMode := previous != nil && previous.Funnel != cfg.Funnel
+	if changingFunnelMode {
+		m.tailnet = nil
+		m.tailEpoch++
+		m.mu.Unlock()
+
+		if err := m.reloadLocked(ctx, "tailnet listener mode transition"); err != nil {
+			m.mu.Lock()
+			m.tailnet = previous
+			m.tailEpoch = previousEpoch
+			m.mu.Unlock()
+			return err
+		}
+
+		m.mu.Lock()
+		m.tailnet = &copyCfg
+		m.mu.Unlock()
+		if err := m.reloadLocked(ctx, "tailnet listener updated"); err != nil {
+			// The replacement was rejected (for example, Funnel is not allowed
+			// by the tailnet policy). Restore the previously working private
+			// listener so a failed public-exposure attempt never takes private
+			// tailnet access down with it.
+			m.mu.Lock()
+			m.tailnet = previous
+			m.tailEpoch++
+			m.mu.Unlock()
+			if restoreErr := m.reloadLocked(ctx, "previous tailnet listener restored"); restoreErr != nil {
+				return fmt.Errorf("%w (restoring previous tailnet listener: %v)", err, restoreErr)
+			}
+			return err
+		}
+		return nil
+	}
+
 	if previous == nil || previous.Source != cfg.Source {
 		m.tailEpoch++
 	}

@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -212,6 +213,134 @@ func TestManagerHotAddsRemoteHTTPSAndHTTP3(t *testing.T) {
 	}
 }
 
+func TestManagerSwitchesTailnetHTTPSListenerToFunnel(t *testing.T) {
+	hostAddress := availableTCPAddress(t)
+	tailTCP443 := availableTCPAddress(t)
+	tailTCP80 := availableTCPAddress(t)
+	tailUDP443 := availableUDPAddress(t)
+	certificate := localTestCertificate(t)
+	source := &conflictingTailnetSource{
+		tcp443: tailTCP443,
+		tcp80:  tailTCP80,
+		udp443: tailUDP443,
+		cert:   certificate,
+	}
+
+	manager := New(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "tailnet")
+	}), zerolog.Nop())
+	if err := manager.Start(t.Context(), HostConfig{
+		Address: hostAddress, DataDir: t.TempDir(), LogLevel: "error",
+	}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Close() })
+
+	direct := TailnetConfig{
+		Address: "100.64.0.1", CertDomain: "heya.example.ts.net",
+		HTTPS: true, Source: source,
+	}
+	if err := manager.SetTailnet(t.Context(), direct); err != nil {
+		t.Fatalf("SetTailnet direct HTTPS: %v", err)
+	}
+	if got := manager.Status().Listeners; !hasListener(got, "tailnet") {
+		t.Fatalf("direct tailnet listener missing: %+v", got)
+	}
+
+	funnel := direct
+	funnel.Funnel = true
+	if err := manager.SetTailnet(t.Context(), funnel); err != nil {
+		t.Fatalf("switch to Funnel: %v", err)
+	}
+	if got := manager.Status().Listeners; !hasListener(got, "funnel") {
+		t.Fatalf("Funnel listener missing: %+v", got)
+	}
+	funnelClient := &http.Client{
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, //nolint:gosec // test-only certificate
+		Timeout:   10 * time.Second,
+	}
+	response, err := funnelClient.Get("https://" + tailTCP443 + "/funnel")
+	if err != nil {
+		t.Fatalf("Funnel HTTPS GET: %v", err)
+	}
+	body, readErr := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if readErr != nil {
+		t.Fatalf("read Funnel HTTPS body: %v", readErr)
+	}
+	if response.StatusCode != http.StatusOK || string(body) != "tailnet" {
+		t.Fatalf("Funnel response = %d %q", response.StatusCode, body)
+	}
+
+	if err := manager.SetTailnet(t.Context(), direct); err != nil {
+		t.Fatalf("switch back to direct HTTPS: %v", err)
+	}
+	if got := manager.Status().Listeners; !hasListener(got, "tailnet") || hasListener(got, "funnel") {
+		t.Fatalf("unexpected listeners after disabling Funnel: %+v", got)
+	}
+
+	source.funnelErr = errors.New("Funnel not available for this node")
+	if err := manager.SetTailnet(t.Context(), funnel); err == nil {
+		t.Fatal("switch to unavailable Funnel unexpectedly succeeded")
+	}
+	if got := manager.Status().Listeners; !hasListener(got, "tailnet") || hasListener(got, "funnel") {
+		t.Fatalf("private listener was not restored after Funnel failure: %+v", got)
+	}
+}
+
+// conflictingTailnetSource deliberately maps direct TCP and Funnel to the
+// same real socket. It mirrors tsnet's one-listener-per-port rule and catches
+// make-before-break reloads that try to bind :443 twice.
+type conflictingTailnetSource struct {
+	tcp443    string
+	tcp80     string
+	udp443    string
+	cert      *tls.Certificate
+	funnelErr error
+}
+
+func (s *conflictingTailnetSource) ListenTCP(address string) (net.Listener, error) {
+	_, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+	if port == "443" {
+		return net.Listen("tcp", s.tcp443)
+	}
+	return net.Listen("tcp", s.tcp80)
+}
+
+func (s *conflictingTailnetSource) ListenPacket(string) (net.PacketConn, error) {
+	return net.ListenPacket("udp", s.udp443)
+}
+
+func (s *conflictingTailnetSource) ListenFunnel(string) (net.Listener, error) {
+	if s.funnelErr != nil {
+		return nil, s.funnelErr
+	}
+	listener, err := net.Listen("tcp", s.tcp443)
+	if err != nil {
+		return nil, err
+	}
+	return tls.NewListener(listener, &tls.Config{
+		Certificates: []tls.Certificate{*s.cert},
+		NextProtos:   []string{"h2", "http/1.1"},
+	}), nil
+}
+
+func (s *conflictingTailnetSource) GetCertificate(context.Context, *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	return s.cert, nil
+}
+
+func hasListener(listeners []ListenerStatus, name string) bool {
+	for _, listener := range listeners {
+		if listener.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func localTestCertificate(t *testing.T) *tls.Certificate {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -255,6 +384,19 @@ func availableTCPAddress(t *testing.T) string {
 	}
 	address := listener.Addr().String()
 	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return address
+}
+
+func availableUDPAddress(t *testing.T) string {
+	t.Helper()
+	packet, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := packet.LocalAddr().String()
+	if err := packet.Close(); err != nil {
 		t.Fatal(err)
 	}
 	return address
