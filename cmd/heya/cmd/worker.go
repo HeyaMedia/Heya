@@ -43,11 +43,13 @@ user-targeted live events are currently process-local.`,
 			return err
 		}
 
+		logRing := configureRuntimeLogRing(2000, "worker")
 		app, err := service.NewWorker(workerCtx, cfg)
 		if err != nil {
 			return err
 		}
 		defer app.Close()
+		app.StartWorkerLogRelay(workerCtx, logRing)
 
 		// River treats cancellation of its Start context as an immediate job
 		// cancellation. Detach it from the signal context so the signal stops

@@ -162,6 +162,8 @@ type Event struct {
 }
 
 type LogPayload struct {
+	Time    time.Time      `json:"time,omitempty"`
+	Source  string         `json:"source,omitempty"`
 	Level   string         `json:"level"`
 	Message string         `json:"message"`
 	Fields  map[string]any `json:"fields,omitempty"`

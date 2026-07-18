@@ -275,3 +275,32 @@ func (h *Hub) SubscriberCount() int {
 	defer h.mu.RUnlock()
 	return len(h.subs)
 }
+
+type SubscriberStats struct {
+	WebSocket int
+	Admin     int
+	Internal  int
+}
+
+// SubscriberStats distinguishes actual browser WebSocket connections from
+// trusted in-process consumers. Counting both as "WS subscribers" made the
+// diagnostics number climb whenever an internal bridge was added.
+func (h *Hub) SubscriberStats() SubscriberStats {
+	if h == nil {
+		return SubscriberStats{}
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var stats SubscriberStats
+	for _, principal := range h.subs {
+		if principal.Internal {
+			stats.Internal++
+			continue
+		}
+		stats.WebSocket++
+		if principal.IsAdmin {
+			stats.Admin++
+		}
+	}
+	return stats
+}

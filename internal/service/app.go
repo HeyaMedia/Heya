@@ -16,6 +16,7 @@ import (
 	"github.com/karbowiak/heya/internal/config"
 	"github.com/karbowiak/heya/internal/database"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/diagnostics"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/imagegen"
 	"github.com/karbowiak/heya/internal/images"
@@ -55,6 +56,7 @@ type App struct {
 	config              *config.Config
 	configMu            sync.RWMutex
 	db                  *pgxpool.Pool
+	diagnostics         *diagnostics.Collector
 	sessionLookup       *auth.AsyncSessionLookup
 	coordinatorLease    leaseCloser
 	matcher             *matcher.Matcher
@@ -193,6 +195,7 @@ func (a *App) WatcherManager() *watcher.Manager     { return a.watcher }
 func (a *App) TaskScheduler() *scheduler.Trigger    { return a.scheduler }
 func (a *App) Metadata() *heyametadata.HeyaProvider { return a.heya }
 func (a *App) DBPool() *pgxpool.Pool                { return a.db }
+func (a *App) Diagnostics() *diagnostics.Collector  { return a.diagnostics }
 func (a *App) RiverClient() *river.Client[pgx.Tx]   { return a.river }
 func (a *App) Sessions() *sessions.Store            { return a.sessions }
 
@@ -417,10 +420,19 @@ func newApp(ctx context.Context, cfg *config.Config, runtimeMode appRuntimeMode)
 		log.Warn().Msg("passive mode: skipping auto-migrate; this binary will NOT alter the target schema")
 	}
 
+	diagnosticCollector := diagnostics.NewCollector()
 	dbOptions := databaseOptionsForRuntime(cfg, runtimeMode)
+	dbOptions.QueryTracer = diagnosticCollector
 	db, err := database.ConnectWithOptions(ctx, cfg.DatabaseURL.Value, dbOptions)
 	if err != nil {
 		return nil, err
+	}
+	if !cfg.PassiveMode.Value && runtimeMode == appRuntimeAPI {
+		extensionCtx, cancel := context.WithTimeout(diagnostics.WithoutQueryTrace(ctx), 10*time.Second)
+		if extensionErr := database.EnsurePGStatStatements(extensionCtx, db); extensionErr != nil {
+			log.Warn().Err(extensionErr).Msg("pg_stat_statements could not be enabled automatically; query diagnostics will use the process tracer")
+		}
+		cancel()
 	}
 
 	// Establish ownership as soon as the database is live. Components created
@@ -683,6 +695,7 @@ func newApp(ctx context.Context, cfg *config.Config, runtimeMode appRuntimeMode)
 	app := &App{
 		config:           cfg,
 		db:               db,
+		diagnostics:      diagnosticCollector,
 		sessionLookup:    sessionLookup,
 		coordinatorLease: coordinator,
 		matcher:          m,

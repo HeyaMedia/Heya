@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -14,13 +15,11 @@ import (
 	"github.com/karbowiak/heya/internal/ingress"
 	"github.com/karbowiak/heya/internal/logbuf"
 	"github.com/karbowiak/heya/internal/remote"
-	"github.com/karbowiak/heya/internal/safelog"
 	"github.com/karbowiak/heya/internal/scheduler"
 	"github.com/karbowiak/heya/internal/server"
 	"github.com/karbowiak/heya/internal/service"
 	tsnetwrap "github.com/karbowiak/heya/internal/tailscale"
 
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
@@ -54,18 +53,7 @@ var serveCmd = &cobra.Command{
 			}
 		}()
 
-		logRing := logbuf.New(2000)
-
-		var baseWriter zerolog.LevelWriter
-		if cfg.LogFormat.Value == "console" {
-			baseWriter = zerolog.MultiLevelWriter(
-				safelog.Redact(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339}),
-				logRing,
-			)
-		} else {
-			baseWriter = zerolog.MultiLevelWriter(safelog.Redact(os.Stderr), logRing)
-		}
-		log.Logger = zerolog.New(baseWriter).With().Timestamp().Logger()
+		logRing := configureRuntimeLogRing(2000, "serve")
 
 		// Resolve run mode and enforce the active-mode safety guard BEFORE
 		// service.New(): New() auto-migrates and active startup then bootstraps
@@ -192,6 +180,7 @@ var serveCmd = &cobra.Command{
 		log.Info().Str("addr", cfg.Addr()).Bool("https", !devBackend).Msg("embedded Caddy ingress started")
 
 		startAppLoop(func() { bridgeLogToHub(appCtx, logRing, app.EventHub()) })
+		startAppLoop(func() { bridgeWorkerLogsToRing(appCtx, logRing, app.EventHub()) })
 		app.EventHub().StartPeriodicEmitters(appCtx, app.DBPool())
 		// Bridge events published from other processes (e.g. a `heya library
 		// remove` CLI call) onto this process's live hub → WebSocket clients.
@@ -332,9 +321,54 @@ func bridgeLogToHub(ctx context.Context, ring *logbuf.RingBuffer, hub *eventhub.
 				return
 			}
 			hub.Emit(eventhub.EventLog, eventhub.LogPayload{
+				Time:    entry.Time,
+				Source:  entry.Source,
 				Level:   entry.Level,
 				Message: entry.Message,
 				Fields:  entry.Fields,
+			})
+		}
+	}
+}
+
+func bridgeWorkerLogsToRing(ctx context.Context, ring *logbuf.RingBuffer, hub *eventhub.Hub) {
+	ch := hub.Subscribe()
+	defer hub.Unsubscribe(ch)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-ch:
+			if !ok {
+				return
+			}
+			if event.Type != eventhub.EventLog {
+				continue
+			}
+			var payload eventhub.LogPayload
+			switch value := event.Payload.(type) {
+			case eventhub.LogPayload:
+				payload = value
+			case *eventhub.LogPayload:
+				if value != nil {
+					payload = *value
+				}
+			default:
+				raw, err := json.Marshal(value)
+				if err != nil || json.Unmarshal(raw, &payload) != nil {
+					continue
+				}
+			}
+			if payload.Source != "worker" {
+				continue
+			}
+			at := payload.Time
+			if at.IsZero() {
+				at = event.Timestamp
+			}
+			ring.Store(logbuf.Entry{
+				Time: at, Source: payload.Source, Level: payload.Level,
+				Message: payload.Message, Fields: payload.Fields,
 			})
 		}
 	}

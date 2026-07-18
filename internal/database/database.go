@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -9,8 +10,9 @@ import (
 )
 
 type Options struct {
-	MaxConns int32
-	MinConns int32
+	MaxConns    int32
+	MinConns    int32
+	QueryTracer pgx.QueryTracer
 }
 
 // ResolveHosts returns every host pgx will actually dial for databaseURL, using
@@ -82,6 +84,7 @@ func ConnectWithOptions(ctx context.Context, databaseURL string, opts Options) (
 
 	cfg.MaxConns = opts.MaxConns
 	cfg.MinConns = opts.MinConns
+	cfg.ConnConfig.Tracer = opts.QueryTracer
 
 	// pgvector 0.8+: let HNSW scans keep iterating (relaxed order) instead of
 	// silently truncating at hnsw.ef_search tuples. Without this, any KNN
@@ -108,4 +111,27 @@ func ConnectWithOptions(ctx context.Context, databaseURL string, opts Options) (
 	}
 
 	return pool, nil
+}
+
+// EnsurePGStatStatements installs the SQL extension after the server has been
+// configured with shared_preload_libraries=pg_stat_statements. It is
+// deliberately best-effort at the service layer: managed PostgreSQL roles may
+// not have CREATE EXTENSION permission, and that must not stop Heya booting.
+func EnsurePGStatStatements(ctx context.Context, pool *pgxpool.Pool) error {
+	if pool == nil {
+		return fmt.Errorf("database pool unavailable")
+	}
+	const extensionLockID int64 = 0x4845594150475353 // "HEYAPGSS"
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", extensionLockID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements"); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }

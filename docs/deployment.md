@@ -112,6 +112,33 @@ storage, mount the share on the host and bind-mount it at the same path into the
 serve and worker containers. Configure that mounted path in Heya; transport
 URLs such as `smb://…` are intentionally rejected.
 
+### Query diagnostics with pg_stat_statements
+
+The bundled Compose and all-in-one PostgreSQL configurations preload
+`pg_stat_statements`; Heya then creates the extension automatically when its
+database role has permission. Existing containers need one PostgreSQL restart
+after updating so the preload setting takes effect:
+
+```bash
+docker compose up -d --force-recreate postgres
+```
+
+For an external PostgreSQL server, add the following to `postgresql.conf` (or
+the equivalent managed-database parameter group), restart PostgreSQL, and
+create the extension in Heya's database:
+
+```conf
+shared_preload_libraries = 'pg_stat_statements'
+pg_stat_statements.track = all
+```
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+```
+
+Without preload or extension privileges Heya remains fully functional and its
+Diagnostics page falls back to the bounded per-process query tracer.
+
 ## Production process topology
 
 Regular images do not supervise multiple processes. Every deployment must run:

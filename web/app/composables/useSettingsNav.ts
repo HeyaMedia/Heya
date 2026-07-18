@@ -117,9 +117,12 @@ const ALL_GROUPS: SettingsNavGroup[] = [
     items: [
       { to: '/settings/configuration', label: 'Configuration', icon: 'settings' },
       {
-        to: '/settings/diagnostics', label: 'Diagnostics', icon: 'cpu',
+        to: '/settings/diagnostics', label: 'Diagnostics', icon: 'pulse',
         tabs: [
-          { to: '/settings/diagnostics', label: 'Runtime' },
+          { to: '/settings/diagnostics', label: 'Dashboard' },
+          { to: '/settings/runtime', label: 'Runtime' },
+          { to: '/settings/workers', label: 'Workers' },
+          { to: '/settings/traffic', label: 'API & WS' },
           { to: '/settings/logs', label: 'Logs' },
           { to: '/settings/database', label: 'Database' },
         ],

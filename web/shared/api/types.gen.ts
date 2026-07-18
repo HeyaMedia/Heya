@@ -305,21 +305,75 @@ export type AdminDbBody = {
     acquire_count: number;
     acquire_duration_ms: number;
     acquired_connections: number;
+    active_queries: number;
+    blocks_hit: number;
+    blocks_read: number;
+    buffer_cache_hit_ratio: number;
     canceled_acquire_count: number;
     database_name: string;
+    dead_tuples: number;
+    deadlocks: number;
     empty_acquire_count: number;
     error?: string;
     idle_connections: number;
+    index_scan_ratio: number;
+    longest_query_ms: number;
     max_connections: number;
+    query_stats_available: boolean;
+    query_stats_error?: string;
+    rows_deleted: number;
+    rows_fetched: number;
+    rows_inserted: number;
+    rows_returned: number;
+    rows_updated: number;
     size_bytes: number;
+    temp_bytes: number;
+    top_queries: Array<AdminDbQuery> | null;
     top_tables: Array<AdminDbTable> | null;
     total_connections: number;
+    transactions_committed: number;
+    transactions_rolled_back: number;
     version: string;
+    waiting_queries: number;
+};
+
+export type AdminDbQuery = {
+    average_ms: number;
+    calls: number;
+    max_ms: number;
+    rows: number;
+    statement: string;
+    total_duration_ms: number;
 };
 
 export type AdminDbTable = {
     name: string;
     size_bytes: number;
+};
+
+export type AdminDiagnosticFinding = {
+    detail: string;
+    section: 'runtime' | 'traffic' | 'database' | 'queries' | 'logs';
+    title: string;
+    tone: 'good' | 'warn' | 'bad';
+};
+
+export type AdminDiagnosticsBody = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    database: AdminDbBody;
+    findings: Array<AdminDiagnosticFinding> | null;
+    generated_at: string;
+    http: HttpMetrics;
+    http_available: boolean;
+    logs: AdminLogSummary;
+    queries: QuerySnapshot;
+    status: 'healthy' | 'watching' | 'degraded';
+    system: AdminSystemBody;
+    worker: WorkerRuntimeStatus;
+    worker_online: boolean;
 };
 
 export type AdminListener = {
@@ -357,12 +411,27 @@ export type AdminLogLevelBody = {
     level: string;
 };
 
+export type AdminLogSummary = {
+    buffered: number;
+    capacity: number;
+    counts: {
+        [key: string]: number;
+    };
+    last_5_minutes: {
+        [key: string]: number;
+    };
+    latest_at?: string;
+    recent: Array<Entry> | null;
+};
+
 export type AdminNetworkGeneral = {
     bind_address: string;
     hostname: string;
     https_required: boolean;
     interfaces: Array<AdminNetworkInterface> | null;
+    internal_subscribers: number;
     lan_ip?: string;
+    ws_admin_subscribers: number;
     ws_subscribers: number;
 };
 
@@ -440,6 +509,10 @@ export type AdminSystemBody = {
     build?: {
         [key: string]: unknown;
     };
+    /**
+     * Serve process CPU where one fully occupied logical core equals 100 percent
+     */
+    cpu_percent: number;
     gc_pause_last_ns: number;
     go_version: string;
     goarch: string;
@@ -448,6 +521,18 @@ export type AdminSystemBody = {
     goroutines: number;
     heap_alloc_bytes: number;
     heap_inuse_bytes: number;
+    /**
+     * Whether the host exposes a readable CPU counter
+     */
+    host_cpu_available: boolean;
+    /**
+     * cpu_utilization on Linux or load_average_1m on macOS
+     */
+    host_cpu_metric: string;
+    /**
+     * Whole-host load as a percentage of logical CPU capacity
+     */
+    host_cpu_percent: number;
     hostname: string;
     num_cgo_call: number;
     num_cpu: number;
@@ -470,6 +555,20 @@ export type AdminUserView = {
     id: number;
     is_admin: boolean;
     username: string;
+};
+
+export type AdminWorkersBody = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    active_jobs: Array<JobRow> | null;
+    error?: string;
+    generated_at: string;
+    online: boolean;
+    queue_summary: Array<JobSummaryRow> | null;
+    recent_jobs: Array<JobRow> | null;
+    status: WorkerRuntimeStatus;
 };
 
 export type AiCatalogBody = {
@@ -1468,6 +1567,7 @@ export type Entry = {
     };
     level: string;
     message: string;
+    source?: string;
     time: string;
 };
 
@@ -4077,6 +4177,39 @@ export type QualityOption = {
     label: string;
 };
 
+export type QuerySnapshot = {
+    average_ms: number;
+    in_flight: number;
+    max_ms: number;
+    p50_ms: number;
+    p95_ms: number;
+    queries_per_second: number;
+    recent_errors: number;
+    started_at: string;
+    top_statements: Array<QueryStatement> | null;
+    total_errors: number;
+    total_queries: number;
+    tracked_statements: number;
+    window_seconds: number;
+};
+
+export type QueryStatement = {
+    average_ms: number;
+    calls: number;
+    errors: number;
+    last_error_at?: string;
+    last_error_code?: string;
+    last_seen_at: string;
+    max_ms: number;
+    recent_average_ms: number;
+    recent_calls: number;
+    recent_errors: number;
+    recent_p95_ms: number;
+    rows: number;
+    statement: string;
+    total_duration_ms: number;
+};
+
 export type QueueAdvanceRequest = {
     /**
      * A URL to the JSON Schema for this object.
@@ -6088,6 +6221,31 @@ export type WaveformBody = {
     waveform: unknown;
 };
 
+export type WorkerRuntimeStatus = {
+    cpu_percent: number;
+    gomaxprocs: number;
+    goroutines: number;
+    heap_alloc_bytes: number;
+    heap_inuse_bytes: number;
+    heartbeat_at: string;
+    host_cpu_available: boolean;
+    host_cpu_metric: string;
+    host_cpu_percent: number;
+    hostname?: string;
+    log_level: string;
+    num_cpu: number;
+    pid?: number;
+    running: boolean;
+    started_at: string;
+    sys_bytes: number;
+    watchers: Array<WorkerRuntimeWatcher> | null;
+};
+
+export type WorkerRuntimeWatcher = {
+    library_id: number;
+    path: string;
+};
+
 export type AiChatRequestWritable = {
     max_tokens?: number;
     /**
@@ -6251,16 +6409,50 @@ export type AdminDbBodyWritable = {
     acquire_count: number;
     acquire_duration_ms: number;
     acquired_connections: number;
+    active_queries: number;
+    blocks_hit: number;
+    blocks_read: number;
+    buffer_cache_hit_ratio: number;
     canceled_acquire_count: number;
     database_name: string;
+    dead_tuples: number;
+    deadlocks: number;
     empty_acquire_count: number;
     error?: string;
     idle_connections: number;
+    index_scan_ratio: number;
+    longest_query_ms: number;
     max_connections: number;
+    query_stats_available: boolean;
+    query_stats_error?: string;
+    rows_deleted: number;
+    rows_fetched: number;
+    rows_inserted: number;
+    rows_returned: number;
+    rows_updated: number;
     size_bytes: number;
+    temp_bytes: number;
+    top_queries: Array<AdminDbQuery> | null;
     top_tables: Array<AdminDbTable> | null;
     total_connections: number;
+    transactions_committed: number;
+    transactions_rolled_back: number;
     version: string;
+    waiting_queries: number;
+};
+
+export type AdminDiagnosticsBodyWritable = {
+    database: AdminDbBodyWritable;
+    findings: Array<AdminDiagnosticFinding> | null;
+    generated_at: string;
+    http: HttpMetrics;
+    http_available: boolean;
+    logs: AdminLogSummary;
+    queries: QuerySnapshot;
+    status: 'healthy' | 'watching' | 'degraded';
+    system: AdminSystemBodyWritable;
+    worker: WorkerRuntimeStatus;
+    worker_online: boolean;
 };
 
 export type AdminListenersBodyWritable = {
@@ -6304,6 +6496,10 @@ export type AdminSystemBodyWritable = {
     build?: {
         [key: string]: unknown;
     };
+    /**
+     * Serve process CPU where one fully occupied logical core equals 100 percent
+     */
+    cpu_percent: number;
     gc_pause_last_ns: number;
     go_version: string;
     goarch: string;
@@ -6312,6 +6508,18 @@ export type AdminSystemBodyWritable = {
     goroutines: number;
     heap_alloc_bytes: number;
     heap_inuse_bytes: number;
+    /**
+     * Whether the host exposes a readable CPU counter
+     */
+    host_cpu_available: boolean;
+    /**
+     * cpu_utilization on Linux or load_average_1m on macOS
+     */
+    host_cpu_metric: string;
+    /**
+     * Whole-host load as a percentage of logical CPU capacity
+     */
+    host_cpu_percent: number;
     hostname: string;
     num_cgo_call: number;
     num_cpu: number;
@@ -6330,6 +6538,16 @@ export type AdminUserViewWritable = {
     id: number;
     is_admin: boolean;
     username: string;
+};
+
+export type AdminWorkersBodyWritable = {
+    active_jobs: Array<JobRow> | null;
+    error?: string;
+    generated_at: string;
+    online: boolean;
+    queue_summary: Array<JobSummaryRow> | null;
+    recent_jobs: Array<JobRow> | null;
+    status: WorkerRuntimeStatus;
 };
 
 export type AiCatalogBodyWritable = {
@@ -8341,6 +8559,31 @@ export type AdminDbResponses = {
 
 export type AdminDbResponse = AdminDbResponses[keyof AdminDbResponses];
 
+export type AdminDiagnosticsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/admin/diagnostics';
+};
+
+export type AdminDiagnosticsErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type AdminDiagnosticsError = AdminDiagnosticsErrors[keyof AdminDiagnosticsErrors];
+
+export type AdminDiagnosticsResponses = {
+    /**
+     * OK
+     */
+    200: AdminDiagnosticsBody;
+};
+
+export type AdminDiagnosticsResponse = AdminDiagnosticsResponses[keyof AdminDiagnosticsResponses];
+
 export type AdminDoctorData = {
     body?: never;
     path?: never;
@@ -8955,6 +9198,31 @@ export type AdminSetUserRoleResponses = {
 };
 
 export type AdminSetUserRoleResponse = AdminSetUserRoleResponses[keyof AdminSetUserRoleResponses];
+
+export type AdminWorkersData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/admin/workers';
+};
+
+export type AdminWorkersErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type AdminWorkersError = AdminWorkersErrors[keyof AdminWorkersErrors];
+
+export type AdminWorkersResponses = {
+    /**
+     * OK
+     */
+    200: AdminWorkersBody;
+};
+
+export type AdminWorkersResponse = AdminWorkersResponses[keyof AdminWorkersResponses];
 
 export type GetAiCatalogData = {
     body?: never;

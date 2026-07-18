@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"runtime"
 	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/secrettext"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -32,10 +35,23 @@ type WorkerRuntimeWatcher struct {
 // It lives in system_settings so a newly restarted API process can report the
 // current worker without waiting for an in-memory event.
 type WorkerRuntimeStatus struct {
-	StartedAt   time.Time              `json:"started_at"`
-	HeartbeatAt time.Time              `json:"heartbeat_at"`
-	Running     bool                   `json:"running"`
-	Watchers    []WorkerRuntimeWatcher `json:"watchers"`
+	StartedAt        time.Time              `json:"started_at"`
+	HeartbeatAt      time.Time              `json:"heartbeat_at"`
+	Running          bool                   `json:"running"`
+	Hostname         string                 `json:"hostname,omitempty"`
+	PID              int                    `json:"pid,omitempty"`
+	CPUPercent       float64                `json:"cpu_percent"`
+	HostCPUPercent   float64                `json:"host_cpu_percent"`
+	HostCPUAvailable bool                   `json:"host_cpu_available"`
+	HostCPUMetric    string                 `json:"host_cpu_metric"`
+	Goroutines       int                    `json:"goroutines"`
+	HeapInUseBytes   uint64                 `json:"heap_inuse_bytes"`
+	HeapAllocBytes   uint64                 `json:"heap_alloc_bytes"`
+	SysBytes         uint64                 `json:"sys_bytes"`
+	NumCPU           int                    `json:"num_cpu"`
+	GOMAXPROCS       int                    `json:"gomaxprocs"`
+	LogLevel         string                 `json:"log_level"`
+	Watchers         []WorkerRuntimeWatcher `json:"watchers"`
 }
 
 // Online reports whether the last heartbeat represents a live worker. The
@@ -76,21 +92,38 @@ func (a *App) WorkerRuntimeStatus(ctx context.Context) (WorkerRuntimeStatus, err
 // final Running=false snapshot; after a crash, the heartbeat expires naturally.
 func (a *App) StartWorkerRuntimeHeartbeat(ctx context.Context) {
 	publish := func(writeCtx context.Context, running bool) {
-		if a.watcher == nil {
-			return
-		}
-		watcherStatus := a.watcher.Status()
-		watchers := make([]WorkerRuntimeWatcher, 0, len(watcherStatus))
-		for libraryID, path := range watcherStatus {
-			watchers = append(watchers, WorkerRuntimeWatcher{LibraryID: libraryID, Path: secrettext.Redact(path)})
+		watchers := []WorkerRuntimeWatcher{}
+		if a.watcher != nil {
+			watcherStatus := a.watcher.Status()
+			watchers = make([]WorkerRuntimeWatcher, 0, len(watcherStatus))
+			for libraryID, path := range watcherStatus {
+				watchers = append(watchers, WorkerRuntimeWatcher{LibraryID: libraryID, Path: secrettext.Redact(path)})
+			}
 		}
 		sort.Slice(watchers, func(i, j int) bool { return watchers[i].LibraryID < watchers[j].LibraryID })
 
+		var memory runtime.MemStats
+		runtime.ReadMemStats(&memory)
+		hostname, _ := os.Hostname()
+		cpu := a.Diagnostics().CPUUsage()
 		status := WorkerRuntimeStatus{
-			StartedAt:   a.startedAt,
-			HeartbeatAt: time.Now().UTC(),
-			Running:     running,
-			Watchers:    watchers,
+			StartedAt:        a.startedAt,
+			HeartbeatAt:      time.Now().UTC(),
+			Running:          running,
+			Hostname:         hostname,
+			PID:              os.Getpid(),
+			CPUPercent:       cpu.ProcessPercent,
+			HostCPUPercent:   cpu.HostPercent,
+			HostCPUAvailable: cpu.HostAvailable,
+			HostCPUMetric:    cpu.HostMetric,
+			Goroutines:       runtime.NumGoroutine(),
+			HeapInUseBytes:   memory.HeapInuse,
+			HeapAllocBytes:   memory.HeapAlloc,
+			SysBytes:         memory.Sys,
+			NumCPU:           runtime.NumCPU(),
+			GOMAXPROCS:       runtime.GOMAXPROCS(0),
+			LogLevel:         zerolog.GlobalLevel().String(),
+			Watchers:         watchers,
 		}
 		raw, err := json.Marshal(status)
 		if err != nil {

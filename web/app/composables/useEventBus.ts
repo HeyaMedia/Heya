@@ -5,6 +5,8 @@ export interface WsEvent<T = any> {
 }
 
 export interface LogPayload {
+  time?: string
+  source?: 'serve' | 'worker' | string
   level: string
   message: string
   fields?: Record<string, any>

@@ -77,6 +77,8 @@ var adminRoutes = []struct {
 	body   map[string]any
 }{
 	{"system", http.MethodGet, "/api/admin/system", nil},
+	{"diagnostics", http.MethodGet, "/api/admin/diagnostics", nil},
+	{"workers", http.MethodGet, "/api/admin/workers", nil},
 	{"storage", http.MethodGet, "/api/admin/storage", nil},
 	{"storage/scan", http.MethodPost, "/api/admin/storage/scan", map[string]any{"library_id": 0}},
 	{"db", http.MethodGet, "/api/admin/db", nil},

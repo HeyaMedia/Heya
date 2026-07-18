@@ -8,6 +8,7 @@ import type { LogEntry as Entry } from '~/queries/settings'
 const { on, connected: wsConnected } = useEventBus()
 
 const LEVELS = ['trace', 'debug', 'info', 'warn', 'error'] as const
+const SOURCES = ['all', 'serve', 'worker'] as const
 type Level = (typeof LEVELS)[number]
 
 const MAX_BUFFER = 5000
@@ -21,6 +22,7 @@ const { flash } = useFlash()
 
 const search = ref('')
 const enabledLevels = ref<Set<Level>>(new Set(LEVELS))
+const sourceFilter = ref<'all' | 'serve' | 'worker'>('all')
 
 // Tail length defaults to "last 500" — much faster to render than the full
 // 5k ring and still gives plenty of recent context for the eye-test case.
@@ -54,7 +56,8 @@ const unsubLog = on('log', (event) => {
   }
   const p = event.payload as LogPayload
   logs.value.push({
-    time: event.ts,
+    time: p.time ?? event.ts,
+    source: p.source ?? 'serve',
     level: p.level,
     message: p.message,
     fields: p.fields,
@@ -119,6 +122,9 @@ const filteredLogs = computed(() => {
   if (enabledLevels.value.size !== LEVELS.length) {
     out = out.filter(e => enabledLevels.value.has(e.level as Level))
   }
+  if (sourceFilter.value !== 'all') {
+    out = out.filter(e => (e.source || 'serve') === sourceFilter.value)
+  }
   if (q) {
     out = out.filter(e => {
       if (e.message?.toLowerCase().includes(q)) return true
@@ -180,6 +186,15 @@ function fieldsToString(fields?: Record<string, any>): string {
     .join(' · ')
 }
 
+function logSource(entry: Entry): 'serve' | 'worker' | string {
+  return entry.source || 'serve'
+}
+
+const sourceCounts = computed(() => ({
+  serve: logs.value.filter(entry => logSource(entry) === 'serve').length,
+  worker: logs.value.filter(entry => logSource(entry) === 'worker').length,
+}))
+
 function hasFields(e: Entry): boolean {
   return !!e.fields && Object.keys(e.fields).length > 0
 }
@@ -212,12 +227,15 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
       title="Logs"
       icon="clipboard"
       eyebrow="Advanced · Live server events"
-      description="Filter and search the in-process log stream, pause it for inspection, or export the current view as structured JSON."
+      description="Read structured serve and worker logs, isolate a process or severity, inspect fields, and export the current view as JSON."
     />
 
     <div class="tiles">
       <MetricTile label="Buffered" :value="totalBuffered" icon="clipboard"
         :sub="`cap ${MAX_BUFFER}`" />
+      <MetricTile label="Serve" :value="sourceCounts.serve" icon="pulse" />
+      <MetricTile label="Worker" :value="sourceCounts.worker" icon="wrench"
+        :tone="sourceCounts.worker > 0 ? 'good' : 'neutral'" />
       <MetricTile
         v-for="lvl in LEVELS" :key="lvl"
         :label="lvl"
@@ -246,6 +264,10 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
           <button class="lvl-all" :disabled="enabledLevels.size === LEVELS.length" @click="allLevels">all</button>
         </div>
         <input v-model="search" class="search-input" placeholder="search message + fields…" aria-label="Search logs by message or fields" spellcheck="false" />
+        <div class="source-toggle" role="group" aria-label="Log process">
+          <button v-for="source in SOURCES" :key="source"
+            :class="{ active: sourceFilter === source }" @click="sourceFilter = source">{{ source }}</button>
+        </div>
       </div>
 
       <div class="tb-right">
@@ -275,7 +297,7 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
     <div class="status-bar">
       <span class="sb-count">
         Showing <strong>{{ totalShown }}</strong> of <strong>{{ totalBuffered }}</strong> buffered
-        <template v-if="search || enabledLevels.size !== LEVELS.length"> · filtered</template>
+        <template v-if="search || enabledLevels.size !== LEVELS.length || sourceFilter !== 'all'"> · filtered</template>
       </span>
       <LiveDot :connected="wsConnected" :label="wsConnected ? 'Live · WS' : 'WS offline'" />
     </div>
@@ -301,7 +323,8 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
           @keydown.enter="hasFields(e) && toggleExpand(i)"
           @keydown.space.prevent="hasFields(e) && toggleExpand(i)"
         >
-          <span class="lr-time">{{ formatTime(e.time) }}</span>
+          <span class="lr-time" :title="new Date(e.time).toLocaleString()">{{ formatTime(e.time) }}</span>
+          <span class="lr-source" :class="logSource(e)">{{ logSource(e) }}</span>
           <span class="lr-level" :class="e.level">{{ e.level }}</span>
           <span class="lr-msg">{{ e.message }}</span>
           <span v-if="hasFields(e) && !expanded.has(i)" class="lr-fields">
@@ -409,6 +432,13 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
 }
 .search-input:focus { border-color: var(--gold); }
 
+.source-toggle { display: inline-flex; padding: 2px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-0); }
+.source-toggle button {
+  padding: 3px 8px; border: 0; border-radius: var(--r-xs); background: transparent;
+  color: var(--fg-4); font-family: var(--font-mono); font-size: 9.5px; text-transform: uppercase; cursor: pointer;
+}
+.source-toggle button.active { background: var(--bg-3); color: var(--fg-1); }
+
 .tail-select {
   background: var(--bg-2);
   border: 1px solid var(--border);
@@ -468,10 +498,11 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
 
 .log-row {
   display: grid;
-  grid-template-columns: 90px 50px 1fr;
-  gap: 8px;
-  padding: 2px 14px;
-  align-items: baseline;
+  grid-template-columns: 88px 58px 50px minmax(0, 1fr);
+  gap: 9px;
+  padding: 5px 14px;
+  align-items: start;
+  border-bottom: 1px solid var(--hair);
 }
 .log-row.has-fields { cursor: pointer; }
 .log-row:hover { background: rgb(var(--ink) / 0.02); }
@@ -480,17 +511,27 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
 .log-row.expanded { background: rgb(var(--ink) / 0.04); }
 
 .lr-time   { color: var(--fg-4); white-space: nowrap; }
+.lr-source {
+  display: inline-flex; justify-content: center; padding: 1px 5px;
+  border: 1px solid var(--border); border-radius: 999px;
+  color: var(--fg-3); font-size: 9px; font-weight: 700; line-height: 1.5;
+  text-transform: uppercase;
+}
+.lr-source.worker { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 35%, var(--border)); background: var(--gold-soft); }
 .lr-level  { font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; }
 .lr-level.trace { color: var(--fg-4); }
 .lr-level.debug { color: var(--fg-3); }
 .lr-level.info  { color: rgb(140, 160, 255); }
 .lr-level.warn  { color: var(--gold); }
 .lr-level.error { color: var(--bad); }
-.lr-msg { color: var(--fg-1); word-break: break-word; }
-.lr-fields { color: var(--fg-4); margin-left: 8px; }
+.lr-msg { color: var(--fg-1); word-break: break-word; line-height: 1.5; }
+.lr-fields {
+  grid-column: 4 / -1; overflow: hidden; color: var(--fg-4);
+  font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap;
+}
 
 .lr-fields-expanded {
-  grid-column: 3 / -1;
+  grid-column: 4 / -1;
   margin-top: 4px;
   display: grid;
   grid-template-columns: minmax(120px, max-content) 1fr;
@@ -522,5 +563,6 @@ useLiveFallback(backfill, { pollWhileOffline: 0, immediate: false })
   .lvl-row { flex-wrap: wrap; row-gap: 6px; }
   .search-input { width: 100%; }
   .status-bar { flex-wrap: wrap; row-gap: 4px; }
+  .log-row { grid-template-columns: 88px 52px 44px minmax(0, 1fr); gap: 6px; padding-inline: 8px; }
 }
 </style>

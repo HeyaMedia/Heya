@@ -13,6 +13,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/diagnostics"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/karbowiak/heya/internal/service"
@@ -203,25 +204,29 @@ func toAdminUserView(u sqlc.User) adminUserView {
 // --- /api/admin/system ---
 
 type adminSystemBody struct {
-	Hostname       string         `json:"hostname"`
-	PID            int            `json:"pid"`
-	StartedAt      string         `json:"started_at" example:"2026-05-25T08:14:01Z"`
-	UptimeSeconds  int64          `json:"uptime_seconds"`
-	GoVersion      string         `json:"go_version"`
-	GOOS           string         `json:"goos"`
-	GOARCH         string         `json:"goarch"`
-	NumCPU         int            `json:"num_cpu"`
-	GOMAXPROCS     int            `json:"gomaxprocs"`
-	Goroutines     int            `json:"goroutines"`
-	HeapInUseBytes uint64         `json:"heap_inuse_bytes"`
-	HeapAllocBytes uint64         `json:"heap_alloc_bytes"`
-	SysBytes       uint64         `json:"sys_bytes"`
-	StackBytes     uint64         `json:"stack_bytes"`
-	NumGC          uint32         `json:"num_gc"`
-	GCPauseLastNs  uint64         `json:"gc_pause_last_ns"`
-	NumCgoCall     int64          `json:"num_cgo_call"`
-	WSSubscribers  int            `json:"ws_subscribers"`
-	Build          map[string]any `json:"build,omitempty"`
+	Hostname         string         `json:"hostname"`
+	PID              int            `json:"pid"`
+	StartedAt        string         `json:"started_at" example:"2026-05-25T08:14:01Z"`
+	UptimeSeconds    int64          `json:"uptime_seconds"`
+	GoVersion        string         `json:"go_version"`
+	GOOS             string         `json:"goos"`
+	GOARCH           string         `json:"goarch"`
+	NumCPU           int            `json:"num_cpu"`
+	GOMAXPROCS       int            `json:"gomaxprocs"`
+	Goroutines       int            `json:"goroutines"`
+	HeapInUseBytes   uint64         `json:"heap_inuse_bytes"`
+	HeapAllocBytes   uint64         `json:"heap_alloc_bytes"`
+	SysBytes         uint64         `json:"sys_bytes"`
+	StackBytes       uint64         `json:"stack_bytes"`
+	NumGC            uint32         `json:"num_gc"`
+	GCPauseLastNs    uint64         `json:"gc_pause_last_ns"`
+	NumCgoCall       int64          `json:"num_cgo_call"`
+	CPUPercent       float64        `json:"cpu_percent" doc:"Serve process CPU where one fully occupied logical core equals 100 percent"`
+	HostCPUPercent   float64        `json:"host_cpu_percent" doc:"Whole-host load as a percentage of logical CPU capacity"`
+	HostCPUAvailable bool           `json:"host_cpu_available" doc:"Whether the host exposes a readable CPU counter"`
+	HostCPUMetric    string         `json:"host_cpu_metric" doc:"cpu_utilization on Linux or load_average_1m on macOS"`
+	WSSubscribers    int            `json:"ws_subscribers"`
+	Build            map[string]any `json:"build,omitempty"`
 }
 
 func collectAdminSystem(app *service.App, hub *eventhub.Hub) adminSystemBody {
@@ -250,7 +255,14 @@ func collectAdminSystem(app *service.App, hub *eventhub.Hub) adminSystemBody {
 		NumCgoCall:     runtime.NumCgoCall(),
 	}
 	if hub != nil {
-		body.WSSubscribers = hub.SubscriberCount()
+		body.WSSubscribers = hub.SubscriberStats().WebSocket
+	}
+	if app != nil && app.Diagnostics() != nil {
+		usage := app.Diagnostics().CPUUsage()
+		body.CPUPercent = usage.ProcessPercent
+		body.HostCPUPercent = usage.HostPercent
+		body.HostCPUAvailable = usage.HostAvailable
+		body.HostCPUMetric = usage.HostMetric
 	}
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		build := map[string]any{
@@ -366,24 +378,54 @@ type adminDBTable struct {
 	SizeBytes int64  `json:"size_bytes"`
 }
 
+type adminDBQuery struct {
+	Statement       string  `json:"statement"`
+	Calls           int64   `json:"calls"`
+	Rows            int64   `json:"rows"`
+	TotalDurationMS float64 `json:"total_duration_ms"`
+	AverageMS       float64 `json:"average_ms"`
+	MaxMS           float64 `json:"max_ms"`
+}
+
 type adminDBBody struct {
-	Version              string         `json:"version"`
-	DatabaseName         string         `json:"database_name"`
-	SizeBytes            int64          `json:"size_bytes"`
-	TotalConnections     int32          `json:"total_connections"`
-	AcquiredConnections  int32          `json:"acquired_connections"`
-	IdleConnections      int32          `json:"idle_connections"`
-	MaxConnections       int32          `json:"max_connections"`
-	AcquireCount         int64          `json:"acquire_count"`
-	AcquireDurationMs    int64          `json:"acquire_duration_ms"`
-	CanceledAcquireCount int64          `json:"canceled_acquire_count"`
-	EmptyAcquireCount    int64          `json:"empty_acquire_count"`
-	TopTables            []adminDBTable `json:"top_tables"`
-	Error                string         `json:"error,omitempty"`
+	Version                string         `json:"version"`
+	DatabaseName           string         `json:"database_name"`
+	SizeBytes              int64          `json:"size_bytes"`
+	TotalConnections       int32          `json:"total_connections"`
+	AcquiredConnections    int32          `json:"acquired_connections"`
+	IdleConnections        int32          `json:"idle_connections"`
+	MaxConnections         int32          `json:"max_connections"`
+	AcquireCount           int64          `json:"acquire_count"`
+	AcquireDurationMs      int64          `json:"acquire_duration_ms"`
+	CanceledAcquireCount   int64          `json:"canceled_acquire_count"`
+	EmptyAcquireCount      int64          `json:"empty_acquire_count"`
+	TopTables              []adminDBTable `json:"top_tables"`
+	TransactionsCommitted  int64          `json:"transactions_committed"`
+	TransactionsRolledBack int64          `json:"transactions_rolled_back"`
+	BlocksRead             int64          `json:"blocks_read"`
+	BlocksHit              int64          `json:"blocks_hit"`
+	BufferCacheHitRatio    float64        `json:"buffer_cache_hit_ratio"`
+	RowsReturned           int64          `json:"rows_returned"`
+	RowsFetched            int64          `json:"rows_fetched"`
+	RowsInserted           int64          `json:"rows_inserted"`
+	RowsUpdated            int64          `json:"rows_updated"`
+	RowsDeleted            int64          `json:"rows_deleted"`
+	TempBytes              int64          `json:"temp_bytes"`
+	Deadlocks              int64          `json:"deadlocks"`
+	DeadTuples             int64          `json:"dead_tuples"`
+	IndexScanRatio         float64        `json:"index_scan_ratio"`
+	ActiveQueries          int64          `json:"active_queries"`
+	WaitingQueries         int64          `json:"waiting_queries"`
+	LongestQueryMS         float64        `json:"longest_query_ms"`
+	QueryStatsAvailable    bool           `json:"query_stats_available"`
+	QueryStatsError        string         `json:"query_stats_error,omitempty"`
+	TopQueries             []adminDBQuery `json:"top_queries"`
+	Error                  string         `json:"error,omitempty"`
 }
 
 func collectAdminDB(ctx context.Context, app *service.App) adminDBBody {
-	body := adminDBBody{}
+	ctx = diagnostics.WithoutQueryTrace(ctx)
+	body := adminDBBody{TopTables: []adminDBTable{}, TopQueries: []adminDBQuery{}}
 	pool := app.DBPool()
 	if pool == nil {
 		body.Error = "no database pool"
@@ -400,7 +442,7 @@ func collectAdminDB(ctx context.Context, app *service.App) adminDBBody {
 	body.CanceledAcquireCount = st.CanceledAcquireCount()
 	body.EmptyAcquireCount = st.EmptyAcquireCount()
 
-	if err := pool.QueryRow(ctx, "SELECT current_database()").Scan(&body.DatabaseName); err != nil {
+	if err := pool.QueryRow(ctx, "/* heya:diagnostics */ SELECT current_database()").Scan(&body.DatabaseName); err != nil {
 		body.Error = err.Error()
 		return body
 	}
@@ -408,18 +450,48 @@ func collectAdminDB(ctx context.Context, app *service.App) adminDBBody {
 	// Postgres version() returns a verbose string; trim the leading "PostgreSQL"
 	// to keep the dashboard readable.
 	var rawVersion string
-	if err := pool.QueryRow(ctx, "SELECT version()").Scan(&rawVersion); err == nil {
+	if err := pool.QueryRow(ctx, "/* heya:diagnostics */ SELECT version()").Scan(&rawVersion); err == nil {
 		body.Version = strings.TrimPrefix(rawVersion, "PostgreSQL ")
 	}
 
-	if err := pool.QueryRow(ctx, "SELECT pg_database_size(current_database())").Scan(&body.SizeBytes); err != nil && body.Error == "" {
+	if err := pool.QueryRow(ctx, "/* heya:diagnostics */ SELECT pg_database_size(current_database())").Scan(&body.SizeBytes); err != nil && body.Error == "" {
 		body.Error = err.Error()
 	}
+
+	_ = pool.QueryRow(ctx, `/* heya:diagnostics */
+		SELECT xact_commit, xact_rollback, blks_read, blks_hit,
+		       CASE WHEN blks_read + blks_hit = 0 THEN 0
+		            ELSE blks_hit::double precision / (blks_read + blks_hit) * 100 END,
+		       tup_returned, tup_fetched, tup_inserted, tup_updated, tup_deleted,
+		       temp_bytes, deadlocks
+		FROM pg_stat_database
+		WHERE datname = current_database()
+	`).Scan(
+		&body.TransactionsCommitted, &body.TransactionsRolledBack, &body.BlocksRead, &body.BlocksHit,
+		&body.BufferCacheHitRatio, &body.RowsReturned, &body.RowsFetched, &body.RowsInserted,
+		&body.RowsUpdated, &body.RowsDeleted, &body.TempBytes, &body.Deadlocks,
+	)
+
+	_ = pool.QueryRow(ctx, `/* heya:diagnostics */
+		SELECT COALESCE(sum(n_dead_tup), 0)::bigint,
+		       CASE WHEN COALESCE(sum(seq_scan + idx_scan), 0) = 0 THEN 0
+		            ELSE COALESCE(sum(idx_scan), 0)::double precision / sum(seq_scan + idx_scan) * 100 END
+		FROM pg_stat_user_tables
+	`).Scan(&body.DeadTuples, &body.IndexScanRatio)
+
+	_ = pool.QueryRow(ctx, `/* heya:diagnostics */
+		SELECT count(*) FILTER (WHERE state = 'active' AND pid <> pg_backend_pid()),
+		       count(*) FILTER (WHERE state = 'active' AND wait_event IS NOT NULL AND pid <> pg_backend_pid()),
+		       COALESCE(max(EXTRACT(EPOCH FROM (clock_timestamp() - query_start)) * 1000)
+		         FILTER (WHERE state = 'active' AND pid <> pg_backend_pid()), 0)
+		FROM pg_stat_activity
+		WHERE datname = current_database()
+	`).Scan(&body.ActiveQueries, &body.WaitingQueries, &body.LongestQueryMS)
 
 	// Top 10 user tables by total size (table + indexes + toast). Skips the
 	// pg_catalog and information_schema so the dashboard reflects Heya data,
 	// not pg bookkeeping.
-	const topTablesSQL = `
+	const topTablesSQL = `/* heya:diagnostics */
 		SELECT schemaname || '.' || relname AS name,
 		       pg_total_relation_size(relid) AS size
 		FROM pg_catalog.pg_statio_user_tables
@@ -435,6 +507,41 @@ func collectAdminDB(ctx context.Context, app *service.App) adminDBBody {
 				break
 			}
 			body.TopTables = append(body.TopTables, t)
+		}
+	}
+
+	var extensionInstalled bool
+	if err := pool.QueryRow(ctx, `/* heya:diagnostics */ SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')`).Scan(&extensionInstalled); err != nil {
+		body.QueryStatsError = err.Error()
+	} else if !extensionInstalled {
+		body.QueryStatsError = "pg_stat_statements extension is not installed"
+	} else {
+		const statementsSQL = `/* heya:diagnostics */
+			SELECT query, calls::bigint, rows::bigint, total_exec_time, mean_exec_time, max_exec_time
+			FROM pg_stat_statements
+			WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+			  AND query NOT LIKE '/* heya:diagnostics */%'
+			ORDER BY total_exec_time DESC
+			LIMIT 10
+		`
+		queryRows, queryErr := pool.Query(ctx, statementsSQL)
+		if queryErr != nil {
+			body.QueryStatsError = queryErr.Error()
+		} else {
+			defer queryRows.Close()
+			for queryRows.Next() {
+				var query adminDBQuery
+				if err := queryRows.Scan(&query.Statement, &query.Calls, &query.Rows, &query.TotalDurationMS, &query.AverageMS, &query.MaxMS); err != nil {
+					body.QueryStatsError = err.Error()
+					break
+				}
+				query.Statement = diagnostics.SanitizeStatement(query.Statement)
+				body.TopQueries = append(body.TopQueries, query)
+			}
+			if err := queryRows.Err(); err != nil && body.QueryStatsError == "" {
+				body.QueryStatsError = err.Error()
+			}
+			body.QueryStatsAvailable = body.QueryStatsError == ""
 		}
 	}
 	return body
@@ -464,7 +571,7 @@ func collectAdminListeners(app *service.App, hub *eventhub.Hub) adminListenersBo
 	cfg := app.ConfigSnapshot()
 	body := adminListenersBody{}
 	if hub != nil {
-		body.WSSubscribers = hub.SubscriberCount()
+		body.WSSubscribers = hub.SubscriberStats().WebSocket
 	}
 	if manager := app.Ingress(); manager != nil {
 		for _, listener := range manager.Status().Listeners {

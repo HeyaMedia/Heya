@@ -29,12 +29,14 @@ type adminNetworkStatusBody struct {
 }
 
 type adminNetworkGeneral struct {
-	Hostname      string                  `json:"hostname"`
-	BindAddress   string                  `json:"bind_address"`
-	LANIP         string                  `json:"lan_ip,omitempty"`
-	HTTPSRequired bool                    `json:"https_required"`
-	WSSubscribers int                     `json:"ws_subscribers"`
-	Interfaces    []adminNetworkInterface `json:"interfaces"`
+	Hostname            string                  `json:"hostname"`
+	BindAddress         string                  `json:"bind_address"`
+	LANIP               string                  `json:"lan_ip,omitempty"`
+	HTTPSRequired       bool                    `json:"https_required"`
+	WSSubscribers       int                     `json:"ws_subscribers"`
+	WSAdminSubscribers  int                     `json:"ws_admin_subscribers"`
+	InternalSubscribers int                     `json:"internal_subscribers"`
+	Interfaces          []adminNetworkInterface `json:"interfaces"`
 }
 
 type adminNetworkInterface struct {
@@ -74,7 +76,10 @@ func collectAdminNetworkStatus(app *service.App, hub *eventhub.Hub) adminNetwork
 	}
 	body.General.Hostname, _ = os.Hostname()
 	if hub != nil {
-		body.General.WSSubscribers = hub.SubscriberCount()
+		subscribers := hub.SubscriberStats()
+		body.General.WSSubscribers = subscribers.WebSocket
+		body.General.WSAdminSubscribers = subscribers.Admin
+		body.General.InternalSubscribers = subscribers.Internal
 	}
 	body.General.LANIP = ingress.DetectLANIP()
 	body.General.Interfaces = collectNetworkInterfaces()

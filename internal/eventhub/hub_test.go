@@ -77,6 +77,22 @@ func TestBroadcastVisibilityUsesSubscriberPrincipal(t *testing.T) {
 	requireNoEvent(t, user)
 }
 
+func TestSubscriberStatsSeparatesWebSocketsFromInternalConsumers(t *testing.T) {
+	h := New()
+	defer h.Close()
+	internal := h.Subscribe()
+	admin := h.SubscribePrincipal(SubscriberPrincipal{UserID: 1, IsAdmin: true})
+	user := h.SubscribePrincipal(SubscriberPrincipal{UserID: 2})
+	defer h.Unsubscribe(internal)
+	defer h.Unsubscribe(admin)
+	defer h.Unsubscribe(user)
+
+	stats := h.SubscriberStats()
+	if stats.WebSocket != 2 || stats.Admin != 1 || stats.Internal != 1 {
+		t.Fatalf("subscriber stats = %+v, want websocket=2 admin=1 internal=1", stats)
+	}
+}
+
 func TestTargetedVisibilityPreservesUserAndInternalRouting(t *testing.T) {
 	h := New()
 	internal := h.Subscribe()

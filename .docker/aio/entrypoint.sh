@@ -57,6 +57,16 @@ EOF
     trap - EXIT HUP INT TERM
 fi
 
+# Query diagnostics need the collector loaded when PostgreSQL starts. Keep
+# this outside first-boot initialization so existing AIO data volumes gain the
+# setting on their next container restart too.
+if ! grep -Eq '^[[:space:]]*shared_preload_libraries[[:space:]]*=.*pg_stat_statements' "$PGDATA/postgresql.conf"; then
+    cat >> "$PGDATA/postgresql.conf" <<'EOF'
+shared_preload_libraries = 'pg_stat_statements'
+pg_stat_statements.track = 'all'
+EOF
+fi
+
 # Finish database creation separately from initdb so an interrupted first boot
 # can safely resume instead of leaving a valid cluster without POSTGRES_DB.
 if [ ! -f "$PGDATA/.heya-aio-initialized" ]; then

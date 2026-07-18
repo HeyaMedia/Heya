@@ -11,6 +11,7 @@ import (
 
 type Entry struct {
 	Time    time.Time      `json:"time"`
+	Source  string         `json:"source,omitempty"`
 	Level   string         `json:"level"`
 	Message string         `json:"message"`
 	Fields  map[string]any `json:"fields,omitempty"`
@@ -22,21 +23,30 @@ type RingBuffer struct {
 	size    int
 	pos     int
 	full    bool
+	source  string
 
 	subsMu sync.RWMutex
 	subs   map[chan Entry]struct{}
 }
 
 func New(size int) *RingBuffer {
+	return NewWithSource(size, "serve")
+}
+
+func NewWithSource(size int, source string) *RingBuffer {
+	if size < 1 {
+		size = 1
+	}
 	return &RingBuffer{
 		entries: make([]Entry, size),
 		size:    size,
+		source:  source,
 		subs:    make(map[chan Entry]struct{}),
 	}
 }
 
 func (rb *RingBuffer) Write(p []byte) (n int, err error) {
-	e := Entry{Time: time.Now()}
+	e := Entry{Time: time.Now(), Source: rb.source}
 	var raw map[string]any
 	if json.Unmarshal(p, &raw) == nil {
 		if lvl, ok := raw["level"].(string); ok {
@@ -64,6 +74,31 @@ func (rb *RingBuffer) Write(p []byte) (n int, err error) {
 		e.Message = secrettext.Redact(string(p))
 	}
 
+	rb.append(e, true)
+
+	return len(p), nil
+}
+
+// Store inserts an already-structured entry without notifying subscribers.
+// The API uses this for worker logs that have already arrived over the
+// cross-process event relay: storing them makes /api/logs backfill complete
+// without emitting the same event back onto the WebSocket hub.
+func (rb *RingBuffer) Store(e Entry) {
+	if rb == nil {
+		return
+	}
+	if e.Time.IsZero() {
+		e.Time = time.Now()
+	}
+	if e.Source == "" {
+		e.Source = rb.source
+	}
+	e.Message = secrettext.Redact(e.Message)
+	e.Fields = secrettext.RedactMap(e.Fields)
+	rb.append(e, false)
+}
+
+func (rb *RingBuffer) append(e Entry, publish bool) {
 	rb.mu.Lock()
 	rb.entries[rb.pos] = e
 	rb.pos = (rb.pos + 1) % rb.size
@@ -71,20 +106,23 @@ func (rb *RingBuffer) Write(p []byte) (n int, err error) {
 		rb.full = true
 	}
 	rb.mu.Unlock()
-
+	if !publish {
+		return
+	}
 	rb.subsMu.RLock()
+	defer rb.subsMu.RUnlock()
 	for ch := range rb.subs {
 		select {
 		case ch <- e:
 		default:
 		}
 	}
-	rb.subsMu.RUnlock()
-
-	return len(p), nil
 }
 
 func (rb *RingBuffer) Recent(n int) []Entry {
+	if rb == nil || n <= 0 {
+		return []Entry{}
+	}
 	rb.mu.RLock()
 	defer rb.mu.RUnlock()
 
@@ -105,6 +143,13 @@ func (rb *RingBuffer) Recent(n int) []Entry {
 		result[i] = rb.entries[idx]
 	}
 	return result
+}
+
+func (rb *RingBuffer) Capacity() int {
+	if rb == nil {
+		return 0
+	}
+	return rb.size
 }
 
 func (rb *RingBuffer) Subscribe() chan Entry {

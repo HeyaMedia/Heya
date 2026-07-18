@@ -2,7 +2,9 @@ import { defineQueryOptions } from '@pinia/colada'
 export type {
   AdminDbBody as AdminDatabase,
   AdminLogLevelBody as AdminLogLevel,
+  AdminDiagnosticsBody as AdminDiagnostics,
   AdminSystemBody as AdminSystem,
+  AdminWorkersBody as AdminWorkers,
   DashboardStats,
   HealthBody as Health,
   JobSummaryRow,
@@ -15,7 +17,9 @@ export type {
 import type {
   AdminDbBody as AdminDatabase,
   AdminLogLevelBody as AdminLogLevel,
+  AdminDiagnosticsBody as AdminDiagnostics,
   AdminSystemBody as AdminSystem,
+  AdminWorkersBody as AdminWorkers,
   DashboardStats,
   HealthBody as Health,
   JobSummaryRow,
@@ -58,6 +62,26 @@ export const adminSystemQuery = defineQueryOptions(() => ({
     return await $heya('/api/admin/system') as AdminSystem
   },
   staleTime: 1000 * 2,
+  meta: privateRuntime,
+}))
+
+export const adminDiagnosticsQuery = defineQueryOptions(() => ({
+  key: ['admin', 'diagnostics'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/admin/diagnostics') as AdminDiagnostics
+  },
+  staleTime: 1000 * 3,
+  meta: privateRuntime,
+}))
+
+export const adminWorkersQuery = defineQueryOptions(() => ({
+  key: ['admin', 'workers'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/admin/workers') as AdminWorkers
+  },
+  staleTime: 1000 * 3,
   meta: privateRuntime,
 }))
 
