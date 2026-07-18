@@ -606,7 +606,17 @@ func musicSearchFallbackArtists(artist MusicArtistPlan) []string {
 		}
 		fallbacks = append(fallbacks, value)
 	}
-	add(musicStorageOwnerArtist(artist.Files))
+	// The physical owner is only evidence when it is actually part of the
+	// credited identity. Music libraries often have staging/miscellaneous
+	// owners whose children are correctly tagged as unrelated artists. Using
+	// such an owner as a generic fallback turns a failed MINNIE lookup under an
+	// "Explo" directory into an Explo candidate and pollutes the review result.
+	// Collaboration credits such as "Jax Jones, Ado" under Ado still get the
+	// intended owner fallback.
+	owner := musicStorageOwnerArtist(artist.Files)
+	if musicCreditContainsArtist(artist.Artist, owner) {
+		add(owner)
+	}
 	add(musicPrimaryCollaborationArtist(artist.Artist))
 	return fallbacks
 }

@@ -529,6 +529,18 @@ func TestSearchMusicArtistsPrefersStorageOwnerForCollaborationCredit(t *testing.
 	}
 }
 
+func TestMusicSearchFallbackArtistsRejectsUnrelatedStorageOwner(t *testing.T) {
+	artist := MusicArtistPlan{
+		Artist: "MINNIE",
+		Files:  []string{"Explo/[2025] HER/MINNIE - HER - 02 - HER.flac"},
+	}
+	for _, fallback := range musicSearchFallbackArtists(artist) {
+		if fallback == "Explo" {
+			t.Fatalf("unrelated storage owner became a search fallback: %#v", musicSearchFallbackArtists(artist))
+		}
+	}
+}
+
 func TestMusicID3FixtureUsesEmbeddedTags(t *testing.T) {
 	if _, err := exec.LookPath("ffprobe"); err != nil {
 		t.Skip("ffprobe not on PATH")
