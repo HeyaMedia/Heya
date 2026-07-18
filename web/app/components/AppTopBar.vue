@@ -305,10 +305,18 @@ const KIND_LABELS: Record<string, { label: string, icon: string }> = {
   // NFOs
   save_nfo:                { label: 'Writing NFO',           icon: 'clipboard' },
   save_music_nfo:          { label: 'Writing music NFO',     icon: 'clipboard' },
-  // Loudness
+  // Loudness + fingerprint
   kickoff_music_loudness:  { label: 'Loudness kickoff',      icon: 'eq' },
   scan_track_loudness:     { label: 'Measuring loudness',    icon: 'eq' },
   scan_album_loudness:     { label: 'Album loudness',        icon: 'eq' },
+  kickoff_music_fingerprint: { label: 'Fingerprint kickoff', icon: 'fingerprint' },
+  scan_track_fingerprint:  { label: 'Fingerprinting track',  icon: 'fingerprint' },
+  // Media segments
+  kickoff_media_segments:  { label: 'Segments kickoff',      icon: 'scissors' },
+  scan_media_segments_file:{ label: 'Scanning segments',     icon: 'scissors' },
+  kickoff_detect_segments: { label: 'Segment detection kickoff', icon: 'wand' },
+  detect_segments_movie:   { label: 'Detecting segments',    icon: 'wand' },
+  detect_segments_season:  { label: 'Detecting segments',    icon: 'wand' },
   // Trickplay + thumbnails
   kickoff_trickplay:       { label: 'Trickplay kickoff',     icon: 'film' },
   trickplay_file:          { label: 'Generating trickplay',  icon: 'film' },
@@ -322,9 +330,22 @@ const KIND_LABELS: Record<string, { label: string, icon: string }> = {
   // Recommendations
   kickoff_embed_recommendations: { label: 'Embeddings kickoff',     icon: 'sparkle' },
   embed_recommendations:         { label: 'Embedding recommendations', icon: 'sparkle' },
+  // Music services
+  kickoff_listen_import:   { label: 'Listen import kickoff', icon: 'music' },
+  import_listens_batch:    { label: 'Importing listens',     icon: 'music' },
+  kickoff_music_services_sync: { label: 'Music services sync', icon: 'music' },
+  sync_reactions_out:      { label: 'Syncing reactions',     icon: 'heart' },
+  // Metadata feeds
+  sync_metadata_changes:   { label: 'Metadata change feed',  icon: 'refresh' },
+  sync_metadata_workflow_events: { label: 'Metadata workflow feed', icon: 'refresh' },
+  reconcile_metadata_scope: { label: 'Reconciling metadata scope', icon: 'refresh' },
+  apply_rich_metadata:     { label: 'Applying rich metadata', icon: 'cloud-download' },
   // Misc
   transcode:               { label: 'Transcoding',           icon: 'film' },
   soft_delete:             { label: 'Cleaning up',           icon: 'trash' },
+  warm_pending_images:     { label: 'Warming image cache',   icon: 'image' },
+  scan_library_disk:       { label: 'Scanning disk',         icon: 'folder' },
+  cleanup_scanner_artifacts: { label: 'Scanner cleanup',     icon: 'trash' },
 }
 
 function jobLabel(kind: string) {

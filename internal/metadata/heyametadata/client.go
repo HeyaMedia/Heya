@@ -522,6 +522,38 @@ func (c *Client) TopTracks(ctx context.Context, entityID string, credentials ...
 	}
 }
 
+// ArtistTopTrackEntries returns the provider-neutral top-track projection used
+// by local read-model writers. Unlike an empty result, a transport or decode
+// failure is returned to the caller so it cannot erase the last good ranking.
+func (c *Client) ArtistTopTrackEntries(ctx context.Context, entityID string, credentials ...ProviderCredentials) ([]metadata.TopTrackEntry, error) {
+	tracks, err := c.TopTracks(ctx, entityID, credentials...)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]metadata.TopTrackEntry, 0, len(tracks))
+	for _, track := range tracks {
+		recordingEntityID := ""
+		if track.RecordingEntityId != nil {
+			recordingEntityID = track.RecordingEntityId.String()
+		}
+		entry := metadata.TopTrackEntry{
+			Rank: int(track.Rank), Provider: track.Provider, Title: track.Title,
+			RecordingEntityID: recordingEntityID, Playcount: int64Value(track.Playcount),
+			Listeners: int64Value(track.Listeners), URL: stringValue(track.Url),
+		}
+		if track.ExternalIds != nil {
+			for _, externalID := range *track.ExternalIds {
+				if externalID.Provider == "musicbrainz" {
+					entry.MBID = externalID.Value
+					break
+				}
+			}
+		}
+		result = append(result, entry)
+	}
+	return result, nil
+}
+
 func (c *Client) RecordingLyrics(ctx context.Context, entityID string, credentials ...ProviderCredentials) ([]RecordingLyrics, error) {
 	id, err := uuid.Parse(entityID)
 	if err != nil {

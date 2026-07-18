@@ -3,12 +3,16 @@ package matcher
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/metadatasync"
 )
 
 // albumWriteTitleYear decides the (title, year) to persist for a single album
@@ -82,32 +86,26 @@ func (m *Matcher) writeArtistExtendedMetadata(ctx context.Context, artistID int6
 	})
 }
 
-func (m *Matcher) writeArtistTopTracks(ctx context.Context, artistID int64, tops []metadata.TopTrackEntry) error {
-	type topTrackRow struct {
-		Rank              int    `json:"rank"`
-		Provider          string `json:"provider"`
-		ProviderRank      int    `json:"provider_rank"`
-		Title             string `json:"title"`
-		MBID              string `json:"mbid"`
-		RecordingEntityID string `json:"recording_entity_id"`
-		Playcount         int64  `json:"playcount"`
-		Listeners         int64  `json:"listeners"`
-		URL               string `json:"url"`
-	}
-	rows := make([]topTrackRow, 0, len(tops))
-	for i, t := range tops {
-		rows = append(rows, topTrackRow{Rank: i + 1, Provider: t.Provider, ProviderRank: t.Rank, Title: t.Title, MBID: t.MBID,
-			RecordingEntityID: t.RecordingEntityID, Playcount: t.Playcount,
-			Listeners: t.Listeners, URL: t.URL})
-	}
-	body, err := json.Marshal(rows)
+func (m *Matcher) writeArtistTopTracks(ctx context.Context, artistID int64, entityIDText, entityKind string, projectionVersion int64, tops []metadata.TopTrackEntry) error {
+	entityID, err := uuid.Parse(entityIDText)
 	if err != nil {
+		return fmt.Errorf("invalid canonical artist ID %q: %w", entityIDText, err)
+	}
+	if m.inTx {
+		return metadatasync.ReplaceArtistTopTracks(ctx, m.q, artistID, entityID, entityKind, projectionVersion, tops)
+	}
+	tx, err := m.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin artist top-tracks replacement: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := metadatasync.ReplaceArtistTopTracks(ctx, m.q.WithTx(tx), artistID, entityID, entityKind, projectionVersion, tops); err != nil {
 		return err
 	}
-	if err := m.q.DeleteArtistTopTracks(ctx, artistID); err != nil {
-		return err
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit artist top-tracks replacement: %w", err)
 	}
-	return m.q.InsertArtistTopTracks(ctx, sqlc.InsertArtistTopTracksParams{ArtistID: artistID, Tracks: body})
+	return nil
 }
 
 func (m *Matcher) writeArtistSimilarArtists(ctx context.Context, artistID int64, sims []metadata.SimilarArtistEntry) error {

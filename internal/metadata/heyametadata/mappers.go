@@ -453,28 +453,14 @@ func (p *HeyaProvider) mapArtist(ctx context.Context, document artistDocument) (
 			Description: video.Description,
 		})
 	}
-	if tracks, err := p.client.TopTracks(ctx, document.ID, p.credentials); err != nil {
+	if tracks, err := p.client.ArtistTopTrackEntries(ctx, document.ID, p.credentials); err != nil {
 		// Loaded stays false so the writer preserves the last known local
 		// ranking. Don't swallow the error silently — an always-failing
 		// fetch looks identical to "artist has no top tracks" otherwise.
 		log.Warn().Err(err).Str("entity_id", document.ID).Msg("heyametadata: artist top-tracks fetch failed; keeping previous ranking")
 	} else {
 		detail.ArtistTopTracksLoaded = true
-		for _, track := range tracks {
-			recordingEntityID := ""
-			if track.RecordingEntityId != nil {
-				recordingEntityID = track.RecordingEntityId.String()
-			}
-			mapped := metadata.TopTrackEntry{Rank: int(track.Rank), Provider: track.Provider, Title: track.Title, RecordingEntityID: recordingEntityID, Playcount: int64Value(track.Playcount), Listeners: int64Value(track.Listeners), URL: stringValue(track.Url)}
-			if track.ExternalIds != nil {
-				for _, id := range *track.ExternalIds {
-					if id.Provider == "musicbrainz" {
-						mapped.MBID = id.Value
-					}
-				}
-			}
-			detail.ArtistTopTracks = append(detail.ArtistTopTracks, mapped)
-		}
+		detail.ArtistTopTracks = append(detail.ArtistTopTracks, tracks...)
 	}
 	albums, err := p.artistDiscography(ctx, document.ID)
 	if err != nil {

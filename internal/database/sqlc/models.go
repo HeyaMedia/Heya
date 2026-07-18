@@ -780,6 +780,16 @@ type MetadataMatchCandidate struct {
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
+type MetadataProjectionState struct {
+	LocalKind         string             `json:"local_kind"`
+	LocalID           int64              `json:"local_id"`
+	Scope             string             `json:"scope"`
+	EntityID          uuid.UUID          `json:"entity_id"`
+	EntityKind        string             `json:"entity_kind"`
+	ProjectionVersion int64              `json:"projection_version"`
+	AppliedAt         pgtype.Timestamptz `json:"applied_at"`
+}
+
 type MetadataResolutionWorkflow struct {
 	ID                 int64              `json:"id"`
 	RequestKey         string             `json:"request_key"`

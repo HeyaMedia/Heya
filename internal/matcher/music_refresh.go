@@ -265,8 +265,8 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 		log.Warn().Err(err).Int64("artist_id", artistID).Msg("write artist extended metadata failed")
 	}
 	if detail.ArtistTopTracksLoaded {
-		if err := m.writeArtistTopTracks(ctx, artistID, detail.ArtistTopTracks); err != nil {
-			log.Warn().Err(err).Int64("artist_id", artistID).Msg("write artist top tracks failed")
+		if err := m.writeArtistTopTracks(ctx, artistID, detail.CanonicalID, detail.CanonicalKind, detail.ProjectionVersion, detail.ArtistTopTracks); err != nil {
+			return res, fmt.Errorf("write artist top tracks: %w", err)
 		}
 	}
 	if err := m.writeArtistSimilarArtists(ctx, artistID, detail.ArtistSimilarArtists); err != nil {

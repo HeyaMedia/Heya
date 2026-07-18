@@ -63,6 +63,29 @@ func (SyncMetadataWorkflowEventsArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
+// ReconcileMetadataScopeArgs applies one independently fetched canonical
+// projection to its directly bound local row. ProjectionVersion is part of
+// the args (and therefore River uniqueness), so a newer change is never lost
+// behind an older in-flight reconciliation.
+type ReconcileMetadataScopeArgs struct {
+	LocalKind         string `json:"local_kind"`
+	LocalID           int64  `json:"local_id"`
+	EntityID          string `json:"entity_id"`
+	EntityKind        string `json:"entity_kind"`
+	Scope             string `json:"scope"`
+	ProjectionVersion int64  `json:"projection_version"`
+}
+
+func (ReconcileMetadataScopeArgs) Kind() string { return "reconcile_metadata_scope" }
+func (ReconcileMetadataScopeArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{
+		Queue:       "reconcile_metadata_scope",
+		MaxAttempts: 10,
+		Priority:    PriorityScan,
+		UniqueOpts:  uniqueWhileActive(),
+	}
+}
+
 type DownloadImageArgs struct {
 	MediaItemID int64  `json:"media_item_id"`
 	PersonID    int64  `json:"person_id,omitempty"`

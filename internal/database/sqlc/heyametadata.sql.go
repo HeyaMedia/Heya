@@ -193,6 +193,61 @@ func (q *Queries) GetMetadataEntityBinding(ctx context.Context, arg GetMetadataE
 	return i, err
 }
 
+const getMetadataEntityBindingForUpdate = `-- name: GetMetadataEntityBindingForUpdate :one
+SELECT local_kind, local_id, entity_id, entity_kind, schema_version, projection_version, bound_at, updated_at
+FROM metadata_entity_bindings
+WHERE local_kind = $1 AND local_id = $2
+FOR UPDATE
+`
+
+type GetMetadataEntityBindingForUpdateParams struct {
+	LocalKind string `json:"local_kind"`
+	LocalID   int64  `json:"local_id"`
+}
+
+func (q *Queries) GetMetadataEntityBindingForUpdate(ctx context.Context, arg GetMetadataEntityBindingForUpdateParams) (MetadataEntityBinding, error) {
+	row := q.db.QueryRow(ctx, getMetadataEntityBindingForUpdate, arg.LocalKind, arg.LocalID)
+	var i MetadataEntityBinding
+	err := row.Scan(
+		&i.LocalKind,
+		&i.LocalID,
+		&i.EntityID,
+		&i.EntityKind,
+		&i.SchemaVersion,
+		&i.ProjectionVersion,
+		&i.BoundAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getMetadataProjectionState = `-- name: GetMetadataProjectionState :one
+SELECT local_kind, local_id, scope, entity_id, entity_kind, projection_version, applied_at
+FROM metadata_projection_states
+WHERE local_kind = $1 AND local_id = $2 AND scope = $3
+`
+
+type GetMetadataProjectionStateParams struct {
+	LocalKind string `json:"local_kind"`
+	LocalID   int64  `json:"local_id"`
+	Scope     string `json:"scope"`
+}
+
+func (q *Queries) GetMetadataProjectionState(ctx context.Context, arg GetMetadataProjectionStateParams) (MetadataProjectionState, error) {
+	row := q.db.QueryRow(ctx, getMetadataProjectionState, arg.LocalKind, arg.LocalID, arg.Scope)
+	var i MetadataProjectionState
+	err := row.Scan(
+		&i.LocalKind,
+		&i.LocalID,
+		&i.Scope,
+		&i.EntityID,
+		&i.EntityKind,
+		&i.ProjectionVersion,
+		&i.AppliedAt,
+	)
+	return i, err
+}
+
 const getMetadataWorkflowByKey = `-- name: GetMetadataWorkflowByKey :one
 SELECT id, request_key, identity_id, kind, query, hints, selected_resolution, discovery_id, job_id, entity_id, state, last_error, created_at, updated_at, completed_at
 FROM metadata_resolution_workflows
@@ -368,6 +423,85 @@ func (q *Queries) ListMetadataChangeTargetsByEntities(ctx context.Context, entit
 			&i.ProjectionVersion,
 			&i.TargetKind,
 			&i.TargetID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMetadataProjectionStatesByEntities = `-- name: ListMetadataProjectionStatesByEntities :many
+SELECT local_kind, local_id, scope, entity_id, entity_kind, projection_version, applied_at
+FROM metadata_projection_states
+WHERE entity_id = ANY($1::uuid[])
+ORDER BY entity_id, local_kind, local_id, scope
+`
+
+func (q *Queries) ListMetadataProjectionStatesByEntities(ctx context.Context, entityIds []uuid.UUID) ([]MetadataProjectionState, error) {
+	rows, err := q.db.Query(ctx, listMetadataProjectionStatesByEntities, entityIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MetadataProjectionState{}
+	for rows.Next() {
+		var i MetadataProjectionState
+		if err := rows.Scan(
+			&i.LocalKind,
+			&i.LocalID,
+			&i.Scope,
+			&i.EntityID,
+			&i.EntityKind,
+			&i.ProjectionVersion,
+			&i.AppliedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMetadataScopeTargetsByEntities = `-- name: ListMetadataScopeTargetsByEntities :many
+SELECT local_kind, local_id, entity_id, entity_kind, projection_version
+FROM metadata_entity_bindings
+WHERE entity_id = ANY($1::uuid[])
+ORDER BY entity_id, local_kind, local_id
+`
+
+type ListMetadataScopeTargetsByEntitiesRow struct {
+	LocalKind         string    `json:"local_kind"`
+	LocalID           int64     `json:"local_id"`
+	EntityID          uuid.UUID `json:"entity_id"`
+	EntityKind        string    `json:"entity_kind"`
+	ProjectionVersion int64     `json:"projection_version"`
+}
+
+// Scope workers write directly to the locally bound row. This deliberately
+// differs from ListMetadataChangeTargetsByEntities, which resolves a child
+// binding to the parent media_item used by a full-document enrichment.
+func (q *Queries) ListMetadataScopeTargetsByEntities(ctx context.Context, entityIds []uuid.UUID) ([]ListMetadataScopeTargetsByEntitiesRow, error) {
+	rows, err := q.db.Query(ctx, listMetadataScopeTargetsByEntities, entityIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMetadataScopeTargetsByEntitiesRow{}
+	for rows.Next() {
+		var i ListMetadataScopeTargetsByEntitiesRow
+		if err := rows.Scan(
+			&i.LocalKind,
+			&i.LocalID,
+			&i.EntityID,
+			&i.EntityKind,
+			&i.ProjectionVersion,
 		); err != nil {
 			return nil, err
 		}
@@ -577,6 +711,53 @@ ON CONFLICT (local_kind, local_id) DO UPDATE SET
 func (q *Queries) UpsertMetadataEntityBindings(ctx context.Context, bindings []byte) error {
 	_, err := q.db.Exec(ctx, upsertMetadataEntityBindings, bindings)
 	return err
+}
+
+const upsertMetadataProjectionState = `-- name: UpsertMetadataProjectionState :one
+INSERT INTO metadata_projection_states (
+  local_kind, local_id, scope, entity_id, entity_kind, projection_version
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (local_kind, local_id, scope) DO UPDATE SET
+  entity_id = EXCLUDED.entity_id,
+  entity_kind = EXCLUDED.entity_kind,
+  projection_version = CASE
+    WHEN metadata_projection_states.entity_id = EXCLUDED.entity_id
+      THEN GREATEST(metadata_projection_states.projection_version, EXCLUDED.projection_version)
+    ELSE EXCLUDED.projection_version
+  END,
+  applied_at = now()
+RETURNING local_kind, local_id, scope, entity_id, entity_kind, projection_version, applied_at
+`
+
+type UpsertMetadataProjectionStateParams struct {
+	LocalKind         string    `json:"local_kind"`
+	LocalID           int64     `json:"local_id"`
+	Scope             string    `json:"scope"`
+	EntityID          uuid.UUID `json:"entity_id"`
+	EntityKind        string    `json:"entity_kind"`
+	ProjectionVersion int64     `json:"projection_version"`
+}
+
+func (q *Queries) UpsertMetadataProjectionState(ctx context.Context, arg UpsertMetadataProjectionStateParams) (MetadataProjectionState, error) {
+	row := q.db.QueryRow(ctx, upsertMetadataProjectionState,
+		arg.LocalKind,
+		arg.LocalID,
+		arg.Scope,
+		arg.EntityID,
+		arg.EntityKind,
+		arg.ProjectionVersion,
+	)
+	var i MetadataProjectionState
+	err := row.Scan(
+		&i.LocalKind,
+		&i.LocalID,
+		&i.Scope,
+		&i.EntityID,
+		&i.EntityKind,
+		&i.ProjectionVersion,
+		&i.AppliedAt,
+	)
+	return i, err
 }
 
 const upsertMetadataWorkflow = `-- name: UpsertMetadataWorkflow :one

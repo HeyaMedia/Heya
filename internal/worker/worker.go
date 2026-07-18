@@ -185,6 +185,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	river.AddWorker(workers, &MetadataContinuationSweepWorker{DB: cfg.DB, Backoff: continuationBackoff})
 	river.AddWorker(workers, &SyncMetadataChangesWorker{DB: cfg.DB, Source: cfg.HeyaMetadata})
 	river.AddWorker(workers, &SyncMetadataWorkflowEventsWorker{DB: cfg.DB, Source: cfg.HeyaMetadata})
+	river.AddWorker(workers, &ReconcileMetadataScopeWorker{DB: cfg.DB, Source: cfg.HeyaMetadata})
 
 	client, err := river.NewClient(riverpgxv5.New(cfg.DB), &river.Config{
 		// Scanner stages are split by media type, so a large Music fan-out
@@ -342,6 +343,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			"metadata_continuation_sweep":   {MaxWorkers: 1},                                      // promotes a bounded due batch; intentionally not user-tunable
 			"sync_metadata_changes":         {MaxWorkers: queueWorkers(cfg, "sync_metadata_changes", 1)},
 			"sync_metadata_workflow_events": {MaxWorkers: 1},
+			"reconcile_metadata_scope":      {MaxWorkers: queueWorkers(cfg, "reconcile_metadata_scope", 4)},
 			river.QueueDefault:              {MaxWorkers: queueWorkers(cfg, river.QueueDefault, 1)}, // fallback only; we shouldn't actually use it after the split
 		},
 		// Periodic jobs — River-managed cron. The DebounceSweep fires

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
+	"github.com/karbowiak/heya/internal/metadatasync"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
@@ -118,6 +119,7 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 			type pageChange struct {
 				change heyametadata.Change
 				force  bool
+				scopes map[string]struct{}
 			}
 			changesByEntity := make(map[uuid.UUID]pageChange, len(page.Entries))
 			entityIDs := make([]uuid.UUID, 0, len(page.Entries))
@@ -130,8 +132,16 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 				if !exists {
 					entityIDs = append(entityIDs, entityID)
 				}
-				state.change = change
+				if !exists || change.ProjectionVersion >= state.change.ProjectionVersion {
+					state.change = change
+				}
 				state.force = state.force || change.ChangeType == "redirected"
+				if state.scopes == nil {
+					state.scopes = make(map[string]struct{}, len(change.ChangedScopes))
+				}
+				for _, scope := range change.ChangedScopes {
+					state.scopes[scope] = struct{}{}
+				}
 				changesByEntity[entityID] = state
 			}
 
@@ -167,6 +177,47 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 					mediaRefreshIDs = append(mediaRefreshIDs, target.TargetID)
 				}
 			}
+
+			// Independently fetched projections cannot use the parent binding's
+			// version as proof of success. Route changed_scopes to direct local
+			// bindings even when the full-document refresh is already current.
+			if len(entityIDs) > 0 {
+				scopeTargets, scopeErr := qtx.ListMetadataScopeTargetsByEntities(ctx, entityIDs)
+				if scopeErr != nil {
+					return fmt.Errorf("resolve metadata scope targets: %w", scopeErr)
+				}
+				projectionStates, stateErr := qtx.ListMetadataProjectionStatesByEntities(ctx, entityIDs)
+				if stateErr != nil {
+					return fmt.Errorf("read metadata projection checkpoints: %w", stateErr)
+				}
+				type checkpointKey struct {
+					localKind string
+					localID   int64
+					scope     string
+				}
+				checkpoints := make(map[checkpointKey]sqlc.MetadataProjectionState, len(projectionStates))
+				for _, projectionState := range projectionStates {
+					checkpoints[checkpointKey{projectionState.LocalKind, projectionState.LocalID, projectionState.Scope}] = projectionState
+				}
+				for _, target := range scopeTargets {
+					changeState := changesByEntity[target.EntityID]
+					if _, changed := changeState.scopes[metadatasync.ArtistTopTracksScope]; !changed || target.LocalKind != "artist" || target.EntityKind != "artist" {
+						continue
+					}
+					checkpoint, exists := checkpoints[checkpointKey{target.LocalKind, target.LocalID, metadatasync.ArtistTopTracksScope}]
+					if exists && checkpoint.EntityID == target.EntityID && changeState.change.ProjectionVersion > 0 && checkpoint.ProjectionVersion >= changeState.change.ProjectionVersion {
+						continue
+					}
+					args := ReconcileMetadataScopeArgs{
+						LocalKind: target.LocalKind, LocalID: target.LocalID,
+						EntityID: target.EntityID.String(), EntityKind: target.EntityKind,
+						Scope:             metadatasync.ArtistTopTracksScope,
+						ProjectionVersion: changeState.change.ProjectionVersion,
+					}
+					opts := args.InsertOpts()
+					jobs = append(jobs, river.InsertManyParams{Args: args, InsertOpts: &opts})
+				}
+			}
 			// Replace each item's queued metadata-change refresh with this newer
 			// trailing refresh. A running refresh is intentionally preserved; the
 			// replacement runs after it and observes the newest upstream state.
@@ -192,6 +243,11 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 				if queued {
 					enqueued++
 				}
+				scopeQueued, scopeBackfillErr := enqueueMetadataScopeBackfill(ctx, tx, rc, 25)
+				if scopeBackfillErr != nil {
+					return scopeBackfillErr
+				}
+				enqueued += scopeQueued
 				backfillChecked = true
 			}
 			if err := qtx.CommitMetadataChangeCursor(ctx, sqlc.CommitMetadataChangeCursorParams{
@@ -275,4 +331,73 @@ func enqueueOneMetadataBindingBackfill(ctx context.Context, tx pgx.Tx, rc *river
 		return false, fmt.Errorf("enqueue metadata binding backfill for %d: %w", mediaID, err)
 	}
 	return true, nil
+}
+
+// enqueueMetadataScopeBackfill repairs bindings created before per-scope
+// checkpoints existed, plus any projection that lagged a later parent refresh.
+// Successful empty projections have a checkpoint and naturally fall out of
+// this query. Active jobs and recently discarded River jobs suppress churn.
+func enqueueMetadataScopeBackfill(ctx context.Context, tx pgx.Tx, rc *river.Client[pgx.Tx], limit int) (int, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT binding.local_kind, binding.local_id, binding.entity_id,
+		       binding.entity_kind, binding.projection_version
+		FROM metadata_entity_bindings binding
+		JOIN artists artist ON artist.id = binding.local_id
+		LEFT JOIN metadata_projection_states state
+		  ON state.local_kind = binding.local_kind
+		 AND state.local_id = binding.local_id
+		 AND state.scope = 'top_tracks'
+		WHERE binding.local_kind = 'artist'
+		  AND binding.entity_kind = 'artist'
+		  AND (
+		    state.local_id IS NULL
+		    OR state.entity_id <> binding.entity_id
+		    OR state.projection_version < binding.projection_version
+		  )
+		  AND NOT EXISTS (
+		    SELECT 1
+		    FROM river_job job
+		    WHERE job.kind = 'reconcile_metadata_scope'
+		      AND job.state IN ('available', 'pending', 'running', 'retryable', 'scheduled', 'discarded')
+		      AND job.args->>'local_kind' = binding.local_kind
+		      AND NULLIF(job.args->>'local_id', '')::bigint = binding.local_id
+		      AND job.args->>'scope' = 'top_tracks'
+		  )
+		ORDER BY state.applied_at NULLS FIRST, binding.local_id
+		LIMIT $1`, limit)
+	if err != nil {
+		return 0, fmt.Errorf("select metadata scope backfill: %w", err)
+	}
+	defer rows.Close()
+
+	jobs := make([]river.InsertManyParams, 0, limit)
+	for rows.Next() {
+		var args ReconcileMetadataScopeArgs
+		var entityID uuid.UUID
+		if err := rows.Scan(&args.LocalKind, &args.LocalID, &entityID, &args.EntityKind, &args.ProjectionVersion); err != nil {
+			return 0, fmt.Errorf("scan metadata scope backfill: %w", err)
+		}
+		args.EntityID = entityID.String()
+		args.Scope = metadatasync.ArtistTopTracksScope
+		opts := args.InsertOpts()
+		opts.Priority = PriorityAnalysis
+		jobs = append(jobs, river.InsertManyParams{Args: args, InsertOpts: &opts})
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("read metadata scope backfill: %w", err)
+	}
+	if len(jobs) == 0 {
+		return 0, nil
+	}
+	results, err := rc.InsertManyTx(ctx, tx, jobs)
+	if err != nil {
+		return 0, fmt.Errorf("enqueue metadata scope backfill: %w", err)
+	}
+	queued := 0
+	for _, result := range results {
+		if !result.UniqueSkippedAsDuplicate {
+			queued++
+		}
+	}
+	return queued, nil
 }

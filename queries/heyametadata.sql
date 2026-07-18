@@ -53,6 +53,47 @@ SELECT *
 FROM metadata_entity_bindings
 WHERE local_kind = 'media_item' AND local_id = $1;
 
+-- name: GetMetadataEntityBindingForUpdate :one
+SELECT *
+FROM metadata_entity_bindings
+WHERE local_kind = $1 AND local_id = $2
+FOR UPDATE;
+
+-- name: UpsertMetadataProjectionState :one
+INSERT INTO metadata_projection_states (
+  local_kind, local_id, scope, entity_id, entity_kind, projection_version
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (local_kind, local_id, scope) DO UPDATE SET
+  entity_id = EXCLUDED.entity_id,
+  entity_kind = EXCLUDED.entity_kind,
+  projection_version = CASE
+    WHEN metadata_projection_states.entity_id = EXCLUDED.entity_id
+      THEN GREATEST(metadata_projection_states.projection_version, EXCLUDED.projection_version)
+    ELSE EXCLUDED.projection_version
+  END,
+  applied_at = now()
+RETURNING *;
+
+-- name: GetMetadataProjectionState :one
+SELECT *
+FROM metadata_projection_states
+WHERE local_kind = $1 AND local_id = $2 AND scope = $3;
+
+-- name: ListMetadataProjectionStatesByEntities :many
+SELECT *
+FROM metadata_projection_states
+WHERE entity_id = ANY(sqlc.arg(entity_ids)::uuid[])
+ORDER BY entity_id, local_kind, local_id, scope;
+
+-- name: ListMetadataScopeTargetsByEntities :many
+-- Scope workers write directly to the locally bound row. This deliberately
+-- differs from ListMetadataChangeTargetsByEntities, which resolves a child
+-- binding to the parent media_item used by a full-document enrichment.
+SELECT local_kind, local_id, entity_id, entity_kind, projection_version
+FROM metadata_entity_bindings
+WHERE entity_id = ANY(sqlc.arg(entity_ids)::uuid[])
+ORDER BY entity_id, local_kind, local_id;
+
 -- name: PromoteCanonicalMetadataProviderID :exec
 UPDATE local_media_identities
 SET metadata_provider_id = $2,
