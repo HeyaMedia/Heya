@@ -682,6 +682,7 @@ watch(cfg, (next) => {
       <template #actions>
         <StatusBadge :state="tailscaleBadge.state">{{ tailscaleBadge.label }}</StatusBadge>
         <AppSwitch
+          class="tailscale-setting-switch"
           :model-value="enabled"
           size="md"
           aria-label="Enable Tailscale"
@@ -753,34 +754,47 @@ watch(cfg, (next) => {
         />
       </SettingsField>
 
-      <SettingsField label="HTTPS on :443"
+      <SettingsField class="tailscale-toggle-field" label="HTTPS on :443"
         description="Serve TLS on tailnet :443 using a Tailscale-issued cert. Requires HTTPS to be enabled for your tailnet."
         :lockedBy="isLocked('tailscale.https') ? lockTooltip('tailscale.https') : undefined"
         v-slot="{ fieldId }">
-        <AppSwitch
-          :id="fieldId"
-          :model-value="cfg?.https ?? true"
-          size="md"
-          aria-label="HTTPS on port 443"
-          :disabled="saving || isLocked('tailscale.https')"
-          @update:model-value="saveHTTPS"
-        />
-        <span v-if="cfg?.https && !status?.https_active" class="hint-warn">requested · not yet active</span>
+        <div class="tailscale-toggle-control">
+          <span class="tailscale-toggle-state" :class="{ active: cfg?.https }">
+            <span class="tailscale-toggle-dot" />
+            {{ cfg?.https ? 'On' : 'Off' }}
+          </span>
+          <AppSwitch
+            class="tailscale-setting-switch"
+            :id="fieldId"
+            :model-value="cfg?.https ?? true"
+            size="md"
+            aria-label="HTTPS on port 443"
+            :disabled="saving || isLocked('tailscale.https')"
+            @update:model-value="saveHTTPS"
+          />
+          <span v-if="cfg?.https && !status?.https_active" class="hint-warn">requested · not yet active</span>
+        </div>
       </SettingsField>
 
-      <SettingsField label="Funnel (public exposure)"
+      <SettingsField class="tailscale-toggle-field" label="Funnel (public exposure)"
         description="Publish Heya to the open internet via Tailscale Funnel. Requires Funnel to be allowed for your tailnet."
         :lockedBy="isLocked('tailscale.funnel') ? lockTooltip('tailscale.funnel') : undefined"
         v-slot="{ fieldId }">
-        <AppSwitch
-          :id="fieldId"
-          :model-value="cfg?.funnel ?? false"
-          size="md"
-          aria-label="Publish Heya through Tailscale Funnel"
-          :disabled="saving || isLocked('tailscale.funnel')"
-          @update:model-value="saveFunnel"
-        />
-        <span v-if="funnelApplying" class="hint-warn"><Icon name="spinner" :size="11" /> applying…</span>
+        <div class="tailscale-toggle-control">
+          <span class="tailscale-toggle-state" :class="{ active: cfg?.funnel }">
+            <span class="tailscale-toggle-dot" />
+            {{ funnelApplying ? 'Applying…' : (cfg?.funnel ? 'Public' : 'Private') }}
+          </span>
+          <AppSwitch
+            class="tailscale-setting-switch"
+            :id="fieldId"
+            :model-value="cfg?.funnel ?? false"
+            size="md"
+            aria-label="Publish Heya through Tailscale Funnel"
+            :disabled="saving || isLocked('tailscale.funnel')"
+            @update:model-value="saveFunnel"
+          />
+        </div>
       </SettingsField>
 
       <div v-if="cfg?.funnel" class="funnel-panel" :class="funnelPanel.tone">
@@ -998,6 +1012,85 @@ watch(cfg, (next) => {
 .hint-warn { font-size: 11px; color: var(--gold); margin-left: 8px; }
 .hint-warn :deep(svg) { vertical-align: -2px; }
 
+.tailscale-toggle-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "label control"
+    "description control"
+    "hint hint";
+  column-gap: 24px;
+  align-items: center;
+}
+.tailscale-toggle-field :deep(.sv2-field-label) { grid-area: label; }
+.tailscale-toggle-field :deep(.sv2-field-desc) { grid-area: description; }
+.tailscale-toggle-field :deep(.sv2-field-control) {
+  grid-area: control;
+  margin-top: 0;
+}
+.tailscale-toggle-field :deep(.sv2-field-hint) { grid-area: hint; }
+.tailscale-toggle-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-width: 128px;
+}
+.tailscale-toggle-control .hint-warn {
+  flex-basis: 100%;
+  margin-left: 0;
+  text-align: right;
+}
+.tailscale-toggle-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 58px;
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.tailscale-toggle-state.active { color: var(--gold-bright); }
+.tailscale-toggle-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-3);
+  box-shadow: 0 0 0 3px rgb(var(--ink) / 0.04);
+}
+.tailscale-toggle-state.active .tailscale-toggle-dot {
+  background: var(--gold);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--gold) 65%, transparent);
+}
+:deep(.app-switch.tailscale-setting-switch) {
+  box-sizing: border-box;
+  flex-shrink: 0;
+  background: var(--bg-4);
+  border-color: var(--border-strong);
+  box-shadow: inset 0 1px 2px rgb(var(--shade) / 0.24);
+}
+:deep(.app-switch.tailscale-setting-switch:hover) {
+  border-color: color-mix(in srgb, var(--fg-2) 52%, transparent);
+}
+:deep(.app-switch.tailscale-setting-switch[data-state="checked"]) {
+  background: color-mix(in srgb, var(--gold) 32%, var(--bg-3));
+  border-color: color-mix(in srgb, var(--gold) 68%, var(--border-strong));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 12%, transparent);
+}
+:deep(.app-switch.tailscale-setting-switch .app-switch-thumb) {
+  background: var(--fg-1);
+  box-shadow: 0 1px 3px rgb(var(--shade) / 0.45);
+}
+:deep(.app-switch.tailscale-setting-switch[data-state="checked"] .app-switch-thumb) {
+  background: var(--gold-bright);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gold) 65%, transparent), 0 0 8px color-mix(in srgb, var(--gold) 55%, transparent);
+}
+
 .tailscale-alert,
 .funnel-panel {
   display: flex;
@@ -1111,5 +1204,16 @@ watch(cfg, (next) => {
   .sv2-input { min-width: 0; width: 100%; }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ingress-row { grid-template-columns: 1fr 1fr; gap: 5px 10px; }
+  .tailscale-toggle-field {
+    grid-template-columns: 1fr;
+    grid-template-areas: "label" "description" "control" "hint";
+    row-gap: 6px;
+  }
+  .tailscale-toggle-control {
+    justify-content: space-between;
+    margin-top: 4px;
+  }
+  .tailscale-toggle-state { justify-content: flex-start; }
+  .tailscale-toggle-control .hint-warn { text-align: left; }
 }
 </style>
