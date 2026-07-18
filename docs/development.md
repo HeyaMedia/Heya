@@ -29,11 +29,18 @@ make db-up                 # start Postgres on :5440
 make dev                   # mprocs: proxy + API + worker + Nuxt — open :8080
 ```
 
-Prerequisite: `brew install mprocs`. `make dev` runs a preflight that reclaims
-ports `:8080`/`:3050`/`:3000` from any orphaned previous run, then launches
-mprocs (config in `mprocs.yaml`) with four procs: `proxy`, `api`, `worker`,
-`web`. Quitting mprocs (`q` / Ctrl+C) tears all four down cleanly; press `r` on a
-pane to restart just that process.
+Prerequisite: `brew install mprocs`. `make dev` runs `make dev-stop` as a
+preflight — it reaps every layer a previous run may have left behind (air,
+`go run` wrappers, `tmp/heya*` binaries, and the `:8080`/`:3050`/`:3000`
+listeners) — then launches mprocs (config in `mprocs.yaml`) with four procs:
+`proxy`, `api`, `worker`, `web`. Quitting mprocs (`q` / Ctrl+C) tears all four
+down cleanly; press `r` on a pane to restart just that process.
+
+**Never clean up a dev stack by killing port listeners alone.** The air panes
+are a `sh → go run → air → heya` chain and `go run` does not forward SIGTERM —
+killing the listener orphans air, which then rebuilds and respawns backends on
+every file save (the classic "30 stray `compile` processes eating the machine"
+failure). `make dev-stop` is the one true cleanup.
 
 Or split into four terminals for independent control:
 

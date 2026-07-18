@@ -3,7 +3,7 @@ GO_CACHE_DIR ?= $(CURDIR)/.cache/go-build
 GO_MODCACHE_DIR ?= $(CURDIR)/.cache/go-mod
 GO := GOCACHE=$(GO_CACHE_DIR) GOMODCACHE=$(GO_MODCACHE_DIR) go
 
-.PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev dev-front dev-go dev-worker dev-web gen-api-client gen-heyametadata-client check-heyametadata-client deadcode dead-components docker-runtime-cpu docker-runtime-cuda docker-runtime-openvino docker docker-cuda docker-openvino docker-multiarch docker-run docker-run-gpu
+.PHONY: build run test lint clean db-up db-down db-reset migrate build-frontend dev dev-stop dev-front dev-go dev-worker dev-web gen-api-client gen-heyametadata-client check-heyametadata-client deadcode dead-components docker-runtime-cpu docker-runtime-cuda docker-runtime-openvino docker docker-cuda docker-openvino docker-multiarch docker-run docker-run-gpu
 
 # Pinned at the same version HeyaMedia uses for its self-client; oapi-codegen
 # bumps occasionally break field shapes and we want clients to match.
@@ -32,20 +32,37 @@ run: build-go
 # access are production-only; the proxy exists solely to give Nuxt HMR and the
 # reloading Go API one stable browser origin. A second Air process owns the
 # dedicated worker runtime. mprocs supervises all four and
-# tears them down cleanly on quit (q / Ctrl+C). The preflight reclaims
-# :8080/:3050/:3000 from anything a previous hard kill left orphaned.
+# tears them down cleanly on quit (q / Ctrl+C). The preflight runs dev-stop
+# to reap anything a previous hard kill left orphaned.
 # Open http://localhost:8080.
 #
 # mprocs is the prerequisite: `brew install mprocs`.
 dev:
 	@command -v mprocs >/dev/null 2>&1 || { echo "mprocs not found — install with: brew install mprocs"; exit 1; }
 	@mkdir -p tmp  # gitignored; the proxy + air both build into it — create it before mprocs spawns them
-	@for p in 8080 3050 3000; do pids=$$(lsof -ti tcp:$$p 2>/dev/null); [ -n "$$pids" ] && kill $$pids 2>/dev/null || true; done
+	@$(MAKE) -s dev-stop
 	mprocs
+
+# Reap EVERY layer of a leftover dev stack, not just the port listeners.
+# Killing by port alone is how orphans accumulate: the heya binary dies but
+# `go run`/air survive (verified: `go run` does NOT forward SIGTERM to its
+# child), and a leftover air keeps rebuilding + respawning backends on every
+# file save — that's the "30 stray compile processes" failure mode.
+# Order matters: air first (SIGTERM → it reaps its own child process group),
+# then the go-run wrappers, then any binaries/listeners air didn't own.
+dev-stop:
+	-@pkill -x air 2>/dev/null || true
+	-@pkill -f 'go run github.com/air-verse/air' 2>/dev/null || true
+	-@sleep 1
+	-@pkill -f 'tmp/heya serve --dev-backend' 2>/dev/null || true
+	-@pkill -f 'tmp/heya-worker worker' 2>/dev/null || true
+	-@pkill -f 'tmp/heya-dev dev-proxy' 2>/dev/null || true
+	-@for p in 8080 3050 3000; do pids=$$(lsof -ti tcp:$$p 2>/dev/null); [ -n "$$pids" ] && kill $$pids 2>/dev/null || true; done
+	@echo "dev stack reaped (air, go-run wrappers, tmp binaries, ports 8080/3050/3000)"
 
 # Same processes as `make dev`, split across terminals if you want control.
 dev-front:
-	mkdir -p tmp && $(GO) build -o tmp/heya-dev ./cmd/heya && exec tmp/heya-dev dev-proxy
+	HEYA_AIR_OUTPUT=tmp/heya-dev ./scripts/air-build.sh && exec tmp/heya-dev dev-proxy
 
 dev-go:
 	mkdir -p tmp && $(GO) run github.com/air-verse/air@latest

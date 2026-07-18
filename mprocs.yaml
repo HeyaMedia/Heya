@@ -12,18 +12,33 @@
 #   web    Nuxt/Vite dev server on :3000 (HMR).
 #
 # Open http://localhost:8080. Quit (q / Ctrl+C) tears all four down cleanly.
-# `exec` so SIGTERM reaches each child for a clean shutdown.
+#
+# Teardown discipline: the air panes are a `sh → go run → air → heya` chain,
+# and `go run` does NOT forward SIGTERM to its child (verified empirically) —
+# a targeted TERM dies at the wrapper and orphans air + the heya binary,
+# which then keeps rebuilding on every file save. So the wrapped panes stop
+# via send-keys Ctrl+C: the PTY delivers SIGINT to the whole foreground
+# process group, air hears it directly and reaps its own child group.
+# The proxy pane `exec`s a single binary, so a plain TERM works there.
+# `make dev-stop` reaps any stack a hard kill left behind.
 procs:
   proxy:
-    # mkdir -p tmp: it's gitignored, so on a clean checkout it may not exist
-    # yet when this proc races air to build into it.
-    shell: "mkdir -p tmp && go build -o tmp/heya-dev ./cmd/heya && exec tmp/heya-dev dev-proxy"
+    # Builds through air-build.sh like the air panes: same repo-local Go
+    # cache, and the build lock collapses the three identical startup builds
+    # into one compile + three copies.
+    shell: "HEYA_AIR_OUTPUT=tmp/heya-dev ./scripts/air-build.sh && exec tmp/heya-dev dev-proxy"
   api:
     # mkdir -p tmp: it's gitignored, so on a clean checkout it may not exist
     # yet when air races the proxy to build into it. (.air.toml keeps
     # clean_on_exit=false so air never deletes this shared dir on exit.)
-    shell: "mkdir -p tmp && go run github.com/air-verse/air@latest"
+    shell: "mkdir -p tmp && exec go run github.com/air-verse/air@latest"
+    stop:
+      send-keys: ["<C-c>"]
   worker:
-    shell: "mkdir -p tmp && go run github.com/air-verse/air@latest -c .air.worker.toml"
+    shell: "mkdir -p tmp && exec go run github.com/air-verse/air@latest -c .air.worker.toml"
+    stop:
+      send-keys: ["<C-c>"]
   web:
-    shell: "cd web && bun run dev"
+    shell: "cd web && exec bun run dev"
+    stop:
+      send-keys: ["<C-c>"]

@@ -50,9 +50,12 @@ The front door is its own Go process *on purpose*: the backend restarts on
 every code save (air's job), but the browser-facing port must not flap with
 it — the HMR socket and any in-flight WS connection survive air rebuilds.
 The dev-proxy does exactly one thing (proxy); Tailscale and remote access
-are **production-only** subsystems that don't exist under `--dev-backend`. `make dev` reclaims ports `:8080`/`:3050`/`:3000` from any orphaned
-run, then launches mprocs; quitting mprocs (`q` / Ctrl+C) tears all four down,
-and pressing `r` on a pane restarts just that process. `make dev-front` /
+are **production-only** subsystems that don't exist under `--dev-backend`. `make dev` runs the `make dev-stop` preflight (reaps leftover air /
+`go run` wrappers / `tmp/heya*` binaries / port listeners — never clean up by
+killing ports alone, `go run` doesn't forward SIGTERM and an orphaned air
+keeps rebuilding on every save), then launches mprocs; quitting mprocs
+(`q` / Ctrl+C) tears all four down, and pressing `r` on a pane restarts just
+that process. `make dev-front` /
 `make dev-go` / `make dev-worker` / `make dev-web` split them into separate
 terminals. You open **http://localhost:8080** as before. Production uses the
 same binary in two roles: `heya serve` owns Caddy/API/SPA/networking and
