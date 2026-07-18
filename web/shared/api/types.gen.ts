@@ -1854,6 +1854,17 @@ export type GetMusicArtistBySlugRow = {
     wikipedia_links: string;
 };
 
+export type GetUserRatedTracksStatsRow = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    artist_count: number;
+    last_rated_at: Timestamptz;
+    total_duration: number;
+    track_count: number;
+};
+
 export type HttpMetrics = {
     bytes_received: number;
     bytes_sent: number;
@@ -2578,16 +2589,36 @@ export type ListMusicArtistsRow = {
 
 export type ListMusicTracksRow = {
     album_cover_path: string;
+    album_genres: Array<string> | null;
     album_id: number;
+    album_label: string;
+    album_release_date: Date;
     album_slug: string;
     album_title: string;
     album_year: string;
     artist_id: number;
     artist_name: string;
     artist_slug: string;
+    artists_display: string;
     available: boolean;
+    bit_depth: Int4;
+    bitrate_kbps: Int4;
+    bpm: Float4;
+    channels: Int4;
+    composer: string;
     disc_number: number;
     duration: number;
+    explicit: boolean;
+    format: Text;
+    integrated_lufs: Numeric;
+    key_mode: Int2;
+    key_root: Int2;
+    last_played_at: Timestamptz;
+    library_added_at: Timestamptz;
+    play_count: number;
+    rating: Int2;
+    sample_rate_hz: Int4;
+    size_bytes: Int8;
     track_id: number;
     track_number: number;
     track_title: string;
@@ -2649,21 +2680,37 @@ export type ListOnThisDayAlbumsRow = {
 export type ListPlaylistTracksRow = {
     added_at: Timestamptz;
     album_cover_path: string;
+    album_genres: Array<string> | null;
     album_id: number;
+    album_label: string;
+    album_release_date: Date;
     album_slug: string;
     album_title: string;
     album_year: string;
     artist_id: number;
     artist_name: string;
     artist_slug: string;
+    artists_display: string;
     available: boolean;
     bit_depth: Int4;
     bitrate_kbps: Int4;
+    bpm: Float4;
+    channels: Int4;
+    composer: string;
     disc_number: number;
     duration: number;
+    explicit: boolean;
     format: Text;
+    integrated_lufs: Numeric;
+    key_mode: Int2;
+    key_root: Int2;
+    last_played_at: Timestamptz;
+    library_added_at: Timestamptz;
+    play_count: number;
     position: number;
+    rating: Int2;
     sample_rate_hz: Int4;
+    size_bytes: Int8;
     track_id: number;
     track_number: number;
     track_title: string;
@@ -3103,17 +3150,37 @@ export type ListUserRatedArtistsRow = {
 
 export type ListUserRatedTracksRow = {
     album_cover_path: string;
+    album_genres: Array<string> | null;
     album_id: number;
+    album_label: string;
+    album_release_date: Date;
     album_slug: string;
     album_title: string;
     album_year: string;
     artist_id: number;
     artist_name: string;
     artist_slug: string;
+    artists_display: string;
+    available: boolean;
+    bit_depth: Int4;
+    bitrate_kbps: Int4;
+    bpm: Float4;
+    channels: Int4;
+    composer: string;
     disc_number: number;
     duration: number;
+    explicit: boolean;
+    format: Text;
+    integrated_lufs: Numeric;
+    key_mode: Int2;
+    key_root: Int2;
+    last_played_at: Timestamptz;
+    library_added_at: Timestamptz;
+    play_count: number;
     rated_at: Timestamptz;
     rating: number;
+    sample_rate_hz: Int4;
+    size_bytes: Int8;
     track_id: number;
     track_number: number;
     track_title: string;
@@ -7020,6 +7087,13 @@ export type GetMusicArtistBySlugRowWritable = {
     track_count: number;
     urls: string;
     wikipedia_links: string;
+};
+
+export type GetUserRatedTracksStatsRowWritable = {
+    artist_count: number;
+    last_rated_at: Timestamptz;
+    total_duration: number;
+    track_count: number;
 };
 
 export type HealthBodyWritable = {
@@ -14460,6 +14534,34 @@ export type SetFavoritesThresholdResponses = {
 };
 
 export type SetFavoritesThresholdResponse = SetFavoritesThresholdResponses[keyof SetFavoritesThresholdResponses];
+
+export type RatedTrackStatsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        min_rating?: number;
+        max_rating?: number;
+    };
+    url: '/api/me/ratings/track-stats';
+};
+
+export type RatedTrackStatsErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type RatedTrackStatsError = RatedTrackStatsErrors[keyof RatedTrackStatsErrors];
+
+export type RatedTrackStatsResponses = {
+    /**
+     * OK
+     */
+    200: GetUserRatedTracksStatsRow;
+};
+
+export type RatedTrackStatsResponse = RatedTrackStatsResponses[keyof RatedTrackStatsResponses];
 
 export type ListRatedTracksData = {
     body?: never;

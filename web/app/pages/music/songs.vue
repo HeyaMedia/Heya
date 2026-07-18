@@ -17,7 +17,7 @@
       v-else-if="(total ?? 0) > 0"
       :tracks="tlRows"
       :columns="columns"
-      grid-template-columns="48px 56px 1fr minmax(160px, 1.5fr) 70px 120px 60px"
+      storage-key="songs"
       :context-items="contextItemsFor"
       :active-track-id="activeTrackId"
       :on-rating-change="onRatingChange"
@@ -37,17 +37,23 @@
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
 import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
+import type { RichTrackWire } from '~/utils/trackListMeta'
 
 definePageMeta({ layout: 'default' })
 
+// Fixed set matches the old table; the rich optional set (plays, bitrate,
+// BPM, key, …) rides the column picker, persisted under "songs". Year keeps
+// its old default-on state via the registry override. Column order
+// contract: title → artist → album → everything else → duration.
 const columns: TrackListColumn[] = [
-  { key: 'idx', kind: 'index', label: '#' },
-  { key: 'art', kind: 'art', label: '' },
-  { key: 'title', kind: 'title', label: 'Title', subtitle: 'artist-link' },
-  { key: 'album', kind: 'album', label: 'Album' },
-  { key: 'year', kind: 'year', label: 'Year' },
-  { key: 'rating', kind: 'rating', label: 'Rating' },
-  { key: 'duration', kind: 'duration', headerIcon: 'clock' },
+  { key: 'idx', kind: 'index', label: '#', width: '48px' },
+  { key: 'art', kind: 'art', label: '', width: '56px' },
+  { key: 'title', kind: 'title', label: 'Title', subtitle: 'artist-link', width: 'minmax(200px, 1fr)' },
+  artistTrackColumn(),
+  { key: 'album', kind: 'album', label: 'Album', width: 'minmax(160px, 1.5fr)', optional: true, defaultOn: true },
+  ...richTrackColumns().map((c) => (c.key === 'year' ? { ...c, width: '70px', defaultOn: true } : c)),
+  { key: 'rating', kind: 'rating', label: 'Rating', width: '120px' },
+  { key: 'duration', kind: 'duration', headerIcon: 'clock', width: '60px' },
 ]
 
 const { play, queue, currentTrack, playTracks } = usePlayerBindings()
@@ -77,7 +83,7 @@ function rowToTrackEntity(t: TrackRow) {
   }
 }
 
-interface TrackRow {
+interface TrackRow extends RichTrackWire {
   track_id: number
   track_title: string
   duration: number
@@ -92,6 +98,7 @@ interface TrackRow {
   artist_name: string
   artist_slug: string
   available?: boolean
+  rating?: number | null
 }
 
 const { total, pending, itemAt, ensureRange, loadedItems } = useVirtualCatalog<TrackRow>(() => ({
@@ -129,7 +136,8 @@ const tlRows = computed<TrackListRow[]>(() => {
           duration: t.duration,
           available: t.available,
           poster: useAlbumCoverUrl(t.artist_slug, t.album_slug),
-          rating: ratings.value.get(t.track_id) ?? 0,
+          rating: ratings.value.get(t.track_id) ?? t.rating ?? 0,
+          ...pickRichFields(t),
         }
       : { id: -(i + 1), pending: true, title: '', artist: '', album: '', duration: 0 }
   }
@@ -173,7 +181,7 @@ async function playFrom(startIdx: number) {
 </script>
 
 <style scoped>
-.ms-songs { max-width: 1400px; }
+.ms-songs { max-width: none; }
 
 .ms-loading { color: var(--fg-3); font-size: 13px; padding: 40px 0; text-align: center; }
 

@@ -1,7 +1,8 @@
 import { defineQueryOptions } from '@pinia/colada'
 import type { MediaDetail, MusicAlbumDetail, MusicAlbumRow, MusicArtistRow, MusicListPage } from '~~/shared/types'
+import type { RichTrackWire } from '~/utils/trackListMeta'
 
-export interface PlaylistTrackRow {
+export interface PlaylistTrackRow extends RichTrackWire {
   track_id: number
   track_title: string
   duration: number
@@ -18,10 +19,7 @@ export interface PlaylistTrackRow {
   position: number
   added_at: string
   available?: boolean
-  format: string | null
-  bitrate_kbps: number | null
-  sample_rate_hz: number | null
-  bit_depth: number | null
+  rating?: number | null
 }
 
 export interface PlaylistDetailResponse {

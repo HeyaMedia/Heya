@@ -57,6 +57,47 @@ func (q *Queries) GetUserFavoritesThreshold(ctx context.Context, id int64) (int1
 	return favorites_threshold, err
 }
 
+const getUserRatedTracksStats = `-- name: GetUserRatedTracksStats :one
+SELECT count(*)                             AS track_count,
+       COALESCE(sum(t.duration), 0)::bigint AS total_duration,
+       count(DISTINCT al.artist_id)         AS artist_count,
+       max(utr.updated_at)::timestamptz     AS last_rated_at
+FROM user_track_ratings utr
+JOIN tracks t  ON t.id  = utr.track_id
+JOIN albums al ON al.id = t.album_id
+WHERE utr.user_id = $1
+  AND utr.rating >= $2
+  AND utr.rating <= $3
+`
+
+type GetUserRatedTracksStatsParams struct {
+	UserID    int64 `json:"user_id"`
+	MinRating int16 `json:"min_rating"`
+	MaxRating int16 `json:"max_rating"`
+}
+
+type GetUserRatedTracksStatsRow struct {
+	TrackCount    int64              `json:"track_count"`
+	TotalDuration int64              `json:"total_duration"`
+	ArtistCount   int64              `json:"artist_count"`
+	LastRatedAt   pgtype.Timestamptz `json:"last_rated_at"`
+}
+
+// Aggregates for a rating band's ledger strip (Loved Songs hero): track
+// count, total runtime, distinct artists, most recent rating touch. One
+// pass over the user's rated set — small by construction.
+func (q *Queries) GetUserRatedTracksStats(ctx context.Context, arg GetUserRatedTracksStatsParams) (GetUserRatedTracksStatsRow, error) {
+	row := q.db.QueryRow(ctx, getUserRatedTracksStats, arg.UserID, arg.MinRating, arg.MaxRating)
+	var i GetUserRatedTracksStatsRow
+	err := row.Scan(
+		&i.TrackCount,
+		&i.TotalDuration,
+		&i.ArtistCount,
+		&i.LastRatedAt,
+	)
+	return i, err
+}
+
 const getUserTrackRating = `-- name: GetUserTrackRating :one
 SELECT rating FROM user_track_ratings
 WHERE user_id = $1 AND track_id = $2
@@ -119,21 +160,55 @@ SELECT t.id              AS track_id,
        t.duration        AS duration,
        t.disc_number     AS disc_number,
        t.track_number    AS track_number,
+       t.explicit        AS explicit,
        al.id             AS album_id,
        al.title          AS album_title,
        al.slug           AS album_slug,
        al.cover_path     AS album_cover_path,
        al.year           AS album_year,
+       al.genres         AS album_genres,
+       al.label          AS album_label,
+       al.release_date   AS album_release_date,
        a.id              AS artist_id,
        a.name            AS artist_name,
        mi.slug           AS artist_slug,
        utr.rating        AS rating,
-       utr.updated_at    AS rated_at
+       utr.updated_at    AS rated_at,
+       EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL) AS available,
+       bf.format          AS format,
+       bf.bitrate_kbps    AS bitrate_kbps,
+       bf.sample_rate_hz  AS sample_rate_hz,
+       bf.bit_depth       AS bit_depth,
+       bf.channels        AS channels,
+       bf.size_bytes      AS size_bytes,
+       bf.integrated_lufs AS integrated_lufs,
+       blf.created_at     AS library_added_at,
+       tfc.bpm            AS bpm,
+       tfc.key_root       AS key_root,
+       tfc.key_mode       AS key_mode,
+       COALESCE((SELECT string_agg((ac.value ->> 'name') || COALESCE(ac.value ->> 'join_phrase', ''), '' ORDER BY ac.ord)
+          FROM jsonb_array_elements(CASE WHEN jsonb_typeof(t.artist_credits) = 'array' THEN t.artist_credits ELSE '[]'::jsonb END)
+               WITH ORDINALITY AS ac(value, ord)), '')::text AS artists_display,
+       COALESCE((SELECT string_agg(DISTINCT cr.value ->> 'artist_name', ', ')
+          FROM jsonb_array_elements(CASE WHEN jsonb_typeof(t.credits) = 'array' THEN t.credits ELSE '[]'::jsonb END) AS cr(value)
+         WHERE cr.value ->> 'role' = 'composer'), '')::text AS composer,
+       (SELECT count(*) FROM play_events pe WHERE pe.user_id = utr.user_id AND pe.track_id = t.id) AS play_count,
+       (SELECT max(pe.played_at) FROM play_events pe WHERE pe.user_id = utr.user_id AND pe.track_id = t.id)::timestamptz AS last_played_at
 FROM user_track_ratings utr
 JOIN tracks      t  ON t.id  = utr.track_id
 JOIN albums      al ON al.id = t.album_id
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
+LEFT JOIN track_files bf ON bf.id = (
+    SELECT tf.id
+    FROM track_files tf
+    JOIN library_files lf ON lf.id = tf.library_file_id
+    WHERE tf.track_id = t.id AND lf.deleted_at IS NULL
+    ORDER BY tf.quality_score DESC, tf.id ASC
+    LIMIT 1
+)
+LEFT JOIN library_files blf ON blf.id = bf.library_file_id
+LEFT JOIN track_facets tfc ON tfc.track_id = t.id
 WHERE utr.user_id = $1
   AND utr.rating  >= $2
   AND utr.rating  <= $3
@@ -150,27 +225,53 @@ type ListUserRatedTracksParams struct {
 }
 
 type ListUserRatedTracksRow struct {
-	TrackID        int64              `json:"track_id"`
-	TrackTitle     string             `json:"track_title"`
-	Duration       int32              `json:"duration"`
-	DiscNumber     int32              `json:"disc_number"`
-	TrackNumber    int32              `json:"track_number"`
-	AlbumID        int64              `json:"album_id"`
-	AlbumTitle     string             `json:"album_title"`
-	AlbumSlug      string             `json:"album_slug"`
-	AlbumCoverPath string             `json:"album_cover_path"`
-	AlbumYear      string             `json:"album_year"`
-	ArtistID       int64              `json:"artist_id"`
-	ArtistName     string             `json:"artist_name"`
-	ArtistSlug     string             `json:"artist_slug"`
-	Rating         int16              `json:"rating"`
-	RatedAt        pgtype.Timestamptz `json:"rated_at"`
+	TrackID          int64              `json:"track_id"`
+	TrackTitle       string             `json:"track_title"`
+	Duration         int32              `json:"duration"`
+	DiscNumber       int32              `json:"disc_number"`
+	TrackNumber      int32              `json:"track_number"`
+	Explicit         bool               `json:"explicit"`
+	AlbumID          int64              `json:"album_id"`
+	AlbumTitle       string             `json:"album_title"`
+	AlbumSlug        string             `json:"album_slug"`
+	AlbumCoverPath   string             `json:"album_cover_path"`
+	AlbumYear        string             `json:"album_year"`
+	AlbumGenres      []string           `json:"album_genres"`
+	AlbumLabel       string             `json:"album_label"`
+	AlbumReleaseDate pgtype.Date        `json:"album_release_date"`
+	ArtistID         int64              `json:"artist_id"`
+	ArtistName       string             `json:"artist_name"`
+	ArtistSlug       string             `json:"artist_slug"`
+	Rating           int16              `json:"rating"`
+	RatedAt          pgtype.Timestamptz `json:"rated_at"`
+	Available        bool               `json:"available"`
+	Format           pgtype.Text        `json:"format"`
+	BitrateKbps      pgtype.Int4        `json:"bitrate_kbps"`
+	SampleRateHz     pgtype.Int4        `json:"sample_rate_hz"`
+	BitDepth         pgtype.Int4        `json:"bit_depth"`
+	Channels         pgtype.Int4        `json:"channels"`
+	SizeBytes        pgtype.Int8        `json:"size_bytes"`
+	IntegratedLufs   pgtype.Numeric     `json:"integrated_lufs"`
+	LibraryAddedAt   pgtype.Timestamptz `json:"library_added_at"`
+	Bpm              pgtype.Float4      `json:"bpm"`
+	KeyRoot          pgtype.Int2        `json:"key_root"`
+	KeyMode          pgtype.Int2        `json:"key_mode"`
+	ArtistsDisplay   string             `json:"artists_display"`
+	Composer         string             `json:"composer"`
+	PlayCount        int64              `json:"play_count"`
+	LastPlayedAt     pgtype.Timestamptz `json:"last_played_at"`
 }
 
 // Paginated list of every track the user has rated, sorted by rating
 // desc then most-recently-rated. Carries album+artist context so the FE
 // renders self-contained rows. Filters by min_rating for the Favorites
 // view (use 1 to get everything rated).
+//
+// Enrichment columns (best file, facets, play stats, composer) mirror
+// ListPlaylistTracks — see the comment there for the LATERAL-avoidance and
+// jsonb-extraction rationale. Kept as direct joins without a keys-subquery
+// wrap: the joined set is one user's rated tracks (thousands at most), not
+// the whole catalog.
 func (q *Queries) ListUserRatedTracks(ctx context.Context, arg ListUserRatedTracksParams) ([]ListUserRatedTracksRow, error) {
 	rows, err := q.db.Query(ctx, listUserRatedTracks,
 		arg.UserID,
@@ -192,16 +293,36 @@ func (q *Queries) ListUserRatedTracks(ctx context.Context, arg ListUserRatedTrac
 			&i.Duration,
 			&i.DiscNumber,
 			&i.TrackNumber,
+			&i.Explicit,
 			&i.AlbumID,
 			&i.AlbumTitle,
 			&i.AlbumSlug,
 			&i.AlbumCoverPath,
 			&i.AlbumYear,
+			&i.AlbumGenres,
+			&i.AlbumLabel,
+			&i.AlbumReleaseDate,
 			&i.ArtistID,
 			&i.ArtistName,
 			&i.ArtistSlug,
 			&i.Rating,
 			&i.RatedAt,
+			&i.Available,
+			&i.Format,
+			&i.BitrateKbps,
+			&i.SampleRateHz,
+			&i.BitDepth,
+			&i.Channels,
+			&i.SizeBytes,
+			&i.IntegratedLufs,
+			&i.LibraryAddedAt,
+			&i.Bpm,
+			&i.KeyRoot,
+			&i.KeyMode,
+			&i.ArtistsDisplay,
+			&i.Composer,
+			&i.PlayCount,
+			&i.LastPlayedAt,
 		); err != nil {
 			return nil, err
 		}

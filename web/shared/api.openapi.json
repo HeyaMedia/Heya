@@ -6212,6 +6212,42 @@
         ],
         "type": "object"
       },
+      "GetUserRatedTracksStatsRow": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/GetUserRatedTracksStatsRow.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "artist_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_rated_at": {
+            "$ref": "#/components/schemas/Timestamptz"
+          },
+          "total_duration": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "track_count": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "track_count",
+          "total_duration",
+          "artist_count",
+          "last_rated_at"
+        ],
+        "type": "object"
+      },
       "HTTPMetrics": {
         "additionalProperties": false,
         "properties": {
@@ -9016,9 +9052,24 @@
           "album_cover_path": {
             "type": "string"
           },
+          "album_genres": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "album_id": {
             "format": "int64",
             "type": "integer"
+          },
+          "album_label": {
+            "type": "string"
+          },
+          "album_release_date": {
+            "$ref": "#/components/schemas/Date"
           },
           "album_slug": {
             "type": "string"
@@ -9039,8 +9090,26 @@
           "artist_slug": {
             "type": "string"
           },
+          "artists_display": {
+            "type": "string"
+          },
           "available": {
             "type": "boolean"
+          },
+          "bit_depth": {
+            "$ref": "#/components/schemas/Int4"
+          },
+          "bitrate_kbps": {
+            "$ref": "#/components/schemas/Int4"
+          },
+          "bpm": {
+            "$ref": "#/components/schemas/Float4"
+          },
+          "channels": {
+            "$ref": "#/components/schemas/Int4"
+          },
+          "composer": {
+            "type": "string"
           },
           "disc_number": {
             "format": "int32",
@@ -9049,6 +9118,40 @@
           "duration": {
             "format": "int32",
             "type": "integer"
+          },
+          "explicit": {
+            "type": "boolean"
+          },
+          "format": {
+            "$ref": "#/components/schemas/Text"
+          },
+          "integrated_lufs": {
+            "$ref": "#/components/schemas/Numeric"
+          },
+          "key_mode": {
+            "$ref": "#/components/schemas/Int2"
+          },
+          "key_root": {
+            "$ref": "#/components/schemas/Int2"
+          },
+          "last_played_at": {
+            "$ref": "#/components/schemas/Timestamptz"
+          },
+          "library_added_at": {
+            "$ref": "#/components/schemas/Timestamptz"
+          },
+          "play_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rating": {
+            "$ref": "#/components/schemas/Int2"
+          },
+          "sample_rate_hz": {
+            "$ref": "#/components/schemas/Int4"
+          },
+          "size_bytes": {
+            "$ref": "#/components/schemas/Int8"
           },
           "track_id": {
             "format": "int64",
@@ -9076,7 +9179,27 @@
           "artist_id",
           "artist_name",
           "artist_slug",
-          "available"
+          "available",
+          "explicit",
+          "album_genres",
+          "album_label",
+          "album_release_date",
+          "format",
+          "bitrate_kbps",
+          "sample_rate_hz",
+          "bit_depth",
+          "channels",
+          "size_bytes",
+          "integrated_lufs",
+          "library_added_at",
+          "bpm",
+          "key_root",
+          "key_mode",
+          "rating",
+          "artists_display",
+          "composer",
+          "play_count",
+          "last_played_at"
         ],
         "type": "object"
       },
@@ -9343,9 +9466,24 @@
           "album_cover_path": {
             "type": "string"
           },
+          "album_genres": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "album_id": {
             "format": "int64",
             "type": "integer"
+          },
+          "album_label": {
+            "type": "string"
+          },
+          "album_release_date": {
+            "$ref": "#/components/schemas/Date"
           },
           "album_slug": {
             "type": "string"
@@ -9366,6 +9504,9 @@
           "artist_slug": {
             "type": "string"
           },
+          "artists_display": {
+            "type": "string"
+          },
           "available": {
             "type": "boolean"
           },
@@ -9375,6 +9516,15 @@
           "bitrate_kbps": {
             "$ref": "#/components/schemas/Int4"
           },
+          "bpm": {
+            "$ref": "#/components/schemas/Float4"
+          },
+          "channels": {
+            "$ref": "#/components/schemas/Int4"
+          },
+          "composer": {
+            "type": "string"
+          },
           "disc_number": {
             "format": "int32",
             "type": "integer"
@@ -9383,15 +9533,43 @@
             "format": "int32",
             "type": "integer"
           },
+          "explicit": {
+            "type": "boolean"
+          },
           "format": {
             "$ref": "#/components/schemas/Text"
+          },
+          "integrated_lufs": {
+            "$ref": "#/components/schemas/Numeric"
+          },
+          "key_mode": {
+            "$ref": "#/components/schemas/Int2"
+          },
+          "key_root": {
+            "$ref": "#/components/schemas/Int2"
+          },
+          "last_played_at": {
+            "$ref": "#/components/schemas/Timestamptz"
+          },
+          "library_added_at": {
+            "$ref": "#/components/schemas/Timestamptz"
+          },
+          "play_count": {
+            "format": "int64",
+            "type": "integer"
           },
           "position": {
             "format": "int32",
             "type": "integer"
           },
+          "rating": {
+            "$ref": "#/components/schemas/Int2"
+          },
           "sample_rate_hz": {
             "$ref": "#/components/schemas/Int4"
+          },
+          "size_bytes": {
+            "$ref": "#/components/schemas/Int8"
           },
           "track_id": {
             "format": "int64",
@@ -9411,11 +9589,15 @@
           "duration",
           "disc_number",
           "track_number",
+          "explicit",
           "album_id",
           "album_title",
           "album_cover_path",
           "album_year",
           "album_slug",
+          "album_genres",
+          "album_label",
+          "album_release_date",
           "artist_id",
           "artist_name",
           "artist_slug",
@@ -9425,7 +9607,19 @@
           "format",
           "bitrate_kbps",
           "sample_rate_hz",
-          "bit_depth"
+          "bit_depth",
+          "channels",
+          "size_bytes",
+          "integrated_lufs",
+          "library_added_at",
+          "bpm",
+          "key_root",
+          "key_mode",
+          "rating",
+          "artists_display",
+          "composer",
+          "play_count",
+          "last_played_at"
         ],
         "type": "object"
       },
@@ -11355,9 +11549,24 @@
           "album_cover_path": {
             "type": "string"
           },
+          "album_genres": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "album_id": {
             "format": "int64",
             "type": "integer"
+          },
+          "album_label": {
+            "type": "string"
+          },
+          "album_release_date": {
+            "$ref": "#/components/schemas/Date"
           },
           "album_slug": {
             "type": "string"
@@ -11378,6 +11587,27 @@
           "artist_slug": {
             "type": "string"
           },
+          "artists_display": {
+            "type": "string"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "bit_depth": {
+            "$ref": "#/components/schemas/Int4"
+          },
+          "bitrate_kbps": {
+            "$ref": "#/components/schemas/Int4"
+          },
+          "bpm": {
+            "$ref": "#/components/schemas/Float4"
+          },
+          "channels": {
+            "$ref": "#/components/schemas/Int4"
+          },
+          "composer": {
+            "type": "string"
+          },
           "disc_number": {
             "format": "int32",
             "type": "integer"
@@ -11386,12 +11616,43 @@
             "format": "int32",
             "type": "integer"
           },
+          "explicit": {
+            "type": "boolean"
+          },
+          "format": {
+            "$ref": "#/components/schemas/Text"
+          },
+          "integrated_lufs": {
+            "$ref": "#/components/schemas/Numeric"
+          },
+          "key_mode": {
+            "$ref": "#/components/schemas/Int2"
+          },
+          "key_root": {
+            "$ref": "#/components/schemas/Int2"
+          },
+          "last_played_at": {
+            "$ref": "#/components/schemas/Timestamptz"
+          },
+          "library_added_at": {
+            "$ref": "#/components/schemas/Timestamptz"
+          },
+          "play_count": {
+            "format": "int64",
+            "type": "integer"
+          },
           "rated_at": {
             "$ref": "#/components/schemas/Timestamptz"
           },
           "rating": {
             "format": "int32",
             "type": "integer"
+          },
+          "sample_rate_hz": {
+            "$ref": "#/components/schemas/Int4"
+          },
+          "size_bytes": {
+            "$ref": "#/components/schemas/Int8"
           },
           "track_id": {
             "format": "int64",
@@ -11411,16 +11672,36 @@
           "duration",
           "disc_number",
           "track_number",
+          "explicit",
           "album_id",
           "album_title",
           "album_slug",
           "album_cover_path",
           "album_year",
+          "album_genres",
+          "album_label",
+          "album_release_date",
           "artist_id",
           "artist_name",
           "artist_slug",
           "rating",
-          "rated_at"
+          "rated_at",
+          "available",
+          "format",
+          "bitrate_kbps",
+          "sample_rate_hz",
+          "bit_depth",
+          "channels",
+          "size_bytes",
+          "integrated_lufs",
+          "library_added_at",
+          "bpm",
+          "key_root",
+          "key_mode",
+          "artists_display",
+          "composer",
+          "play_count",
+          "last_played_at"
         ],
         "type": "object"
       },
@@ -33919,6 +34200,75 @@
           }
         ],
         "summary": "Move the favorites threshold (1..10)",
+        "tags": [
+          "Me"
+        ]
+      }
+    },
+    "/api/me/ratings/track-stats": {
+      "get": {
+        "operationId": "rated-track-stats",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "min_rating",
+            "schema": {
+              "default": 1,
+              "format": "int32",
+              "maximum": 10,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "max_rating",
+            "schema": {
+              "default": 10,
+              "format": "int32",
+              "maximum": 10,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetUserRatedTracksStatsRow"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Aggregates for a rating band (count, runtime, artists, last rated)",
         "tags": [
           "Me"
         ]

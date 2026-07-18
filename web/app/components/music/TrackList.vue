@@ -43,21 +43,46 @@
     <div
       v-if="showHeader && !isPhone"
       class="tl-row tl-head"
-      :style="{ gridTemplateColumns }"
+      :style="{ gridTemplateColumns: effectiveGrid }"
     >
       <div
-        v-for="col in columns"
+        v-for="col in visibleColumns"
         :key="col.key"
         class="tl-cell"
-        :class="`tl-c-${col.kind}`"
+        :class="[`tl-c-${col.kind}`, {
+          'tl-align-right': col.align === 'right',
+          'tl-sortable': col.sortable && sortEnabled,
+          'tl-sorted': sortKey === col.key,
+        }]"
+        @click="onHeaderClick(col)"
       >
         <Icon v-if="col.headerIcon" :name="col.headerIcon" :size="13" />
         <template v-else>{{ col.label }}</template>
+        <Icon v-if="sortKey === col.key" :name="sortDir === 'asc' ? 'chevup' : 'chevdown'" :size="10" class="tl-sort-arrow" />
+      </div>
+      <div v-if="pickerEnabled" class="tl-cell tl-c-picker">
+        <AppMenu trigger-class="tl-picker-btn" trigger-title="Choose columns" trigger-aria-label="Choose columns">
+          <template #trigger><Icon name="eq" :size="13" /></template>
+          <div class="tl-picker-heading">Columns</div>
+          <div class="tl-picker-list">
+            <DropdownMenuItem
+              v-for="col in optionalColumns"
+              :key="col.key"
+              class="surface-item tl-picker-item"
+              @select.prevent="toggleColumn(col.key)"
+            >
+              <span class="tl-picker-check" :class="{ on: isColumnOn(col) }">
+                <Icon name="check" :size="11" />
+              </span>
+              {{ col.label }}
+            </DropdownMenuItem>
+          </div>
+        </AppMenu>
       </div>
     </div>
 
     <div v-if="!virtualized" class="tl-body">
-      <template v-for="(t, i) in tracks" :key="t.id">
+      <template v-for="(t, i) in displayRows" :key="t.id">
         <!-- Optional escape hatch (W2c) for content between rows — e.g. the
              album page's disc-boundary markers. Unused by every other
              consumer; renders nothing when the slot isn't provided. -->
@@ -65,9 +90,9 @@
         <TrackListItem
           :track="t"
           :index="i"
-          :columns="columns"
-          :grid-template-columns="gridTemplateColumns"
-          :context-items="contextItems"
+          :columns="visibleColumns"
+          :grid-template-columns="effectiveGrid"
+          :context-items="contextItemsAt"
           :active="isActive(t)"
           :playing="playing"
           :is-phone="isPhone"
@@ -80,11 +105,11 @@
           :duration-formatter="durationFormatter"
           :on-drag-start="onDragStart"
           :on-drag-end="onDragEnd"
-          @row-click="emit('row-click', $event)"
+          @row-click="emit('row-click', origIdx(t, $event))"
           @open-sheet="openSheet"
         >
           <template v-for="col in columns" :key="col.key" #[`cell-${col.key}`]="slotProps">
-            <slot :name="`cell-${col.key}`" v-bind="slotProps" />
+            <slot :name="`cell-${col.key}`" v-bind="slotProps" :index="origIdx(slotProps.track, slotProps.index)" />
           </template>
         </TrackListItem>
       </template>
@@ -93,7 +118,7 @@
     <RecycleScroller
       v-else
       class="tl-body tl-virtual"
-      :items="tracks"
+      :items="displayRows"
       :item-size="isPhone ? 65 : 61"
       :buffer="610"
       key-field="id"
@@ -105,16 +130,16 @@
       <!-- Sparse (random-access paged) lists hand down placeholder rows for
            the stretches the scrollbar hasn't visited yet — hold the row
            footprint with a shimmer instead of mounting a dead TrackListItem. -->
-      <div v-if="t.pending" class="tl-row tl-track tl-pending" :style="!isPhone ? { gridTemplateColumns } : undefined">
+      <div v-if="t.pending" class="tl-row tl-track tl-pending" :style="!isPhone ? { gridTemplateColumns: effectiveGrid } : undefined">
         <div class="tl-skel-bar" />
       </div>
       <TrackListItem
         v-else
         :track="t"
         :index="i"
-        :columns="columns"
-        :grid-template-columns="gridTemplateColumns"
-        :context-items="contextItems"
+        :columns="visibleColumns"
+        :grid-template-columns="effectiveGrid"
+        :context-items="contextItemsAt"
         :active="isActive(t)"
         :playing="playing"
         :is-phone="isPhone"
@@ -127,75 +152,44 @@
         :duration-formatter="durationFormatter"
         :on-drag-start="onDragStart"
         :on-drag-end="onDragEnd"
-        @row-click="emit('row-click', $event)"
+        @row-click="emit('row-click', origIdx(t, $event))"
         @open-sheet="openSheet"
       >
         <template v-for="col in columns" :key="col.key" #[`cell-${col.key}`]="slotProps">
-          <slot :name="`cell-${col.key}`" v-bind="slotProps" />
+          <slot :name="`cell-${col.key}`" v-bind="slotProps" :index="origIdx(slotProps.track, slotProps.index)" />
         </template>
       </TrackListItem>
     </RecycleScroller>
 
     <ActionSheet
       v-model:open="sheetOpen"
-      :items="sheetTrack ? contextItems(sheetTrack, sheetIndex) : []"
+      :items="sheetTrack ? contextItemsAt(sheetTrack, sheetIndex) : []"
       :title="sheetTrack?.title"
     />
   </div>
 </template>
 
 <script setup lang="ts">
+import { DropdownMenuItem } from 'reka-ui'
 import type { ContextMenuItem } from '~~/shared/types'
 
-// Minimal row shape TrackList needs. Pages map their (differently-shaped)
-// query rows into this before handing them down — see the `tlRows`
-// computed in each migrated page for the adapter.
-export interface TrackListRow {
-  id: number
-  title: string
-  artist: string
-  artist_slug?: string
-  album: string
-  album_slug?: string
-  album_year?: string | number | null
-  duration: number
-  /** false = file removed from disk; row dims and stops accepting clicks. */
-  available?: boolean
-  poster?: string | null
-  /** 0..10 half-star scale; only rendered when a 'rating' column is present. */
-  rating?: number
-  /** Phone-only quality label ("FLAC 24/96", "MP3 320") — see utils/trackQuality.ts.
-   *  Rendered under the duration in the phone row; omitted entirely when absent. */
-  quality?: string | null
-  /** Placeholder row in a sparse (random-access paged) list — renders as a
-   *  skeleton. Give placeholders unique negative ids for the v-for key. */
-  pending?: boolean
-}
+// Row/column types live in utils/trackListMeta.ts (a plain .ts module —
+// raw tsc can't resolve type exports from an SFC); re-exported here so
+// consuming pages keep their existing import path.
+import type { TrackListColumn, TrackListRow } from '~/utils/trackListMeta'
 
-export type TrackListColumnKind =
-  | 'index' | 'art' | 'title' | 'album' | 'year' | 'rating' | 'duration' | 'custom'
-
-export interface TrackListColumn {
-  key: string
-  kind: TrackListColumnKind
-  /** Header cell text. Ignored when `headerIcon` is set. */
-  label?: string
-  /** Header cell renders this icon instead of `label` (songs.vue's clock-over-duration). */
-  headerIcon?: string
-  /** 'title' only — render a thumb ahead of the text (browse's combined art+title cell). */
-  inlineArt?: boolean
-  inlineArtSize?: number
-  /** 'title' only — how the line under the title renders. */
-  subtitle?: 'artist-link' | 'artist-plain' | 'artist-album-year' | 'none'
-  /** 'album' only — NuxtLink (default) vs plain text. */
-  linkAlbum?: boolean
-}
+export type { TrackListColumn, TrackListColumnKind, TrackListRow } from '~/utils/trackListMeta'
 
 const props = withDefaults(defineProps<{
   tracks: TrackListRow[]
   columns: TrackListColumn[]
-  /** Verbatim `grid-template-columns` value from the page being migrated. */
-  gridTemplateColumns: string
+  /** Verbatim `grid-template-columns` value from the page being migrated.
+   *  Ignored (and omissible) when every column carries a `width` — the grid
+   *  is then computed from the currently-visible column set. */
+  gridTemplateColumns?: string
+  /** Enables the column picker: optional columns become user-toggleable and
+   *  the visible set persists in localStorage under this key. */
+  storageKey?: string
   contextItems: (track: TrackListRow, index: number) => ContextMenuItem[]
   /** Drives `.tl-active`/`.playing` tint + the VU meter swap. Omit (or leave
    *  null) to never highlight a row — matches pages that don't track it today. */
@@ -216,6 +210,7 @@ const props = withDefaults(defineProps<{
    *  with hundreds of fixed-height rows; small/detail lists stay native. */
   virtualized?: boolean
 }>(), {
+  gridTemplateColumns: '',
   activeTrackId: null,
   playing: false,
   showHeader: true,
@@ -243,6 +238,150 @@ const { onDragStart, onDragEnd } = useMusicDragDrop()
 function onScrollerUpdate(start: number, end: number) {
   emit('range', start, end)
 }
+
+// ── Column picker ────────────────────────────────────────────────────
+// Optional columns toggle through an AppMenu in the header. The preference
+// is SITE-WIDE: one global key stores the user's explicit on/off DELTAS
+// (not the absolute set), so per-page defaults still apply where a page
+// declares them (playlist's "Added", loved's "Loved") while a column
+// enabled on any list follows the user to every other list. Defaults
+// render on both SSR and first client paint; the stored preference applies
+// onMounted (localStorage isn't available server-side, and reading it
+// during hydration would mismatch).
+const TL_COLS_KEY = 'heya:tl-cols'
+const pickerEnabled = computed(() => !!props.storageKey && !isPhone.value)
+const optionalColumns = computed(() => props.columns.filter((c) => c.optional))
+const userOn = ref<Set<string>>(new Set())
+const userOff = ref<Set<string>>(new Set())
+onMounted(() => {
+  try {
+    const saved = localStorage.getItem(TL_COLS_KEY)
+    if (saved) {
+      const { on, off } = JSON.parse(saved) as { on?: string[]; off?: string[] }
+      userOn.value = new Set(on ?? [])
+      userOff.value = new Set(off ?? [])
+    }
+  } catch { /* corrupt entry — keep defaults */ }
+})
+function isColumnOn(col: TrackListColumn): boolean {
+  if (!col.optional) return true
+  if (userOff.value.has(col.key)) return false
+  return userOn.value.has(col.key) || !!col.defaultOn
+}
+function toggleColumn(key: string) {
+  const col = props.columns.find((c) => c.key === key)
+  if (!col) return
+  const on = new Set(userOn.value)
+  const off = new Set(userOff.value)
+  if (isColumnOn(col)) {
+    on.delete(key)
+    off.add(key)
+  } else {
+    off.delete(key)
+    on.add(key)
+  }
+  userOn.value = on
+  userOff.value = off
+  try { localStorage.setItem(TL_COLS_KEY, JSON.stringify({ on: [...on], off: [...off] })) } catch { /* quota */ }
+}
+
+const visibleColumns = computed(() => props.columns.filter(isColumnOn))
+
+// ── Sorting ──────────────────────────────────────────────────────────
+// Client-side, header-click, asc → desc → off. Only offered when every row
+// is materialized — sorting a sparse (random-access paged) list would order
+// the loaded islands and lie about the rest. Events and contextItems keep
+// receiving ORIGINAL indexes (pages resolve rows by index into their own
+// source arrays), so sorted views translate through an id → index map.
+const sortKey = ref<string | null>(null)
+const sortDir = ref<'asc' | 'desc'>('asc')
+const hasPending = computed(() => props.tracks.some((t) => t.pending))
+const sortEnabled = computed(() => !hasPending.value)
+
+onMounted(() => {
+  if (!props.storageKey) return
+  try {
+    const saved = localStorage.getItem(`heya:tl-sort:${props.storageKey}`)
+    if (saved) {
+      const { key, dir } = JSON.parse(saved) as { key: string | null; dir: 'asc' | 'desc' }
+      sortKey.value = key
+      sortDir.value = dir === 'desc' ? 'desc' : 'asc'
+    }
+  } catch { /* corrupt entry — keep defaults */ }
+})
+
+function onHeaderClick(col: TrackListColumn) {
+  if (!col.sortable || !sortEnabled.value) return
+  if (sortKey.value !== col.key) {
+    sortKey.value = col.key
+    sortDir.value = 'asc'
+  } else if (sortDir.value === 'asc') {
+    sortDir.value = 'desc'
+  } else {
+    sortKey.value = null
+    sortDir.value = 'asc'
+  }
+  if (props.storageKey) {
+    try { localStorage.setItem(`heya:tl-sort:${props.storageKey}`, JSON.stringify({ key: sortKey.value, dir: sortDir.value })) } catch { /* quota */ }
+  }
+}
+
+// Built-in kinds sort on their natural field; meta columns bring their own
+// sortValue from the registry.
+function kindSortValue(col: TrackListColumn): ((r: TrackListRow) => string | number | null | undefined) | null {
+  switch (col.kind) {
+    case 'title': return (r) => r.title
+    case 'artist': return (r) => r.artist
+    case 'album': return (r) => r.album
+    case 'year': return (r) => Number(r.album_year) || null
+    case 'rating': return (r) => r.rating ?? 0
+    case 'duration': return (r) => r.duration
+    default: return null
+  }
+}
+
+const displayRows = computed<TrackListRow[]>(() => {
+  const key = sortKey.value
+  if (!key || !sortEnabled.value) return props.tracks
+  const col = props.columns.find((c) => c.key === key)
+  const sv = col ? (col.sortValue ?? kindSortValue(col)) : null
+  if (!col || !sv) return props.tracks
+  const dir = sortDir.value === 'desc' ? -1 : 1
+  return [...props.tracks].sort((a, b) => {
+    const av = sv(a)
+    const bv = sv(b)
+    // Absent values sink to the bottom in either direction.
+    if (av == null || av === '') return bv == null || bv === '' ? 0 : 1
+    if (bv == null || bv === '') return -1
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
+    return String(av).localeCompare(String(bv), undefined, { sensitivity: 'base', numeric: true }) * dir
+  })
+})
+
+// Original index per row id — events/contextItems speak the page's indexes.
+const originalIndex = computed(() => {
+  const m = new Map<number, number>()
+  props.tracks.forEach((t, i) => m.set(t.id, i))
+  return m
+})
+const origIdx = (t: TrackListRow, fallback: number) => originalIndex.value.get(t.id) ?? fallback
+// Wrapped builder handed to rows: translates the visual index back to the
+// page's original index before delegating.
+function contextItemsAt(track: TrackListRow, visualIndex: number) {
+  return props.contextItems(track, origIdx(track, visualIndex))
+}
+
+// Grid: computed from the visible columns' widths when every column has one
+// (picker mode); the page's literal string otherwise. The trailing 28px
+// track hosts the picker button in the header — body rows auto-place their
+// cells into the leading tracks and leave it empty, so alignment holds.
+const effectiveGrid = computed(() => {
+  const cols = visibleColumns.value
+  const base = cols.every((c) => c.width) && cols.length
+    ? cols.map((c) => c.width!).join(' ')
+    : props.gridTemplateColumns
+  return pickerEnabled.value ? `${base} 28px` : base
+})
 
 const hasArt = computed(() => props.columns.some((c) => c.kind === 'art' || (c.kind === 'title' && c.inlineArt)))
 
@@ -350,6 +489,25 @@ padding: 4px 6px 8px;
 .tl-c-year { color: var(--fg-3); font-family: var(--font-mono); font-size: 12px; }
 .tl-c-duration { text-align: right; color: var(--fg-3); font-family: var(--font-mono); font-size: 12px; }
 .tl-c-rating { display: flex; align-items: center; }
+.tl-c-meta {
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0;
+}
+.tl-align-right { text-align: right; }
+
+/* Sortable headers — pointer + hover ink; the active column carries a
+   direction arrow inline after its label. */
+.tl-head .tl-cell.tl-sortable { cursor: pointer; user-select: none; }
+.tl-head .tl-cell.tl-sortable:hover { color: var(--fg-0); }
+.tl-head .tl-cell.tl-sorted { color: var(--gold); }
+.tl-sort-arrow { vertical-align: -1px; margin-left: 3px; }
+
+/* Column picker — trailing 28px header track. The button is header-only;
+   body rows leave the track empty so column alignment holds. */
+.tl-c-picker { display: flex; justify-content: flex-end; }
 
 .tl-c-art {
   width: 48px;
@@ -397,6 +555,8 @@ padding: 4px 6px 8px;
   max-width: 100%;
 }
 .tl-artist-link:hover { color: var(--fg-1); text-decoration: underline; }
+/* Credit tail past the primary artist (" feat. B") — dimmer than the link text. */
+.tl-feat { color: var(--fg-3); opacity: 0.85; }
 .tl-artist-plain { font-size: 11px; margin-top: 2px; }
 .tl-artist-combo {
   font-size: 12px;
@@ -472,5 +632,46 @@ padding: 4px 6px 8px;
   cursor: pointer;
 }
 .tl-phone-more:active { background: rgb(var(--ink) / 0.06); color: var(--fg-0); }
+
+.tl-picker-btn {
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--fg-3);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.tl-picker-btn:hover,
+.tl-picker-btn[data-state="open"] { background: rgb(var(--ink) / 0.06); color: var(--fg-0); }
+}
+
+/* Picker menu content is portaled out of .tl (docs/ui.md gotcha #2) — these
+   stay top-level. */
+.tl-picker-heading {
+  padding: 6px 10px 4px;
+  font: 600 10px var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.tl-picker-item { gap: 8px; }
+/* 19 optional columns overflow shorter viewports — scroll the list, keep
+   the heading pinned. */
+.tl-picker-list { max-height: min(56vh, 460px); overflow-y: auto; }
+.tl-picker-check {
+  width: 15px; height: 15px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 4px;
+  border: 1px solid var(--border-strong);
+  color: transparent;
+  flex-shrink: 0;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.tl-picker-check.on {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: var(--bg-0);
 }
 </style>

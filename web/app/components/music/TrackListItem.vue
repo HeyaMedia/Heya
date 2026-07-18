@@ -49,15 +49,32 @@
             </template>
             <div class="tl-title-text">
               <div class="tl-title">{{ track.title }}</div>
-              <NuxtLink
-                v-if="col.subtitle === 'artist-link' && track.artist_slug"
-                :to="`/music/artist/${track.artist_slug}`"
-                class="tl-artist tl-artist-link"
-                @click.stop
-              >{{ track.artist }}</NuxtLink>
-              <div v-else-if="col.subtitle === 'artist-plain'" class="tl-artist tl-artist-plain">{{ track.artist }}</div>
-              <div v-else-if="col.subtitle === 'artist-album-year'" class="tl-artist tl-artist-combo">{{ subtitleFull }}</div>
+              <!-- Full credit string when it says more than the artist alone
+                   ("A feat. B") — the artist link keeps its target, the
+                   join/feat remainder rides as plain text after it. A
+                   visible dedicated Artist column suppresses the subtitle
+                   (no point saying it twice — plexify's rule). -->
+              <template v-if="!hasArtistColumn">
+                <NuxtLink
+                  v-if="col.subtitle === 'artist-link' && track.artist_slug"
+                  :to="`/music/artist/${track.artist_slug}`"
+                  class="tl-artist tl-artist-link"
+                  @click.stop
+                >{{ track.artist }}<template v-if="creditRemainder"><span class="tl-feat">{{ creditRemainder }}</span></template></NuxtLink>
+                <div v-else-if="col.subtitle === 'artist-plain'" class="tl-artist tl-artist-plain">{{ subtitleArtist }}</div>
+                <div v-else-if="col.subtitle === 'artist-album-year'" class="tl-artist tl-artist-combo">{{ subtitleFull }}</div>
+              </template>
             </div>
+          </template>
+
+          <template v-else-if="col.kind === 'artist'">
+            <NuxtLink
+              v-if="track.artist_slug"
+              :to="`/music/artist/${track.artist_slug}`"
+              class="tl-album-link"
+              @click.stop
+            >{{ track.artist }}</NuxtLink>
+            <span v-else class="tl-album-link tl-album-plain">{{ track.artist }}</span>
           </template>
 
           <template v-else-if="col.kind === 'album'">
@@ -77,6 +94,10 @@
           </template>
 
           <template v-else-if="col.kind === 'duration'">{{ durationFormatter(track.duration) }}</template>
+
+          <template v-else-if="col.kind === 'meta'">
+            <span :title="col.tooltip?.(track) || undefined">{{ col.format?.(track) ?? '' }}</span>
+          </template>
 
           <template v-else-if="col.kind === 'custom'">
             <slot :name="`cell-${col.key}`" :track="track" :index="index" :active="active" />
@@ -134,16 +155,34 @@ const emit = defineEmits<{
   'open-sheet': [track: TrackListRow, index: number]
 }>()
 
+// A dedicated Artist column supersedes the title-cell artist subtitle.
+const hasArtistColumn = computed(() => props.columns.some((c) => c.kind === 'artist'))
+
+// Full credit string ("A feat. B") when it says more than the bare artist;
+// falls back to the artist name.
+const subtitleArtist = computed(() => {
+  const d = props.track.artists_display
+  return d && d !== props.track.artist ? d : props.track.artist
+})
+
+// The credit tail past the primary artist's name (" feat. B") — rendered
+// as plain text after the artist link so the link target stays the artist.
+const creditRemainder = computed(() => {
+  const d = props.track.artists_display
+  if (!d || d === props.track.artist || !d.startsWith(props.track.artist)) return ''
+  return d.slice(props.track.artist.length)
+})
+
 const subtitleFull = computed(() => {
-  let value = props.track.artist
+  let value = subtitleArtist.value
   if (props.track.album) value += ` · ${props.track.album}`
   if (props.track.album_year) value += ` · ${props.track.album_year}`
   return value
 })
 
 const subtitlePhone = computed(() => props.track.album
-  ? `${props.track.artist} · ${props.track.album}`
-  : props.track.artist)
+  ? `${subtitleArtist.value} · ${props.track.album}`
+  : subtitleArtist.value)
 
 function onRowClick() {
   if (props.track.available === false) return

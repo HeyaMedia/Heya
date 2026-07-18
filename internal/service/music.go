@@ -606,11 +606,12 @@ func (a *App) ListTrackFiles(ctx context.Context, trackID int64) ([]sqlc.TrackFi
 }
 
 // ListMusicTracks returns a flat track listing across every music library.
-func (a *App) ListMusicTracks(ctx context.Context, limit, offset int32) (*MusicListPage[sqlc.ListMusicTracksRow], error) {
+// userID scopes the per-caller enrichment (rating, play stats) on each row.
+func (a *App) ListMusicTracks(ctx context.Context, userID int64, limit, offset int32) (*MusicListPage[sqlc.ListMusicTracksRow], error) {
 	q := sqlc.New(a.db)
 	return musicPage(limit, offset, "listing music tracks",
 		func(limit, offset int32) ([]sqlc.ListMusicTracksRow, error) {
-			return q.ListMusicTracks(ctx, sqlc.ListMusicTracksParams{Limit: limit, Offset: offset})
+			return q.ListMusicTracks(ctx, sqlc.ListMusicTracksParams{UserID: userID, TrackLimit: limit, Offset: offset})
 		},
 		func() (int64, error) { return q.CountMusicTracks(ctx) })
 }

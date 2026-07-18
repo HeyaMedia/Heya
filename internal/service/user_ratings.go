@@ -130,6 +130,19 @@ func (a *App) ListUserRatedTracks(ctx context.Context, userID int64, minRating, 
 		})
 }
 
+// GetUserRatedTracksStats aggregates a rating band for the Loved Songs
+// hero ledger: track count, total runtime, distinct artists, most recent
+// rating touch.
+func (a *App) GetUserRatedTracksStats(ctx context.Context, userID int64, minRating, maxRating int16) (*sqlc.GetUserRatedTracksStatsRow, error) {
+	row, err := sqlc.New(a.db).GetUserRatedTracksStats(ctx, sqlc.GetUserRatedTracksStatsParams{
+		UserID: userID, MinRating: minRating, MaxRating: maxRating,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("rated track stats: %w", err)
+	}
+	return &row, nil
+}
+
 // ============== Albums ==============
 
 func (a *App) SetUserAlbumRating(ctx context.Context, userID, albumID int64, rating int16) error {

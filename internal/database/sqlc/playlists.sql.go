@@ -164,21 +164,41 @@ SELECT t.id            AS track_id,
        t.duration      AS duration,
        t.disc_number   AS disc_number,
        t.track_number  AS track_number,
+       t.explicit      AS explicit,
        al.id           AS album_id,
        al.title        AS album_title,
        al.cover_path   AS album_cover_path,
        al.year         AS album_year,
        al.slug         AS album_slug,
+       al.genres       AS album_genres,
+       al.label        AS album_label,
+       al.release_date AS album_release_date,
        a.id            AS artist_id,
        a.name          AS artist_name,
        mi.slug         AS artist_slug,
        upt.position    AS position,
        upt.added_at    AS added_at,
        EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL) AS available,
-       bf.format         AS format,
-       bf.bitrate_kbps   AS bitrate_kbps,
-       bf.sample_rate_hz AS sample_rate_hz,
-       bf.bit_depth      AS bit_depth
+       bf.format          AS format,
+       bf.bitrate_kbps    AS bitrate_kbps,
+       bf.sample_rate_hz  AS sample_rate_hz,
+       bf.bit_depth       AS bit_depth,
+       bf.channels        AS channels,
+       bf.size_bytes      AS size_bytes,
+       bf.integrated_lufs AS integrated_lufs,
+       blf.created_at     AS library_added_at,
+       tfc.bpm            AS bpm,
+       tfc.key_root       AS key_root,
+       tfc.key_mode       AS key_mode,
+       utr.rating         AS rating,
+       COALESCE((SELECT string_agg((ac.value ->> 'name') || COALESCE(ac.value ->> 'join_phrase', ''), '' ORDER BY ac.ord)
+          FROM jsonb_array_elements(CASE WHEN jsonb_typeof(t.artist_credits) = 'array' THEN t.artist_credits ELSE '[]'::jsonb END)
+               WITH ORDINALITY AS ac(value, ord)), '')::text AS artists_display,
+       COALESCE((SELECT string_agg(DISTINCT cr.value ->> 'artist_name', ', ')
+          FROM jsonb_array_elements(CASE WHEN jsonb_typeof(t.credits) = 'array' THEN t.credits ELSE '[]'::jsonb END) AS cr(value)
+         WHERE cr.value ->> 'role' = 'composer'), '')::text AS composer,
+       (SELECT count(*) FROM play_events pe WHERE pe.user_id = $1 AND pe.track_id = t.id) AS play_count,
+       (SELECT max(pe.played_at) FROM play_events pe WHERE pe.user_id = $1 AND pe.track_id = t.id)::timestamptz AS last_played_at
 FROM user_playlist_tracks upt
 JOIN tracks      t  ON t.id  = upt.track_id
 JOIN albums      al ON al.id = t.album_id
@@ -192,35 +212,59 @@ LEFT JOIN track_files bf ON bf.id = (
     ORDER BY tf.quality_score DESC, tf.id ASC
     LIMIT 1
 )
-WHERE upt.playlist_id = $1
+LEFT JOIN library_files blf ON blf.id = bf.library_file_id
+LEFT JOIN track_facets tfc ON tfc.track_id = t.id
+LEFT JOIN user_track_ratings utr ON utr.user_id = $1 AND utr.track_id = t.id
+WHERE upt.playlist_id = $2
 ORDER BY upt.position ASC
 `
 
+type ListPlaylistTracksParams struct {
+	UserID     int64 `json:"user_id"`
+	PlaylistID int64 `json:"playlist_id"`
+}
+
 type ListPlaylistTracksRow struct {
-	TrackID        int64              `json:"track_id"`
-	TrackTitle     string             `json:"track_title"`
-	Duration       int32              `json:"duration"`
-	DiscNumber     int32              `json:"disc_number"`
-	TrackNumber    int32              `json:"track_number"`
-	AlbumID        int64              `json:"album_id"`
-	AlbumTitle     string             `json:"album_title"`
-	AlbumCoverPath string             `json:"album_cover_path"`
-	AlbumYear      string             `json:"album_year"`
-	AlbumSlug      string             `json:"album_slug"`
-	ArtistID       int64              `json:"artist_id"`
-	ArtistName     string             `json:"artist_name"`
-	ArtistSlug     string             `json:"artist_slug"`
-	Position       int32              `json:"position"`
-	AddedAt        pgtype.Timestamptz `json:"added_at"`
-	Available      bool               `json:"available"`
-	Format         pgtype.Text        `json:"format"`
-	BitrateKbps    pgtype.Int4        `json:"bitrate_kbps"`
-	SampleRateHz   pgtype.Int4        `json:"sample_rate_hz"`
-	BitDepth       pgtype.Int4        `json:"bit_depth"`
+	TrackID          int64              `json:"track_id"`
+	TrackTitle       string             `json:"track_title"`
+	Duration         int32              `json:"duration"`
+	DiscNumber       int32              `json:"disc_number"`
+	TrackNumber      int32              `json:"track_number"`
+	Explicit         bool               `json:"explicit"`
+	AlbumID          int64              `json:"album_id"`
+	AlbumTitle       string             `json:"album_title"`
+	AlbumCoverPath   string             `json:"album_cover_path"`
+	AlbumYear        string             `json:"album_year"`
+	AlbumSlug        string             `json:"album_slug"`
+	AlbumGenres      []string           `json:"album_genres"`
+	AlbumLabel       string             `json:"album_label"`
+	AlbumReleaseDate pgtype.Date        `json:"album_release_date"`
+	ArtistID         int64              `json:"artist_id"`
+	ArtistName       string             `json:"artist_name"`
+	ArtistSlug       string             `json:"artist_slug"`
+	Position         int32              `json:"position"`
+	AddedAt          pgtype.Timestamptz `json:"added_at"`
+	Available        bool               `json:"available"`
+	Format           pgtype.Text        `json:"format"`
+	BitrateKbps      pgtype.Int4        `json:"bitrate_kbps"`
+	SampleRateHz     pgtype.Int4        `json:"sample_rate_hz"`
+	BitDepth         pgtype.Int4        `json:"bit_depth"`
+	Channels         pgtype.Int4        `json:"channels"`
+	SizeBytes        pgtype.Int8        `json:"size_bytes"`
+	IntegratedLufs   pgtype.Numeric     `json:"integrated_lufs"`
+	LibraryAddedAt   pgtype.Timestamptz `json:"library_added_at"`
+	Bpm              pgtype.Float4      `json:"bpm"`
+	KeyRoot          pgtype.Int2        `json:"key_root"`
+	KeyMode          pgtype.Int2        `json:"key_mode"`
+	Rating           pgtype.Int2        `json:"rating"`
+	ArtistsDisplay   string             `json:"artists_display"`
+	Composer         string             `json:"composer"`
+	PlayCount        int64              `json:"play_count"`
+	LastPlayedAt     pgtype.Timestamptz `json:"last_played_at"`
 }
 
 // Tracks in the playlist with full album + artist join so the playlist page
-// renders in a single round trip. The four quality fields come from the
+// renders in a single round trip. The quality fields come from the
 // track's best file (highest quality_score, smallest id as tiebreak —
 // mirrors GetPrimaryTrackFile/ListAlbumTrackFilesForLoudness), resolved via
 // a plain LEFT JOIN whose ON-clause picks the file id with a correlated
@@ -230,8 +274,14 @@ type ListPlaylistTracksRow struct {
 // track with zero files. Joining the real table directly — with the
 // correlation moved into the ON-clause subquery instead of the FROM list —
 // makes sqlc infer the correct nullable pgtype for bf.* columns.
-func (q *Queries) ListPlaylistTracks(ctx context.Context, playlistID int64) ([]ListPlaylistTracksRow, error) {
-	rows, err := q.db.Query(ctx, listPlaylistTracks, playlistID)
+//
+// The composer/artists_display strings are extracted in SQL (not decoded in
+// Go) because jsonb columns embedded raw in a row struct marshal as base64
+// over the wire. jsonb_typeof guards keep jsonb 'null' scalars from blowing
+// up jsonb_array_elements. user_id feeds the caller's rating + play stats;
+// play_events probes ride play_events_user_track_played_idx.
+func (q *Queries) ListPlaylistTracks(ctx context.Context, arg ListPlaylistTracksParams) ([]ListPlaylistTracksRow, error) {
+	rows, err := q.db.Query(ctx, listPlaylistTracks, arg.UserID, arg.PlaylistID)
 	if err != nil {
 		return nil, err
 	}
@@ -245,11 +295,15 @@ func (q *Queries) ListPlaylistTracks(ctx context.Context, playlistID int64) ([]L
 			&i.Duration,
 			&i.DiscNumber,
 			&i.TrackNumber,
+			&i.Explicit,
 			&i.AlbumID,
 			&i.AlbumTitle,
 			&i.AlbumCoverPath,
 			&i.AlbumYear,
 			&i.AlbumSlug,
+			&i.AlbumGenres,
+			&i.AlbumLabel,
+			&i.AlbumReleaseDate,
 			&i.ArtistID,
 			&i.ArtistName,
 			&i.ArtistSlug,
@@ -260,6 +314,18 @@ func (q *Queries) ListPlaylistTracks(ctx context.Context, playlistID int64) ([]L
 			&i.BitrateKbps,
 			&i.SampleRateHz,
 			&i.BitDepth,
+			&i.Channels,
+			&i.SizeBytes,
+			&i.IntegratedLufs,
+			&i.LibraryAddedAt,
+			&i.Bpm,
+			&i.KeyRoot,
+			&i.KeyMode,
+			&i.Rating,
+			&i.ArtistsDisplay,
+			&i.Composer,
+			&i.PlayCount,
+			&i.LastPlayedAt,
 		); err != nil {
 			return nil, err
 		}

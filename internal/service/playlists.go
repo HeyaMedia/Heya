@@ -121,7 +121,7 @@ func (a *App) GetUserPlaylistDetailByRef(ctx context.Context, userID int64, ref 
 // buildPlaylistDetail fetches the ordered tracklist for an already-resolved,
 // already-ownership-checked playlist row and assembles the detail payload.
 func buildPlaylistDetail(ctx context.Context, q *sqlc.Queries, pl sqlc.UserPlaylist) (*PlaylistDetail, error) {
-	tracks, _ := q.ListPlaylistTracks(ctx, pl.ID)
+	tracks, _ := q.ListPlaylistTracks(ctx, sqlc.ListPlaylistTracksParams{PlaylistID: pl.ID, UserID: pl.UserID})
 	if tracks == nil {
 		tracks = []sqlc.ListPlaylistTracksRow{}
 	}

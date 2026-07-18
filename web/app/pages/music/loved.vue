@@ -1,59 +1,96 @@
 <template>
-  <div class="ml page-pad">
-    <MusicPageHead title="Loved Songs">
-      <template #subtitle>
-        <span>Every track you've hearted. Tap the heart on any track to add it — tap again to remove.</span>
-        <span class="dot">·</span>
-        <span>{{ (total ?? 0).toLocaleString() }} tracks</span>
+  <!-- Tone-follow: every descendant (hero buttons, ledger tone cells)
+       inherits --tone/--tone-rgb/--tone-ink published here. -->
+  <div class="ml" :style="toneStyle">
+    <!-- Shared collection hero — same grammar as the playlist detail page:
+         collage art from the loved tracks' albums, display title, stats
+         line, Play/Shuffle. -->
+    <MusicCollectionHero
+      kind="Collection"
+      title="Loved Songs"
+      :images="artistArtUrls"
+      :backdrop="collageArt"
+      @image="currentBgArt = $event"
+    >
+      <template #art>
+        <MixCollage v-if="collageTracks.length" :tracks="collageTracks" :alt="'Loved Songs collage'" class="ml-hero-collage" @art="collageArt = $event" />
+        <Icon v-else name="heartfill" :size="48" />
       </template>
-    </MusicPageHead>
+      <template #stats>
+        <span>{{ (total ?? 0).toLocaleString() }} {{ (total ?? 0) === 1 ? 'track' : 'tracks' }}</span>
+        <template v-if="stats && stats.total_duration > 0">
+          <span class="dot">·</span>
+          <span>{{ formatRunTime(stats.total_duration) }}</span>
+        </template>
+      </template>
+      <template #actions>
+        <button class="btn-play" :disabled="!total" @click="playAll(false)">
+          <span class="tri" /> Play <small>{{ (total ?? 0).toLocaleString() }} {{ (total ?? 0) === 1 ? 'TRACK' : 'TRACKS' }}</small>
+        </button>
+        <button class="pill" :disabled="!total" @click="playAll(true)">
+          <Icon name="shuffle" :size="15" /> Shuffle
+        </button>
+      </template>
+    </MusicCollectionHero>
 
-    <div v-if="pending" class="ml-loading">Loading…</div>
+    <!-- The Heya 2.0 spec strip at the hero's hard-clip seam. -->
+    <LedgerStrip :cells="ledgerCells" :pending="pending" />
 
-    <div v-else-if="!total" class="ml-empty">
+    <div v-if="pending" class="ml-loading page-pad">Loading…</div>
+
+    <div v-else-if="!total" class="ml-empty page-pad">
       <Icon name="star" :size="40" />
-      <h3>No rated tracks yet</h3>
+      <h3>No loved tracks yet</h3>
       <p>Heart a track from the <NuxtLink to="/music/songs">Songs page</NuxtLink>, the player, or an album page. It'll appear here as soon as you love something.</p>
     </div>
 
     <!-- Sparse full-length list — the scrollbar spans every loved track;
-         pages stream in wherever it's dragged (500-cap gone). -->
-    <TrackList
-      v-else
-      :tracks="tlRows"
-      :columns="columns"
-      grid-template-columns="32px 44px 1fr minmax(160px, 1.2fr) 130px 60px"
-      :show-header="false"
-      :context-items="contextItemsFor"
-      :active-track-id="activeTrackId"
-      :playing="playing"
-      vu-meter-in="art"
-      :art-play-icon-size="13"
-      :duration-formatter="formatTime"
-      :on-rating-change="onRatingChange"
-      virtualized
-      @row-click="playFrom"
-      @range="ensureRange"
-    />
+         pages stream in wherever it's dragged. Rich optional columns
+         (plays, bitrate, BPM, key, …) ride the column picker. -->
+    <section v-else class="page-pad ml-tracks">
+      <TrackList
+        :tracks="tlRows"
+        :columns="columns"
+        storage-key="loved"
+        :context-items="contextItemsFor"
+        :active-track-id="activeTrackId"
+        :playing="playing"
+        vu-meter-in="art"
+        :art-play-icon-size="13"
+        :duration-formatter="formatTime"
+        :on-rating-change="onRatingChange"
+        virtualized
+        @row-click="playFrom"
+        @range="ensureRange"
+      />
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
 import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
+import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
+import type { RichTrackWire } from '~/utils/trackListMeta'
+import type { ImageTone } from '~/composables/useImageTone'
 
 definePageMeta({ layout: 'default' })
 
+// Column order contract: title → artist → album → loved → everything
+// else → duration.
 const columns: TrackListColumn[] = [
-  { key: 'idx', kind: 'index' },
-  { key: 'art', kind: 'art' },
-  { key: 'title', kind: 'title', subtitle: 'artist-link' },
-  { key: 'album', kind: 'album' },
-  { key: 'rating', kind: 'rating' },
-  { key: 'duration', kind: 'duration' },
+  { key: 'idx', kind: 'index', label: '#', width: '40px' },
+  { key: 'art', kind: 'art', width: '48px' },
+  { key: 'title', kind: 'title', subtitle: 'artist-link', label: 'Title', width: 'minmax(200px, 1fr)', sortable: true },
+  artistTrackColumn(),
+  { key: 'album', kind: 'album', label: 'Album', width: 'minmax(160px, 1.2fr)', optional: true, defaultOn: true, sortable: true },
+  { key: 'loved', kind: 'meta', label: 'Loved', width: '96px', optional: true, defaultOn: true, format: (r) => (r.rated_at ? formatShortDate(r.rated_at) : '—'), sortable: true, sortValue: (r) => (r.rated_at ? Date.parse(r.rated_at) || null : null), tooltip: (r) => formatFullDateTime(r.rated_at) },
+  ...richTrackColumns(),
+  { key: 'rating', kind: 'rating', label: 'Rating', width: '130px', sortable: true },
+  { key: 'duration', kind: 'duration', headerIcon: 'clock', width: '60px', sortable: true },
 ]
 
-interface RatedTrackRow {
+interface RatedTrackRow extends RichTrackWire {
   track_id: number
   track_title: string
   duration: number
@@ -65,7 +102,15 @@ interface RatedTrackRow {
   artist_name: string
   artist_slug: string
   rating: number
+  rated_at?: string
   available?: boolean
+}
+
+interface RatedTrackStats {
+  track_count: number
+  total_duration: number
+  artist_count: number
+  last_rated_at: string | null
 }
 
 const { play, queue, currentTrack, playing, formatTime, playTracks } = usePlayerBindings()
@@ -76,7 +121,7 @@ const actions = useMusicActions()
 
 const { total, pending, itemAt, ensureRange, loadedItems, reset } = useVirtualCatalog<RatedTrackRow>(() => ({
   key: 'me:rated:tracks:loved',
-  pageSize: 100,
+  pageSize: 500,
   fetch: async (offset, limit) => {
     const r = await $heya('/api/me/ratings/tracks', {
       query: { min_rating: 9, limit, offset },
@@ -87,6 +132,104 @@ const { total, pending, itemAt, ensureRange, loadedItems, reset } = useVirtualCa
   },
 }))
 
+// Eagerly materialize the whole list (loved sets top out in the low
+// thousands — not the 280k Songs catalog) so header sorting has every row
+// to work with; TrackList disables sort affordances while any row is
+// pending. Past the cap we stay sparse and sorting stays off rather than
+// lying. ~10 pages of 500 at the cap.
+watch(total, (n) => {
+  if (n && n > 0 && n <= 5000) ensureRange(0, n - 1)
+}, { immediate: true })
+
+// ── Hero ledger — band aggregates from the server (the sparse list only
+// holds the pages the user has scrolled; runtime/artists need the lot). ──
+const stats = ref<RatedTrackStats | null>(null)
+async function loadStats() {
+  try {
+    stats.value = await $heya('/api/me/ratings/track-stats', {
+      query: { min_rating: 9 },
+    }) as unknown as RatedTrackStats
+  } catch { /* strip renders from list totals only */ }
+}
+onMounted(loadStats)
+
+const ledgerCells = computed<LedgerCell[]>(() => {
+  const s = stats.value
+  if (!s || !s.track_count) return []
+  const cells: LedgerCell[] = [
+    { k: 'Tracks', v: s.track_count.toLocaleString() },
+    { k: 'Runtime', v: formatRunTime(s.total_duration) },
+    { k: 'Artists', v: s.artist_count.toLocaleString() },
+  ]
+  if (s.last_rated_at) cells.push({ k: 'Last Loved', v: timeAgoShort(s.last_rated_at), tone: true })
+  return cells
+})
+
+// ── Hero art + tone-follow ───────────────────────────────────────────
+// Collage candidates: the first loaded rows' (artist, album) pairs.
+// Re-computes as pages stream in; MixCollage dedupes to 4.
+const collageTracks = computed(() => {
+  const out: Array<{ artist_slug: string; album_slug: string }> = []
+  const n = Math.min(total.value ?? 0, 50)
+  for (let i = 0; i < n; i++) {
+    const t = itemAt(i)
+    if (t) out.push({ artist_slug: t.artist_slug, album_slug: t.album_slug })
+    if (out.length >= 16) break
+  }
+  return out
+})
+const collageArt = ref<string | null>(null)
+
+// Current hero image (declared ahead of the tone watch below, which reads
+// it with immediate: true). Driven by the rotation block further down.
+const currentBgArt = ref<string | null>(null)
+
+// ── Tone-follow: publish --tone/--tone-rgb/--tone-ink on the page root.
+// Primary source is the AmbientBackdrop's own sampled tone (HeroCanvas
+// claims the ambient layer with the hero image); local sample of the
+// current hero image is the fallback — same pattern as the artist page.
+const bgTone = useBackgroundTone()
+const localTone = ref<ImageTone | null>(null)
+let toneSeq = 0
+watch(() => currentBgArt.value || collageArt.value, (src) => {
+  const seq = ++toneSeq
+  if (!src || !import.meta.client) { localTone.value = null; return }
+  sampleImageTone(src).then((t) => {
+    if (seq === toneSeq) localTone.value = t
+  })
+}, { immediate: true })
+
+const { toneFollowEnabled } = useAppearance()
+const toneStyle = computed(() => {
+  if (!toneFollowEnabled.value) return undefined
+  const t = bgTone.value || localTone.value
+  return t ? toneStyleVars(t) : undefined
+})
+
+// ── Hero art — the loved artists (same rotation the playlist page runs;
+// HeroCanvas mirrors each pick to the ambient layer, keeping the blur
+// below the ledger seam in lockstep with the band). ──
+
+const artistArtUrls = computed(() => {
+  const seen = new Set<string>()
+  const urls: string[] = []
+  const n = Math.min(total.value ?? 0, 100)
+  for (let i = 0; i < n; i++) {
+    const t = itemAt(i)
+    if (!t || !t.artist_slug || seen.has(t.artist_slug)) continue
+    seen.add(t.artist_slug)
+    urls.push(`/api/media/${t.artist_slug}/image/poster`)
+    if (urls.length === 12) break
+  }
+  return urls
+})
+
+// MusicCollectionHero owns the rotation (CycleControls ring is the clock;
+// prev/pause/next/expand live in its tools cluster) — this page just
+// supplies the pool above and mirrors the shown image via @image for the
+// tone fallback sample.
+
+// ── Rows ─────────────────────────────────────────────────────────────
 // Sparse full-length rows — unloaded stretches render as skeletons.
 const tlRows = computed<TrackListRow[]>(() => {
   const n = total.value ?? 0
@@ -106,6 +249,8 @@ const tlRows = computed<TrackListRow[]>(() => {
           available: t.available,
           poster: useAlbumCoverUrl(t.artist_slug, t.album_slug),
           rating: ratings.value.get(t.track_id) ?? t.rating,
+          rated_at: t.rated_at,
+          ...pickRichFields(t),
         }
       : { id: -(i + 1), pending: true, title: '', artist: '', album: '', duration: 0 }
   }
@@ -115,17 +260,33 @@ const tlRows = computed<TrackListRow[]>(() => {
 function contextItemsFor(_track: TrackListRow, i: number) {
   const t = itemAt(i)
   if (!t) return []
-  return actions.forTrack({ id: t.track_id, title: t.track_title, artist: t.artist_name, album: t.album_title, duration: t.duration, album_id: t.album_id, artist_id: t.artist_id, artist_slug: t.artist_slug, album_slug: t.album_slug, available: t.available })
+  const items = actions.forTrack({ id: t.track_id, title: t.track_title, artist: t.artist_name, album: t.album_title, duration: t.duration, album_id: t.album_id, artist_id: t.artist_id, artist_slug: t.artist_slug, album_slug: t.album_slug, available: t.available })
+  return [
+    ...items,
+    { label: '', separator: true },
+    { label: 'Remove from Loved Songs', icon: 'close', action: () => unlove(t.track_id) },
+  ]
 }
 
 const activeTrackId = computed(() => currentTrack.value?.id ?? null)
+
+async function unlove(trackId: number) {
+  try {
+    await trackRatings.set(trackId, 0)
+    reset()
+    loadStats()
+  } catch { /* optimistic rollback handled by composable */ }
+}
 
 async function onRatingChange(trackId: number, v: number) {
   try {
     await trackRatings.set(trackId, v)
     // Dropping below the loved band removes the row — reset the catalog so
     // indexes/total stay honest rather than leaving a hole.
-    if (v < 9) reset()
+    if (v < 9) {
+      reset()
+      loadStats()
+    }
   } catch {
     // optimistic rollback handled by composable
   }
@@ -147,24 +308,40 @@ function toPlayable(row: RatedTrackRow): Track {
   }
 }
 
-async function playFrom(i: number) {
-  const clicked = itemAt(i)
-  if (!clicked || clicked.available === false) return
-  // Queue every LOADED playable track in list order — the pages the user has
-  // actually scrolled through.
-  const built = loadedItems()
+// Queue every LOADED playable track in list order — the pages the user has
+// actually scrolled through.
+function loadedPlayable(): Track[] {
+  return loadedItems()
     .map(({ item }) => item)
     .filter((r) => r.available !== false)
     .map(toPlayable)
+}
+
+async function playAll(shuffle: boolean) {
+  let built = loadedPlayable()
+  if (shuffle) built = [...built].sort(() => Math.random() - 0.5)
+  if (!built.length) return
+  await playTracks(built)
+}
+
+async function playFrom(i: number) {
+  const clicked = itemAt(i)
+  if (!clicked || clicked.available === false) return
+  const built = loadedPlayable()
   if (!built.length) return
   await playTracks(built, built.find((b) => b.id === clicked.track_id))
 }
 </script>
 
 <style scoped>
-.ml { max-width: 1300px; }
+.ml { padding-bottom: 80px; }
 
 .dot { opacity: 0.4; }
+
+/* The collage manages its own radius/shadow — flatten inside the frame. */
+.ml-hero-collage { width: 100%; height: 100%; border-radius: 0; box-shadow: none; }
+
+.ml-tracks { padding-top: 24px; }
 
 .ml-loading { color: var(--fg-3); font-size: 13px; padding: 40px 0; text-align: center; }
 .ml-empty {
@@ -176,12 +353,11 @@ async function playFrom(i: number) {
 .ml-empty a { color: var(--gold); text-decoration: none; }
 .ml-empty a:hover { text-decoration: underline; }
 
-/* TrackList's baseline CSS matches music/songs.vue exactly (48px art, 12px
-   index, 1px list gap, gold-tinted index on the active row, no duration
-   letter-spacing) — this page's numbers differ in a handful of spots, so
-   layer the deltas on via :deep() rather than duplicating the whole table.
-   TrackList isn't portaled, so scoped :deep() reaches its internals fine
-   (docs/ui.md gotcha #2 only applies to portaled content). */
+/* TrackList's baseline CSS matches music/songs.vue exactly — this page's
+   numbers differ in a handful of spots, so layer the deltas on via :deep()
+   rather than duplicating the whole table. TrackList isn't portaled, so
+   scoped :deep() reaches its internals fine (docs/ui.md gotcha #2 only
+   applies to portaled content). */
 :deep(.tl-body) { gap: 2px; }
 :deep(.tl-c-art) { width: 44px; height: 44px; }
 :deep(.tl-c-index) { font-size: 11px; }

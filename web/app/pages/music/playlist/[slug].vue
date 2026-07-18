@@ -6,69 +6,71 @@
       <NuxtLink to="/music">sidebar</NuxtLink>.
     </MusicEmptyState>
   </div>
-  <div v-else class="pl-page">
-    <!-- Ambient-extended (house hero convention, same as artist/movie/TV):
-         with ambient backdrops ON, the layer behind the app rotates through
-         this playlist's artists and the hero paints NOTHING of its own — a
-         local band would seam against the full-page art. Only with ambient
-         OFF does the hero paint its blurred-cover backdrop inside itself. -->
-    <header class="pl-hero" :class="{ 'ambient-extended': ambientEnabled }">
-      <div class="pl-hero-bg" :style="coverStyle" />
-      <div class="pl-hero-fade" />
-      <div class="pl-hero-content">
+  <!-- Tone-follow: every descendant (hero buttons, ledger tone cells)
+       inherits --tone/--tone-rgb/--tone-ink published here. -->
+  <div v-else class="pl-page" :style="toneStyle">
+    <!-- Shared collection hero (MusicCollectionHero owns the ambient-extended
+         convention — with ambient ON the app's background layer rotates
+         through this playlist's artists and the hero paints nothing). -->
+    <MusicCollectionHero
+      kind="Playlist"
+      :title="pl.name"
+      :description="plainDescription"
+      :images="artistArtUrls"
+      :backdrop="backdropSrc"
+      @image="currentBgArt = $event"
+    >
+      <template #art>
         <!-- Cover: the user's uploaded image when set; otherwise a collage
              built from the playlist's own albums (MixCollage dedupes to 4,
-             falls back to the first album cover, then the icon tile). -->
-        <div class="pl-hero-art">
-          <LoadingImage v-if="customCoverUrl" :src="customCoverUrl" :width="400" :quality="85" :alt="`${pl.name} cover`" />
-          <!-- @art reports the image the collage ACTUALLY rendered (post
-               error-cascade) — the tone sampler follows it, never a
-               candidate URL that may 404. -->
-          <MixCollage v-else-if="tracks.length" :tracks="tracks" :seed-src="firstAlbumCover" :alt="`${pl.name} cover`" class="pl-hero-collage" @art="collageArt = $event" />
-          <Icon v-else name="heart" :size="48" />
-        </div>
-        <div class="pl-hero-meta">
-          <div class="m-kind">Playlist</div>
-          <h1 class="m-title">{{ pl.name }}</h1>
-          <p v-if="pl.description" class="m-sub">{{ pl.description }}</p>
-          <div class="pl-hero-stats">
-            <span>{{ tracks.length }} {{ tracks.length === 1 ? 'track' : 'tracks' }}</span>
-            <span v-if="totalDuration > 0" class="dot">·</span>
-            <span v-if="totalDuration > 0">{{ formatRunTime(totalDuration) }}</span>
-          </div>
-          <div class="m-actions">
-            <button class="btn btn-primary" :style="heroToneStyle" :disabled="!tracks.length" @click="playAll(false)">
-              <Icon name="play" :size="16" /> Play
-            </button>
-            <button class="btn" :style="heroAltStyle" :disabled="!tracks.length" @click="playAll(true)">
-              <Icon name="shuffle" :size="16" /> Shuffle
-            </button>
-            <button class="btn" :style="heroAltStyle" :disabled="syncBusy" @click="playlistSyncAction">
-              <Icon :name="listenBrainzSync ? 'refresh' : 'globe'" :size="15" /> {{ playlistSyncActionLabel }}
-            </button>
-            <AppMenu trigger-class="btn-ghost pl-more" trigger-title="Playlist options" trigger-aria-label="Playlist options" :trigger-style="heroAltStyle">
-              <template #trigger><Icon name="more" :size="16" /></template>
-              <DropdownMenuItem class="surface-item" @select="openEdit">
-                <Icon name="pencil" :size="14" class="surface-item-icon" /> Edit details…
-              </DropdownMenuItem>
-              <DropdownMenuItem class="surface-item" @select="coverInput?.click()">
-                <Icon name="image" :size="14" class="surface-item-icon" /> {{ hasCover ? 'Replace cover…' : 'Set custom cover…' }}
-              </DropdownMenuItem>
-              <DropdownMenuItem v-if="hasCover" class="surface-item" @select="removeCover">
-                <Icon name="undo" :size="14" class="surface-item-icon" /> Use generated cover
-              </DropdownMenuItem>
-              <div class="surface-divider" />
-              <DropdownMenuItem class="surface-item surface-item-destructive" @select="onDelete">
-                <Icon name="trash" :size="14" class="surface-item-icon" /> Delete playlist
-              </DropdownMenuItem>
-            </AppMenu>
-            <!-- Hidden picker for the custom cover (same raw-multipart flow
-                 as the metadata editor's artwork upload). -->
-            <input ref="coverInput" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" class="pl-cover-input" @change="onCoverPicked" />
-          </div>
-        </div>
-      </div>
-    </header>
+             falls back to the first album cover, then the icon tile).
+             @art reports the image the collage ACTUALLY rendered (post
+             error-cascade) — the tone sampler follows it, never a candidate
+             URL that may 404. -->
+        <LoadingImage v-if="customCoverUrl" :src="customCoverUrl" :width="400" :quality="85" :alt="`${pl.name} cover`" />
+        <MixCollage v-else-if="tracks.length" :tracks="tracks" :seed-src="firstAlbumCover" :alt="`${pl.name} cover`" class="pl-hero-collage" @art="collageArt = $event" />
+        <Icon v-else name="heart" :size="48" />
+      </template>
+      <template #stats>
+        <span>{{ tracks.length }} {{ tracks.length === 1 ? 'track' : 'tracks' }}</span>
+        <span v-if="totalDuration > 0" class="dot">·</span>
+        <span v-if="totalDuration > 0">{{ formatRunTime(totalDuration) }}</span>
+      </template>
+      <template #actions>
+        <button class="btn-play" :disabled="!tracks.length" @click="playAll(false)">
+          <span class="tri" /> Play <small>{{ tracks.length }} {{ tracks.length === 1 ? 'TRACK' : 'TRACKS' }}</small>
+        </button>
+        <button class="pill" :disabled="!tracks.length" @click="playAll(true)">
+          <Icon name="shuffle" :size="15" /> Shuffle
+        </button>
+        <button class="pill" :disabled="syncBusy" @click="playlistSyncAction">
+          <Icon :name="listenBrainzSync ? 'refresh' : 'globe'" :size="15" /> {{ playlistSyncActionLabel }}
+        </button>
+        <AppMenu trigger-class="pill icon" trigger-title="Playlist options" trigger-aria-label="Playlist options">
+          <template #trigger><Icon name="more" :size="16" /></template>
+          <DropdownMenuItem class="surface-item" @select="openEdit">
+            <Icon name="pencil" :size="14" class="surface-item-icon" /> Edit details…
+          </DropdownMenuItem>
+          <DropdownMenuItem class="surface-item" @select="coverInput?.click()">
+            <Icon name="image" :size="14" class="surface-item-icon" /> {{ hasCover ? 'Replace cover…' : 'Set custom cover…' }}
+          </DropdownMenuItem>
+          <DropdownMenuItem v-if="hasCover" class="surface-item" @select="removeCover">
+            <Icon name="undo" :size="14" class="surface-item-icon" /> Use generated cover
+          </DropdownMenuItem>
+          <div class="surface-divider" />
+          <DropdownMenuItem class="surface-item surface-item-destructive" @select="onDelete">
+            <Icon name="trash" :size="14" class="surface-item-icon" /> Delete playlist
+          </DropdownMenuItem>
+        </AppMenu>
+        <!-- Hidden picker for the custom cover (same raw-multipart flow
+             as the metadata editor's artwork upload). -->
+        <input ref="coverInput" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" class="pl-cover-input" @change="onCoverPicked" />
+      </template>
+    </MusicCollectionHero>
+
+    <!-- The Heya 2.0 spec strip at the hero's hard-clip seam — same element
+         the album/artist detail pages carry. -->
+    <LedgerStrip :cells="ledgerCells" />
 
     <section v-if="!tracks.length" class="page-pad">
       <MusicEmptyState icon="music" title="This playlist is empty" compact>
@@ -88,18 +90,16 @@
       <TrackList
         :tracks="tlRows"
         :columns="columns"
-        grid-template-columns="48px 56px 1fr minmax(160px, 1.2fr) 110px 36px 70px"
+        storage-key="playlist"
         :context-items="contextItemsFor"
         :active-track-id="currentTrack?.id ?? null"
         :playing="playing"
         vu-meter-in="art"
         :duration-formatter="formatTime"
+        :on-rating-change="onRatingChange"
         :virtualized="tlRows.length > 200"
         @row-click="playFrom"
       >
-        <template #cell-added="{ index }">
-          <span class="pl-added">{{ formatDate(tracks[index]!.added_at) }}</span>
-        </template>
         <template #cell-remove="{ index }">
           <button
             type="button"
@@ -154,6 +154,7 @@
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
 import type { TrackListColumn, TrackListRow } from '~/components/music/TrackList.vue'
+import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
 import type { ContextMenuItem } from '~~/shared/types'
 import type { ImageTone } from '~/composables/useImageTone'
 import { DropdownMenuItem } from 'reka-ui'
@@ -199,6 +200,14 @@ const playlistSyncActionLabel = computed(() => {
 })
 const totalDuration = computed(() => tracks.value.reduce((s, t) => s + (t.duration || 0), 0))
 
+// Synced playlists carry service-authored HTML descriptions (ListenBrainz
+// wraps paragraphs in <p>) — the hero renders plain text, so strip tags.
+const plainDescription = computed(() => {
+  const d = pl.value?.description ?? ''
+  const text = d.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  return text || undefined
+})
+
 // ── Cover ────────────────────────────────────────────────────────────
 // coverBust invalidates the <img> URL after an upload — the endpoint path
 // never changes, only the bytes behind it.
@@ -216,57 +225,58 @@ const firstAlbumCover = computed(() => {
 const collageArt = ref<string | null>(null)
 // The blurred hero backdrop (ambient-off mode) follows the healed art too.
 const backdropSrc = computed(() => customCoverUrl.value || collageArt.value || firstAlbumCover.value)
-const coverStyle = computed(() => backdropSrc.value ? { backgroundImage: `url(${backdropSrc.value})` } : {})
 
-// ── Tone-follow ──────────────────────────────────────────────────────
-// Sample the image the hero actually shows: the custom cover, else the
-// collage's healed pick (never a candidate that may 404). Play wears the
-// main tone; Shuffle and the ⋯ menu wear the complement — the palette's
-// "other" color — so the action row reads as one family with a lead voice.
-const heroTone = ref<ImageTone | null>(null)
+// ── Ledger strip — playlist facts from the (fully loaded) tracklist ────
+const LOSSLESS_FORMATS = new Set(['flac', 'alac', 'wav', 'aiff'])
+const ledgerCells = computed<LedgerCell[]>(() => {
+  const n = tracks.value.length
+  if (!n) return []
+  const artistCount = new Set(tracks.value.map((t) => t.artist_id)).size
+  const lossless = tracks.value.filter((t) => LOSSLESS_FORMATS.has((t.format ?? '').toLowerCase())).length
+  const plays = tracks.value.reduce((s, t) => s + (t.play_count ?? 0), 0)
+  const cells: LedgerCell[] = [
+    { k: 'Tracks', v: String(n) },
+    { k: 'Runtime', v: formatRunTime(totalDuration.value) },
+    { k: 'Artists', v: String(artistCount) },
+    { k: 'Lossless', v: `${Math.round((lossless / n) * 100)}%` },
+    { k: 'Plays', v: plays.toLocaleString(), tone: plays > 0 },
+  ]
+  if (pl.value.updated_at) cells.push({ k: 'Updated', v: timeAgoShort(pl.value.updated_at) })
+  return cells
+})
+
+// Current hero image (declared ahead of the tone watch below, which reads
+// it with immediate: true). Driven by the rotation block further down.
+const currentBgArt = ref<string | null>(null)
+
+// ── Tone-follow: publish --tone/--tone-rgb/--tone-ink on the page root.
+// Primary source is the AmbientBackdrop's own sampled tone (HeroCanvas
+// claims the ambient layer with the hero image, so useBackgroundTone
+// re-samples on every rotation); a direct sample of the current hero image
+// is the fallback, sequence-guarded — same pattern as the artist/album
+// heroes.
+const bgTone = useBackgroundTone()
+const localTone = ref<ImageTone | null>(null)
 let toneSeq = 0
-watch(() => customCoverUrl.value || collageArt.value, (src) => {
+watch(() => currentBgArt.value || customCoverUrl.value || collageArt.value, (src) => {
   const seq = ++toneSeq
-  heroTone.value = null
-  if (!src || !import.meta.client) return
+  if (!src || !import.meta.client) { localTone.value = null; return }
   sampleImageTone(src).then((t) => {
-    if (seq === toneSeq) heroTone.value = t
+    if (seq === toneSeq) localTone.value = t
   })
 }, { immediate: true })
 
-// Luminance-picked ink for the complement fill (same crossover the sampler
-// uses for `main` — it only precomputes ink for that one).
-function inkFor(triplet: string): string {
-  const [r = 0, g = 0, b = 0] = triplet.split(' ').map(Number)
-  const lin = (v: number) => {
-    v /= 255
-    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
-  }
-  const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
-  return L > 0.2 ? '#16130d' : '#ffffff'
-}
+const { toneFollowEnabled } = useAppearance()
+const toneStyle = computed(() => {
+  if (!toneFollowEnabled.value) return undefined
+  const t = bgTone.value || localTone.value
+  return t ? toneStyleVars(t) : undefined
+})
 
-const heroToneStyle = computed(() =>
-  heroTone.value ? { background: heroTone.value.main, color: heroTone.value.ink } : undefined)
-const heroAltStyle = computed(() =>
-  heroTone.value
-    ? {
-        background: `rgb(${heroTone.value.complementTriplet} / 0.85)`,
-        borderColor: 'transparent',
-        color: inkFor(heroTone.value.complementTriplet),
-      }
-    : undefined)
-
-// ── Ambient backdrop — the playlist's artists ────────────────────────
-// With ambient on, this page claims the background layer and walks it
-// through the distinct artists in the playlist (their portraits — posters
-// fall back through media_assets, so they're the reliable image; backdrops
-// are spotty for artists). set() replaces the claim in place, so this is
-// the pool experience with page-owned content; BG_ROTATE_MS keeps cadence
-// identical to the library pools.
-const { ambientEnabled } = useAppearance()
-const background = useBackground()
-const bgTools = useBackgroundImageTools()
+// ── Hero art — the playlist's artists ────────────────────────────────
+// One rotating pick drives the sharp hero band; HeroCanvas mirrors it to
+// the app's ambient layer, so the blur below the ledger seam is ALWAYS the
+// same image. BG_ROTATE_MS keeps cadence identical to the library pools.
 
 const artistArtUrls = computed(() => {
   const seen = new Set<string>()
@@ -280,23 +290,10 @@ const artistArtUrls = computed(() => {
   return urls
 })
 
-let bgTimer: ReturnType<typeof setInterval> | undefined
-let bgIdx = 0
-watch([artistArtUrls, ambientEnabled], ([urls, on]) => {
-  if (bgTimer) { clearInterval(bgTimer); bgTimer = undefined }
-  if (!on || !urls.length) { background.clear(); return }
-  bgIdx = 0
-  background.set(urls[0])
-  if (urls.length > 1) {
-    bgTools.warm(urls[1]!)
-    bgTimer = setInterval(() => {
-      bgIdx = (bgIdx + 1) % urls.length
-      background.set(urls[bgIdx])
-      bgTools.warm(urls[(bgIdx + 1) % urls.length]!)
-    }, BG_ROTATE_MS)
-  }
-}, { immediate: true })
-onBeforeUnmount(() => { if (bgTimer) clearInterval(bgTimer) })
+// MusicCollectionHero owns the rotation (CycleControls ring is the clock;
+// prev/pause/next/expand live in its tools cluster) — this page just
+// supplies the pool above and mirrors the shown image via @image for the
+// tone fallback sample.
 
 const coverInput = ref<HTMLInputElement>()
 async function onCoverPicked(e: Event) {
@@ -446,17 +443,36 @@ async function removeRow(trackId: number) {
   queryClient.invalidateQueries({ key: ['music', 'home', 'recent-playlists'] })
 }
 
-// Shared TrackList wiring (see script-top comment).
+// Shared TrackList wiring (see script-top comment). The fixed column set
+// matches the old table; the rich optional set (plays, bitrate, BPM, key,
+// …) rides the column picker, persisted under the "playlist" storage key.
 const actions = useMusicActions()
+const trackRatings = useTrackRatings()
+const ratings = trackRatings.ratings
 
+// Server rows carry the caller's rating — prime the shared ratings map so
+// the (optional) rating column and React submenu agree without a batch call.
+watch(tracks, (rows) => {
+  if (rows.length) trackRatings.primeMany(rows.map((t) => [t.track_id, t.rating ?? 0] as [number, number]))
+}, { immediate: true })
+
+async function onRatingChange(trackId: number, v: number) {
+  try { await trackRatings.set(trackId, v) } catch { /* rollback handled */ }
+}
+
+// Column order contract: title → artist → album → added → everything
+// else → duration (the remove button hugs duration at the end).
 const columns: TrackListColumn[] = [
-  { key: 'idx', kind: 'index', label: '#' },
-  { key: 'art', kind: 'art' },
-  { key: 'title', kind: 'title', label: 'Title', subtitle: 'artist-plain' },
-  { key: 'album', kind: 'album', label: 'Album' },
-  { key: 'added', kind: 'custom', label: 'Added' },
-  { key: 'remove', kind: 'custom' },
-  { key: 'duration', kind: 'duration', headerIcon: 'clock' },
+  { key: 'idx', kind: 'index', label: '#', width: '48px' },
+  { key: 'art', kind: 'art', width: '56px' },
+  { key: 'title', kind: 'title', label: 'Title', subtitle: 'artist-plain', width: 'minmax(200px, 1fr)', sortable: true },
+  artistTrackColumn(),
+  { key: 'album', kind: 'album', label: 'Album', width: 'minmax(160px, 1.2fr)', optional: true, defaultOn: true, sortable: true },
+  { key: 'added', kind: 'meta', label: 'Added', width: '96px', optional: true, defaultOn: true, format: (r) => (r.added_at ? formatShortDate(r.added_at) : '—'), sortable: true, sortValue: (r) => (r.added_at ? Date.parse(r.added_at) || null : null), tooltip: (r) => formatFullDateTime(r.added_at) },
+  ...richTrackColumns(),
+  { key: 'rating', kind: 'rating', label: 'Rating', width: '130px', optional: true, sortable: true },
+  { key: 'remove', kind: 'custom', width: '32px' },
+  { key: 'duration', kind: 'duration', headerIcon: 'clock', width: '64px', sortable: true },
 ]
 
 const tlRows = computed<TrackListRow[]>(() => tracks.value.map((t) => ({
@@ -466,10 +482,13 @@ const tlRows = computed<TrackListRow[]>(() => tracks.value.map((t) => ({
   artist_slug: t.artist_slug,
   album: t.album_title,
   album_slug: t.album_slug,
+  album_year: t.album_year,
   duration: t.duration,
   available: t.available,
   poster: useAlbumCoverUrl(t.artist_slug, t.album_slug),
-  quality: formatTrackQuality(t),
+  rating: ratings.value.get(t.track_id) ?? t.rating ?? 0,
+  added_at: t.added_at,
+  ...pickRichFields(t),
 })))
 
 function contextItemsFor(_row: TrackListRow, i: number): ContextMenuItem[] {
@@ -506,13 +525,6 @@ async function onDelete() {
   await playlists.remove(playlistId.value)
   router.push('/music')
 }
-
-function formatDate(iso: string) {
-  if (!iso) return ''
-  try {
-    return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
-  } catch { return '' }
-}
 </script>
 
 <style scoped>
@@ -526,133 +538,17 @@ function formatDate(iso: string) {
 .pl-sync-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 .m-loading { color: var(--fg-2); padding: 32px 40px; font-size: 13px; text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1); }
 
-.pl-hero {
-  position: relative;
-  min-height: 280px;
-  display: flex;
-  align-items: flex-end;
-  overflow: hidden;
-  border-radius: 0 0 var(--r-md) var(--r-md);
-}
-
-/* Ambient-extended: the layer behind the app owns the art (this playlist's
-   artists) — the hero paints nothing, or its local band would seam against
-   the continuing full-page artwork. Text flips from on-artwork literals to
-   theme tokens + --bg-1 halos because the ambient scrim is theme-aware
-   (paper in light mode, where literal white would vanish). */
-.pl-hero.ambient-extended { min-height: 0; overflow: visible; }
-.pl-hero.ambient-extended .pl-hero-bg,
-.pl-hero.ambient-extended .pl-hero-fade { display: none; }
-.pl-hero.ambient-extended .m-kind {
-  color: var(--fg-2);
-  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
-}
-.pl-hero.ambient-extended .m-title {
-  color: var(--fg-0);
-  text-shadow: 0 1px 2px var(--bg-1), 0 0 10px var(--bg-1), 0 0 24px var(--bg-1);
-}
-.pl-hero.ambient-extended .m-sub {
-  color: var(--fg-1);
-  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
-}
-.pl-hero.ambient-extended .pl-hero-stats {
-  color: var(--fg-2);
-  text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1);
-}
-.pl-hero.ambient-extended .pl-hero-stats .dot { color: var(--fg-3); }
-.pl-hero-bg {
-  position: absolute; inset: 0;
-  background-size: cover;
-  background-position: center;
-  filter: blur(60px) brightness(0.45) saturate(2.2);
-  transform: scale(1.4);
-  z-index: 0;
-  background-color: var(--bg-3); /* fallback fill behind the blurred cover art */
-}
-.pl-hero-fade {
-  position: absolute; inset: 0;
-  /* Accent-derived decorative wash + the on-artwork black scrim (stays
-     literal per house rule), fading to var(--bg-0) at the page canvas. */
-  background:
-    linear-gradient(135deg,
-      color-mix(in srgb, var(--gold) 30%, transparent),
-      color-mix(in srgb, var(--gold-deep, var(--gold)) 16%, transparent) 60%,
-      rgba(0, 0, 0, 0.25)),
-    linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.3) 60%, var(--bg-0) 100%);
-  z-index: 1;
-}
-.pl-hero-content {
-  position: relative; z-index: 2;
-  display: flex; align-items: flex-end; gap: 28px;
-  padding: 32px 40px;
-  width: 100%;
-}
-.pl-hero-art {
-  width: 200px; height: 200px;
-  border-radius: var(--r-md);
-  /* Accent-derived placeholder (same pair as the avatar / Loved tile). */
-  background: linear-gradient(135deg, var(--gold-deep, var(--gold)), var(--gold));
-  display: flex; align-items: center; justify-content: center;
-  color: rgba(255,255,255,0.9); /* icon on the generated placeholder art — stays literal */
-  box-shadow: 0 24px 48px rgb(var(--shade) / 0.6), 0 0 0 1px rgb(var(--ink) / 0.05);
-  flex-shrink: 0;
-  overflow: hidden;
-}
-.pl-hero-art img { width: 100%; height: 100%; object-fit: cover; }
+/* Hero grammar lives in MusicCollectionHero now — this page keeps only its
+   own extras (collage flattening, hidden file input, tracklist cells). */
 /* The collage manages its own radius/shadow — flatten inside the frame. */
 .pl-hero-collage { width: 100%; height: 100%; border-radius: 0; box-shadow: none; }
-.pl-hero-meta { flex: 1; min-width: 0; }
-/* Hero backdrop is the cover blurred + darkened in BOTH themes → hero text
-   is on-artwork: lock to literal light tones per house rule. */
-.m-kind {
-  font-size: 11px; font-family: var(--font-mono);
-  text-transform: uppercase; letter-spacing: 0.12em;
-  color: rgba(255,255,255,0.72); /* on darkened artwork — stays literal */
-  margin-bottom: 6px;
-}
-.m-title {
-  font-size: clamp(36px, 4.5vw, 60px);
-  font-weight: 800;
-  line-height: 1.02;
-  margin-bottom: 8px;
-  color: #fff; /* on darkened artwork — stays literal */
-  text-shadow: 0 2px 24px rgba(0,0,0,0.55); /* on artwork — stays literal */
-  letter-spacing: -0.02em;
-}
-.m-sub {
-  color: rgba(255,255,255,0.85); /* on darkened artwork — stays literal */
-  margin-bottom: 12px; max-width: 64ch; font-size: 14px;
-}
-.pl-hero-stats {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 12px;
-  color: rgba(255,255,255,0.75); /* on darkened artwork — stays literal */
-  font-family: var(--font-mono);
-  margin-bottom: 16px;
-}
-.pl-hero-stats .dot { color: rgba(255,255,255,0.45); /* on artwork — stays literal */ }
 .dot { color: var(--fg-3); }
-.m-actions { display: flex; gap: 10px; align-items: center; }
-.m-actions :deep(.btn-primary) {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 0 20px; height: 40px;
-  border-radius: 999px; font-weight: 600;
-  transition: background 0.4s ease, color 0.4s ease, filter 0.15s;
-}
-.m-actions :deep(.btn-primary:hover) { filter: brightness(1.1); }
-/* Shuffle wears the complement tint (heroAltStyle) — glide with the art. */
-.m-actions .btn { transition: background 0.4s ease, color 0.4s ease, border-color 0.4s ease; }
 .pl-cover-input { display: none; }
 
 .pl-tracks { padding-top: 24px; }
 /* Playlist-specific cells inside the shared TrackList — the glass panel,
    grid, and row chrome all come from TrackList itself. Scoped rules reach
    this content because it renders through OUR cell-slot templates. */
-.pl-added {
-  font-size: 11px;
-  color: var(--fg-3);
-  font-family: var(--font-mono);
-}
 .pl-remove {
   background: transparent;
   border: 0;
@@ -693,48 +589,5 @@ function formatDate(iso: string) {
 .pl-edit-input:focus { border-color: var(--gold); }
 .pl-edit-desc { resize: vertical; min-height: 70px; line-height: 1.5; }
 
-/* Phone (<=720px): stack the hero, center the cover, wrap the action row. */
-@media (max-width: 720px) {
-  .pl-hero { min-height: 0; }
-  .pl-hero-content {
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    padding: 24px 20px 20px;
-    gap: 14px;
-  }
-  .pl-hero-art { width: min(55vw, 240px); height: min(55vw, 240px); }
-  .pl-hero-meta { width: 100%; }
-  .pl-hero-stats { justify-content: center; }
-  .m-actions { justify-content: center; flex-wrap: wrap; }
-}
 </style>
 
-<!-- AppMenu owns its trigger element — scoped selectors don't reach it
-     (docs/ui.md gotcha #2), so the round ⋯ button styles live unscoped. -->
-<style>
-.pl-more {
-  background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.12); /* over the hero backdrop — literal */
-  color: rgba(255, 255, 255, 0.85); /* on darkened artwork — literal */
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  /* 0.4s so the complement tint (trigger-style) glides in with the art. */
-  transition: background 0.4s ease, color 0.4s ease, border-color 0.4s ease;
-}
-.pl-more:hover { filter: brightness(1.1); }
-
-/* Ambient-extended: the ⋯ button sits on the theme wash, not a darkened
-   hero — swap the literal-white ghost coat for theme glass. */
-.pl-hero.ambient-extended .pl-more {
-  background: color-mix(in oklab, var(--bg-2) 82%, transparent);
-  border-color: var(--border);
-  color: var(--fg-1);
-}
-.pl-hero.ambient-extended .pl-more:hover { background: var(--bg-3); color: var(--fg-0); }
-</style>

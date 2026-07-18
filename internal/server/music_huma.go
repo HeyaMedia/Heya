@@ -42,7 +42,7 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/tracks", "list-music-tracks", "All music tracks", "Music")),
 		func(ctx context.Context, in *Pagination) (*JSONOutput[*service.MusicListPage[sqlc.ListMusicTracksRow]], error) {
 			limit := defaultPositive(in.Limit, 200)
-			page, err := app.ListMusicTracks(ctx, limit, in.Offset)
+			page, err := app.ListMusicTracks(ctx, userFrom(ctx).ID, limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
@@ -670,6 +670,21 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 	registerRatingRoutes[artistIDsBody, sqlc.ListUserRatedArtistsRow](api, "artists", "artist",
 		app.GetUserArtistRating, app.SetUserArtistRating, app.RatingsForArtists, app.ListUserRatedArtists,
 		func(b artistIDsBody) []int64 { return b.ArtistIDs })
+
+	// Aggregate stats for one rating band (Loved Songs hero ledger). Its own
+	// path segment ("track-stats", not "tracks/stats") so it can't collide
+	// with the /ratings/tracks/{id} param route.
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/ratings/track-stats", "rated-track-stats", "Aggregates for a rating band (count, runtime, artists, last rated)", "Me")),
+		func(ctx context.Context, in *struct {
+			MinRating int16 `query:"min_rating" minimum:"1" maximum:"10" default:"1"`
+			MaxRating int16 `query:"max_rating" minimum:"1" maximum:"10" default:"10"`
+		}) (*JSONOutput[*sqlc.GetUserRatedTracksStatsRow], error) {
+			stats, err := app.GetUserRatedTracksStats(ctx, userFrom(ctx).ID, in.MinRating, in.MaxRating)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(stats), nil
+		})
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/me/ratings/threshold", "get-favorites-threshold", "Where the favorites bar sits on the 1..10 scale", "Me")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[ratingBody], error) {
