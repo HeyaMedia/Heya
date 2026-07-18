@@ -221,6 +221,56 @@ var libraryRemoveCmd = &cobra.Command{
 	},
 }
 
+var libraryRematchMusicReviewsCmd = &cobra.Command{
+	Use:   "rematch-music-reviews",
+	Short: "Replay retained music review rows through the current matcher",
+	Long: "Enqueues only the normal metadata-search stage for music entities currently in Needs Review. " +
+		"It reuses retained local analysis artifacts, so it does not walk or re-analyze the library.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, _ := cmd.Flags().GetInt64("id")
+		limit, _ := cmd.Flags().GetInt32("limit")
+		if id == 0 {
+			return fmt.Errorf("--id is required")
+		}
+		if limit <= 0 {
+			limit = 10000
+		}
+		return withApp(func(ctx context.Context, app *service.App) error {
+			q := sqlc.New(app.DBPool())
+			lib, err := q.GetLibraryByID(ctx, id)
+			if err != nil {
+				return err
+			}
+			if lib.MediaType != sqlc.MediaTypeMusic {
+				return fmt.Errorf("library %d is %s, not music", id, lib.MediaType)
+			}
+			rows, err := q.ListMusicScannerReviewsForRematch(ctx, sqlc.ListMusicScannerReviewsForRematchParams{
+				LibraryID: id,
+				RowLimit:  limit,
+			})
+			if err != nil {
+				return err
+			}
+			enqueued := 0
+			for _, row := range rows {
+				if err := worker.EnqueueSearchLibraryMetadata(ctx, app.RiverClient(), app.DBPool(), worker.SearchLibraryMetadataArgs{
+					LibraryID:          row.LibraryID,
+					MediaType:          sqlc.MediaTypeMusic,
+					ScopePaths:         row.ScopePaths,
+					ScannerEntityID:    row.ScannerEntityID,
+					AnalysisArtifactID: row.AnalysisArtifactID,
+					Force:              true,
+				}, worker.PriorityMatch, ""); err != nil {
+					return fmt.Errorf("enqueue scanner entity %d after %d rows: %w", row.ScannerEntityID, enqueued, err)
+				}
+				enqueued++
+			}
+			ui.Success("Enqueued %d music review rematches for %s", enqueued, lib.Name)
+			return nil
+		})
+	},
+}
+
 var libraryFilesCmd = &cobra.Command{
 	Use:   "files",
 	Short: "List files in a library",
@@ -443,6 +493,8 @@ func init() {
 	libraryScanCmd.Flags().Bool("search", false, "Search HeyaMetadata for candidate matches without fetching metadata")
 
 	libraryRemoveCmd.Flags().Int64("id", 0, "Library ID to remove")
+	libraryRematchMusicReviewsCmd.Flags().Int64("id", 0, "Music library ID")
+	libraryRematchMusicReviewsCmd.Flags().Int32("limit", 10000, "Maximum review rows to enqueue")
 
 	libraryFilesCmd.Flags().Int64("id", 0, "Library ID")
 	libraryFilesCmd.Flags().String("media", "", "Filter by media type")
@@ -461,6 +513,7 @@ func init() {
 	libraryCmd.AddCommand(libraryListCmd)
 	libraryCmd.AddCommand(libraryScanCmd)
 	libraryCmd.AddCommand(libraryRemoveCmd)
+	libraryCmd.AddCommand(libraryRematchMusicReviewsCmd)
 	libraryCmd.AddCommand(libraryFilesCmd)
 	libraryCmd.AddCommand(libraryStatsCmd)
 	libraryCmd.AddCommand(libraryWatchCmd)

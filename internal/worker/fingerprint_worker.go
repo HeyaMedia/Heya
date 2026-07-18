@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -42,8 +44,8 @@ const (
 )
 
 // ScanTrackFingerprintWorker computes a chromaprint for one audio file and
-// writes it back to its track_files row. CPU-bound but light (decodes ≤120s),
-// runs on its own queue at MaxWorkers=1 like the other analysis passes.
+// stores it against library_files so matching can consume it before a track
+// exists. The track_files columns remain a compatibility mirror.
 type ScanTrackFingerprintWorker struct {
 	river.WorkerDefaults[ScanTrackFingerprintArgs]
 	DB       *pgxpool.Pool
@@ -57,19 +59,9 @@ func (w *ScanTrackFingerprintWorker) Work(ctx context.Context, job *river.Job[Sc
 
 	q := sqlc.New(w.DB)
 
-	tf, err := q.GetTrackFileByID(ctx, job.Args.TrackFileID)
+	lf, tf, hasTrack, err := fingerprintJobFile(ctx, q, job.Args)
 	if err != nil {
-		return fmt.Errorf("get track_file %d: %w", job.Args.TrackFileID, err)
-	}
-
-	// Already fingerprinted (e.g. re-enqueued by a final sweep)? Done.
-	if tf.FingerprintedAt.Valid {
-		return nil
-	}
-
-	lf, err := q.GetLibraryFileByID(ctx, tf.LibraryFileID)
-	if err != nil {
-		return fmt.Errorf("get library_file %d: %w", tf.LibraryFileID, err)
+		return err
 	}
 
 	// Soft-deleted file? Drop silently. The matcher will requeue once a fresh
@@ -80,31 +72,141 @@ func (w *ScanTrackFingerprintWorker) Work(ctx context.Context, job *river.Job[Sc
 
 	w.Progress.SetCurrent(ScanTrackFingerprintArgs{}.Kind(), job.Args.ScheduledTaskID, filepath.Base(lf.Path))
 
-	// Decoding ≤120s of audio is seconds of work; 2 minutes covers a wedged
-	// SMB read without holding the queue's single slot hostage.
-	fpCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
+	// A valid file-level row is authoritative. Mirror it to a newly-created
+	// track_files row without decoding the audio again.
+	if stored, storedErr := q.GetLibraryFileFingerprint(ctx, lf.ID); storedErr == nil && libraryFingerprintCurrent(stored, lf) {
+		return mirrorTrackFingerprint(ctx, q, lf.ID, stored.Fingerprint, stored.Algorithm, stored.FingerprintDurationSecs)
+	} else if storedErr != nil && !errors.Is(storedErr, pgx.ErrNoRows) {
+		return fmt.Errorf("get library_file fingerprint %d: %w", lf.ID, storedErr)
+	}
 
-	fp, err := chromaprintFile(fpCtx, lf.Path)
+	// Rolling-deploy compatibility: an old track job may already have written
+	// the historical columns before the file-level migration became visible.
+	if hasTrack && tf.FingerprintedAt.Valid && tf.Chromaprint.Valid && tf.Chromaprint.String != "" &&
+		tf.ChromaprintAlgorithm.Valid && tf.ChromaprintDurationSecs.Valid && tf.SizeBytes == lf.Size {
+		sourceDuration := max(tf.Duration, tf.ChromaprintDurationSecs.Int32, 1)
+		stored, upsertErr := q.UpsertLibraryFileFingerprint(ctx, sqlc.UpsertLibraryFileFingerprintParams{
+			LibraryFileID: lf.ID, Algorithm: tf.ChromaprintAlgorithm.Int16,
+			Fingerprint: tf.Chromaprint.String, FingerprintDurationSecs: tf.ChromaprintDurationSecs.Int32,
+			SourceDurationSecs: sourceDuration, SourceSize: lf.Size, SourceMtime: lf.Mtime,
+		})
+		if upsertErr != nil {
+			return fmt.Errorf("backfill library_file fingerprint: %w", upsertErr)
+		}
+		return mirrorTrackFingerprint(ctx, q, lf.ID, stored.Fingerprint, stored.Algorithm, stored.FingerprintDurationSecs)
+	}
+
+	sourceDuration := int32(0)
+	if hasTrack {
+		sourceDuration = tf.Duration
+	}
+	stored, err := ensureLibraryFileFingerprint(ctx, q, lf, sourceDuration)
 	if err != nil {
-		return fmt.Errorf("chromaprint %s: %w", lf.Path, err)
+		return err
+	}
+	return mirrorTrackFingerprint(ctx, q, lf.ID, stored.Fingerprint, stored.Algorithm, stored.FingerprintDurationSecs)
+}
+
+func fingerprintJobFile(ctx context.Context, q *sqlc.Queries, args ScanTrackFingerprintArgs) (sqlc.LibraryFile, sqlc.TrackFile, bool, error) {
+	if args.LibraryFileID > 0 {
+		lf, err := q.GetLibraryFileByID(ctx, args.LibraryFileID)
+		if err != nil {
+			return sqlc.LibraryFile{}, sqlc.TrackFile{}, false, fmt.Errorf("get library_file %d: %w", args.LibraryFileID, err)
+		}
+		tf, trackErr := q.GetTrackFileByLibraryFileID(ctx, lf.ID)
+		if errors.Is(trackErr, pgx.ErrNoRows) {
+			return lf, sqlc.TrackFile{}, false, nil
+		}
+		if trackErr != nil {
+			return sqlc.LibraryFile{}, sqlc.TrackFile{}, false, fmt.Errorf("get track_file for library_file %d: %w", lf.ID, trackErr)
+		}
+		return lf, tf, true, nil
+	}
+	if args.TrackFileID <= 0 {
+		return sqlc.LibraryFile{}, sqlc.TrackFile{}, false, errors.New("fingerprint job requires library_file_id or track_file_id")
+	}
+	tf, err := q.GetTrackFileByID(ctx, args.TrackFileID)
+	if err != nil {
+		return sqlc.LibraryFile{}, sqlc.TrackFile{}, false, fmt.Errorf("get track_file %d: %w", args.TrackFileID, err)
+	}
+	lf, err := q.GetLibraryFileByID(ctx, tf.LibraryFileID)
+	if err != nil {
+		return sqlc.LibraryFile{}, sqlc.TrackFile{}, false, fmt.Errorf("get library_file %d: %w", tf.LibraryFileID, err)
+	}
+	return lf, tf, true, nil
+}
+
+func libraryFingerprintCurrent(fp sqlc.LibraryFileFingerprint, lf sqlc.LibraryFile) bool {
+	if fp.Algorithm != chromaprintAlgorithm || fp.SourceSize != lf.Size || fp.Fingerprint == "" {
+		return false
+	}
+	if fp.SourceMtime.Valid != lf.Mtime.Valid {
+		return false
+	}
+	return !fp.SourceMtime.Valid || fp.SourceMtime.Time.Equal(lf.Mtime.Time)
+}
+
+// ensureLibraryFileFingerprint is shared by the background corpus sweep and
+// the matcher's on-demand uncertainty path. The fast name/release matcher never
+// calls it; only a candidate headed for review pays the audio decode cost.
+func ensureLibraryFileFingerprint(ctx context.Context, q *sqlc.Queries, lf sqlc.LibraryFile, sourceDuration int32) (sqlc.LibraryFileFingerprint, error) {
+	stored, err := q.GetLibraryFileFingerprint(ctx, lf.ID)
+	if err == nil && libraryFingerprintCurrent(stored, lf) && stored.SourceDurationSecs > 0 {
+		return stored, nil
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return sqlc.LibraryFileFingerprint{}, fmt.Errorf("get library_file fingerprint %d: %w", lf.ID, err)
 	}
 
-	// Window actually covered: the full file when it's shorter than the cap.
-	window := int32(chromaprintWindowSecs)
-	if tf.Duration > 0 && tf.Duration < window {
-		window = tf.Duration
+	// Decoding ≤120s of audio is seconds of work; 2 minutes covers a wedged
+	// SMB read without holding a search worker indefinitely.
+	fpCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	fingerprint, err := computeChromaprint(fpCtx, lf.Path)
+	cancel()
+	if err != nil {
+		return sqlc.LibraryFileFingerprint{}, fmt.Errorf("chromaprint %s: %w", lf.Path, err)
+	}
+	if sourceDuration <= 0 {
+		var info MediaInfo
+		if len(lf.MediaInfo) > 2 && json.Unmarshal(lf.MediaInfo, &info) == nil && info.Duration > 0 {
+			sourceDuration = int32(math.Round(info.Duration))
+		}
+	}
+	if sourceDuration <= 0 {
+		probeCtx, probeCancel := context.WithTimeout(ctx, 2*time.Minute)
+		info, probeErr := ProbeFile(probeCtx, lf.Path)
+		probeCancel()
+		if probeErr != nil {
+			return sqlc.LibraryFileFingerprint{}, fmt.Errorf("probe duration %s: %w", lf.Path, probeErr)
+		}
+		sourceDuration = int32(math.Round(info.Duration))
+	}
+	if sourceDuration <= 0 {
+		return sqlc.LibraryFileFingerprint{}, fmt.Errorf("fingerprint %s: source duration is unavailable", lf.Path)
 	}
 
-	if err := q.UpdateTrackFileFingerprint(ctx, sqlc.UpdateTrackFileFingerprintParams{
-		ID:                      tf.ID,
-		Chromaprint:             pgtype.Text{String: fp, Valid: true},
-		ChromaprintAlgorithm:    pgtype.Int2{Int16: chromaprintAlgorithm, Valid: true},
-		ChromaprintDurationSecs: pgtype.Int4{Int32: window, Valid: true},
+	stored, err = q.UpsertLibraryFileFingerprint(ctx, sqlc.UpsertLibraryFileFingerprintParams{
+		LibraryFileID: lf.ID, Algorithm: chromaprintAlgorithm, Fingerprint: fingerprint,
+		FingerprintDurationSecs: min(sourceDuration, int32(chromaprintWindowSecs)),
+		SourceDurationSecs:      sourceDuration,
+		SourceSize:              lf.Size,
+		SourceMtime:             lf.Mtime,
+	})
+	if err != nil {
+		return sqlc.LibraryFileFingerprint{}, fmt.Errorf("update library_file fingerprint: %w", err)
+	}
+	return stored, nil
+}
+
+func mirrorTrackFingerprint(ctx context.Context, q *sqlc.Queries, libraryFileID int64, fingerprint string, algorithm int16, duration int32) error {
+	if err := q.UpdateTrackFileFingerprintByLibraryFile(ctx, sqlc.UpdateTrackFileFingerprintByLibraryFileParams{
+		LibraryFileID:           libraryFileID,
+		Chromaprint:             pgtype.Text{String: fingerprint, Valid: fingerprint != ""},
+		ChromaprintAlgorithm:    pgtype.Int2{Int16: algorithm, Valid: true},
+		ChromaprintDurationSecs: pgtype.Int4{Int32: duration, Valid: true},
 	}); err != nil {
-		return fmt.Errorf("update track_file fingerprint: %w", err)
+		return fmt.Errorf("mirror track_file fingerprint: %w", err)
 	}
-
 	return nil
 }
 
@@ -149,6 +251,8 @@ func chromaprintFile(ctx context.Context, path string) (string, error) {
 		return "", errors.New("no chromaprint extractor available (need ffmpeg with chromaprint muxer, or fpcalc)")
 	}
 }
+
+var computeChromaprint = chromaprintFile
 
 func chromaprintViaFFmpeg(ctx context.Context, path string) (string, error) {
 	// -t before -i bounds the demux read itself. -vn/-sn/-dn plus an explicit
@@ -202,9 +306,8 @@ func chromaprintViaFpcalc(ctx context.Context, path string) (string, error) {
 // backlog size.
 const kickoffFingerprintTrackBatch = 500
 
-// KickoffMusicFingerprintWorker is the single-phase loudness-pump clone for
-// chromaprints: snooze-loop sweeping ListTrackFilesPendingFingerprint with a
-// cursor, one wave of scan_track_fingerprint jobs in flight at a time.
+// KickoffMusicFingerprintWorker sweeps every physical music file, including
+// unmatched files which have no track_files row yet.
 type KickoffMusicFingerprintWorker struct {
 	river.WorkerDefaults[KickoffMusicFingerprintArgs]
 	DB       *pgxpool.Pool
@@ -245,7 +348,7 @@ func (w *KickoffMusicFingerprintWorker) Work(ctx context.Context, job *river.Job
 	}
 	tracksListed := -1 // -1: wave full, sweep not consulted this wake
 	if want := kickoffFingerprintTrackBatch - trackActive; want > 0 {
-		rows, err := q.ListTrackFilesPendingFingerprint(ctx, sqlc.ListTrackFilesPendingFingerprintParams{
+		rows, err := q.ListMusicLibraryFilesPendingFingerprint(ctx, sqlc.ListMusicLibraryFilesPendingFingerprintParams{
 			AfterID:  st.TrackCursor,
 			RowLimit: int32(want),
 		})
@@ -262,7 +365,7 @@ func (w *KickoffMusicFingerprintWorker) Work(ctx context.Context, job *river.Job
 			jobs := make([]river.InsertManyParams, len(rows))
 			for i, row := range rows {
 				jobs[i] = river.InsertManyParams{
-					Args:       ScanTrackFingerprintArgs{TrackFileID: row.ID, ScheduledTaskID: taskID},
+					Args:       ScanTrackFingerprintArgs{LibraryFileID: row.ID, ScheduledTaskID: taskID},
 					InsertOpts: scheduledJobInsertOpts(st.Source),
 				}
 			}

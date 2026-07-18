@@ -334,6 +334,47 @@ func TestPersistScannerSearchEntitiesStoresNarrowArtifacts(t *testing.T) {
 	require.Equal(t, "Dune (2021)/Dune.mkv", loaded.Inventory.Roots[0].Files[0].RelPath)
 }
 
+func TestMusicReviewRematchReusesRetainedAnalysisArtifact(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	userID := testutil.TestUserID(t, pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name: "music-review-rematch-test", MediaType: sqlc.MediaTypeMusic,
+		Paths: []string{"/media/music"}, ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy: userID, Settings: []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	const key = "artist:uncertain"
+	result := Result{Inventory: Inventory{Roots: []InventoryRoot{{Root: "/media/music", Files: []InventoryFile{{
+		Root: "/media/music", Path: "/media/music/Uncertain/01 - Example.flac", RelPath: "Uncertain/01 - Example.flac", Class: ClassPrimaryMedia,
+	}}}}}, MusicArtists: []MusicArtistPlan{{
+		Key: key, Artist: "Uncertain", Files: []string{"Uncertain/01 - Example.flac"},
+		Albums: []MusicAlbumPlan{{Album: "Example", Tracks: []MusicTrackPlan{{
+			Key: "track:example", Artist: "Uncertain", Album: "Example", TrackTitle: "Example", RelPath: "Uncertain/01 - Example.flac",
+		}}}},
+	}}}
+	scope := []string{"/media/music/Uncertain"}
+	analysisRefs, err := PersistScannerAnalysisEntities(ctx, pool, lib, Options{ScopePaths: scope}, result)
+	require.NoError(t, err)
+	require.Len(t, analysisRefs, 1)
+
+	result.MusicSearch = []MusicSearchMatch{{Key: key, Query: MusicSearchQuery{Artist: "Uncertain"}, Reason: "ambiguous_or_low_confidence"}}
+	searchRefs, err := PersistScannerSearchEntities(ctx, pool, lib, Options{ScopePaths: scope}, result, 0)
+	require.NoError(t, err)
+	require.Len(t, searchRefs, 1)
+	require.Equal(t, "needs_review", searchRefs[0].Entity.Status)
+
+	rows, err := q.ListMusicScannerReviewsForRematch(ctx, sqlc.ListMusicScannerReviewsForRematchParams{LibraryID: lib.ID, RowLimit: 10})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, searchRefs[0].Entity.ID, rows[0].ScannerEntityID)
+	require.Equal(t, analysisRefs[0].Artifact.ID, rows[0].AnalysisArtifactID)
+	require.Equal(t, scope, rows[0].ScopePaths)
+}
+
 func TestCompactAppliedScannerArtifactsKeepsEntityState(t *testing.T) {
 	pool := testutil.SetupDB(t)
 	ctx := context.Background()

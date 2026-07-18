@@ -328,10 +328,15 @@ func (c *Client) RecordingMetadata(ctx context.Context, entityID string, credent
 			Namespace      string `json:"namespace"`
 			ProviderID     string `json:"provider_id"`
 			Title          string `json:"title"`
+			DurationMS     int64  `json:"duration_ms"`
 			Disambiguation string `json:"disambiguation"`
 			ArtistCredits  []struct {
-				Name       string `json:"name"`
-				ArtistName string `json:"artist_name"`
+				Name           string `json:"name"`
+				JoinPhrase     string `json:"join_phrase"`
+				ArtistName     string `json:"artist_name"`
+				ArtistEntityID string `json:"artist_entity_id"`
+				ArtistProvider string `json:"artist_provider"`
+				ArtistID       string `json:"artist_id"`
 			} `json:"artist_credits"`
 			Genres []struct {
 				Name string `json:"name"`
@@ -358,7 +363,7 @@ func (c *Client) RecordingMetadata(ctx context.Context, entityID string, credent
 	}
 	result := metadata.RecordingMetadata{
 		CanonicalID: document.ID, Title: document.Data.Title,
-		Disambiguation: document.Data.Disambiguation,
+		Disambiguation: document.Data.Disambiguation, Duration: int(document.Data.DurationMS / 1000),
 	}
 	if result.CanonicalID == "" {
 		result.CanonicalID = entityID
@@ -366,8 +371,18 @@ func (c *Client) RecordingMetadata(ctx context.Context, entityID string, credent
 	if document.Data.Provider == "musicbrainz" && document.Data.Namespace == "recording" {
 		result.RecordingMBID = document.Data.ProviderID
 	}
-	if len(document.Data.ArtistCredits) > 0 {
-		result.ArtistName = firstNonEmpty(document.Data.ArtistCredits[0].Name, document.Data.ArtistCredits[0].ArtistName)
+	for _, value := range document.Data.ArtistCredits {
+		credit := metadata.ArtistCreditEntry{
+			Name: firstNonEmpty(value.Name, value.ArtistName), JoinPhrase: value.JoinPhrase,
+			Slug: value.ArtistEntityID,
+		}
+		if value.ArtistProvider == "musicbrainz" {
+			credit.MBID = value.ArtistID
+		}
+		result.ArtistCredits = append(result.ArtistCredits, credit)
+	}
+	if len(result.ArtistCredits) > 0 {
+		result.ArtistName = result.ArtistCredits[0].Name
 	}
 	for _, value := range document.Data.Genres {
 		result.Genres = append(result.Genres, value.Name)

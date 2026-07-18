@@ -13,6 +13,7 @@ var allHeyaEnvKeys = []string{
 	"HEYA_PASSIVE_MODE", "HEYA_ALLOW_REMOTE_ACTIVE",
 	"HEYA_HOST", "HEYA_PORT", "HEYA_LOG_LEVEL",
 	"HEYA_LOG_FORMAT", "HEYA_DATA_DIR", "HEYA_METADATA_URL", "HEYA_METADATA_API_KEY", "HEYA_THEINTRODB_API_KEY", "HEYA_HWACCEL",
+	"HEYA_ACOUSTID_API_KEY", "HEYA_ACOUSTID_BASE_URL", "HEYA_ACOUSTID_REQUESTS_PER_SECOND",
 	"HEYA_TRANSCODE_CACHE_DIR", "HEYA_TRANSCODE_CACHE_MAX_GB",
 	"HEYA_CAST_ENABLED", "HEYA_CAST_BASE_URL", "HEYA_CAST_DEVICES",
 	"HEYA_TAILSCALE_ENABLED", "HEYA_TAILSCALE_HOSTNAME",
@@ -52,6 +53,8 @@ func TestLoadDefaults(t *testing.T) {
 	assert.Equal(t, "console", cfg.LogFormat.Value)
 	assert.Equal(t, "./data", cfg.DataDir.Value)
 	assert.Equal(t, "auto", cfg.HWAccel.Value)
+	assert.Equal(t, "https://api.acoustid.org", cfg.AcoustIDBaseURL.Value)
+	assert.Equal(t, 3, cfg.AcoustIDRequestsPerSecond.Value)
 	assert.Equal(t, 50, cfg.TranscodeCacheMaxGB.Value)
 	assert.Equal(t, 4, cfg.Jobs.Workers["process_scan"].Value)
 	assert.Equal(t, 4, cfg.Jobs.Workers["search_metadata"].Value)

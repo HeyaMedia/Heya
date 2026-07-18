@@ -447,6 +447,30 @@ type LibraryFile struct {
 	AudioFormats       []string           `json:"audio_formats"`
 }
 
+type LibraryFileFingerprint struct {
+	LibraryFileID           int64              `json:"library_file_id"`
+	Algorithm               int16              `json:"algorithm"`
+	Fingerprint             string             `json:"fingerprint"`
+	FingerprintDurationSecs int32              `json:"fingerprint_duration_secs"`
+	SourceDurationSecs      int32              `json:"source_duration_secs"`
+	SourceSize              int64              `json:"source_size"`
+	SourceMtime             pgtype.Timestamptz `json:"source_mtime"`
+	FingerprintedAt         pgtype.Timestamptz `json:"fingerprinted_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+}
+
+type LibraryFileFingerprintLookup struct {
+	LibraryFileID int64              `json:"library_file_id"`
+	Provider      string             `json:"provider"`
+	EvidenceKey   string             `json:"evidence_key"`
+	State         string             `json:"state"`
+	Results       []byte             `json:"results"`
+	ErrorMessage  string             `json:"error_message"`
+	ObservedAt    pgtype.Timestamptz `json:"observed_at"`
+	RetryAfter    pgtype.Timestamptz `json:"retry_after"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type LibraryFileLink struct {
 	ID             int64              `json:"id"`
 	LibraryFileID  int64              `json:"library_file_id"`

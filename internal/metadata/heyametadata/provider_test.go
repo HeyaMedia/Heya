@@ -418,7 +418,7 @@ func TestRecordingMetadataKeepsFocusedSemanticFields(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"` + testRecordID + `","kind":"recording","data":{"provider":"musicbrainz","namespace":"recording","provider_id":"recording-mbid","title":"Usseewa","disambiguation":"live","artist_credits":[{"name":"Ado","artist_name":"Ado"}],"genres":[{"name":"J-Rock"}],"tags":[{"name":"aggressive"}],"credits":[{"role":"instrument","attributes":["electric guitar"],"artist_provider":"musicbrainz","artist_id":"artist-mbid","artist_name":"Player"}],"links":[{"type":"lastfm","url":"https://example.test/track"}]}}`))
+		_, _ = w.Write([]byte(`{"id":"` + testRecordID + `","kind":"recording","data":{"provider":"musicbrainz","namespace":"recording","provider_id":"recording-mbid","title":"Usseewa","duration_ms":223000,"disambiguation":"live","artist_credits":[{"name":"Ado","artist_name":"Ado","artist_entity_id":"` + testMovieID + `","artist_provider":"musicbrainz","artist_id":"artist-mbid"}],"genres":[{"name":"J-Rock"}],"tags":[{"name":"aggressive"}],"credits":[{"role":"instrument","attributes":["electric guitar"],"artist_provider":"musicbrainz","artist_id":"artist-mbid","artist_name":"Player"}],"links":[{"type":"lastfm","url":"https://example.test/track"}]}}`))
 	}))
 	defer server.Close()
 	client, err := NewClient(server.URL, "")
@@ -430,11 +430,48 @@ func TestRecordingMetadataKeepsFocusedSemanticFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.CanonicalID != testRecordID || got.Title != "Usseewa" || got.ArtistName != "Ado" || got.RecordingMBID != "recording-mbid" {
+	if got.CanonicalID != testRecordID || got.Title != "Usseewa" || got.Duration != 223 || got.ArtistName != "Ado" || got.RecordingMBID != "recording-mbid" {
 		t.Fatalf("recording identity = %#v", got)
+	}
+	if len(got.ArtistCredits) != 1 || got.ArtistCredits[0].Slug != testMovieID || got.ArtistCredits[0].MBID != "artist-mbid" {
+		t.Fatalf("recording artist credits = %#v", got.ArtistCredits)
 	}
 	if len(got.Genres) != 1 || got.Genres[0] != "J-Rock" || len(got.Tags) != 1 || len(got.Credits) != 1 || len(got.Links) != 1 {
 		t.Fatalf("recording semantic fields = %#v", got)
+	}
+}
+
+func TestResolveRecordingMBIDUsesCanonicalDiscovery(t *testing.T) {
+	const recordingMBID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/discoveries":
+			var request gen.Request
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatal(err)
+			}
+			if request.Kind != "recording" || request.Identifiers == nil || len(*request.Identifiers) != 1 || (*request.Identifiers)[0].Value != recordingMBID {
+				t.Fatalf("recording discovery = %#v", request)
+			}
+			_, _ = w.Write([]byte(`{"id":"99999999-9999-4999-8999-999999999999","state":"completed","expires_at":"2099-01-01T00:00:00Z","result":{"kind":"recording","entity_id":"` + testRecordID + `","recommendation":"existing_entity","status":"completed","schema_version":1,"observed_at":"2026-01-01T00:00:00Z"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/recordings/"+testRecordID:
+			_, _ = w.Write([]byte(`{"id":"` + testRecordID + `","kind":"recording","data":{"provider":"musicbrainz","namespace":"recording","provider_id":"` + recordingMBID + `","title":"Song","duration_ms":180000,"artist_credits":[{"name":"Artist","artist_entity_id":"` + testMovieID + `"}]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := NewHeyaProvider(client).ResolveRecordingMBID(context.Background(), recordingMBID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CanonicalID != testRecordID || got.RecordingMBID != recordingMBID || len(got.ArtistCredits) != 1 || got.ArtistCredits[0].Slug != testMovieID {
+		t.Fatalf("resolved recording = %#v", got)
 	}
 }
 

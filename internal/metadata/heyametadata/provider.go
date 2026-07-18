@@ -52,6 +52,28 @@ func (p *HeyaProvider) RecordingLyrics(ctx context.Context, entityID string) ([]
 	return p.client.RecordingLyrics(ctx, entityID, p.credentials)
 }
 
+// ResolveRecordingMBID lets Heya turn direct AcoustID evidence into the same
+// canonical recording/artist graph used by normal metadata ingestion. The
+// MusicBrainz identifier is submitted as evidence; Heya never constructs or
+// persists a provider-specific canonical identity itself.
+func (p *HeyaProvider) ResolveRecordingMBID(ctx context.Context, mbid string) (metadata.RecordingMetadata, error) {
+	mbid = strings.ToLower(strings.TrimSpace(mbid))
+	if mbid == "" {
+		return metadata.RecordingMetadata{}, errors.New("recording MBID is required")
+	}
+	request := discoveryRequest("recording", metadata.SearchQuery{
+		Identifiers: map[string]string{"musicbrainz_recording": mbid},
+	})
+	resource, err := p.client.Discover(ctx, request, p.credentials, p.store)
+	if err != nil {
+		return metadata.RecordingMetadata{}, err
+	}
+	if resource == nil || resource.Result == nil || resource.Result.EntityId == nil {
+		return metadata.RecordingMetadata{}, fmt.Errorf("recording MBID %s did not resolve to a canonical entity", mbid)
+	}
+	return p.client.RecordingMetadata(ctx, resource.Result.EntityId.String(), p.credentials)
+}
+
 func canonicalKind(kind metadata.MediaKind, explicit string, externalIDs map[string]string) string {
 	if explicit != "" {
 		return explicit

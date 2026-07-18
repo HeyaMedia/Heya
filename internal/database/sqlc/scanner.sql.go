@@ -1232,6 +1232,67 @@ func (q *Queries) ListMediaItemExternalIDs(ctx context.Context, mediaItemID int6
 	return items, nil
 }
 
+const listMusicScannerReviewsForRematch = `-- name: ListMusicScannerReviewsForRematch :many
+SELECT
+    entity.id AS scanner_entity_id,
+    entity.library_id,
+    entity.scope_paths,
+    artifact.id AS analysis_artifact_id
+FROM scanner_entities entity
+JOIN LATERAL (
+    SELECT id
+    FROM scanner_entity_artifacts
+    WHERE entity_id = entity.id
+      AND stage = 'analysis_result'
+    ORDER BY id DESC
+    LIMIT 1
+) artifact ON true
+WHERE entity.library_id = $1
+  AND entity.media_type = 'music'
+  AND entity.status = 'needs_review'
+ORDER BY entity.id
+LIMIT $2
+`
+
+type ListMusicScannerReviewsForRematchParams struct {
+	LibraryID int64 `json:"library_id"`
+	RowLimit  int32 `json:"row_limit"`
+}
+
+type ListMusicScannerReviewsForRematchRow struct {
+	ScannerEntityID    int64    `json:"scanner_entity_id"`
+	LibraryID          int64    `json:"library_id"`
+	ScopePaths         []string `json:"scope_paths"`
+	AnalysisArtifactID int64    `json:"analysis_artifact_id"`
+}
+
+// Manual matcher-upgrade replay: reuse the retained local analysis artifact,
+// bypassing inventory/analyze and enqueueing only the normal search stage.
+func (q *Queries) ListMusicScannerReviewsForRematch(ctx context.Context, arg ListMusicScannerReviewsForRematchParams) ([]ListMusicScannerReviewsForRematchRow, error) {
+	rows, err := q.db.Query(ctx, listMusicScannerReviewsForRematch, arg.LibraryID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMusicScannerReviewsForRematchRow{}
+	for rows.Next() {
+		var i ListMusicScannerReviewsForRematchRow
+		if err := rows.Scan(
+			&i.ScannerEntityID,
+			&i.LibraryID,
+			&i.ScopePaths,
+			&i.AnalysisArtifactID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOpenScannerFindingsByLibrary = `-- name: ListOpenScannerFindingsByLibrary :many
 SELECT
     sf.id, sf.scan_run_id, sf.library_id, sf.media_type, sf.identity_id, sf.media_item_id, sf.library_file_id, sf.severity, sf.code, sf.rel_path, sf.message, sf.data, sf.resolved_at, sf.created_at,

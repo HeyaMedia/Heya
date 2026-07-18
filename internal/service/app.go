@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/karbowiak/heya/internal/acoustid"
 	"github.com/karbowiak/heya/internal/auth"
 	"github.com/karbowiak/heya/internal/cast"
 	"github.com/karbowiak/heya/internal/communitysegments"
@@ -257,6 +258,14 @@ func newApp(ctx context.Context, cfg *config.Config, runtimeMode appRuntimeMode)
 	heya := heyametadata.NewHeyaProvider(hm, db).WithProviderCredentials(heyametadata.ProviderCredentials{
 		LastFMAPIKey: cfg.LastfmAPIKey.Value,
 	})
+	acoustID, err := acoustid.New(acoustid.Options{
+		BaseURL: cfg.AcoustIDBaseURL.Value, APIKey: cfg.AcoustIDAPIKey.Value,
+		RequestsPerSecond: cfg.AcoustIDRequestsPerSecond.Value,
+	})
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
 	segmentService := communitysegments.New(db, communitysegments.Options{TheIntroDBAPIKey: cfg.TheIntroDBAPIKey.Value})
 
 	log.Info().Str("url", cfg.HeyaMetadataURL.Value).Msg("canonical metadata provider registered via HeyaMetadata V2")
@@ -325,6 +334,7 @@ func newApp(ctx context.Context, cfg *config.Config, runtimeMode appRuntimeMode)
 			DataDir:        cfg.DataDir.Value,
 			HeyaMetadata:   hm,
 			Heya:           heya,
+			AcoustID:       acoustID,
 			Segments:       segmentService,
 			Matcher:        m,
 			Downloader:     dl,

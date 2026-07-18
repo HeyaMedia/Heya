@@ -41,24 +41,30 @@ type Config struct {
 	// base (e.g. https://heya.example.ts.net) so posters/backdrops/covers
 	// render. Empty → serve locally (images 404 in passive mode). See
 	// docs/development.md.
-	ImageProxyURL       Field[string]
-	Host                Field[string]
-	Port                Field[string]
-	LogLevel            Field[string]
-	LogFormat           Field[string]
-	HeyaMetadataURL     Field[string]
-	HeyaMetadataAPIKey  Field[string] `json:"-"`
-	TheIntroDBAPIKey    Field[string] `json:"-"`
-	DataDir             Field[string]
-	HWAccel             Field[string]
-	TranscodeCacheDir   Field[string]
-	TranscodeCacheMaxGB Field[int]
-	Tailscale           TailscaleConfig
-	Remote              RemoteConfig
-	Jellyfin            JellyfinConfig
-	Subsonic            SubsonicConfig
-	Cast                CastConfig
-	Jobs                JobsConfig
+	ImageProxyURL      Field[string]
+	Host               Field[string]
+	Port               Field[string]
+	LogLevel           Field[string]
+	LogFormat          Field[string]
+	HeyaMetadataURL    Field[string]
+	HeyaMetadataAPIKey Field[string] `json:"-"`
+	// AcoustID is a read-only pre-match fallback for music files with an
+	// ambiguous metadata search. This is the application/client key, never a
+	// user's submission key; Heya does not submit fingerprints.
+	AcoustIDAPIKey            Field[string] `json:"-"`
+	AcoustIDBaseURL           Field[string]
+	AcoustIDRequestsPerSecond Field[int]
+	TheIntroDBAPIKey          Field[string] `json:"-"`
+	DataDir                   Field[string]
+	HWAccel                   Field[string]
+	TranscodeCacheDir         Field[string]
+	TranscodeCacheMaxGB       Field[int]
+	Tailscale                 TailscaleConfig
+	Remote                    RemoteConfig
+	Jellyfin                  JellyfinConfig
+	Subsonic                  SubsonicConfig
+	Cast                      CastConfig
+	Jobs                      JobsConfig
 	// Podcast Index API credentials. Sign up at https://api.podcastindex.org
 	// — free tier covers personal-use traffic comfortably. When empty the
 	// /api/podcasts trending+search endpoints will surface a clear error.
@@ -163,27 +169,30 @@ func Load() *Config {
 	dataDir := envString("HEYA_DATA_DIR", "./data")
 
 	return &Config{
-		DatabaseURL:         envString("HEYA_DATABASE_URL", "postgres://heya:heya@localhost:5440/heya?sslmode=disable"),
-		DatabaseMaxConns:    envInt("HEYA_DB_MAX_CONNS", 30),
-		DatabaseMinConns:    envInt("HEYA_DB_MIN_CONNS", 2),
-		PassiveMode:         envBool("HEYA_PASSIVE_MODE", false),
-		AllowRemoteActive:   envBool("HEYA_ALLOW_REMOTE_ACTIVE", false),
-		ImageProxyURL:       envString("HEYA_IMAGE_PROXY_URL", ""),
-		Host:                envString("HEYA_HOST", "0.0.0.0"),
-		Port:                envString("HEYA_PORT", "8080"),
-		LogLevel:            envString("HEYA_LOG_LEVEL", "info"),
-		LogFormat:           envString("HEYA_LOG_FORMAT", "console"),
-		HeyaMetadataURL:     envString("HEYA_METADATA_URL", "http://localhost:3030"),
-		HeyaMetadataAPIKey:  envString("HEYA_METADATA_API_KEY", ""),
-		TheIntroDBAPIKey:    envString("HEYA_THEINTRODB_API_KEY", ""),
-		DataDir:             dataDir,
-		HWAccel:             envString("HEYA_HWACCEL", "auto"),
-		TranscodeCacheDir:   envString("HEYA_TRANSCODE_CACHE_DIR", dataDir.Value+"/transcode"),
-		TranscodeCacheMaxGB: envInt("HEYA_TRANSCODE_CACHE_MAX_GB", 50),
-		PodcastIndexKey:     envString("HEYA_PODCAST_INDEX_KEY", ""),
-		PodcastIndexSecret:  envString("HEYA_PODCAST_INDEX_SECRET", ""),
-		LastfmAPIKey:        envString("HEYA_LASTFM_API_KEY", ""),
-		LastfmSecret:        envString("HEYA_LASTFM_SECRET", ""),
+		DatabaseURL:               envString("HEYA_DATABASE_URL", "postgres://heya:heya@localhost:5440/heya?sslmode=disable"),
+		DatabaseMaxConns:          envInt("HEYA_DB_MAX_CONNS", 30),
+		DatabaseMinConns:          envInt("HEYA_DB_MIN_CONNS", 2),
+		PassiveMode:               envBool("HEYA_PASSIVE_MODE", false),
+		AllowRemoteActive:         envBool("HEYA_ALLOW_REMOTE_ACTIVE", false),
+		ImageProxyURL:             envString("HEYA_IMAGE_PROXY_URL", ""),
+		Host:                      envString("HEYA_HOST", "0.0.0.0"),
+		Port:                      envString("HEYA_PORT", "8080"),
+		LogLevel:                  envString("HEYA_LOG_LEVEL", "info"),
+		LogFormat:                 envString("HEYA_LOG_FORMAT", "console"),
+		HeyaMetadataURL:           envString("HEYA_METADATA_URL", "http://localhost:3030"),
+		HeyaMetadataAPIKey:        envString("HEYA_METADATA_API_KEY", ""),
+		AcoustIDAPIKey:            envString("HEYA_ACOUSTID_API_KEY", ""),
+		AcoustIDBaseURL:           envString("HEYA_ACOUSTID_BASE_URL", "https://api.acoustid.org"),
+		AcoustIDRequestsPerSecond: envInt("HEYA_ACOUSTID_REQUESTS_PER_SECOND", 3),
+		TheIntroDBAPIKey:          envString("HEYA_THEINTRODB_API_KEY", ""),
+		DataDir:                   dataDir,
+		HWAccel:                   envString("HEYA_HWACCEL", "auto"),
+		TranscodeCacheDir:         envString("HEYA_TRANSCODE_CACHE_DIR", dataDir.Value+"/transcode"),
+		TranscodeCacheMaxGB:       envInt("HEYA_TRANSCODE_CACHE_MAX_GB", 50),
+		PodcastIndexKey:           envString("HEYA_PODCAST_INDEX_KEY", ""),
+		PodcastIndexSecret:        envString("HEYA_PODCAST_INDEX_SECRET", ""),
+		LastfmAPIKey:              envString("HEYA_LASTFM_API_KEY", ""),
+		LastfmSecret:              envString("HEYA_LASTFM_SECRET", ""),
 		Jellyfin: JellyfinConfig{
 			Enabled: envBool("HEYA_JELLYFIN_API_ENABLED", false),
 		},
@@ -378,6 +387,8 @@ var sourceFields = []sourceField{
 	{"infra.log_format", func(c *Config) SourceEntry { return c.LogFormat.Entry() }},
 	{"infra.data_dir", func(c *Config) SourceEntry { return c.DataDir.Entry() }},
 	{"infra.heya_metadata_url", func(c *Config) SourceEntry { return c.HeyaMetadataURL.Entry() }},
+	{"infra.acoustid_base_url", func(c *Config) SourceEntry { return c.AcoustIDBaseURL.Entry() }},
+	{"infra.acoustid_requests_per_second", func(c *Config) SourceEntry { return c.AcoustIDRequestsPerSecond.Entry() }},
 	{"transcoder.hwaccel", func(c *Config) SourceEntry { return c.HWAccel.Entry() }},
 	{"transcoder.cache_dir", func(c *Config) SourceEntry { return c.TranscodeCacheDir.Entry() }},
 	{"transcoder.cache_max_gb", func(c *Config) SourceEntry { return c.TranscodeCacheMaxGB.Entry() }},

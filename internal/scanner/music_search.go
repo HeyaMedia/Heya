@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -15,6 +16,7 @@ import (
 )
 
 const musicArtistAutoMatchThreshold = 0.85
+const musicQueryOnlyCanonicalConfidence = 0.80
 const musicArtistSearchTimeout = 3 * time.Minute
 const musicArtistSearchConcurrency = 4
 const musicArtistDiscoveryReleaseHintLimit = 3
@@ -29,6 +31,28 @@ var musicCollaborationSeparatorRE = regexp.MustCompile(`(?i)(?:\s+(?:&|and|with|
 
 type MusicSearchProvider interface {
 	Search(context.Context, metadata.MediaKind, metadata.SearchQuery) ([]metadata.SearchResult, error)
+}
+
+// MusicFingerprintEvidenceProvider supplies recording-level evidence for a
+// local file. Implementations own fingerprint storage and provider lookups;
+// scanner owns the conservative artist-level acceptance policy.
+type MusicFingerprintEvidenceProvider interface {
+	MatchTrack(context.Context, MusicTrackPlan) ([]MusicRecordingEvidence, error)
+}
+
+type MusicRecordingEvidence struct {
+	RecordingMBID     string
+	Title             string
+	FingerprintScore  float64
+	SourceDuration    int
+	RecordingDuration int
+	Artists           []MusicRecordingArtistEvidence
+}
+
+type MusicRecordingArtistEvidence struct {
+	CanonicalID string
+	Name        string
+	MBID        string
 }
 
 type MusicSearchMatch struct {
@@ -67,6 +91,10 @@ type MusicSearchCandidate struct {
 }
 
 func SearchMusicArtists(ctx context.Context, artists []MusicArtistPlan, provider MusicSearchProvider, emit Emitter, threshold float64, decisionsOpt ...SearchDecisions) ([]MusicSearchMatch, error) {
+	return SearchMusicArtistsWithFingerprints(ctx, artists, provider, nil, emit, threshold, decisionsOpt...)
+}
+
+func SearchMusicArtistsWithFingerprints(ctx context.Context, artists []MusicArtistPlan, provider MusicSearchProvider, fingerprints MusicFingerprintEvidenceProvider, emit Emitter, threshold float64, decisionsOpt ...SearchDecisions) ([]MusicSearchMatch, error) {
 	if provider == nil {
 		return nil, fmt.Errorf("music search provider is required")
 	}
@@ -110,7 +138,7 @@ fanout:
 				setErr(err)
 				return
 			}
-			result, err := searchOneMusicArtist(ctx, artist, provider, emit, threshold, decisions)
+			result, err := searchOneMusicArtist(ctx, artist, provider, fingerprints, emit, threshold, decisions)
 			if err != nil {
 				setErr(err)
 				return
@@ -133,7 +161,7 @@ fanout:
 	return results, nil
 }
 
-func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider MusicSearchProvider, emit Emitter, threshold float64, decisions SearchDecisions) (MusicSearchMatch, error) {
+func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider MusicSearchProvider, fingerprints MusicFingerprintEvidenceProvider, emit Emitter, threshold float64, decisions SearchDecisions) (MusicSearchMatch, error) {
 	releases := musicDiscoveryReleaseHints(artist.Albums)
 	identifiers := musicDiscoveryArtistIdentifiers(artist.ExternalIDs)
 	if identifiers["mbid"] != "" {
@@ -237,6 +265,20 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 		}
 	}
 
+	if !musicSearchCanAutoAccept(scored, selectionArtist.Artist, threshold) && fingerprints != nil {
+		fingerprintMatch, ok, fingerprintErr := resolveMusicArtistByFingerprint(ctx, selectionArtist, fingerprints, threshold, emit)
+		if fingerprintErr != nil {
+			if _, deferred := metadata.DeferredWorkRetryAfter(fingerprintErr); deferred {
+				return search, fingerprintErr
+			}
+			emit.Emit(Event{Event: "match.fingerprint_failed", Severity: SeverityInfo, Kind: "music", Message: fingerprintErr.Error(), Data: map[string]any{
+				"key": artist.Key, "artist": selectionArtist.Artist,
+			}})
+		} else if ok {
+			scored = []metadata.SearchResult{fingerprintMatch}
+		}
+	}
+
 	for _, candidate := range scored {
 		providerID := musicPreferredProviderID(candidate)
 		search.Candidates = append(search.Candidates, MusicSearchCandidate{
@@ -308,6 +350,186 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 		})
 	}
 	return search, nil
+}
+
+const (
+	musicFingerprintTrackLimit   = 3
+	musicFingerprintMinimumScore = .90
+)
+
+func resolveMusicArtistByFingerprint(ctx context.Context, artist MusicArtistPlan, provider MusicFingerprintEvidenceProvider, threshold float64, emit Emitter) (metadata.SearchResult, bool, error) {
+	tracks := representativeFingerprintTracks(artist)
+	if len(tracks) == 0 {
+		return metadata.SearchResult{}, false, nil
+	}
+	type support struct {
+		artist     MusicRecordingArtistEvidence
+		files      int
+		totalScore float64
+		recordings []string
+	}
+	byArtist := map[string]*support{}
+	decisiveFiles := 0
+	for _, track := range tracks {
+		values, err := provider.MatchTrack(ctx, track)
+		if err != nil {
+			return metadata.SearchResult{}, false, err
+		}
+		best, ok := bestMusicRecordingEvidence(artist, track, values)
+		if !ok {
+			continue
+		}
+		decisiveFiles++
+		entry := byArtist[best.artist.CanonicalID]
+		if entry == nil {
+			entry = &support{artist: best.artist}
+			byArtist[best.artist.CanonicalID] = entry
+		}
+		entry.files++
+		entry.totalScore += best.score
+		entry.recordings = append(entry.recordings, best.recordingMBID)
+	}
+	if decisiveFiles == 0 || len(byArtist) != 1 {
+		return metadata.SearchResult{}, false, nil
+	}
+	var winner *support
+	for _, value := range byArtist {
+		winner = value
+	}
+	required := 1
+	if len(tracks) > 1 {
+		required = min(2, len(tracks))
+	}
+	if winner.files < required || winner.files != decisiveFiles {
+		return metadata.SearchResult{}, false, nil
+	}
+	average := winner.totalScore / float64(winner.files)
+	if average < musicFingerprintMinimumScore {
+		return metadata.SearchResult{}, false, nil
+	}
+	confidence := math.Min(.99, math.Max(threshold, average))
+	evidence := []metadata.SearchEvidence{
+		{Field: "chromaprint", Outcome: fmt.Sprintf("%d_of_%d", winner.files, len(tracks)), Weight: confidence, Detail: "AcoustID recording matches converge on one canonical artist"},
+		{Field: "musicbrainz_recordings", Outcome: "matched", Weight: confidence, Detail: strings.Join(cleanSortedStrings(winner.recordings), ",")},
+	}
+	result := metadata.SearchResult{
+		ProviderID: heyametadata.EncodeEntityProviderID(winner.artist.CanonicalID), ProviderName: "heya",
+		Title: winner.artist.Name, Confidence: confidence, Recommendation: "fingerprint_match",
+		RequiresReview: false, Enriched: true, Evidence: evidence,
+		ExternalIDs: map[string]string{"mbid": winner.artist.MBID}, HeyaSlug: winner.artist.CanonicalID,
+	}
+	emit.Emit(Event{Event: "match.fingerprint_selected", Kind: "music", Data: map[string]any{
+		"key": artist.Key, "artist": artist.Artist, "canonical_id": winner.artist.CanonicalID,
+		"recordings": winner.files, "confidence": confidence,
+	}})
+	return result, true, nil
+}
+
+type scoredMusicRecordingEvidence struct {
+	artist        MusicRecordingArtistEvidence
+	recordingMBID string
+	score         float64
+}
+
+func bestMusicRecordingEvidence(artist MusicArtistPlan, track MusicTrackPlan, values []MusicRecordingEvidence) (scoredMusicRecordingEvidence, bool) {
+	var candidates []scoredMusicRecordingEvidence
+	for _, value := range values {
+		if value.FingerprintScore < musicFingerprintMinimumScore || value.RecordingMBID == "" {
+			continue
+		}
+		titleScore := musicNameSimilarity(track.TrackTitle, value.Title)
+		if titleScore < musicArtistAutoMatchThreshold || !musicDurationsCompatible(value.SourceDuration, value.RecordingDuration) {
+			continue
+		}
+		for _, credit := range value.Artists {
+			if credit.CanonicalID == "" || musicNameSimilarity(artist.Artist, credit.Name) < musicArtistAutoMatchThreshold {
+				continue
+			}
+			durationScore := musicDurationScore(value.SourceDuration, value.RecordingDuration)
+			score := value.FingerprintScore*.60 + titleScore*.25 + durationScore*.15
+			candidates = append(candidates, scoredMusicRecordingEvidence{artist: credit, recordingMBID: value.RecordingMBID, score: score})
+		}
+	}
+	if len(candidates) == 0 {
+		return scoredMusicRecordingEvidence{}, false
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].score > candidates[j].score })
+	if len(candidates) > 1 && candidates[0].artist.CanonicalID != candidates[1].artist.CanonicalID && candidates[0].score-candidates[1].score < .05 {
+		return scoredMusicRecordingEvidence{}, false
+	}
+	return candidates[0], true
+}
+
+func representativeFingerprintTracks(artist MusicArtistPlan) []MusicTrackPlan {
+	var tracks []MusicTrackPlan
+	seenAlbums := map[string]bool{}
+	for _, album := range artist.Albums {
+		for _, track := range album.Tracks {
+			if strings.TrimSpace(track.RelPath) == "" || strings.TrimSpace(track.TrackTitle) == "" {
+				continue
+			}
+			albumKey := normalizeMusicKeyPart(album.Album)
+			if seenAlbums[albumKey] && len(tracks) < musicFingerprintTrackLimit-1 {
+				continue
+			}
+			seenAlbums[albumKey] = true
+			tracks = append(tracks, track)
+			break
+		}
+		if len(tracks) == musicFingerprintTrackLimit {
+			return tracks
+		}
+	}
+	// A single album can still contribute multiple independent recordings.
+	if len(tracks) < musicFingerprintTrackLimit {
+		seenPaths := map[string]bool{}
+		for _, track := range tracks {
+			seenPaths[track.RelPath] = true
+		}
+		for _, album := range artist.Albums {
+			for _, track := range album.Tracks {
+				if seenPaths[track.RelPath] || track.RelPath == "" || track.TrackTitle == "" {
+					continue
+				}
+				tracks = append(tracks, track)
+				seenPaths[track.RelPath] = true
+				if len(tracks) == musicFingerprintTrackLimit {
+					return tracks
+				}
+			}
+		}
+	}
+	return tracks
+}
+
+func musicDurationsCompatible(left, right int) bool {
+	if left <= 0 || right <= 0 {
+		return false
+	}
+	delta := absInt(left - right)
+	return delta <= max(8, int(math.Round(float64(max(left, right))*.05)))
+}
+
+func musicDurationScore(left, right int) float64 {
+	if !musicDurationsCompatible(left, right) {
+		return 0
+	}
+	delta := float64(absInt(left - right))
+	return math.Max(0, 1-delta/float64(max(left, right)))
+}
+
+func cleanSortedStrings(values []string) []string {
+	seen := map[string]bool{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" && !seen[value] {
+			seen[value] = true
+			result = append(result, value)
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 func scoreMusicSearchResults(artist MusicArtistPlan, candidates []metadata.SearchResult) []metadata.SearchResult {
@@ -684,6 +906,24 @@ func scoreMusicSearchCandidate(artist MusicArtistPlan, candidate metadata.Search
 			}
 			best = score
 		}
+	}
+
+	// HeyaMetadata's discovery confidence already combines provider quality,
+	// name/alias similarity, and structured release evidence. Replacing it
+	// with the local name score made every exact-name identity a perfect 1.0,
+	// producing enormous artificial ties for common and reused artist names.
+	// The local score remains a safety ceiling so an upstream fuzzy result can
+	// never outrank what the submitted artist label actually supports.
+	if candidate.Confidence > 0 {
+		best = minFloat(best, candidate.Confidence)
+	}
+
+	// Canonical index summaries use confidence=1 to order text search results,
+	// but when HeyaMetadata explicitly marks one review-only and supplies no
+	// evidence, that number is not identity confidence. Keep the useful known
+	// entity visible without allowing it to masquerade as corroboration.
+	if candidate.Enriched && candidate.RequiresReview && len(candidate.Evidence) == 0 {
+		best = minFloat(best, musicQueryOnlyCanonicalConfidence)
 	}
 	return best
 }

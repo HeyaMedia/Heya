@@ -31,6 +31,7 @@ type Options struct {
 	MusicFetcher       MusicDetailProvider
 	MusicMaterializer  MusicMaterializeStore
 	MusicProbe         MusicProbeFunc
+	MusicFingerprinter MusicFingerprintEvidenceProvider
 	MusicSearcher      MusicSearchProvider
 	EventWriters       []EventWriter
 	ScopePaths         []string
@@ -363,7 +364,7 @@ func (r *LibraryRun) runSearch(ctx context.Context) error {
 	case lib.MediaType == sqlc.MediaTypeBook:
 		r.result.BookSearch, err = SearchBookPlans(ctx, r.result.BookPlans, r.opts.BookSearcher, r.sink, threshold, r.searchDecisions)
 	case lib.MediaType == sqlc.MediaTypeMusic:
-		r.result.MusicSearch, err = SearchMusicArtists(ctx, r.result.MusicArtists, r.opts.MusicSearcher, r.sink, threshold, r.searchDecisions)
+		r.result.MusicSearch, err = SearchMusicArtistsWithFingerprints(ctx, r.result.MusicArtists, r.opts.MusicSearcher, r.opts.MusicFingerprinter, r.sink, threshold, r.searchDecisions)
 	case mediatype.IsTVLike(lib.MediaType):
 		searcher := r.opts.TVSearcher
 		if searcher == nil {

@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/karbowiak/heya/internal/acoustid"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/mediafile"
@@ -428,6 +429,7 @@ type SearchLibraryMetadataWorker struct {
 	river.WorkerDefaults[SearchLibraryMetadataArgs]
 	DB       *pgxpool.Pool
 	Heya     *heyametadata.HeyaProvider
+	AcoustID *acoustid.Client
 	Hub      EventPublisher
 	Progress *TaskProgressBroadcaster
 	Backoff  *metadataContinuationBackoff
@@ -1617,6 +1619,13 @@ func EnqueueProcessLibraryScan(ctx context.Context, rc *river.Client[pgx.Tx], db
 	return insertScanUnitWithBurst(ctx, rc, db, args.LibraryID, args, applyScheduledJobSource(opts, source))
 }
 
+// EnqueueSearchLibraryMetadata replays one retained analysis artifact through
+// the ordinary matcher. It is exported for explicit admin rematches; normal
+// scanner fan-out uses the same internal path.
+func EnqueueSearchLibraryMetadata(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, args SearchLibraryMetadataArgs, priority int, source string) error {
+	return enqueueSearchLibraryMetadata(ctx, rc, db, args, priority, source)
+}
+
 // EnqueueKickoffLibraryScan routes a single-library inventory to its
 // media-type queue. LibraryID=0 is the scan-all coordinator and deliberately
 // remains on the unsuffixed queue; its per-library process work fans out to
@@ -1807,6 +1816,7 @@ func (w *SearchLibraryMetadataWorker) scanLibrarySearchArtifact(ctx context.Cont
 		return libraryScanOutcome{}, scanner.Result{}, 0, fmt.Errorf("search_metadata requires analysis_artifact_id")
 	}
 	opts := scannerSearchOptions(w.DB, w.Heya)
+	opts.MusicFingerprinter = newMusicFingerprintMatcher(w.DB, lib, w.AcoustID, w.Heya)
 	opts.ScopePaths = scopePaths
 	opts.EventWriters = []scanner.EventWriter{newScannerEventBridge(w.Hub, "search_metadata")}
 	run := scanner.NewLibraryRun(lib, opts, io.Discard)

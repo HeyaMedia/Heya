@@ -14,6 +14,8 @@ x-heya-common: &heya-common
     # Run HeyaMetadata separately. This default reaches a host-side dev
     # instance on :3030; override HEYA_METADATA_URL for another deployment.
     HEYA_METADATA_URL: ${HEYA_METADATA_URL:-http://host.docker.internal:3030}
+    # Optional read-only fallback for uncertain music matches.
+    HEYA_ACOUSTID_API_KEY: ${HEYA_ACOUSTID_API_KEY:-}
     # First-boot admin bootstrap (ignored once an admin user exists):
     # HEYA_ADMIN_USERNAME: admin
     # HEYA_ADMIN_EMAIL: admin@example.com

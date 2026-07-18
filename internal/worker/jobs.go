@@ -401,11 +401,11 @@ func (ScanTrackLoudnessArgs) InsertOpts() river.InsertOpts {
 	}
 }
 
-// ScanTrackFingerprintArgs computes a chromaprint audio fingerprint for a
-// single file and writes it back to its track_files row. Light CPU work
-// (decodes ≤120s), runs on its own queue at MaxWorkers=1 like the other
-// analysis passes.
+// ScanTrackFingerprintArgs computes a chromaprint for one physical audio file.
+// LibraryFileID is the canonical pre-match input; TrackFileID remains optional
+// so jobs queued by older releases survive a rolling deploy unchanged.
 type ScanTrackFingerprintArgs struct {
+	LibraryFileID   int64  `json:"library_file_id,omitempty" river:"unique"`
 	TrackFileID     int64  `json:"track_file_id" river:"unique"`
 	ScheduledTaskID string `json:"scheduled_task_id,omitempty"`
 }

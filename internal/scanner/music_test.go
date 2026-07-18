@@ -233,6 +233,88 @@ func TestSearchMusicArtistsSelectsAndRejects(t *testing.T) {
 	}
 }
 
+func TestMusicSearchPreservesStructuredCandidateConfidence(t *testing.T) {
+	artist := MusicArtistPlan{Artist: "$Not"}
+
+	// Production discovery commonly returns several exact-name provider
+	// identities with no matching release evidence. Name similarity must not
+	// flatten every one of those nuanced upstream scores to 1.0.
+	ambiguous := metadata.SearchResult{
+		Title: "$NOT", Confidence: .60, RequiresReview: true,
+		Evidence: []metadata.SearchEvidence{{Field: "releases", Outcome: "0_of_1"}},
+	}
+	if got := scoreMusicSearchCandidate(artist, ambiguous); got != .60 {
+		t.Fatalf("ambiguous exact-name score = %.2f, want .60", got)
+	}
+
+	// A query-only canonical index hit carries confidence=1 for search
+	// ordering, not identity proof. Keep it below the automatic floor until
+	// structured evidence or an identifier corroborates it.
+	canonical := metadata.SearchResult{
+		Title: "$Not", Confidence: 1, Enriched: true, RequiresReview: true,
+	}
+	if got := scoreMusicSearchCandidate(artist, canonical); got != musicQueryOnlyCanonicalConfidence {
+		t.Fatalf("query-only canonical score = %.2f, want %.2f", got, musicQueryOnlyCanonicalConfidence)
+	}
+
+	corroborated := metadata.SearchResult{
+		Title: "$Not", Confidence: .91,
+		Evidence: []metadata.SearchEvidence{{Field: "releases", Outcome: "1_of_1"}},
+	}
+	if got := scoreMusicSearchCandidate(artist, corroborated); got != .91 {
+		t.Fatalf("corroborated exact-name score = %.2f, want .91", got)
+	}
+}
+
+func TestMusicSearchUsesConvergedFingerprintRecordingEvidence(t *testing.T) {
+	const canonical = "20000000-0000-4000-8000-000000000001"
+	search := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{
+		"$Not": {
+			{ProviderID: "opaque-mb", ProviderName: "heya", Title: "$Not", Confidence: .60, Recommendation: "ambiguous", RequiresReview: true},
+			{ProviderID: "opaque-apple", ProviderName: "heya", Title: "$NOT", Confidence: .60, Recommendation: "ambiguous", RequiresReview: true},
+		},
+	}}
+	fingerprints := &fakeMusicFingerprintProvider{results: map[string][]MusicRecordingEvidence{
+		"$Not/Ethereal/01.flac": {{
+			RecordingMBID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", Title: "Ethereal",
+			FingerprintScore: .99, SourceDuration: 181, RecordingDuration: 180,
+			Artists: []MusicRecordingArtistEvidence{{CanonicalID: canonical, Name: "$Not", MBID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}},
+		}},
+	}}
+	artist := MusicArtistPlan{Key: "artist:not", Artist: "$Not", Albums: []MusicAlbumPlan{{
+		Album: "Ethereal", Tracks: []MusicTrackPlan{{TrackTitle: "Ethereal", RelPath: "$Not/Ethereal/01.flac"}},
+	}}}
+
+	results, err := SearchMusicArtistsWithFingerprints(context.Background(), []MusicArtistPlan{artist}, search, fingerprints, &captureEmitter{}, musicArtistAutoMatchThreshold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || !results[0].Accepted || results[0].ProviderID != heyametadata.EncodeEntityProviderID(canonical) {
+		t.Fatalf("fingerprint search = %#v", results)
+	}
+	if len(results[0].Candidates) != 1 || results[0].Candidates[0].Recommendation != "fingerprint_match" {
+		t.Fatalf("fingerprint candidate = %#v", results[0].Candidates)
+	}
+}
+
+func TestMusicSearchRejectsConflictingFingerprintArtists(t *testing.T) {
+	search := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{"Example": nil}}
+	fingerprints := &fakeMusicFingerprintProvider{results: map[string][]MusicRecordingEvidence{
+		"Example/One.flac": {{RecordingMBID: "one", Title: "One", FingerprintScore: .99, SourceDuration: 180, RecordingDuration: 180, Artists: []MusicRecordingArtistEvidence{{CanonicalID: "artist-one", Name: "Example"}}}},
+		"Example/Two.flac": {{RecordingMBID: "two", Title: "Two", FingerprintScore: .99, SourceDuration: 200, RecordingDuration: 200, Artists: []MusicRecordingArtistEvidence{{CanonicalID: "artist-two", Name: "Example"}}}},
+	}}
+	artist := MusicArtistPlan{Key: "artist:example", Artist: "Example", Albums: []MusicAlbumPlan{{Album: "Album", Tracks: []MusicTrackPlan{
+		{TrackTitle: "One", RelPath: "Example/One.flac"}, {TrackTitle: "Two", RelPath: "Example/Two.flac"},
+	}}}}
+	results, err := SearchMusicArtistsWithFingerprints(context.Background(), []MusicArtistPlan{artist}, search, fingerprints, &captureEmitter{}, musicArtistAutoMatchThreshold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Accepted {
+		t.Fatalf("conflicting fingerprint artists were accepted: %#v", results)
+	}
+}
+
 func TestSearchMusicArtistsUsesConsistentMusicBrainzSpine(t *testing.T) {
 	const providerID = "heyametadata:v2:entity:10000000-0000-4000-8000-000000000001"
 	provider := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{
@@ -802,6 +884,14 @@ type fakeMusicSearchProvider struct {
 type convergingMusicSearchProvider struct {
 	*fakeMusicSearchProvider
 	details map[string]*metadata.MediaDetail
+}
+
+type fakeMusicFingerprintProvider struct {
+	results map[string][]MusicRecordingEvidence
+}
+
+func (f *fakeMusicFingerprintProvider) MatchTrack(_ context.Context, track MusicTrackPlan) ([]MusicRecordingEvidence, error) {
+	return f.results[track.RelPath], nil
 }
 
 func (f *convergingMusicSearchProvider) GetDetail(_ context.Context, providerID string, _ *metadata.FetchOptions) (*metadata.MediaDetail, error) {

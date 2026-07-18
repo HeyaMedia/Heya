@@ -510,15 +510,17 @@ type RecordingCredit struct {
 // album descriptions, and other long context that would overpower musical
 // character in a similarity embedding.
 type RecordingMetadata struct {
-	CanonicalID    string            `json:"canonical_id"`
-	Title          string            `json:"title"`
-	Disambiguation string            `json:"disambiguation,omitempty"`
-	RecordingMBID  string            `json:"recording_mbid,omitempty"`
-	ArtistName     string            `json:"artist_name,omitempty"`
-	Genres         []string          `json:"genres,omitempty"`
-	Tags           []string          `json:"tags,omitempty"`
-	Credits        []RecordingCredit `json:"credits,omitempty"`
-	Links          []URLEntry        `json:"links,omitempty"`
+	CanonicalID    string              `json:"canonical_id"`
+	Title          string              `json:"title"`
+	Disambiguation string              `json:"disambiguation,omitempty"`
+	RecordingMBID  string              `json:"recording_mbid,omitempty"`
+	Duration       int                 `json:"duration,omitempty"`
+	ArtistName     string              `json:"artist_name,omitempty"`
+	ArtistCredits  []ArtistCreditEntry `json:"artist_credits,omitempty"`
+	Genres         []string            `json:"genres,omitempty"`
+	Tags           []string            `json:"tags,omitempty"`
+	Credits        []RecordingCredit   `json:"credits,omitempty"`
+	Links          []URLEntry          `json:"links,omitempty"`
 }
 
 // AlbumEntry is one album as returned in payload.albums on an artist lookup.

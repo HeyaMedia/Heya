@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/karbowiak/heya/internal/acoustid"
 	"github.com/karbowiak/heya/internal/communitysegments"
 	"github.com/karbowiak/heya/internal/database"
 	"github.com/karbowiak/heya/internal/eventhub"
@@ -45,6 +46,7 @@ type Config struct {
 	DataDir        string
 	HeyaMetadata   *heyametadata.Client
 	Heya           *heyametadata.HeyaProvider
+	AcoustID       *acoustid.Client
 	Segments       *communitysegments.Service
 	Matcher        MatchService
 	Downloader     *images.Downloader
@@ -160,7 +162,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	kickoffLibraryWorker := &KickoffLibraryScanWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress}
 	river.AddWorker(workers, kickoffLibraryWorker)
 	river.AddWorker(workers, &ProcessLibraryScanWorker{DB: cfg.DB, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress})
-	river.AddWorker(workers, &SearchLibraryMetadataWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Progress: cfg.Progress, Backoff: continuationBackoff})
+	river.AddWorker(workers, &SearchLibraryMetadataWorker{DB: cfg.DB, Heya: cfg.Heya, AcoustID: cfg.AcoustID, Hub: cfg.Hub, Progress: cfg.Progress, Backoff: continuationBackoff})
 	river.AddWorker(workers, &FetchLibraryMetadataWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, Progress: cfg.Progress})
 	river.AddWorker(workers, &ApplyLibraryScanWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Watcher: cfg.Watcher, SonicEnabled: cfg.SonicEnabled, Progress: cfg.Progress})
 	river.AddWorker(workers, &ApplyRichMetadataWorker{DB: cfg.DB, Matcher: cfg.Matcher, Hub: cfg.Hub, Progress: cfg.Progress})

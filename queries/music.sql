@@ -956,6 +956,85 @@ UPDATE track_files
        fingerprinted_at          = now()
  WHERE id = $1;
 
+-- name: UpdateTrackFileFingerprintByLibraryFile :exec
+-- Compatibility mirror while playback/duplicate detection still reads the
+-- historical track_files columns. A pre-match file has no track_files row and
+-- simply updates zero rows here.
+UPDATE track_files
+   SET chromaprint               = sqlc.arg(chromaprint),
+       chromaprint_algorithm     = sqlc.arg(chromaprint_algorithm),
+       chromaprint_duration_secs = sqlc.arg(chromaprint_duration_secs),
+       fingerprinted_at          = now()
+ WHERE library_file_id = sqlc.arg(library_file_id);
+
+-- name: GetLibraryFileFingerprint :one
+SELECT *
+FROM library_file_fingerprints
+WHERE library_file_id = $1;
+
+-- name: GetLibraryFileFingerprintLookup :one
+SELECT *
+FROM library_file_fingerprint_lookups
+WHERE library_file_id = sqlc.arg(library_file_id)
+  AND provider = sqlc.arg(provider);
+
+-- name: UpsertLibraryFileFingerprintLookup :one
+INSERT INTO library_file_fingerprint_lookups (
+    library_file_id,
+    provider,
+    evidence_key,
+    state,
+    results,
+    error_message,
+    retry_after
+) VALUES (
+    sqlc.arg(library_file_id),
+    sqlc.arg(provider),
+    sqlc.arg(evidence_key),
+    sqlc.arg(state),
+    sqlc.arg(results),
+    sqlc.arg(error_message),
+    sqlc.narg(retry_after)
+)
+ON CONFLICT (library_file_id, provider) DO UPDATE
+SET evidence_key  = EXCLUDED.evidence_key,
+    state         = EXCLUDED.state,
+    results       = EXCLUDED.results,
+    error_message = EXCLUDED.error_message,
+    observed_at   = now(),
+    retry_after   = EXCLUDED.retry_after,
+    updated_at    = now()
+RETURNING *;
+
+-- name: UpsertLibraryFileFingerprint :one
+INSERT INTO library_file_fingerprints (
+    library_file_id,
+    algorithm,
+    fingerprint,
+    fingerprint_duration_secs,
+    source_duration_secs,
+    source_size,
+    source_mtime
+) VALUES (
+    sqlc.arg(library_file_id),
+    sqlc.arg(algorithm),
+    sqlc.arg(fingerprint),
+    sqlc.arg(fingerprint_duration_secs),
+    sqlc.arg(source_duration_secs),
+    sqlc.arg(source_size),
+    sqlc.narg(source_mtime)
+)
+ON CONFLICT (library_file_id) DO UPDATE
+SET algorithm                 = EXCLUDED.algorithm,
+    fingerprint               = EXCLUDED.fingerprint,
+    fingerprint_duration_secs = EXCLUDED.fingerprint_duration_secs,
+    source_duration_secs      = EXCLUDED.source_duration_secs,
+    source_size               = EXCLUDED.source_size,
+    source_mtime              = EXCLUDED.source_mtime,
+    fingerprinted_at          = now(),
+    updated_at                = now()
+RETURNING *;
+
 -- name: ListTrackFilesPendingFingerprint :many
 -- Files in music libraries missing a chromaprint (and not soft-deleted).
 -- The kickoff pump sweeps this with an id cursor (after_id) so one run visits
@@ -974,6 +1053,27 @@ WHERE l.media_type = 'music'
   AND tf.id > sqlc.arg(after_id)::bigint
   AND tf.fingerprinted_at IS NULL
 ORDER BY tf.id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ListMusicLibraryFilesPendingFingerprint :many
+-- Unlike the legacy track_files sweep, this includes unmatched audio. The
+-- source size/mtime comparison invalidates evidence if a path is overwritten
+-- in place while retaining its library_files identity.
+SELECT lf.id, lf.path
+FROM library_files lf
+JOIN libraries l ON l.id = lf.library_id
+LEFT JOIN library_file_fingerprints fp ON fp.library_file_id = lf.id
+WHERE l.media_type = 'music'
+  AND lf.deleted_at IS NULL
+  AND lf.id > sqlc.arg(after_id)::bigint
+  AND lower(lf.path) ~ '\.(flac|mp3|m4a|aac|ogg|opus|wav|wma|ape|wv|alac|aiff|aif)$'
+  AND (
+      fp.library_file_id IS NULL
+      OR fp.algorithm <> 1
+      OR fp.source_size <> lf.size
+      OR fp.source_mtime IS DISTINCT FROM lf.mtime
+  )
+ORDER BY lf.id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: UpdateAlbumLoudness :exec

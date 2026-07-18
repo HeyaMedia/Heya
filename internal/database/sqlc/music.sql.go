@@ -1326,6 +1326,58 @@ func (q *Queries) GetArtistByNameAndDisambiguationExcludingID(ctx context.Contex
 	return i, err
 }
 
+const getLibraryFileFingerprint = `-- name: GetLibraryFileFingerprint :one
+SELECT library_file_id, algorithm, fingerprint, fingerprint_duration_secs, source_duration_secs, source_size, source_mtime, fingerprinted_at, updated_at
+FROM library_file_fingerprints
+WHERE library_file_id = $1
+`
+
+func (q *Queries) GetLibraryFileFingerprint(ctx context.Context, libraryFileID int64) (LibraryFileFingerprint, error) {
+	row := q.db.QueryRow(ctx, getLibraryFileFingerprint, libraryFileID)
+	var i LibraryFileFingerprint
+	err := row.Scan(
+		&i.LibraryFileID,
+		&i.Algorithm,
+		&i.Fingerprint,
+		&i.FingerprintDurationSecs,
+		&i.SourceDurationSecs,
+		&i.SourceSize,
+		&i.SourceMtime,
+		&i.FingerprintedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getLibraryFileFingerprintLookup = `-- name: GetLibraryFileFingerprintLookup :one
+SELECT library_file_id, provider, evidence_key, state, results, error_message, observed_at, retry_after, updated_at
+FROM library_file_fingerprint_lookups
+WHERE library_file_id = $1
+  AND provider = $2
+`
+
+type GetLibraryFileFingerprintLookupParams struct {
+	LibraryFileID int64  `json:"library_file_id"`
+	Provider      string `json:"provider"`
+}
+
+func (q *Queries) GetLibraryFileFingerprintLookup(ctx context.Context, arg GetLibraryFileFingerprintLookupParams) (LibraryFileFingerprintLookup, error) {
+	row := q.db.QueryRow(ctx, getLibraryFileFingerprintLookup, arg.LibraryFileID, arg.Provider)
+	var i LibraryFileFingerprintLookup
+	err := row.Scan(
+		&i.LibraryFileID,
+		&i.Provider,
+		&i.EvidenceKey,
+		&i.State,
+		&i.Results,
+		&i.ErrorMessage,
+		&i.ObservedAt,
+		&i.RetryAfter,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getMusicArtistBySlug = `-- name: GetMusicArtistBySlug :one
 SELECT a.id, a.media_item_id, a.musicbrainz_id, a.name, a.sort_name, a.disambiguation, a.biography, a.search_vector, a.discography_enriched_at, a.cover_art_enriched_at, a.listeners, a.playcount, a.popularity, a.annotation, a.urls, a.wikipedia_links, a.profiles, a.aliases, a.groups, a.members, a.artist_type, a.begin_date, a.begin_year, a.end_date, a.ended, a.deathday, a.birthplace, a.tags, a.genres, a.metadata_sources, a.followers,
        mi.slug         AS slug,
@@ -2865,6 +2917,58 @@ func (q *Queries) ListMusicArtists(ctx context.Context, arg ListMusicArtistsPara
 			&i.TrackCount,
 			&i.Available,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMusicLibraryFilesPendingFingerprint = `-- name: ListMusicLibraryFilesPendingFingerprint :many
+SELECT lf.id, lf.path
+FROM library_files lf
+JOIN libraries l ON l.id = lf.library_id
+LEFT JOIN library_file_fingerprints fp ON fp.library_file_id = lf.id
+WHERE l.media_type = 'music'
+  AND lf.deleted_at IS NULL
+  AND lf.id > $1::bigint
+  AND lower(lf.path) ~ '\.(flac|mp3|m4a|aac|ogg|opus|wav|wma|ape|wv|alac|aiff|aif)$'
+  AND (
+      fp.library_file_id IS NULL
+      OR fp.algorithm <> 1
+      OR fp.source_size <> lf.size
+      OR fp.source_mtime IS DISTINCT FROM lf.mtime
+  )
+ORDER BY lf.id
+LIMIT $2::int
+`
+
+type ListMusicLibraryFilesPendingFingerprintParams struct {
+	AfterID  int64 `json:"after_id"`
+	RowLimit int32 `json:"row_limit"`
+}
+
+type ListMusicLibraryFilesPendingFingerprintRow struct {
+	ID   int64  `json:"id"`
+	Path string `json:"path"`
+}
+
+// Unlike the legacy track_files sweep, this includes unmatched audio. The
+// source size/mtime comparison invalidates evidence if a path is overwritten
+// in place while retaining its library_files identity.
+func (q *Queries) ListMusicLibraryFilesPendingFingerprint(ctx context.Context, arg ListMusicLibraryFilesPendingFingerprintParams) ([]ListMusicLibraryFilesPendingFingerprintRow, error) {
+	rows, err := q.db.Query(ctx, listMusicLibraryFilesPendingFingerprint, arg.AfterID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMusicLibraryFilesPendingFingerprintRow{}
+	for rows.Next() {
+		var i ListMusicLibraryFilesPendingFingerprintRow
+		if err := rows.Scan(&i.ID, &i.Path); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -4950,6 +5054,35 @@ func (q *Queries) UpdateTrackFileFingerprint(ctx context.Context, arg UpdateTrac
 	return err
 }
 
+const updateTrackFileFingerprintByLibraryFile = `-- name: UpdateTrackFileFingerprintByLibraryFile :exec
+UPDATE track_files
+   SET chromaprint               = $1,
+       chromaprint_algorithm     = $2,
+       chromaprint_duration_secs = $3,
+       fingerprinted_at          = now()
+ WHERE library_file_id = $4
+`
+
+type UpdateTrackFileFingerprintByLibraryFileParams struct {
+	Chromaprint             pgtype.Text `json:"-"`
+	ChromaprintAlgorithm    pgtype.Int2 `json:"chromaprint_algorithm"`
+	ChromaprintDurationSecs pgtype.Int4 `json:"chromaprint_duration_secs"`
+	LibraryFileID           int64       `json:"library_file_id"`
+}
+
+// Compatibility mirror while playback/duplicate detection still reads the
+// historical track_files columns. A pre-match file has no track_files row and
+// simply updates zero rows here.
+func (q *Queries) UpdateTrackFileFingerprintByLibraryFile(ctx context.Context, arg UpdateTrackFileFingerprintByLibraryFileParams) error {
+	_, err := q.db.Exec(ctx, updateTrackFileFingerprintByLibraryFile,
+		arg.Chromaprint,
+		arg.ChromaprintAlgorithm,
+		arg.ChromaprintDurationSecs,
+		arg.LibraryFileID,
+	)
+	return err
+}
+
 const updateTrackFileLoudness = `-- name: UpdateTrackFileLoudness :exec
 UPDATE track_files
    SET integrated_lufs      = $2,
@@ -5123,6 +5256,135 @@ func (q *Queries) UpdateTrackTitleAndDuration(ctx context.Context, arg UpdateTra
 		&i.SortAlbumYear,
 		&i.SortAlbum,
 		&i.Credits,
+	)
+	return i, err
+}
+
+const upsertLibraryFileFingerprint = `-- name: UpsertLibraryFileFingerprint :one
+INSERT INTO library_file_fingerprints (
+    library_file_id,
+    algorithm,
+    fingerprint,
+    fingerprint_duration_secs,
+    source_duration_secs,
+    source_size,
+    source_mtime
+) VALUES (
+    $1,
+    $2,
+    $3,
+    $4,
+    $5,
+    $6,
+    $7
+)
+ON CONFLICT (library_file_id) DO UPDATE
+SET algorithm                 = EXCLUDED.algorithm,
+    fingerprint               = EXCLUDED.fingerprint,
+    fingerprint_duration_secs = EXCLUDED.fingerprint_duration_secs,
+    source_duration_secs      = EXCLUDED.source_duration_secs,
+    source_size               = EXCLUDED.source_size,
+    source_mtime              = EXCLUDED.source_mtime,
+    fingerprinted_at          = now(),
+    updated_at                = now()
+RETURNING library_file_id, algorithm, fingerprint, fingerprint_duration_secs, source_duration_secs, source_size, source_mtime, fingerprinted_at, updated_at
+`
+
+type UpsertLibraryFileFingerprintParams struct {
+	LibraryFileID           int64              `json:"library_file_id"`
+	Algorithm               int16              `json:"algorithm"`
+	Fingerprint             string             `json:"fingerprint"`
+	FingerprintDurationSecs int32              `json:"fingerprint_duration_secs"`
+	SourceDurationSecs      int32              `json:"source_duration_secs"`
+	SourceSize              int64              `json:"source_size"`
+	SourceMtime             pgtype.Timestamptz `json:"source_mtime"`
+}
+
+func (q *Queries) UpsertLibraryFileFingerprint(ctx context.Context, arg UpsertLibraryFileFingerprintParams) (LibraryFileFingerprint, error) {
+	row := q.db.QueryRow(ctx, upsertLibraryFileFingerprint,
+		arg.LibraryFileID,
+		arg.Algorithm,
+		arg.Fingerprint,
+		arg.FingerprintDurationSecs,
+		arg.SourceDurationSecs,
+		arg.SourceSize,
+		arg.SourceMtime,
+	)
+	var i LibraryFileFingerprint
+	err := row.Scan(
+		&i.LibraryFileID,
+		&i.Algorithm,
+		&i.Fingerprint,
+		&i.FingerprintDurationSecs,
+		&i.SourceDurationSecs,
+		&i.SourceSize,
+		&i.SourceMtime,
+		&i.FingerprintedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertLibraryFileFingerprintLookup = `-- name: UpsertLibraryFileFingerprintLookup :one
+INSERT INTO library_file_fingerprint_lookups (
+    library_file_id,
+    provider,
+    evidence_key,
+    state,
+    results,
+    error_message,
+    retry_after
+) VALUES (
+    $1,
+    $2,
+    $3,
+    $4,
+    $5,
+    $6,
+    $7
+)
+ON CONFLICT (library_file_id, provider) DO UPDATE
+SET evidence_key  = EXCLUDED.evidence_key,
+    state         = EXCLUDED.state,
+    results       = EXCLUDED.results,
+    error_message = EXCLUDED.error_message,
+    observed_at   = now(),
+    retry_after   = EXCLUDED.retry_after,
+    updated_at    = now()
+RETURNING library_file_id, provider, evidence_key, state, results, error_message, observed_at, retry_after, updated_at
+`
+
+type UpsertLibraryFileFingerprintLookupParams struct {
+	LibraryFileID int64              `json:"library_file_id"`
+	Provider      string             `json:"provider"`
+	EvidenceKey   string             `json:"evidence_key"`
+	State         string             `json:"state"`
+	Results       []byte             `json:"results"`
+	ErrorMessage  string             `json:"error_message"`
+	RetryAfter    pgtype.Timestamptz `json:"retry_after"`
+}
+
+func (q *Queries) UpsertLibraryFileFingerprintLookup(ctx context.Context, arg UpsertLibraryFileFingerprintLookupParams) (LibraryFileFingerprintLookup, error) {
+	row := q.db.QueryRow(ctx, upsertLibraryFileFingerprintLookup,
+		arg.LibraryFileID,
+		arg.Provider,
+		arg.EvidenceKey,
+		arg.State,
+		arg.Results,
+		arg.ErrorMessage,
+		arg.RetryAfter,
+	)
+	var i LibraryFileFingerprintLookup
+	err := row.Scan(
+		&i.LibraryFileID,
+		&i.Provider,
+		&i.EvidenceKey,
+		&i.State,
+		&i.Results,
+		&i.ErrorMessage,
+		&i.ObservedAt,
+		&i.RetryAfter,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
