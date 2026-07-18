@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -59,7 +60,8 @@ func (w *ReconcileMetadataScopeWorker) Work(ctx context.Context, job *river.Job[
 	if binding.EntityID != entityID || binding.EntityKind != args.EntityKind {
 		return nil
 	}
-	if _, err := q.GetArtistByID(ctx, args.LocalID); errors.Is(err, pgx.ErrNoRows) {
+	artist, err := q.GetArtistByID(ctx, args.LocalID)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	} else if err != nil {
 		return fmt.Errorf("reconcile metadata scope: read local artist: %w", err)
@@ -75,6 +77,25 @@ func (w *ReconcileMetadataScopeWorker) Work(ctx context.Context, job *river.Job[
 
 	tracks, err := w.Source.ArtistTopTrackEntries(ctx, args.EntityID)
 	if err != nil {
+		var apiErr *heyametadata.APIError
+		if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound {
+			rc, clientErr := river.ClientFromContextSafely[pgx.Tx](ctx)
+			if clientErr != nil {
+				return fmt.Errorf("reconcile metadata scope: enqueue stale-binding repair: %w", clientErr)
+			}
+			repairArgs := EnrichMediaItemArgs{
+				ItemID: artist.MediaItemID, Source: "metadata_scope_rebind", Force: true,
+			}
+			opts := repairArgs.InsertOpts()
+			opts.Priority = PriorityEnrichment
+			opts.UniqueOpts = uniqueWhileActive()
+			if _, insertErr := rc.Insert(ctx, repairArgs, &opts); insertErr != nil {
+				return fmt.Errorf("reconcile metadata scope: enqueue stale-binding repair: %w", insertErr)
+			}
+			log.Warn().Int64("artist_id", args.LocalID).Int64("media_item_id", artist.MediaItemID).
+				Str("stale_entity_id", args.EntityID).Msg("canonical artist binding disappeared; queued full metadata re-resolution")
+			return nil
+		}
 		return fmt.Errorf("reconcile metadata scope: fetch artist top tracks: %w", err)
 	}
 

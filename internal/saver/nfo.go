@@ -1,6 +1,7 @@
 package saver
 
 import (
+	"bytes"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -250,7 +251,14 @@ func writeXML(path string, v any) error {
 		return err
 	}
 	content := xml.Header + string(data) + "\n"
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	contentBytes := []byte(content)
+	//nolint:gosec // path is the configured media-library sidecar destination.
+	if existing, readErr := os.ReadFile(path); readErr == nil && bytes.Equal(existing, contentBytes) {
+		log.Debug().Str("path", path).Msg("NFO unchanged, skipping write")
+		return nil
+	}
+	//nolint:gosec // NFO sidecars are intentionally readable by media clients.
+	if err := os.WriteFile(path, contentBytes, 0o644); err != nil {
 		return err
 	}
 	log.Info().Str("path", path).Msg("NFO written")

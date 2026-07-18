@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/google/uuid"
@@ -15,6 +16,7 @@ import (
 	"github.com/karbowiak/heya/internal/metadatasync"
 	"github.com/karbowiak/heya/internal/testutil"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -129,4 +131,21 @@ func TestReconcileMetadataScopeWorkerPreservesAndCheckpointsSnapshots(t *testing
 	state, err = q.GetMetadataProjectionState(ctx, sqlc.GetMetadataProjectionStateParams{LocalKind: "artist", LocalID: artist.ID, Scope: metadatasync.ArtistTopTracksScope})
 	require.NoError(t, err)
 	require.Equal(t, int64(8), state.ProjectionVersion)
+
+	// A canonical 404 means the binding itself disappeared (an artist with no
+	// ranking is a successful empty 200). Recover through the existing full
+	// enrichment path so discovery can establish the replacement UUID.
+	insertClient, err := NewInsertClient(pool)
+	require.NoError(t, err)
+	source.err = &heyametadata.APIError{Operation: "read canonical artist top tracks", Status: http.StatusNotFound}
+	recoveryCtx := rivertest.WorkContext(ctx, insertClient)
+	require.NoError(t, worker.Work(recoveryCtx, &river.Job[ReconcileMetadataScopeArgs]{Args: args}))
+	var repairJobID int64
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT id FROM river_job
+		WHERE kind = 'enrich_media_item'
+		  AND NULLIF(args->>'item_id', '')::bigint = $1
+		  AND args->>'source' = 'metadata_scope_rebind'
+		ORDER BY id DESC LIMIT 1`, item.ID).Scan(&repairJobID))
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE id = $1`, repairJobID) })
 }

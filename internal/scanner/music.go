@@ -218,6 +218,7 @@ func AnalyzeMusicWithOptions(ctx context.Context, inv Inventory, emit Emitter, o
 				plan, ok := planMusicTrack(item.file, planningNFOs, effectiveTags)
 				if ok {
 					plan = applyMusicReleaseConsensus(plan, item.tags, nfos[dir], consensus)
+					plan = applyMusicStorageOwner(plan)
 				}
 				if !ok {
 					emit.Emit(Event{
@@ -427,6 +428,67 @@ func appendMusicIssue(issues []string, issue string) []string {
 		return append(issues, issue)
 	}
 	return issues
+}
+
+// applyMusicStorageOwner folds release-level collaboration credits back into
+// the top-level library owner when that owner is explicitly present in the
+// credit. This prevents an Ado scope from creating a second local artist named
+// "Jax Jones, Ado", while still allowing a genuinely misfiled d4vd release in
+// an ATRIP folder to remain d4vd. Release identifiers survive; artist-level
+// identifiers are cleared because a multi-credit tag cannot safely tell us
+// which ID belongs to the storage owner without provider resolution.
+func applyMusicStorageOwner(plan MusicTrackPlan) MusicTrackPlan {
+	segments := splitRelPath(plan.RelPath)
+	if len(segments) < 2 {
+		return plan
+	}
+	owner, disambiguation := splitMusicArtistFolder(segments[0])
+	if owner == "" || looksLikeUnusableMusicIdentity(owner) || !musicCreditContainsArtist(plan.Artist, owner) {
+		return plan
+	}
+	if musicConjunctionKey(plan.Artist) != musicConjunctionKey(owner) {
+		if !musicCollaborationSeparatorRE.MatchString(plan.Artist) && !strings.Contains(plan.Artist, ",") {
+			return plan
+		}
+		plan.Issues = appendMusicIssue(plan.Issues, "artist_collaboration_collapsed_to_storage_owner")
+		for _, key := range []string{
+			"musicbrainz_artist", "musicbrainz_album_artist", "itunes_artist",
+			"apple_artist", "deezer_artist", "spotify_artist", "audiodb_artist",
+		} {
+			delete(plan.ExternalIDs, key)
+		}
+	}
+	plan.Artist = owner
+	plan.ArtistDisambiguation = disambiguation
+	if plan.Source == "" {
+		plan.Source = "storage_owner"
+	} else if !strings.Contains(plan.Source, "storage_owner") {
+		plan.Source += "+storage_owner"
+	}
+	plan.IdentityKeys = musicAlbumIdentityKeys(plan)
+	plan.Key = plan.IdentityKeys[0]
+	return plan
+}
+
+func musicCreditContainsArtist(credit, artist string) bool {
+	creditFields := strings.Fields(musicConjunctionKey(credit))
+	artistFields := strings.Fields(musicConjunctionKey(artist))
+	if len(creditFields) == 0 || len(artistFields) == 0 || len(artistFields) > len(creditFields) {
+		return false
+	}
+	for start := 0; start+len(artistFields) <= len(creditFields); start++ {
+		matches := true
+		for offset := range artistFields {
+			if creditFields[start+offset] != artistFields[offset] {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
 }
 
 func probeMusicTags(ctx context.Context, file InventoryFile, opts MusicAnalysisOptions, emit Emitter) audiotags.Tags {
@@ -822,31 +884,39 @@ func replaceMusicArtist(artist, disambiguation *string, replacement string) {
 // first-value-wins behaviour paired arbitrary MusicBrainz and Apple IDs and
 // turned inconsistent local evidence into a misleading upstream conflict.
 func consistentMusicArtistExternalIDs(albums []MusicAlbumPlan, issues *[]string) map[string]string {
-	values := map[string]map[string]struct{}{}
+	values := map[string][]map[string]struct{}{}
 	for _, album := range albums {
 		for provider, value := range musicArtistExternalIDsFromAlbum(album) {
-			value = strings.TrimSpace(value)
-			if value == "" {
+			providerIDs := splitMusicProviderIDs(value)
+			if len(providerIDs) == 0 {
 				continue
 			}
-			if values[provider] == nil {
-				values[provider] = map[string]struct{}{}
-			}
-			values[provider][value] = struct{}{}
+			values[provider] = append(values[provider], providerIDs)
 		}
 	}
 
 	result := map[string]string{}
 	for _, provider := range []string{"mbid", "apple"} {
-		providerValues := values[provider]
-		switch len(providerValues) {
-		case 0:
+		providerSets := values[provider]
+		if len(providerSets) == 0 {
 			continue
-		case 1:
-			for value := range providerValues {
+		}
+		intersection := make(map[string]struct{}, len(providerSets[0]))
+		for value := range providerSets[0] {
+			intersection[value] = struct{}{}
+		}
+		for _, providerSet := range providerSets[1:] {
+			for value := range intersection {
+				if _, present := providerSet[value]; !present {
+					delete(intersection, value)
+				}
+			}
+		}
+		if len(intersection) == 1 {
+			for value := range intersection {
 				result[provider] = value
 			}
-		default:
+		} else {
 			issue := "conflicting_artist_" + provider + "_ids"
 			if !contains(*issues, issue) {
 				*issues = append(*issues, issue)
@@ -854,6 +924,16 @@ func consistentMusicArtistExternalIDs(albums []MusicAlbumPlan, issues *[]string)
 		}
 	}
 	return nonEmptyStringMap(result)
+}
+
+func splitMusicProviderIDs(value string) map[string]struct{} {
+	ids := map[string]struct{}{}
+	for _, part := range strings.FieldsFunc(value, func(r rune) bool { return r == ';' || r == ',' }) {
+		if id := strings.TrimSpace(part); id != "" {
+			ids[id] = struct{}{}
+		}
+	}
+	return ids
 }
 
 func musicArtistExternalIDsFromAlbum(album MusicAlbumPlan) map[string]string {

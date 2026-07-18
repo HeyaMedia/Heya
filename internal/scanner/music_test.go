@@ -406,6 +406,47 @@ func TestSearchMusicArtistsFallsBackToPrimaryCollaborationCredit(t *testing.T) {
 	}
 }
 
+func TestSearchMusicArtistsPrefersStorageOwnerForCollaborationCredit(t *testing.T) {
+	const ado = "heyametadata:v2:entity:51497a0b-fd77-48dc-9cb0-bfe8ce205173"
+	const aboveBeyond = "heyametadata:v2:entity:c1e3738b-8cf0-48bf-8da7-f25f32437805"
+	provider := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{
+		"Jax Jones, Ado":                 {{ProviderID: "opaque-jax", ProviderName: "heya", Title: "Jax Jones", Confidence: 1, RequiresReview: true}},
+		"Ado":                            {{ProviderID: ado, ProviderName: "heya", Title: "Ado", Recommendation: "strong_match"}},
+		"Above & Beyond ft Zoe Johnston": {{ProviderID: "opaque-above", ProviderName: "heya", Title: "Above", Confidence: 1, RequiresReview: true}},
+		"Above and Beyond":               {{ProviderID: aboveBeyond, ProviderName: "heya", Title: "Above & Beyond", Recommendation: "strong_match"}},
+	}}
+	artists := []MusicArtistPlan{
+		{
+			Key: "artist:jax jones ado", Artist: "Jax Jones, Ado",
+			Files:  []string{"Ado (Japanese vocalist)/Jax Jones, Ado - Show/01.flac"},
+			Albums: []MusicAlbumPlan{{Album: "Show (Jax Jones Remix)", Year: "2023"}},
+		},
+		{
+			Key: "artist:above beyond ft zoe", Artist: "Above & Beyond ft Zoe Johnston",
+			Files:  []string{"Above and Beyond/Above and Beyond - Single - 2024 - Crazy Love/01.flac"},
+			Albums: []MusicAlbumPlan{{Album: "Crazy Love", Year: "2024"}},
+		},
+	}
+
+	results, err := SearchMusicArtists(context.Background(), artists, provider, &captureEmitter{}, musicArtistAutoMatchThreshold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byKey := map[string]MusicSearchMatch{}
+	for _, result := range results {
+		byKey[result.Key] = result
+	}
+	if result := byKey["artist:jax jones ado"]; !result.Accepted || result.ProviderID != ado || result.Artist != "Ado" {
+		t.Fatalf("Ado storage-owner fallback = %#v", result)
+	}
+	if result := byKey["artist:above beyond ft zoe"]; !result.Accepted || result.ProviderID != aboveBeyond || result.Artist != "Above & Beyond" {
+		t.Fatalf("Above & Beyond storage-owner fallback = %#v", result)
+	}
+	if provider.calls["Above"] != 0 {
+		t.Fatalf("storage owner succeeded but primary-token fallback still ran: calls=%#v", provider.calls)
+	}
+}
+
 func TestMusicID3FixtureUsesEmbeddedTags(t *testing.T) {
 	if _, err := exec.LookPath("ffprobe"); err != nil {
 		t.Skip("ffprobe not on PATH")
@@ -548,6 +589,49 @@ func TestPlanMusicTrackDoesNotLeakFolderDisambiguationToReplacementArtist(t *tes
 	}
 }
 
+func TestApplyMusicStorageOwnerCollapsesContainedCollaborationCredits(t *testing.T) {
+	cases := []struct {
+		path, credited, owner string
+	}{
+		{"Ado (Japanese vocalist)/Jax Jones, Ado - Show/01.flac", "Jax Jones, Ado", "Ado"},
+		{"Above and Beyond/Above and Beyond - Crazy Love/01.flac", "Above & Beyond ft Zoe Johnston", "Above and Beyond"},
+		{"Atarashii Gakko!/Tokyo Calling/01.flac", "88rising, ATARASHII GAKKO!, Warren Hue", "Atarashii Gakko!"},
+	}
+	for _, tc := range cases {
+		plan := applyMusicStorageOwner(MusicTrackPlan{
+			Artist: tc.credited, Album: "Release", Year: "2024", RelPath: tc.path,
+			ExternalIDs: map[string]string{
+				"musicbrainz_artist":       "artist-one;artist-two",
+				"musicbrainz_album_artist": "artist-one;artist-two",
+				"musicbrainz_album":        "release-id",
+			},
+		})
+		if plan.Artist != tc.owner || !contains(plan.Issues, "artist_collaboration_collapsed_to_storage_owner") {
+			t.Errorf("storage owner for %q = %#v", tc.credited, plan)
+		}
+		if plan.ExternalIDs["musicbrainz_artist"] != "" || plan.ExternalIDs["musicbrainz_album_artist"] != "" || plan.ExternalIDs["musicbrainz_album"] != "release-id" {
+			t.Errorf("unsafe artist IDs were not isolated for %q: %#v", tc.credited, plan.ExternalIDs)
+		}
+	}
+}
+
+func TestApplyMusicStorageOwnerDoesNotRewriteMisfiledArtist(t *testing.T) {
+	plan := MusicTrackPlan{
+		Artist: "d4vd", Album: "Petals to Thorns", RelPath: "ATRIP (Patrick Alexander Pache)/d4vd - Album - 2024 - Petals to Thorns/01.flac",
+		ExternalIDs: map[string]string{"musicbrainz_artist": "d4vd-id"},
+	}
+	got := applyMusicStorageOwner(plan)
+	if got.Artist != "d4vd" || got.ExternalIDs["musicbrainz_artist"] != "d4vd-id" || len(got.Issues) != 0 {
+		t.Fatalf("misfiled artist was rewritten to storage owner: %#v", got)
+	}
+	extended := applyMusicStorageOwner(MusicTrackPlan{
+		Artist: "The Beatles Tribute Band", Album: "Tribute", RelPath: "The Beatles/Tribute/01.flac",
+	})
+	if extended.Artist != "The Beatles Tribute Band" {
+		t.Fatalf("non-collaboration artist containing the owner was rewritten: %#v", extended)
+	}
+}
+
 func TestGroupMusicArtistsRejectsInconsistentProviderIDs(t *testing.T) {
 	albums := []MusicAlbumPlan{
 		{Artist: "Example", Album: "One", ExternalIDs: map[string]string{"musicbrainz_album_artist": "mbid-one", "itunes_artist": "apple-one"}, Confidence: 1},
@@ -562,6 +646,22 @@ func TestGroupMusicArtistsRejectsInconsistentProviderIDs(t *testing.T) {
 	}
 	if !contains(artists[0].Issues, "conflicting_artist_mbid_ids") {
 		t.Fatalf("artist issues = %#v", artists[0].Issues)
+	}
+}
+
+func TestGroupMusicArtistsIntersectsMultiArtistProviderIDs(t *testing.T) {
+	const primary = "6497cbed-bcc0-4492-95e9-6fe7e4826b5e"
+	albums := []MusicAlbumPlan{
+		{Artist: "Alex Mind", Album: "Solo", ExternalIDs: map[string]string{"musicbrainz_album_artist": primary}, Confidence: 1},
+		{Artist: "Alex Mind", Album: "Collab One", ExternalIDs: map[string]string{"musicbrainz_album_artist": primary + ";1ed70d86-9f5d-4b82-9835-024e26c9ed05"}, Confidence: 1},
+		{Artist: "Alex Mind", Album: "Collab Two", ExternalIDs: map[string]string{"musicbrainz_album_artist": primary + ";ddfbbf71-e5a3-4bad-84ea-d5f88ec3df77"}, Confidence: 1},
+	}
+	artists := groupMusicArtists(albums)
+	if len(artists) != 1 || artists[0].ExternalIDs["mbid"] != primary {
+		t.Fatalf("multi-artist MBID intersection = %#v", artists)
+	}
+	if contains(artists[0].Issues, "conflicting_artist_mbid_ids") {
+		t.Fatalf("shared primary MBID was marked conflicting: %#v", artists[0].Issues)
 	}
 }
 

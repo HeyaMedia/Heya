@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +25,13 @@ import (
 )
 
 const debounceDelay = 2 * time.Second
+
+// Variables so the coalescing behaviour can be exercised without slow tests.
+var (
+	rescanDebounceDelay        = 5 * time.Second
+	softDeleteDebounceDelay    = 2 * time.Second
+	sidecarRescanDebounceDelay = 2 * time.Second
+)
 
 // watchWalkStallTimeout bounds *stalls* in the recursive directory walk when
 // arming a watcher — not total walk time. A big tree under heavy I/O pressure
@@ -46,21 +54,45 @@ type LibraryWatcher struct {
 
 type ScanFunc func(libraryID int64, force bool)
 
+type pendingSoftDelete struct {
+	paths map[string]struct{}
+	timer *time.Timer
+}
+
 type Manager struct {
-	mu       sync.Mutex
-	watchers map[string]*LibraryWatcher
-	db       *pgxpool.Pool
-	river    *river.Client[pgx.Tx]
-	onScan   ScanFunc
+	mu                  sync.Mutex
+	watchers            map[string]*LibraryWatcher
+	db                  *pgxpool.Pool
+	river               *river.Client[pgx.Tx]
+	onScan              ScanFunc
+	softDeleteMu        sync.Mutex
+	softDeletes         map[int64]*pendingSoftDelete
+	softDeleteInsert    func(context.Context, worker.SoftDeleteArgs) error
+	sidecarRescanMu     sync.Mutex
+	sidecarRescans      map[int64]*pendingSoftDelete
+	sidecarRescanInsert func(context.Context, int64, []string) error
+	rescanMu            sync.Mutex
+	rescanTimers        map[int64]*time.Timer
 }
 
 func NewManager(db *pgxpool.Pool, riverClient *river.Client[pgx.Tx], onScan ScanFunc) *Manager {
-	return &Manager{
-		watchers: make(map[string]*LibraryWatcher),
-		db:       db,
-		river:    riverClient,
-		onScan:   onScan,
+	m := &Manager{
+		watchers:       make(map[string]*LibraryWatcher),
+		db:             db,
+		river:          riverClient,
+		onScan:         onScan,
+		softDeletes:    make(map[int64]*pendingSoftDelete),
+		sidecarRescans: make(map[int64]*pendingSoftDelete),
+		rescanTimers:   make(map[int64]*time.Timer),
 	}
+	if riverClient != nil {
+		m.softDeleteInsert = func(ctx context.Context, args worker.SoftDeleteArgs) error {
+			_, err := riverClient.Insert(ctx, args, nil)
+			return err
+		}
+		m.sidecarRescanInsert = m.insertSidecarRescan
+	}
+	return m
 }
 
 func (m *Manager) StartAll(ctx context.Context) error {
@@ -209,6 +241,7 @@ func (m *Manager) StopAll() {
 		lw.fsw.Close()
 		delete(m.watchers, key)
 	}
+	m.stopPendingEnqueues()
 	log.Info().Msg("all watchers stopped")
 }
 
@@ -290,9 +323,15 @@ func (m *Manager) handleEvent(ctx context.Context, lw *LibraryWatcher, event fsn
 
 	if event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) {
 		ext := strings.ToLower(filepath.Ext(path))
-		if isScannerTriggerPath(path) {
-			log.Info().Str("path", vfs.RedactPath(path)).Str("op", event.Op.String()).Msg("scanner input removed")
+		if isPrimaryMediaPath(path) {
+			log.Info().Str("path", vfs.RedactPath(path)).Str("op", event.Op.String()).Msg("primary media removed; batching soft delete")
 			m.enqueueSoftDelete(ctx, lw.libraryID, path)
+		} else if isSidecarTriggerPath(path) {
+			// Sidecars never have library_files rows, so soft-deleting them one by
+			// one is both ineffective and catastrophically noisy during a bulk
+			// cleanup. Coalesce their owner scopes behind one process coordinator.
+			log.Info().Str("path", vfs.RedactPath(path)).Str("op", event.Op.String()).Int64("library_id", lw.libraryID).Msg("scanner sidecar removed; scheduling coalesced scoped rescan")
+			m.enqueueSidecarRescan(ctx, lw.libraryID, path)
 		} else if ext == "" {
 			log.Info().Str("path", vfs.RedactPath(path)).Str("op", event.Op.String()).Int64("library_id", lw.libraryID).Msg("directory removed, scheduling rescan")
 			m.enqueueRescan(ctx, lw.libraryID)
@@ -322,16 +361,127 @@ func (m *Manager) handleEvent(ctx context.Context, lw *LibraryWatcher, event fsn
 }
 
 func (m *Manager) enqueueSoftDelete(ctx context.Context, libraryID int64, path string) {
-	if m.river == nil {
+	if m.softDeleteInsert == nil {
 		log.Warn().Str("path", vfs.RedactPath(path)).Msg("cannot enqueue soft delete: river client unavailable")
 		return
 	}
-	if _, err := m.river.Insert(ctx, worker.SoftDeleteArgs{
-		LibraryID: libraryID,
-		Paths:     []string{path},
-	}, nil); err != nil {
-		log.Warn().Err(err).Str("path", vfs.RedactPath(path)).Int64("library_id", libraryID).Msg("enqueue soft delete failed")
+
+	m.softDeleteMu.Lock()
+	defer m.softDeleteMu.Unlock()
+	if m.softDeletes == nil {
+		m.softDeletes = make(map[int64]*pendingSoftDelete)
 	}
+	batch := m.softDeletes[libraryID]
+	if batch == nil {
+		batch = &pendingSoftDelete{paths: make(map[string]struct{})}
+		m.softDeletes[libraryID] = batch
+	}
+	batch.paths[path] = struct{}{}
+	if batch.timer != nil {
+		batch.timer.Stop()
+	}
+	batch.timer = time.AfterFunc(softDeleteDebounceDelay, func() { m.flushSoftDeletes(libraryID) })
+	_ = ctx // insertion deliberately outlives the individual fsnotify event
+}
+
+func (m *Manager) flushSoftDeletes(libraryID int64) {
+	m.softDeleteMu.Lock()
+	batch := m.softDeletes[libraryID]
+	delete(m.softDeletes, libraryID)
+	m.softDeleteMu.Unlock()
+	if batch == nil || len(batch.paths) == 0 {
+		return
+	}
+
+	paths := make([]string, 0, len(batch.paths))
+	for path := range batch.paths {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := m.softDeleteInsert(ctx, worker.SoftDeleteArgs{LibraryID: libraryID, Paths: paths}); err != nil {
+		log.Warn().Err(err).Int64("library_id", libraryID).Int("count", len(paths)).Msg("enqueue batched soft delete failed")
+		return
+	}
+	log.Info().Int64("library_id", libraryID).Int("count", len(paths)).Msg("batched soft delete enqueued")
+}
+
+func (m *Manager) enqueueSidecarRescan(ctx context.Context, libraryID int64, path string) {
+	if m.sidecarRescanInsert == nil {
+		log.Warn().Str("path", vfs.RedactPath(path)).Msg("cannot enqueue sidecar rescan: river client unavailable")
+		return
+	}
+	m.sidecarRescanMu.Lock()
+	defer m.sidecarRescanMu.Unlock()
+	if m.sidecarRescans == nil {
+		m.sidecarRescans = make(map[int64]*pendingSoftDelete)
+	}
+	batch := m.sidecarRescans[libraryID]
+	if batch == nil {
+		batch = &pendingSoftDelete{paths: make(map[string]struct{})}
+		m.sidecarRescans[libraryID] = batch
+	}
+	batch.paths[path] = struct{}{}
+	if batch.timer != nil {
+		batch.timer.Stop()
+	}
+	batch.timer = time.AfterFunc(sidecarRescanDebounceDelay, func() { m.flushSidecarRescans(libraryID) })
+	_ = ctx // insertion deliberately outlives the individual fsnotify event
+}
+
+func (m *Manager) flushSidecarRescans(libraryID int64) {
+	m.sidecarRescanMu.Lock()
+	batch := m.sidecarRescans[libraryID]
+	delete(m.sidecarRescans, libraryID)
+	m.sidecarRescanMu.Unlock()
+	if batch == nil || len(batch.paths) == 0 {
+		return
+	}
+	paths := make([]string, 0, len(batch.paths))
+	for path := range batch.paths {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := m.sidecarRescanInsert(ctx, libraryID, paths); err != nil {
+		log.Warn().Err(err).Int64("library_id", libraryID).Int("count", len(paths)).Msg("enqueue coalesced sidecar rescan failed")
+		return
+	}
+	log.Info().Int64("library_id", libraryID).Int("count", len(paths)).Msg("coalesced sidecar rescan enqueued")
+}
+
+func (m *Manager) insertSidecarRescan(ctx context.Context, libraryID int64, triggerPaths []string) error {
+	lib, err := sqlc.New(m.db).GetLibraryByID(ctx, libraryID)
+	if err != nil {
+		return fmt.Errorf("library lookup: %w", err)
+	}
+	scopes := scannerScopesForTriggerPaths(lib, triggerPaths)
+	if len(scopes) == 0 {
+		return nil
+	}
+	return worker.EnqueueProcessLibraryScan(ctx, m.river, m.db, worker.ProcessLibraryScanArgs{
+		LibraryID:  libraryID,
+		MediaType:  lib.MediaType,
+		ScopePaths: scopes,
+		Force:      true,
+	}, worker.PriorityWatcher, "")
+}
+
+func scannerScopesForTriggerPaths(lib sqlc.Library, triggerPaths []string) []string {
+	scopeSet := make(map[string]struct{}, len(triggerPaths))
+	for _, path := range triggerPaths {
+		if scope := worker.ScannerScopeForLibraryPath(lib, path); scope != "" {
+			scopeSet[scope] = struct{}{}
+		}
+	}
+	scopes := make([]string, 0, len(scopeSet))
+	for scope := range scopeSet {
+		scopes = append(scopes, scope)
+	}
+	sort.Strings(scopes)
+	return scopes
 }
 
 func (m *Manager) enqueueScannerRescan(ctx context.Context, libraryID int64, triggerPath string) {
@@ -361,37 +511,69 @@ func (m *Manager) enqueueScannerRescan(ctx context.Context, libraryID int64, tri
 	log.Info().Int64("library_id", libraryID).Str("path", vfs.RedactPath(triggerPath)).Msg("watcher-triggered scanner run enqueued")
 }
 
-var (
-	rescanTimers   = make(map[int64]*time.Timer)
-	rescanTimersMu sync.Mutex
-)
-
 func (m *Manager) enqueueRescan(_ context.Context, libraryID int64) {
-	rescanTimersMu.Lock()
-	defer rescanTimersMu.Unlock()
+	m.rescanMu.Lock()
+	defer m.rescanMu.Unlock()
+	if m.rescanTimers == nil {
+		m.rescanTimers = make(map[int64]*time.Timer)
+	}
 
-	if t, ok := rescanTimers[libraryID]; ok {
+	if t, ok := m.rescanTimers[libraryID]; ok {
 		t.Stop()
 	}
 
-	rescanTimers[libraryID] = time.AfterFunc(5*time.Second, func() {
-		rescanTimersMu.Lock()
-		delete(rescanTimers, libraryID)
-		rescanTimersMu.Unlock()
+	m.rescanTimers[libraryID] = time.AfterFunc(rescanDebounceDelay, func() {
+		m.rescanMu.Lock()
+		delete(m.rescanTimers, libraryID)
+		m.rescanMu.Unlock()
 
 		if m.onScan != nil {
 			m.onScan(libraryID, false)
 		}
-		log.Info().Int64("library_id", libraryID).Msg("rescan enqueued after directory change")
+		log.Info().Int64("library_id", libraryID).Msg("coalesced library rescan enqueued after filesystem change")
 	})
 }
 
+func (m *Manager) stopPendingEnqueues() {
+	m.softDeleteMu.Lock()
+	for libraryID, batch := range m.softDeletes {
+		if batch.timer != nil {
+			batch.timer.Stop()
+		}
+		delete(m.softDeletes, libraryID)
+	}
+	m.softDeleteMu.Unlock()
+
+	m.sidecarRescanMu.Lock()
+	for libraryID, batch := range m.sidecarRescans {
+		if batch.timer != nil {
+			batch.timer.Stop()
+		}
+		delete(m.sidecarRescans, libraryID)
+	}
+	m.sidecarRescanMu.Unlock()
+
+	m.rescanMu.Lock()
+	for libraryID, timer := range m.rescanTimers {
+		timer.Stop()
+		delete(m.rescanTimers, libraryID)
+	}
+	m.rescanMu.Unlock()
+}
+
 func isScannerTriggerPath(path string) bool {
+	return isPrimaryMediaPath(path) || isSidecarTriggerPath(path)
+}
+
+func isPrimaryMediaPath(path string) bool {
+	ext := strings.ToLower(filepath.Ext(filepath.Base(path)))
+	return mediafile.IsVideoExt(ext) || mediafile.IsAudioExt(ext)
+}
+
+func isSidecarTriggerPath(path string) bool {
 	name := filepath.Base(path)
 	ext := strings.ToLower(filepath.Ext(name))
 	switch {
-	case mediafile.IsVideoExt(ext), mediafile.IsAudioExt(ext):
-		return true
 	case mediafile.IsImageExt(ext), mediafile.IsSubtitleExt(ext), mediafile.IsLyricsExt(ext):
 		return true
 	case ext == ".nfo":

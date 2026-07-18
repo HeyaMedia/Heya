@@ -189,11 +189,11 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 	selectionArtist := artist
 	scored := scoreMusicSearchResults(artist, candidates)
 	if !musicSearchCanAutoAccept(scored, artist.Artist, threshold) {
-		if primary := musicPrimaryCollaborationArtist(artist.Artist); primary != "" {
+		for _, fallbackName := range musicSearchFallbackArtists(artist) {
 			fallbackArtist := artist
-			fallbackArtist.Artist = primary
+			fallbackArtist.Artist = fallbackName
 			fallbackArtist.ExternalIDs = nil
-			fallbackQuery := metadata.SearchQuery{Title: primary, Releases: releases}
+			fallbackQuery := metadata.SearchQuery{Title: fallbackName, Releases: releases}
 			fallbackCtx, fallbackCancel := context.WithTimeout(ctx, musicArtistSearchTimeout)
 			fallbackCandidates, fallbackErr := provider.Search(fallbackCtx, metadata.KindMusic, fallbackQuery)
 			fallbackCancel()
@@ -204,20 +204,25 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 				emit.Emit(Event{
 					Event: "match.collaboration_fallback_failed", Severity: SeverityInfo, Kind: "music",
 					Message: fallbackErr.Error(),
-					Data:    map[string]any{"key": artist.Key, "artist": artist.Artist, "primary_artist": primary},
+					Data:    map[string]any{"key": artist.Key, "artist": artist.Artist, "fallback_artist": fallbackName},
 				})
 			} else {
 				selectionArtist = fallbackArtist
-				search.Query.Aliases = []string{artist.Artist}
+				if !contains(search.Query.Aliases, artist.Artist) {
+					search.Query.Aliases = append(search.Query.Aliases, artist.Artist)
+				}
 				scored = mergeScoredMusicSearchResults(scored, scoreMusicSearchResults(fallbackArtist, fallbackCandidates))
 				sortMusicSearchCandidates(scored, selectionArtist)
 				emit.Emit(Event{
 					Event: "match.collaboration_fallback", Kind: "music",
 					Data: map[string]any{
-						"key": artist.Key, "artist": artist.Artist, "primary_artist": primary,
+						"key": artist.Key, "artist": artist.Artist, "fallback_artist": fallbackName,
 						"candidates": len(fallbackCandidates),
 					},
 				})
+				if musicSearchCanAutoAccept(scored, selectionArtist.Artist, threshold) {
+					break
+				}
 			}
 		}
 	}
@@ -357,6 +362,53 @@ func musicPrimaryCollaborationArtist(value string) string {
 		return ""
 	}
 	return primary
+}
+
+// musicSearchFallbackArtists uses the physical owner folder as the first
+// second-chance identity. A release credited to "Jax Jones, Ado" inside the
+// Ado owner scope should try Ado before heuristically splitting the credit;
+// likewise "Above & Beyond ft Zoe Johnston" should try the storage owner
+// "Above and Beyond", not the meaningless first token "Above". We only use
+// this after the literal identity failed, preserving real fixed-name groups.
+func musicSearchFallbackArtists(artist MusicArtistPlan) []string {
+	var fallbacks []string
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" || normalizeMusicKeyPart(value) == normalizeMusicKeyPart(artist.Artist) {
+			return
+		}
+		for _, existing := range fallbacks {
+			if normalizeMusicKeyPart(existing) == normalizeMusicKeyPart(value) {
+				return
+			}
+		}
+		fallbacks = append(fallbacks, value)
+	}
+	add(musicStorageOwnerArtist(artist.Files))
+	add(musicPrimaryCollaborationArtist(artist.Artist))
+	return fallbacks
+}
+
+func musicStorageOwnerArtist(files []string) string {
+	owners := map[string]string{}
+	for _, path := range files {
+		segments := splitRelPath(path)
+		if len(segments) < 2 {
+			continue
+		}
+		owner, _ := splitMusicArtistFolder(segments[0])
+		key := normalizeMusicKeyPart(owner)
+		if key != "" {
+			owners[key] = owner
+		}
+	}
+	if len(owners) != 1 {
+		return ""
+	}
+	for _, owner := range owners {
+		return owner
+	}
+	return ""
 }
 
 func mergeScoredMusicSearchResults(groups ...[]metadata.SearchResult) []metadata.SearchResult {
@@ -650,6 +702,13 @@ func musicNameSimilarity(a, b string) float64 {
 	if na == nb && na != "" {
 		return 1
 	}
+	// normalizeMusicKeyPart drops punctuation, so an ampersand disappears
+	// while the word "and" remains. Preserve the conjunction before generic
+	// normalization so storage folder "Above and Beyond" is exact-equivalent
+	// to canonical "Above & Beyond" without making leading "And" optional.
+	if ca, cb := musicConjunctionKey(a), musicConjunctionKey(b); ca != "" && ca == cb {
+		return 1
+	}
 	if na == "" || nb == "" {
 		return 0
 	}
@@ -660,6 +719,11 @@ func musicNameSimilarity(a, b string) float64 {
 		return 1
 	}
 	return musicNormalizedSimilarity(na, nb)
+}
+
+func musicConjunctionKey(value string) string {
+	value = strings.NewReplacer("&", " and ", "＆", " and ").Replace(value)
+	return normalizeMusicKeyPart(value)
 }
 
 func musicFuzzyMatchSafe(na, nb string) bool {
