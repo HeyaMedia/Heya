@@ -1292,27 +1292,6 @@ func (a *App) GetPerson(ctx context.Context, idOrSlug string) (map[string]any, e
 	return result, nil
 }
 
-// personTmdbID pulls the upstream TMDB id out of the `people.external_ids`
-// JSONB blob. Stored either as a numeric or a string depending on which
-// path wrote it; tolerate both. Returns 0 when missing or unparseable.
-func personTmdbID(extIDs []byte) int {
-	if len(extIDs) == 0 {
-		return 0
-	}
-	var m map[string]any
-	if err := json.Unmarshal(extIDs, &m); err != nil {
-		return 0
-	}
-	switch v := m["tmdb"].(type) {
-	case string:
-		n, _ := strconv.Atoi(v)
-		return n
-	case float64:
-		return int(v)
-	}
-	return 0
-}
-
 // ListUnmatched returns unmatched library files with their match candidates.
 func (a *App) ListUnmatched(ctx context.Context, libraryID int64) ([]UnmatchedFile, error) {
 	q := sqlc.New(a.db)

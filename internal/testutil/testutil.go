@@ -42,15 +42,20 @@ func SetupDB(t testing.TB) *pgxpool.Pool {
 		t.Skipf("database not available: %v", err)
 	}
 	goose.SetBaseFS(migrations.FS)
-	goose.SetDialect("postgres")
+	if err := goose.SetDialect("postgres"); err != nil {
+		_ = db.Close()
+		t.Fatalf("setting migration dialect: %v", err)
+	}
 	goose.SetLogger(goose.NopLogger())
 	// AllowMissing mirrors service.AutoMigrate: concurrent sessions race
 	// migration numbers; tests must not refuse the shared dev DB over it.
 	if err := goose.Up(db, ".", goose.WithAllowMissing()); err != nil {
-		db.Close()
+		_ = db.Close()
 		t.Fatalf("running migrations: %v", err)
 	}
-	db.Close()
+	if err := db.Close(); err != nil {
+		t.Fatalf("closing migration database: %v", err)
+	}
 
 	pool, err := pgxpool.New(ctx, url)
 	if err != nil {
@@ -81,6 +86,10 @@ func TestUserID(t testing.TB, pool *pgxpool.Pool) int64 {
 func CleanupLibrary(t testing.TB, pool *pgxpool.Pool, libraryID int64) {
 	t.Helper()
 	ctx := context.Background()
-	pool.Exec(ctx, "DELETE FROM library_files WHERE library_id = $1", libraryID)
-	pool.Exec(ctx, "DELETE FROM libraries WHERE id = $1", libraryID)
+	if _, err := pool.Exec(ctx, "DELETE FROM library_files WHERE library_id = $1", libraryID); err != nil {
+		t.Errorf("cleaning up library files for library %d: %v", libraryID, err)
+	}
+	if _, err := pool.Exec(ctx, "DELETE FROM libraries WHERE id = $1", libraryID); err != nil {
+		t.Errorf("cleaning up library %d: %v", libraryID, err)
+	}
 }

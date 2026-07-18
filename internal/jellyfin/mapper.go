@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/secrettext"
 )
 
 // tag32 renders a stable 32-hex-char tag from a namespace + id. Real Jellyfin
@@ -33,25 +34,13 @@ func dashedGUID(id string) string {
 	return id[0:8] + "-" + id[8:12] + "-" + id[12:16] + "-" + id[16:20] + "-" + id[20:32]
 }
 
-// sanitizePath reduces a storage path to a server-internal-looking absolute
-// path — stripping any scheme://authority (e.g. smb://guest:guest@host).
-// Two reasons:
-//   - security: never leak share hosts or embedded credentials to clients.
-//   - compatibility: real Jellyfin sends server-local paths (/media/...) that
-//     clients know they can't reach, and stream over HTTP. An smb:// path
-//     signals "reachable share" to SMB-aware clients (Infuse), which then try
-//     to connect directly and fail the whole add. Presenting just the path
-//     component keeps them on the HTTP stream path.
+// sanitizePath preserves the configured filesystem path while ensuring a
+// legacy URL-shaped database value can never expose embedded credentials.
+// Supported libraries use absolute host/container-visible paths; validation at
+// the filesystem boundary rejects URL transports rather than rewriting them
+// into misleading local names.
 func sanitizePath(p string) string {
-	i := strings.Index(p, "://")
-	if i < 0 {
-		return p // already a plain local path
-	}
-	rest := p[i+3:] // strip scheme
-	if slash := strings.IndexByte(rest, '/'); slash >= 0 {
-		return rest[slash:] // drop the authority, keep the leading-slash path
-	}
-	return "/" + rest
+	return secrettext.Redact(p)
 }
 
 // Mapping from Heya rows to BaseItemDto. Per the repo convention, image tags

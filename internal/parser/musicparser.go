@@ -287,7 +287,7 @@ func parseMusicScene(prepared PreparedSegment) *SceneReleaseParse {
 }
 
 func collectReleaseKinds(value string) []string {
-	suffixToken := `(?:WEB|CD|VINYL|TAPE|CASSETTE|FLAC|MP3|AAC|ALAC|M4A|WAV|OGG|OPUS|(?:19|20)\d{2})`
+	suffixToken := `(?:WEB|CD|VINYL|TAPE|CASSETTE|FLAC|MP3|AAC|ALAC|M4A|WAV|OGG|OPUS|(?:19|20)\d{2})` //nolint:gosec // release-format regex, not a credential
 	patterns := []struct {
 		token   string
 		pattern *regexp.Regexp

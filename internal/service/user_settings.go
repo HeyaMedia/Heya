@@ -149,7 +149,10 @@ func (a *App) GetUserSettings(ctx context.Context, userID int64) (UserSettings, 
 
 	settings := DefaultUserSettings()
 	if len(raw) > 2 {
-		json.Unmarshal(raw, &settings)
+		candidate := settings
+		if err := json.Unmarshal(raw, &candidate); err == nil {
+			settings = candidate
+		}
 	}
 	return settings, nil
 }

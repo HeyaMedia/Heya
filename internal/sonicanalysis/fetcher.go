@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/karbowiak/heya/internal/artifactdownload"
 	"github.com/rs/zerolog/log"
 )
 
@@ -53,8 +54,19 @@ type ModelFile struct {
 	Name   string // path relative to ModelsDir
 	URL    string // absolute download URL
 	SHA256 string // hex-encoded; "" disables integrity check
-	Size   int64  // bytes (for progress UI; doesn't gate verification)
+	Size   int64  // approximate bytes for progress UI; not an exact-size assertion
+	// MaxBytes optionally supplies a hard download cap. Zero derives a
+	// conservative cap from Size; use this for files whose expected size is
+	// absent or whose upstream is known to vary beyond the default tolerance.
+	MaxBytes int64
 }
+
+const (
+	modelFetchTimeout    = 30 * time.Minute
+	modelSizeMinHeadroom = 8 << 20
+	modelSizeMaxHeadroom = 256 << 20
+	unknownModelMaxBytes = 2 << 30
+)
 
 // FetchProgress is a snapshot of the in-flight download state, safe
 // to read concurrently.
@@ -95,7 +107,7 @@ func NewModelFetcherWithManifest(targetDir, urlBase string, manifest []ModelFile
 		targetDir: targetDir,
 		urlBase:   urlBase,
 		manifest:  manifest,
-		client:    &http.Client{Timeout: 30 * time.Minute},
+		client:    artifactdownload.NewClient(modelFetchTimeout),
 	}
 }
 
@@ -302,50 +314,20 @@ func (f *ModelFetcher) fail(err error) {
 // worker processes share a model directory and both start the same download.
 // Verifies SHA256 before renaming.
 func (f *ModelFetcher) fetchOne(ctx context.Context, m ModelFile, finalPath string) error {
-	if err := os.MkdirAll(filepath.Dir(finalPath), 0o750); err != nil {
-		return fmt.Errorf("mkdir parent: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.URL, nil)
+	written, err := artifactdownload.Fetch(ctx, f.client, artifactdownload.Spec{
+		URL:         m.URL,
+		Destination: finalPath,
+		MaxBytes:    modelDownloadLimit(m),
+		SHA256:      m.SHA256,
+		Mode:        0o640,
+	})
 	if err != nil {
-		return err
-	}
-	resp, err := f.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d for %s", resp.StatusCode, m.URL)
-	}
-
-	// G304: the directory and filename pattern are built from f.targetDir
-	// (env-derived) + the server-controlled model manifest.
-	dst, err := os.CreateTemp(
-		filepath.Dir(finalPath),
-		filepath.Base(finalPath)+".tmp-*",
-	) //nolint:gosec // G304: server-built path
-	if err != nil {
-		return err
-	}
-	tmpPath := dst.Name()
-	defer func() { _ = os.Remove(tmpPath) }()
-
-	hasher := sha256.New()
-	written, err := io.Copy(io.MultiWriter(dst, hasher), resp.Body)
-	closeErr := dst.Close()
-	if err != nil {
-		return fmt.Errorf("download body: %w", err)
-	}
-	if closeErr != nil {
-		return fmt.Errorf("close tmp: %w", closeErr)
-	}
-
-	if m.SHA256 != "" {
-		got := hex.EncodeToString(hasher.Sum(nil))
-		if got != m.SHA256 {
-			return fmt.Errorf("sha256 mismatch: got %s, want %s", got, m.SHA256)
+		// Close the publication race between processes. A peer's valid final
+		// artifact means this fetch succeeded; our unique temporary is gone.
+		if ok, verifyErr := verifyFile(finalPath, m); verifyErr == nil && ok {
+			return nil
 		}
+		return err
 	}
 
 	// Progress accounting: bump BytesDone by this file's bytes.
@@ -355,22 +337,33 @@ func (f *ModelFetcher) fetchOne(ctx context.Context, m ModelFile, finalPath stri
 		f.progress.Store(&next)
 	}
 
-	// Another Heya process may have completed the same download while this one
-	// was in flight. Prefer its already-verified artifact and discard our temp
-	// file instead of replacing it or failing on platforms where Rename cannot
-	// overwrite an existing destination.
-	if ok, verifyErr := verifyFile(finalPath, m); verifyErr == nil && ok {
-		return nil
-	}
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		// Close the final race between the check and Rename: if a peer won it,
-		// its valid file means this fetch succeeded too.
-		if ok, verifyErr := verifyFile(finalPath, m); verifyErr == nil && ok {
-			return nil
-		}
-		return err
-	}
 	return nil
+}
+
+// modelDownloadLimit turns the manifest's approximate progress size into a
+// hard safety bound. Upstreams currently do not publish stable checksums for
+// the sonic catalog and may revise files in place, so exact-size enforcement
+// would reject legitimate updates. The derived cap allows 50% headroom, clamped
+// to 8-256 MiB, and never permits an undeclared artifact above 2 GiB. A
+// manifest may set MaxBytes when it needs a different explicit ceiling.
+func modelDownloadLimit(model ModelFile) int64 {
+	if model.MaxBytes > 0 {
+		return model.MaxBytes
+	}
+	if model.Size <= 0 || model.Size >= unknownModelMaxBytes {
+		return unknownModelMaxBytes
+	}
+	headroom := model.Size / 2
+	if headroom < modelSizeMinHeadroom {
+		headroom = modelSizeMinHeadroom
+	}
+	if headroom > modelSizeMaxHeadroom {
+		headroom = modelSizeMaxHeadroom
+	}
+	if model.Size > unknownModelMaxBytes-headroom {
+		return unknownModelMaxBytes
+	}
+	return model.Size + headroom
 }
 
 // verifyFile reports whether `path` exists and matches the manifest

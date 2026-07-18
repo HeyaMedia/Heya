@@ -8,10 +8,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/queueops"
+	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/karbowiak/heya/internal/taskdefs"
-	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/karbowiak/heya/internal/worker"
 	"github.com/rs/zerolog/log"
 )
@@ -203,6 +202,9 @@ func (a *App) ListJobs(ctx context.Context, state string, kind string, limit int
 		}
 		j.AttemptedAt = attemptedAt
 		j.FinalizedAt = finalizedAt
+		// Redact only the response copy. River retains the exact stored args and
+		// errors required for execution, retries, and operator forensics.
+		j = redactJobRow(j)
 		jobs = append(jobs, j)
 	}
 	if err := rows.Err(); err != nil {
@@ -219,6 +221,12 @@ func (a *App) ListJobs(ctx context.Context, state string, kind string, limit int
 	}
 
 	return JobListResult{Jobs: jobs, Total: total, HasMore: hasMore, NextBeforeID: nextBeforeID}, nil
+}
+
+func redactJobRow(job JobRow) JobRow {
+	job.Args = secrettext.RedactJSONOrText(job.Args)
+	job.Errors = secrettext.RedactJSONOrText(job.Errors)
+	return job
 }
 
 // MetadataQueueStatus is a snapshot of the `enrich_media_item` queue:
@@ -431,10 +439,11 @@ func (a *App) CancelJob(ctx context.Context, id int64) error {
 
 // RescueOrphanedJobsAtStartup releases every river_job stuck in
 // state='running' from a previous process. Called before
-// app.StartWorkers — no worker in *this* process has started yet, so
-// every state='running' row is definitionally an orphan from a prior
-// boot (process killed mid-job, air reload, OS OOM, etc.) and safe to
-// flip back to available.
+// app.StartWorkers. The long-lived worker command holds the singleton
+// coordinator advisory lease before calling this method, so no other healthy
+// coordinator can still own a running row; every state='running' row is an
+// orphan from a prior boot (process killed mid-job, air reload, OS OOM, etc.)
+// and safe to flip back to available.
 //
 // River's own periodic rescuer would eventually catch these via
 // RescueStuckJobsAfter (queueops.RescueStuckAfter), but that's far too
@@ -626,90 +635,4 @@ func (a *App) CancelLibraryJobs(ctx context.Context, libraryID int64) (int64, er
 // work (probes, keyframes, fingerprints, loudness, facets, enrichment).
 func (a *App) CancelAllPendingJobs(ctx context.Context) (int64, error) {
 	return a.cancelScanJobs(ctx, taskdefs.TaskKinds("scan_libraries"), 0)
-}
-
-// ScheduleEntry describes a periodic schedule derived from library settings.
-type ScheduleEntry struct {
-	LibraryID   int64  `json:"library_id"`
-	LibraryName string `json:"library_name"`
-	MediaType   string `json:"media_type"`
-	Type        string `json:"type"`
-	Interval    string `json:"interval"`
-	IntervalSec int    `json:"interval_sec"`
-}
-
-// ListSchedules computes the active periodic schedules from all library settings.
-func (a *App) ListSchedules(ctx context.Context) ([]ScheduleEntry, error) {
-	libs, err := a.ListLibraries(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	entries := []ScheduleEntry{}
-
-	for _, lib := range libs {
-		settings := metadata.ParseSettings(lib.Settings)
-
-		if settings.Watch {
-			hasSMB := false
-			for _, p := range lib.Paths {
-				if vfs.IsSMBPath(p) {
-					hasSMB = true
-					break
-				}
-			}
-			if hasSMB {
-				interval := time.Hour
-				if lib.ScanInterval.Valid {
-					interval = time.Duration(lib.ScanInterval.Microseconds) * time.Microsecond
-				}
-				entries = append(entries, ScheduleEntry{
-					LibraryID:   lib.ID,
-					LibraryName: lib.Name,
-					MediaType:   string(lib.MediaType),
-					Type:        "scan",
-					Interval:    FormatDuration(interval),
-					IntervalSec: int(interval.Seconds()),
-				})
-			}
-		}
-
-	}
-
-	return entries, nil
-}
-
-// FormatDuration formats a duration as a human-readable string.
-func FormatDuration(d time.Duration) string {
-	if d >= 24*time.Hour {
-		days := int(d.Hours() / 24)
-		if days == 1 {
-			return "1 day"
-		}
-		return formatInt(days) + " days"
-	}
-	if d >= time.Hour {
-		h := int(d.Hours())
-		if h == 1 {
-			return "1 hour"
-		}
-		return formatInt(h) + " hours"
-	}
-	m := int(d.Minutes())
-	if m == 1 {
-		return "1 minute"
-	}
-	return formatInt(m) + " minutes"
-}
-
-func formatInt(n int) string {
-	s := ""
-	for n > 0 {
-		s = string(rune('0'+n%10)) + s
-		n /= 10
-	}
-	if s == "" {
-		return "0"
-	}
-	return s
 }

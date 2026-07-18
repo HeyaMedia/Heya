@@ -2,9 +2,8 @@ package images
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,7 +16,11 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-const maxImageBytes = 25 << 20
+const (
+	maxAcceptedImagePolls = 60
+	maxAcceptedImageWait  = 2 * time.Minute
+	maxConcurrentFetches  = 8
+)
 
 // StatusError is returned by Download when the server answers with a non-200
 // status. Permanent reports whether a retry is pointless: a 4xx (other than
@@ -45,6 +48,7 @@ type Downloader struct {
 	client        *http.Client
 	trustedClient *http.Client
 	trusted       map[string]http.Header
+	fetchSlots    chan struct{}
 }
 
 type TrustedSource struct {
@@ -57,15 +61,16 @@ func NewDownloader(dataDir string, trustedSources ...TrustedSource) *Downloader 
 	// fetches artwork on first view, so a fresh library grid can burst dozens of
 	// concurrent downloads from the same CDN host — reuse warm connections
 	// instead of paying a TLS handshake each time.
-	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.MaxIdleConns = 100
-	t.MaxIdleConnsPerHost = 16
 	// SSRF guard: the Downloader now fetches DB-stored (semi-trusted, possibly
 	// NFO-sourced) URLs synchronously from the anonymous /api/media/*/image and
-	// /api/person/*/image endpoints. Reject non-public dial targets post-DNS and
-	// disable Proxy so an HTTP_PROXY can't tunnel past the guard.
-	t.Proxy = nil
-	t.DialContext = (&net.Dialer{Timeout: 10 * time.Second, Control: safedial.Control}).DialContext
+	// /api/person/*/image endpoints. The canonical public client rejects
+	// non-public dial targets post-DNS, disables environment proxies, and
+	// revalidates every redirect hop.
+	publicClient := safedial.NewPublicHTTPClientWithOptions(safedial.PublicHTTPClientOptions{
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 16,
+	})
+	publicClient.Timeout = 30 * time.Second
 	trustedTransport := http.DefaultTransport.(*http.Transport).Clone()
 	trustedTransport.Proxy = nil
 	trustedTransport.MaxIdleConns = 100
@@ -84,7 +89,10 @@ func NewDownloader(dataDir string, trustedSources ...TrustedSource) *Downloader 
 	}
 	trustedClient := &http.Client{
 		Timeout: 30 * time.Second, Transport: trustedTransport,
-		CheckRedirect: func(request *http.Request, _ []*http.Request) error {
+		CheckRedirect: func(request *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
 			origin := request.URL.Scheme + "://" + request.URL.Host
 			if _, ok := trusted[origin]; !ok {
 				return http.ErrUseLastResponse
@@ -94,9 +102,10 @@ func NewDownloader(dataDir string, trustedSources ...TrustedSource) *Downloader 
 	}
 	return &Downloader{
 		dataDir:       dataDir,
-		client:        &http.Client{Timeout: 30 * time.Second, Transport: t},
+		client:        publicClient,
 		trustedClient: trustedClient,
 		trusted:       trusted,
+		fetchSlots:    make(chan struct{}, maxConcurrentFetches),
 	}
 }
 
@@ -122,20 +131,45 @@ func (d *Downloader) download(ctx context.Context, url, mediaType string, dirNam
 	}
 
 	dir := filepath.Join(d.dataDir, "images", mediaType, dirName)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", fmt.Errorf("creating image dir: %w", err)
 	}
 
-	localPath := filepath.Join(dir, filename)
+	filename = filepath.Base(filename)
+	if filename == "" || filename == "." {
+		return "", errors.New("invalid image cache filename")
+	}
+	candidates := cacheImageCandidates(dir, filename)
 
-	if _, err := os.Stat(localPath); err == nil && !replace {
-		return localPath, nil
+	if !replace {
+		if candidate := newestValidCacheImage(ctx, candidates); candidate != "" {
+			return candidate, nil
+		}
+		// A cache entry created by an older version may be truncated or may not
+		// be an image at all. Keep it in place until a valid replacement has
+		// been completely fetched and decoded below.
+	}
+
+	select {
+	case d.fetchSlots <- struct{}{}:
+		defer func() { <-d.fetchSlots }()
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	// Another request may have populated this key while this one waited for a
+	// bounded network slot.
+	if !replace {
+		if candidate := newestValidCacheImage(ctx, candidates); candidate != "" {
+			return candidate, nil
+		}
 	}
 
 	client, headers := d.clientForURL(url)
+	pollCtx, cancelPoll := context.WithTimeout(ctx, maxAcceptedImageWait)
+	defer cancelPoll()
 	var resp *http.Response
-	for {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	for attempt := 0; ; attempt++ {
+		req, err := http.NewRequestWithContext(pollCtx, http.MethodGet, url, nil)
 		if err != nil {
 			return "", err
 		}
@@ -152,11 +186,14 @@ func (d *Downloader) download(ctx context.Context, url, mediaType string, dirNam
 			break
 		}
 		_ = resp.Body.Close()
-		if err := waitForImage(ctx, imageRetryAfter(resp.Header.Get("Retry-After"))); err != nil {
+		if attempt+1 >= maxAcceptedImagePolls {
+			return "", &StatusError{Code: http.StatusAccepted, URL: url}
+		}
+		if err := waitForImage(pollCtx, imageRetryAfter(resp.Header.Get("Retry-After"))); err != nil {
 			return "", &StatusError{Code: http.StatusAccepted, URL: url}
 		}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", &StatusError{Code: resp.StatusCode, URL: url}
@@ -165,29 +202,71 @@ func (d *Downloader) download(ctx context.Context, url, mediaType string, dirNam
 		return "", fmt.Errorf("unexpected image content type %q downloading %s", ct, url)
 	}
 
-	tmp, err := os.CreateTemp(dir, "."+filename+"-*")
+	staged, err := StageRasterContext(pollCtx, dir, resp.Body)
 	if err != nil {
+		return "", fmt.Errorf("validate downloaded image %s: %w", url, err)
+	}
+	defer func() { _ = staged.Rollback() }()
+	stem := strings.TrimSuffix(filename, filepath.Ext(filename))
+	if stem == "" {
+		stem = "image"
+	}
+	localPath := filepath.Join(dir, stem+staged.Info.Extension)
+	if err := staged.Publish(localPath); err != nil {
 		return "", err
 	}
-	tmpPath := tmp.Name()
-	defer func() { _ = os.Remove(tmpPath) }()
+	if err := staged.Commit(); err != nil {
+		return "", err
+	}
+	// Alternate-extension entries are intentionally retained here. Callers
+	// persist the returned path in a separate DB transaction; deleting an older
+	// path before that transaction commits could break its still-live row. The
+	// DB-aware materialization/reconciliation path owns orphan cleanup.
 
-	n, err := io.Copy(tmp, io.LimitReader(resp.Body, maxImageBytes+1))
-	if closeErr := tmp.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return "", err
-	}
-	if n > maxImageBytes {
-		return "", fmt.Errorf("image exceeds %d bytes: %s", maxImageBytes, url)
-	}
-	if err := os.Rename(tmpPath, localPath); err != nil {
-		return "", err
-	}
-
-	log.Debug().Str("url", url).Str("path", localPath).Msg("downloaded image")
+	log.Debug().Str("url", url).Str("path", localPath).
+		Str("format", staged.Info.Format).Int("width", staged.Info.Width).Int("height", staged.Info.Height).
+		Msg("downloaded image")
 	return localPath, nil
+}
+
+func newestValidCacheImage(ctx context.Context, candidates []string) string {
+	newest := ""
+	var newestModTime time.Time
+	for _, candidate := range candidates {
+		stat, err := os.Stat(candidate)
+		if err != nil || !stat.Mode().IsRegular() {
+			continue
+		}
+		if _, err := ValidateRasterFileContext(ctx, candidate); err != nil {
+			continue
+		}
+		if newest == "" || stat.ModTime().After(newestModTime) {
+			newest = candidate
+			newestModTime = stat.ModTime()
+		}
+	}
+	return newest
+}
+
+func cacheImageCandidates(dir, filename string) []string {
+	stem := strings.TrimSuffix(filename, filepath.Ext(filename))
+	if stem == "" {
+		stem = "image"
+	}
+	result := make([]string, 0, 5)
+	seen := make(map[string]struct{}, 5)
+	add := func(path string) {
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		result = append(result, path)
+	}
+	add(filepath.Join(dir, filename))
+	for _, extension := range []string{".jpg", ".png", ".webp"} {
+		add(filepath.Join(dir, stem+extension))
+	}
+	return result
 }
 
 func (d *Downloader) clientForURL(rawURL string) (*http.Client, http.Header) {

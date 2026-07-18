@@ -243,14 +243,16 @@ func (w *DownloadImageWorker) maybeSaveToMediaDirFor(ctx context.Context, mediaI
 	}
 
 	client := river.ClientFromContext[pgx.Tx](ctx)
-	client.Insert(ctx, SaveImagesArgs{
+	if _, err := client.Insert(ctx, SaveImagesArgs{
 		MediaItemID: mediaItemID,
 		FilePath:    files[0].Path,
 		CachedPath:  localPath,
 		AssetType:   assetType,
 		SortOrder:   sortOrder,
 		Label:       label,
-	}, nil)
+	}, nil); err != nil {
+		log.Debug().Err(err).Int64("media_item_id", mediaItemID).Msg("enqueue image sidecar save failed")
+	}
 }
 
 // materializePendingAsset is the eager-warm path: the media_assets row
@@ -463,10 +465,12 @@ func (w *DownloadImageWorker) downloadPersonImage(ctx context.Context, job *rive
 	if localPath == "" {
 		return nil
 	}
-	q.UpdatePersonProfilePath(ctx, sqlc.UpdatePersonProfilePathParams{
+	if err := q.UpdatePersonProfilePath(ctx, sqlc.UpdatePersonProfilePathParams{
 		ID:          job.Args.PersonID,
 		ProfilePath: localPath,
-	})
+	}); err != nil {
+		return fmt.Errorf("store downloaded person profile path: %w", err)
+	}
 
 	log.Debug().Int64("person_id", job.Args.PersonID).Str("path", localPath).Msg("person headshot downloaded")
 	return nil

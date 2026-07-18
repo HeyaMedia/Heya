@@ -44,7 +44,7 @@ func registerBinaryRoutes(api huma.API, app *service.App) {
 		wrapStreamAs[extraBinaryInput](proxiedImage(imgProxy, handleExtraThumbnail(app))))
 
 	huma.Register(api, binaryOp(http.MethodGet, "/api/tmdb/image/{path}", "tmdb-image-proxy", "Proxied TMDB image bytes", "Images"),
-		wrapStreamAs[tmdbImageInput](handleTMDBImageProxy()))
+		wrapStreamAs[tmdbImageInput](handleTMDBImageProxy(nil)))
 
 	huma.Register(api, binaryOp(http.MethodGet, "/api/music/artists/{artist_slug}/albums/{album_slug}/cover", "album-cover", "Album cover bytes (local file or 302 to upstream URL)", "Images"),
 		wrapStreamAs[albumCoverInput](proxiedImage(imgProxy, handleAlbumCover(app))))
@@ -139,11 +139,16 @@ func registerBinaryRoutes(api huma.API, app *service.App) {
 
 	// --- Internet-radio stream proxy (long-lived, ICY metadata stripped) ---
 	huma.Register(api, securedBinary(http.MethodGet, "/api/radio/stream", "stream-radio", "Proxy an internet-radio stream URL", "Radio"),
-		wrapStreamAs[proxyStreamInput](handleRadioStream(app)))
+		func(ctx context.Context, _ *proxyStreamInput) (*huma.StreamResponse, error) {
+			// Capture the authenticated owner before Huma hands the response to
+			// the stdlib streaming handler. ICY metadata is per-playback state and
+			// must only reach this user's WebSocket connections.
+			return streamResponse(handleRadioStream(app.EventHub(), userFrom(ctx).ID, publicMediaHTTPClient)), nil
+		})
 
 	// --- Podcast episode stream proxy (range-served audio from RSS enclosure) ---
 	huma.Register(api, securedBinary(http.MethodGet, "/api/podcasts/episode/stream", "stream-podcast-episode", "Proxy a podcast episode audio URL", "Podcasts"),
-		wrapStreamAs[proxyStreamInput](handlePodcastStream(app)))
+		wrapStreamAs[proxyStreamInput](handlePodcastStream(publicMediaHTTPClient)))
 
 	// Multipart upload lives in metadata_editor_huma.go because it uses
 	// huma.MultipartFormFiles instead of wrapStream — proper typed binding

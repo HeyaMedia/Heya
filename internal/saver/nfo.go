@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/karbowiak/heya/internal/atomicfile"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/rs/zerolog/log"
 )
 
@@ -49,7 +52,7 @@ type UniqueID struct {
 func WriteMovieNFO(mediaDir string, item sqlc.MediaItemCard, movie sqlc.Movie) error {
 	nfoPath := filepath.Join(mediaDir, "movie.nfo")
 	if _, err := os.Stat(nfoPath); err == nil {
-		log.Debug().Str("path", nfoPath).Msg("NFO already exists, skipping")
+		log.Debug().Str("path", vfs.RedactPath(nfoPath)).Msg("NFO already exists, skipping")
 		return nil
 	}
 
@@ -77,7 +80,7 @@ func WriteMovieNFO(mediaDir string, item sqlc.MediaItemCard, movie sqlc.Movie) e
 func WriteTVShowNFO(mediaDir string, item sqlc.MediaItemCard, series sqlc.TvSeries) error {
 	nfoPath := filepath.Join(mediaDir, "tvshow.nfo")
 	if _, err := os.Stat(nfoPath); err == nil {
-		log.Debug().Str("path", nfoPath).Msg("NFO already exists, skipping")
+		log.Debug().Str("path", vfs.RedactPath(nfoPath)).Msg("NFO already exists, skipping")
 		return nil
 	}
 
@@ -252,16 +255,20 @@ func writeXML(path string, v any) error {
 	}
 	content := xml.Header + string(data) + "\n"
 	contentBytes := []byte(content)
-	//nolint:gosec // path is the configured media-library sidecar destination.
-	if existing, readErr := os.ReadFile(path); readErr == nil && bytes.Equal(existing, contentBytes) {
-		log.Debug().Str("path", path).Msg("NFO unchanged, skipping write")
-		return nil
+	if info, statErr := os.Stat(path); statErr == nil && info.Mode().IsRegular() && info.Size() == int64(len(contentBytes)) {
+		//nolint:gosec // size equality above bounds this read to generated content length.
+		if existing, readErr := os.ReadFile(path); readErr == nil && bytes.Equal(existing, contentBytes) {
+			log.Debug().Str("path", vfs.RedactPath(path)).Msg("NFO unchanged, skipping write")
+			return nil
+		}
 	}
-	//nolint:gosec // NFO sidecars are intentionally readable by media clients.
-	if err := os.WriteFile(path, contentBytes, 0o644); err != nil {
+	if err := atomicfile.Write(path, 0o644, func(writer io.Writer) error {
+		_, err := writer.Write(contentBytes)
+		return err
+	}); err != nil {
 		return err
 	}
-	log.Info().Str("path", path).Msg("NFO written")
+	log.Info().Str("path", vfs.RedactPath(path)).Msg("NFO written")
 	return nil
 }
 

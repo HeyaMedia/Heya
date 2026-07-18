@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -74,7 +75,9 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 			if v, ok := extIDs["tmdb"]; ok {
 				switch t := v.(type) {
 				case string:
-					fmt.Sscanf(t, "%d", &tmdbID)
+					if parsedID, parseErr := strconv.Atoi(t); parseErr == nil {
+						tmdbID = parsedID
+					}
 				case float64:
 					tmdbID = int(t)
 				}
@@ -219,16 +222,18 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 		if bio == "" {
 			continue
 		}
-		q.CreatePersonBiography(ctx, sqlc.CreatePersonBiographyParams{
+		if err := q.CreatePersonBiography(ctx, sqlc.CreatePersonBiographyParams{
 			PersonID:  job.Args.PersonID,
 			Language:  lang,
 			Biography: bio,
-		})
+		}); err != nil {
+			return fmt.Errorf("store %s biography for person %d: %w", lang, job.Args.PersonID, err)
+		}
 	}
 
 	// 9. Store profiles.
 	for i, prof := range pay.Profiles {
-		q.CreatePersonProfile(ctx, sqlc.CreatePersonProfileParams{
+		if err := q.CreatePersonProfile(ctx, sqlc.CreatePersonProfileParams{
 			PersonID:  job.Args.PersonID,
 			Url:       prof.URL,
 			Source:    prof.Source,
@@ -237,17 +242,27 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 			Height:    int32(prof.Height),
 			Score:     numericFromFloat64(prof.Score),
 			SortOrder: int32(i),
-		})
+		}); err != nil {
+			return fmt.Errorf("store profile for person %d: %w", job.Args.PersonID, err)
+		}
 	}
 
 	// 9b. Replace external credits (cast + crew + known_for_titles). We
 	// nuke + reinsert rather than upsert one-by-one because upstream may
 	// drop entries between enrichment runs, and stale rows would clutter
 	// the "Known For" tab forever.
-	_ = q.DeletePersonExternalCredits(ctx, job.Args.PersonID)
-	storeExternalCredits(ctx, q, job.Args.PersonID, "cast", pay.Cast)
-	storeExternalCredits(ctx, q, job.Args.PersonID, "crew", pay.Crew)
-	storeExternalCredits(ctx, q, job.Args.PersonID, "known_for", pay.KnownForTitles)
+	if err := q.DeletePersonExternalCredits(ctx, job.Args.PersonID); err != nil {
+		return fmt.Errorf("delete stale credits for person %d: %w", job.Args.PersonID, err)
+	}
+	if err := storeExternalCredits(ctx, q, job.Args.PersonID, "cast", pay.Cast); err != nil {
+		return err
+	}
+	if err := storeExternalCredits(ctx, q, job.Args.PersonID, "crew", pay.Crew); err != nil {
+		return err
+	}
+	if err := storeExternalCredits(ctx, q, job.Args.PersonID, "known_for", pay.KnownForTitles); err != nil {
+		return err
+	}
 
 	// 10. Generate slug if not set.
 	if existing.Slug == "" {
@@ -259,22 +274,29 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 				}
 				return r, nil
 			})
-		q.UpdatePersonSlug(ctx, sqlc.UpdatePersonSlugParams{ID: job.Args.PersonID, Slug: personSlug})
+		if err := q.UpdatePersonSlug(ctx, sqlc.UpdatePersonSlugParams{ID: job.Args.PersonID, Slug: personSlug}); err != nil {
+			return fmt.Errorf("update slug for person %d: %w", job.Args.PersonID, err)
+		}
 	}
 
-	// 11. Mark enriched.
-	q.MarkPersonEnriched(ctx, job.Args.PersonID)
-
-	// 12. Queue profile image download for the best photo.
+	// 11. Queue profile image download before marking enrichment complete. If
+	// enqueueing fails, the retry must still enter this worker and try again.
 	if profilePath != "" {
 		client := river.ClientFromContext[pgx.Tx](ctx)
-		client.Insert(ctx, DownloadImageArgs{
+		if _, err := client.Insert(ctx, DownloadImageArgs{
 			PersonID:   job.Args.PersonID,
 			EntityType: "person",
 			URL:        profilePath,
 			AssetType:  "profile",
 			MediaType:  "person",
-		}, &river.InsertOpts{Priority: 4})
+		}, &river.InsertOpts{Priority: 4}); err != nil {
+			return fmt.Errorf("enqueue profile image for person %d: %w", job.Args.PersonID, err)
+		}
+	}
+
+	// 12. Mark enriched only after every durable write and follow-up enqueue.
+	if err := q.MarkPersonEnriched(ctx, job.Args.PersonID); err != nil {
+		return fmt.Errorf("mark person %d enriched: %w", job.Args.PersonID, err)
 	}
 
 	log.Debug().
@@ -289,7 +311,7 @@ func (w *PersonFetchWorker) Work(ctx context.Context, job *river.Job[PersonFetch
 // the upstream payload. Each row carries the union of external IDs we
 // receive so the FE LEFT JOIN against media_items can resolve the
 // "already in library" link without a roundtrip per row.
-func storeExternalCredits(ctx context.Context, q *sqlc.Queries, personID int64, kind string, credits []heyametadata.HeyaCredit) {
+func storeExternalCredits(ctx context.Context, q *sqlc.Queries, personID int64, kind string, credits []heyametadata.HeyaCredit) error {
 	for i, c := range credits {
 		ids := map[string]string{}
 		if c.TmdbID > 0 {
@@ -311,7 +333,7 @@ func storeExternalCredits(ctx context.Context, q *sqlc.Queries, personID int64, 
 			order = i
 		}
 
-		_ = q.UpsertPersonExternalCredit(ctx, sqlc.UpsertPersonExternalCreditParams{
+		if err := q.UpsertPersonExternalCredit(ctx, sqlc.UpsertPersonExternalCreditParams{
 			PersonID:     personID,
 			Kind:         kind,
 			MediaKind:    c.Kind,
@@ -326,8 +348,11 @@ func storeExternalCredits(ctx context.Context, q *sqlc.Queries, personID int64, 
 			PosterUrl:    c.PosterURL,
 			ExternalIds:  idsJSON,
 			Source:       c.Source,
-		})
+		}); err != nil {
+			return fmt.Errorf("store %s credit for person %d: %w", kind, personID, err)
+		}
 	}
+	return nil
 }
 
 // personGenderToInt converts the string gender from the Heya API to an int:

@@ -155,9 +155,9 @@ func (a *App) SubsonicAuthBySecret(ctx context.Context, secret string) (sqlc.Use
 // TouchSubsonicCredential stamps last_used_at asynchronously — called on
 // successful auth; failure is inconsequential.
 func (a *App) TouchSubsonicCredential(userID int64) {
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	a.startBackground(func() {
+		ctx, cancel := context.WithTimeout(a.LifetimeContext(), 2*time.Second)
 		defer cancel()
 		_, _ = a.db.Exec(ctx, `UPDATE subsonic_credentials SET last_used_at = now() WHERE user_id = $1`, userID)
-	}()
+	})
 }

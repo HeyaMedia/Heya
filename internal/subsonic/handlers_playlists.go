@@ -132,7 +132,7 @@ func (s *Server) handleCreatePlaylist(w http.ResponseWriter, r *http.Request) {
 			respondError(w, r, errMissingParameter, `either "playlistId" or "name" is required`)
 			return
 		}
-		created, err := s.app.CreateUserPlaylist(ctx, u.ID, name, "", "")
+		created, err := s.app.CreateUserPlaylist(ctx, u.ID, name, "")
 		if err != nil {
 			respondError(w, r, errGeneric, "creating playlist failed")
 			return
@@ -177,7 +177,7 @@ func (s *Server) handleUpdatePlaylist(w http.ResponseWriter, r *http.Request) {
 	if v := param(r, "comment"); v != "" {
 		comment = v
 	}
-	if err := s.app.UpdateUserPlaylist(ctx, u.ID, playlistID, name, comment, detail.Playlist.CoverPath, nil); err != nil {
+	if err := s.app.UpdateUserPlaylist(ctx, u.ID, playlistID, name, comment, nil); err != nil {
 		respondError(w, r, errGeneric, "updating playlist failed")
 		return
 	}

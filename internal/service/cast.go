@@ -17,9 +17,8 @@ import (
 	"github.com/karbowiak/heya/internal/cast"
 	"github.com/karbowiak/heya/internal/config"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/transcoder"
-	"github.com/karbowiak/heya/internal/vfs"
-	"github.com/karbowiak/heya/internal/worker"
 	"github.com/rs/zerolog/log"
 )
 
@@ -38,45 +37,80 @@ var (
 )
 
 func (a *App) SaveCastSettings(ctx context.Context, enabled bool, baseURL, devices string, allowedUserIDs []int64) error {
-	cur := a.config.Cast
-	if err := errIfEnvLockedChanged(castKeyEnabled, cur.Enabled, enabled); err != nil {
-		return err
-	}
-	if err := errIfEnvLockedChanged(castKeyDevices, cur.Devices, devices); err != nil {
-		return err
-	}
-	currentBaseURL, err := normalizeCastBaseURL(cur.BaseURL.Value)
-	if err != nil {
-		return fmt.Errorf("current casting media URL is invalid: %w", err)
-	}
+	var err error
 	baseURL, err = normalizeCastBaseURL(baseURL)
 	if err != nil {
-		return err
-	}
-	baseURLField := cur.BaseURL
-	baseURLField.Value = currentBaseURL
-	if err := errIfEnvLockedChanged(castKeyBaseURL, baseURLField, baseURL); err != nil {
 		return err
 	}
 	users, allowedUserIDs, err := a.validateCastAllowedUsers(ctx, allowedUserIDs)
 	if err != nil {
 		return err
 	}
-	if err := persistFieldSetting(a, ctx, castKeyEnabled, cur.Enabled, enabled); err != nil {
+
+	// Serializing the whole settings transition keeps manager side effects in
+	// the same order as persistence without holding the general config lock
+	// while receiver sessions are stopped or discovery is restarted.
+	a.castSettingsMu.Lock()
+	defer a.castSettingsMu.Unlock()
+	effective, port, devicesChanged, err := a.persistCastSettings(ctx, enabled, baseURL, devices, allowedUserIDs)
+	if err != nil {
 		return err
+	}
+
+	if a.castMgr != nil {
+		effectiveBaseURL, _ := normalizeCastBaseURL(effective.BaseURL.Value)
+		a.castMgr.SetMediaOrigin(effectiveBaseURL, port)
+	}
+	a.setCastAllowedUsers(allowedUserIDs)
+	a.stopDisallowedCastSessions(users)
+	// Flips take effect immediately: enable starts discovery, disable
+	// tears down every active session (receivers see a clean TEARDOWN).
+	// A device-list change while running restarts the manager so the
+	// resolve loop picks it up — active sessions stop (rare admin action).
+	if a.castMgr != nil && (!effective.Enabled.Value || devicesChanged) {
+		a.castMgr.Stop()
+	}
+	if effective.Enabled.Value {
+		a.startCast(ctx, effective, port)
+	}
+	return nil
+}
+
+func (a *App) persistCastSettings(ctx context.Context, enabled bool, baseURL, devices string, allowedUserIDs []int64) (config.CastConfig, string, bool, error) {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+
+	cur := a.config.Cast
+	if err := errIfEnvLockedChanged(castKeyEnabled, cur.Enabled, enabled); err != nil {
+		return config.CastConfig{}, "", false, err
+	}
+	if err := errIfEnvLockedChanged(castKeyDevices, cur.Devices, devices); err != nil {
+		return config.CastConfig{}, "", false, err
+	}
+	currentBaseURL, err := normalizeCastBaseURL(cur.BaseURL.Value)
+	if err != nil {
+		return config.CastConfig{}, "", false, fmt.Errorf("current casting media URL is invalid: %w", err)
+	}
+	baseURLField := cur.BaseURL
+	baseURLField.Value = currentBaseURL
+	if err := errIfEnvLockedChanged(castKeyBaseURL, baseURLField, baseURL); err != nil {
+		return config.CastConfig{}, "", false, err
+	}
+	if err := persistFieldSetting(a, ctx, castKeyEnabled, cur.Enabled, enabled); err != nil {
+		return config.CastConfig{}, "", false, err
 	}
 	if err := persistFieldSetting(a, ctx, castKeyDevices, cur.Devices, devices); err != nil {
-		return err
+		return config.CastConfig{}, "", false, err
 	}
 	if err := persistFieldSetting(a, ctx, castKeyBaseURL, cur.BaseURL, baseURL); err != nil {
-		return err
+		return config.CastConfig{}, "", false, err
 	}
 	allowedJSON, err := json.Marshal(allowedUserIDs)
 	if err != nil {
-		return fmt.Errorf("encoding casting allowance: %w", err)
+		return config.CastConfig{}, "", false, fmt.Errorf("encoding casting allowance: %w", err)
 	}
 	if err := a.SetSystemSetting(ctx, castKeyAllowedUsers, allowedJSON); err != nil {
-		return fmt.Errorf("saving casting allowance: %w", err)
+		return config.CastConfig{}, "", false, fmt.Errorf("saving casting allowance: %w", err)
 	}
 	if a.config.Cast.Enabled.Source != config.SourceEnv {
 		a.config.Cast.Enabled = config.Field[bool]{Value: enabled, Source: config.SourceDB}
@@ -87,27 +121,9 @@ func (a *App) SaveCastSettings(ctx context.Context, enabled bool, baseURL, devic
 	if a.config.Cast.BaseURL.Source != config.SourceEnv {
 		a.config.Cast.BaseURL = config.Field[string]{Value: baseURL, Source: config.SourceDB}
 	}
-	if a.castMgr != nil {
-		effectiveBaseURL := baseURL
-		if a.config.Cast.BaseURL.Source == config.SourceEnv {
-			effectiveBaseURL = currentBaseURL
-		}
-		a.castMgr.SetMediaOrigin(effectiveBaseURL, a.config.Port.Value)
-	}
-	a.setCastAllowedUsers(allowedUserIDs)
-	a.stopDisallowedCastSessions(users)
-	// Flips take effect immediately: enable starts discovery, disable
-	// tears down every active session (receivers see a clean TEARDOWN).
-	// A device-list change while running restarts the manager so the
-	// resolve loop picks it up — active sessions stop (rare admin action).
-	devicesChanged := cur.Devices.Value != a.config.Cast.Devices.Value
-	if a.castMgr != nil && (!a.CastEnabled() || devicesChanged) {
-		a.castMgr.Stop()
-	}
-	if a.CastEnabled() {
-		a.StartCast(ctx)
-	}
-	return nil
+	effective := a.config.Cast
+	devicesChanged := cur.Devices.Value != effective.Devices.Value
+	return effective, a.config.Port.Value, devicesChanged, nil
 }
 
 // LoadCastFromDB seeds the in-memory snapshot from system_settings at
@@ -116,12 +132,16 @@ func (a *App) LoadCastFromDB(ctx context.Context) {
 	if a.db == nil {
 		return
 	}
+	a.castSettingsMu.Lock()
+	defer a.castSettingsMu.Unlock()
+	a.configMu.Lock()
 	overlayFieldFromDB(a, ctx, &a.config.Cast.Enabled, castKeyEnabled, nil)
 	overlayFieldFromDB(a, ctx, &a.config.Cast.BaseURL, castKeyBaseURL, func(v string) bool {
 		_, err := normalizeCastBaseURL(v)
 		return err == nil
 	})
 	overlayFieldFromDB(a, ctx, &a.config.Cast.Devices, castKeyDevices, nil)
+	a.configMu.Unlock()
 	raw, err := a.GetSystemSetting(ctx, castKeyAllowedUsers)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Secure default for upgrades and fresh installs: admins retain the
@@ -141,7 +161,12 @@ func (a *App) LoadCastFromDB(ctx context.Context) {
 	a.setCastAllowedUsers(ids)
 }
 
-func (a *App) CastEnabled() bool { return a.config.Cast.Enabled.Value }
+func (a *App) CastEnabled() bool {
+	a.configMu.RLock()
+	enabled := a.config.Cast.Enabled.Value
+	a.configMu.RUnlock()
+	return enabled
+}
 
 func normalizeCastBaseURL(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
@@ -282,16 +307,30 @@ func (a *App) stopCastSessionsForUser(userID int64) {
 // StartCast launches discovery when casting is enabled. Idempotent —
 // called from serve at boot and again on settings flips.
 func (a *App) StartCast(ctx context.Context) {
-	if a.castMgr == nil || !a.CastEnabled() {
+	a.castSettingsMu.Lock()
+	defer a.castSettingsMu.Unlock()
+
+	cfg := a.ConfigSnapshot()
+	if cfg == nil {
 		return
 	}
-	a.castMgr.SetStaticDevices(splitCastDevices(a.config.Cast.Devices.Value))
-	baseURL, err := normalizeCastBaseURL(a.config.Cast.BaseURL.Value)
+	a.startCast(ctx, cfg.Cast, cfg.Port.Value)
+}
+
+// startCast applies a captured effective config. SaveCastSettings invokes it
+// while holding castSettingsMu, whereas the public StartCast takes an
+// immutable snapshot first; neither path recursively acquires the config lock.
+func (a *App) startCast(ctx context.Context, cfg config.CastConfig, port string) {
+	if a.castMgr == nil || !cfg.Enabled.Value {
+		return
+	}
+	a.castMgr.SetStaticDevices(splitCastDevices(cfg.Devices.Value))
+	baseURL, err := normalizeCastBaseURL(cfg.BaseURL.Value)
 	if err != nil {
-		log.Error().Err(err).Str("value", a.config.Cast.BaseURL.Value).Msg("cast: invalid receiver media URL; falling back to automatic LAN address")
+		log.Error().Err(err).Str("value", cfg.BaseURL.Value).Msg("cast: invalid receiver media URL; falling back to automatic LAN address")
 		baseURL = ""
 	}
-	a.castMgr.SetMediaOrigin(baseURL, a.config.Port.Value)
+	a.castMgr.SetMediaOrigin(baseURL, port)
 	if err := a.castMgr.Start(a.lifetimeCtx); err != nil {
 		// Extraction/spawn problems shouldn't kill the server; devices
 		// simply won't appear and the API reports the empty list.
@@ -328,14 +367,22 @@ type CastConfigView struct {
 }
 
 func (a *App) CastConfig() CastConfigView {
-	baseURL, _ := normalizeCastBaseURL(a.config.Cast.BaseURL.Value)
+	a.castSettingsMu.Lock()
+	defer a.castSettingsMu.Unlock()
+
+	cfg := a.ConfigSnapshot()
+	if cfg == nil {
+		return CastConfigView{AllowedUserIDs: a.castAllowedUserIDs()}
+	}
+	cur := cfg.Cast
+	baseURL, _ := normalizeCastBaseURL(cur.BaseURL.Value)
 	return CastConfigView{
-		Enabled:        a.config.Cast.Enabled.Value,
-		EnabledSource:  string(a.config.Cast.Enabled.Source),
+		Enabled:        cur.Enabled.Value,
+		EnabledSource:  string(cur.Enabled.Source),
 		BaseURL:        baseURL,
-		BaseURLSource:  string(a.config.Cast.BaseURL.Source),
-		Devices:        a.config.Cast.Devices.Value,
-		DevicesSource:  string(a.config.Cast.Devices.Source),
+		BaseURLSource:  string(cur.BaseURL.Source),
+		Devices:        cur.Devices.Value,
+		DevicesSource:  string(cur.Devices.Source),
 		AllowedUserIDs: a.castAllowedUserIDs(),
 	}
 }
@@ -487,12 +534,12 @@ func (a *App) CastPlayVideo(ctx context.Context, userID int64, deviceID, fileRef
 	if err != nil {
 		return cast.SessionSnapshot{}, fmt.Errorf("cast: probing video file: %w", err)
 	}
-	var mediaInfo worker.MediaInfo
+	var mediaInfo mediaprobe.MediaInfo
 	if len(file.MediaInfo) > 0 {
 		_ = json.Unmarshal(file.MediaInfo, &mediaInfo)
 	}
-	audioStreams := make([]worker.StreamInfo, 0)
-	subtitleStreams := make([]worker.StreamInfo, 0)
+	audioStreams := make([]mediaprobe.StreamInfo, 0)
+	subtitleStreams := make([]mediaprobe.StreamInfo, 0)
 	for _, stream := range mediaInfo.Streams {
 		switch stream.CodecType {
 		case "audio":
@@ -504,7 +551,7 @@ func (a *App) CastPlayVideo(ctx context.Context, userID int64, deviceID, fileRef
 	if audioTrack > 0 && audioTrack >= len(audioStreams) {
 		return cast.SessionSnapshot{}, fmt.Errorf("cast: video audio track %d does not exist", audioTrack)
 	}
-	var selectedSubtitle *worker.StreamInfo
+	var selectedSubtitle *mediaprobe.StreamInfo
 	if subtitleTrack != nil {
 		if *subtitleTrack < 0 || *subtitleTrack >= len(subtitleStreams) {
 			return cast.SessionSnapshot{}, fmt.Errorf("cast: video subtitle track %d does not exist", *subtitleTrack)
@@ -603,7 +650,7 @@ func (a *App) CastPlayVideo(ctx context.Context, userID int64, deviceID, fileRef
 // Chromecast generations: an SDR, progressive, 8-bit H.264 + AAC MP4 using
 // the default audio track. Newer receivers support more, but HLS fallback is
 // preferable to a LOAD that succeeds and then fails silently on old hardware.
-func castVideoCanDirect(info worker.MediaInfo, path string, audioTrack int) bool {
+func castVideoCanDirect(info mediaprobe.MediaInfo, path string, audioTrack int) bool {
 	if audioTrack != 0 {
 		return false
 	}
@@ -611,7 +658,7 @@ func castVideoCanDirect(info worker.MediaInfo, path string, audioTrack int) bool
 	if ext != ".mp4" && ext != ".m4v" {
 		return false
 	}
-	var video, audio *worker.StreamInfo
+	var video, audio *mediaprobe.StreamInfo
 	for i := range info.Streams {
 		s := &info.Streams[i]
 		if s.CodecType == "video" && video == nil {
@@ -657,11 +704,6 @@ func (a *App) castTrackInfo(ctx context.Context, trackID int64, provider string)
 	if err != nil {
 		return cast.TrackInfo{}, fmt.Errorf("track %d: library file missing", trackID)
 	}
-	if provider == "airplay" && vfs.IsSMBPath(lf.Path) {
-		// Same restriction as the AAC transcode path: the PCM feeder
-		// needs a locally-readable file. Revisit with vfs streaming.
-		return cast.TrackInfo{}, fmt.Errorf("casting from remote (SMB) sources is not supported yet")
-	}
 	info := cast.TrackInfo{
 		TrackID:   detail.ID,
 		Path:      lf.Path,
@@ -680,7 +722,7 @@ func (a *App) castTrackInfo(ctx context.Context, trackID int64, provider string)
 				return info, nil
 			}
 		}
-		if a.AudioSessions() == nil || vfs.IsSMBPath(lf.Path) {
+		if a.AudioSessions() == nil {
 			return cast.TrackInfo{}, fmt.Errorf("track %d has no Chromecast-compatible source and cannot be transcoded", trackID)
 		}
 		info.ContentType = "audio/mp4"

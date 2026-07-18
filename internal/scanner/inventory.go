@@ -89,14 +89,13 @@ func walkInventory(ctx context.Context, roots []string, scopes []string, emit Em
 			data["scopes"] = len(relStarts)
 		}
 		emit.Emit(Event{Event: "root.enter", Root: root, Data: data})
-		source, err := vfs.Open(root)
+		source, err := vfs.OpenContext(ctx, root)
 		if err != nil {
 			emit.Emit(Event{Event: "root.error", Severity: SeverityWarn, Root: root, Message: err.Error()})
 			return inv, err
 		}
 
 		rootInv := InventoryRoot{Root: root, FS: source.FS}
-		isSMB := vfs.IsSMBPath(root)
 		seen := map[string]bool{}
 		for _, relStart := range relStarts {
 			if len(scopes) > 0 {
@@ -134,7 +133,7 @@ func walkInventory(ctx context.Context, roots []string, scopes []string, emit Em
 					}
 				}
 
-				file := classifyFile(source.FS, root, relPath, d, isSMB)
+				file := classifyFile(source.FS, root, relPath, d)
 				if seen[file.Path] {
 					return nil
 				}
@@ -168,12 +167,8 @@ func walkInventory(ctx context.Context, roots []string, scopes []string, emit Em
 				break
 			}
 		}
-		closeErr := source.Close()
 		if err != nil {
 			return inv, err
-		}
-		if closeErr != nil {
-			return inv, closeErr
 		}
 		sort.Slice(rootInv.Files, func(i, j int) bool {
 			return rootInv.Files[i].RelPath < rootInv.Files[j].RelPath
@@ -200,22 +195,13 @@ func scopeRelPathsForRoot(root string, scopes []string) []string {
 }
 
 func scopeRelPathForRoot(root, scope string) (string, bool) {
-	root = strings.TrimRight(strings.TrimSpace(root), "/")
-	scope = strings.TrimRight(strings.TrimSpace(scope), "/")
+	root = strings.TrimSpace(root)
+	scope = strings.TrimSpace(scope)
 	if root == "" || scope == "" {
 		return "", false
 	}
-	if strings.Contains(root, "://") || strings.Contains(scope, "://") {
-		if scope != root && !strings.HasPrefix(scope, root+"/") {
-			return "", false
-		}
-		rel := strings.TrimPrefix(scope, root)
-		rel = strings.TrimPrefix(rel, "/")
-		if rel == "" {
-			return ".", true
-		}
-		return rel, true
-	}
+	root = filepath.Clean(root)
+	scope = filepath.Clean(scope)
 	rel, err := filepath.Rel(root, scope)
 	if err != nil {
 		return "", false
@@ -282,16 +268,6 @@ func normalizeScopeDir(scope string) string {
 	if scope == "" {
 		return ""
 	}
-	if strings.Contains(scope, "://") {
-		scope = strings.TrimRight(scope, "/")
-		if scopePathLooksLikeFile(scope) {
-			if idx := strings.LastIndex(scope, "/"); idx > strings.Index(scope, "://")+2 {
-				scope = scope[:idx]
-			}
-		}
-		return strings.TrimRight(scope, "/")
-	}
-
 	scope = filepath.Clean(scope)
 	if info, err := os.Stat(scope); err == nil {
 		if info.IsDir() {
@@ -332,12 +308,6 @@ func inventoryFileInAnyScope(file InventoryFile, scopes []string) bool {
 }
 
 func inventoryPathInScope(filePath, scope string) bool {
-	if strings.Contains(filePath, "://") || strings.Contains(scope, "://") {
-		filePath = strings.TrimRight(filePath, "/")
-		scope = strings.TrimRight(scope, "/")
-		return filePath == scope || strings.HasPrefix(filePath, scope+"/")
-	}
-
 	filePath = filepath.Clean(filePath)
 	scope = filepath.Clean(scope)
 	rel, err := filepath.Rel(scope, filePath)
@@ -347,7 +317,7 @@ func inventoryPathInScope(filePath, scope string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
-func classifyFile(fsys fs.FS, root, relPath string, d fs.DirEntry, isSMB bool) InventoryFile {
+func classifyFile(fsys fs.FS, root, relPath string, d fs.DirEntry) InventoryFile {
 	name := d.Name()
 	ext := strings.ToLower(filepath.Ext(name))
 	class := ClassUnknown
@@ -378,12 +348,7 @@ func classifyFile(fsys fs.FS, root, relPath string, d fs.DirEntry, isSMB bool) I
 		class = ClassPrimaryMedia
 	}
 
-	var fullPath string
-	if isSMB {
-		fullPath = vfs.Join(root, relPath)
-	} else {
-		fullPath = filepath.Join(root, relPath)
-	}
+	fullPath := filepath.Join(root, relPath)
 	info, _ := d.Info()
 	// Symlinked media must stat the TARGET, not the link: d.Info() is an
 	// lstat, but a loose-file scope's scoped walk stats its root with fs.Stat

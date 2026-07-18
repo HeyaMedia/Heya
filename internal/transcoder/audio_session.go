@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -20,11 +19,12 @@ import (
 // fragmented MP4 — universal browser support and small enough that storage
 // isn't a concern.
 //
-// Single-shot per (track_file_id, profile): the first request triggers an
-// ffmpeg run that writes a tempfile, sync.Map keeps duplicate requests
-// waiting on the same run rather than transcoding twice. Subsequent requests
-// hit the cached file directly. Different bitrates for the same source file
-// are cached independently — the profile string is part of the cache key.
+// Single-shot per (track_file_id, profile): the first request triggers a
+// manager-owned ffmpeg run that writes a unique temporary file; duplicate
+// requests wait on the same run rather than transcoding twice. Subsequent
+// requests hit the cached file directly. Different bitrates for the same
+// source file are cached independently — the profile string is part of the
+// cache key.
 //
 // No HLS / no segments: progressive-download with byte-range serving is
 // simpler and matches how hibiki's audio engine consumes URLs. HLS audio
@@ -32,9 +32,25 @@ import (
 type AudioSessionManager struct {
 	cache *CacheManager
 
-	mu       sync.Mutex
-	inflight map[string]*audioEncode
+	runCtx context.Context
+	cancel context.CancelFunc
+
+	mu        sync.Mutex
+	closed    bool
+	inflight  map[string]*audioEncode
+	wg        sync.WaitGroup
+	closeOnce sync.Once
+	closeDone chan struct{}
+
+	// encodeAAC is a seam for lifecycle/concurrency tests. Production uses
+	// runFFmpegAAC; keeping the orchestration independent of os/exec also
+	// makes its cancellation contract explicit.
+	encodeAAC func(context.Context, string, string, int) error
 }
+
+// ErrAudioManagerClosed is returned when new audio work is requested after
+// the manager has begun shutting down.
+var ErrAudioManagerClosed = errors.New("audio session manager closed")
 
 // audioEncode is one in-flight ffmpeg run shared by every caller asking for
 // the same (track_file_id, profile). err is written exactly once, before done
@@ -46,11 +62,42 @@ type audioEncode struct {
 	err  error
 }
 
-func NewAudioSessionManager(cache *CacheManager) *AudioSessionManager {
-	return &AudioSessionManager{
-		cache:    cache,
-		inflight: make(map[string]*audioEncode),
+// AACFile is an open cached AAC output whose cache lease lasts exactly as
+// long as the file handle. Closing it releases both the descriptor and the
+// eviction pin, eliminating the EnsureAAC -> os.Open serving gap.
+type AACFile struct {
+	*os.File
+	lease     *CacheLease
+	closeOnce sync.Once
+	closeErr  error
+}
+
+// Close is idempotent and releases the cache lease after the open descriptor
+// has been closed.
+func (f *AACFile) Close() error {
+	if f == nil {
+		return nil
 	}
+	f.closeOnce.Do(func() {
+		if f.File != nil {
+			f.closeErr = f.File.Close()
+		}
+		f.lease.Release()
+	})
+	return f.closeErr
+}
+
+func NewAudioSessionManager(cache *CacheManager) *AudioSessionManager {
+	runCtx, cancel := context.WithCancel(context.Background())
+	m := &AudioSessionManager{
+		cache:     cache,
+		runCtx:    runCtx,
+		cancel:    cancel,
+		inflight:  make(map[string]*audioEncode),
+		closeDone: make(chan struct{}),
+	}
+	m.encodeAAC = m.runFFmpegAAC
+	return m
 }
 
 // DefaultAudioBitrateKbps is the historical fallback bitrate used when a
@@ -79,8 +126,7 @@ func audioProfile(bitrateKbps int) string {
 }
 
 func (m *AudioSessionManager) outputPath(trackFileID int64, profile string) string {
-	dir := filepath.Join(m.cache.BaseDir(), "audio")
-	_ = os.MkdirAll(dir, 0o750)
+	dir := filepath.Join(m.cache.BaseDir(), audioCacheNamespace)
 	return filepath.Join(dir, fmt.Sprintf("%d_%s.m4a", trackFileID, profile))
 }
 
@@ -89,6 +135,12 @@ func (m *AudioSessionManager) outputPath(trackFileID int64, profile string) stri
 // Concurrent callers for the same (id, bitrate) will all wait on a single
 // ffmpeg invocation. bitrateKbps must be one of IsAllowedAudioBitrate's set.
 func (m *AudioSessionManager) EnsureAAC(ctx context.Context, trackFileID int64, sourcePath string, bitrateKbps int) (string, error) {
+	m.mu.Lock()
+	closed := m.closed
+	m.mu.Unlock()
+	if closed {
+		return "", ErrAudioManagerClosed
+	}
 	if !IsAllowedAudioBitrate(bitrateKbps) {
 		return "", fmt.Errorf("unsupported audio bitrate: %dk", bitrateKbps)
 	}
@@ -96,45 +148,158 @@ func (m *AudioSessionManager) EnsureAAC(ctx context.Context, trackFileID int64, 
 	outPath := m.outputPath(trackFileID, audioProfile(bitrateKbps))
 
 	if _, err := os.Stat(outPath); err == nil {
+		// File mtime is the cache's access clock for item-level LRU.
+		now := time.Now()
+		_ = os.Chtimes(outPath, now, now)
 		return outPath, nil
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("stat cached audio: %w", err)
 	}
 
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return "", ErrAudioManagerClosed
+	}
 	if enc, ok := m.inflight[outPath]; ok {
 		m.mu.Unlock()
-		select {
-		case <-enc.done:
-			if enc.err != nil {
-				return "", enc.err
-			}
-			return outPath, nil
-		case <-ctx.Done():
-			return "", ctx.Err()
-		}
+		return m.waitForEncode(ctx, outPath, enc)
+	}
+	// Recheck after taking the manager lock. A just-finished encode may have
+	// disappeared from inflight after publishing its final file between the
+	// fast-path stat and this critical section.
+	if _, err := os.Stat(outPath); err == nil {
+		m.mu.Unlock()
+		return outPath, nil
+	} else if !os.IsNotExist(err) {
+		m.mu.Unlock()
+		return "", fmt.Errorf("stat cached audio: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o750); err != nil {
+		m.mu.Unlock()
+		return "", fmt.Errorf("create audio cache directory: %w", err)
 	}
 	enc := &audioEncode{done: make(chan struct{})}
 	m.inflight[outPath] = enc
+	m.wg.Add(1)
 	m.mu.Unlock()
 
-	var encErr error
-	defer func() {
-		m.mu.Lock()
-		delete(m.inflight, outPath)
-		m.mu.Unlock()
-		enc.err = encErr
-		close(enc.done)
-	}()
+	// The manager, not the first HTTP request, owns shared work. Every caller
+	// below is merely a waiter and can leave independently without cancelling
+	// an encode another listener still needs.
+	go m.runEncode(enc, sourcePath, outPath, bitrateKbps)
+	return m.waitForEncode(ctx, outPath, enc)
+}
 
-	// The encode runs detached from the leader's request context: concurrent
-	// listeners share this one ffmpeg run, so the first caller's disconnect
-	// must not kill the encode for everyone else still waiting (mirrors the
-	// HLS heads in session.go). runFFmpegAAC caps wall clock at 10 minutes.
-	if err := m.runFFmpegAAC(context.WithoutCancel(ctx), sourcePath, outPath, bitrateKbps); err != nil {
-		_ = os.Remove(outPath)
-		encErr = err
-		return "", err
+// OpenAAC ensures an AAC output exists and opens it while holding one
+// uninterrupted cache lease. Callers must Close the returned file after
+// ServeContent completes. This is the serving API; EnsureAAC remains useful
+// for producer orchestration/tests that only need a durable path.
+func (m *AudioSessionManager) OpenAAC(ctx context.Context, trackFileID int64, sourcePath string, bitrateKbps int) (*AACFile, error) {
+	if !IsAllowedAudioBitrate(bitrateKbps) {
+		return nil, fmt.Errorf("unsupported audio bitrate: %dk", bitrateKbps)
 	}
-	return outPath, nil
+	outPath := m.outputPath(trackFileID, audioProfile(bitrateKbps))
+	lease := m.cache.lease(outPath)
+
+	path, err := m.EnsureAAC(ctx, trackFileID, sourcePath, bitrateKbps)
+	if err != nil {
+		lease.Release()
+		return nil, err
+	}
+	file, err := os.Open(path) //nolint:gosec // path is derived from the owned cache root and numeric/profile keys
+	if err != nil {
+		lease.Release()
+		return nil, fmt.Errorf("open cached audio: %w", err)
+	}
+	return &AACFile{File: file, lease: lease}, nil
+}
+
+func (m *AudioSessionManager) runEncode(enc *audioEncode, sourcePath, outPath string, bitrateKbps int) {
+	defer m.wg.Done()
+
+	err := m.encodeAAC(m.runCtx, sourcePath, outPath, bitrateKbps)
+	if err != nil && m.runCtx.Err() != nil {
+		err = fmt.Errorf("%w: %v", ErrAudioManagerClosed, err)
+	}
+	if err == nil {
+		if _, statErr := os.Stat(outPath); statErr != nil {
+			err = fmt.Errorf("audio encoder did not publish output: %w", statErr)
+		}
+	}
+
+	// Publish the result before closing done. Channel close establishes the
+	// happens-before edge that lets any number of waiters safely read enc.err.
+	m.mu.Lock()
+	enc.err = err
+	if m.inflight[outPath] == enc {
+		delete(m.inflight, outPath)
+	}
+	close(enc.done)
+	m.mu.Unlock()
+}
+
+func (m *AudioSessionManager) waitForEncode(ctx context.Context, outPath string, enc *audioEncode) (string, error) {
+	result := func() (string, error) {
+		if enc.err != nil {
+			return "", enc.err
+		}
+		return outPath, nil
+	}
+
+	// Prefer an already-published result over a simultaneous caller or manager
+	// cancellation. This matters at shutdown when ffmpeg completed just before
+	// the manager context was cancelled.
+	select {
+	case <-enc.done:
+		return result()
+	default:
+	}
+
+	select {
+	case <-enc.done:
+		return result()
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-m.runCtx.Done():
+		select {
+		case <-enc.done:
+			return result()
+		default:
+			return "", ErrAudioManagerClosed
+		}
+	}
+}
+
+// Close prevents new encodes, cancels all manager-owned work, and waits for
+// every encode goroutine to finish. It is idempotent; a caller whose context
+// expires may call Close again later to continue waiting for cleanup.
+func (m *AudioSessionManager) Close(ctx context.Context) error {
+	m.closeOnce.Do(func() {
+		// closed and WaitGroup.Add are synchronized by m.mu, so once this lock
+		// is released no Add can race the Wait below.
+		m.mu.Lock()
+		m.closed = true
+		m.cancel()
+		m.mu.Unlock()
+
+		go func() {
+			m.wg.Wait()
+			close(m.closeDone)
+		}()
+	})
+
+	select {
+	case <-m.closeDone:
+		return nil
+	default:
+	}
+	select {
+	case <-m.closeDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // maxFFmpegStderrTail bounds how much of ffmpeg's stderr we keep around for
@@ -173,15 +338,39 @@ func (t *stderrTail) String() string {
 // AAC bitrate. faststart moves the moov atom to the front so the browser can
 // begin playback without buffering the whole file first; empty_moov keeps
 // the file progressive-friendly.
-func (m *AudioSessionManager) runFFmpegAAC(ctx context.Context, source, out string, bitrateKbps int) error {
+func (m *AudioSessionManager) runFFmpegAAC(ctx context.Context, source, out string, bitrateKbps int) (returnErr error) {
 	// Generous timeout: ffmpeg AAC encode is roughly real-time-ish on a
 	// modern CPU; a 10-min track lands in 10-30s. Cap at 10 min wall clock.
 	runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
+	if err := vfs.ValidateLocalPath(source); err != nil {
+		return fmt.Errorf("audio input: %w", err)
+	}
 
-	tmp := out + ".tmp"
-	cmd := exec.CommandContext(runCtx, //nolint:gosec // source comes from library_files; ffmpeg binary is fixed
-		"ffmpeg",
+	// Reserve the tempfile and pin both names under the cache lock. Otherwise
+	// the LRU walker can observe the just-created tempfile in the tiny window
+	// before a separate pin call and remove it from under ffmpeg.
+	m.cache.mu.Lock()
+	tmp, err := reserveAtomicOutput(out)
+	var pinned []string
+	if err == nil {
+		pinned = m.cache.pinLocked(out, tmp)
+	}
+	m.cache.mu.Unlock()
+	if err != nil {
+		return fmt.Errorf("reserve transcode output: %w", err)
+	}
+	releasePin := m.cache.releasePins(pinned)
+	defer releasePin()
+	// Remove the unpublished temporary output while it is still protected from
+	// eviction; the pin is released by the previously registered defer.
+	defer func() {
+		if cleanupErr := removeTemporaryOutput(tmp); cleanupErr != nil {
+			returnErr = errors.Join(returnErr, cleanupErr)
+		}
+	}()
+
+	cmd := ffmpegCommandContext(runCtx,
 		"-nostdin", "-nostats", "-hide_banner",
 		"-y",
 		"-i", source,
@@ -196,7 +385,6 @@ func (m *AudioSessionManager) runFFmpegAAC(ctx context.Context, source, out stri
 	stderr := newStderrTail(maxFFmpegStderrTail)
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
-		_ = os.Remove(tmp)
 		tail := stderr.String()
 		log.Error().Err(err).
 			Str("component", "audio_transcode").

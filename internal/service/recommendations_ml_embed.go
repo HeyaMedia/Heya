@@ -20,7 +20,7 @@ import (
 
 // This file owns the ML write + read paths: composing the per-item embed doc,
 // backfilling media_item_facets, and natural-language semantic search. All of
-// it no-ops cleanly when the engine is disabled (recEmbedderInstance → nil).
+// it no-ops cleanly when the engine is disabled (borrowRecEmbedder → nil).
 
 // ErrMLDisabled is returned by ML-only paths when the engine is off / not ready.
 var ErrMLDisabled = fmt.Errorf("recommendation ML engine is not enabled or the model is still downloading")
@@ -277,13 +277,15 @@ func (a *App) loadFacetStates(ctx context.Context, table, keyCol string) (map[in
 // media_item_facets / episode_facets. Returns the count embedded and skipped
 // (tokenizer failures). Requires the engine enabled.
 func (a *App) BackfillVideoEmbeddings(ctx context.Context, force bool) (embedded, skipped int, err error) {
-	emb, err := a.recEmbedderInstance(ctx)
+	lease, err := a.borrowRecEmbedder(ctx)
 	if err != nil {
 		return 0, 0, fmt.Errorf("load embedder: %w", err)
 	}
-	if emb == nil {
+	if lease == nil {
 		return 0, 0, ErrMLDisabled
 	}
+	defer lease.Close()
+	emb := lease.embedder
 	// Upgrade/backstop path for libraries enriched before the semantic music
 	// catalog existed. Artist refresh handles new data; each embedding sweep
 	// hydrates a bounded batch of already-known canonical recording IDs.
@@ -563,13 +565,15 @@ func l2normVec(v []float32) {
 // spoiler-safe blurb says nothing. Episode-driven hits carry a "Matched
 // S02E05 …" reason as evidence.
 func (a *App) SemanticSearch(ctx context.Context, query string, facets ForYouFacets) ([]ForYouItem, error) {
-	emb, err := a.recEmbedderInstance(ctx)
+	lease, err := a.borrowRecEmbedder(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load embedder: %w", err)
 	}
-	if emb == nil {
+	if lease == nil {
 		return nil, ErrMLDisabled
 	}
+	defer lease.Close()
+	emb := lease.embedder
 	if strings.TrimSpace(query) == "" {
 		return nil, nil
 	}

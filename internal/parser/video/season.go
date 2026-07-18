@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -361,11 +362,11 @@ func parseMatchCollection(match *regexp2.Match, simpleTitle string) *matchResult
 
 		episodeCaptures := getAllCaptures(match, "episode")
 		episode1Captures := getAllCaptures(match, "episode1")
-		allEpisodes := append(episodeCaptures, episode1Captures...)
+		allEpisodes := slices.Concat(episodeCaptures, episode1Captures)
 
 		absCaptures := getAllCaptures(match, "absoluteepisode")
 		abs1Captures := getAllCaptures(match, "absoluteepisode1")
-		allAbsolute := append(absCaptures, abs1Captures...)
+		allAbsolute := slices.Concat(absCaptures, abs1Captures)
 
 		if len(allEpisodes) > 0 {
 			first, _ := strconv.Atoi(allEpisodes[0])

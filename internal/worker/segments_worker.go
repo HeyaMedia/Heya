@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/communitysegments"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
@@ -244,6 +245,10 @@ func (snapshot segmentFileSnapshot) Equal(other segmentFileSnapshot) bool {
 // missing/soft-deleted file or a size/mtime mismatch is a benign stale job,
 // not permission to write results against the replacement.
 func currentSegmentFileSnapshot(file sqlc.LibraryFile) (segmentFileSnapshot, string, error) {
+	return currentSegmentFileSnapshotContext(context.Background(), file)
+}
+
+func currentSegmentFileSnapshotContext(ctx context.Context, file sqlc.LibraryFile) (segmentFileSnapshot, string, error) {
 	if file.DeletedAt.Valid {
 		return segmentFileSnapshot{}, "file_soft_deleted", nil
 	}
@@ -251,21 +256,19 @@ func currentSegmentFileSnapshot(file sqlc.LibraryFile) (segmentFileSnapshot, str
 		return segmentFileSnapshot{}, "file_mtime_unknown", nil
 	}
 
-	var mediaInfo MediaInfo
+	var mediaInfo mediaprobe.MediaInfo
 	if len(file.MediaInfo) == 0 || json.Unmarshal(file.MediaInfo, &mediaInfo) != nil || mediaInfo.Duration <= 0 {
 		return segmentFileSnapshot{}, "file_not_probed", nil
 	}
 
-	source, err := vfs.Open(vfs.Dir(file.Path))
+	source, err := vfs.OpenContext(ctx, filepath.Dir(file.Path))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return segmentFileSnapshot{}, "file_missing", nil
 		}
 		return segmentFileSnapshot{}, "", err
 	}
-	defer source.Close() //nolint:errcheck // read-only stat source
-
-	info, err := fs.Stat(source.FS, vfs.Base(file.Path))
+	info, err := fs.Stat(source.FS, filepath.Base(file.Path))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return segmentFileSnapshot{}, "file_missing", nil
@@ -307,7 +310,7 @@ func (w *ScanMediaSegmentsFileWorker) Work(ctx context.Context, job *river.Job[S
 	if lf.DeletedAt.Valid {
 		return nil
 	}
-	fileSnapshot, skipReason, err := currentSegmentFileSnapshot(lf)
+	fileSnapshot, skipReason, err := currentSegmentFileSnapshotContext(ctx, lf)
 	if err != nil {
 		return fmt.Errorf("validate segment file %d: %w", lf.ID, err)
 	}
@@ -374,7 +377,7 @@ func (w *ScanMediaSegmentsFileWorker) Work(ctx context.Context, job *river.Job[S
 	if err != nil {
 		return fmt.Errorf("revalidate library_file %d: %w", lf.ID, err)
 	}
-	currentSnapshot, skipReason, err := currentSegmentFileSnapshot(currentFile)
+	currentSnapshot, skipReason, err := currentSegmentFileSnapshotContext(ctx, currentFile)
 	if err != nil {
 		return fmt.Errorf("revalidate segment file %d: %w", lf.ID, err)
 	}

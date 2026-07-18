@@ -12,9 +12,10 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
-}
+// The default origin policy accepts non-browser clients without an Origin
+// header and otherwise requires the browser Origin host to match r.Host.
+// Keeping that check is important here because authentication is cookie based.
+var upgrader = websocket.Upgrader{}
 
 type wsClientMessage struct {
 	Type     string                 `json:"type"`
@@ -39,26 +40,33 @@ func handleWebSocket(hub *eventhub.Hub, sessionLookup auth.SessionLookup) http.H
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
+		rawEvents := r.URL.Query().Get("events") == "raw"
+		if rawEvents && !resolved.User.IsAdmin {
+			http.Error(w, `{"error":"admin access required"}`, http.StatusForbidden)
+			return
+		}
 
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Warn().Err(err).Msg("websocket upgrade failed")
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
-		ch := hub.SubscribeUser(resolved.User.ID)
+		ch := hub.SubscribePrincipal(eventhub.SubscriberPrincipal{
+			UserID:  resolved.User.ID,
+			IsAdmin: resolved.User.IsAdmin,
+		})
 		defer hub.Unsubscribe(ch)
 
 		ctx := r.Context()
-		rawEvents := r.URL.Query().Get("events") == "raw"
 		clientSubscriptions := r.URL.Query().Get("subscriptions") == "1"
 		var registeredDeviceID atomic.Value
 		registeredDeviceID.Store("")
 		var wantsLogs atomic.Bool
-		// Old frontend bundles never send subscription controls. Keep their
-		// behavior intact across a backend restart; only negotiated clients opt
-		// into suppressing the otherwise-global log stream.
+		// Old admin frontend bundles never send subscription controls. Keep
+		// their behavior intact across a backend restart; the hub's visibility
+		// policy independently prevents regular users from receiving logs.
 		wantsLogs.Store(rawEvents || !clientSubscriptions)
 		var coalescer *wsEventCoalescer
 		var flushTicker *time.Ticker
@@ -132,7 +140,7 @@ func handleWebSocket(hub *eventhub.Hub, sessionLookup auth.SessionLookup) http.H
 		for {
 			select {
 			case <-ctx.Done():
-				conn.WriteControl(
+				_ = conn.WriteControl(
 					websocket.CloseMessage,
 					websocket.FormatCloseMessage(websocket.CloseGoingAway, "server shutting down"),
 					time.Now().Add(time.Second),

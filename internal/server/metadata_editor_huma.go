@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/karbowiak/heya/internal/service"
 )
 
@@ -163,7 +165,9 @@ func registerMetadataEditorRoutes(api huma.API, app *service.App) {
 	// Upload artwork via multipart/form-data. Huma decodes the `file` field
 	// into a typed FormFile; the asset_type string field is read off the raw
 	// form (Huma's MultipartFormFiles only auto-binds FormFile/[]FormFile).
-	huma.Register(api, adminSecured(op(http.MethodPost, "/api/media/{id}/assets/upload", "upload-media-asset", "Upload an artwork file", "Metadata Editor")),
+	uploadAssetOp := adminSecured(op(http.MethodPost, "/api/media/{id}/assets/upload", "upload-media-asset", "Upload an artwork file", "Metadata Editor"))
+	uploadAssetOp.BodyReadTimeout = 30 * time.Second
+	huma.Register(api, uploadAssetOp,
 		func(ctx context.Context, in *struct {
 			IDPath
 			RawBody huma.MultipartFormFiles[uploadAssetForm]
@@ -183,9 +187,9 @@ func registerMetadataEditorRoutes(api huma.API, app *service.App) {
 				label = vs[0]
 			}
 
-			result, err := app.UploadMediaAsset(ctx, in.ID, data.File, data.File.Filename, assetType, label)
+			result, err := app.UploadMediaAsset(ctx, in.ID, data.File, assetType, label)
 			if err != nil {
-				return nil, huma.Error500InternalServerError(err.Error())
+				return nil, humaServiceError(err)
 			}
 			body := uploadAssetResultBody{Status: "uploaded", Path: result.Path}
 			if result.Asset != nil {
@@ -202,8 +206,8 @@ type uploadAssetForm struct {
 	File huma.FormFile `form:"file" contentType:"image/*" required:"true"`
 	// asset_type is declared here only so it shows up in the OpenAPI schema;
 	// the actual value is read from RawBody.Form.Value["asset_type"].
-	AssetType string `form:"asset_type" doc:"poster|backdrop|logo|… (defaults to poster)"`
-	Label     string `form:"label" doc:"Optional season/episode asset label"`
+	AssetType string `form:"asset_type" enum:"poster,backdrop,logo,art,banner,thumb,disc,clearart,still" doc:"Artwork slot (defaults to poster)"`
+	Label     string `form:"label" maxLength:"128" doc:"Optional season/episode asset label"`
 }
 
 type identifyBody struct {
@@ -257,7 +261,7 @@ type mediaFileInfo struct {
 func buildMediaFileInfo(f sqlc.LibraryFile) mediaFileInfo {
 	fi := mediaFileInfo{
 		ID:       f.ID,
-		Path:     f.Path,
+		Path:     secrettext.Redact(f.Path),
 		Filename: filepath.Base(f.Path),
 		Size:     f.Size,
 	}

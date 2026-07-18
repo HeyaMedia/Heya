@@ -3,10 +3,15 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/karbowiak/heya/internal/database/sqlc"
 )
 
 // Env vars that overlay the two UI-tunable sonic-analysis fields. When set,
@@ -92,8 +97,17 @@ const sonicSettingsKey = "sonicanalysis"
 // when no row exists. Env-sourced fields (HEYA_SONIC_ENABLED /
 // HEYA_SONIC_ACCELERATOR) overlay the DB blob — env wins.
 func (a *App) SonicAnalysisSettings(ctx context.Context) SonicAnalysisSettings {
-	s := a.sonicAnalysisSettingsFromDB(ctx)
+	return effectiveSonicAnalysisSettings(ctx, a.GetSystemSetting)
+}
 
+type sonicSettingGetter func(context.Context, string) (json.RawMessage, error)
+
+func effectiveSonicAnalysisSettings(ctx context.Context, get sonicSettingGetter) SonicAnalysisSettings {
+	s := sonicAnalysisSettingsFromGetter(ctx, get)
+	return overlaySonicAnalysisEnv(s)
+}
+
+func overlaySonicAnalysisEnv(s SonicAnalysisSettings) SonicAnalysisSettings {
 	if v, ok := sonicEnabledFromEnv(); ok {
 		s.Enabled = v
 	}
@@ -103,22 +117,66 @@ func (a *App) SonicAnalysisSettings(ctx context.Context) SonicAnalysisSettings {
 	return s
 }
 
-func (a *App) sonicAnalysisSettingsFromDB(ctx context.Context) SonicAnalysisSettings {
-	s := DefaultSonicAnalysisSettings()
-	raw, err := a.GetSystemSetting(ctx, sonicSettingsKey)
-	if err == nil {
-		var persisted SonicAnalysisSettings
-		if json.Unmarshal(raw, &persisted) == nil {
-			s = persisted
-			if s.Accelerator == "" {
-				s.Accelerator = DefaultSonicAnalysisSettings().Accelerator
-			}
-		}
+func effectiveSonicAnalysisSettingsStrict(ctx context.Context, get sonicSettingGetter) (SonicAnalysisSettings, error) {
+	s, err := readSonicAnalysisSettings(ctx, get)
+	if err != nil {
+		return SonicAnalysisSettings{}, err
 	}
+	return overlaySonicAnalysisEnv(s), nil
+}
+
+func effectiveSonicAnalysisSettingsFromDB(ctx context.Context, db *pgxpool.Pool) SonicAnalysisSettings {
+	q := sqlc.New(db)
+	return effectiveSonicAnalysisSettings(ctx, func(ctx context.Context, key string) (json.RawMessage, error) {
+		raw, err := q.GetSystemSetting(ctx, key)
+		return json.RawMessage(raw), err
+	})
+}
+
+func (a *App) sonicAnalysisSettingsFromDB(ctx context.Context) SonicAnalysisSettings {
+	return sonicAnalysisSettingsFromGetter(ctx, a.GetSystemSetting)
+}
+
+func sonicAnalysisSettingsFromGetter(ctx context.Context, get sonicSettingGetter) SonicAnalysisSettings {
+	s, _ := readSonicAnalysisSettings(ctx, get)
 	// Any DB error here (including the expected pgx.ErrNoRows on first boot)
 	// soft-falls back to defaults — we'd rather show a configurable form than
 	// crash the settings page.
 	return s
+}
+
+func readSonicAnalysisSettings(ctx context.Context, get sonicSettingGetter) (SonicAnalysisSettings, error) {
+	s := DefaultSonicAnalysisSettings()
+	if get == nil {
+		return s, nil
+	}
+	raw, err := get(ctx, sonicSettingsKey)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return s, nil
+	}
+	if err != nil {
+		return s, err
+	}
+	var persisted SonicAnalysisSettings
+	if err := json.Unmarshal(raw, &persisted); err != nil {
+		return s, fmt.Errorf("decode sonic-analysis settings: %w", err)
+	}
+	if persisted.Accelerator == "" {
+		persisted.Accelerator = s.Accelerator
+	}
+	if err := validateSonicAccelerator(persisted.Accelerator); err != nil {
+		return s, err
+	}
+	return persisted, nil
+}
+
+func validateSonicAccelerator(accelerator string) error {
+	switch accelerator {
+	case "auto", "cpu", "coreml", "cuda", "openvino", "directml":
+		return nil
+	default:
+		return fmt.Errorf("invalid accelerator %q", accelerator)
+	}
 }
 
 // SetSonicAnalysisSettings persists the new settings. When the
@@ -127,10 +185,8 @@ func (a *App) sonicAnalysisSettingsFromDB(ctx context.Context) SonicAnalysisSett
 // models are not re-loaded automatically — that would require
 // destroying a running batch.
 func (a *App) SetSonicAnalysisSettings(ctx context.Context, s SonicAnalysisSettings) error {
-	switch s.Accelerator {
-	case "auto", "cpu", "coreml", "cuda", "openvino", "directml":
-	default:
-		return fmt.Errorf("invalid accelerator %q", s.Accelerator)
+	if err := validateSonicAccelerator(s.Accelerator); err != nil {
+		return err
 	}
 	if v, ok := sonicEnabledFromEnv(); ok && v != s.Enabled {
 		return &ErrFieldLockedByEnv{Field: "sonic_analysis.enabled", EnvVar: sonicEnvEnabled}
@@ -163,10 +219,9 @@ func (a *App) SetSonicAnalysisSettings(ctx context.Context, s SonicAnalysisSetti
 	// (fetches take minutes) but bind to app lifetime so a graceful
 	// shutdown can still cancel an in-flight download.
 	if s.Enabled && !prev.Enabled && a.modelFetcher != nil {
-		fetchCtx := a.LifetimeContext()
-		go func() {
-			_ = a.modelFetcher.Run(fetchCtx)
-		}()
+		a.startBackground(func() {
+			_ = a.modelFetcher.Run(a.LifetimeContext())
+		})
 	}
 	return nil
 }

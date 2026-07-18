@@ -1,16 +1,13 @@
 package server
 
 import (
-	"io"
-	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
-	"time"
 
 	"github.com/karbowiak/heya/internal/imageserve"
+	"github.com/karbowiak/heya/internal/publichttp"
 	"github.com/karbowiak/heya/internal/service"
 )
 
@@ -63,32 +60,17 @@ func handleAlbumCover(app *service.App) http.HandlerFunc {
 	}
 }
 
-var remoteImageClient = &http.Client{Timeout: 15 * time.Second}
-
 // proxyRemoteImage streams an upstream image through the server so the
 // browser sees a same-origin response it can canvas-read. URL comes from
 // the DB (provider metadata), never from the request. A non-image or error
 // upstream just 404s — the consumer falls back gracefully.
-func proxyRemoteImage(w http.ResponseWriter, r *http.Request, url string) {
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, url, nil)
+func proxyRemoteImage(w http.ResponseWriter, r *http.Request, rawURL string) {
+	image, err := publichttp.FetchImage(r.Context(), rawURL)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	resp, err := remoteImageClient.Do(req)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	defer func() { _ = resp.Body.Close() }()
-	ct := resp.Header.Get("Content-Type")
-	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(ct, "image/") {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", ct)
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	_, _ = io.Copy(w, io.LimitReader(resp.Body, 32<<20))
+	publichttp.ServeImage(w, r, image, "public, max-age=3600")
 }
 
 // handlePlaylistCover serves a user playlist's custom cover file. Registered
@@ -117,13 +99,14 @@ func handlePlaylistCover(app *service.App) http.HandlerFunc {
 			return
 		}
 		defer func() { _ = f.Close() }()
-		stat, _ := f.Stat()
-
-		ct := mime.TypeByExtension(filepath.Ext(path))
-		if ct == "" {
-			ct = "application/octet-stream"
+		stat, statErr := f.Stat()
+		if statErr != nil || !stat.Mode().IsRegular() {
+			http.NotFound(w, r)
+			return
 		}
-		w.Header().Set("Content-Type", ct)
+
+		w.Header().Set("Content-Type", imageserve.ContentTypeForPath(path))
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "private, max-age=300")
 		http.ServeContent(w, r, filepath.Base(path), stat.ModTime(), f)
 	}

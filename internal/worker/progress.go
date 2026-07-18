@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/karbowiak/heya/internal/eventhub"
+	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/karbowiak/heya/internal/taskdefs"
 )
 
@@ -52,6 +53,10 @@ func (b *TaskProgressBroadcaster) Current(taskID string) (eventhub.TaskProgressP
 }
 
 func (b *TaskProgressBroadcaster) emit(p eventhub.TaskProgressPayload) {
+	// Progress is a presentation boundary. It can include paths copied from
+	// legacy database rows, so redact generic URL credentials before emitting.
+	p.CurrentItem = secrettext.Redact(p.CurrentItem)
+	p.CurrentStage = secrettext.Redact(p.CurrentStage)
 	b.mu.Lock()
 	b.current[p.TaskID] = p
 	b.mu.Unlock()

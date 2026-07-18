@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/signal"
 	"syscall"
 	"time"
@@ -17,14 +18,18 @@ var workerIdleInPassive bool
 
 var workerCmd = &cobra.Command{
 	Use:   "worker",
-	Short: "Run Heya's background queue and filesystem services",
+	Short: "Run Heya's singleton background coordinator",
 	Long: `Run the long-lived River worker runtime, filesystem watchers, scheduler,
 model/background maintenance, and orphan recovery without opening an HTTP port.
-Production deployments should run exactly one worker process alongside one or
-more "heya serve" API/ingress processes.`,
+Heya enforces exactly one coordinator per database with a session-level
+PostgreSQL advisory lease. Run it alongside "heya serve". Replicating the API
+role remains a separate deployment concern because playback sessions and
+user-targeted live events are currently process-local.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
+		workerCtx, cancelWorker := context.WithCancel(ctx)
+		defer cancelWorker()
 
 		if cfg.PassiveMode.Value {
 			if !workerIdleInPassive {
@@ -38,63 +43,110 @@ more "heya serve" API/ingress processes.`,
 			return err
 		}
 
-		app, err := service.NewWorker(ctx, cfg)
+		app, err := service.NewWorker(workerCtx, cfg)
 		if err != nil {
 			return err
 		}
 		defer app.Close()
 
+		// River treats cancellation of its Start context as an immediate job
+		// cancellation. Detach it from the signal context so the signal stops
+		// auxiliary loops first, then StopWorkers gets the full graceful window.
+		riverCtx, cancelRiver := newRiverStartContext(workerCtx)
+		defer cancelRiver()
+		leaseFailure := watchWorkerLease(
+			workerCtx,
+			app.CoordinatorLeaseLost(),
+			cancelWorker,
+			cancelRiver,
+		)
+
 		// This hub receives library lifecycle events from the API process. River
 		// workers publish through a separate Postgres-backed publisher configured
 		// by service.NewWorker, avoiding an event relay feedback loop.
-		app.EventHub().StartCrossProcessRelay(ctx, app.DBPool())
-		app.StartLibraryWatcherReconciler(ctx)
+		app.EventHub().StartCrossProcessRelay(workerCtx, app.DBPool())
+		app.StartLibraryWatcherReconciler(workerCtx)
 
 		taskTrigger := scheduler.NewTrigger(app.DBPool(), app.RiverClient())
 		app.SetScheduler(taskTrigger)
 
-		if n, rescueErr := app.RescueOrphanedJobsAtStartup(ctx); rescueErr != nil {
+		if n, rescueErr := app.RescueOrphanedJobsAtStartup(workerCtx); rescueErr != nil {
 			log.Warn().Err(rescueErr).Msg("startup orphan-rescue failed")
 		} else if n > 0 {
 			log.Info().Int64("rescued", n).Msg("released orphaned jobs from previous worker process")
 		}
 
-		if err := app.StartWorkers(ctx); err != nil {
+		if err := app.StartWorkers(riverCtx); err != nil {
 			return err
 		}
-		app.StartWorkerRuntimeHeartbeat(ctx)
-		app.StartSonicRuntimeHeartbeat(ctx)
+		app.StartWorkerRuntimeHeartbeat(workerCtx)
+		app.StartSonicRuntimeHeartbeat(workerCtx)
 		log.Info().Msg("dedicated River worker started")
 
-		// Watch discovery may be slow on a large or unavailable SMB mount. It is
+		// Watch discovery may be slow on a large or unavailable mounted share. It is
 		// independent from queue/scheduler startup and therefore never gates it.
-		go func() {
-			if err := app.StartWatchers(ctx); err != nil && ctx.Err() == nil {
-				log.Warn().Err(err).Msg("failed to start filesystem watchers")
-			}
-		}()
+		app.StartWatchersBackground(workerCtx)
 
-		taskTrigger.Start(ctx)
-		app.StartPlaylistSync()
-		app.StartSonicAnalysis(ctx)
-		app.StartRecommendationsML(ctx)
-		go func() {
-			if _, err := app.BackfillAbsoluteEpisodes(ctx); err != nil && ctx.Err() == nil {
-				log.Warn().Err(err).Msg("startup absolute-episode backfill failed")
-			}
-		}()
+		app.StartScheduler(workerCtx)
+		app.StartPlaylistSync(workerCtx)
+		app.StartSonicAnalysis(workerCtx)
+		app.StartRecommendationsML(workerCtx)
+		app.StartAbsoluteEpisodeBackfill(workerCtx)
 
-		<-ctx.Done()
+		shutdownErr := waitForWorkerShutdown(ctx, leaseFailure)
 		log.Info().Msg("shutting down dedicated worker")
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-		defer cancel()
-		if err := app.StopWorkers(shutdownCtx); err != nil {
-			log.Warn().Err(err).Msg("worker shutdown error")
+		if stopErr := stopRiverWorkers(app, cancelRiver); stopErr != nil {
+			log.Warn().Err(stopErr).Msg("worker shutdown error")
 		}
 		log.Info().Msg("dedicated worker stopped")
-		return nil
+		return shutdownErr
 	},
+}
+
+func watchWorkerLease(
+	workerCtx context.Context,
+	leaseLost <-chan error,
+	cancelWorker context.CancelFunc,
+	cancelRiver context.CancelFunc,
+) <-chan error {
+	failure := make(chan error, 1)
+	go func() {
+		select {
+		case <-workerCtx.Done():
+			return
+		case err := <-leaseLost:
+			if err == nil {
+				err = errors.New("coordinator lease monitor stopped unexpectedly")
+			}
+			// Fail closed: stop every auxiliary loop and hard-cancel River work
+			// as soon as PostgreSQL may admit a replacement coordinator.
+			cancelWorker()
+			cancelRiver()
+			failure <- fmt.Errorf("worker coordinator lease lost: %w", err)
+		}
+	}()
+	return failure
+}
+
+func waitForWorkerShutdown(signalCtx context.Context, leaseFailure <-chan error) error {
+	select {
+	case <-signalCtx.Done():
+		return nil
+	case err := <-leaseFailure:
+		return err
+	}
+}
+
+func newRiverStartContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithCancel(context.WithoutCancel(parent))
+}
+
+func stopRiverWorkers(app *service.App, cancelRiver context.CancelFunc) error {
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	defer cancelRiver()
+	return app.StopWorkers(shutdownCtx)
 }
 
 func init() {

@@ -54,7 +54,7 @@ func GenerateDynamicPlaylistWithQuery(sess *TranscodeSession, rawQuery string) s
 	var b strings.Builder
 	b.WriteString("#EXTM3U\n")
 	b.WriteString("#EXT-X-VERSION:6\n")
-	b.WriteString(fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", targetDuration))
+	fmt.Fprintf(&b, "#EXT-X-TARGETDURATION:%d\n", targetDuration)
 	b.WriteString("#EXT-X-MEDIA-SEQUENCE:0\n")
 	b.WriteString("#EXT-X-PLAYLIST-TYPE:VOD\n")
 	b.WriteString("#EXT-X-INDEPENDENT-SEGMENTS\n")
@@ -73,7 +73,7 @@ func GenerateDynamicPlaylistWithQuery(sess *TranscodeSession, rawQuery string) s
 		segFmt = "seg_%d" + sess.SegExt
 	}
 	for i := 0; i < n; i++ {
-		b.WriteString(fmt.Sprintf("#EXTINF:%.6f,\n", durs[i]))
+		fmt.Fprintf(&b, "#EXTINF:%.6f,\n", durs[i])
 		fmt.Fprintf(&b, segFmt+"%s\n", i, querySuffix)
 	}
 	b.WriteString("#EXT-X-ENDLIST\n")

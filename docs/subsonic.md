@@ -84,7 +84,8 @@ Everything lives in `internal/subsonic/` (see the package comment in
   `internal/service/subsonic_query.go` as raw-pgx service methods (no sqlc
   codegen, no collision with concurrent query work).
 - **Delivery**: `stream`/`download` serve the track's best file directly
-  (range-capable, SMB-aware) — raw bytes; `maxBitRate`/`format` are
+  (range-capable, including mounted network storage) — raw bytes;
+  `maxBitRate`/`format` are
   accepted and ignored. `getCoverArt` dispatches in-process to the native
   image pipeline (`/api/media/{id}/image/poster`, album cover endpoint) and
   resolves redirects server-side, mirroring the Jellyfin layer.

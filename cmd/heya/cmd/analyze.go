@@ -36,7 +36,7 @@ func modelsDir() string { return cfg.DataDir.Value + "/models" }
 // settings + DB-backed plumbing as the running server. Caller is
 // responsible for app.Close() (or the process exit cleans it up).
 func openApp(ctx context.Context) (*service.App, error) {
-	return service.New(ctx, cfg)
+	return service.NewCommand(ctx, cfg)
 }
 
 var analyzeStatusCmd = &cobra.Command{

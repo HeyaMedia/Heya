@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/radiobrowser"
@@ -97,8 +98,14 @@ func (a *App) RecordRadioPlay(ctx context.Context, userID int64, s *radiobrowser
 		Bitrate:     int32(s.Bitrate),
 	})
 	if err == nil {
-		// Notify the upstream — purely advisory, never block playback on it.
-		a.radioBrowser.PostClick(ctx, s.StationUUID)
+		// Notify the upstream without blocking playback, but keep the detached
+		// request App-owned so shutdown cancels and joins it before returning.
+		stationUUID := s.StationUUID
+		a.startBackground(func() {
+			clickCtx, cancel := context.WithTimeout(a.LifetimeContext(), 15*time.Second)
+			defer cancel()
+			a.radioBrowser.PostClick(clickCtx, stationUUID)
+		})
 	}
 	return err
 }

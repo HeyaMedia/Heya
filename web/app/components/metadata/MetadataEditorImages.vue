@@ -44,7 +44,7 @@
       <label class="btn btn-ghost-sm">
         <Icon name="plus" :size="14" />
         Upload Custom
-        <input type="file" accept="image/*" style="display:none" @change="uploadFile" />
+        <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" style="display:none" @change="uploadFile" />
       </label>
     </div>
 
@@ -357,6 +357,21 @@ async function uploadFile(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
+
+  const acceptedTypes = new Set(['image/jpeg', 'image/png', 'image/webp'])
+  // Some browsers leave File.type empty (notably for files selected from
+  // uncommon filesystem providers). The server validates the decoded bytes,
+  // so only reject MIME types when the browser actually supplied one.
+  if (file.type && !acceptedTypes.has(file.type)) {
+    toast.err('Choose a JPEG, PNG, or WebP image')
+    input.value = ''
+    return
+  }
+  if (file.size > 25 * 1024 * 1024) {
+    toast.err('Images must be 25 MiB or smaller')
+    input.value = ''
+    return
+  }
 
   const form = new FormData()
   form.append('file', file)

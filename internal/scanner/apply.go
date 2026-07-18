@@ -67,7 +67,7 @@ func ApplyMovieMaterialization(ctx context.Context, lib sqlc.Library, result Res
 	if err != nil {
 		return nil, fmt.Errorf("begin movie apply: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }() // No-op after Commit; rollback is best-effort cleanup on early returns.
 
 	q := sqlc.New(tx)
 	txMatcher := matcher.New(db, matcher.MatchOptions{}, nil, nil).WithTx(tx)
@@ -757,9 +757,10 @@ func emitMovieApplyResult(result MovieApplyResult, emit Emitter) {
 	}
 	event := "materialize.apply"
 	severity := SeverityInfo
-	if result.Action == "skipped" {
+	switch result.Action {
+	case "skipped":
 		event = "materialize.apply_skipped"
-	} else if result.Action == "failed" {
+	case "failed":
 		event = "materialize.apply_failed"
 		severity = SeverityWarn
 	}

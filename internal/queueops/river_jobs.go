@@ -15,7 +15,7 @@ import (
 const (
 	// JobTimeout is the per-job context deadline River applies to every
 	// Work(ctx) (wired into the river.Config in internal/worker). River's
-	// own default is 1 minute, which silently killed long jobs — SMB library
+	// own default is 1 minute, which silently killed long jobs — large library
 	// scans, the 30-minute sonic model fetch, transcode/loudness/disk-walk —
 	// with "context deadline exceeded". 6h is a generous ceiling no legitimate
 	// single job should reach.
@@ -574,7 +574,7 @@ func RescueOrphanedRunning(ctx context.Context, db DB) (int64, error) {
 func RescueStuckRunning(ctx context.Context, db DB) (rescued int64, retriesReset int64, err error) {
 	// Only sweep jobs past RescueStuckAfter — i.e. beyond their context
 	// deadline and therefore genuinely stuck. A shorter window would flip a
-	// live, slow-but-working job (e.g. a large SMB scan) back to 'available'
+	// live, slow-but-working job (e.g. a large network-mounted scan) back to 'available'
 	// and run it a second time.
 	stuckSecs := RescueStuckAfter.Seconds()
 	tag1, err := db.Exec(ctx, `

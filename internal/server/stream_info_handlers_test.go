@@ -7,18 +7,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/transcoder"
-	"github.com/karbowiak/heya/internal/worker"
 )
 
-func loadWorkerFixture(t *testing.T, name string) worker.MediaInfo {
+func loadMediaProbeFixture(t *testing.T, name string) mediaprobe.MediaInfo {
 	t.Helper()
 	path := filepath.Join("..", "..", "testdata", "ffprobe", name)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("loading fixture %s: %v", name, err)
 	}
-	info, err := worker.ParseFFProbeOutput(data)
+	info, err := mediaprobe.Parse(data)
 	if err != nil {
 		t.Fatalf("parsing fixture %s: %v", name, err)
 	}
@@ -26,7 +26,7 @@ func loadWorkerFixture(t *testing.T, name string) worker.MediaInfo {
 }
 
 func TestBuildStreamInfoResponse_Predator(t *testing.T) {
-	info := loadWorkerFixture(t, "movie_predator_1987.json")
+	info := loadMediaProbeFixture(t, "movie_predator_1987.json")
 	resp := buildStreamInfoResponse(info, transcoder.DefaultClientCaps, "/test/file.mkv", 1)
 
 	if resp.Container != "matroska,webm" {
@@ -69,7 +69,7 @@ func TestBuildStreamInfoResponse_Predator(t *testing.T) {
 }
 
 func TestBuildStreamInfoResponse_Horimiya(t *testing.T) {
-	info := loadWorkerFixture(t, "anime_horimiya_s01e03.json")
+	info := loadMediaProbeFixture(t, "anime_horimiya_s01e03.json")
 	resp := buildStreamInfoResponse(info, transcoder.DefaultClientCaps, "/test/file.mkv", 1)
 
 	if len(resp.Video) != 1 {
@@ -109,7 +109,7 @@ func TestBuildStreamInfoResponse_Horimiya(t *testing.T) {
 }
 
 func TestBuildStreamInfoResponse_Extant(t *testing.T) {
-	info := loadWorkerFixture(t, "tv_extant_s01e13.json")
+	info := loadMediaProbeFixture(t, "tv_extant_s01e13.json")
 	resp := buildStreamInfoResponse(info, transcoder.DefaultClientCaps, "/test/file.mkv", 1)
 
 	if len(resp.Video) != 1 || len(resp.Audio) != 1 || len(resp.Subtitle) != 1 {
@@ -121,7 +121,7 @@ func TestBuildStreamInfoResponse_Extant(t *testing.T) {
 }
 
 func TestBuildStreamInfoResponse_EmptyMediaInfo(t *testing.T) {
-	resp := buildStreamInfoResponse(worker.MediaInfo{}, transcoder.DefaultClientCaps, "/test/file.mkv", 1)
+	resp := buildStreamInfoResponse(mediaprobe.MediaInfo{}, transcoder.DefaultClientCaps, "/test/file.mkv", 1)
 
 	out, _ := json.Marshal(resp)
 	s := string(out)
@@ -154,7 +154,7 @@ func TestIsHDR(t *testing.T) {
 		{"", false},
 	}
 	for _, tt := range tests {
-		s := worker.StreamInfo{ColorTransfer: tt.transfer}
+		s := mediaprobe.StreamInfo{ColorTransfer: tt.transfer}
 		if got := isHDR(s); got != tt.want {
 			t.Errorf("isHDR(%q) = %v, want %v", tt.transfer, got, tt.want)
 		}
@@ -243,7 +243,7 @@ func TestNormalizeRotation(t *testing.T) {
 
 func TestDeriveSideDataFields(t *testing.T) {
 	t.Run("dovi profile 8 + display matrix", func(t *testing.T) {
-		side := []worker.SideData{
+		side := []mediaprobe.SideData{
 			{Type: "Display Matrix", Rotation: -90},
 			{Type: "DOVI configuration record", DvProfile: 8, DvBlSignalCompatibilityID: 1},
 		}
@@ -259,7 +259,7 @@ func TestDeriveSideDataFields(t *testing.T) {
 		}
 	})
 	t.Run("unknown side data type ignored", func(t *testing.T) {
-		side := []worker.SideData{
+		side := []mediaprobe.SideData{
 			{Type: "Mastering display metadata"},
 			{Type: "Content light level metadata"},
 		}
@@ -271,9 +271,9 @@ func TestDeriveSideDataFields(t *testing.T) {
 }
 
 func TestWorkerToTranscoderInfo_FullDerivation(t *testing.T) {
-	info := &worker.MediaInfo{
+	info := &mediaprobe.MediaInfo{
 		Container: "mp4",
-		Streams: []worker.StreamInfo{
+		Streams: []mediaprobe.StreamInfo{
 			{
 				CodecName:         "hevc",
 				CodecType:         "video",
@@ -282,7 +282,7 @@ func TestWorkerToTranscoderInfo_FullDerivation(t *testing.T) {
 				PixFmt:            "yuv420p10le",
 				SampleAspectRatio: "32:27",
 				FieldOrder:        "tt",
-				SideDataList: []worker.SideData{
+				SideDataList: []mediaprobe.SideData{
 					{Type: "Display Matrix", Rotation: -90},
 					{Type: "DOVI configuration record", DvProfile: 8, DvBlSignalCompatibilityID: 1},
 				},
@@ -291,7 +291,7 @@ func TestWorkerToTranscoderInfo_FullDerivation(t *testing.T) {
 		},
 	}
 	t.Helper()
-	out := workerToTranscoderInfo(info)
+	out := mediaProbeToTranscoderInfo(info)
 	if len(out.Streams) != 2 {
 		t.Fatalf("expected 2 streams, got %d", len(out.Streams))
 	}

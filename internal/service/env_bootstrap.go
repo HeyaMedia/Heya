@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/secrettext"
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/rs/zerolog/log"
 )
 
@@ -47,8 +49,15 @@ var libEnvRegex = regexp.MustCompile(`^HEYA_LIBRARY_(\d+)_NAME$`)
 // returns one EnvLibrary per matched index, with sibling _PATHS and _TYPE
 // fields resolved. Indices may be sparse — the result is sorted by index.
 func scanEnvLibraries() ([]EnvLibrary, error) {
+	return scanEnvLibrariesFrom(os.Environ(), os.Getenv)
+}
+
+// scanEnvLibrariesFrom keeps environment parsing deterministic and directly
+// testable while scanEnvLibraries remains the small process-environment
+// adapter used at boot.
+func scanEnvLibrariesFrom(environ []string, getenv func(string) string) ([]EnvLibrary, error) {
 	indices := map[int]bool{}
-	for _, kv := range os.Environ() {
+	for _, kv := range environ {
 		k := kv
 		if eq := strings.IndexByte(kv, '='); eq >= 0 {
 			k = kv[:eq]
@@ -69,19 +78,25 @@ func scanEnvLibraries() ([]EnvLibrary, error) {
 
 	out := make([]EnvLibrary, 0, len(sorted))
 	for _, n := range sorted {
-		name := strings.TrimSpace(os.Getenv(fmt.Sprintf("HEYA_LIBRARY_%d_NAME", n)))
-		pathsRaw := strings.TrimSpace(os.Getenv(fmt.Sprintf("HEYA_LIBRARY_%d_PATHS", n)))
-		typeRaw := strings.TrimSpace(os.Getenv(fmt.Sprintf("HEYA_LIBRARY_%d_TYPE", n)))
+		name := strings.TrimSpace(getenv(fmt.Sprintf("HEYA_LIBRARY_%d_NAME", n)))
+		pathsRaw := strings.TrimSpace(getenv(fmt.Sprintf("HEYA_LIBRARY_%d_PATHS", n)))
+		typeRaw := strings.TrimSpace(getenv(fmt.Sprintf("HEYA_LIBRARY_%d_TYPE", n)))
 
 		if name == "" || pathsRaw == "" || typeRaw == "" {
-			return nil, fmt.Errorf("HEYA_LIBRARY_%d_* is incomplete (NAME=%q PATHS=%q TYPE=%q — all three are required)", n, name, pathsRaw, typeRaw)
+			return nil, fmt.Errorf("HEYA_LIBRARY_%d_* is incomplete (NAME=%q PATHS=%q TYPE=%q — all three are required)", n, name, secrettext.Redact(pathsRaw), typeRaw)
 		}
 
 		paths := []string{}
 		for _, p := range strings.Split(pathsRaw, ",") {
 			if p = strings.TrimSpace(p); p != "" {
+				if err := vfs.ValidateLocalPath(p); err != nil {
+					return nil, fmt.Errorf("HEYA_LIBRARY_%d_PATHS contains %q: %w", n, vfs.RedactPath(p), err)
+				}
 				paths = append(paths, p)
 			}
+		}
+		if len(paths) == 0 {
+			return nil, fmt.Errorf("HEYA_LIBRARY_%d_PATHS must contain at least one filesystem path", n)
 		}
 
 		mt, err := ParseMediaType(typeRaw)
@@ -140,13 +155,16 @@ func (a *App) BootstrapLibrariesFromEnv(ctx context.Context) error {
 	}
 
 	for _, env := range envLibs {
+		if err := validateLibraryPaths(env.Paths); err != nil {
+			return fmt.Errorf("HEYA_LIBRARY_%d_PATHS: %w", env.Index, err)
+		}
 		existing, err := q.GetLibraryByName(ctx, env.Name)
 		if err != nil {
 			lib, cerr := a.CreateLibrary(ctx, env.Name, env.MediaType, env.Paths, creatorID, nil)
 			if cerr != nil {
 				return fmt.Errorf("create env library %q: %w", env.Name, cerr)
 			}
-			log.Info().Int64("library_id", lib.ID).Str("name", env.Name).Strs("paths", env.Paths).Msg("env library created from HEYA_LIBRARY_* vars")
+			log.Info().Int64("library_id", lib.ID).Str("name", env.Name).Strs("paths", secrettext.RedactStrings(env.Paths)).Msg("env library created from HEYA_LIBRARY_* vars")
 			a.recordEnvLibrary(lib.ID, env)
 			continue
 		}

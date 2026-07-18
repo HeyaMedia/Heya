@@ -154,7 +154,7 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 			m.markFile(ctx, f.ID, sqlc.FileStatusUnmatched, "empty release directory (no audio tracks)", 0)
 			unmatched++
 		}
-		log.Debug().Str("dir", releaseDir).Int("files", len(files)).Msg("skipping music release group with no tracks")
+		log.Debug().Str("dir", vfs.RedactPath(releaseDir)).Int("files", len(files)).Msg("skipping music release group with no tracks")
 		return 0, unmatched, 0, 0
 	}
 
@@ -531,7 +531,7 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 			Duration:    int32(duration),
 		})
 		if err != nil {
-			log.Warn().Err(err).Str("track", trackFile.Path).Msg("get-or-create track failed")
+			log.Warn().Err(vfs.RedactError(err)).Str("track", vfs.RedactPath(trackFile.Path)).Msg("get-or-create track failed")
 			m.markFile(ctx, trackFile.ID, sqlc.FileStatusError, err.Error(), 0)
 			errored++
 			continue
@@ -575,7 +575,7 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 			SizeBytes:     trackFile.Size,
 		})
 		if err != nil {
-			log.Warn().Err(err).Str("file", vfs.RedactPath(trackFile.Path)).Msg("upsert track_file failed")
+			log.Warn().Err(vfs.RedactError(err)).Str("file", vfs.RedactPath(trackFile.Path)).Msg("upsert track_file failed")
 			m.markFile(ctx, trackFile.ID, sqlc.FileStatusError, err.Error(), 0)
 			errored++
 			continue
@@ -583,10 +583,10 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 		if probe != nil {
 			if err := m.q.UpdateTrackFileProbeData(ctx, sqlc.UpdateTrackFileProbeDataParams{
 				ID:           insertedTrackFile.ID,
-				BitrateKbps:  int32(probe.BitrateKbps),
-				SampleRateHz: int32(probe.SampleRateHz),
-				BitDepth:     int32(probe.BitDepth),
-				Channels:     int32(probe.Channels),
+				BitrateKbps:  probe.BitrateKbps,
+				SampleRateHz: probe.SampleRateHz,
+				BitDepth:     probe.BitDepth,
+				Channels:     probe.Channels,
 				Duration:     probe.Duration,
 				QualityScore: int32(score),
 			}); err != nil {
@@ -1287,7 +1287,7 @@ func audioFieldsFromInfo(info *mediaprobe.MediaInfo) *mediaprobe.AudioFields {
 // re-probe. Returns nil when no prober is wired (tests) or the probe fails;
 // callers then fall back to path/NFO only, exactly as before tag fusion.
 // musicProbeTimeout bounds a single on-demand probe during matching, mirroring
-// the bounds the other worker.ProbeFile callers use.
+// the bounds the other mediaprobe callers use.
 const musicProbeTimeout = 90 * time.Second
 
 func (m *Matcher) musicFileProbe(ctx context.Context, file sqlc.LibraryFile) *mediaprobe.MediaInfo {
@@ -1299,14 +1299,14 @@ func (m *Matcher) musicFileProbe(ctx context.Context, file sqlc.LibraryFile) *me
 	}
 	// Bound every on-demand probe like the other ProbeFile call sites do
 	// (FFProbeWorker 120s, EnsureFileProbed 60s). Without this the raw match-job
-	// context (River JobTimeout is 6h) would let a stalled SMB read hang ffprobe
+	// context (River JobTimeout is 6h) would let a stalled filesystem read hang ffprobe
 	// on its pipe and wedge the single-worker match queue — which serves every
 	// media type — for hours.
 	probeCtx, cancel := context.WithTimeout(ctx, musicProbeTimeout)
 	defer cancel()
 	info, err := m.probe(probeCtx, file.Path)
 	if err != nil {
-		log.Debug().Err(err).Str("path", vfs.RedactPath(file.Path)).Msg("on-demand music probe failed; using path/NFO only")
+		log.Debug().Err(vfs.RedactError(err)).Str("path", vfs.RedactPath(file.Path)).Msg("on-demand music probe failed; using path/NFO only")
 		return nil
 	}
 	if infoJSON, mErr := json.Marshal(info); mErr == nil && file.ID > 0 {

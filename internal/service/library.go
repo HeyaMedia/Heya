@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -29,6 +30,8 @@ var validMediaTypes = map[string]sqlc.MediaType{
 	"radio":   sqlc.MediaTypeRadio,
 }
 
+var libraryWatcherReconcileInterval = time.Minute
+
 func ParseMediaType(s string) (sqlc.MediaType, error) {
 	mt, ok := validMediaTypes[s]
 	if !ok {
@@ -38,17 +41,8 @@ func ParseMediaType(s string) (sqlc.MediaType, error) {
 }
 
 func (a *App) CreateLibrary(ctx context.Context, name string, mediaType sqlc.MediaType, paths []string, userID int64, settings *metadata.LibrarySettings) (sqlc.Library, error) {
-	for _, p := range paths {
-		if vfs.IsSMBPath(p) {
-			continue
-		}
-		info, err := os.Stat(p)
-		if err != nil {
-			return sqlc.Library{}, fmt.Errorf("path %q: %w", p, err)
-		}
-		if !info.IsDir() {
-			return sqlc.Library{}, fmt.Errorf("path %q is not a directory", p)
-		}
+	if err := validateLibraryPaths(paths); err != nil {
+		return sqlc.Library{}, err
 	}
 
 	var settingsJSON []byte
@@ -86,17 +80,8 @@ func (a *App) GetLibrary(ctx context.Context, id int64) (sqlc.Library, error) {
 }
 
 func (a *App) UpdateLibrary(ctx context.Context, id int64, name string, paths []string) (sqlc.Library, error) {
-	for _, p := range paths {
-		if vfs.IsSMBPath(p) {
-			continue
-		}
-		info, err := os.Stat(p)
-		if err != nil {
-			return sqlc.Library{}, fmt.Errorf("path %q: %w", p, err)
-		}
-		if !info.IsDir() {
-			return sqlc.Library{}, fmt.Errorf("path %q is not a directory", p)
-		}
+	if err := validateLibraryPaths(paths); err != nil {
+		return sqlc.Library{}, err
 	}
 
 	q := sqlc.New(a.db)
@@ -111,6 +96,48 @@ func (a *App) UpdateLibrary(ctx context.Context, id int64, name string, paths []
 	}
 	a.notifyLibraryChanged(ctx, lib)
 	return lib, nil
+}
+
+func validateLibraryPaths(paths []string) error {
+	if len(paths) == 0 {
+		return errors.New("at least one filesystem path is required")
+	}
+	for _, p := range paths {
+		if err := vfs.ValidateLocalPath(p); err != nil {
+			return fmt.Errorf("path %q: %w", vfs.RedactPath(p), err)
+		}
+		info, err := os.Stat(p)
+		if err != nil {
+			return fmt.Errorf("path %q: %w", vfs.RedactPath(p), err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("path %q is not a directory", vfs.RedactPath(p))
+		}
+	}
+	return nil
+}
+
+// ReportUnsupportedLibraryPaths makes legacy database rows visible at boot
+// without preventing the API from starting—the admin still needs access to
+// edit those rows. Actual filesystem entry points reject the same paths, so a
+// legacy URL can never fall through to os.Stat as a misleading local name.
+func (a *App) ReportUnsupportedLibraryPaths(ctx context.Context) {
+	libs, err := a.ListLibraries(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("check configured library paths failed")
+		return
+	}
+	for _, lib := range libs {
+		for _, path := range lib.Paths {
+			if err := vfs.ValidateLocalPath(path); err != nil {
+				log.Error().Err(err).
+					Int64("library_id", lib.ID).
+					Str("library", lib.Name).
+					Str("path", vfs.RedactPath(path)).
+					Msg("library path requires migration before it can be scanned or played")
+			}
+		}
+	}
 }
 
 func (a *App) UpdateLibrarySettings(ctx context.Context, id int64, settings metadata.LibrarySettings) (sqlc.Library, error) {
@@ -178,19 +205,31 @@ func (a *App) DeleteLibrary(ctx context.Context, id int64) error {
 
 // StartLibraryWatcherReconciler keeps the dedicated worker process's
 // filesystem watchers aligned with library mutations performed by the API or
-// a CLI process. Events arrive through Postgres LISTEN/NOTIFY; changes reload
-// the row and call SyncLibrary, while deletions tear the watcher down.
+// a CLI process. Postgres LISTEN/NOTIFY is the low-latency path; a periodic DB
+// reconciliation repairs notifications lost during listener reconnects.
 func (a *App) StartLibraryWatcherReconciler(ctx context.Context) {
 	if a.hub == nil || a.watcher == nil {
 		return
 	}
-	ch := a.hub.Subscribe()
-	go func() {
+	a.startBackground(func() {
+		workCtx, cancel := a.backgroundContext(ctx)
+		defer cancel()
+		ticker := time.NewTicker(libraryWatcherReconcileInterval)
+		defer ticker.Stop()
+		ch := a.hub.Subscribe()
 		defer a.hub.Unsubscribe(ch)
+		reconcile := func() {
+			if err := a.watcher.Reconcile(workCtx); err != nil && workCtx.Err() == nil {
+				log.Warn().Err(err).Msg("periodic library watcher reconciliation failed")
+			}
+		}
+		reconcile()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-workCtx.Done():
 				return
+			case <-ticker.C:
+				reconcile()
 			case ev, ok := <-ch:
 				if !ok {
 					return
@@ -203,16 +242,16 @@ func (a *App) StartLibraryWatcherReconciler(ctx context.Context) {
 				case eventhub.EventLibraryDeleted:
 					a.watcher.Unwatch(id)
 				case eventhub.EventLibraryChanged:
-					lib, err := a.GetLibrary(ctx, id)
+					lib, err := a.GetLibrary(workCtx, id)
 					if err != nil {
 						log.Warn().Err(err).Int64("library_id", id).Msg("reload changed library for watcher failed")
 						continue
 					}
-					a.watcher.SyncLibrary(ctx, lib)
+					a.watcher.SyncLibrary(workCtx, lib)
 				}
 			}
 		}
-	}()
+	})
 }
 
 // libraryIDFromEventPayload pulls library_id out of a hub event. Events that

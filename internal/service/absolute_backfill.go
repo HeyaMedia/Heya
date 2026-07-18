@@ -48,3 +48,16 @@ func (a *App) BackfillAbsoluteEpisodes(ctx context.Context) (int, error) {
 	}
 	return total, nil
 }
+
+// StartAbsoluteEpisodeBackfill runs startup reconciliation without delaying
+// the worker queue. It is admitted through the App lifecycle so shutdown waits
+// for the cancellation-aware backfill before closing the database.
+func (a *App) StartAbsoluteEpisodeBackfill(ctx context.Context) {
+	a.startBackground(func() {
+		workCtx, cancel := a.backgroundContext(ctx)
+		defer cancel()
+		if _, err := a.BackfillAbsoluteEpisodes(workCtx); err != nil && workCtx.Err() == nil {
+			log.Warn().Err(err).Msg("startup absolute-episode backfill failed")
+		}
+	})
+}

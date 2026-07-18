@@ -22,6 +22,9 @@ const (
 // subsystem needs kicking — the jellyfin middleware checks the snapshot on
 // every request, so the flip is live immediately.
 func (a *App) SaveJellyfinSettings(ctx context.Context, enabled bool) error {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+
 	cur := a.config.Jellyfin
 
 	if err := errIfEnvLockedChanged(jfKeyEnabled, cur.Enabled, enabled); err != nil {
@@ -30,7 +33,7 @@ func (a *App) SaveJellyfinSettings(ctx context.Context, enabled bool) error {
 	if err := persistFieldSetting(a, ctx, jfKeyEnabled, cur.Enabled, enabled); err != nil {
 		return err
 	}
-	a.UpdateJellyfinConfig(enabled)
+	a.updateJellyfinConfigLocked(enabled)
 	return nil
 }
 
@@ -39,13 +42,22 @@ func (a *App) SaveJellyfinSettings(ctx context.Context, enabled bool) error {
 // fields retain their env provenance; only default-sourced fields get the
 // DB overlay. Safe to call with no DB rows present.
 func (a *App) LoadJellyfinFromDB(ctx context.Context) {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+
 	overlayFieldFromDB(a, ctx, &a.config.Jellyfin.Enabled, jfKeyEnabled, nil)
 }
 
-// UpdateJellyfinConfig overlays the in-memory jellyfin snapshot after a
-// settings update, preserving env provenance (the caller refuses env-locked
-// writes before getting here).
+// UpdateJellyfinConfig overlays the in-memory jellyfin snapshot for callers
+// that manage persistence separately. SaveJellyfinSettings uses the same
+// locked primitive. Env-sourced fields retain their provenance.
 func (a *App) UpdateJellyfinConfig(enabled bool) {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+	a.updateJellyfinConfigLocked(enabled)
+}
+
+func (a *App) updateJellyfinConfigLocked(enabled bool) {
 	if a.config.Jellyfin.Enabled.Source != config.SourceEnv {
 		a.config.Jellyfin.Enabled = config.Field[bool]{Value: enabled, Source: config.SourceDB}
 	}
@@ -53,7 +65,10 @@ func (a *App) UpdateJellyfinConfig(enabled bool) {
 
 // JellyfinEnabled is the per-request gate the jellyfin middleware consults.
 func (a *App) JellyfinEnabled() bool {
-	return a.config.Jellyfin.Enabled.Value
+	a.configMu.RLock()
+	enabled := a.config.Jellyfin.Enabled.Value
+	a.configMu.RUnlock()
+	return enabled
 }
 
 // Process-lifetime cache for the persisted server id. Package-level (not an

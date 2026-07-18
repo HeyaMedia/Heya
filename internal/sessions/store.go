@@ -86,21 +86,45 @@ type Session struct {
 // Store is the concurrent map of active sessions. Use New to create one
 // with the background purge goroutine running.
 type Store struct {
-	mu   sync.RWMutex
-	hub  *eventhub.Hub
-	data map[string]*Session
+	mu        sync.RWMutex
+	hub       *eventhub.Hub
+	data      map[string]*Session
+	cancel    context.CancelFunc
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 // New constructs a Store and kicks off a background purge goroutine that
 // removes expired sessions every 10 seconds. The goroutine exits when
 // ctx is cancelled — pass the app's lifetime context here.
 func New(ctx context.Context, hub *eventhub.Hub) *Store {
-	s := &Store{
-		hub:  hub,
-		data: make(map[string]*Session),
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	go s.purgeLoop(ctx)
+	runCtx, cancel := context.WithCancel(ctx)
+	s := &Store{
+		hub:    hub,
+		data:   make(map[string]*Session),
+		cancel: cancel,
+		done:   make(chan struct{}),
+	}
+	go func() {
+		defer close(s.done)
+		s.purgeLoop(runCtx)
+	}()
 	return s
+}
+
+// Close cancels and joins the expiry loop before its Hub owner is released.
+// It is safe to call more than once.
+func (s *Store) Close() {
+	if s == nil {
+		return
+	}
+	s.closeOnce.Do(func() {
+		s.cancel()
+		<-s.done
+	})
 }
 
 // Upsert applies an incoming heartbeat. New sessions get StartedAt set;

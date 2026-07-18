@@ -54,7 +54,7 @@ func (w *RatingsFetchWorker) Work(ctx context.Context, job *river.Job[RatingsFet
 
 	totalStored := 0
 	for _, r := range data.Ratings {
-		q.UpsertExternalRating(ctx, sqlc.UpsertExternalRatingParams{
+		if _, err := q.UpsertExternalRating(ctx, sqlc.UpsertExternalRatingParams{
 			MediaItemID: job.Args.MediaItemID,
 			Source:      r.Source,
 			Value:       r.Value,
@@ -65,7 +65,10 @@ func (w *RatingsFetchWorker) Work(ctx context.Context, job *river.Job[RatingsFet
 			},
 			Votes:    int32(r.Votes),
 			RawValue: r.RawValue,
-		})
+		}); err != nil {
+			log.Warn().Err(err).Int64("media_id", job.Args.MediaItemID).Str("source", r.Source).Msg("store external rating failed")
+			continue
+		}
 		totalStored++
 	}
 

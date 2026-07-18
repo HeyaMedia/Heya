@@ -2,6 +2,7 @@ package trickplay
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/rs/zerolog/log"
 )
 
@@ -17,6 +19,9 @@ func init() {
 }
 
 func ExtractThumbnail(ctx context.Context, filePath string, durationMs int32, outPath string) error {
+	if err := vfs.ValidateLocalPath(filePath); err != nil {
+		return fmt.Errorf("thumbnail input: %w", err)
+	}
 	seekPcts := []float64{0.10, 0.20, 0.30}
 	for _, pct := range seekPcts {
 		seekTime := 5.0
@@ -25,29 +30,29 @@ func ExtractThumbnail(ctx context.Context, filePath string, durationMs int32, ou
 		}
 
 		if err := extractFrame(ctx, filePath, seekTime, outPath); err != nil {
-			log.Warn().Err(err).Str("file", filePath).Float64("seek", seekTime).Msg("frame extraction failed")
+			log.Warn().Err(vfs.RedactError(err)).Str("file", vfs.RedactPath(filePath)).Float64("seek", seekTime).Msg("frame extraction failed")
 			continue
 		}
 
 		if isBlackFrame(outPath) {
-			os.Remove(outPath)
+			if err := os.Remove(outPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("remove unusable frame: %w", vfs.RedactError(err))
+			}
 			continue
 		}
 
 		return nil
 	}
 
-	if _, err := os.Stat(outPath); err != nil {
-		return fmt.Errorf("no usable frame extracted")
-	}
-	return nil
+	return fmt.Errorf("no usable frame extracted")
 }
 
 func extractFrame(ctx context.Context, input string, seekTime float64, output string) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "ffmpeg",
+	// ffmpeg is fixed and every path is passed as a distinct, non-shell argument.
+	cmd := exec.CommandContext(ctx, "ffmpeg", //nolint:gosec
 		"-nostats", "-loglevel", "warning",
 		"-ss", fmt.Sprintf("%.3f", seekTime),
 		"-i", input,
@@ -60,14 +65,15 @@ func extractFrame(ctx context.Context, input string, seekTime float64, output st
 }
 
 func isBlackFrame(path string) bool {
-	f, err := os.Open(path)
+	// path is the thumbnail destination supplied to ExtractThumbnail.
+	f, err := os.Open(path) //nolint:gosec
 	if err != nil {
 		return true
 	}
-	defer f.Close()
 
-	img, err := jpeg.Decode(f)
-	if err != nil {
+	img, decodeErr := jpeg.Decode(f)
+	closeErr := f.Close()
+	if decodeErr != nil || closeErr != nil {
 		return true
 	}
 

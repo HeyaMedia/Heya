@@ -40,6 +40,8 @@ export function useTranscodeStatus(
   fileId: Ref<string | number | null | undefined>,
   enabled: Ref<boolean>,
   token: Ref<string | null | undefined>,
+  sessionId: () => string,
+  audioTrack: Ref<number>,
   intervalMs = 1500,
 ) {
   const status = ref<TranscodeStatus | null>(null)
@@ -50,7 +52,9 @@ export function useTranscodeStatus(
     const id = fileId.value
     if (!id || !token.value) return
     try {
-      const url = `/api/stream/${id}/transcode-status`
+      const query = new URLSearchParams({ sid: sessionId() })
+      if (audioTrack.value > 0) query.set('audio', String(audioTrack.value))
+      const url = `/api/stream/${id}/transcode-status?${query}`
       const res = await fetch(url, {
         headers: withClientSurfaceHeaders(url, { Authorization: `Bearer ${token.value}` }),
       })
@@ -75,7 +79,7 @@ export function useTranscodeStatus(
     if (timer) { clearInterval(timer); timer = null }
   }
 
-  watch([enabled, fileId, token], ([on, id, tok]) => {
+  watch([enabled, fileId, token, audioTrack], ([on, id, tok]) => {
     if (on && id && tok) start()
     else stop()
   }, { immediate: true })

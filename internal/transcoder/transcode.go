@@ -3,19 +3,20 @@ package transcoder
 import (
 	"context"
 	"fmt"
-	"io"
 	"math"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/karbowiak/heya/internal/vfs"
 )
 
 // PlannedSegmentTimes is a FALLBACK predictor used only when the accurate
 // RealSegmentBoundaries probe (session.go's computeCopyVideoSegmentEnds)
-// isn't available — e.g. an SMB source, or the probe process failing/timing
-// out. It approximates where ffmpeg would cut a copy-video stream from a
+// isn't available — for example, when the probe process fails or times out.
+// It approximates where ffmpeg would cut a copy-video stream from a
 // cached keyframe list, but its min-gap heuristic does NOT reproduce
 // ffmpeg's real internal split decision (see RealSegmentBoundaries' doc for
 // the drift this caused when it was the only predictor). Prefer the real
@@ -103,9 +104,12 @@ type TranscodeOpts struct {
 func TranscodeToHLSWithOpts(ctx context.Context, opts TranscodeOpts) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
+	if err := vfs.ValidateLocalPath(opts.Input); err != nil {
+		return fmt.Errorf("transcode input: %w", err)
+	}
 
 	args := buildTranscodeArgs(opts)
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	cmd := ffmpegCommandContext(ctx, args...)
 	return cmd.Run()
 }
 
@@ -482,28 +486,34 @@ func TranscodeToHLS(ctx context.Context, input, outputDir string, profile Profil
 func ExtractSubtitlesAs(ctx context.Context, input string, streamIndex int, output string, codec string) error {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
+	if err := vfs.ValidateLocalPath(input); err != nil {
+		return fmt.Errorf("subtitle input: %w", err)
+	}
+	muxer := subtitleOutputMuxer(output, codec)
 
-	cmd := exec.CommandContext(ctx, "ffmpeg",
-		"-nostats", "-loglevel", "warning",
-		"-i", input,
-		"-map", fmt.Sprintf("0:%d", streamIndex),
-		"-c:s", codec,
-		output,
-	)
-	return cmd.Run()
+	return produceAtomicOutput(output, func(tmp string) error {
+		cmd := ffmpegCommandContext(ctx,
+			"-nostdin", "-nostats", "-loglevel", "warning",
+			"-y",
+			"-i", input,
+			"-map", fmt.Sprintf("0:%d", streamIndex),
+			"-c:s", codec,
+			"-f", muxer,
+			tmp,
+		)
+		return cmd.Run()
+	})
 }
 
-func ExtractSubtitlesFromReaderAs(ctx context.Context, reader io.Reader, streamIndex int, output string, codec string) error {
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "ffmpeg",
-		"-nostats", "-loglevel", "warning",
-		"-i", "pipe:0",
-		"-map", fmt.Sprintf("0:%d", streamIndex),
-		"-c:s", codec,
-		output,
-	)
-	cmd.Stdin = reader
-	return cmd.Run()
+func subtitleOutputMuxer(output, codec string) string {
+	switch strings.ToLower(filepath.Ext(output)) {
+	case ".vtt":
+		return "webvtt"
+	case ".ass", ".ssa":
+		return "ass"
+	case ".srt":
+		return "srt"
+	default:
+		return codec
+	}
 }

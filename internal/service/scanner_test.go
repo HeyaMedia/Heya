@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/karbowiak/heya/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -64,7 +65,7 @@ func TestScannerReviewViewBucketsAndActions(t *testing.T) {
 		ProviderID:      "heya:broken",
 		Status:          "apply_error",
 		SearchScanRunID: pgInt8ForTest(run.ID),
-		ErrorMessage:    "insert album: duplicate key",
+		ErrorMessage:    "open https://reader:super-secret@storage.test/share: duplicate key",
 		Data:            []byte(`{}`),
 	})
 	require.NoError(t, err)
@@ -130,24 +131,26 @@ func TestScannerReviewViewBucketsAndActions(t *testing.T) {
 	}, scannerBucketsByID(view.Identities))
 	require.Len(t, view.Candidates, 2)
 	require.Len(t, view.OpenFindings, 1)
+	redactedPipelineError := secrettext.Redact(pipelineFailure.ErrorMessage)
+	require.NotContains(t, redactedPipelineError, "super-secret")
 	require.Equal(t, []ScannerPipelineFailureView{{
 		ID:           pipelineFailure.ID,
 		IdentityKey:  pipelineFailure.IdentityKey,
 		Title:        pipelineFailure.Title,
 		Status:       pipelineFailure.Status,
 		Stage:        "metadata apply",
-		ErrorMessage: pipelineFailure.ErrorMessage,
+		ErrorMessage: redactedPipelineError,
 		UpdatedAt:    timePtr(pipelineFailure.UpdatedAt),
 	}}, view.PipelineFailures)
 	require.NotNil(t, view.LatestRun)
 	require.Equal(t, 1, view.LatestRun.PipelineFailureCount)
-	require.Equal(t, pipelineFailure.ErrorMessage, view.LatestRun.PipelineErrorMessage)
+	require.Equal(t, redactedPipelineError, view.LatestRun.PipelineErrorMessage)
 
 	runs, err := app.ListLibraryScannerRuns(ctx, lib.ID, 10, 0)
 	require.NoError(t, err)
 	require.NotEmpty(t, runs)
 	require.Equal(t, 1, runs[0].PipelineFailureCount)
-	require.Equal(t, pipelineFailure.ErrorMessage, runs[0].PipelineErrorMessage)
+	require.Equal(t, redactedPipelineError, runs[0].PipelineErrorMessage)
 
 	approved, err := app.ApproveScannerCandidate(ctx, lib.ID, review.ID, candidate.ID)
 	require.NoError(t, err)

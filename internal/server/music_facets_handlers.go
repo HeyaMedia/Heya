@@ -12,7 +12,7 @@ import (
 // collectSonicAnalysisStatus snapshots the model fetcher + analyzer lifecycle
 // for the admin UI ("downloading models", "ready", "analyzing N tracks", etc.).
 // Invoked by the Huma operation registered in admin_huma.go.
-func collectSonicAnalysisStatus(app *service.App) map[string]any {
+func collectSonicAnalysisStatus(ctx context.Context, app *service.App) map[string]any {
 	out := map[string]any{
 		"accelerators":     sonicanalysis.AvailableAccelerators(),
 		"analyzer_version": sonicanalysis.AnalyzerVersion,
@@ -53,7 +53,6 @@ func collectSonicAnalysisStatus(app *service.App) map[string]any {
 	// Holder — otherwise the panel reports "cold" forever while the
 	// worker's GPU is busy. Fall back to local state when the worker is
 	// offline or the snapshot is stale.
-	ctx := context.Background()
 	now := time.Now()
 	var holderSt *sonicanalysis.Status
 	holderSource := "local"

@@ -45,7 +45,9 @@ func ParseSettings(data []byte) LibrarySettings {
 		return LibrarySettings{UseLocalData: true}
 	}
 	var s LibrarySettings
-	json.Unmarshal(data, &s)
+	if err := json.Unmarshal(data, &s); err != nil {
+		return LibrarySettings{UseLocalData: true}
+	}
 	return s
 }
 

@@ -95,6 +95,18 @@ func (a *App) UpdateWatchProgress(ctx context.Context, userID int64, entityType 
 	// avoids float rounding; total is seconds so total*9 can't overflow int32.
 	completed := total > 0 && progress >= total*9/10
 
+	q := sqlc.New(a.db)
+	row, err := q.UpsertWatchProgress(ctx, sqlc.UpsertWatchProgressParams{
+		UserID:          userID,
+		EntityType:      entityType,
+		EntityID:        entityID,
+		ProgressSeconds: progress,
+		TotalSeconds:    total,
+		Completed:       completed,
+	})
+	if err != nil {
+		return row, err
+	}
 	if a.hub != nil {
 		a.hub.EmitToUserAndInternal(userID, eventhub.EventMediaWatched, eventhub.WatchPayload{
 			UserID:      userID,
@@ -104,16 +116,7 @@ func (a *App) UpdateWatchProgress(ctx context.Context, userID int64, entityType 
 			Completed:   completed,
 		})
 	}
-
-	q := sqlc.New(a.db)
-	return q.UpsertWatchProgress(ctx, sqlc.UpsertWatchProgressParams{
-		UserID:          userID,
-		EntityType:      entityType,
-		EntityID:        entityID,
-		ProgressSeconds: progress,
-		TotalSeconds:    total,
-		Completed:       completed,
-	})
+	return row, nil
 }
 
 func (a *App) ListContinueWatching(ctx context.Context, userID int64) ([]ContinueWatchingEnrichedRow, error) {

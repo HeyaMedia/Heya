@@ -64,19 +64,6 @@ func ComputeWaveform(ctx context.Context, audioPath string) ([]float32, error) {
 	return envelope.Waveform, nil
 }
 
-// computeWaveform decodes audio and reduces it to `n` peak buckets
-// covering the full duration in time order.
-func computeWaveform(ctx context.Context, audioPath string, n int) ([]float32, error) {
-	if n <= 0 {
-		n = waveformDefaultN
-	}
-	pcm, err := decodePCM(ctx, audioPath, waveformSampleRate)
-	if err != nil {
-		return nil, fmt.Errorf("decode: %w", err)
-	}
-	return waveformFromPCM(pcm, n)
-}
-
 // waveformFromPCM is the underlying routine, exposed so the Analyzer
 // can share one decode across multiple steps. Expects PCM at any
 // rate (only the count of samples matters for bucketing).

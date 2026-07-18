@@ -162,7 +162,7 @@ func (r *LocalRuntime) Download(ctx context.Context, modelID, backend string) er
 			size:  asset.Size,
 			fetch: func(onProgress func(int64)) error {
 				archive := filepath.Join(r.dir, "server", asset.Name)
-				if err := fetchFile(ctx, asset.URL, asset.SHA256, archive, onProgress); err != nil {
+				if err := fetchFile(ctx, asset.URL, asset.SHA256, asset.Size, archive, onProgress); err != nil {
 					return err
 				}
 				defer func() { _ = os.Remove(archive) }()
@@ -175,7 +175,7 @@ func (r *LocalRuntime) Download(ctx context.Context, modelID, backend string) er
 			label: model.File,
 			size:  model.Size,
 			fetch: func(onProgress func(int64)) error {
-				return fetchFile(ctx, model.URL, model.SHA256, r.modelPath(model), onProgress)
+				return fetchFile(ctx, model.URL, model.SHA256, model.Size, r.modelPath(model), onProgress)
 			},
 		})
 	}

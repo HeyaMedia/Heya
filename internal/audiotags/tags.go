@@ -2,7 +2,6 @@ package audiotags
 
 import (
 	"context"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -43,23 +42,10 @@ func (t Tags) HasAny() bool {
 		t.ReleaseGroupMBID != ""
 }
 
-// ProbeFile runs ffprobe against a local file path and extracts embedded tags.
-// Callers that need SMB support should inject the shared worker ProbeFile and
-// pass its MediaInfo through FromMediaInfo instead.
+// ProbeFile runs the shared media probe used by scanners and playback. Mounted
+// network storage is an ordinary filesystem path at this boundary.
 func ProbeFile(ctx context.Context, path string) (*mediaprobe.MediaInfo, error) {
-	//nolint:gosec // The scanner intentionally probes the configured media path.
-	cmd := exec.CommandContext(ctx, "ffprobe",
-		"-v", "quiet",
-		"-print_format", "json",
-		"-show_format",
-		"-show_streams",
-		"-i", path,
-	)
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	return mediaprobe.Parse(out)
+	return mediaprobe.Probe(ctx, path)
 }
 
 func FromMediaInfo(info *mediaprobe.MediaInfo) Tags {

@@ -35,6 +35,8 @@ var (
 	apiRaw     bool
 )
 
+const maxBufferedAPIResponseBytes int64 = 32 << 20
+
 var apiCmd = &cobra.Command{
 	Use:   "api <method> <path> [body]",
 	Short: "Issue an authenticated request to the local Heya API",
@@ -301,19 +303,53 @@ func doAPIRequest(ctx context.Context, method, fullURL, token string, body []byt
 // audio/video) print to stdout verbatim when --raw is on, so callers
 // can pipe `heya api get /api/tracks/123/stream --raw > out.flac`.
 func writeAPIResponse(resp *http.Response) error {
-	raw, err := io.ReadAll(resp.Body)
+	nonOK, err := renderAPIResponse(resp, os.Stdout, os.Stderr)
 	if err != nil {
-		return fmt.Errorf("read response: %w", err)
+		return err
 	}
+	if nonOK {
+		// Cobra's default error path also exits non-zero, but it prints a
+		// trailing "Error: ..." line. We've already printed the status +
+		// body to stderr — just exit cleanly.
+		os.Exit(1)
+	}
+	return nil
+}
 
+func renderAPIResponse(resp *http.Response, stdout, stderr io.Writer) (bool, error) {
 	ok := resp.StatusCode >= 200 && resp.StatusCode < 300
-	target := os.Stdout
-	if !ok {
-		target = os.Stderr
-		fmt.Fprintf(target, "HTTP %d %s\n", resp.StatusCode, resp.Status) //nolint:errcheck // diagnostic stderr write
+	jsonContent := isAPIJSONContent(resp)
+
+	// Successful raw and non-JSON responses may be multi-gigabyte media
+	// streams. Copy them directly: buffering would defeat --raw, risk an OOM,
+	// and appending a courtesy newline would corrupt binary output.
+	if ok && (apiRaw || !jsonContent) {
+		if _, err := io.Copy(stdout, resp.Body); err != nil {
+			return false, fmt.Errorf("stream response: %w", err)
+		}
+		return false, nil
 	}
 
-	pretty := !apiRaw && isAPIJSONContent(resp)
+	target := stdout
+	if !ok {
+		target = stderr
+		status := strings.TrimSpace(resp.Status)
+		if status == "" {
+			status = http.StatusText(resp.StatusCode)
+		}
+		code := fmt.Sprintf("%d", resp.StatusCode)
+		if status != code && !strings.HasPrefix(status, code+" ") {
+			status = code + " " + status
+		}
+		fmt.Fprintf(target, "HTTP %s\n", status) //nolint:errcheck // diagnostic stderr write
+	}
+
+	raw, err := readBufferedAPIResponse(resp)
+	if err != nil {
+		return !ok, err
+	}
+
+	pretty := !apiRaw && jsonContent
 	if pretty {
 		var v interface{}
 		if jsonErr := json.Unmarshal(raw, &v); jsonErr == nil {
@@ -330,13 +366,29 @@ func writeAPIResponse(resp *http.Response) error {
 		ensureTrailingNewline(target, raw)
 	}
 
-	if !ok {
-		// Cobra's default error path also exits non-zero, but it prints a
-		// trailing "Error: ..." line. We've already printed the status +
-		// body to stderr — just exit cleanly.
-		os.Exit(1)
+	return !ok, nil
+}
+
+func readBufferedAPIResponse(resp *http.Response) ([]byte, error) {
+	return readBufferedAPIResponseLimit(resp, maxBufferedAPIResponseBytes)
+}
+
+func readBufferedAPIResponseLimit(resp *http.Response, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		return nil, errors.New("response buffer limit must be positive")
 	}
-	return nil
+	if resp.ContentLength > limit {
+		return nil, fmt.Errorf("response body is too large to buffer (%d bytes; limit %d); use --raw to stream successful responses",
+			resp.ContentLength, limit)
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if int64(len(raw)) > limit {
+		return nil, fmt.Errorf("response body exceeds %d-byte buffer limit; use --raw to stream successful responses", limit)
+	}
+	return raw, nil
 }
 
 func ensureTrailingNewline(w io.Writer, raw []byte) {

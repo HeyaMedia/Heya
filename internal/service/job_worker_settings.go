@@ -56,12 +56,13 @@ func LoadJobWorkersFromDB(ctx context.Context, db *pgxpool.Pool, cfg *config.Con
 }
 
 func (a *App) JobWorkerSettings(_ context.Context) (JobWorkerSettings, error) {
+	cfg := a.ConfigSnapshot()
 	workers := make([]JobWorkerSetting, 0, len(config.DefaultJobWorkerCounts))
 	for _, kind := range config.JobWorkerKinds() {
 		def := config.DefaultJobWorkerCounts[kind]
 		field := config.Field[int]{Value: def, Source: config.SourceDefault}
-		if a.config != nil && a.config.Jobs.Workers != nil {
-			if f, ok := a.config.Jobs.Workers[kind]; ok {
+		if cfg != nil && cfg.Jobs.Workers != nil {
+			if f, ok := cfg.Jobs.Workers[kind]; ok {
 				field = f
 			}
 		}
@@ -88,6 +89,9 @@ func (a *App) SaveJobWorkerSettings(ctx context.Context, update JobWorkerUpdate)
 		kinds = append(kinds, kind)
 	}
 	sort.Strings(kinds)
+
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
 
 	for _, kind := range kinds {
 		value := update.Workers[kind]
@@ -125,7 +129,7 @@ func jobWorkerLabel(kind string) string {
 	replacer := strings.NewReplacer("_", " ", "-", " ")
 	words := strings.Fields(replacer.Replace(kind))
 	for i, word := range words {
-		if word == "nfo" || word == "smb" {
+		if word == "nfo" {
 			words[i] = strings.ToUpper(word)
 			continue
 		}

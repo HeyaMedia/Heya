@@ -8,7 +8,6 @@ import (
 
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/radiobrowser"
-	"github.com/karbowiak/heya/internal/service"
 )
 
 // handleRadioStream proxies an internet-radio stream to the browser while
@@ -25,8 +24,9 @@ import (
 // Browsers can't attach Authorization headers to <audio src>, so this
 // endpoint accepts ?token= as an alternative (same as the music streaming
 // endpoints).
-func handleRadioStream(app *service.App) http.HandlerFunc {
+func handleRadioStream(hub *eventhub.Hub, userID int64, client *http.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		streamURL := r.URL.Query().Get("url")
 		if streamURL == "" {
 			writeError(w, http.StatusBadRequest, "missing url parameter")
@@ -35,16 +35,8 @@ func handleRadioStream(app *service.App) http.HandlerFunc {
 
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
-		// Abort the outbound fetch when the client tab closes the audio
-		// element. Without this the upstream connection would dangle until
-		// our HTTP timeout fires.
-		go func() {
-			<-ctx.Done()
-		}()
 
-		// G704 SSRF: streamURL is from the radio-browser community catalog
-		// (curated public radio streams). Proxying it is the feature.
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, streamURL, nil) //nolint:gosec
+		req, err := newPublicMediaRequest(ctx, streamURL)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid stream URL")
 			return
@@ -52,20 +44,29 @@ func handleRadioStream(app *service.App) http.HandlerFunc {
 		// `1` asks for inline metadata; absent means plain audio.
 		req.Header.Set("Icy-MetaData", "1")
 		req.Header.Set("User-Agent", "Heya/0.1 (+https://heya.media)")
-		// Use a separate client (not app.RadioBrowser's HTTP client) so the
-		// long-lived stream doesn't share the 15s timeout meant for one-shot
-		// API calls. Streams stay open until either side disconnects.
-		client := &http.Client{}
-		resp, err := client.Do(req) //nolint:gosec // see G704 note above
+		// The public-only client has no whole-request timeout: streams stay open
+		// until either side disconnects, while its transport still bounds dials.
+		// newPublicMediaRequest validates the URL and production uses the
+		// public-only transport; a custom client is accepted for isolated tests.
+		resp, err := mediaHTTPClient(client).Do(req) //nolint:gosec
 		if err != nil {
-			writeError(w, http.StatusBadGateway, "failed to connect to radio stream: "+err.Error())
+			writeError(w, http.StatusBadGateway, "failed to connect to radio stream")
 			return
 		}
 		defer resp.Body.Close() //nolint:errcheck // defer close
 
-		contentType := resp.Header.Get("Content-Type")
-		if contentType == "" {
-			contentType = "audio/mpeg"
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+			writeError(w, http.StatusBadGateway, "radio upstream returned "+resp.Status)
+			return
+		}
+		contentURL := streamURL
+		if resp.Request != nil && resp.Request.URL != nil {
+			contentURL = resp.Request.URL.String()
+		}
+		contentType, ok := safeAudioContentType(resp.Header.Get("Content-Type"), contentURL)
+		if !ok {
+			writeError(w, http.StatusBadGateway, "radio upstream returned non-audio content")
+			return
 		}
 		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Cache-Control", "no-cache, no-store")
@@ -76,10 +77,9 @@ func handleRadioStream(app *service.App) http.HandlerFunc {
 		var src io.Reader = resp.Body
 		if metaintStr := resp.Header.Get("icy-metaint"); metaintStr != "" {
 			if metaint, err := strconv.Atoi(metaintStr); err == nil && metaint > 0 {
-				hub := app.EventHub()
 				src = radiobrowser.NewIcyReader(resp.Body, metaint, func(artist, title string) {
 					if hub != nil {
-						hub.Emit(eventhub.EventRadioICY, eventhub.RadioICYPayload{
+						hub.EmitToUser(userID, eventhub.EventRadioICY, eventhub.RadioICYPayload{
 							Artist:    artist,
 							Title:     title,
 							StreamURL: streamURL,

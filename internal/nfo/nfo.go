@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/rs/zerolog/log"
 )
 
@@ -208,10 +209,10 @@ func ParseFile(fsys fs.FS, path, kind string) *ParsedNFO {
 
 	parsed, err := parseNFO(f, kind)
 	if err != nil {
-		log.Debug().Err(err).Str("path", path).Msg("error parsing NFO")
+		log.Debug().Err(vfs.RedactError(err)).Str("path", vfs.RedactPath(path)).Msg("error parsing NFO")
 		return nil
 	}
-	log.Info().Str("path", path).Str("kind", kind).Str("title", parsed.Title).Str("tmdb", parsed.TMDBID).Str("imdb", parsed.IMDBID).Msg("found NFO")
+	log.Info().Str("path", vfs.RedactPath(path)).Str("kind", kind).Str("title", parsed.Title).Str("tmdb", parsed.TMDBID).Str("imdb", parsed.IMDBID).Msg("found NFO")
 	return parsed
 }
 
@@ -244,11 +245,11 @@ func FindAndParseInDir(dir string) *ParsedNFO {
 
 		parsed, err := parseNFOBytes(data, nf.kind)
 		if err != nil {
-			log.Debug().Err(err).Str("path", path).Msg("error parsing NFO")
+			log.Debug().Err(vfs.RedactError(err)).Str("path", vfs.RedactPath(path)).Msg("error parsing NFO")
 			continue
 		}
 
-		log.Info().Str("path", path).Str("kind", nf.kind).Str("title", parsed.Title).Str("tmdb", parsed.TMDBID).Str("imdb", parsed.IMDBID).Msg("found NFO")
+		log.Info().Str("path", vfs.RedactPath(path)).Str("kind", nf.kind).Str("title", parsed.Title).Str("tmdb", parsed.TMDBID).Str("imdb", parsed.IMDBID).Msg("found NFO")
 		return parsed
 	}
 
@@ -432,10 +433,12 @@ func stripBOM(data []byte) []byte {
 }
 
 func readFileBytes(path string) ([]byte, error) {
-	f, err := os.Open(path)
+	// Callers construct path from a configured media directory and one of the
+	// fixed canonical NFO basenames above.
+	f, err := os.Open(path) //nolint:gosec
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return io.ReadAll(io.LimitReader(f, 1<<20))
 }

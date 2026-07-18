@@ -4,24 +4,24 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/karbowiak/heya/internal/artifactdownload"
 )
 
 // Download plumbing for the two local artifacts: the llama-server bundle
 // (small tar.gz, extracted) and the GGUF model (single large file). Same
 // contract as sonicanalysis.ModelFetcher: temp file + hash-while-writing +
 // verify + atomic rename, with an in-memory progress snapshot polled by the
-// status endpoint. URLs and hashes are pinned constants (artifacts.go), so no
-// SSRF guard is needed — same trust model as the sonic model manifest.
+// status endpoint. URLs and hashes are pinned constants (artifacts.go), and the
+// shared downloader still enforces public-only DNS/redirects plus hard size
+// bounds so a compromised upstream cannot pivot inward or consume the disk.
 
 // DownloadState mirrors the sonic fetcher's state machine.
 type DownloadState string
@@ -33,6 +33,13 @@ const (
 	DownloadFailed      DownloadState = "failed"
 )
 
+// GGUFs are multi-gigabyte deliberate downloads. Six hours is a finite safety
+// net while still accommodating slow links; connect/TLS/header waits have much
+// shorter deadlines in artifactdownload's public-only transport.
+const localArtifactDownloadTimeout = 6 * time.Hour
+
+var localArtifactHTTPClient = artifactdownload.NewClient(localArtifactDownloadTimeout)
+
 // DownloadProgress is the poll-friendly snapshot of an in-flight download.
 type DownloadProgress struct {
 	CurrentFile string    `json:"current_file,omitempty"`
@@ -41,74 +48,27 @@ type DownloadProgress struct {
 	StartedAt   time.Time `json:"started_at"`
 }
 
-// fetchFile downloads url to destPath atomically, verifying sha256 and
-// reporting byte progress via onProgress (called with cumulative bytes).
-func fetchFile(ctx context.Context, url, sha, destPath string, onProgress func(int64)) error {
-	if err := os.MkdirAll(filepath.Dir(destPath), 0o750); err != nil {
-		return fmt.Errorf("mkdir parent: %w", err)
-	}
-	tmpPath := destPath + ".tmp"
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+// fetchFile downloads url to destPath atomically, enforcing the catalog's
+// exact size and checksum while reporting cumulative byte progress.
+func fetchFile(ctx context.Context, url, sha string, size int64, destPath string, onProgress func(int64)) error {
+	_, err := artifactdownload.Fetch(ctx, localArtifactHTTPClient, artifactdownload.Spec{
+		URL:           url,
+		Destination:   destPath,
+		MaxBytes:      size,
+		ExpectedBytes: size,
+		SHA256:        sha,
+		Mode:          0o640,
+		Progress:      onProgress,
+	})
 	if err != nil {
-		return err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
-	}
-
-	dst, err := os.Create(tmpPath) //nolint:gosec // G304: path built from server-controlled data dir + pinned filename
-	if err != nil {
-		return err
-	}
-	hasher := sha256.New()
-	written, err := io.Copy(io.MultiWriter(dst, hasher, progressWriter(onProgress)), resp.Body)
-	closeErr := dst.Close()
-	if err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("download body: %w", err)
-	}
-	if closeErr != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("close tmp: %w", closeErr)
-	}
-	_ = written
-
-	if sha != "" {
-		got := hex.EncodeToString(hasher.Sum(nil))
-		if got != sha {
-			_ = os.Remove(tmpPath)
-			return fmt.Errorf("sha256 mismatch for %s: got %s, want %s", filepath.Base(destPath), got, sha)
+		// Concurrent Heya processes can race at publication. Both downloads are
+		// verified; if a peer installed the exact-size destination first, use it.
+		if fileSizeMatches(destPath, size) {
+			return nil
 		}
+		return fmt.Errorf("fetch %s: %w", filepath.Base(destPath), err)
 	}
-	return os.Rename(tmpPath, destPath)
-}
-
-// progressWriter adapts a cumulative-bytes callback into an io.Writer for
-// io.MultiWriter.
-type progressWriterFn func(int64)
-
-func progressWriter(fn func(int64)) io.Writer {
-	if fn == nil {
-		return io.Discard
-	}
-	return &countingWriter{fn: fn}
-}
-
-type countingWriter struct {
-	fn    progressWriterFn
-	total int64
-}
-
-func (w *countingWriter) Write(p []byte) (int, error) {
-	w.total += int64(len(p))
-	w.fn(w.total)
-	return len(p), nil
+	return nil
 }
 
 // extractServerBundle unpacks the llama.cpp release tar.gz into destDir,

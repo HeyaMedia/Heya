@@ -328,7 +328,7 @@ func loadDotEnv() {
 	}
 	values := map[string]string{}
 	for _, path := range []string{".env", ".env.local"} {
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) //nolint:gosec // fixed application-local dotenv filenames, never user input
 		if err != nil {
 			continue
 		}

@@ -4,9 +4,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/transcoder"
-	"github.com/karbowiak/heya/internal/vfs"
-	"github.com/karbowiak/heya/internal/worker"
 )
 
 type playbackDecision struct {
@@ -138,13 +137,9 @@ func queryFlag(v string) bool {
 	return v == "1" || strings.EqualFold(v, "true")
 }
 
-func buildStreamInfoResponse(info worker.MediaInfo, caps transcoder.ClientCapabilities, filePath string, libraryID int64) streamInfoResponse {
-	tInfo := workerToTranscoderInfo(&info)
+func buildStreamInfoResponse(info mediaprobe.MediaInfo, caps transcoder.ClientCapabilities, filePath string, libraryID int64) streamInfoResponse {
+	tInfo := mediaProbeToTranscoderInfo(&info)
 	plan := transcoder.Decide(&tInfo, caps)
-
-	if plan.Action == transcoder.ActionDirectPlay && vfs.IsSMBPath(filePath) {
-		plan = transcoder.PlaybackPlan{Action: transcoder.ActionRemux, Profile: "remux", Reason: "remote file requires HLS delivery"}
-	}
 
 	sourceHeight := 0
 	for _, s := range info.Streams {
@@ -256,7 +251,7 @@ func buildStreamInfoResponse(info worker.MediaInfo, caps transcoder.ClientCapabi
 	return resp
 }
 
-func isHDR(s worker.StreamInfo) bool {
+func isHDR(s mediaprobe.StreamInfo) bool {
 	switch s.ColorTransfer {
 	case "smpte2084", "arib-std-b67":
 		return true

@@ -81,7 +81,9 @@ func parseDirectory(dirPath string, asJSON bool) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "TYPE\tMEDIA\tSTATUS\tTITLE\tYEAR\tPATH\n")
+	if _, err := fmt.Fprint(w, "TYPE\tMEDIA\tSTATUS\tTITLE\tYEAR\tPATH\n"); err != nil {
+		return fmt.Errorf("write parse table header: %w", err)
+	}
 
 	for _, r := range results {
 		title := ""
@@ -90,8 +92,10 @@ func parseDirectory(dirPath string, asJSON bool) error {
 			title = r.Release.Title
 			year = r.Release.Year
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			r.EntryType, r.Media, r.Status, title, year, r.Basename)
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			r.EntryType, r.Media, r.Status, title, year, r.Basename); err != nil {
+			return fmt.Errorf("write parse table row: %w", err)
+		}
 	}
 
 	return w.Flush()

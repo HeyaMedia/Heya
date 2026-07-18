@@ -5,9 +5,11 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
 )
@@ -254,7 +256,7 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 		func(ctx context.Context, in *struct {
 			Body playlistMutation
 		}) (*JSONOutput[sqlc.UserPlaylist], error) {
-			pl, err := app.CreateUserPlaylist(ctx, userFrom(ctx).ID, in.Body.Name, in.Body.Description, in.Body.Cover)
+			pl, err := app.CreateUserPlaylist(ctx, userFrom(ctx).ID, in.Body.Name, in.Body.Description)
 			if err != nil {
 				return nil, huma.Error400BadRequest(err.Error())
 			}
@@ -275,7 +277,7 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			IDPath
 			Body playlistMutation
 		}) (*struct{}, error) {
-			if err := app.UpdateUserPlaylist(ctx, userFrom(ctx).ID, in.ID, in.Body.Name, in.Body.Description, in.Body.Cover, in.Body.Tags); err != nil {
+			if err := app.UpdateUserPlaylist(ctx, userFrom(ctx).ID, in.ID, in.Body.Name, in.Body.Description, in.Body.Tags); err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
 			return nil, nil
@@ -319,7 +321,9 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 	// normal /api/me bearer wrapper. The matching GET (raw image bytes) is
 	// registered unauthenticated in binary_huma.go instead — see
 	// GetUserPlaylistCoverPath's doc comment for why.
-	huma.Register(api, secured(op(http.MethodPost, "/api/me/playlists/{id}/cover", "upload-playlist-cover", "Upload a custom playlist cover", "Me")),
+	uploadPlaylistCoverOp := secured(op(http.MethodPost, "/api/me/playlists/{id}/cover", "upload-playlist-cover", "Upload a custom playlist cover", "Me"))
+	uploadPlaylistCoverOp.BodyReadTimeout = 30 * time.Second
+	huma.Register(api, uploadPlaylistCoverOp,
 		func(ctx context.Context, in *struct {
 			IDPath
 			RawBody huma.MultipartFormFiles[playlistCoverUploadForm]
@@ -330,8 +334,8 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			}
 			defer func() { _ = data.File.Close() }()
 
-			if err := app.SetUserPlaylistCover(ctx, userFrom(ctx).ID, in.ID, data.File, data.File.Filename); err != nil {
-				return nil, huma.Error500InternalServerError(err.Error())
+			if err := app.SetUserPlaylistCover(ctx, userFrom(ctx).ID, in.ID, data.File); err != nil {
+				return nil, humaServiceError(err)
 			}
 			return statusOK("uploaded"), nil
 		})
@@ -383,6 +387,9 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			files, err := app.ListTrackFiles(ctx, in.ID)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			for i := range files {
+				files[i].LyricsPath = secrettext.Redact(files[i].LyricsPath)
 			}
 			return cachedJSON(files, 300), nil
 		})

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/rs/zerolog/log"
 )
 
@@ -81,6 +82,9 @@ func GenerateSprites(ctx context.Context, filePath string, duration float64, out
 	if duration <= 0 {
 		return 0, nil
 	}
+	if err := vfs.ValidateLocalPath(filePath); err != nil {
+		return 0, fmt.Errorf("trickplay input: %w", err)
+	}
 
 	if _, err := os.Stat(filepath.Join(GridDir(outDir), SpriteName(0))); err == nil {
 		return 0, nil
@@ -97,10 +101,14 @@ func GenerateSprites(ctx context.Context, filePath string, duration float64, out
 	if err != nil {
 		return 0, fmt.Errorf("create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			log.Warn().Err(err).Msg("remove trickplay temp directory")
+		}
+	}()
 
 	log.Info().
-		Str("file", filePath).
+		Str("file", vfs.RedactPath(filePath)).
 		Int("tiles", totalTiles).
 		Float64("interval", interval).
 		Msg("generating trickplay thumbnails")
@@ -108,7 +116,8 @@ func GenerateSprites(ctx context.Context, filePath string, duration float64, out
 	fctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(fctx, "ffmpeg",
+	// ffmpeg is fixed and every path is passed as a distinct, non-shell argument.
+	cmd := exec.CommandContext(fctx, "ffmpeg", //nolint:gosec
 		"-nostats", "-loglevel", "warning",
 		"-i", filePath,
 		"-vf", fmt.Sprintf("fps=1/%.1f,scale=%d:%d", interval, TileW, TileH),
@@ -120,7 +129,10 @@ func GenerateSprites(ctx context.Context, filePath string, duration float64, out
 		return 0, fmt.Errorf("extract frames: %w", err)
 	}
 
-	tiles, _ := filepath.Glob(filepath.Join(tmpDir, "tile_*.jpg"))
+	tiles, err := filepath.Glob(filepath.Join(tmpDir, "tile_*.jpg"))
+	if err != nil {
+		return 0, fmt.Errorf("list extracted frames: %w", err)
+	}
 	if len(tiles) == 0 {
 		return 0, fmt.Errorf("no frames extracted")
 	}
@@ -150,13 +162,17 @@ func GenerateSprites(ctx context.Context, filePath string, duration float64, out
 			col := i % Cols
 			row := i / Cols
 
-			f, err := os.Open(tilePath)
+			// tilePath is produced by the fixed glob inside our private temp directory.
+			f, err := os.Open(tilePath) //nolint:gosec
 			if err != nil {
 				continue
 			}
-			img, err := jpeg.Decode(f)
-			f.Close()
-			if err != nil {
+			img, decodeErr := jpeg.Decode(f)
+			closeErr := f.Close()
+			if closeErr != nil {
+				return 0, fmt.Errorf("close extracted frame: %w", closeErr)
+			}
+			if decodeErr != nil {
 				continue
 			}
 
@@ -168,22 +184,28 @@ func GenerateSprites(ctx context.Context, filePath string, duration float64, out
 		}
 
 		spritePath := filepath.Join(sheetDir, SpriteName(spriteIdx))
-		sf, err := os.Create(spritePath)
+		// spritePath is constructed from the caller-selected output directory and a generated filename.
+		sf, err := os.Create(spritePath) //nolint:gosec
 		if err != nil {
 			return 0, fmt.Errorf("create sprite: %w", err)
 		}
-		if err := jpeg.Encode(sf, sprite, &jpeg.Options{Quality: 80}); err != nil {
-			sf.Close()
-			return 0, fmt.Errorf("encode sprite: %w", err)
+		encodeErr := jpeg.Encode(sf, sprite, &jpeg.Options{Quality: 80})
+		closeErr := sf.Close()
+		if encodeErr != nil {
+			_ = os.Remove(spritePath)
+			return 0, fmt.Errorf("encode sprite: %w", encodeErr)
 		}
-		sf.Close()
+		if closeErr != nil {
+			_ = os.Remove(spritePath)
+			return 0, fmt.Errorf("close sprite: %w", closeErr)
+		}
 	}
 
 	log.Info().
-		Str("file", filePath).
+		Str("file", vfs.RedactPath(filePath)).
 		Int("tiles", len(tiles)).
 		Int("sprites", spriteCount).
-		Str("out", outDir).
+		Str("out", vfs.RedactPath(outDir)).
 		Msg("trickplay generation complete")
 
 	return len(tiles), nil

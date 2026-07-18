@@ -100,21 +100,60 @@ func (a *App) StartSonicRuntimeHeartbeat(ctx context.Context) {
 			log.Warn().Err(err).Msg("failed to publish sonic runtime heartbeat")
 		}
 	}
+	reconcileSettings := func(readCtx context.Context) {
+		if err := a.reconcileSonicHolderSettings(readCtx); err != nil && !errors.Is(err, sonicanalysis.ErrHolderBusy) {
+			log.Warn().Err(err).Msg("failed to reconcile worker sonic-analysis settings")
+		}
+	}
 
-	publish(ctx, true)
-	go func() {
+	a.startBackground(func() {
+		workCtx, cancel := a.backgroundContext(ctx)
+		defer cancel()
+		reconcileSettings(workCtx)
+		publish(workCtx, true)
 		ticker := time.NewTicker(sonicRuntimeHeartbeatPeriod)
 		defer ticker.Stop()
 		for {
 			select {
-			case <-ctx.Done():
-				shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			case <-workCtx.Done():
+				shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(workCtx), 2*time.Second)
 				publish(shutdownCtx, false)
 				cancel()
 				return
 			case <-ticker.C:
-				publish(ctx, true)
+				reconcileSettings(workCtx)
+				publish(workCtx, true)
 			}
 		}
-	}()
+	})
+}
+
+// reconcileSonicHolderSettings converges the worker-owned analysis Holder on
+// the durable/env-overlayed accelerator setting. The API and worker are
+// separate processes, so the heartbeat loop calls this periodically instead
+// of pretending an API-process pointer update reconfigured worker inference.
+func (a *App) reconcileSonicHolderSettings(ctx context.Context) error {
+	if a == nil || a.sonicHolder == nil {
+		return nil
+	}
+	settings, err := effectiveSonicAnalysisSettingsStrict(ctx, a.GetSystemSetting)
+	if err != nil {
+		return fmt.Errorf("read durable sonic-analysis settings: %w", err)
+	}
+	desired := sonicanalysis.Accelerator(settings.Accelerator)
+	status := a.sonicHolder.Status()
+	if status.Accelerator == desired && status.PendingAccelerator == nil {
+		return nil
+	}
+	if status.PendingAccelerator != nil && *status.PendingAccelerator == desired {
+		return nil
+	}
+	cfg := a.ConfigSnapshot()
+	if cfg == nil {
+		return errors.New("sonic-analysis runtime has no application config")
+	}
+	return a.sonicHolder.Reconfigure(sonicanalysis.Config{
+		ModelsDir:   cfg.DataDir.Value + "/models",
+		Accelerator: desired,
+	})
 }

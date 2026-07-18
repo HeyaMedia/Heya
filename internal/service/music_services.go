@@ -306,8 +306,8 @@ func (a *App) ReactionOutbound(userID, trackID int64, oldRating, newRating int16
 	if oldBand == newBand {
 		return
 	}
-	ctx := a.LifetimeContext()
-	go func() {
+	a.startBackground(func() {
+		ctx := a.LifetimeContext()
 		rows, err := a.db.Query(ctx, `
 			SELECT service, token FROM user_music_services
 			WHERE user_id = $1 AND scrobble_enabled = true AND token <> ''`, userID)
@@ -362,13 +362,15 @@ func (a *App) ReactionOutbound(userID, trackID int64, oldRating, newRating int16
 				return nil
 			}
 			if err := submit(); err != nil {
-				time.Sleep(5 * time.Second)
+				if !waitForBackgroundRetry(ctx, 5*time.Second) {
+					return
+				}
 				if err := submit(); err != nil {
 					log.Warn().Err(err).Str("service", s.service).Msg("outbound reaction sync failed")
 				}
 			}
 		}
-	}()
+	})
 }
 
 // NowPlayingOutbound tells every enabled service that one Heya track has just
@@ -389,8 +391,8 @@ func (a *App) ScrobbleOutbound(userID, trackID int64, playedAt time.Time) {
 // logging between the transient start notification and permanent completion.
 // Fire-and-forget by design: an external outage must never break playback.
 func (a *App) submitPlaybackOutbound(userID, trackID int64, playedAt time.Time, completed bool) {
-	ctx := a.LifetimeContext()
-	go func() {
+	a.startBackground(func() {
+		ctx := a.LifetimeContext()
 		rows, err := a.db.Query(ctx, `
 			SELECT service, username, token FROM user_music_services
 			WHERE user_id = $1 AND scrobble_enabled = true AND token <> ''`, userID)
@@ -446,7 +448,9 @@ func (a *App) submitPlaybackOutbound(userID, trackID int64, playedAt time.Time, 
 				return nil
 			}
 			if err := submit(); err != nil {
-				time.Sleep(5 * time.Second)
+				if !waitForBackgroundRetry(ctx, 5*time.Second) {
+					return
+				}
 				if err := submit(); err != nil {
 					event := "now-playing"
 					if completed {
@@ -456,5 +460,16 @@ func (a *App) submitPlaybackOutbound(userID, trackID int64, playedAt time.Time, 
 				}
 			}
 		}
-	}()
+	})
+}
+
+func waitForBackgroundRetry(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }

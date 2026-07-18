@@ -4,11 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -234,7 +235,7 @@ func (s *Server) mediaSourceForFile(ctx context.Context, file sqlc.LibraryFile, 
 	caps := capsFromProfile(profile, videoCodecOf(&info))
 	tInfo := toTranscoderInfo(&info)
 	plan := transcoder.Decide(&tInfo, caps)
-	directOK := plan.Action == transcoder.ActionDirectPlay && !vfs.IsSMBPath(file.Path)
+	directOK := plan.Action == transcoder.ActionDirectPlay
 
 	streams, defAudio, defSub := buildMediaStreams(file.ID, token, &info)
 	if streams == nil {
@@ -392,17 +393,24 @@ func (s *Server) handleAudioUniversal(w http.ResponseWriter, r *http.Request, p 
 		s.serveMediaFile(w, r, target.file.ID, target.file.Path)
 		return
 	}
-	outPath, err := mgr.EnsureAAC(r.Context(), target.trackFileID, target.file.Path, transcoder.DefaultAudioBitrateKbps)
+	file, err := mgr.OpenAAC(r.Context(), target.trackFileID, target.file.Path, transcoder.DefaultAudioBitrateKbps)
 	if err != nil {
 		log.Warn().Err(err).Str("component", "jellyfin").Int64("track_file", target.trackFileID).Msg("universal audio transcode failed")
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+	defer func() { _ = file.Close() }()
+	stat, err := file.Stat()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "audio/mp4")
-	http.ServeFile(w, r, outPath)
+	w.Header().Set("Accept-Ranges", "bytes")
+	http.ServeContent(w, r, file.Name(), stat.ModTime(), file)
 }
 
-// serveMediaFile range-serves a local or SMB-backed media file. In passive
+// serveMediaFile range-serves a filesystem-backed media file. In passive
 // mode (borrowed prod DB, media files on the prod host's disk) a file that
 // isn't present locally is proxied from the upstream Heya's native
 // /api/stream/{fileId} endpoint — the client's token is a session row in the
@@ -413,14 +421,12 @@ func (s *Server) serveMediaFile(w http.ResponseWriter, r *http.Request, fileID i
 		http.NotFound(w, r)
 		return
 	}
-	if vfs.IsSMBPath(path) {
-		w.Header().Set("Content-Type", contentTypeForPath(path))
-		w.Header().Set("Accept-Ranges", "bytes")
-		serveVFS(w, r, path)
-		return
-	}
-	f, err := os.Open(path) //nolint:gosec // G304: path comes from library_files rows, not request input
+	file, err := vfs.OpenFile(path)
 	if err != nil {
+		if errors.Is(err, vfs.ErrUnsupportedPathScheme) {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		if upstream := s.app.PassiveMediaUpstream(); upstream != "" && fileID > 0 {
 			s.proxyUpstreamMedia(w, r, upstream, fileID)
 			return
@@ -428,15 +434,16 @@ func (s *Server) serveMediaFile(w http.ResponseWriter, r *http.Request, fileID i
 		http.NotFound(w, r)
 		return
 	}
+	defer func() { _ = file.Close() }()
+
 	w.Header().Set("Content-Type", contentTypeForPath(path))
 	w.Header().Set("Accept-Ranges", "bytes")
-	defer func() { _ = f.Close() }()
-	stat, err := f.Stat()
+	stat, err := file.Stat()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	http.ServeContent(w, r, path, stat.ModTime(), f)
+	http.ServeContent(w, r, filepath.Base(path), stat.ModTime(), file)
 }
 
 // passiveMediaClient streams upstream media bytes. No overall timeout — a
@@ -473,37 +480,6 @@ func (s *Server) proxyUpstreamMedia(w http.ResponseWriter, r *http.Request, upst
 	if r.Method != http.MethodHead {
 		_, _ = io.Copy(w, res.Body)
 	}
-}
-
-func serveVFS(w http.ResponseWriter, r *http.Request, smbPath string) {
-	lastSlash := strings.LastIndex(smbPath, "/")
-	if lastSlash < 0 {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	source, err := vfs.Open(smbPath[:lastSlash])
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	defer func() { _ = source.Close() }()
-	f, err := source.FS.Open(smbPath[lastSlash+1:])
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	defer func() { _ = f.Close() }()
-	stat, err := f.Stat()
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	if rs, ok := f.(io.ReadSeeker); ok {
-		http.ServeContent(w, r, smbPath[lastSlash+1:], stat.ModTime(), rs)
-		return
-	}
-	w.Header().Set("Content-Length", strconv.FormatInt(stat.Size(), 10))
-	_, _ = io.Copy(w, f)
 }
 
 // --- playstate reporting ---

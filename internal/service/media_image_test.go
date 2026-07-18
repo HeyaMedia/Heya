@@ -1,7 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -95,6 +99,12 @@ func TestImageCacheFilename(t *testing.T) {
 
 func TestMetadataImagePathWaitsForCanonicalBytes(t *testing.T) {
 	t.Parallel()
+	var canonical bytes.Buffer
+	pixel := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	pixel.Set(0, 0, color.RGBA{R: 120, G: 40, B: 200, A: 255})
+	if err := jpeg.Encode(&canonical, pixel, nil); err != nil {
+		t.Fatal(err)
+	}
 	var requests atomic.Int32
 	metadataServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if requests.Add(1) == 1 {
@@ -103,7 +113,7 @@ func TestMetadataImagePathWaitsForCanonicalBytes(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "image/jpeg")
-		_, _ = w.Write([]byte("canonical-image"))
+		_, _ = w.Write(canonical.Bytes())
 	}))
 	defer metadataServer.Close()
 
@@ -120,8 +130,8 @@ func TestMetadataImagePathWaitsForCanonicalBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(body) != "canonical-image" {
-		t.Fatalf("stored body = %q", body)
+	if !bytes.Equal(body, canonical.Bytes()) {
+		t.Fatal("stored body does not match canonical JPEG")
 	}
 	if requests.Load() != 2 {
 		t.Fatalf("metadata requests = %d, want 2", requests.Load())

@@ -69,11 +69,11 @@ export function usePlaylists() {
     queryCache.invalidateQueries({ key: ['me', 'playlists'] })
   }
 
-  async function create(name: string, description = '', coverPath = '') {
+  async function create(name: string, description = '') {
     const { $heya } = useNuxtApp()
     const created = await $heya('/api/me/playlists', {
       method: 'POST',
-      body: { name, description, cover_path: coverPath },
+      body: { name, description } as never,
     }) as UserPlaylistRow
     const row = { ...created, track_count: 0, auto_artist_slug: '', auto_album_slug: '' } as UserPlaylistRow
     updateList(rows => [row, ...rows])
@@ -118,15 +118,11 @@ export function usePlaylists() {
   // invalidation refetch lands — the server doesn't echo the update).
   async function update(id: number, patch: { name?: string; description?: string; tags?: string[] }) {
     const { $heya } = useNuxtApp()
-    // The PUT body requires name/description/cover_path — cover_path stores
-    // the custom cover's disk path, so passing the current value through is
-    // what keeps a rename from clearing an uploaded cover.
     await ensureLoaded()
     const current = playlists.value.find(p => p.id === id)
     const body = {
       name: patch.name ?? current?.name ?? '',
       description: patch.description ?? current?.description ?? '',
-      cover_path: current?.cover_path ?? '',
       // Omitted tags = keep existing (server treats null as "no change").
       ...(patch.tags ? { tags: patch.tags } : {}),
     }

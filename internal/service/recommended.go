@@ -291,9 +291,11 @@ func (a *App) localizeRails(ctx context.Context, q *sqlc.Queries, rails []RecRai
 	}
 	overlay := a.preferredTitleOverlayFor(ctx, q, targets)
 	for ri := range rails {
-		for ii := range rails[ri].Items {
-			if t, ok := overlay[rails[ri].Items[ii].ID]; ok && t != "" {
-				rails[ri].Items[ii].Title = t
+		items := rails[ri].Items
+		for ii := range items {
+			item := &items[ii]
+			if title, ok := overlay[item.ID]; ok && title != "" {
+				item.Title = title
 			}
 		}
 	}

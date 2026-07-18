@@ -73,7 +73,8 @@ func runReleaseParsing(t *testing.T, fixture string) {
 			continue
 		}
 		t.Run(tc.Label, func(t *testing.T) {
-			if tc.Kind == "storage-path" {
+			switch tc.Kind {
+			case "storage-path":
 				result := ParseStoragePath(tc.Input)
 
 				if tc.Expected.Media != "" && string(result.Media) != tc.Expected.Media {
@@ -99,7 +100,7 @@ func runReleaseParsing(t *testing.T, fixture string) {
 
 				checkRelease(t, result.Release, tc.Expected.Release)
 
-			} else if tc.Kind == "release-name" {
+			case "release-name":
 				hint := SceneMediaKind(tc.MediaHint)
 				if hint == "" {
 					hint = MediaUnknown

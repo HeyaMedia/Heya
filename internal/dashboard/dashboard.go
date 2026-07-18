@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/karbowiak/heya/internal/secrettext"
 )
 
 var (
@@ -172,9 +173,9 @@ func (m Model) renderOverview() string {
 	var sb strings.Builder
 	uptime := time.Since(m.startTime).Round(time.Second)
 
-	sb.WriteString(fmt.Sprintf("  %s %s  %s %s\n\n",
+	fmt.Fprintf(&sb, "  %s %s  %s %s\n\n",
 		labelStyle.Render("Server:"), successStyle.Render("Running"),
-		labelStyle.Render("Uptime:"), dimStyle.Render(uptime.String())))
+		labelStyle.Render("Uptime:"), dimStyle.Render(uptime.String()))
 
 	var totalFiles int64
 	var totalMatched int64
@@ -217,16 +218,16 @@ func (m Model) renderLibraries() string {
 			Background(mediaColor(lib.MediaType)).Padding(0, 1).
 			Render(strings.ToUpper(lib.MediaType))
 
-		sb.WriteString(fmt.Sprintf("  %s %s (id=%d)\n", badge, countStyle.Render(lib.Name), lib.ID))
+		fmt.Fprintf(&sb, "  %s %s (id=%d)\n", badge, countStyle.Render(lib.Name), lib.ID)
 
 		stats := m.fileStats[lib.ID]
 		if len(stats) > 0 {
 			for status, count := range stats {
-				sb.WriteString(fmt.Sprintf("    %s %d\n", labelStyle.Render(status+":"), count))
+				fmt.Fprintf(&sb, "    %s %d\n", labelStyle.Render(status+":"), count)
 			}
 		}
 		if len(lib.Paths) > 0 {
-			sb.WriteString(fmt.Sprintf("    %s %s\n", labelStyle.Render("Paths:"), dimStyle.Render(strings.Join(lib.Paths, ", "))))
+			fmt.Fprintf(&sb, "    %s %s\n", labelStyle.Render("Paths:"), dimStyle.Render(strings.Join(secrettext.RedactStrings(lib.Paths), ", ")))
 		}
 		sb.WriteString("\n")
 	}
@@ -244,7 +245,7 @@ func (m Model) renderWatchers() string {
 
 	var sb strings.Builder
 	for _, w := range m.watchers {
-		sb.WriteString(fmt.Sprintf("  Library %-4d %s\n", w.LibraryID, w.Path))
+		fmt.Fprintf(&sb, "  Library %-4d %s\n", w.LibraryID, secrettext.Redact(w.Path))
 	}
 	return sb.String()
 }

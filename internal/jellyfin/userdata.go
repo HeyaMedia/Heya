@@ -56,12 +56,12 @@ func (s *Server) handleSetFavorite(loved bool) handlerFunc {
 		if loved {
 			rating = 10
 		}
-		switch {
-		case kind == KindTrack:
+		switch kind {
+		case KindTrack:
 			err = s.app.SetUserTrackRating(ctx, u.ID, id, rating)
-		case kind == KindAlbum:
+		case KindAlbum:
 			err = s.app.SetUserAlbumRating(ctx, u.ID, id, rating)
-		case kind == KindItem:
+		case KindItem:
 			if artistID, isArtist := s.app.ArtistIDForMediaItem(ctx, id); isArtist {
 				err = s.app.SetUserArtistRating(ctx, u.ID, artistID, rating)
 			} else {

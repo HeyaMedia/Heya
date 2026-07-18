@@ -5,6 +5,8 @@ import (
 	"io"
 	"sync"
 	"time"
+
+	"github.com/karbowiak/heya/internal/secrettext"
 )
 
 type Entry struct {
@@ -41,7 +43,7 @@ func (rb *RingBuffer) Write(p []byte) (n int, err error) {
 			e.Level = lvl
 		}
 		if msg, ok := raw["message"].(string); ok {
-			e.Message = msg
+			e.Message = secrettext.Redact(msg)
 		}
 		if t, ok := raw["time"].(string); ok {
 			if parsed, err := time.Parse(time.RFC3339Nano, t); err == nil {
@@ -55,11 +57,11 @@ func (rb *RingBuffer) Write(p []byte) (n int, err error) {
 			}
 		}
 		if len(fields) > 0 {
-			e.Fields = fields
+			e.Fields = secrettext.RedactMap(fields)
 		}
 	} else {
 		e.Level = "info"
-		e.Message = string(p)
+		e.Message = secrettext.Redact(string(p))
 	}
 
 	rb.mu.Lock()

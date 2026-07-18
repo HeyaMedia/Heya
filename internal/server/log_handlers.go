@@ -35,7 +35,9 @@ func handleLogStream(buf *logbuf.RingBuffer) http.HandlerFunc {
 					return
 				}
 				data, _ := json.Marshal(entry)
-				fmt.Fprintf(w, "data: %s\n\n", data)
+				if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+					return
+				}
 				flusher.Flush()
 			}
 		}

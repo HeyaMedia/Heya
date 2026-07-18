@@ -1151,7 +1151,7 @@ export type CreateLibraryInputBody = {
     media_type: 'movie' | 'tv' | 'anime' | 'music' | 'book' | 'comic' | 'podcast' | 'radio';
     name: string;
     /**
-     * Absolute filesystem paths or smb://… URIs
+     * Absolute filesystem directory paths visible to the Heya host or container; mount network shares before configuring them
      */
     paths: Array<string> | null;
     settings?: LibrarySettings;
@@ -1297,9 +1297,8 @@ export type DoctorLibrary = {
 export type DoctorLibraryPath = {
     error?: string;
     exists: boolean;
-    is_smb?: boolean;
     /**
-     * SMB credentials are redacted; see vfs.RedactPath
+     * Configured filesystem path; URL credentials are redacted in legacy invalid values
      */
     path: string;
     readable: boolean;
@@ -3905,10 +3904,6 @@ export type PlaylistMutation = {
      * A URL to the JSON Schema for this object.
      */
     readonly $schema?: string;
-    /**
-     * Optional path/URL to a custom cover image
-     */
-    cover_path: string;
     description: string;
     name: string;
     /**
@@ -4797,15 +4792,6 @@ export type ScannerView = {
     latest_run?: ScannerRunView;
     open_findings: Array<ScannerFindingView> | null;
     pipeline_failures: Array<ScannerPipelineFailureView> | null;
-};
-
-export type ScheduleEntry = {
-    interval: string;
-    interval_sec: number;
-    library_id: number;
-    library_name: string;
-    media_type: string;
-    type: string;
 };
 
 export type SearchBucket = {
@@ -5750,6 +5736,9 @@ export type UpdateLibraryRequest = {
      */
     readonly $schema?: string;
     name: string;
+    /**
+     * Absolute filesystem directory paths visible to the Heya host or container; mount network shares before configuring them
+     */
     paths: Array<string> | null;
 };
 
@@ -6629,7 +6618,7 @@ export type CreateLibraryInputBodyWritable = {
     media_type: 'movie' | 'tv' | 'anime' | 'music' | 'book' | 'comic' | 'podcast' | 'radio';
     name: string;
     /**
-     * Absolute filesystem paths or smb://… URIs
+     * Absolute filesystem directory paths visible to the Heya host or container; mount network shares before configuring them
      */
     paths: Array<string> | null;
     settings?: LibrarySettingsWritable;
@@ -7318,10 +7307,6 @@ export type PlaylistDetailWritable = {
 };
 
 export type PlaylistMutationWritable = {
-    /**
-     * Optional path/URL to a custom cover image
-     */
-    cover_path: string;
     description: string;
     name: string;
     /**
@@ -8083,6 +8068,9 @@ export type UpNextResultWritable = {
 
 export type UpdateLibraryRequestWritable = {
     name: string;
+    /**
+     * Absolute filesystem directory paths visible to the Heya host or container; mount network shares before configuring them
+     */
     paths: Array<string> | null;
 };
 
@@ -15177,9 +15165,9 @@ export type SearchProviderArtworkResponse = SearchProviderArtworkResponses[keyof
 export type UploadMediaAssetData = {
     body?: {
         /**
-         * poster|backdrop|logo|… (defaults to poster)
+         * Artwork slot (defaults to poster)
          */
-        asset_type: string;
+        asset_type: 'poster' | 'backdrop' | 'logo' | 'art' | 'banner' | 'thumb' | 'disc' | 'clearart' | 'still';
         file: Blob | File;
         /**
          * Optional season/episode asset label
@@ -17889,31 +17877,6 @@ export type RemoteStatusResponses = {
 
 export type RemoteStatusResponse = RemoteStatusResponses[keyof RemoteStatusResponses];
 
-export type ListSchedulesData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/api/schedules';
-};
-
-export type ListSchedulesErrors = {
-    /**
-     * Error
-     */
-    default: ErrorModel;
-};
-
-export type ListSchedulesError = ListSchedulesErrors[keyof ListSchedulesErrors];
-
-export type ListSchedulesResponses = {
-    /**
-     * OK
-     */
-    200: Array<ScheduleEntry> | null;
-};
-
-export type ListSchedulesResponse = ListSchedulesResponses[keyof ListSchedulesResponses];
-
 export type SearchAllData = {
     body?: never;
     path?: never;
@@ -18331,7 +18294,16 @@ export type StreamTranscodeStatusData = {
     path: {
         file_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Zero-based audio track used by the HLS session
+         */
+        audio?: number;
+        /**
+         * Playback session id carried by the HLS manifest
+         */
+        sid?: string;
+    };
     url: '/api/stream/{file_id}/transcode-status';
 };
 

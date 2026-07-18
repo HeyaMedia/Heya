@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/karbowiak/heya/internal/vfs"
 )
 
 type Keyframes struct {
@@ -35,10 +37,17 @@ func HasExactHLSBoundaries(k *Keyframes) bool {
 }
 
 func ExtractKeyframes(ctx context.Context, filePath string) (*Keyframes, error) {
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
+	return extractKeyframes(ctx, filePath, exec.CommandContext)
+}
 
-	cmd := exec.CommandContext(ctx, "ffprobe",
+func extractKeyframes(ctx context.Context, filePath string, command func(context.Context, string, ...string) *exec.Cmd) (*Keyframes, error) {
+	packetCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	if err := vfs.ValidateLocalPath(filePath); err != nil {
+		return nil, fmt.Errorf("keyframe input: %w", err)
+	}
+
+	cmd := command(packetCtx, "ffprobe",
 		"-v", "quiet",
 		"-select_streams", "v:0",
 		"-show_entries", "packet=pts_time,flags",
@@ -46,6 +55,8 @@ func ExtractKeyframes(ctx context.Context, filePath string) (*Keyframes, error) 
 		"-i",
 		filePath,
 	)
+	stderr := newStderrTail(maxFFmpegStderrTail)
+	cmd.Stderr = stderr
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -75,15 +86,31 @@ func ExtractKeyframes(ctx context.Context, filePath string) (*Keyframes, error) 
 		}
 		iframes = append(iframes, ts)
 	}
-
-	cmd.Wait()
+	if err := scanner.Err(); err != nil {
+		// Stop the child before Wait because stdout is no longer being drained.
+		cancel()
+		_ = cmd.Wait()
+		return nil, fmt.Errorf("scan ffprobe keyframes: %w", err)
+	}
+	if err := cmd.Wait(); err != nil {
+		return nil, fmt.Errorf("ffprobe keyframes: %w (stderr: %s)", err, stderr.String())
+	}
+	// Release the packet-scan timer before starting the independent duration
+	// probe. Reusing an almost-expired context made otherwise complete packet
+	// results inherit a timeout from the first process.
+	cancel()
 
 	var duration float64
 	if len(iframes) > 0 {
+		// Explicit fallback: packet extraction succeeded, so the final keyframe
+		// is a conservative lower bound if the small format-duration probe is
+		// unavailable or the container omits duration metadata.
 		duration = iframes[len(iframes)-1]
 	}
 
-	durationCmd := exec.CommandContext(ctx, "ffprobe",
+	durationCtx, durationCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer durationCancel()
+	durationCmd := command(durationCtx, "ffprobe",
 		"-v", "quiet",
 		"-show_entries", "format=duration",
 		"-of", "csv=p=0",
@@ -148,6 +175,9 @@ func RealSegmentBoundaries(ctx context.Context, filePath string, target float64)
 	if filePath == "" {
 		return nil, fmt.Errorf("RealSegmentBoundaries: filePath is required")
 	}
+	if err := vfs.ValidateLocalPath(filePath); err != nil {
+		return nil, fmt.Errorf("segment boundary input: %w", err)
+	}
 	if target <= 0 {
 		target = SegmentDuration
 	}
@@ -166,7 +196,7 @@ func RealSegmentBoundaries(ctx context.Context, filePath string, target float64)
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", //nolint:gosec // filePath comes from library_files we control; ffmpeg binary is fixed
+	cmd := ffmpegCommandContext(ctx,
 		"-nostats", "-loglevel", "error",
 		"-i", filePath,
 		// -sn matters, not just -an: without it the hls muxer auto-selects

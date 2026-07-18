@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/rs/zerolog/log"
 )
 
@@ -19,10 +20,10 @@ import (
 const pgNotifyChannel = "heya_events"
 
 // Notify publishes an event to other processes via Postgres NOTIFY. It is
-// fire-and-forget: if no server process is LISTENing (e.g. a CLI command run
-// while nothing is serving), the notification is simply dropped — which is
-// correct, since there are then no browsers to update. Safe to call from any
-// process that holds a DB pool.
+// fire-and-forget: if no process is LISTENing, the notification is dropped.
+// Browser invalidations tolerate that; worker filesystem watchers additionally
+// reconcile from the durable libraries table, so NOTIFY is only their fast
+// path rather than their source of truth. Safe to call from any DB process.
 func Notify(ctx context.Context, db *pgxpool.Pool, t EventType, payload any) error {
 	buf, err := json.Marshal(Event{Type: t, Timestamp: time.Now(), Payload: payload})
 	if err != nil {
@@ -41,7 +42,7 @@ func Notify(ctx context.Context, db *pgxpool.Pool, t EventType, payload any) err
 // alongside the periodic emitters. Holds its own dedicated connection (not a
 // pooled one, which can't stay parked on LISTEN) and reconnects with backoff.
 func (h *Hub) StartCrossProcessRelay(ctx context.Context, pool *pgxpool.Pool) {
-	go h.relayLoop(ctx, pool)
+	h.startRuntime(ctx, func(runCtx context.Context) { h.relayLoop(runCtx, pool) })
 }
 
 func (h *Hub) relayLoop(ctx context.Context, pool *pgxpool.Pool) {
@@ -49,7 +50,7 @@ func (h *Hub) relayLoop(ctx context.Context, pool *pgxpool.Pool) {
 	backoff := time.Second
 	for ctx.Err() == nil {
 		if err := h.listen(ctx, pool); err != nil && ctx.Err() == nil {
-			log.Warn().Err(err).Msg("eventhub: cross-process relay dropped, reconnecting")
+			log.Warn().Err(secrettext.RedactError(err)).Msg("eventhub: cross-process relay dropped, reconnecting")
 		}
 		if ctx.Err() != nil {
 			return
@@ -73,7 +74,14 @@ func (h *Hub) listen(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = conn.Close(context.Background()) }()
+	defer func() {
+		// pgx guarantees the underlying socket is closed when the deadline
+		// expires. Never let a broken LISTEN connection make Hub.Close—and
+		// therefore App.Close—wait forever.
+		closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = conn.Close(closeCtx)
+		cancel()
+	}()
 
 	if _, err := conn.Exec(ctx, "LISTEN "+pgNotifyChannel); err != nil {
 		return err
@@ -86,7 +94,7 @@ func (h *Hub) listen(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 		var ev Event
 		if err := json.Unmarshal([]byte(n.Payload), &ev); err != nil {
-			log.Warn().Err(err).Str("payload", n.Payload).Msg("eventhub: bad cross-process notification")
+			log.Warn().Err(err).Str("payload", secrettext.Redact(n.Payload)).Msg("eventhub: bad cross-process notification")
 			continue
 		}
 		h.Publish(ev)

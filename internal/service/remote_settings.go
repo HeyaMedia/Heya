@@ -7,7 +7,9 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/karbowiak/heya/internal/config"
 	"github.com/karbowiak/heya/internal/remote"
+	"github.com/rs/zerolog/log"
 )
 
 // RemoteUpdate is the DTO accepted by the API for runtime remote-access
@@ -70,6 +72,11 @@ func (a *App) SaveRemoteSettings(ctx context.Context, u RemoteUpdate) error {
 		return fmt.Errorf("remote port must be 0 (auto) or 1024-65535, got %d", u.Port)
 	}
 
+	// Serialize the DB overlay with readers and other settings saves so the
+	// in-memory snapshot always describes the last completed persistence pass.
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+
 	cur := a.config.Remote
 	if err := errIfEnvLockedChanged(remoteKeyEnabled, cur.Enabled, u.Enabled); err != nil {
 		return err
@@ -125,11 +132,71 @@ func (a *App) SaveRemoteSettings(ctx context.Context, u RemoteUpdate) error {
 	return nil
 }
 
+// SaveAndApplyRemoteSettings keeps persistence order and asynchronous manager
+// transition order identical across concurrent admin requests.
+func (a *App) SaveAndApplyRemoteSettings(ctx context.Context, update RemoteUpdate) (config.RemoteConfig, error) {
+	a.remoteSettingsMu.Lock()
+	defer a.remoteSettingsMu.Unlock()
+	if err := a.SaveRemoteSettings(ctx, update); err != nil {
+		return config.RemoteConfig{}, err
+	}
+	return a.applyRemoteRuntimeLocked(ctx)
+}
+
+// ApplyRemoteRuntime applies the effective config already loaded at server
+// boot. It returns after admitting the App-owned background transition.
+func (a *App) ApplyRemoteRuntime(ctx context.Context) error {
+	a.remoteSettingsMu.Lock()
+	defer a.remoteSettingsMu.Unlock()
+	_, err := a.applyRemoteRuntimeLocked(ctx)
+	return err
+}
+
+func (a *App) applyRemoteRuntimeLocked(ctx context.Context) (config.RemoteConfig, error) {
+	snapshot := a.ConfigSnapshot()
+	if snapshot == nil {
+		return config.RemoteConfig{}, fmt.Errorf("remote config is unavailable")
+	}
+	manager := a.Remote()
+	if manager == nil {
+		return config.RemoteConfig{}, fmt.Errorf("remote access manager is unavailable")
+	}
+	cur := snapshot.Remote
+	var runtimeConfig remote.Config
+	if cur.Enabled.Value {
+		resolved, err := a.RemoteRuntimeConfig(ctx)
+		if err != nil {
+			return config.RemoteConfig{}, err
+		}
+		runtimeConfig = resolved
+		// RemoteRuntimeConfig may have minted and persisted the first sticky port.
+		cur = a.ConfigSnapshot().Remote
+	}
+	started := a.remoteTransition.Start(a, func(workCtx context.Context) {
+		var err error
+		if cur.Enabled.Value {
+			err = manager.Enable(workCtx, runtimeConfig)
+		} else {
+			err = manager.Disable()
+		}
+		if err != nil && workCtx.Err() == nil {
+			log.Warn().Err(err).Msg("remote access live config transition failed")
+		}
+	})
+	if !started {
+		return config.RemoteConfig{}, errAppClosing
+	}
+	return cur, nil
+}
+
 // LoadRemoteFromDB seeds the in-memory snapshot from system_settings.
 // Called once at boot after config.Load(); env-set fields keep their env
 // provenance. Skipped in passive mode alongside LoadTailscaleFromDB — a
 // borrowed prod DB's remote.enabled must not open ports on a dev box.
 func (a *App) LoadRemoteFromDB(ctx context.Context) {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+
 	overlayFieldFromDB(a, ctx, &a.config.Remote.Enabled, remoteKeyEnabled, nil)
 	overlayFieldFromDB(a, ctx, &a.config.Remote.Port, remoteKeyPort, func(v int) bool { return v >= 1024 && v <= 65535 })
 	overlayFieldFromDB(a, ctx, &a.config.Remote.ACMEEmail, remoteKeyACMEEmail, nil)
@@ -144,6 +211,9 @@ func (a *App) LoadRemoteFromDB(ctx context.Context) {
 // port that is persisted immediately — the port lands in bookmarks and
 // client configs, so it must survive restarts.
 func (a *App) RemoteRuntimeConfig(ctx context.Context) (remote.Config, error) {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+
 	cur := a.config.Remote
 	port := cur.Port.Value
 	if port == 0 {

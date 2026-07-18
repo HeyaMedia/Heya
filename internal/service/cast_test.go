@@ -3,7 +3,7 @@ package service
 import (
 	"testing"
 
-	"github.com/karbowiak/heya/internal/worker"
+	"github.com/karbowiak/heya/internal/mediaprobe"
 )
 
 func TestCastAccessPolicy(t *testing.T) {
@@ -46,9 +46,9 @@ func TestNormalizeCastBaseURL(t *testing.T) {
 }
 
 func TestCastVideoCanDirectUsesConservativeBaseline(t *testing.T) {
-	base := worker.MediaInfo{
+	base := mediaprobe.MediaInfo{
 		Duration: 120,
-		Streams: []worker.StreamInfo{
+		Streams: []mediaprobe.StreamInfo{
 			{CodecType: "video", CodecName: "h264", PixFmt: "yuv420p", FieldOrder: "progressive"},
 			{CodecType: "audio", CodecName: "aac"},
 		},
@@ -64,14 +64,14 @@ func TestCastVideoCanDirectUsesConservativeBaseline(t *testing.T) {
 	}
 
 	hevc := base
-	hevc.Streams = append([]worker.StreamInfo(nil), base.Streams...)
+	hevc.Streams = append([]mediaprobe.StreamInfo(nil), base.Streams...)
 	hevc.Streams[0].CodecName = "hevc"
 	if castVideoCanDirect(hevc, "/media/movie.mp4", 0) {
 		t.Fatal("HEVC should use the compatibility HLS path")
 	}
 
 	hdr := base
-	hdr.Streams = append([]worker.StreamInfo(nil), base.Streams...)
+	hdr.Streams = append([]mediaprobe.StreamInfo(nil), base.Streams...)
 	hdr.Streams[0].ColorTransfer = "smpte2084"
 	if castVideoCanDirect(hdr, "/media/movie.mp4", 0) {
 		t.Fatal("HDR should use HLS so Heya can tone-map for the baseline receiver")

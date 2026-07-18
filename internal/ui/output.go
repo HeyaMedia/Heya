@@ -8,9 +8,9 @@ import (
 func Success(msg string, args ...any) {
 	text := fmt.Sprintf(msg, args...)
 	if ColorEnabled {
-		fmt.Fprintf(os.Stdout, "%s %s\n", StyleSuccess.Render("✓"), text)
+		_, _ = fmt.Fprintf(os.Stdout, "%s %s\n", StyleSuccess.Render("✓"), text)
 	} else {
-		fmt.Fprintf(os.Stdout, "[OK] %s\n", text)
+		_, _ = fmt.Fprintf(os.Stdout, "[OK] %s\n", text)
 	}
 }
 

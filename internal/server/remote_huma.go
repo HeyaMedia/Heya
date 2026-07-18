@@ -31,7 +31,7 @@ func registerRemoteRoutes(api huma.API, app *service.App, _ *config.Config) {
 			if err := remoteReadOnly(app.ConfigSnapshot()); err != nil {
 				return nil, err
 			}
-			if err := app.SaveRemoteSettings(ctx, service.RemoteUpdate{
+			cur, err := app.SaveAndApplyRemoteSettings(ctx, service.RemoteUpdate{
 				Enabled:     in.Body.Enabled,
 				Port:        in.Body.Port,
 				ACMEEmail:   in.Body.ACMEEmail,
@@ -39,40 +39,19 @@ func registerRemoteRoutes(api huma.API, app *service.App, _ *config.Config) {
 				DNSToken:    in.Body.DNSToken,
 				Domain:      in.Body.Domain,
 				Subdomain:   in.Body.Subdomain,
-			}); err != nil {
+			})
+			if err != nil {
 				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
 			}
-			cur := app.ConfigSnapshot().Remote
 			log.Info().
 				Bool("enabled", cur.Enabled.Value).
 				Str("provider", cur.DNSProvider.Value).
 				Str("domain", cur.Domain.Value).
 				Msg("remote access config saved")
 
-			mgr := app.Remote()
-			if mgr == nil {
-				return nil, huma.Error400BadRequest("remote access is production-only (unavailable under --dev-backend)")
-			}
 			if !cur.Enabled.Value {
-				// Backgrounded: Disable unmaps the router port and must not
-				// deadlock a request that arrived over the remote listener.
-				go func() { _ = mgr.Disable() }()
 				return &JSONOutput[statusBody]{Body: statusBody{Status: "disabling"}}, nil
 			}
-			// Enable re-resolves the runtime config (may mint + persist the
-			// random port on first run) and rebuilds the stack. Progress
-			// streams over the remote.status WS event.
-			go func() {
-				ctx := app.LifetimeContext()
-				rc, err := app.RemoteRuntimeConfig(ctx)
-				if err != nil {
-					log.Warn().Err(err).Msg("remote runtime config failed")
-					return
-				}
-				if err := mgr.Enable(ctx, rc); err != nil {
-					log.Warn().Err(err).Msg("remote access enable failed")
-				}
-			}()
 			return &JSONOutput[statusBody]{Body: statusBody{Status: "enabling"}}, nil
 		})
 

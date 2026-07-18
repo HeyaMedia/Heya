@@ -7,12 +7,13 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/queueops"
+	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/karbowiak/heya/internal/taskdefs"
 )
 
 func (h *Hub) StartPeriodicEmitters(ctx context.Context, db *pgxpool.Pool) {
-	go h.queueTelemetryTicker(ctx, db)
-	go h.statsTicker(ctx, db)
+	h.startRuntime(ctx, func(runCtx context.Context) { h.queueTelemetryTicker(runCtx, db) })
+	h.startRuntime(ctx, func(runCtx context.Context) { h.statsTicker(runCtx, db) })
 }
 
 // queueTelemetryTicker makes one grouped pass over live River rows every ten
@@ -83,7 +84,7 @@ func (h *Hub) queueTelemetryTicker(ctx context.Context, db *pgxpool.Pool) {
 				if startedAt != nil {
 					j.StartedAt = *startedAt
 				}
-				jobs = append(jobs, j)
+				jobs = append(jobs, redactActiveJob(j))
 			}
 			rows.Close()
 			h.Emit(EventActiveJobs, ActiveJobsPayload{Jobs: jobs})
@@ -95,6 +96,11 @@ func (h *Hub) queueTelemetryTicker(ctx context.Context, db *pgxpool.Pool) {
 			wasScanning = scanning
 		}
 	}
+}
+
+func redactActiveJob(job ActiveJob) ActiveJob {
+	job.ArgsJSON = secrettext.RedactJSONOrText(job.ArgsJSON)
+	return job
 }
 
 func queueSnapshotCounts(live []queueops.TaskKindCounts) (QueueStatusPayload, map[int64]int, map[int64]struct{}, bool) {

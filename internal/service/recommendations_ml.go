@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/karbowiak/heya/internal/sonicanalysis"
 	"github.com/karbowiak/heya/internal/textembed"
@@ -149,7 +150,7 @@ func (a *App) SetRecommendationsMLSettings(ctx context.Context, s Recommendation
 		a.resetRecEmbedder()
 	}
 	if s.Enabled && !prev.Enabled && a.recFetcher != nil {
-		go a.fetchThenBackfill(a.LifetimeContext())
+		a.startRecommendationsMLBackground(a.LifetimeContext())
 	}
 	return nil
 }
@@ -160,13 +161,34 @@ func (a *App) StartRecommendationsML(ctx context.Context) {
 	if a.recFetcher == nil || !a.RecommendationsMLEnabled(ctx) {
 		return
 	}
-	go a.fetchThenBackfill(ctx)
+	a.startRecommendationsMLBackground(ctx)
 }
 
 // TriggerRecommendationsMLFetch re-runs the download + backfill in the background
 // (settings-page "download / re-verify" button).
-func (a *App) TriggerRecommendationsMLFetch(ctx context.Context) {
-	go a.fetchThenBackfill(ctx)
+func (a *App) TriggerRecommendationsMLFetch() bool {
+	return a.startRecommendationsMLBackground(a.LifetimeContext())
+}
+
+// TriggerRecommendationsMLBackfill starts a detached catalog backfill owned
+// by the App lifecycle. It returns false when shutdown has begun and admission
+// is closed; admitted work is cancelled and joined before native models and
+// the database are released.
+func (a *App) TriggerRecommendationsMLBackfill(force bool) bool {
+	return a.startBackground(func() {
+		_, _, _ = a.BackfillVideoEmbeddings(a.LifetimeContext(), force)
+	})
+}
+
+// startRecommendationsMLBackground detaches the minutes-long fetch/backfill
+// from the request or startup context that triggered it, while keeping it
+// cancellable and joined as part of App.Close.
+func (a *App) startRecommendationsMLBackground(parent context.Context) bool {
+	return a.startBackground(func() {
+		ctx, cancel := a.backgroundContext(parent)
+		defer cancel()
+		a.fetchThenBackfill(ctx)
+	})
 }
 
 // fetchThenBackfill downloads the model (idempotent) then embeds any items
@@ -184,19 +206,73 @@ func (a *App) fetchThenBackfill(ctx context.Context) {
 // RecFetcher exposes the model fetcher for the settings status endpoint.
 func (a *App) RecFetcher() *sonicanalysis.ModelFetcher { return a.recFetcher }
 
+type recEmbedderGeneration struct {
+	embedder *textembed.Embedder
+	refs     int
+	retired  bool
+	closed   bool
+}
+
+type recEmbedderLease struct {
+	app        *App
+	generation *recEmbedderGeneration
+	embedder   *textembed.Embedder
+	once       sync.Once
+}
+
+func (l *recEmbedderLease) Close() {
+	if l == nil || l.app == nil || l.generation == nil {
+		return
+	}
+	l.once.Do(func() { l.app.releaseRecEmbedder(l.generation) })
+}
+
 func (a *App) resetRecEmbedder() {
 	a.recEmbedderMu.Lock()
-	defer a.recEmbedderMu.Unlock()
-	if a.recEmbedder != nil {
-		a.recEmbedder.Close()
-		a.recEmbedder = nil
+	generation := a.recEmbedder
+	a.recEmbedder = nil
+	toClose := retireRecEmbedderLocked(generation)
+	a.recEmbedderMu.Unlock()
+	if toClose != nil {
+		toClose.Close()
 	}
 }
 
-// recEmbedderInstance lazily loads the BGE embedder when ML is enabled and the
+func retireRecEmbedderLocked(generation *recEmbedderGeneration) *textembed.Embedder {
+	if generation == nil {
+		return nil
+	}
+	generation.retired = true
+	if generation.refs != 0 || generation.closed {
+		return nil
+	}
+	generation.closed = true
+	embedder := generation.embedder
+	generation.embedder = nil
+	return embedder
+}
+
+func (a *App) releaseRecEmbedder(generation *recEmbedderGeneration) {
+	a.recEmbedderMu.Lock()
+	if generation.refs > 0 {
+		generation.refs--
+	}
+	var toClose *textembed.Embedder
+	if generation.retired {
+		toClose = retireRecEmbedderLocked(generation)
+	}
+	a.recEmbedderMu.Unlock()
+	if toClose != nil {
+		toClose.Close()
+	}
+}
+
+// borrowRecEmbedder lazily loads the BGE embedder when ML is enabled and the
 // model is present. Returns (nil, nil) when the engine is disabled so callers
-// cleanly fall back to the non-ML path.
-func (a *App) recEmbedderInstance(ctx context.Context) (*textembed.Embedder, error) {
+// cleanly fall back to the non-ML path. The lease must span every Embed call;
+// settings changes can then retire a generation without destroying native
+// state underneath active inference.
+func (a *App) borrowRecEmbedder(ctx context.Context) (*recEmbedderLease, error) {
 	if !a.RecommendationsMLEnabled(ctx) {
 		return nil, nil
 	}
@@ -209,14 +285,25 @@ func (a *App) recEmbedderInstance(ctx context.Context) (*textembed.Embedder, err
 	}
 	a.recEmbedderMu.Lock()
 	defer a.recEmbedderMu.Unlock()
+	// The setting can change after the optimistic check above but before this
+	// serialized construction point.
+	if !a.RecommendationsMLEnabled(ctx) {
+		return nil, nil
+	}
 	if a.recEmbedder != nil {
-		return a.recEmbedder, nil
+		a.recEmbedder.refs++
+		return &recEmbedderLease{
+			app:        a,
+			generation: a.recEmbedder,
+			embedder:   a.recEmbedder.embedder,
+		}, nil
 	}
 	accel := sonicanalysis.Accelerator(a.RecommendationsMLSettings(ctx).Accelerator)
 	e, err := textembed.New(a.recModelsDir, accel)
 	if err != nil {
 		return nil, err
 	}
-	a.recEmbedder = e
-	return e, nil
+	generation := &recEmbedderGeneration{embedder: e, refs: 1}
+	a.recEmbedder = generation
+	return &recEmbedderLease{app: a, generation: generation, embedder: e}, nil
 }

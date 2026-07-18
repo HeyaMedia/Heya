@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/karbowiak/heya/internal/worker"
 	"github.com/rs/zerolog/log"
 )
@@ -598,7 +599,7 @@ func (a *App) ListLibraryScannerRuns(ctx context.Context, libraryID int64, limit
 		}
 		if len(failures) > 0 {
 			out[0].PipelineFailureCount = len(failures)
-			out[0].PipelineErrorMessage = failures[0].ErrorMessage
+			out[0].PipelineErrorMessage = secrettext.Redact(failures[0].ErrorMessage)
 		}
 	}
 	return out, nil
@@ -612,8 +613,8 @@ func scannerRunView(row sqlc.ScanRun) ScannerRunView {
 		ScannerVersion: row.ScannerVersion,
 		Mode:           row.Mode,
 		Status:         row.Status,
-		Summary:        jsonMap(row.Summary),
-		ErrorMessage:   row.ErrorMessage,
+		Summary:        secrettext.RedactMap(jsonMap(row.Summary)),
+		ErrorMessage:   secrettext.Redact(row.ErrorMessage),
 		StartedAt:      timePtr(row.StartedAt),
 		FinishedAt:     timePtr(row.FinishedAt),
 		CreatedAt:      timePtr(row.CreatedAt),
@@ -634,7 +635,7 @@ func scannerPipelineFailureView(row sqlc.ScannerEntity) ScannerPipelineFailureVi
 		Title:        row.Title,
 		Status:       row.Status,
 		Stage:        stage,
-		ErrorMessage: row.ErrorMessage,
+		ErrorMessage: secrettext.Redact(row.ErrorMessage),
 		UpdatedAt:    timePtr(row.UpdatedAt),
 	}
 }
@@ -650,9 +651,9 @@ func scannerFindingView(row sqlc.ListOpenScannerFindingsByLibraryRow) ScannerFin
 		LibraryFileID: int8Ptr(row.LibraryFileID),
 		Severity:      row.Severity,
 		Code:          row.Code,
-		RelPath:       row.RelPath,
-		Message:       row.Message,
-		Data:          jsonMap(row.Data),
+		RelPath:       secrettext.Redact(row.RelPath),
+		Message:       secrettext.Redact(row.Message),
+		Data:          secrettext.RedactMap(jsonMap(row.Data)),
 		CreatedAt:     timePtr(row.CreatedAt),
 		IdentityKey:   textValue(row.IdentityKey),
 		IdentityTitle: textValue(row.IdentityTitle),
@@ -855,13 +856,6 @@ func scannerRelDir(file string) string {
 	if file == "" {
 		return ""
 	}
-	if strings.Contains(file, "://") {
-		file = strings.TrimRight(file, "/")
-		if idx := strings.LastIndex(file, "/"); idx > strings.Index(file, "://")+2 {
-			return file[:idx]
-		}
-		return file
-	}
 	dir := filepath.Dir(filepath.Clean(file))
 	if dir == "." {
 		return "."
@@ -907,20 +901,10 @@ func scannerJoinScope(root, relDir string) string {
 	if relDir == "." {
 		return strings.TrimRight(root, "/")
 	}
-	if strings.Contains(root, "://") {
-		return strings.TrimRight(root, "/") + "/" + strings.TrimPrefix(filepath.ToSlash(relDir), "/")
-	}
 	if filepath.IsAbs(relDir) {
 		return relDir
 	}
 	return filepath.Join(root, relDir)
-}
-
-func int8Value(value pgtype.Int8) int64 {
-	if !value.Valid {
-		return 0
-	}
-	return value.Int64
 }
 
 func scannerIdentityBucket(reviewStatus string, mediaItemID pgtype.Int8, selectedProviderID string, openFindingCount int64) string {

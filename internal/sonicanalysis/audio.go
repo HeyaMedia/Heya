@@ -8,6 +8,8 @@ import (
 	"io"
 	"math"
 	"os/exec"
+
+	"github.com/karbowiak/heya/internal/vfs"
 )
 
 // decodePCM shells ffmpeg to decode `path` to a `sampleRate`-Hz mono
@@ -32,6 +34,11 @@ import (
 // back to swr+filter_size=128 if soxr isn't compiled in.
 func decodePCM(ctx context.Context, path string, sampleRate int) ([]float32, error) {
 	maxBytes := int64(sampleRate) * int64(MaxAnalysisDurationSeconds+60) * 4
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if err := vfs.ValidateLocalPath(path); err != nil {
+		return nil, fmt.Errorf("audio input: %w", err)
+	}
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "error",
@@ -46,7 +53,7 @@ func decodePCM(ctx context.Context, path string, sampleRate int) ([]float32, err
 	}
 	// G204: args contain the audio path which originates from a library
 	// scan, not user input. Binary name is hardcoded.
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...) //nolint:gosec // G204: server-controlled args, hardcoded binary
+	cmd := exec.CommandContext(runCtx, "ffmpeg", args...) //nolint:gosec // G204: server-controlled args, hardcoded binary
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()
@@ -58,18 +65,20 @@ func decodePCM(ctx context.Context, path string, sampleRate int) ([]float32, err
 	}
 	raw, readErr := io.ReadAll(io.LimitReader(stdout, maxBytes+1))
 	if int64(len(raw)) > maxBytes {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
+		// Cancel before Wait so a child blocked while writing the bounded stdout
+		// pipe cannot hold this analysis open.
+		cancel()
 		_ = cmd.Wait()
 		return nil, fmt.Errorf("decoded PCM exceeds %d bytes", maxBytes)
+	}
+	if readErr != nil {
+		cancel()
+		_ = cmd.Wait()
+		return nil, fmt.Errorf("read ffmpeg stdout: %w", readErr)
 	}
 	waitErr := cmd.Wait()
 	if waitErr != nil {
 		return nil, fmt.Errorf("ffmpeg: %w (stderr: %s)", waitErr, stderr.String())
-	}
-	if readErr != nil {
-		return nil, fmt.Errorf("read ffmpeg stdout: %w", readErr)
 	}
 	if len(raw)%4 != 0 {
 		return nil, fmt.Errorf("ffmpeg output not float32-aligned (%d bytes)", len(raw))

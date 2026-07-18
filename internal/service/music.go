@@ -12,6 +12,7 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/queueops"
+	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/karbowiak/heya/internal/worker"
 	"golang.org/x/sync/errgroup"
 )
@@ -133,13 +134,28 @@ func (a *App) GetMusicTrackDetail(ctx context.Context, trackID int64) (*MusicTra
 			files = refreshed
 		}
 	}
-	return &MusicTrackDetail{GetTrackDetailByIDRow: row, Files: files}, nil
+	row = redactMusicTrackDetailPaths(row)
+	return &MusicTrackDetail{GetTrackDetailByIDRow: row, Files: redactTrackFilePaths(files)}, nil
+}
+
+func redactMusicTrackDetailPaths(row sqlc.GetTrackDetailByIDRow) sqlc.GetTrackDetailByIDRow {
+	row.FilePath = secrettext.Redact(row.FilePath)
+	row.LyricsPath = secrettext.Redact(row.LyricsPath)
+	return row
+}
+
+func redactTrackFilePaths(files []sqlc.TrackFile) []sqlc.TrackFile {
+	redacted := append([]sqlc.TrackFile(nil), files...)
+	for i := range redacted {
+		redacted[i].LyricsPath = secrettext.Redact(redacted[i].LyricsPath)
+	}
+	return redacted
 }
 
 // EnsureTrackPlaybackReady blocks only for replay-gain loudness, then starts
 // waveform and smart-crossfade analysis behind playback.
 func (a *App) EnsureTrackPlaybackReady(ctx context.Context, trackID, trackFileID int64) error {
-	if err := worker.EnsureTrackLoudness(ctx, a.db, trackFileID); err != nil {
+	if err := a.mediaAnalysis.EnsureTrackLoudness(ctx, trackFileID); err != nil {
 		return err
 	}
 	// Preserve the worker's album-loudness cascade when on-demand playback
@@ -161,12 +177,12 @@ func (a *App) EnsureTrackPlaybackReady(ctx context.Context, trackID, trackFileID
 // ensureTrackPlaybackExtras hot-fills non-blocking playback artifacts after
 // loudness is ready. It outlives the request but stops with the application.
 func (a *App) ensureTrackPlaybackExtras(trackID, trackFileID int64) {
-	go func() {
+	a.startBackground(func() {
 		ctx, cancel := context.WithTimeout(a.lifetimeCtx, 5*time.Minute)
 		defer cancel()
 		boundaryDone := make(chan error, 1)
 		waveformDone := make(chan error, 1)
-		go func() { boundaryDone <- worker.EnsureTrackBoundaries(ctx, a.db, trackFileID) }()
+		go func() { boundaryDone <- a.mediaAnalysis.EnsureTrackBoundaries(ctx, trackFileID) }()
 		go func() {
 			_, err := a.ensureTrackWaveform(ctx, trackID)
 			waveformDone <- err
@@ -176,7 +192,7 @@ func (a *App) ensureTrackPlaybackExtras(trackID, trackFileID int64) {
 		if boundaryErr == nil && waveformErr == nil {
 			_, _ = queueops.CancelPendingLoudnessJobsForTrackFile(ctx, a.db, trackFileID)
 		}
-	}()
+	})
 }
 
 // ListTracksByArtistSlug returns one artist's tracks (flat, all albums), paginated.

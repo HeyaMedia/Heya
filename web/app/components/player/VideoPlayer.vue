@@ -296,6 +296,8 @@ const { status: transcodeStatus } = useTranscodeStatus(
   fileIdRef,
   computed(() => showInfoPanel.value && usingHLS.value),
   token,
+  () => sessionId,
+  activeAudioIdx,
 )
 
 const qualityLabel = computed(() => {

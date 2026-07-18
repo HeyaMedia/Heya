@@ -14,6 +14,10 @@ import (
 	"github.com/karbowiak/heya/internal/testutil"
 )
 
+type MediaInfo = mediaprobe.MediaInfo
+type FormatInfo = mediaprobe.FormatInfo
+type StreamInfo = mediaprobe.StreamInfo
+
 func loadFixture(t *testing.T, name string) []byte {
 	t.Helper()
 	path := filepath.Join("..", "..", "testdata", "ffprobe", name)
@@ -28,7 +32,7 @@ func loadFixture(t *testing.T, name string) []byte {
 
 func TestParseFFProbeOutput_MoviePredator(t *testing.T) {
 	data := loadFixture(t, "movie_predator_1987.json")
-	info, err := ParseFFProbeOutput(data)
+	info, err := mediaprobe.Parse(data)
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
@@ -89,7 +93,7 @@ func TestParseFFProbeOutput_MoviePredator(t *testing.T) {
 
 func TestParseFFProbeOutput_AnimeHorimiya(t *testing.T) {
 	data := loadFixture(t, "anime_horimiya_s01e03.json")
-	info, err := ParseFFProbeOutput(data)
+	info, err := mediaprobe.Parse(data)
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
@@ -166,7 +170,7 @@ func TestParseFFProbeOutput_AnimeHorimiya(t *testing.T) {
 
 func TestParseFFProbeOutput_TVExtant(t *testing.T) {
 	data := loadFixture(t, "tv_extant_s01e13.json")
-	info, err := ParseFFProbeOutput(data)
+	info, err := mediaprobe.Parse(data)
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
@@ -197,7 +201,7 @@ func TestParseFFProbeOutput_TVExtant(t *testing.T) {
 }
 
 func TestParseFFProbeOutput_InvalidJSON(t *testing.T) {
-	_, err := ParseFFProbeOutput([]byte(`{garbage`))
+	_, err := mediaprobe.Parse([]byte(`{garbage`))
 	if err == nil {
 		t.Error("expected error for invalid JSON")
 	}
@@ -205,7 +209,7 @@ func TestParseFFProbeOutput_InvalidJSON(t *testing.T) {
 
 func TestParseFFProbeOutput_EmptyStreams(t *testing.T) {
 	data := []byte(`{"format": {"format_name": "mp4", "duration": "10.5"}, "streams": []}`)
-	info, err := ParseFFProbeOutput(data)
+	info, err := mediaprobe.Parse(data)
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
@@ -228,7 +232,7 @@ func TestParseFFProbeOutput_OnlyAttachments(t *testing.T) {
 			{"index": 1, "codec_type": "attachment", "codec_name": "otf"}
 		]
 	}`)
-	info, err := ParseFFProbeOutput(data)
+	info, err := mediaprobe.Parse(data)
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
@@ -294,7 +298,7 @@ func TestPopulateNumericFields(t *testing.T) {
 
 func TestMediaInfoJSONRoundTrip(t *testing.T) {
 	data := loadFixture(t, "anime_horimiya_s01e03.json")
-	info, err := ParseFFProbeOutput(data)
+	info, err := mediaprobe.Parse(data)
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
@@ -389,7 +393,7 @@ func TestFFProbeRealFile(t *testing.T) {
 		t.Fatalf("ffprobe exec: %v", err)
 	}
 
-	info, err := ParseFFProbeOutput(output)
+	info, err := mediaprobe.Parse(output)
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
@@ -441,7 +445,7 @@ func TestFFProbeRealFile_AllFulldata(t *testing.T) {
 				t.Fatalf("ffprobe exec: %v", err)
 			}
 
-			info, err := ParseFFProbeOutput(output)
+			info, err := mediaprobe.Parse(output)
 			if err != nil {
 				t.Fatalf("parse error: %v", err)
 			}
@@ -519,7 +523,7 @@ func TestFFProbeWorker_Integration(t *testing.T) {
 		t.Fatalf("ffprobe exec: %v", err)
 	}
 
-	info, err := ParseFFProbeOutput(output)
+	info, err := mediaprobe.Parse(output)
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}

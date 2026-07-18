@@ -107,6 +107,11 @@ bootstrap, declarative `HEYA_LIBRARY_<N>_*` libraries, media mounts, and
 (`make db-up` starts only the `postgres` service — that's the dev flow, and it
 shares this file.)
 
+Library paths are absolute paths inside the container. For NAS or other network
+storage, mount the share on the host and bind-mount it at the same path into the
+serve and worker containers. Configure that mounted path in Heya; transport
+URLs such as `smb://…` are intentionally rejected.
+
 ## Production process topology
 
 Regular images do not supervise multiple processes. Every deployment must run:

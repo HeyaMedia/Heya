@@ -654,7 +654,7 @@ func DecideForHLS(info *MediaInfo, audioStreamIdx int, caps ClientCapabilities) 
 
 	// Always emit ReasonContainerNotSupported for HLS delivery — by definition
 	// we're not playing the source container directly.
-	var reasonBits TranscodeReason = ReasonContainerNotSupported
+	reasonBits := ReasonContainerNotSupported
 	if !copyVideo {
 		switch {
 		case dvNeedsHandling && !canStripDVtoHDR10:

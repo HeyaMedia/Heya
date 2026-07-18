@@ -29,6 +29,7 @@ type Holder struct {
 	idleTimeout time.Duration
 
 	mu              sync.Mutex
+	closed          bool
 	pendingCfg      *Config // Reconfigure arrived while leased; applied when refs drop to 0
 	analyzer        *Analyzer
 	refs            int
@@ -103,16 +104,15 @@ func NewHolder(cfg Config, idleTimeout time.Duration) *Holder {
 type Lease struct {
 	holder   *Holder
 	Analyzer *Analyzer
-	closed   bool
+	once     sync.Once
 }
 
 // Close releases the borrow. Safe to call multiple times.
 func (l *Lease) Close() {
-	if l == nil || l.closed {
+	if l == nil {
 		return
 	}
-	l.closed = true
-	l.holder.release()
+	l.once.Do(l.holder.release)
 }
 
 // Borrow returns a Lease holding a ready Analyzer. Lazy-loads the
@@ -121,6 +121,10 @@ func (l *Lease) Close() {
 // so cancelling it aborts a cold-load mid-flight.
 func (h *Holder) Borrow(ctx context.Context) (*Lease, error) {
 	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		return nil, ErrHolderClosed
+	}
 	if h.idleStop != nil {
 		close(h.idleStop)
 		h.idleStop = nil
@@ -158,6 +162,9 @@ func (h *Holder) Borrow(ctx context.Context) (*Lease, error) {
 func (h *Holder) Reconfigure(cfg Config) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.closed {
+		return ErrHolderClosed
+	}
 	if h.refs > 0 {
 		c := cfg
 		h.pendingCfg = &c
@@ -185,18 +192,31 @@ func (h *Holder) applyConfigLocked(cfg Config) {
 	h.cfg = cfg
 }
 
-// Close tears down the holder, unloading any resident model. The
-// process shutdown sequence calls this so we don't leak ORT sessions.
+// Close prevents new borrows and tears down the holder. If an analysis is
+// still using the native model sessions, their unload is deferred until the
+// last lease is released. This matters during bounded shutdown: native
+// inference is not context-interruptible, so the worker may outlive its stop
+// timeout and must be allowed to finish without its sessions disappearing.
 func (h *Holder) Close() {
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	if h.closed {
+		h.mu.Unlock()
+		return
+	}
+	h.closed = true
+	h.pendingCfg = nil
 	if h.idleStop != nil {
 		close(h.idleStop)
 		h.idleStop = nil
 	}
-	if h.analyzer != nil && h.analyzer.State() == StateReady {
-		h.analyzer.Unload()
+	h.idleUnloadAt = time.Time{}
+	if h.refs > 0 {
+		h.mu.Unlock()
+		return
 	}
+	a := h.detachAnalyzerLocked()
+	h.mu.Unlock()
+	unloadAnalyzer(a)
 }
 
 // State returns the underlying Analyzer's state, or StateUnloaded
@@ -215,6 +235,12 @@ func (h *Holder) release() {
 	h.refs--
 	if h.refs < 0 {
 		h.refs = 0
+	}
+	if h.refs == 0 && h.closed {
+		a := h.detachAnalyzerLocked()
+		h.mu.Unlock()
+		unloadAnalyzer(a)
+		return
 	}
 	// A Reconfigure that arrived mid-batch was stashed; this refs→0
 	// transition is the "next idle" it was waiting for. Apply it now —
@@ -258,17 +284,31 @@ func (h *Holder) unloadIfIdle(myStop chan struct{}) {
 		h.mu.Unlock()
 		return
 	}
-	a := h.analyzer
+	a := h.detachAnalyzerLocked()
 	h.mu.Unlock()
-	if a.State() == StateReady {
+	unloadAnalyzer(a)
+}
+
+// detachAnalyzerLocked transfers ownership of the current analyzer to the
+// caller so a potentially expensive native unload can happen without h.mu.
+func (h *Holder) detachAnalyzerLocked() *Analyzer {
+	a := h.analyzer
+	h.analyzer = nil
+	h.loadedAt = time.Time{}
+	h.idleUnloadAt = time.Time{}
+	return a
+}
+
+func unloadAnalyzer(a *Analyzer) {
+	if a != nil && a.State() == StateReady {
 		a.Unload()
 	}
-	h.mu.Lock()
-	h.loadedAt = time.Time{}
-	h.mu.Unlock()
 }
 
 // ErrHolderBusy is returned by Reconfigure when a lease is still
 // outstanding. The config is NOT lost — it's stashed and applied
 // automatically when the current leases drain.
 var ErrHolderBusy = errors.New("sonicanalysis: holder is busy; settings will apply when the current batch finishes")
+
+// ErrHolderClosed is returned when work is submitted after shutdown began.
+var ErrHolderClosed = errors.New("sonicanalysis: holder is closed")

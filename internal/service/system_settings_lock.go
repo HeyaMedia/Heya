@@ -14,32 +14,33 @@ package service
 // raw key directly. For keys outside the env-managed namespace
 // (opensubtitles credentials, etc.) the write proceeds normally.
 func (a *App) SystemSettingEnvLock(key string) (envVar string, locked bool) {
+	cfg := a.ConfigSnapshot()
 	switch key {
 	case jfKeyEnabled:
-		return a.config.Jellyfin.Enabled.EnvLock()
+		return cfg.Jellyfin.Enabled.EnvLock()
 	case tsKeyEnabled:
-		return a.config.Tailscale.Enabled.EnvLock()
+		return cfg.Tailscale.Enabled.EnvLock()
 	case tsKeyHTTPS:
-		return a.config.Tailscale.HTTPS.EnvLock()
+		return cfg.Tailscale.HTTPS.EnvLock()
 	case tsKeyFunnel:
-		return a.config.Tailscale.Funnel.EnvLock()
+		return cfg.Tailscale.Funnel.EnvLock()
 	case tsKeyHostname:
-		return a.config.Tailscale.Hostname.EnvLock()
+		return cfg.Tailscale.Hostname.EnvLock()
 	case transcoderKeyHWAccel:
-		return a.config.HWAccel.EnvLock()
+		return cfg.HWAccel.EnvLock()
 	case transcoderKeyCacheMaxGB:
-		return a.config.TranscodeCacheMaxGB.EnvLock()
+		return cfg.TranscodeCacheMaxGB.EnvLock()
 	case "lastfm":
 		// Whole-blob lock: env key presence forces env provenance for the pair.
-		if v, locked := a.config.LastfmAPIKey.EnvLock(); locked {
+		if v, locked := cfg.LastfmAPIKey.EnvLock(); locked {
 			return v, true
 		}
-		return a.config.LastfmSecret.EnvLock()
+		return cfg.LastfmSecret.EnvLock()
 	case "podcast_index":
-		if v, locked := a.config.PodcastIndexKey.EnvLock(); locked {
+		if v, locked := cfg.PodcastIndexKey.EnvLock(); locked {
 			return v, true
 		}
-		return a.config.PodcastIndexSecret.EnvLock()
+		return cfg.PodcastIndexSecret.EnvLock()
 	case sonicSettingsKey:
 		// Sonic is a multi-field blob — refuse the generic write if ANY
 		// field inside is env-locked. Caller must go through the typed

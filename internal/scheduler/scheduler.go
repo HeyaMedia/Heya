@@ -25,8 +25,8 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Trigger is the cron decider. Construct once per process, call Start
-// with the lifetime ctx, and it drives the kickoff cadence forever.
+// Trigger is the cron decider. Construct once per process, call Run with the
+// lifetime context, and join its return before releasing the DB or River.
 type Trigger struct {
 	db    *pgxpool.Pool
 	river *river.Client[pgx.Tx]
@@ -36,12 +36,23 @@ func NewTrigger(db *pgxpool.Pool, rc *river.Client[pgx.Tx]) *Trigger {
 	return &Trigger{db: db, river: rc}
 }
 
-func (t *Trigger) Start(ctx context.Context) {
-	go t.loop(ctx)
-	go t.maxRuntimeLoop(ctx)
+// Run drives both scheduler loops and returns only after they have stopped.
+// Runtime owners can therefore join the scheduler before releasing its
+// database and River dependencies.
+func (t *Trigger) Run(ctx context.Context) {
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		t.loop(ctx)
+	}()
+	t.maxRuntimeLoop(ctx)
+	<-loopDone
 }
 
 func (t *Trigger) loop(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 	t.tick(ctx)

@@ -25,16 +25,14 @@ const musicProbeTimeout = 90 * time.Second
 
 // musicProbeConcurrency bounds the parallel tag probes in
 // AnalyzeMusicWithOptions. Each probe is one short ffprobe subprocess whose
-// cost is dominated by media round trips (libraries typically live on SMB),
+// cost is dominated by media round trips (often over network-mounted storage),
 // so a small fan-out hides the network latency without stampeding the share
 // or the local CPU. Matches the musicFetchConcurrency scale used elsewhere
 // in this package.
 const musicProbeConcurrency = 4
 
-type MusicProbeFunc func(ctx context.Context, path string) (*mediaprobe.MediaInfo, error)
-
 type MusicAnalysisOptions struct {
-	Probe MusicProbeFunc
+	Probe mediaprobe.Func
 }
 
 type MusicTrackPlan struct {
@@ -143,7 +141,7 @@ func AnalyzeMusicWithOptions(ctx context.Context, inv Inventory, emit Emitter, o
 		}
 
 		// Probe tags with bounded parallelism: on a fresh import each probe
-		// is an ffprobe round trip against the (typically SMB-backed) share,
+		// is an ffprobe round trip against the (often network-mounted) library,
 		// and probing serially made this the dominant cost of a first music
 		// scan. Results land at their input index so grouping below sees the
 		// same order the serial loop produced. On cancellation we still

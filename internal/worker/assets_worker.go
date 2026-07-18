@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -16,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
+	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/mediafile"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/vfs"
@@ -83,7 +83,7 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 
 	current := item.Title
 	if filePath != "" {
-		current = vfs.Base(filePath)
+		current = filepath.Base(filePath)
 	}
 	w.Progress.SetCurrent(DetectLocalAssetsArgs{}.Kind(), job.Args.ScheduledTaskID, current)
 
@@ -92,23 +92,25 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 		dirName = item.Slug
 	}
 	cacheDir := filepath.Join(w.DataDir, "images", mediaType, dirName)
-	os.MkdirAll(cacheDir, 0o755)
+	if err := os.MkdirAll(cacheDir, 0o750); err != nil {
+		return fmt.Errorf("create local asset cache: %w", err)
+	}
 
 	var source *vfs.Source
 	dir := ""
 	base := ""
 	showDir := ""
 	if filePath != "" {
-		dir = vfs.Dir(filePath)
-		base = strings.TrimSuffix(vfs.Base(filePath), filepath.Ext(vfs.Base(filePath)))
+		dir = filepath.Dir(filePath)
+		base = strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filepath.Base(filePath)))
 		showDir = dir
-		if strings.HasPrefix(strings.ToLower(vfs.Base(dir)), "season") {
-			showDir = vfs.Dir(dir)
+		if strings.HasPrefix(strings.ToLower(filepath.Base(dir)), "season") {
+			showDir = filepath.Dir(dir)
 		}
 		var openErr error
-		source, openErr = vfs.Open(showDir)
+		source, openErr = vfs.OpenContext(ctx, showDir)
 		if openErr != nil {
-			log.Warn().Err(openErr).Str("dir", showDir).Msg("cannot open show directory for assets")
+			log.Warn().Err(vfs.RedactError(openErr)).Str("dir", vfs.RedactPath(showDir)).Msg("cannot open show directory for assets")
 		}
 	} else {
 		log.Debug().Int64("media_item_id", mediaItemID).Msg("skipping local asset detection: no library file path")
@@ -117,35 +119,26 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 	assetsCreated := 0
 
 	if source != nil && useLocalData {
-		defer func() { _ = source.Close() }()
 		assetsCreated += w.detectShowLevelImages(ctx, q, mediaItemID, source.FS, cacheDir)
-	} else if source != nil {
-		defer func() { _ = source.Close() }()
 	}
 
-	if filePath != "" && !vfs.IsSMBPath(dir) {
-		// Local path: os.DirFS + vfs.Join ≡ os.ReadDir + filepath.Join here,
-		// so the FS-based walker covers both the local and SMB shapes.
+	if filePath != "" {
+		// Native and mounted network filesystems both appear as ordinary local
+		// paths here, while the fs.FS boundary keeps the walker testable.
 		assetsCreated += w.detectSiblingAssetsFS(ctx, q, mediaItemID, os.DirFS(dir), dir, base, useLocalData)
-	} else if source != nil {
-		relDir := vfs.Base(dir)
-		if relDir != vfs.Base(showDir) {
-			subFS, err := fs.Sub(source.FS, relDir)
-			if err == nil {
-				assetsCreated += w.detectSiblingAssetsFS(ctx, q, mediaItemID, subFS, dir, base, useLocalData)
-			}
-		}
 	}
 
-	posterPath := filepath.Join(cacheDir, "poster.jpg")
-	backdropPath := filepath.Join(cacheDir, "backdrop.jpg")
+	posterPath := ""
+	backdropPath := ""
 
 	hasPoster := false
 	hasBackdrop := false
 
 	if source != nil && useLocalData {
 		for _, name := range []string{"poster.jpg", "poster.png", "folder.jpg", "folder.png"} {
-			if findAndCopyFS(source.FS, name, posterPath) != "" {
+			candidate := filepath.Join(cacheDir, "poster"+strings.ToLower(filepath.Ext(name)))
+			if copied := findAndCopyFS(ctx, source.FS, name, candidate); copied != "" {
+				posterPath = copied
 				hasPoster = true
 				break
 			}
@@ -153,7 +146,9 @@ func (w *DetectLocalAssetsWorker) Work(ctx context.Context, job *river.Job[Detec
 	}
 	if source != nil && useLocalData {
 		for _, name := range []string{"backdrop.jpg", "backdrop.png", "fanart.jpg", "fanart.png"} {
-			if findAndCopyFS(source.FS, name, backdropPath) != "" {
+			candidate := filepath.Join(cacheDir, "backdrop"+strings.ToLower(filepath.Ext(name)))
+			if copied := findAndCopyFS(ctx, source.FS, name, candidate); copied != "" {
+				backdropPath = copied
 				hasBackdrop = true
 				break
 			}
@@ -320,10 +315,12 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 			if seen[key] {
 				continue
 			}
-			seen[key] = true
 			cacheName := nameNoExt + ext
 			destPath := filepath.Join(cacheDir, cacheName)
-			copyFromFS(fsys, name, destPath, false)
+			if err := copyFromFS(ctx, fsys, name, destPath, false); err != nil {
+				log.Warn().Err(err).Str("asset", name).Msg("copy local media asset failed")
+				continue
+			}
 
 			info, _ := e.Info()
 			size := int64(0)
@@ -356,6 +353,7 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 				})
 			}
 			if err == nil {
+				seen[key] = true
 				created++
 			}
 			continue
@@ -369,7 +367,10 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 				}
 			}
 			destPath := filepath.Join(cacheDir, name)
-			copyFromFS(fsys, name, destPath, false)
+			if err := copyFromFS(ctx, fsys, name, destPath, false); err != nil {
+				log.Warn().Err(err).Str("asset", name).Msg("copy local backdrop failed")
+				continue
+			}
 			if order == 0 {
 				if err := ShiftMediaAssetSortOrders(ctx, q, mediaItemID, sqlc.AssetTypeBackdrop); err != nil {
 					log.Warn().Err(err).Int64("media_item_id", mediaItemID).Msg("make room for numbered local backdrop failed")
@@ -403,10 +404,12 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 			if seen[key] {
 				continue
 			}
-			seen[key] = true
 
 			destPath := filepath.Join(cacheDir, name)
-			copyFromFS(fsys, name, destPath, false)
+			if err := copyFromFS(ctx, fsys, name, destPath, false); err != nil {
+				log.Warn().Err(err).Str("asset", name).Msg("copy local season poster failed")
+				continue
+			}
 
 			if _, err := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 				MediaItemID: mediaItemID,
@@ -415,6 +418,7 @@ func (w *DetectLocalAssetsWorker) detectShowLevelImages(ctx context.Context, q *
 				LocalPath:   destPath,
 				Label:       seasonLabel,
 			}); err == nil {
+				seen[key] = true
 				created++
 			}
 		}
@@ -448,7 +452,7 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssetsFS(ctx context.Context, q *
 		name := e.Name()
 		ext := strings.ToLower(filepath.Ext(name))
 		nameNoExt := strings.TrimSuffix(name, filepath.Ext(name))
-		fullPath := vfs.Join(dir, name)
+		fullPath := filepath.Join(dir, name)
 
 		if mediafile.IsSubtitleExt(ext) && strings.HasPrefix(nameNoExt, baseName) {
 			lang := extractLanguageCode(nameNoExt, baseName)
@@ -484,6 +488,10 @@ func (w *DetectLocalAssetsWorker) detectSiblingAssetsFS(ctx context.Context, q *
 			if hasThumb {
 				continue
 			}
+			if !validRasterPath(ctx, fullPath) {
+				log.Warn().Str("asset", name).Msg("skipping invalid local thumbnail")
+				continue
+			}
 			hasThumb = true
 			if _, err := q.UpsertPrimaryMediaAsset(ctx, sqlc.UpsertPrimaryMediaAssetParams{
 				MediaItemID: mediaItemID,
@@ -509,51 +517,37 @@ func extractLanguageCode(nameNoExt, baseName string) string {
 	return ""
 }
 
-func copyFile(src, dst string) error {
-	if fileExists(dst) {
-		return nil
-	}
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	_, err = io.Copy(out, in)
-	return err
-}
-
 // copyFromFS copies name from fsys to dst. With overwrite=false the copy
 // bails when dst already exists — right for remote downloads. Local
 // re-detection passes overwrite=true so a refresh picks up replacement files.
-func copyFromFS(fsys fs.FS, name, dst string, overwrite bool) error {
+func copyFromFS(ctx context.Context, fsys fs.FS, name, dst string, overwrite bool) (retErr error) {
 	if !overwrite && fileExists(dst) {
-		return nil
+		if info, err := images.ValidateRasterFileContext(ctx, dst); err == nil && imageExtensionMatches(dst, info.Extension) {
+			return nil
+		}
 	}
 	in, err := fsys.Open(name)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { retErr = errors.Join(retErr, in.Close()) }()
 
-	out, err := os.Create(dst)
+	staged, err := images.StageRasterContext(ctx, filepath.Dir(dst), in)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
-
-	_, err = io.Copy(out, in)
-	return err
+	defer func() { retErr = errors.Join(retErr, staged.Rollback()) }()
+	if !imageExtensionMatches(dst, staged.Info.Extension) {
+		return fmt.Errorf("image contents are %s but destination extension is %s", staged.Info.Format, filepath.Ext(dst))
+	}
+	if err := staged.Publish(dst); err != nil {
+		return err
+	}
+	return staged.Commit()
 }
 
-func findAndCopyFS(fsys fs.FS, name, dst string) string {
-	if err := copyFromFS(fsys, name, dst, false); err != nil {
+func findAndCopyFS(ctx context.Context, fsys fs.FS, name, dst string) string {
+	if err := copyFromFS(ctx, fsys, name, dst, false); err != nil {
 		return ""
 	}
 	return dst
@@ -562,4 +556,17 @@ func findAndCopyFS(fsys fs.FS, name, dst string) string {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func validRasterPath(ctx context.Context, path string) bool {
+	info, err := images.ValidateRasterFileContext(ctx, path)
+	return err == nil && imageExtensionMatches(path, info.Extension)
+}
+
+func imageExtensionMatches(path, decodedExtension string) bool {
+	extension := strings.ToLower(filepath.Ext(path))
+	if extension == ".jpeg" {
+		extension = ".jpg"
+	}
+	return extension == decodedExtension
 }

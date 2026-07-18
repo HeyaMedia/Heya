@@ -63,15 +63,15 @@ func registerTailscaleRoutes(api huma.API, app *service.App, _ *config.Config) {
 			if err := tailscaleReadOnly(app.ConfigSnapshot()); err != nil {
 				return nil, err
 			}
-			if err := app.SaveTailscaleSettings(ctx, service.TailscaleUpdate{
+			cur, err := app.SaveAndApplyTailscaleSettings(ctx, service.TailscaleUpdate{
 				Enabled:  in.Body.Enabled,
 				HTTPS:    in.Body.HTTPS,
 				Funnel:   in.Body.Funnel,
 				Hostname: in.Body.Hostname,
-			}); err != nil {
+			})
+			if err != nil {
 				return nil, humaServiceError(err)
 			}
-			cur := app.ConfigSnapshot().Tailscale
 			log.Info().
 				Bool("enabled", cur.Enabled.Value).
 				Bool("https", cur.HTTPS.Value).
@@ -79,32 +79,9 @@ func registerTailscaleRoutes(api huma.API, app *service.App, _ *config.Config) {
 				Str("hostname", cur.Hostname.Value).
 				Msg("tailscale config saved")
 
-			ts := app.Tailscale()
-			if ts == nil {
-				return nil, huma.Error500InternalServerError("tailscale manager not initialized")
-			}
-
 			if !cur.Enabled.Value {
-				// Backgrounded to avoid deadlocking on http.Server.Shutdown
-				// when the request itself came in over a tsnet listener.
-				go func() { _ = ts.Disable() }()
 				return &JSONOutput[statusBody]{Body: statusBody{Status: "disabling"}}, nil
 			}
-
-			// Enable is potentially long-running (90s timeout on first auth).
-			// Fire and forget — the UI picks up the login URL via the
-			// tailscale.status WS event. Bound to app lifetime so shutdown
-			// cancels an in-flight tsnet bring-up.
-			go func() {
-				_ = ts.Enable(app.LifetimeContext(), tsnetwrap.Config{
-					Enabled:  true,
-					Hostname: cur.Hostname.Value,
-					AuthKey:  cur.AuthKey.Value,
-					StateDir: cur.StateDir.Value,
-					HTTPS:    cur.HTTPS.Value,
-					Funnel:   cur.Funnel.Value,
-				})
-			}()
 			return &JSONOutput[statusBody]{Body: statusBody{Status: "enabling"}}, nil
 		})
 
@@ -117,28 +94,16 @@ func registerTailscaleRoutes(api huma.API, app *service.App, _ *config.Config) {
 			if err := tailscaleReadOnly(app.ConfigSnapshot()); err != nil {
 				return nil, err
 			}
-			ts := app.Tailscale()
-			if ts == nil {
-				return nil, huma.Error400BadRequest("Tailscale is not running")
-			}
 			cur := app.ConfigSnapshot().Tailscale
-			if err := app.SaveTailscaleSettings(ctx, service.TailscaleUpdate{
+			if _, err := app.SaveAndApplyTailscaleSettings(ctx, service.TailscaleUpdate{
 				Enabled:  cur.Enabled.Value,
 				HTTPS:    cur.HTTPS.Value,
 				Funnel:   in.Body.Enabled,
 				Hostname: cur.Hostname.Value,
 			}); err != nil {
-				if mapped := humaServiceError(err); mapped != nil {
-					if statusErr, ok := mapped.(huma.StatusError); ok && statusErr.GetStatus() == http.StatusConflict {
-						return nil, mapped
-					}
-				}
-				log.Warn().Err(err).Msg("failed to persist tailscale funnel preference")
-			} else {
-				log.Info().Bool("funnel", in.Body.Enabled).Msg("tailscale funnel preference saved")
+				return nil, humaServiceError(err)
 			}
-			// Backgrounded for the same deadlock reason as Disable.
-			go func() { _ = ts.SetFunnel(app.LifetimeContext(), in.Body.Enabled) }()
+			log.Info().Bool("funnel", in.Body.Enabled).Msg("tailscale funnel preference saved")
 			return &JSONOutput[funnelBody]{Body: funnelBody{Funnel: in.Body.Enabled}}, nil
 		})
 
@@ -147,18 +112,15 @@ func registerTailscaleRoutes(api huma.API, app *service.App, _ *config.Config) {
 			if err := tailscaleReadOnly(app.ConfigSnapshot()); err != nil {
 				return nil, err
 			}
-			ts := app.Tailscale()
-			if ts == nil {
-				return nil, huma.Error400BadRequest("Tailscale is not running")
-			}
 			cur := app.ConfigSnapshot().Tailscale
-			_ = app.SaveTailscaleSettings(ctx, service.TailscaleUpdate{
+			if err := app.SaveAndLogoutTailscale(ctx, service.TailscaleUpdate{
 				Enabled:  false,
 				HTTPS:    cur.HTTPS.Value,
 				Funnel:   cur.Funnel.Value,
 				Hostname: cur.Hostname.Value,
-			})
-			go func() { _ = ts.Logout(app.LifetimeContext()) }()
+			}); err != nil {
+				return nil, humaServiceError(err)
+			}
 			return statusOK("logging out"), nil
 		})
 }

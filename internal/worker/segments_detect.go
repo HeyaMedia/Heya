@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/rs/zerolog/log"
 )
 
@@ -386,7 +387,14 @@ var chromaprintMuxerAvailable = sync.OnceValue(func() bool {
 // always starts at 0), this seeks to an arbitrary offset — needed to
 // fingerprint a tail window without decoding the whole file.
 func chromaprintWindowRaw(ctx context.Context, path string, startSecs, durSecs float64) ([]uint32, error) {
-	cmd := exec.CommandContext(ctx, //nolint:gosec // path comes from library_files we control; ffmpeg binary is fixed
+	if err := vfs.ValidateLocalPath(path); err != nil {
+		return nil, fmt.Errorf("audio input: %w", err)
+	}
+	// The season job may intentionally span many episodes, but no individual
+	// decoder may hold the queue forever on a wedged file or mount.
+	execCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(execCtx, //nolint:gosec // path comes from library_files we control; ffmpeg binary is fixed
 		"ffmpeg",
 		"-nostdin", "-nostats", "-hide_banner",
 		"-ss", fmt.Sprintf("%.3f", startSecs),
@@ -457,6 +465,9 @@ func parseBlackDetectIntervals(stderrOutput string) []blackInterval {
 // black-frame transitions that don't fit the window, and that's a normal
 // outcome, not a failure.
 func detectMovieCredits(ctx context.Context, path string, durationSecs float64) (creditsStartSecs float64, ok bool, err error) {
+	if err := vfs.ValidateLocalPath(path); err != nil {
+		return 0, false, fmt.Errorf("video input: %w", err)
+	}
 	windowStart := durationSecs - movieCreditsWindowSecs
 	if windowStart < 0 {
 		windowStart = 0

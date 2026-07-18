@@ -10,6 +10,7 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/saver"
 	"github.com/karbowiak/heya/internal/titlematch"
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
@@ -76,7 +77,7 @@ func (w *SaveMusicNFOWorker) Work(ctx context.Context, job *river.Job[SaveMusicN
 				Int64("artist_id", artist.ID).
 				Str("artist", artist.Name).
 				Str("album", al.Title).
-				Str("dir", candidateArtistDir).
+				Str("dir", vfs.RedactPath(candidateArtistDir)).
 				Msg("refusing to write music NFO outside matching artist directory")
 			continue
 		}
@@ -85,7 +86,7 @@ func (w *SaveMusicNFOWorker) Work(ctx context.Context, job *river.Job[SaveMusicN
 		}
 
 		if err := saver.WriteAlbumNFO(releaseDir, artist, al, tracks); err != nil {
-			log.Warn().Err(err).Str("dir", releaseDir).Msg("WriteAlbumNFO failed")
+			log.Warn().Err(vfs.RedactError(err)).Str("dir", vfs.RedactPath(releaseDir)).Msg("WriteAlbumNFO failed")
 			continue
 		}
 		wroteAlbums++
@@ -94,7 +95,7 @@ func (w *SaveMusicNFOWorker) Work(ctx context.Context, job *river.Job[SaveMusicN
 
 	if artistDir != "" {
 		if err := saver.WriteArtistNFO(artistDir, artist, mediaItem, albumTitles); err != nil {
-			log.Warn().Err(err).Str("dir", artistDir).Msg("WriteArtistNFO failed")
+			log.Warn().Err(vfs.RedactError(err)).Str("dir", vfs.RedactPath(artistDir)).Msg("WriteArtistNFO failed")
 		}
 	}
 
@@ -102,7 +103,7 @@ func (w *SaveMusicNFOWorker) Work(ctx context.Context, job *river.Job[SaveMusicN
 		Int64("artist_id", artist.ID).
 		Str("name", artist.Name).
 		Int("albums_written", wroteAlbums).
-		Str("artist_dir", artistDir).
+		Str("artist_dir", vfs.RedactPath(artistDir)).
 		Msg("SaveMusicNFO complete")
 
 	return nil

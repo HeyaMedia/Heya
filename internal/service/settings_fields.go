@@ -41,7 +41,8 @@ func readSetting[T any](a *App, ctx context.Context, key string) (T, bool) {
 }
 
 // persistFieldSetting writes a validated new value for one field, skipping
-// the write when env owns the field.
+// the write when env owns the field. Runtime callers capture cur while holding
+// App.configMu and retain that lock through persistence.
 func persistFieldSetting[T any](a *App, ctx context.Context, key string, cur config.Field[T], next T) error {
 	if cur.Source == config.SourceEnv {
 		return nil
@@ -51,7 +52,8 @@ func persistFieldSetting[T any](a *App, ctx context.Context, key string, cur con
 
 // persistAndOverlayField persists next and updates the in-memory snapshot
 // field, both skipped when env owns it. For Save methods whose subsystem
-// reads the snapshot directly (no dedicated Update*Config hook).
+// reads the snapshot directly (no dedicated Update*Config hook). Runtime
+// callers must hold App.configMu across validation, persistence, and overlay.
 func persistAndOverlayField[T any](a *App, ctx context.Context, key string, field *config.Field[T], next T) error {
 	if field.Source == config.SourceEnv {
 		return nil
@@ -66,6 +68,8 @@ func persistAndOverlayField[T any](a *App, ctx context.Context, key string, fiel
 // overlayFieldFromDB replaces a default-sourced field with the persisted DB
 // value when one exists and passes accept (nil accept = any decoded value).
 // Env- and DB-sourced fields are left alone so env provenance survives boot.
+// Callers must hold App.configMu; App-independent startup overlays use their
+// own helper before the config is published.
 func overlayFieldFromDB[T any](a *App, ctx context.Context, field *config.Field[T], key string, accept func(T) bool) {
 	if field.Source != config.SourceDefault {
 		return

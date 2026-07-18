@@ -210,16 +210,19 @@ func (a *App) musicMetadataForTracks(ctx context.Context, trackIDs []int64) (pgv
 	// next scheduled catalog sweep. This remains best-effort: radio still has
 	// provider/popularity fallbacks if the optional model is disabled or busy.
 	if len(missing) > 0 {
-		if embedder, embedderErr := a.recEmbedderInstance(ctx); embedderErr == nil && embedder != nil {
-			for _, value := range missing {
-				doc := musicsemantic.Document(value.facets)
-				embedding, embedErr := embedder.Embed(doc)
-				if embedErr != nil {
-					continue
-				}
-				vector := pgvector.NewVector(embedding)
-				vectors = append(vectors, vector)
-				_, _ = a.db.Exec(ctx, `
+		if lease, embedderErr := a.borrowRecEmbedder(ctx); embedderErr == nil && lease != nil {
+			func() {
+				defer lease.Close()
+				embedder := lease.embedder
+				for _, value := range missing {
+					doc := musicsemantic.Document(value.facets)
+					embedding, embedErr := embedder.Embed(doc)
+					if embedErr != nil {
+						continue
+					}
+					vector := pgvector.NewVector(embedding)
+					vectors = append(vectors, vector)
+					_, _ = a.db.Exec(ctx, `
 					INSERT INTO music_recording_facets
 					  (recording_entity_id, text_embedding, embedder_version, doc_hash, embedded_at)
 					VALUES ($1, $2, $3, $4, now())
@@ -228,8 +231,9 @@ func (a *App) musicMetadataForTracks(ctx context.Context, trackIDs []int64) (pgv
 					  embedder_version = EXCLUDED.embedder_version,
 					  doc_hash = EXCLUDED.doc_hash,
 					  embedded_at = now()`,
-					value.id, vector, int32(textembed.Version), embedDocHash(doc))
-			}
+						value.id, vector, int32(textembed.Version), embedDocHash(doc))
+				}
+			}()
 		}
 	}
 	return averageEmbeddings(vectors), combined, recordingIDs, nil

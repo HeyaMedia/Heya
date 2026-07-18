@@ -14,17 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// realFFProbe replicates worker.ProbeFile without importing worker (which would
-// cycle back into this package). Used only by the real-file test below.
-func realFFProbe(ctx context.Context, path string) (*mediaprobe.MediaInfo, error) {
-	out, err := exec.CommandContext(ctx, "ffprobe", "-v", "quiet", "-print_format", "json",
-		"-show_format", "-show_streams", "-i", path).Output()
-	if err != nil {
-		return nil, err
-	}
-	return mediaprobe.Parse(out)
-}
-
 // scanRealAlbum inserts real library_files (with the parser's real output) for
 // every FLAC in an album dir and runs the actual matcher over them (real
 // ffprobe of the real, MusicBrainz-tagged files). Returns the artist id and the
@@ -84,7 +73,7 @@ func TestMusicTagFusion_RealFulldata(t *testing.T) {
 	qtx := sqlc.New(pool).WithTx(tx)
 
 	_, libID := seedUserAndMusicLib(t, ctx, qtx)
-	m := &Matcher{q: qtx, probe: realFFProbe}
+	m := &Matcher{q: qtx, probe: mediaprobe.Probe}
 
 	findAlbum := func(artistID int64, title string) (sqlc.Album, bool) {
 		albums, err := qtx.ListAlbumsByArtist(ctx, artistID)

@@ -75,7 +75,7 @@ func ApplyTVMaterialization(ctx context.Context, lib sqlc.Library, result Result
 	if err != nil {
 		return nil, fmt.Errorf("begin TV apply: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }() // No-op after Commit; rollback is best-effort cleanup on early returns.
 
 	q := sqlc.New(tx)
 	txMatcher := matcher.New(db, matcher.MatchOptions{}, nil, nil).WithTx(tx)
@@ -820,25 +820,6 @@ func applyTVLocalAssets(ctx context.Context, q *sqlc.Queries, mediaItemID int64,
 	return created, nil
 }
 
-func markTVApplyEnriched(ctx context.Context, q *sqlc.Queries, mediaItemID int64) error {
-	if err := q.MarkEnrichBaseDone(ctx, mediaItemID); err != nil {
-		return err
-	}
-	if err := q.MarkEnrichStructureDone(ctx, mediaItemID); err != nil {
-		return err
-	}
-	if err := q.MarkEnrichPeopleDone(ctx, mediaItemID); err != nil {
-		return err
-	}
-	if err := q.MarkEnrichExtrasDone(ctx, mediaItemID); err != nil {
-		return err
-	}
-	if err := q.MarkEnrichImagesDone(ctx, mediaItemID); err != nil {
-		return err
-	}
-	return q.MarkEnrichComplete(ctx, mediaItemID)
-}
-
 func markTVApplyCoreEnriched(ctx context.Context, q *sqlc.Queries, mediaItemID int64) error {
 	if err := q.MarkEnrichBaseDone(ctx, mediaItemID); err != nil {
 		return err
@@ -858,9 +839,10 @@ func emitTVApplyResult(result TVApplyResult, domain string, emit Emitter) {
 	}
 	event := "materialize.apply"
 	severity := SeverityInfo
-	if result.Action == "skipped" {
+	switch result.Action {
+	case "skipped":
 		event = "materialize.apply_skipped"
-	} else if result.Action == "failed" {
+	case "failed":
 		event = "materialize.apply_failed"
 		severity = SeverityWarn
 	}

@@ -662,10 +662,10 @@ func TestScannerScopeForLibraryDirectoryKeepsNFOOwnerScope(t *testing.T) {
 			want: "/storage/Movies/Dune (2021)",
 		},
 		{
-			name: "SMB TV show",
-			lib:  sqlc.Library{MediaType: sqlc.MediaTypeTv, Paths: []string{"smb://nas/media/TV"}},
-			dir:  "smb://nas/media/TV/Some Show",
-			want: "smb://nas/media/TV/Some Show",
+			name: "mounted TV show",
+			lib:  sqlc.Library{MediaType: sqlc.MediaTypeTv, Paths: []string{"/mnt/nas/media/TV"}},
+			dir:  "/mnt/nas/media/TV/Some Show",
+			want: "/mnt/nas/media/TV/Some Show",
 		},
 	}
 
@@ -700,20 +700,20 @@ func TestProcessLibraryScanFanoutSplitsFullAndRootScopesIntoOwners(t *testing.T)
 			want: []string{"/storage/TV/Foreign/Alpha", "/storage/TV/Foreign/Beta"},
 		},
 		{
-			name: "SMB movies",
+			name: "mounted network movies",
 			lib: sqlc.Library{
 				ID:        4,
 				MediaType: sqlc.MediaTypeMovie,
-				Paths:     []string{"smb://nas/media/Movies"},
+				Paths:     []string{"/mnt/nas/media/Movies"},
 			},
 			inventory: scanner.Inventory{Roots: []scanner.InventoryRoot{{
-				Root: "smb://nas/media/Movies",
+				Root: "/mnt/nas/media/Movies",
 				Files: []scanner.InventoryFile{
-					{Root: "smb://nas/media/Movies", Path: "smb://nas/media/Movies/Alien (1979)/Alien.mkv", RelPath: "Alien (1979)/Alien.mkv", Class: scanner.ClassPrimaryMedia},
-					{Root: "smb://nas/media/Movies", Path: "smb://nas/media/Movies/Dune (2021)/Dune.mkv", RelPath: "Dune (2021)/Dune.mkv", Class: scanner.ClassPrimaryMedia},
+					{Root: "/mnt/nas/media/Movies", Path: "/mnt/nas/media/Movies/Alien (1979)/Alien.mkv", RelPath: "Alien (1979)/Alien.mkv", Class: scanner.ClassPrimaryMedia},
+					{Root: "/mnt/nas/media/Movies", Path: "/mnt/nas/media/Movies/Dune (2021)/Dune.mkv", RelPath: "Dune (2021)/Dune.mkv", Class: scanner.ClassPrimaryMedia},
 				},
 			}}},
-			want: []string{"smb://nas/media/Movies/Alien (1979)", "smb://nas/media/Movies/Dune (2021)"},
+			want: []string{"/mnt/nas/media/Movies/Alien (1979)", "/mnt/nas/media/Movies/Dune (2021)"},
 		},
 	}
 

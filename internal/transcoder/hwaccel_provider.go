@@ -49,7 +49,7 @@ type hwAccelCache struct {
 func NewHwAccelProvider(dataDir, configured string) *HwAccelProvider {
 	t := HwAccelType(configured)
 	if t == "" {
-		t = "auto"
+		t = HwAccelAuto
 	}
 	return &HwAccelProvider{
 		configured: t,
@@ -68,7 +68,7 @@ func (p *HwAccelProvider) Get() HwAccelConfig {
 	}
 
 	// Explicit override — no probe needed.
-	if p.configured != "auto" {
+	if p.configured != HwAccelAuto {
 		cfg := BuildHwAccelConfig(p.configured)
 		p.resolved = &cfg
 		log.Info().Str("hwaccel", string(p.configured)).Msg("hardware acceleration forced from config")
@@ -103,6 +103,20 @@ func (p *HwAccelProvider) Get() HwAccelConfig {
 // or switches GPUs; callers can expose this behind a Settings UI later.
 func (p *HwAccelProvider) Reset() {
 	p.mu.Lock()
+	p.resolved = nil
+	p.mu.Unlock()
+}
+
+// Configure changes the mode used by future transcode sessions and clears the
+// in-memory resolution. Existing sessions retain the HwAccelConfig copied into
+// their options and can finish undisturbed.
+func (p *HwAccelProvider) Configure(configured string) {
+	t := HwAccelType(configured)
+	if t == "" {
+		t = HwAccelAuto
+	}
+	p.mu.Lock()
+	p.configured = t
 	p.resolved = nil
 	p.mu.Unlock()
 }

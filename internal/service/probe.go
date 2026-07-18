@@ -12,13 +12,12 @@ import (
 	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/transcoder"
-	"github.com/karbowiak/heya/internal/worker"
 	"github.com/rs/zerolog/log"
 )
 
-// onDemandProbeTimeout bounds a synchronous, user-facing probe. Local files
-// finish well under a second; SMB sources stream through a pipe and can be
-// slower, but a play request must never hang indefinitely on a flaky mount.
+// onDemandProbeTimeout bounds a synchronous, user-facing probe. Local disks
+// usually finish well under a second; a slow or flaky network mount must not
+// leave a play request hanging indefinitely.
 const onDemandProbeTimeout = 60 * time.Second
 
 // onDemandKeyframeTimeout covers both the packet/keyframe scan and the
@@ -55,7 +54,7 @@ func (a *App) EnsureFileProbed(ctx context.Context, fileID int64) (sqlc.LibraryF
 	probeCtx, cancel := context.WithTimeout(ctx, onDemandProbeTimeout)
 	defer cancel()
 
-	info, err := worker.ProbeFile(probeCtx, file.Path)
+	info, err := mediaprobe.Probe(probeCtx, file.Path)
 	if err != nil {
 		log.Warn().Err(err).Int64("file_id", fileID).Msg("on-demand ffprobe failed; playing with no media info")
 		return file, nil
@@ -87,7 +86,7 @@ func (a *App) EnsureFileProbed(ctx context.Context, fileID int64) (sqlc.LibraryF
 	// (ebur128) is deliberately left to the scheduled backstop — it only affects
 	// ReplayGain normalisation, never playability.
 	if audio := mediaprobe.PrimaryAudio(info); audio != nil {
-		worker.UpdateAudioTrackFileFromProbe(ctx, q, fileID, info, audio)
+		a.mediaAnalysis.UpdateAudioTrackFileFromProbe(ctx, fileID, info, audio)
 	}
 
 	log.Info().
@@ -111,10 +110,10 @@ func mediaInfoEmpty(raw []byte) bool {
 // no current exact HLS-boundary artifact. scan_keyframes remains the normal
 // owner; this is the backstop for old rows and files played before enrichment
 // catches up. Concurrent playback requests coalesce into one pass.
-func (a *App) EnsureKeyframesAnalyzed(libraryFileID int64, filePath string) {
+func (a *App) EnsureKeyframesAnalyzed(libraryFileID int64) {
 	key := strconv.FormatInt(libraryFileID, 10)
-	go func() {
-		_, _, _ = a.keyframeScan.Do(key, func() (any, error) {
+	a.startBackground(func() {
+		_, _, _ = a.keyframeRequests.Do(key, func() (any, error) {
 			ctx, cancel := context.WithTimeout(a.lifetimeCtx, onDemandKeyframeTimeout)
 			defer cancel()
 
@@ -125,7 +124,7 @@ func (a *App) EnsureKeyframesAnalyzed(libraryFileID int64, filePath string) {
 			}
 			var existing transcoder.Keyframes
 			if json.Unmarshal(file.Keyframes, &existing) == nil && transcoder.HasExactHLSBoundaries(&existing) {
-				return nil, nil
+				return &existing, nil
 			}
 
 			// Take ownership from a queued job. If River already started it,
@@ -136,13 +135,13 @@ func (a *App) EnsureKeyframesAnalyzed(libraryFileID int64, filePath string) {
 				return nil, nil
 			}
 
-			kf, err := worker.AnalyzeAndPersistKeyframes(ctx, a.db, libraryFileID, filePath)
+			keyframes, err := a.mediaAnalysis.AnalyzeAndPersistKeyframes(ctx, libraryFileID)
 			if err != nil {
 				log.Warn().Err(err).Int64("file_id", libraryFileID).Msg("on-demand keyframe analysis failed")
 				return nil, err
 			}
-			if kf == nil || len(kf.IFrames) == 0 {
-				return nil, nil
+			if keyframes == nil || len(keyframes.IFrames) == 0 {
+				return keyframes, nil
 			}
 
 			// A probe may have enqueued the same unique job while analysis was
@@ -157,7 +156,7 @@ func (a *App) EnsureKeyframesAnalyzed(libraryFileID int64, filePath string) {
 			}
 
 			log.Info().Int64("file_id", libraryFileID).Msg("on-demand keyframe analysis persisted")
-			return nil, nil
+			return keyframes, nil
 		})
-	}()
+	})
 }

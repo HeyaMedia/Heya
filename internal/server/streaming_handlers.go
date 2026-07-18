@@ -1,20 +1,20 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/karbowiak/heya/internal/vfs"
-	"github.com/karbowiak/heya/internal/worker"
 )
 
 func handleDirectStream(app *service.App) http.HandlerFunc {
@@ -29,20 +29,7 @@ func handleDirectStream(app *service.App) http.HandlerFunc {
 		w.Header().Set("Content-Type", ct)
 		w.Header().Set("Accept-Ranges", "bytes")
 
-		if vfs.IsSMBPath(file.Path) {
-			serveVFSFile(w, r, file.Path)
-			return
-		}
-
-		f, err := os.Open(file.Path)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "cannot open file")
-			return
-		}
-		defer f.Close()
-
-		stat, _ := f.Stat()
-		http.ServeContent(w, r, file.Path, stat.ModTime(), f)
+		serveLibraryFile(w, r, file.Path)
 	}
 }
 
@@ -65,20 +52,7 @@ func handleExtraStream(app *service.App) http.HandlerFunc {
 		w.Header().Set("Content-Type", ct)
 		w.Header().Set("Accept-Ranges", "bytes")
 
-		if vfs.IsSMBPath(extra.FilePath) {
-			serveVFSFile(w, r, extra.FilePath)
-			return
-		}
-
-		f, err := os.Open(extra.FilePath)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "cannot open file")
-			return
-		}
-		defer func() { _ = f.Close() }()
-
-		stat, _ := f.Stat()
-		http.ServeContent(w, r, extra.FilePath, stat.ModTime(), f)
+		serveLibraryFile(w, r, extra.FilePath)
 	}
 }
 
@@ -96,13 +70,13 @@ func handleHLSMaster(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		var info worker.MediaInfo
+		var info mediaprobe.MediaInfo
 		if len(file.MediaInfo) > 0 {
-			json.Unmarshal(file.MediaInfo, &info)
+			_ = json.Unmarshal(file.MediaInfo, &info)
 		}
 
 		caps := parseClientCaps(r)
-		tInfo := workerToTranscoderInfo(&info)
+		tInfo := mediaProbeToTranscoderInfo(&info)
 		audioTrack := 0
 		if a := r.URL.Query().Get("audio"); a != "" {
 			if v, err := strconv.Atoi(a); err == nil && v >= 0 {
@@ -132,12 +106,17 @@ func handleHLSMaster(app *service.App) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 		w.Header().Set("Cache-Control", "no-cache")
 
-		fmt.Fprintf(w, "#EXTM3U\n")
-		fmt.Fprintf(w, "#EXT-X-VERSION:6\n")
+		if _, err := fmt.Fprint(w, "#EXTM3U\n#EXT-X-VERSION:6\n"); err != nil {
+			return
+		}
 		if codecStr != "" {
-			fmt.Fprintf(w, "#EXT-X-STREAM-INF:BANDWIDTH=%d,CODECS=\"%s\",RESOLUTION=%s\n", bw, codecStr, res)
+			if _, err := fmt.Fprintf(w, "#EXT-X-STREAM-INF:BANDWIDTH=%d,CODECS=\"%s\",RESOLUTION=%s\n", bw, codecStr, res); err != nil {
+				return
+			}
 		} else {
-			fmt.Fprintf(w, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%s\n", bw, res)
+			if _, err := fmt.Fprintf(w, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%s\n", bw, res); err != nil {
+				return
+			}
 		}
 		_, _ = fmt.Fprintf(w, "%s/index.m3u8%s\n", hlsBasePath(r, file.PublicID.String()), queryPassthrough(r))
 	}
@@ -162,9 +141,9 @@ func handleHLSPlaylist(app *service.App) http.HandlerFunc {
 			return
 		}
 
-		var info worker.MediaInfo
+		var info mediaprobe.MediaInfo
 		if len(file.MediaInfo) > 0 {
-			json.Unmarshal(file.MediaInfo, &info)
+			_ = json.Unmarshal(file.MediaInfo, &info)
 		}
 
 		session := getOrCreateSession(app, r, fileID, info.Duration)
@@ -178,7 +157,7 @@ func handleHLSPlaylist(app *service.App) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 		w.Header().Set("Cache-Control", "no-cache")
-		w.Write([]byte(playlist))
+		_, _ = w.Write([]byte(playlist))
 	}
 }
 
@@ -216,22 +195,23 @@ func handleHLSSegment(app *service.App) http.HandlerFunc {
 				return
 			}
 			if !session.HasInitSegment() {
-				if !session.RequestSegment(r.Context(), 0) {
-					writeError(w, http.StatusServiceUnavailable, "init segment not ready")
+				if err := session.EnsureSegment(r.Context(), 0); err != nil {
+					writeHLSSegmentError(w, err)
 					return
 				}
 			}
 			w.Header().Set("Content-Type", "video/mp4")
 			w.Header().Set("Cache-Control", "public, max-age=3600")
-			http.ServeFile(w, r, session.InitSegmentPath())
+			// The session derives this path from Heya's cache root and a hashed
+			// session key; no request-controlled path component reaches ServeFile.
+			http.ServeFile(w, r, session.InitSegmentPath()) //nolint:gosec
 			return
 		}
 
 		segIdx := parseSegmentIndex(segmentName)
 
-		if !session.RequestSegment(r.Context(), segIdx) {
-			w.Header().Set("Retry-After", "2")
-			writeError(w, http.StatusServiceUnavailable, "segment not ready")
+		if err := session.EnsureSegment(r.Context(), segIdx); err != nil {
+			writeHLSSegmentError(w, err)
 			return
 		}
 
@@ -242,7 +222,28 @@ func handleHLSSegment(app *service.App) http.HandlerFunc {
 			w.Header().Set("Content-Type", "video/mp2t")
 		}
 		w.Header().Set("Cache-Control", "no-cache")
-		http.ServeFile(w, r, segPath)
+		// SegmentPath accepts the parsed numeric index and joins it beneath the
+		// session's server-created cache directory.
+		http.ServeFile(w, r, segPath) //nolint:gosec
+	}
+}
+
+func writeHLSSegmentError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		// The requester is already gone (or its deadline elapsed), so there is
+		// no useful response left to write.
+		return
+	case errors.Is(err, transcoder.ErrInvalidSegment):
+		writeError(w, http.StatusNotFound, "segment not found")
+	case errors.Is(err, transcoder.ErrTranscodeSessionClosed):
+		writeError(w, http.StatusGone, "transcode session closed")
+	case errors.Is(err, transcoder.ErrTranscodeFailed):
+		w.Header().Set("Retry-After", "2")
+		writeError(w, http.StatusServiceUnavailable, "segment transcode failed")
+	default:
+		w.Header().Set("Retry-After", "2")
+		writeError(w, http.StatusServiceUnavailable, "segment not ready")
 	}
 }
 
@@ -252,9 +253,9 @@ func getOrCreateSession(app *service.App, r *http.Request, fileID int64, duratio
 		return nil
 	}
 
-	var info worker.MediaInfo
+	var info mediaprobe.MediaInfo
 	if len(file.MediaInfo) > 0 {
-		json.Unmarshal(file.MediaInfo, &info)
+		_ = json.Unmarshal(file.MediaInfo, &info)
 	}
 
 	var kf *transcoder.Keyframes
@@ -265,7 +266,7 @@ func getOrCreateSession(app *service.App, r *http.Request, fileID int64, duratio
 		}
 	}
 
-	tInfo := workerToTranscoderInfo(&info)
+	tInfo := mediaProbeToTranscoderInfo(&info)
 
 	audioTrack := 0
 	if a := r.URL.Query().Get("audio"); a != "" {
@@ -297,13 +298,8 @@ func getOrCreateSession(app *service.App, r *http.Request, fileID int64, duratio
 		}
 	}
 
-	input := file.Path
-	if vfs.IsSMBPath(file.Path) {
-		input = "pipe:0"
-	}
-
 	opts := transcoder.TranscodeOpts{
-		Input:      input,
+		Input:      file.Path,
 		Profile:    profile,
 		HWAccel:    app.TranscoderSessions().HWAccel(),
 		AudioTrack: audioTrack,
@@ -322,8 +318,8 @@ func getOrCreateSession(app *service.App, r *http.Request, fileID int64, duratio
 	// Never make playback wait for a full-file scan. Missing or legacy
 	// artifacts use the in-memory heuristic for this session while a shared
 	// background pass persists keyframes and exact boundaries for the next.
-	if opts.Profile.VideoCodec == "copy" && input != "pipe:0" && !transcoder.HasExactHLSBoundaries(kf) {
-		app.EnsureKeyframesAnalyzed(file.ID, input)
+	if opts.Profile.VideoCodec == "copy" && !transcoder.HasExactHLSBoundaries(kf) {
+		app.EnsureKeyframesAnalyzed(file.ID)
 	}
 
 	sessionID := r.URL.Query().Get("sid")
@@ -338,7 +334,7 @@ func parseSegmentIndex(name string) int {
 			return n
 		}
 	}
-	return 0
+	return -1
 }
 
 func queryPassthrough(r *http.Request) string {
@@ -373,7 +369,7 @@ func hlsChildQuery(r *http.Request) string {
 	return out.Encode()
 }
 
-func workerToTranscoderInfo(info *worker.MediaInfo) transcoder.MediaInfo {
+func mediaProbeToTranscoderInfo(info *mediaprobe.MediaInfo) transcoder.MediaInfo {
 	var streams []transcoder.StreamInfo
 	for _, s := range info.Streams {
 		dvProfile, dvCompat, rotation := deriveSideDataFields(s.SideDataList)
@@ -408,7 +404,7 @@ func workerToTranscoderInfo(info *worker.MediaInfo) transcoder.MediaInfo {
 // DV profile/compat and rotation. ffprobe reports Display Matrix rotation as
 // a signed value where -90 means 90° clockwise; we normalise to 0/90/180/270
 // (positive CW) so downstream consumers don't have to worry about sign.
-func deriveSideDataFields(side []worker.SideData) (dvProfile, dvCompat, rotation int) {
+func deriveSideDataFields(side []mediaprobe.SideData) (dvProfile, dvCompat, rotation int) {
 	for _, sd := range side {
 		switch sd.Type {
 		case "DOVI configuration record", "Dolby Vision configuration record", "Dolby Vision Configuration":
@@ -458,7 +454,7 @@ func deriveBitDepth(bitsStr, pixFmt string) int {
 	}
 }
 
-func extractVideoCodec(info *worker.MediaInfo) string {
+func extractVideoCodec(info *mediaprobe.MediaInfo) string {
 	for _, s := range info.Streams {
 		if s.CodecType == "video" {
 			return s.CodecName
@@ -470,7 +466,7 @@ func extractVideoCodec(info *worker.MediaInfo) string {
 // extractAudioCodecAt returns the codec of the Nth audio stream (0-indexed
 // across audio streams only, not file stream indices). Falls back to the first
 // audio codec if the requested index is out of range.
-func extractAudioCodecAt(info *worker.MediaInfo, audioIdx int) string {
+func extractAudioCodecAt(info *mediaprobe.MediaInfo, audioIdx int) string {
 	if audioIdx < 0 {
 		audioIdx = 0
 	}
@@ -491,7 +487,7 @@ func extractAudioCodecAt(info *worker.MediaInfo, audioIdx int) string {
 	return first
 }
 
-func extractResolution(info *worker.MediaInfo) string {
+func extractResolution(info *mediaprobe.MediaInfo) string {
 	for _, s := range info.Streams {
 		if s.CodecType == "video" && s.Width > 0 && s.Height > 0 {
 			return fmt.Sprintf("%dx%d", s.Width, s.Height)
@@ -500,7 +496,7 @@ func extractResolution(info *worker.MediaInfo) string {
 	return "1920x1080"
 }
 
-func estimateBandwidth(info *worker.MediaInfo) int64 {
+func estimateBandwidth(info *mediaprobe.MediaInfo) int64 {
 	if info.BitRate > 0 {
 		return info.BitRate
 	}
@@ -544,39 +540,19 @@ func contentTypeFromExt(ext string) string {
 	}
 }
 
-func serveVFSFile(w http.ResponseWriter, r *http.Request, smbPath string) {
-	lastSlash := strings.LastIndex(smbPath, "/")
-	if lastSlash < 0 {
-		writeError(w, http.StatusInternalServerError, "invalid path")
-		return
-	}
-	dirPath := smbPath[:lastSlash]
-	fileName := smbPath[lastSlash+1:]
-
-	source, err := vfs.Open(dirPath)
+func serveLibraryFile(w http.ResponseWriter, r *http.Request, path string) {
+	file, err := vfs.OpenFile(path)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "cannot open remote path")
+		writeError(w, http.StatusInternalServerError, "cannot open file")
 		return
 	}
-	defer source.Close()
+	defer func() { _ = file.Close() }()
 
-	f, err := source.FS.Open(fileName)
+	stat, err := file.Stat()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "cannot open remote file")
-		return
-	}
-	defer f.Close()
-
-	stat, err := f.Stat()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "cannot stat remote file")
+		writeError(w, http.StatusInternalServerError, "cannot stat file")
 		return
 	}
 
-	if rs, ok := f.(io.ReadSeeker); ok {
-		http.ServeContent(w, r, fileName, stat.ModTime(), rs)
-	} else {
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", stat.Size()))
-		io.Copy(w, f)
-	}
+	http.ServeContent(w, r, filepath.Base(path), stat.ModTime(), file)
 }

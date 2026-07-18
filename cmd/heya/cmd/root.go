@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/karbowiak/heya/internal/config"
+	"github.com/karbowiak/heya/internal/safelog"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/ui"
 	"github.com/rs/zerolog"
@@ -20,7 +21,7 @@ var cfg *config.Config
 // and closes it — the shared preamble of nearly every CLI command.
 func withApp(fn func(ctx context.Context, app *service.App) error) error {
 	ctx := context.Background()
-	app, err := service.New(ctx, cfg)
+	app, err := service.NewCommand(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -45,9 +46,11 @@ var rootCmd = &cobra.Command{
 		}
 		zerolog.SetGlobalLevel(level)
 
+		logWriter := safelog.Redact(os.Stderr)
 		if cfg.LogFormat.Value == "console" {
-			log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+			logWriter = safelog.Redact(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
 		}
+		log.Logger = zerolog.New(logWriter).With().Timestamp().Logger()
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Print(ui.HelpBanner())

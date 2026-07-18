@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/playbackgrant"
 	"github.com/karbowiak/heya/internal/transcoder"
-	"github.com/karbowiak/heya/internal/worker"
 )
 
 var (
@@ -68,7 +68,7 @@ func (a *App) IssueNativePlaybackGrant(ctx context.Context, userID int64, sessio
 	}
 
 	duration := time.Hour
-	var info worker.MediaInfo
+	var info mediaprobe.MediaInfo
 	if len(file.MediaInfo) > 0 && json.Unmarshal(file.MediaInfo, &info) == nil && info.Duration > 0 {
 		duration = time.Duration(info.Duration * float64(time.Second))
 	}

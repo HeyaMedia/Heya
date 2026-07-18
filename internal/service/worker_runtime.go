@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/rs/zerolog/log"
 )
 
@@ -62,6 +63,11 @@ func (a *App) WorkerRuntimeStatus(ctx context.Context) (WorkerRuntimeStatus, err
 	if err := json.Unmarshal(raw, &status); err != nil {
 		return WorkerRuntimeStatus{}, fmt.Errorf("decode worker runtime status: %w", err)
 	}
+	// Defense in depth for heartbeats written by older binaries before paths
+	// were redacted at publication time.
+	for i := range status.Watchers {
+		status.Watchers[i].Path = secrettext.Redact(status.Watchers[i].Path)
+	}
 	return status, nil
 }
 
@@ -76,7 +82,7 @@ func (a *App) StartWorkerRuntimeHeartbeat(ctx context.Context) {
 		watcherStatus := a.watcher.Status()
 		watchers := make([]WorkerRuntimeWatcher, 0, len(watcherStatus))
 		for libraryID, path := range watcherStatus {
-			watchers = append(watchers, WorkerRuntimeWatcher{LibraryID: libraryID, Path: path})
+			watchers = append(watchers, WorkerRuntimeWatcher{LibraryID: libraryID, Path: secrettext.Redact(path)})
 		}
 		sort.Slice(watchers, func(i, j int) bool { return watchers[i].LibraryID < watchers[j].LibraryID })
 
@@ -99,20 +105,22 @@ func (a *App) StartWorkerRuntimeHeartbeat(ctx context.Context) {
 		}
 	}
 
-	publish(ctx, true)
-	go func() {
+	a.startBackground(func() {
+		workCtx, cancel := a.backgroundContext(ctx)
+		defer cancel()
+		publish(workCtx, true)
 		ticker := time.NewTicker(workerRuntimeHeartbeatPeriod)
 		defer ticker.Stop()
 		for {
 			select {
-			case <-ctx.Done():
-				shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			case <-workCtx.Done():
+				shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(workCtx), 2*time.Second)
 				publish(shutdownCtx, false)
 				cancel()
 				return
 			case <-ticker.C:
-				publish(ctx, true)
+				publish(workCtx, true)
 			}
 		}
-	}()
+	})
 }

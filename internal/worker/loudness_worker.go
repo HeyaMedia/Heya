@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -16,17 +15,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediaanalysis"
 	"github.com/karbowiak/heya/internal/queueops"
-	"github.com/karbowiak/heya/internal/sonicanalysis"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
-	"github.com/rs/zerolog/log"
-	"golang.org/x/sync/singleflight"
-)
-
-var (
-	trackLoudnessAnalysis singleflight.Group
-	trackBoundaryAnalysis singleflight.Group
 )
 
 // enqueueTrackLoudnessIfNeeded re-reads the row immediately before insertion.
@@ -59,6 +51,7 @@ func enqueueTrackLoudnessIfNeeded(ctx context.Context, q *sqlc.Queries, client *
 type ScanTrackLoudnessWorker struct {
 	river.WorkerDefaults[ScanTrackLoudnessArgs]
 	DB       *pgxpool.Pool
+	Analysis *mediaanalysis.Service
 	Progress *TaskProgressBroadcaster
 }
 
@@ -87,7 +80,7 @@ func (w *ScanTrackLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanT
 
 	w.Progress.SetCurrent(ScanTrackLoudnessArgs{}.Kind(), job.Args.ScheduledTaskID, filepath.Base(lf.Path))
 
-	if err := EnsureTrackLoudness(ctx, w.DB, tf.ID); err != nil {
+	if err := w.Analysis.EnsureTrackLoudness(ctx, tf.ID); err != nil {
 		return err
 	}
 
@@ -108,7 +101,8 @@ func (w *ScanTrackLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanT
 
 	// Structural boundaries (intro/outro/fade/silence) for smart crossfade — a
 	// cheap 8kHz decode. Best-effort and idempotent: skip if already done, and
-	// never fail the job on a boundary error (e.g. an SMB path ffmpeg can't open).
+	// never fail the job on a boundary error (for example, a temporarily
+	// unavailable mounted path that ffmpeg cannot open).
 	//
 	// We ALWAYS stamp boundaries_analyzed_at after an attempt — including when
 	// detection errors or yields nothing (too-short / undecodable). Otherwise the
@@ -116,67 +110,7 @@ func (w *ScanTrackLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanT
 	// kickoff tick forever. NULL ms columns mean "analyzed, no usable
 	// boundaries"; the client falls back to a timed crossfade. A genuine ctx
 	// cancellation also fails the stamp write below, so those correctly retry.
-	return EnsureTrackBoundaries(ctx, w.DB, tf.ID)
-}
-
-// EnsureTrackLoudness computes and persists replay-gain data exactly once per
-// process, shared by River and blocking playback requests.
-func EnsureTrackLoudness(ctx context.Context, db *pgxpool.Pool, trackFileID int64) error {
-	_, err, _ := trackLoudnessAnalysis.Do(strconv.FormatInt(trackFileID, 10), func() (any, error) {
-		q := sqlc.New(db)
-		tf, err := q.GetTrackFileByID(ctx, trackFileID)
-		if err != nil {
-			return nil, err
-		}
-		if tf.IntegratedLufs.Valid && tf.TruePeakDb.Valid {
-			return nil, nil
-		}
-		lf, err := q.GetLibraryFileByID(ctx, tf.LibraryFileID)
-		if err != nil || lf.DeletedAt.Valid {
-			return nil, err
-		}
-		probeCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-		defer cancel()
-		result, err := runEBUR128(probeCtx, lf.Path)
-		if err != nil {
-			return nil, fmt.Errorf("ebur128 %s: %w", lf.Path, err)
-		}
-		return nil, q.UpdateTrackFileLoudness(ctx, sqlc.UpdateTrackFileLoudnessParams{
-			ID:              tf.ID,
-			IntegratedLufs:  pgNumericFromFloat(result.IntegratedLUFS),
-			TruePeakDb:      pgNumericFromFloat(result.TruePeakDB),
-			LoudnessRangeDb: pgNumericFromFloat(result.LoudnessRangeDB),
-			SamplePeakDb:    pgNumericFromFloat(result.SamplePeakDB),
-		})
-	})
-	return err
-}
-
-// EnsureTrackBoundaries computes the cheap smart-crossfade envelope once,
-// independently of the blocking loudness result.
-func EnsureTrackBoundaries(ctx context.Context, db *pgxpool.Pool, trackFileID int64) error {
-	_, err, _ := trackBoundaryAnalysis.Do(strconv.FormatInt(trackFileID, 10), func() (any, error) {
-		q := sqlc.New(db)
-		tf, err := q.GetTrackFileByID(ctx, trackFileID)
-		if err != nil || tf.BoundariesAnalyzedAt.Valid {
-			return nil, err
-		}
-		lf, err := q.GetLibraryFileByID(ctx, tf.LibraryFileID)
-		if err != nil || lf.DeletedAt.Valid {
-			return nil, err
-		}
-		params := sqlc.UpdateTrackFileBoundariesParams{ID: tf.ID}
-		if b, berr := sonicanalysis.DetectBoundaries(ctx, lf.Path); berr != nil {
-			log.Debug().Err(berr).Str("path", lf.Path).Msg("boundary detection failed; marking analyzed with no boundaries")
-		} else if b != nil {
-			params.IntroEndMs = pgInt4(b.IntroEndMs)
-			params.OutroStartMs = pgInt4(b.OutroStartMs)
-			params.FadeStartMs = pgInt4(b.FadeStartMs)
-			params.SilenceStartMs = pgInt4(b.SilenceStartMs)
-		}
-		return nil, q.UpdateTrackFileBoundaries(ctx, params)
-	})
-	return err
+	return w.Analysis.EnsureTrackBoundaries(ctx, tf.ID)
 }
 
 // ScanAlbumLoudnessWorker runs ebur128 over the *concatenation* of every
@@ -216,19 +150,11 @@ func (w *ScanAlbumLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanA
 		w.Progress.SetCurrent(ScanAlbumLoudnessArgs{}.Kind(), job.Args.ScheduledTaskID, album.Title)
 	}
 
-	// Pre-flight: ebur128's concat demuxer can't read SMB paths through our
-	// VFS, so if any file is remote bail. Picking the up-front would require
-	// streaming through a pipe per file, which defeats the concat-once model.
-	// SMB libraries will need album loudness once we have a local-cache step.
-	for _, r := range rows {
-		if vfs.IsSMBPath(r.Path) {
-			log.Debug().Int64("album_id", job.Args.AlbumID).Msg("skipping album loudness: SMB file in set")
-			return nil
-		}
-	}
-
 	paths := make([]string, len(rows))
 	for i, r := range rows {
+		if err := vfs.ValidateLocalPath(r.Path); err != nil {
+			return fmt.Errorf("album audio input: %w", err)
+		}
 		paths[i] = r.Path
 	}
 
@@ -245,7 +171,7 @@ func (w *ScanAlbumLoudnessWorker) Work(ctx context.Context, job *river.Job[ScanA
 		return fmt.Errorf("ffmpeg ebur128 album: %w", err)
 	}
 
-	result, err := parseEBUR128(stderr.String())
+	result, err := mediaanalysis.ParseEBUR128(stderr.String())
 	if err != nil {
 		return fmt.Errorf("parse ebur128 output for album %d: %w", job.Args.AlbumID, err)
 	}
@@ -298,78 +224,6 @@ func snoozeIfKindsPending(ctx context.Context, db *pgxpool.Pool, kinds []string)
 	return river.JobSnooze(60 * time.Second)
 }
 
-// ebur128Result holds the four numbers ffmpeg's ebur128 summary reports.
-type ebur128Result struct {
-	IntegratedLUFS  float64
-	TruePeakDB      float64
-	LoudnessRangeDB float64
-	SamplePeakDB    float64
-}
-
-// runEBUR128 invokes ffmpeg's ebur128 filter on a single file and parses its
-// summary output. Output lives on stderr; the null muxer eats stdout.
-//
-// -vn/-sn/-dn plus the explicit audio map keep embedded cover art out of the
-// pipeline — art blocks with a lying MIME type (PNG tag, JPEG bytes) otherwise
-// abort the whole run with "Invalid PNG signature".
-func runEBUR128(ctx context.Context, path string) (ebur128Result, error) {
-	cmd := exec.CommandContext(ctx, //nolint:gosec // path comes from library_files we control; ffmpeg binary is fixed
-		"ffmpeg",
-		"-nostdin", "-nostats", "-hide_banner",
-		"-i", path,
-		"-vn", "-sn", "-dn", "-map", "0:a:0",
-		"-af", "ebur128=peak=true",
-		"-f", "null", "-",
-	)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return ebur128Result{}, fmt.Errorf("ffmpeg ebur128: %w (stderr: %s)", err, truncate(stderr.String(), 300))
-	}
-	return parseEBUR128(stderr.String())
-}
-
-var (
-	reIntegrated = regexp.MustCompile(`(?m)^\s*I:\s*(-?\d+(?:\.\d+)?)\s*LUFS`)
-	reLRA        = regexp.MustCompile(`(?m)^\s*LRA:\s*(-?\d+(?:\.\d+)?)\s*LU`)
-	// "Sample peak:" or "True peak:" line, then optional channel "Peak: <N>
-	// dBFS" lines. We grab the first dBFS number that follows the section
-	// header — represents either the overall peak or channel 0, which is
-	// what loudgain / r128gain use too.
-	reSamplePeak = regexp.MustCompile(`(?s)Sample peak:.*?Peak:\s*(-?\d+(?:\.\d+)?)\s*dBFS`)
-	reTruePeak   = regexp.MustCompile(`(?s)True peak:.*?Peak:\s*(-?\d+(?:\.\d+)?)\s*dBFS`)
-)
-
-func parseEBUR128(output string) (ebur128Result, error) {
-	// ffmpeg emits per-second progress lines plus the Summary block at the
-	// end. Slice from "Summary:" so we don't catch streaming peaks.
-	if idx := bytes.Index([]byte(output), []byte("Summary:")); idx >= 0 {
-		output = output[idx:]
-	}
-
-	res := ebur128Result{}
-	var ok bool
-
-	if m := reIntegrated.FindStringSubmatch(output); len(m) == 2 {
-		res.IntegratedLUFS, _ = strconv.ParseFloat(m[1], 64)
-		ok = true
-	}
-	if m := reLRA.FindStringSubmatch(output); len(m) == 2 {
-		res.LoudnessRangeDB, _ = strconv.ParseFloat(m[1], 64)
-	}
-	if m := reTruePeak.FindStringSubmatch(output); len(m) == 2 {
-		res.TruePeakDB, _ = strconv.ParseFloat(m[1], 64)
-	}
-	if m := reSamplePeak.FindStringSubmatch(output); len(m) == 2 {
-		res.SamplePeakDB, _ = strconv.ParseFloat(m[1], 64)
-	}
-
-	if !ok {
-		return res, errors.New("ebur128 summary not found in output")
-	}
-	return res, nil
-}
-
 // pgNumericFromFloat encodes a float64 into pgtype.Numeric for write-back.
 // We round-trip through string so we don't have to deal with the Exp/Int
 // pair manually — fast enough for once-per-track work.
@@ -377,11 +231,6 @@ func pgNumericFromFloat(v float64) pgtype.Numeric {
 	var n pgtype.Numeric
 	_ = n.Scan(strconv.FormatFloat(v, 'f', 2, 64))
 	return n
-}
-
-// pgInt4 wraps a non-null int32 for nullable INTEGER write-back.
-func pgInt4(v int) pgtype.Int4 {
-	return pgtype.Int4{Int32: int32(v), Valid: true}
 }
 
 // albumEBUR128Args builds the full ffmpeg argv for a whole-album loudness

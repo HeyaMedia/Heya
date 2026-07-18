@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/mediatype"
 	"github.com/karbowiak/heya/internal/metadata"
 )
@@ -30,7 +31,7 @@ type Options struct {
 	BookSearcher       BookSearchProvider
 	MusicFetcher       MusicDetailProvider
 	MusicMaterializer  MusicMaterializeStore
-	MusicProbe         MusicProbeFunc
+	MusicProbe         mediaprobe.Func
 	MusicFingerprinter MusicFingerprintEvidenceProvider
 	MusicSearcher      MusicSearchProvider
 	EventWriters       []EventWriter

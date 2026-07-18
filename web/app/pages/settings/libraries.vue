@@ -329,11 +329,18 @@ async function addLibrary() {
   }
 }
 
-function openEdit(lib: Library) {
-  editLib.value = lib
-  editSettings.value = { ...defaultSettings(lib.media_type), ...lib.settings }
-  editPaths.value = [...lib.paths]
-  saveError.value = ''
+async function openEdit(lib: Library) {
+  try {
+    const editable = await ($heya as any)('/api/libraries/{id}', {
+      path: { id: lib.id },
+    }) as Library
+    editLib.value = editable
+    editSettings.value = { ...defaultSettings(editable.media_type), ...editable.settings }
+    editPaths.value = [...editable.paths]
+    saveError.value = ''
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.message ?? 'Could not open library editor.' }
+  }
 }
 
 async function saveEditSettings() {

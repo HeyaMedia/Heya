@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/karbowiak/heya/internal/artifactdownload"
 )
 
 func TestModelFetchersCanShareTargetDirectory(t *testing.T) {
@@ -45,6 +48,7 @@ func TestModelFetchersCanShareTargetDirectory(t *testing.T) {
 	start := make(chan struct{})
 	errs := make(chan error, len(fetchers))
 	for _, fetcher := range fetchers {
+		fetcher.client = server.Client()
 		go func() {
 			<-start
 			errs <- fetcher.Run(context.Background())
@@ -101,6 +105,7 @@ func TestModelFetcherCanRetryAfterFailure(t *testing.T) {
 		Size:   int64(len(payload)),
 	}}
 	fetcher := NewModelFetcherWithManifest(t.TempDir(), "", manifest)
+	fetcher.client = server.Client()
 
 	if err := fetcher.Run(context.Background()); err == nil {
 		t.Fatal("first fetch unexpectedly succeeded")
@@ -116,5 +121,55 @@ func TestModelFetcherCanRetryAfterFailure(t *testing.T) {
 	}
 	if fetcher.LastError() != nil {
 		t.Fatalf("last error was not cleared after retry: %v", fetcher.LastError())
+	}
+}
+
+func TestModelFetcherRejectsExplicitlyOversizedArtifact(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Length", "64")
+		writer.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	target := t.TempDir()
+	manifest := []ModelFile{{
+		Name: "model.onnx", URL: server.URL, Size: 32, MaxBytes: 16,
+	}}
+	fetcher := NewModelFetcherWithManifest(target, "", manifest)
+	fetcher.client = server.Client()
+
+	err := fetcher.Run(context.Background())
+	if !errors.Is(err, artifactdownload.ErrTooLarge) {
+		t.Fatalf("Run() error = %v, want ErrTooLarge", err)
+	}
+	destination := filepath.Join(target, manifest[0].Name)
+	if _, statErr := os.Stat(destination); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("oversized artifact was published: %v", statErr)
+	}
+	leftovers, globErr := filepath.Glob(destination + ".tmp-*")
+	if globErr != nil {
+		t.Fatal(globErr)
+	}
+	if len(leftovers) != 0 {
+		t.Fatalf("temporary downloads leaked: %v", leftovers)
+	}
+}
+
+func TestModelDownloadLimitLeavesRoomForApproximateSizes(t *testing.T) {
+	t.Parallel()
+
+	if got, want := modelDownloadLimit(ModelFile{Size: 1 << 20}), int64(9<<20); got != want {
+		t.Fatalf("small model limit = %d, want %d", got, want)
+	}
+	if got, want := modelDownloadLimit(ModelFile{Size: 100 << 20}), int64(150<<20); got != want {
+		t.Fatalf("mid-size model limit = %d, want %d", got, want)
+	}
+	if got, want := modelDownloadLimit(ModelFile{Size: 1 << 30}), int64((1<<30)+(256<<20)); got != want {
+		t.Fatalf("large model limit = %d, want %d", got, want)
+	}
+	if got := modelDownloadLimit(ModelFile{Size: 100, MaxBytes: 1234}); got != 1234 {
+		t.Fatalf("explicit model limit = %d, want 1234", got)
 	}
 }

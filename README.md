@@ -7,7 +7,7 @@ comes from HeyaMetadata V2 (TMDB, TVDB, AniDB, MusicBrainz, and OpenLibrary
 reconciled behind one UUID-based contract), so Heya stays focused on libraries,
 playback, and the UI. Community skip segments are fetched directly by Heya.
 
-- **Libraries** — local + SMB mounts, filesystem watch + periodic re-scan, NFO-aware matching
+- **Libraries** — host/container-mounted storage, filesystem watch + scheduled re-scan, NFO-aware matching
 - **Playback** — HLS transcoding with per-client capability negotiation, ASS subtitles, trickplay
 - **Music** — web player with gapless/crossfade, sonic analysis on the server
 - **Users** — per-user watch state, favorites and lists, session auth
@@ -33,7 +33,10 @@ music, or books, and set `HEYA_METADATA_URL` to a reachable HeyaMetadata V2
 deployment, then add `/media` as a library in Heya. `$HOME/heya-data`
 holds PostgreSQL and all other Heya state, making it straightforward to inspect
 and back up. A Docker named volume also works, but a normal host path is
-recommended. Or use the regular image against your own Postgres:
+recommended. For network storage, mount the share on the Docker host and bind
+that mount into every Heya container; library configuration accepts absolute
+filesystem paths such as `/media`, not transport URLs. Or use the regular image
+against your own Postgres:
 
 ```bash
 docker run -p 8080:8080/tcp -p 8080:8080/udp -v $PWD/data:/data \

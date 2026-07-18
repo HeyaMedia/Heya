@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 
 	"github.com/rs/zerolog/log"
 )
@@ -22,8 +21,8 @@ import (
 type TextSearcher struct {
 	cfg     Config
 	mu      sync.Mutex
+	closed  bool
 	session *clapTextSession
-	loading atomic.Bool
 }
 
 // NewTextSearcher creates a TextSearcher; the session itself isn't
@@ -37,11 +36,16 @@ func NewTextSearcher(cfg Config) *TextSearcher {
 // downloading yet).
 var ErrTextSearcherUnavailable = errors.New("sonicanalysis: text search model not loaded")
 
+// ErrTextSearcherClosed is returned after application shutdown has made the
+// searcher terminal. Close must not be followed by an implicit 500 MB model
+// reload from a late request.
+var ErrTextSearcherClosed = errors.New("sonicanalysis: text searcher is closed")
+
 // Ready reports whether the encoder is already loaded.
 func (t *TextSearcher) Ready() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.session != nil
+	return !t.closed && t.session != nil
 }
 
 // Embed returns a 512-dim L2-normalized embedding for `text`. Lazy-
@@ -54,13 +58,13 @@ func (t *TextSearcher) Ready() bool {
 // Serializing embeds is fine — a text embed is milliseconds and comes
 // from interactive searches.
 func (t *TextSearcher) Embed(text string) ([]float32, error) {
-	if err := t.ensureLoaded(); err != nil {
-		return nil, err
-	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.session == nil {
-		return nil, ErrTextSearcherUnavailable
+	if t.closed {
+		return nil, ErrTextSearcherClosed
+	}
+	if err := t.ensureLoadedLocked(); err != nil {
+		return nil, err
 	}
 	return t.session.Embed(text)
 }
@@ -74,6 +78,9 @@ func (t *TextSearcher) Embed(text string) ([]float32, error) {
 func (t *TextSearcher) Reconfigure(cfg Config) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.closed {
+		return
+	}
 	if t.session != nil {
 		t.session.Close()
 		t.session = nil
@@ -81,23 +88,32 @@ func (t *TextSearcher) Reconfigure(cfg Config) {
 	t.cfg = cfg.normalize()
 }
 
-// ensureLoaded loads the encoder once; subsequent callers wait on
-// the mutex and see a populated session. Bails early if another
-// goroutine is mid-load.
-func (t *TextSearcher) ensureLoaded() error {
+// Close releases the lazily loaded native text-encoder session. It takes the
+// same lock as Embed and Reconfigure, so shutdown cannot destroy ONNX state
+// beneath an in-flight native call. Close is idempotent.
+func (t *TextSearcher) Close() {
 	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed {
+		return
+	}
+	t.closed = true
 	if t.session != nil {
-		t.mu.Unlock()
+		t.session.Close()
+		t.session = nil
+	}
+}
+
+// ensureLoadedLocked loads the encoder once. The caller holds t.mu for the
+// complete load and embed operation, which both coalesces a cold-load burst
+// and prevents Close/Reconfigure from destroying native state in use.
+func (t *TextSearcher) ensureLoadedLocked() error {
+	if t.closed {
+		return ErrTextSearcherClosed
+	}
+	if t.session != nil {
 		return nil
 	}
-	if !t.loading.CompareAndSwap(false, true) {
-		// Another goroutine is mid-load. Release the lock so it can
-		// finish; the next call will succeed.
-		t.mu.Unlock()
-		return errors.New("sonicanalysis: text searcher load already in progress")
-	}
-	defer t.loading.Store(false)
-	defer t.mu.Unlock()
 
 	log.Info().Msg("sonicanalysis: lazy-loading CLAP text encoder")
 	modelPath := filepath.Join(t.cfg.ModelsDir, "clap", "text_model.onnx")

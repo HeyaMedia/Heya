@@ -3,21 +3,21 @@ package subsonic
 import (
 	"bufio"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
-	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/karbowiak/heya/internal/publichttp"
 	"github.com/karbowiak/heya/internal/vfs"
 )
 
 // Byte delivery. Subsonic clients construct stream/getCoverArt URLs
 // themselves, so these need real handlers; cover art dispatches in-process
 // to the native image pipeline (the Jellyfin layer's trick), and stream /
-// download serve the track's best file directly — range-capable, SMB-aware.
+// download range-serve the track's best file directly.
 
 // resolveTrackFile maps a song id onto its best playable file.
 func (s *Server) resolveTrackFile(r *http.Request) (string, string, bool) {
@@ -60,61 +60,30 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	s.serveMediaFile(w, r, path, contentType, base)
 }
 
-// serveMediaFile range-serves a local or SMB-backed file (same shape as
-// the Jellyfin layer's server).
+// serveMediaFile range-serves a library file (same shape as the Jellyfin
+// layer's server). Host/container-mounted shares are ordinary local paths.
 func (s *Server) serveMediaFile(w http.ResponseWriter, r *http.Request, path, contentType, attachmentName string) {
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Accept-Ranges", "bytes")
 	if attachmentName != "" {
 		w.Header().Set("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(attachmentName, `"`, "")+`"`)
 	}
-	if vfs.IsSMBPath(path) {
-		serveVFS(w, r, path)
-		return
-	}
-	f, err := os.Open(path) //nolint:gosec // G304: path comes from library_files rows, not request input
+	serveFile(w, r, path)
+}
+
+func serveFile(w http.ResponseWriter, r *http.Request, path string) {
+	file, err := vfs.OpenFile(path)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	defer func() { _ = f.Close() }()
-	stat, err := f.Stat()
+	defer func() { _ = file.Close() }()
+	stat, err := file.Stat()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	http.ServeContent(w, r, path, stat.ModTime(), f)
-}
-
-func serveVFS(w http.ResponseWriter, r *http.Request, smbPath string) {
-	lastSlash := strings.LastIndex(smbPath, "/")
-	if lastSlash < 0 {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	source, err := vfs.Open(smbPath[:lastSlash])
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	defer func() { _ = source.Close() }()
-	f, err := source.FS.Open(smbPath[lastSlash+1:])
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	defer func() { _ = f.Close() }()
-	stat, err := f.Stat()
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	if rs, ok := f.(io.ReadSeeker); ok {
-		http.ServeContent(w, r, smbPath[lastSlash+1:], stat.ModTime(), rs)
-		return
-	}
-	w.Header().Set("Content-Length", strconv.FormatInt(stat.Size(), 10))
-	_, _ = io.Copy(w, f)
+	http.ServeContent(w, r, filepath.Base(path), stat.ModTime(), file)
 }
 
 // --- Cover art ---
@@ -301,25 +270,11 @@ func (s *Server) proxyRemoteImage(w http.ResponseWriter, r *http.Request, rawURL
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return false
 	}
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, rawURL, nil)
+	image, err := publichttp.FetchImage(r.Context(), rawURL)
 	if err != nil {
 		return false
 	}
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return false
-	}
-	defer func() { _ = res.Body.Close() }()
-	ct := res.Header.Get("Content-Type")
-	if res.StatusCode != http.StatusOK || !strings.HasPrefix(ct, "image/") {
-		return false
-	}
-	w.Header().Set("Content-Type", ct)
-	w.Header().Set("Cache-Control", "public, max-age=86400")
-	w.WriteHeader(http.StatusOK)
-	if r.Method != http.MethodHead {
-		_, _ = io.Copy(w, io.LimitReader(res.Body, 32<<20))
-	}
+	publichttp.ServeImage(w, r, image, "public, max-age=86400")
 	return true
 }
 

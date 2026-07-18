@@ -3,14 +3,12 @@ package server
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/transcoder"
-	"github.com/karbowiak/heya/internal/vfs"
 )
 
 func handleCastMusicStream(app *service.App) http.HandlerFunc {
@@ -187,26 +185,20 @@ func transcodePrimaryAndServe(w http.ResponseWriter, r *http.Request, app *servi
 		writeError(w, http.StatusNotFound, "library file not found")
 		return
 	}
-	if vfs.IsSMBPath(lf.Path) {
-		// AAC transcode from SMB would need a streaming source — defer.
-		writeError(w, http.StatusServiceUnavailable, "transcode from remote source not supported")
-		return
-	}
-	cached, err := audio.EnsureAAC(r.Context(), primary.ID, lf.Path, bitrateKbps)
+	cached, err := audio.OpenAAC(r.Context(), primary.ID, lf.Path, bitrateKbps)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "transcode failed: "+err.Error())
+		writeError(w, http.StatusInternalServerError, "audio transcode failed")
 		return
 	}
-	f, err := os.Open(cached) //nolint:gosec // cached path is a tempfile we just wrote
+	defer func() { _ = cached.Close() }()
+	stat, err := cached.Stat()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "cannot open transcode output")
+		writeError(w, http.StatusInternalServerError, "cannot stat transcode output")
 		return
 	}
-	defer func() { _ = f.Close() }()
-	stat, _ := f.Stat()
 	w.Header().Set("Content-Type", "audio/mp4")
 	w.Header().Set("Accept-Ranges", "bytes")
-	http.ServeContent(w, r, cached, stat.ModTime(), f)
+	http.ServeContent(w, r, cached.Name(), stat.ModTime(), cached)
 }
 
 // handleStreamTrackFile range-serves an explicitly chosen format of a track.
@@ -241,7 +233,7 @@ func handleStreamTrackFile(app *service.App) http.HandlerFunc {
 
 func ensureTrackLoudness(w http.ResponseWriter, r *http.Request, app *service.App, trackID, trackFileID int64) bool {
 	if err := app.EnsureTrackPlaybackReady(r.Context(), trackID, trackFileID); err != nil {
-		writeError(w, http.StatusInternalServerError, "loudness analysis failed: "+err.Error())
+		writeError(w, http.StatusInternalServerError, "loudness analysis failed")
 		return false
 	}
 	return true
@@ -257,17 +249,5 @@ func serveTrackFileBytes(w http.ResponseWriter, r *http.Request, app *service.Ap
 	w.Header().Set("Content-Type", contentTypeFromExt(filepath.Ext(file.Path)))
 	w.Header().Set("Accept-Ranges", "bytes")
 
-	if vfs.IsSMBPath(file.Path) {
-		serveVFSFile(w, r, file.Path)
-		return
-	}
-
-	f, err := os.Open(file.Path)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "cannot open file")
-		return
-	}
-	defer func() { _ = f.Close() }()
-	stat, _ := f.Stat()
-	http.ServeContent(w, r, file.Path, stat.ModTime(), f)
+	serveLibraryFile(w, r, file.Path)
 }

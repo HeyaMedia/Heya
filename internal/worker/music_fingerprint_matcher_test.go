@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/acoustid"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/testutil"
@@ -44,7 +45,7 @@ func TestMusicFingerprintMatcherComputesInlineAndCachesLookup(t *testing.T) {
 		ParseResult: []byte("{}"), Status: sqlc.FileStatusUnmatched,
 	})
 	require.NoError(t, err)
-	mediaInfo, err := json.Marshal(MediaInfo{Duration: 180.6, Streams: []StreamInfo{}})
+	mediaInfo, err := json.Marshal(mediaprobe.MediaInfo{Duration: 180.6, Streams: []mediaprobe.StreamInfo{}})
 	require.NoError(t, err)
 	require.NoError(t, q.UpdateLibraryFileMediaInfo(ctx, sqlc.UpdateLibraryFileMediaInfoParams{ID: file.ID, MediaInfo: mediaInfo}))
 

@@ -2,17 +2,15 @@ package jellyfin
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
-	"github.com/karbowiak/heya/internal/safedial"
+	"github.com/karbowiak/heya/internal/publichttp"
 )
 
 // Image delivery. Anonymous, like Jellyfin's own image endpoints and Heya's
@@ -213,63 +211,23 @@ func (dw *imageDispatchWriter) Write(b []byte) (int, error) {
 	return dw.ResponseWriter.Write(b)
 }
 
-// remoteImageClient fetches never-downloaded remote assets (heya.media CDN
-// covers/stills) for proxying. The URLs come from DB metadata, not the
-// request — but metadata is only semi-trusted (NFO files can carry artwork
-// URLs), and this runs on an ANONYMOUS endpoint, so treat it as an SSRF
-// surface: the dialer rejects loopback/private/link-local/CGNAT targets at
-// connect time (post-DNS — rebinding-safe, and it covers every redirect
-// hop), and responses are image-typed and size-capped. Timeout bounds a
-// stalled CDN so it can't pin handlers.
-var remoteImageClient = &http.Client{
-	Timeout: 20 * time.Second,
-	Transport: &http.Transport{
-		// Deliberately NO Proxy: an HTTP(S)_PROXY env var would tunnel the
-		// request through the proxy — the dial guard would then vet the
-		// proxy's address while the proxy fetches the private target,
-		// bypassing the SSRF protection entirely. CDN image fetches don't
-		// need proxy support; the guard's integrity does.
-		DialContext: (&net.Dialer{
-			Timeout: 10 * time.Second,
-			Control: safedial.Control,
-		}).DialContext,
-	},
-}
-
-const remoteImageMaxBytes = 32 << 20 // no legitimate cover/still is larger
-
 func (s *Server) proxyRemoteImage(w http.ResponseWriter, r *http.Request, rawURL string) {
 	u, err := url.Parse(rawURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		http.NotFound(w, r)
 		return
 	}
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, rawURL, nil)
+	image, err := publichttp.FetchImage(r.Context(), rawURL)
 	if err != nil {
-		http.NotFound(w, r)
+		var statusErr *publichttp.StatusError
+		if errors.As(err, &statusErr) || errors.Is(err, publichttp.ErrNotImage) {
+			http.NotFound(w, r)
+		} else {
+			w.WriteHeader(http.StatusBadGateway)
+		}
 		return
 	}
-	res, err := remoteImageClient.Do(req)
-	if err != nil {
-		w.WriteHeader(http.StatusBadGateway)
-		return
-	}
-	defer func() { _ = res.Body.Close() }()
-	ct := res.Header.Get("Content-Type")
-	if res.StatusCode != http.StatusOK || !strings.HasPrefix(ct, "image/") {
-		http.NotFound(w, r) // remote miss or non-image = no image
-		return
-	}
-	h := w.Header()
-	h.Set("Content-Type", ct)
-	if cl := res.Header.Get("Content-Length"); cl != "" {
-		h.Set("Content-Length", cl)
-	}
-	h.Set("Cache-Control", "public, max-age=86400")
-	w.WriteHeader(http.StatusOK)
-	if r.Method != http.MethodHead {
-		_, _ = io.Copy(w, io.LimitReader(res.Body, remoteImageMaxBytes))
-	}
+	publichttp.ServeImage(w, r, image, "public, max-age=86400")
 }
 
 // hasImage reports whether a media item has a resolvable image of the given

@@ -3768,7 +3768,7 @@
             "type": "string"
           },
           "paths": {
-            "description": "Absolute filesystem paths or smb://… URIs",
+            "description": "Absolute filesystem directory paths visible to the Heya host or container; mount network shares before configuring them",
             "items": {
               "type": "string"
             },
@@ -4222,11 +4222,8 @@
           "exists": {
             "type": "boolean"
           },
-          "is_smb": {
-            "type": "boolean"
-          },
           "path": {
-            "description": "SMB credentials are redacted; see vfs.RedactPath",
+            "description": "Configured filesystem path; URL credentials are redacted in legacy invalid values",
             "type": "string"
           },
           "readable": {
@@ -14172,11 +14169,6 @@
             "readOnly": true,
             "type": "string"
           },
-          "cover_path": {
-            "description": "Optional path/URL to a custom cover image",
-            "maxLength": 512,
-            "type": "string"
-          },
           "description": {
             "examples": [
               "Deep work soundtrack"
@@ -14206,8 +14198,7 @@
         },
         "required": [
           "name",
-          "description",
-          "cover_path"
+          "description"
         ],
         "type": "object"
       },
@@ -17027,40 +17018,6 @@
           "pipeline_failures",
           "open_findings",
           "identities"
-        ],
-        "type": "object"
-      },
-      "ScheduleEntry": {
-        "additionalProperties": false,
-        "properties": {
-          "interval": {
-            "type": "string"
-          },
-          "interval_sec": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "library_id": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "library_name": {
-            "type": "string"
-          },
-          "media_type": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "library_id",
-          "library_name",
-          "media_type",
-          "type",
-          "interval",
-          "interval_sec"
         ],
         "type": "object"
       },
@@ -20354,6 +20311,7 @@
             "type": "string"
           },
           "paths": {
+            "description": "Absolute filesystem directory paths visible to the Heya host or container; mount network shares before configuring them",
             "items": {
               "type": "string"
             },
@@ -35394,7 +35352,18 @@
               "schema": {
                 "properties": {
                   "asset_type": {
-                    "description": "poster|backdrop|logo|… (defaults to poster)",
+                    "description": "Artwork slot (defaults to poster)",
+                    "enum": [
+                      "poster",
+                      "backdrop",
+                      "logo",
+                      "art",
+                      "banner",
+                      "thumb",
+                      "disc",
+                      "clearart",
+                      "still"
+                    ],
                     "type": "string"
                   },
                   "file": {
@@ -35405,6 +35374,7 @@
                   },
                   "label": {
                     "description": "Optional season/episode asset label",
+                    "maxLength": 128,
                     "type": "string"
                   }
                 },
@@ -41236,55 +41206,6 @@
         ]
       }
     },
-    "/api/schedules": {
-      "get": {
-        "operationId": "list-schedules",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ScheduleEntry"
-                  },
-                  "type": [
-                    "array",
-                    "null"
-                  ]
-                }
-              }
-            },
-            "description": "OK",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorModel"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": null
-          }
-        ],
-        "summary": "Periodic schedules computed from library settings",
-        "tags": [
-          "Jobs"
-        ]
-      }
-    },
     "/api/search": {
       "get": {
         "operationId": "search-all",
@@ -42214,6 +42135,29 @@
             "required": true,
             "schema": {
               "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Zero-based audio track used by the HLS session",
+            "explode": false,
+            "in": "query",
+            "name": "audio",
+            "schema": {
+              "description": "Zero-based audio track used by the HLS session",
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Playback session id carried by the HLS manifest",
+            "explode": false,
+            "in": "query",
+            "name": "sid",
+            "schema": {
+              "description": "Playback session id carried by the HLS manifest",
+              "maxLength": 128,
               "type": "string"
             }
           }

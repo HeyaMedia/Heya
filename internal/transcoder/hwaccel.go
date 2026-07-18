@@ -2,7 +2,6 @@ package transcoder
 
 import (
 	"context"
-	"os/exec"
 	"runtime"
 	"time"
 
@@ -12,12 +11,25 @@ import (
 type HwAccelType string
 
 const (
+	HwAccelAuto         HwAccelType = "auto"
 	HwAccelNone         HwAccelType = "none"
 	HwAccelVAAPI        HwAccelType = "vaapi"
 	HwAccelQSV          HwAccelType = "qsv"
 	HwAccelNVENC        HwAccelType = "nvenc"
 	HwAccelVideoToolbox HwAccelType = "videotoolbox"
 )
+
+// IsValidHWAccelMode reports whether value is a supported configured mode.
+// "auto" is a provider mode rather than a resolved accelerator, while the
+// remaining values are valid both as explicit configuration and resolution.
+func IsValidHWAccelMode(value string) bool {
+	switch HwAccelType(value) {
+	case HwAccelAuto, HwAccelNone, HwAccelVAAPI, HwAccelQSV, HwAccelNVENC, HwAccelVideoToolbox:
+		return true
+	default:
+		return false
+	}
+}
 
 type HwAccelConfig struct {
 	Type        HwAccelType
@@ -62,7 +74,7 @@ func probeEncoder(encoder string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "ffmpeg",
+	cmd := ffmpegCommandContext(ctx,
 		"-f", "lavfi", "-i", "nullsrc=s=64x64:d=1",
 		"-c:v", encoder,
 		"-f", "null", "-",
@@ -78,7 +90,7 @@ func probeEncoderWithFlags(encoder string, extraFlags ...string) bool {
 	args = append(args, extraFlags...)
 	args = append(args, "-c:v", encoder, "-f", "null", "-")
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	cmd := ffmpegCommandContext(ctx, args...)
 	return cmd.Run() == nil
 }
 

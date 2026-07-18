@@ -20,12 +20,14 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/mediafile"
+	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/mediatype"
 	"github.com/karbowiak/heya/internal/metadata"
 	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/scanner"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
@@ -127,23 +129,10 @@ func libraryScopeDisplayName(lib sqlc.Library, scope string) string {
 	}
 	scope = strings.TrimRight(scope, `/\`)
 
-	if strings.Contains(scope, "://") {
-		for _, root := range lib.Paths {
-			root = strings.TrimRight(strings.TrimSpace(root), `/\`)
-			if root == "" || !strings.HasPrefix(scope, root+"/") {
-				continue
-			}
-			if rel := strings.TrimPrefix(scope, root+"/"); rel != "" {
-				return rel
-			}
-		}
-		return scannerScopeBase(scope)
-	}
-
 	cleanScope := filepath.Clean(scope)
 	for _, root := range lib.Paths {
 		root = strings.TrimSpace(root)
-		if root == "" || strings.Contains(root, "://") {
+		if vfs.ValidateLocalPath(root) != nil {
 			continue
 		}
 		rel, err := filepath.Rel(filepath.Clean(root), cleanScope)
@@ -1170,12 +1159,12 @@ func (w *KickoffLibraryScanWorker) relocateMovedFiles(ctx context.Context, q *sq
 			Path:  move.File.Path,
 			Mtime: pgtype.Timestamptz{Time: move.File.MTime, Valid: !move.File.MTime.IsZero()},
 		}); err != nil {
-			log.Warn().Err(err).Int64("file_id", move.Row.ID).Str("from", move.Row.Path).Str("to", move.File.Path).Msg("kickoff_library_scan: relocate moved file failed")
+			log.Warn().Err(vfs.RedactError(err)).Int64("file_id", move.Row.ID).Str("from", vfs.RedactPath(move.Row.Path)).Str("to", vfs.RedactPath(move.File.Path)).Msg("kickoff_library_scan: relocate moved file failed")
 			continue
 		}
 		seen[move.Row.Path] = true // old path escapes the soft-delete pass
 		markChangedScope(ScannerScopeForLibraryPath(lib, move.Row.Path))
-		log.Info().Int64("file_id", move.Row.ID).Str("from", move.Row.Path).Str("to", move.File.Path).Msg("kickoff_library_scan: detected file move")
+		log.Info().Int64("file_id", move.Row.ID).Str("from", vfs.RedactPath(move.Row.Path)).Str("to", vfs.RedactPath(move.File.Path)).Msg("kickoff_library_scan: detected file move")
 		moved++
 	}
 	return moved
@@ -1330,11 +1319,6 @@ func scannerScopeContains(parent, child string) bool {
 	if parent == "" || child == "" {
 		return false
 	}
-	if strings.Contains(parent, "://") || strings.Contains(child, "://") {
-		parent = strings.TrimRight(parent, "/")
-		child = strings.TrimRight(child, "/")
-		return parent == child || strings.HasPrefix(child, parent+"/")
-	}
 	parent = filepath.Clean(parent)
 	child = filepath.Clean(child)
 	rel, err := filepath.Rel(parent, child)
@@ -1424,18 +1408,6 @@ func scannerRelPath(root, path string) (string, bool) {
 	if root == "" || path == "" {
 		return "", false
 	}
-	if strings.Contains(root, "://") || strings.Contains(path, "://") {
-		root = strings.TrimRight(root, "/")
-		path = strings.TrimRight(path, "/")
-		if path == root {
-			return ".", true
-		}
-		prefix := root + "/"
-		if !strings.HasPrefix(path, prefix) {
-			return "", false
-		}
-		return strings.TrimPrefix(path, prefix), true
-	}
 	relPath, err := filepath.Rel(root, path)
 	if err != nil {
 		return "", false
@@ -1470,9 +1442,6 @@ func scannerJoinScopePath(root, child string) string {
 	if root == "" || child == "" {
 		return ""
 	}
-	if strings.Contains(root, "://") {
-		return strings.TrimRight(root, "/") + "/" + child
-	}
 	return filepath.Join(root, child)
 }
 
@@ -1500,12 +1469,6 @@ func scannerScopeBase(scope string) string {
 	if scope == "" {
 		return ""
 	}
-	if strings.Contains(scope, "://") {
-		if idx := strings.LastIndex(scope, "/"); idx >= 0 {
-			return scope[idx+1:]
-		}
-		return scope
-	}
 	return filepath.Base(scope)
 }
 
@@ -1514,13 +1477,6 @@ func scannerScopeParent(scope string) string {
 	if scope == "" {
 		return ""
 	}
-	if strings.Contains(scope, "://") {
-		idx := strings.LastIndex(scope, "/")
-		if idx <= strings.Index(scope, "://")+2 {
-			return scope
-		}
-		return scope[:idx]
-	}
 	return filepath.Dir(scope)
 }
 
@@ -1528,13 +1484,6 @@ func scannerScopeForPath(path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return ""
-	}
-	if strings.Contains(path, "://") {
-		path = strings.TrimRight(path, "/")
-		if idx := strings.LastIndex(path, "/"); idx >= 0 {
-			return path[:idx]
-		}
-		return path
 	}
 	return filepath.Dir(path)
 }
@@ -1998,7 +1947,7 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 			continue
 		}
 		if err != nil {
-			log.Warn().Err(err).Int64("library_id", lib.ID).Str("path", path).Msg("apply_metadata: post-apply file lookup failed")
+			log.Warn().Err(vfs.RedactError(err)).Int64("library_id", lib.ID).Str("path", vfs.RedactPath(path)).Msg("apply_metadata: post-apply file lookup failed")
 			fanout.Failed++
 			continue
 		}
@@ -2207,7 +2156,7 @@ func scannerSearchOptions(db *pgxpool.Pool, heya *heyametadata.HeyaProvider) sca
 func scannerAnalysisOptions(db *pgxpool.Pool) scanner.Options {
 	return scanner.Options{
 		ApplyDB:       db,
-		MusicProbe:    ProbeFile,
+		MusicProbe:    mediaprobe.Probe,
 		PersistenceDB: db,
 	}
 }
@@ -2235,7 +2184,7 @@ func scannerBaseOptions(db *pgxpool.Pool, heya *heyametadata.HeyaProvider) scann
 		MovieSearcher:     heya,
 		MusicFetcher:      heya,
 		MusicMaterializer: scanner.NewSQLMusicMaterializeStore(db),
-		MusicProbe:        ProbeFile,
+		MusicProbe:        mediaprobe.Probe,
 		MusicSearcher:     heya,
 		PersistenceDB:     db,
 		PersistScan:       true,

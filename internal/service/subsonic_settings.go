@@ -14,6 +14,9 @@ const subsonicKeyEnabled = "subsonic.enabled"
 // SaveSubsonicSettings persists the Subsonic toggle to system_settings,
 // refusing the write when the effective value is locked by env.
 func (a *App) SaveSubsonicSettings(ctx context.Context, enabled bool) error {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+
 	cur := a.config.Subsonic
 
 	if err := errIfEnvLockedChanged(subsonicKeyEnabled, cur.Enabled, enabled); err != nil {
@@ -22,7 +25,7 @@ func (a *App) SaveSubsonicSettings(ctx context.Context, enabled bool) error {
 	if err := persistFieldSetting(a, ctx, subsonicKeyEnabled, cur.Enabled, enabled); err != nil {
 		return err
 	}
-	a.UpdateSubsonicConfig(enabled)
+	a.updateSubsonicConfigLocked(enabled)
 	return nil
 }
 
@@ -34,12 +37,22 @@ func (a *App) LoadSubsonicFromDB(ctx context.Context) {
 	if a.db == nil {
 		return // spec-dump / test construction without a database
 	}
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+
 	overlayFieldFromDB(a, ctx, &a.config.Subsonic.Enabled, subsonicKeyEnabled, nil)
 }
 
-// UpdateSubsonicConfig overlays the in-memory subsonic snapshot after a
-// settings update, preserving env provenance.
+// UpdateSubsonicConfig overlays the in-memory subsonic snapshot for callers
+// that manage persistence separately. SaveSubsonicSettings uses the same
+// locked primitive. Env-sourced fields retain their provenance.
 func (a *App) UpdateSubsonicConfig(enabled bool) {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+	a.updateSubsonicConfigLocked(enabled)
+}
+
+func (a *App) updateSubsonicConfigLocked(enabled bool) {
 	if a.config.Subsonic.Enabled.Source != config.SourceEnv {
 		a.config.Subsonic.Enabled = config.Field[bool]{Value: enabled, Source: config.SourceDB}
 	}
@@ -47,5 +60,8 @@ func (a *App) UpdateSubsonicConfig(enabled bool) {
 
 // SubsonicEnabled is the per-request gate the subsonic middleware consults.
 func (a *App) SubsonicEnabled() bool {
-	return a.config.Subsonic.Enabled.Value
+	a.configMu.RLock()
+	enabled := a.config.Subsonic.Enabled.Value
+	a.configMu.RUnlock()
+	return enabled
 }

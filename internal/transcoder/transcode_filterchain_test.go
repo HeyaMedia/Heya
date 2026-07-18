@@ -188,3 +188,18 @@ func TestAppendVideoArgs_CopyNoPlan(t *testing.T) {
 	})
 	assert.Equal(t, []string{"-c:v", "copy"}, args)
 }
+
+func TestSubtitleOutputMuxerUsesPublishedExtension(t *testing.T) {
+	tests := map[string]string{
+		"subtitle.vtt": "webvtt",
+		"subtitle.ass": "ass",
+		"subtitle.ssa": "ass",
+		"subtitle.srt": "srt",
+		"subtitle.bin": "subrip",
+	}
+	for output, want := range tests {
+		if got := subtitleOutputMuxer(output, "subrip"); got != want {
+			t.Errorf("subtitleOutputMuxer(%q) = %q, want %q", output, got, want)
+		}
+	}
+}

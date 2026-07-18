@@ -3,11 +3,8 @@ package imagegen
 import (
 	"archive/zip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/karbowiak/heya/internal/artifactdownload"
 )
 
 type DownloadState string
@@ -26,6 +25,13 @@ const (
 	DownloadReady       DownloadState = "ready"
 	DownloadFailed      DownloadState = "failed"
 )
+
+// Image models can be several gigabytes. Keep a finite whole-request ceiling
+// without making a slow residential connection unable to complete a deliberate
+// download. The transport also enforces shorter connect/TLS/header deadlines.
+const artifactDownloadTimeout = 6 * time.Hour
+
+var artifactHTTPClient = artifactdownload.NewClient(artifactDownloadTimeout)
 
 type ImageDownloadProgress struct {
 	CurrentFile string    `json:"current_file,omitempty"`
@@ -279,58 +285,25 @@ func (r *Runtime) setProgress(file string, n int64) {
 }
 
 func downloadFile(ctx context.Context, a Artifact, dest string, progress func(int64)) error {
-	if err := os.MkdirAll(filepath.Dir(dest), 0750); err != nil {
-		return err
-	}
-	tmp := dest + ".tmp"
-	_ = os.Remove(tmp)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL, nil)
+	_, err := artifactdownload.Fetch(ctx, artifactHTTPClient, artifactdownload.Spec{
+		URL:           a.URL,
+		Destination:   dest,
+		MaxBytes:      a.Size,
+		ExpectedBytes: a.Size,
+		SHA256:        a.SHA256,
+		Mode:          0o640,
+		Progress:      progress,
+	})
 	if err != nil {
-		return err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
+		// A second Heya process may have won the final Rename after this process
+		// started its own verified download. Its exact-size artifact is usable;
+		// artifactdownload has already removed our unique temporary file.
+		if regularSize(dest, a.Size) {
+			return nil
+		}
 		return fmt.Errorf("download %s from %s: %w", a.Name, a.URL, err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download %s from %s: HTTP %d", a.Name, a.URL, resp.StatusCode)
-	}
-	f, err := os.Create(tmp) //nolint:gosec // destination is built from the server-controlled data dir and pinned artifact name
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	h := sha256.New()
-	buf := make([]byte, 4<<20)
-	var n int64
-	for {
-		k, e := resp.Body.Read(buf)
-		if k > 0 {
-			n += int64(k)
-			_, _ = h.Write(buf[:k])
-			if _, err = f.Write(buf[:k]); err != nil {
-				return err
-			}
-			progress(n)
-		}
-		if e == io.EOF {
-			break
-		}
-		if e != nil {
-			return e
-		}
-	}
-	if n != a.Size {
-		return fmt.Errorf("size mismatch for %s: got %d want %d", a.Name, n, a.Size)
-	}
-	if got := hex.EncodeToString(h.Sum(nil)); got != a.SHA256 {
-		return fmt.Errorf("sha256 mismatch for %s: got %s", a.Name, got)
-	}
-	if err = f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, dest)
+	return nil
 }
 
 func extractZipFlatten(src, dest string) error {

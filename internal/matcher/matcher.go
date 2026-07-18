@@ -15,6 +15,7 @@ import (
 	"github.com/karbowiak/heya/internal/metadata"
 	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/karbowiak/heya/internal/parser"
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/rs/zerolog/log"
 )
 
@@ -37,24 +38,16 @@ type MatchInfo struct {
 	ArtistID int64
 }
 
-// ProbeFunc runs ffprobe against a local or SMB path and returns parsed media
-// info. It is injected (rather than imported) so the matcher can read embedded
-// audio tags on demand without depending on the worker package — which imports
-// the matcher, so a direct import would cycle. Wired to worker.ProbeFile in
-// service.App; nil in tests, where music fusion transparently falls back to
-// path/NFO only.
-type ProbeFunc func(ctx context.Context, path string) (*mediaprobe.MediaInfo, error)
-
 type Matcher struct {
 	db    *pgxpool.Pool
 	q     *sqlc.Queries
 	heya  *heyametadata.HeyaProvider
 	opts  MatchOptions
-	probe ProbeFunc
+	probe mediaprobe.Func
 	inTx  bool
 }
 
-func New(db *pgxpool.Pool, opts MatchOptions, heya *heyametadata.HeyaProvider, probe ProbeFunc) *Matcher {
+func New(db *pgxpool.Pool, opts MatchOptions, heya *heyametadata.HeyaProvider, probe mediaprobe.Func) *Matcher {
 	return &Matcher{
 		db:    db,
 		q:     sqlc.New(db),
@@ -96,17 +89,22 @@ func (m *Matcher) MatchLibrary(ctx context.Context, libraryID int64, mediaType s
 	for _, file := range files {
 		_, err := m.matchFile(ctx, file, mediaType, libraryID)
 		if err != nil {
-			log.Error().Err(err).Str("path", file.Path).Msg("match error")
-			m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
+			log.Error().Err(vfs.RedactError(err)).Str("path", vfs.RedactPath(file.Path)).Msg("match error")
+			if statusErr := m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
 				ID:           file.ID,
 				Status:       sqlc.FileStatusError,
 				ErrorMessage: err.Error(),
-			})
+			}); statusErr != nil {
+				log.Error().Err(statusErr).Int64("file_id", file.ID).Msg("mark match error failed")
+			}
 			result.Errors++
 			continue
 		}
 
-		updated, _ := m.q.GetLibraryFileByID(ctx, file.ID)
+		updated, err := m.q.GetLibraryFileByID(ctx, file.ID)
+		if err != nil {
+			return result, fmt.Errorf("reloading library file %d after match: %w", file.ID, err)
+		}
 		if updated.Status == sqlc.FileStatusMatched {
 			result.Matched++
 		} else {
@@ -130,7 +128,9 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 	kind := MediaTypeToKind(mediaType)
 
 	if nfoIDs != nil && (nfoIDs.TMDBID != "" || nfoIDs.IMDBID != "" || nfoIDs.TVDBID != "" || nfoIDs.MBID != "" || nfoIDs.AniDBID != "" || nfoIDs.MALID != "") {
-		if info, matched := m.tryLinkExistingByNFO(ctx, file, libraryID, nfoIDs); matched {
+		if info, matched, err := m.tryLinkExistingByNFO(ctx, file, libraryID, nfoIDs); err != nil {
+			return MatchInfo{}, err
+		} else if matched {
 			return info, nil
 		}
 	}
@@ -158,11 +158,13 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 	}
 
 	if query.Title == "" && query.ISBN == "" {
-		m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
+		if err := m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
 			ID:           file.ID,
 			Status:       sqlc.FileStatusUnmatched,
 			ErrorMessage: "no parseable title",
-		})
+		}); err != nil {
+			return MatchInfo{}, fmt.Errorf("marking file without a parseable title unmatched: %w", err)
+		}
 		return MatchInfo{}, nil
 	}
 
@@ -191,11 +193,13 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 		if searchErr != nil {
 			msg = "search error: " + searchErr.Error()
 		}
-		m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
+		if err := m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
 			ID:           file.ID,
 			Status:       sqlc.FileStatusUnmatched,
 			ErrorMessage: msg,
-		})
+		}); err != nil {
+			return MatchInfo{}, fmt.Errorf("marking file without provider results unmatched: %w", err)
+		}
 		return MatchInfo{}, nil
 	}
 
@@ -232,18 +236,22 @@ func (m *Matcher) matchFile(ctx context.Context, file sqlc.LibraryFile, mediaTyp
 		Int("candidates", len(allResults)).
 		Msg("match rejected — needs manual review")
 
-	m.storeCandidates(ctx, file.ID, allResults)
+	if err := m.storeCandidates(ctx, file.ID, allResults); err != nil {
+		return MatchInfo{}, fmt.Errorf("storing match candidates: %w", err)
+	}
 	// Ambiguous match: candidates are stored for manual review. Materialize a
 	// stub so the file is visible, but restrict the fold to local stubs — never
 	// silently attach onto a published item a coincidental title+year matches.
 	if info, ok := m.materializeLocal(ctx, file, parsed, nfoIDs, kind, mediaType, libraryID, false); ok {
 		return info, nil
 	}
-	m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
+	if err := m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
 		ID:           file.ID,
 		Status:       sqlc.FileStatusUnmatched,
 		ErrorMessage: fmt.Sprintf("%d candidates, top confidence %.2f", len(allResults), top.Confidence),
-	})
+	}); err != nil {
+		return MatchInfo{}, fmt.Errorf("marking ambiguous file unmatched: %w", err)
+	}
 	return MatchInfo{}, nil
 }
 
@@ -480,11 +488,13 @@ func (m *Matcher) autoMatch(ctx context.Context, file sqlc.LibraryFile, result m
 		IsNew:        isNew,
 	}
 
-	m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
+	if err := m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
 		ID:          file.ID,
 		Status:      sqlc.FileStatusMatched,
 		MediaItemID: pgInt8(mediaItemID),
-	})
+	}); err != nil {
+		return MatchInfo{}, fmt.Errorf("marking automatically matched file: %w", err)
+	}
 
 	// Trailing-edge debounce. For media types that grow children over
 	// time (TV: new seasons/episodes), an existing-and-complete parent
@@ -545,38 +555,6 @@ func stubDetailFromSearch(r metadata.SearchResult) *metadata.MediaDetail {
 	}
 }
 
-// stubDetailFromNFO builds a media_items stub from a sidecar NFO. NFOs
-// reliably carry title + year + provider external IDs (TMDB/IMDB/TVDB/MBID),
-// which is enough for the match step. The enrich worker resolves the rest
-// from the provider via the external IDs.
-func stubDetailFromNFO(ids metadata.NFOIDs) *metadata.MediaDetail {
-	extIDs := map[string]string{}
-	if ids.TMDBID != "" {
-		extIDs["tmdb"] = ids.TMDBID
-	}
-	if ids.IMDBID != "" {
-		extIDs["imdb"] = ids.IMDBID
-	}
-	if ids.TVDBID != "" {
-		extIDs["tvdb"] = ids.TVDBID
-	}
-	if ids.MBID != "" {
-		extIDs["mbid"] = ids.MBID
-	}
-	if ids.AniDBID != "" {
-		extIDs["anidb"] = ids.AniDBID
-	}
-	if ids.MALID != "" {
-		extIDs["mal"] = ids.MALID
-	}
-	return &metadata.MediaDetail{
-		Title:       ids.Title,
-		SortTitle:   strings.ToLower(ids.Title),
-		Year:        ids.Year,
-		ExternalIDs: extIDs,
-	}
-}
-
 func (m *Matcher) ResolveMatch(ctx context.Context, libraryFileID int64, candidateID int64) error {
 	candidate, err := m.q.GetMatchCandidateByID(ctx, candidateID)
 	if err != nil {
@@ -607,19 +585,27 @@ func (m *Matcher) ResolveMatch(ctx context.Context, libraryFileID int64, candida
 	// User explicitly picked this candidate — we already paid for GetDetail
 	// above, so fill in the type-specific + rich rows now rather than
 	// queueing a separate enrich job.
-	_ = m.createTypeSpecificRow(ctx, mediaItemID, kind, detail, file.Path)
-	m.storeRichMetadata(ctx, mediaItemID, detail)
+	if err := m.createTypeSpecificRow(ctx, mediaItemID, kind, detail, file.Path); err != nil {
+		return fmt.Errorf("storing selected match detail: %w", err)
+	}
+	if err := m.storeRichMetadata(ctx, mediaItemID, detail); err != nil {
+		return fmt.Errorf("storing selected match metadata: %w", err)
+	}
 
-	m.q.ChooseMatchCandidate(ctx, sqlc.ChooseMatchCandidateParams{
+	if err := m.q.ChooseMatchCandidate(ctx, sqlc.ChooseMatchCandidateParams{
 		ChosenID:      candidateID,
 		LibraryFileID: libraryFileID,
-	})
+	}); err != nil {
+		return fmt.Errorf("choosing match candidate: %w", err)
+	}
 
-	m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
+	if err := m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
 		ID:          file.ID,
 		Status:      sqlc.FileStatusMatched,
 		MediaItemID: pgInt8(mediaItemID),
-	})
+	}); err != nil {
+		return fmt.Errorf("marking manually matched file: %w", err)
+	}
 
 	// The episode catalog was just built inline — reconcile the whole series'
 	// absolute-numbered files onto their real season/episode.
@@ -664,7 +650,7 @@ func parseFileResult(data []byte) (parser.ParsedStorageEntry, *metadata.NFOIDs) 
 	}
 
 	var parsed parser.ParsedStorageEntry
-	json.Unmarshal(data, &parsed)
+	_ = json.Unmarshal(data, &parsed) // Invalid legacy parse data intentionally decodes as an empty result.
 	return parsed, mergeFilenameIDs(nil, parsed.Release)
 }
 
@@ -724,7 +710,7 @@ func nfoIdentifierEvidence(ids *metadata.NFOIDs) map[string]string {
 	return result
 }
 
-func (m *Matcher) tryLinkExistingByNFO(ctx context.Context, file sqlc.LibraryFile, libraryID int64, ids *metadata.NFOIDs) (MatchInfo, bool) {
+func (m *Matcher) tryLinkExistingByNFO(ctx context.Context, file sqlc.LibraryFile, libraryID int64, ids *metadata.NFOIDs) (MatchInfo, bool, error) {
 	candidates := []map[string]string{}
 
 	if ids.TMDBID != "" {
@@ -753,11 +739,13 @@ func (m *Matcher) tryLinkExistingByNFO(ctx context.Context, file sqlc.LibraryFil
 			continue
 		}
 
-		m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
+		if err := m.q.UpdateLibraryFileStatus(ctx, sqlc.UpdateLibraryFileStatusParams{
 			ID:          file.ID,
 			Status:      sqlc.FileStatusMatched,
 			MediaItemID: pgInt8(existing.ID),
-		})
+		}); err != nil {
+			return MatchInfo{}, false, fmt.Errorf("linking library file by NFO identifiers: %w", err)
+		}
 
 		// Anime linked by anidb to an existing (usually enriched) series:
 		// resolve its absolute episode now instead of waiting on a re-enrich.
@@ -766,20 +754,25 @@ func (m *Matcher) tryLinkExistingByNFO(ctx context.Context, file sqlc.LibraryFil
 		}
 
 		log.Debug().Int64("file_id", file.ID).Int64("media_id", existing.ID).Str("title", existing.Title).Msg("linked to existing item via NFO IDs")
-		return MatchInfo{IsNew: false}, true
+		return MatchInfo{IsNew: false}, true, nil
 	}
 
-	return MatchInfo{}, false
+	return MatchInfo{}, false, nil
 }
 
-func (m *Matcher) storeCandidates(ctx context.Context, fileID int64, results []metadata.SearchResult) {
-	m.q.DeleteMatchCandidatesByFile(ctx, fileID)
+func (m *Matcher) storeCandidates(ctx context.Context, fileID int64, results []metadata.SearchResult) error {
+	if err := m.q.DeleteMatchCandidatesByFile(ctx, fileID); err != nil {
+		return fmt.Errorf("deleting stale candidates: %w", err)
+	}
 	for _, r := range results {
-		rawJSON, _ := json.Marshal(r.RawData)
+		rawJSON, err := json.Marshal(r.RawData)
+		if err != nil {
+			return fmt.Errorf("marshalling candidate %q: %w", r.ProviderID, err)
+		}
 		if rawJSON == nil {
 			rawJSON = []byte("{}")
 		}
-		m.q.CreateMatchCandidate(ctx, sqlc.CreateMatchCandidateParams{
+		if _, err := m.q.CreateMatchCandidate(ctx, sqlc.CreateMatchCandidateParams{
 			LibraryFileID: fileID,
 			ProviderName:  r.ProviderName,
 			ProviderID:    r.ProviderID,
@@ -789,8 +782,11 @@ func (m *Matcher) storeCandidates(ctx context.Context, fileID int64, results []m
 			PosterUrl:     r.PosterURL,
 			Confidence:    numericFromFloat(r.Confidence),
 			RawData:       rawJSON,
-		})
+		}); err != nil {
+			return fmt.Errorf("storing candidate %q: %w", r.ProviderID, err)
+		}
 	}
+	return nil
 }
 
 func buildSearchQuery(parsed parser.ParsedStorageEntry, kind metadata.MediaKind) metadata.SearchQuery {

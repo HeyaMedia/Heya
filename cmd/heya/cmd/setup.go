@@ -96,7 +96,7 @@ var setupCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 
 		current, _ := goose.GetDBVersion(db)
 		ui.Info("Current version", fmt.Sprintf("%d", current))
@@ -104,13 +104,15 @@ var setupCmd = &cobra.Command{
 		pending, err := goose.CollectMigrations(".", 0, goose.MaxVersion)
 		if err == nil && int64(len(pending)) > current {
 			var runMigrations bool
-			huh.NewForm(
+			if err := huh.NewForm(
 				huh.NewGroup(
 					huh.NewConfirm().
 						Title(fmt.Sprintf("Apply %d pending migrations?", int64(len(pending))-current)).
 						Value(&runMigrations),
 				),
-			).Run()
+			).Run(); err != nil {
+				return err
+			}
 			if runMigrations {
 				if err := goose.Up(db, "."); err != nil {
 					ui.Error("migration failed: %v", err)
@@ -125,7 +127,10 @@ var setupCmd = &cobra.Command{
 		// Step 3: Create admin user. Build a one-shot service.App against
 		// an inline config so we don't touch the global cfg.
 		fmt.Println()
-		pool, _ = database.Connect(ctx, databaseURL)
+		pool, err = database.Connect(ctx, databaseURL)
+		if err != nil {
+			return fmt.Errorf("reconnecting after migrations: %w", err)
+		}
 		defer pool.Close()
 		q := sqlc.New(pool)
 
@@ -166,7 +171,7 @@ var setupCmd = &cobra.Command{
 				return err
 			}
 
-			app, err := service.New(ctx, bootCfg)
+			app, err := service.NewCommand(ctx, bootCfg)
 			if err != nil {
 				return err
 			}
@@ -189,13 +194,15 @@ var setupCmd = &cobra.Command{
 			}
 		} else {
 			var addLibrary bool
-			huh.NewForm(
+			if err := huh.NewForm(
 				huh.NewGroup(
 					huh.NewConfirm().
 						Title("Add your first media library?").
 						Value(&addLibrary),
 				),
-			).Run()
+			).Run(); err != nil {
+				return err
+			}
 
 			if addLibrary {
 				var libName, libType, libPath string
@@ -217,7 +224,7 @@ var setupCmd = &cobra.Command{
 							Value(&libType),
 						huh.NewInput().
 							Title("Path to media files").
-							Description("Local path or smb://user:pass@host/share/path").
+							Description("Filesystem path visible to Heya. Mount network shares on the host or in the container first.").
 							Value(&libPath),
 					),
 				).Run()
@@ -225,7 +232,7 @@ var setupCmd = &cobra.Command{
 					return err
 				}
 
-				app, err := service.New(ctx, bootCfg)
+				app, err := service.NewCommand(ctx, bootCfg)
 				if err != nil {
 					return err
 				}
@@ -248,14 +255,16 @@ var setupCmd = &cobra.Command{
 		fmt.Println()
 		var writeEnv bool
 		envPath := "./.env"
-		huh.NewForm(
+		if err := huh.NewForm(
 			huh.NewGroup(
 				huh.NewConfirm().
 					Title(fmt.Sprintf("Write infra settings to %s?", envPath)).
 					Description("Only non-default values are written. .env values are loaded automatically by heya serve.").
 					Value(&writeEnv),
 			),
-		).Run()
+		).Run(); err != nil {
+			return err
+		}
 
 		if writeEnv {
 			if err := writeDotEnv(envPath, map[string]string{

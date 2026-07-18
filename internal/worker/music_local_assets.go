@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -90,11 +89,9 @@ func detectLocalMusicAssets(ctx context.Context, q *sqlc.Queries, dataDir string
 		artistDir = resolveArtistDir(ctx, q, mediaItemID)
 		if artistDir == "" {
 			log.Debug().Int64("item_id", mediaItemID).Msg("detect local music: no artist dir resolved")
-		} else if source, err := vfs.Open(artistDir); err != nil {
-			log.Debug().Err(err).Str("dir", artistDir).Msg("detect local music: cannot open artist dir")
+		} else if source, err := vfs.OpenContext(ctx, artistDir); err != nil {
+			log.Debug().Err(vfs.RedactError(err)).Str("dir", vfs.RedactPath(artistDir)).Msg("detect local music: cannot open artist dir")
 		} else {
-			defer source.Close() //nolint:errcheck // defer-close on vfs source
-
 			cacheDir := filepath.Join(dataDir, "images", "music", dirName)
 			if err := ensureDir(cacheDir); err != nil {
 				log.Warn().Err(err).Str("cache_dir", cacheDir).Msg("detect local music: mkdir failed")
@@ -105,7 +102,7 @@ func detectLocalMusicAssets(ctx context.Context, q *sqlc.Queries, dataDir string
 					"poster.jpg", "poster.png",
 					"artist.jpg", "artist.png",
 				}
-				if posterPath := copyFirstMatch(source.FS, posterCandidates, cacheDir, "poster"); posterPath != "" {
+				if posterPath := copyFirstMatch(ctx, source.FS, posterCandidates, cacheDir, "poster"); posterPath != "" {
 					writeAsset(ctx, q, mediaItemID, sqlc.AssetTypePoster, posterPath, 0, "", existingLocal)
 					updateArtworkPathColumns(ctx, q, item, posterPath, item.BackdropPath)
 					item.PosterPath = posterPath
@@ -117,12 +114,12 @@ func detectLocalMusicAssets(ctx context.Context, q *sqlc.Queries, dataDir string
 					"backdrop.jpg", "backdrop.png",
 					"fanart.jpg", "fanart.png",
 				}
-				primaryBackdrop := copyFirstMatch(source.FS, backdropCandidates, cacheDir, "backdrop")
+				primaryBackdrop := copyFirstMatch(ctx, source.FS, backdropCandidates, cacheDir, "backdrop")
 				numbered := findNumberedExtras(source.FS, []string{"backdrop", "fanart"}, []string{".jpg", ".png"})
 				if primaryBackdrop == "" && len(numbered) > 0 {
 					first := numbered[0]
 					dst := filepath.Join(cacheDir, "backdrop"+filepath.Ext(first))
-					if err := copyFromFS(source.FS, first, dst, true); err == nil {
+					if err := copyFromFS(ctx, source.FS, first, dst, true); err == nil {
 						primaryBackdrop = dst
 						numbered = numbered[1:]
 					}
@@ -141,25 +138,25 @@ func detectLocalMusicAssets(ctx context.Context, q *sqlc.Queries, dataDir string
 				}
 				for i, extra := range numbered {
 					dst := filepath.Join(cacheDir, "backdrop"+strconv.Itoa(i+1)+filepath.Ext(extra))
-					if err := copyFromFS(source.FS, extra, dst, true); err == nil {
+					if err := copyFromFS(ctx, source.FS, extra, dst, true); err == nil {
 						writeAsset(ctx, q, mediaItemID, sqlc.AssetTypeBackdrop, dst, int32(i+1), "", existingLocal)
 						result.Backdrop++
 					}
 				}
 
-				if logoPath := copyFirstMatch(source.FS, []string{"logo.png", "clearlogo.png"}, cacheDir, "logo"); logoPath != "" {
+				if logoPath := copyFirstMatch(ctx, source.FS, []string{"logo.png", "clearlogo.png"}, cacheDir, "logo"); logoPath != "" {
 					writeAsset(ctx, q, mediaItemID, sqlc.AssetTypeLogo, logoPath, 0, "", existingLocal)
 					result.Logo++
 				}
-				if bannerPath := copyFirstMatch(source.FS, []string{"banner.jpg", "banner.png", "landscape.jpg", "landscape.png"}, cacheDir, "banner"); bannerPath != "" {
+				if bannerPath := copyFirstMatch(ctx, source.FS, []string{"banner.jpg", "banner.png", "landscape.jpg", "landscape.png"}, cacheDir, "banner"); bannerPath != "" {
 					writeAsset(ctx, q, mediaItemID, sqlc.AssetTypeBanner, bannerPath, 0, "", existingLocal)
 					result.Banner++
 				}
-				if clearart := copyFirstMatch(source.FS, []string{"clearart.png"}, cacheDir, "clearart"); clearart != "" {
+				if clearart := copyFirstMatch(ctx, source.FS, []string{"clearart.png"}, cacheDir, "clearart"); clearart != "" {
 					writeAsset(ctx, q, mediaItemID, sqlc.AssetTypeClearart, clearart, 0, "", existingLocal)
 					result.Clearart++
 				}
-				if thumb := copyFirstMatch(source.FS, []string{"thumb.jpg", "thumb.png"}, cacheDir, "thumb"); thumb != "" {
+				if thumb := copyFirstMatch(ctx, source.FS, []string{"thumb.jpg", "thumb.png"}, cacheDir, "thumb"); thumb != "" {
 					writeAsset(ctx, q, mediaItemID, sqlc.AssetTypeThumb, thumb, 0, "", existingLocal)
 					result.Thumb++
 				}
@@ -205,8 +202,8 @@ func resolveArtistDir(ctx context.Context, q *sqlc.Queries, mediaItemID int64) s
 		return strings.Count(files[i].Path, "/") < strings.Count(files[j].Path, "/")
 	})
 	trackPath := files[0].Path
-	albumDir := vfs.Dir(trackPath)
-	artistDir := vfs.Dir(albumDir)
+	albumDir := filepath.Dir(trackPath)
+	artistDir := filepath.Dir(albumDir)
 	if artistDir == "" || artistDir == "." || artistDir == "/" {
 		return ""
 	}
@@ -219,13 +216,13 @@ func resolveArtistDir(ctx context.Context, q *sqlc.Queries, mediaItemID int64) s
 //
 // Force-overwrites the destination — a stale heya.media download under the
 // same name must be replaced by the user-provided art (local always wins).
-func copyFirstMatch(fsys fs.FS, candidates []string, cacheDir, baseName string) string {
+func copyFirstMatch(ctx context.Context, fsys fs.FS, candidates []string, cacheDir, baseName string) string {
 	for _, name := range candidates {
 		if _, err := fs.Stat(fsys, name); err != nil {
 			continue
 		}
 		dst := filepath.Join(cacheDir, baseName+filepath.Ext(name))
-		if err := copyFromFS(fsys, name, dst, true); err != nil {
+		if err := copyFromFS(ctx, fsys, name, dst, true); err != nil {
 			log.Debug().Err(err).Str("src", name).Str("dst", dst).Msg("local asset copy failed")
 			continue
 		}
@@ -390,7 +387,7 @@ func scanAlbumAssets(ctx context.Context, q *sqlc.Queries, dataDir, artistSlug s
 
 			coverPath := ""
 			for _, d := range albumDirs {
-				coverPath = copyAlbumCover(d, coverCacheDir)
+				coverPath = copyAlbumCover(ctx, d, coverCacheDir)
 				if coverPath != "" {
 					break
 				}
@@ -420,7 +417,7 @@ func scanAlbumAssets(ctx context.Context, q *sqlc.Queries, dataDir, artistSlug s
 			// album cache dir means it's served as a sibling of cover.jpg
 			// for the UI to pick up by predictable URL convention.
 			for _, d := range albumDirs {
-				copyAlbumDiscArt(d, coverCacheDir)
+				copyAlbumDiscArt(ctx, d, coverCacheDir)
 			}
 		}
 
@@ -430,7 +427,7 @@ func scanAlbumAssets(ctx context.Context, q *sqlc.Queries, dataDir, artistSlug s
 			if file.FilePath == "" {
 				continue
 			}
-			lrc := findLyricsSidecar(file.FilePath)
+			lrc := findLyricsSidecar(ctx, file.FilePath)
 			if lrc == "" || lrc == file.LyricsPath {
 				continue
 			}
@@ -458,11 +455,11 @@ func resolveAlbumDirs(files []sqlc.ListTrackFilePathsByAlbumRow) []string {
 		if file.FilePath == "" {
 			continue
 		}
-		dir := vfs.Dir(file.FilePath)
-		base := vfs.Base(dir)
+		dir := filepath.Dir(file.FilePath)
+		base := filepath.Base(dir)
 		lower := strings.ToLower(base)
 		if strings.HasPrefix(lower, "disc ") || strings.HasPrefix(lower, "disc-") || strings.HasPrefix(lower, "cd ") || strings.HasPrefix(lower, "cd-") {
-			dir = vfs.Dir(dir)
+			dir = filepath.Dir(dir)
 		}
 		if dir == "" || dir == "." || dir == "/" {
 			continue
@@ -500,7 +497,7 @@ func extractEmbeddedCover(ctx context.Context, files []sqlc.ListTrackFilePathsBy
 		if file.FilePath == "" {
 			continue
 		}
-		inputPath, cleanup, err := localFileForFFmpeg(file.FilePath)
+		inputPath, cleanup, err := localFileForFFmpeg(ctx, file.FilePath)
 		if err != nil {
 			continue
 		}
@@ -528,65 +525,27 @@ func extractEmbeddedCover(ctx context.Context, files []sqlc.ListTrackFilePathsBy
 	return ""
 }
 
-// localFileForFFmpeg returns a path ffmpeg can read directly. For local
-// filesystem paths it's a no-op (returns the original path + a noop
-// cleanup). For SMB-backed paths it spools the file to a temp location
-// first since ffmpeg can't read smb:// URLs natively, and music files
-// need random access (FLAC vorbis-comment pictures live near the header,
-// M4A moov atoms can sit at either end).
-//
-// Returns (path, cleanup, err) where cleanup MUST be called by the caller
-// to drop the temp copy when extraction is done. The cleanup is a no-op
-// for local-fs inputs so callers don't need to branch.
-func localFileForFFmpeg(srcPath string) (string, func(), error) {
-	if !vfs.IsSMBPath(srcPath) {
-		if _, err := os.Stat(srcPath); err != nil {
-			return "", func() {}, err
-		}
-		return srcPath, func() {}, nil
-	}
-	// SMB path — spool to a temp file. Use vfs.Open + fs.Open against the
-	// parent dir so the SMB connection setup happens through the shared
-	// helper.
-	dir := vfs.Dir(srcPath)
-	name := vfs.Base(srcPath)
-	source, err := vfs.Open(dir)
-	if err != nil {
+// localFileForFFmpeg validates that a scanner-produced path is still a
+// readable regular filesystem entry. Mounted network shares need no special
+// case because ffmpeg sees their host/container path directly.
+func localFileForFFmpeg(ctx context.Context, srcPath string) (string, func(), error) {
+	if err := ctx.Err(); err != nil {
 		return "", func() {}, err
 	}
-	in, err := source.FS.Open(name)
-	if err != nil {
-		_ = source.Close()
+	if err := vfs.ValidateLocalPath(srcPath); err != nil {
 		return "", func() {}, err
 	}
-	tmp, err := os.CreateTemp("", "heya-art-*"+filepath.Ext(name))
-	if err != nil {
-		_ = in.Close()
-		_ = source.Close()
+	if _, err := os.Stat(srcPath); err != nil {
 		return "", func() {}, err
 	}
-	if _, err := io.Copy(tmp, in); err != nil {
-		_ = in.Close()
-		_ = source.Close()
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name())
-		return "", func() {}, err
-	}
-	_ = in.Close()
-	_ = tmp.Close()
-	tmpPath := tmp.Name()
-	cleanup := func() {
-		_ = os.Remove(tmpPath)
-		_ = source.Close()
-	}
-	return tmpPath, cleanup, nil
+	return srcPath, func() {}, nil
 }
 
 // copyAlbumDiscArt looks for the optional disc/CD/vinyl render
 // (disc.png / cdart.png / discart.jpg) that some users keep next to
 // cover.jpg. Lands at <cacheDir>/disc.<ext>. Best-effort and silent on
 // miss — most libraries don't have this and that's fine.
-func copyAlbumDiscArt(albumDir, cacheDir string) {
+func copyAlbumDiscArt(ctx context.Context, albumDir, cacheDir string) {
 	candidates := []string{
 		"disc.png", "disc.jpg", "disc.jpeg",
 		"cdart.png", "cdart.jpg",
@@ -595,12 +554,11 @@ func copyAlbumDiscArt(albumDir, cacheDir string) {
 	if err := os.MkdirAll(cacheDir, 0o750); err != nil {
 		return
 	}
-	source, err := vfs.Open(albumDir)
+	source, err := vfs.OpenContext(ctx, albumDir)
 	if err != nil {
 		return
 	}
-	defer source.Close() //nolint:errcheck // defer-close on vfs source
-	_ = copyFirstMatch(source.FS, candidates, cacheDir, "disc")
+	_ = copyFirstMatch(ctx, source.FS, candidates, cacheDir, "disc")
 }
 
 // copyAlbumCover looks for the conventional album cover filenames in the
@@ -611,7 +569,7 @@ func copyAlbumDiscArt(albumDir, cacheDir string) {
 // (or "CD N") subdir and use the first cover found. The convention used by
 // most rippers (and by the user's library) is one cover.jpg per disc; the
 // album-level art is whichever disc surfaces first.
-func copyAlbumCover(albumDir, cacheDir string) string {
+func copyAlbumCover(ctx context.Context, albumDir, cacheDir string) string {
 	// Conventional Kodi music album art filenames. cover.jpg is the
 	// dominant one; folder.jpg is what most rippers default to (matches
 	// Kodi's "use folder image" mode); front.jpg shows up on releases
@@ -627,9 +585,8 @@ func copyAlbumCover(albumDir, cacheDir string) string {
 		return ""
 	}
 
-	if source, err := vfs.Open(albumDir); err == nil {
-		defer source.Close() //nolint:errcheck // defer-close on vfs source
-		if dst := copyFirstMatch(source.FS, candidates, cacheDir, "cover"); dst != "" {
+	if source, err := vfs.OpenContext(ctx, albumDir); err == nil {
+		if dst := copyFirstMatch(ctx, source.FS, candidates, cacheDir, "cover"); dst != "" {
 			return dst
 		}
 		// No root-level cover — peek into Disc/CD subdirs.
@@ -646,7 +603,7 @@ func copyAlbumCover(albumDir, cacheDir string) string {
 				if err != nil {
 					continue
 				}
-				if dst := copyFirstMatch(sub, candidates, cacheDir, "cover"); dst != "" {
+				if dst := copyFirstMatch(ctx, sub, candidates, cacheDir, "cover"); dst != "" {
 					return dst
 				}
 			}
@@ -662,33 +619,30 @@ func copyAlbumCover(albumDir, cacheDir string) string {
 //	.lrc   — synced timed lyrics (most common; what the player surfaces)
 //	.elrc  — enhanced LRC with per-word timing
 //	.txt   — unsynced plain lyrics
-func findLyricsSidecar(audioPath string) string {
+func findLyricsSidecar(ctx context.Context, audioPath string) string {
 	if audioPath == "" {
 		return ""
 	}
-	dir := vfs.Dir(audioPath)
-	base := vfs.Base(audioPath)
+	dir := filepath.Dir(audioPath)
+	base := filepath.Base(audioPath)
 	ext := filepath.Ext(base)
 	stem := strings.TrimSuffix(base, ext)
 
-	// SMB paths can't be Stat'd directly with os.Stat — defer to vfs.Open
-	// + fs.Stat against the parent dir. The local-fs case also works
-	// through this since vfs.Open returns os.DirFS for non-smb paths.
-	source, err := vfs.Open(dir)
+	// Use the fs.FS view so case-variant sidecar probing remains shared with
+	// the other local-artwork walkers.
+	source, err := vfs.OpenContext(ctx, dir)
 	if err != nil {
 		return ""
 	}
-	defer source.Close() //nolint:errcheck // defer-close on vfs source
-
 	for _, lyricsExt := range []string{".lrc", ".elrc", ".txt"} {
 		candidate := stem + lyricsExt
 		if _, err := fs.Stat(source.FS, candidate); err == nil {
-			return vfs.Join(dir, candidate)
+			return filepath.Join(dir, candidate)
 		}
 		// Some rippers uppercase the extension (.LRC). Cover that too.
 		upper := stem + strings.ToUpper(lyricsExt)
 		if _, err := fs.Stat(source.FS, upper); err == nil {
-			return vfs.Join(dir, upper)
+			return filepath.Join(dir, upper)
 		}
 	}
 	return ""

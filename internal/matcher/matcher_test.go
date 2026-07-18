@@ -1,7 +1,6 @@
 package matcher
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 
@@ -11,43 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-type mockProvider struct {
-	name     string
-	kinds    []metadata.MediaKind
-	results  []metadata.SearchResult
-	detail   *metadata.MediaDetail
-	nfoData  *metadata.MediaDetail
-	nfoID    string
-	searchOK bool
-}
-
-func (m *mockProvider) Name() string { return m.name }
-
-func (m *mockProvider) Supports(kind metadata.MediaKind) bool {
-	for _, k := range m.kinds {
-		if k == kind {
-			return true
-		}
-	}
-	return false
-}
-
-func (m *mockProvider) Search(_ context.Context, _ metadata.MediaKind, _ metadata.SearchQuery) ([]metadata.SearchResult, error) {
-	m.searchOK = true
-	return m.results, nil
-}
-
-func (m *mockProvider) GetDetail(_ context.Context, _ string) (*metadata.MediaDetail, error) {
-	return m.detail, nil
-}
-
-func (m *mockProvider) LookupByNFO(_ context.Context, _ metadata.MediaKind, _ metadata.NFOIDs) (*metadata.MediaDetail, string, error) {
-	if m.nfoData != nil {
-		return m.nfoData, m.nfoID, nil
-	}
-	return nil, "", assert.AnError
-}
 
 func TestBuildSearchQueryMovie(t *testing.T) {
 	parsed := parser.ParsedStorageEntry{

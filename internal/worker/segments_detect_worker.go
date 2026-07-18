@@ -10,7 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/queueops"
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
@@ -38,7 +40,7 @@ import (
 //
 // Both are heavier than the community fetch (real audio decode, not an
 // HTTP round-trip), so River's default per-job context deadline is too
-// tight for a 25-episode season or a slow SMB tail read — both workers
+// tight for a 25-episode season or a slow network-mount tail read — both workers
 // override Timeout() to run unbounded.
 
 // ---------------------------------------------------------------------------
@@ -102,7 +104,7 @@ func (w *DetectSeasonSegmentsWorker) Work(ctx context.Context, job *river.Job[De
 	eps := make([]seasonEpisode, 0, len(rows))
 	epNumbers := make([]int, 0, len(rows))
 	for _, r := range rows {
-		var info MediaInfo
+		var info mediaprobe.MediaInfo
 		if len(r.MediaInfo) > 0 {
 			_ = json.Unmarshal(r.MediaInfo, &info)
 		}
@@ -155,7 +157,7 @@ func (w *DetectSeasonSegmentsWorker) Work(ctx context.Context, job *river.Job[De
 		w.Progress.SetCurrent(DetectSeasonSegmentsArgs{}.Kind(), job.Args.ScheduledTaskID, filepath.Base(eps[i].path))
 		pts, err := chromaprintWindowRaw(ctx, eps[i].path, start, dur)
 		if err != nil {
-			log.Warn().Err(err).Str("path", eps[i].path).Msg("detect_segments_season: intro fingerprint failed")
+			log.Warn().Err(vfs.RedactError(err)).Str("path", vfs.RedactPath(eps[i].path)).Msg("detect_segments_season: intro fingerprint failed")
 			return nil
 		}
 		return pts
@@ -171,7 +173,7 @@ func (w *DetectSeasonSegmentsWorker) Work(ctx context.Context, job *river.Job[De
 		w.Progress.SetCurrent(DetectSeasonSegmentsArgs{}.Kind(), job.Args.ScheduledTaskID, filepath.Base(eps[i].path))
 		pts, err := chromaprintWindowRaw(ctx, eps[i].path, start, dur)
 		if err != nil {
-			log.Warn().Err(err).Str("path", eps[i].path).Msg("detect_segments_season: tail fingerprint failed")
+			log.Warn().Err(vfs.RedactError(err)).Str("path", vfs.RedactPath(eps[i].path)).Msg("detect_segments_season: tail fingerprint failed")
 			return nil
 		}
 		eps[i].tailOffset = start
@@ -381,7 +383,7 @@ func (w *DetectMovieCreditsWorker) Work(ctx context.Context, job *river.Job[Dete
 		return nil
 	}
 
-	var info MediaInfo
+	var info mediaprobe.MediaInfo
 	if len(lf.MediaInfo) > 0 {
 		_ = json.Unmarshal(lf.MediaInfo, &info)
 	}
@@ -394,10 +396,10 @@ func (w *DetectMovieCreditsWorker) Work(ctx context.Context, job *river.Job[Dete
 
 	startSecs, ok, err := detectMovieCredits(ctx, lf.Path, info.Duration)
 	if err != nil {
-		log.Warn().Err(err).Str("path", lf.Path).Msg("detect_segments_movie: blackdetect failed")
+		log.Warn().Err(vfs.RedactError(err)).Str("path", vfs.RedactPath(lf.Path)).Msg("detect_segments_movie: blackdetect failed")
 		// Stamp anyway — a permanently-undecodable file (bad remux, exotic
 		// codec) shouldn't be retried by every future pump sweep. A
-		// transient SMB blip is the tradeoff; the community pass and any
+		// transient mount blip is the tradeoff; the community pass and any
 		// future re-scan can still fill it later.
 		return q.MarkFileSegmentsDetected(ctx, []int64{lf.ID})
 	}

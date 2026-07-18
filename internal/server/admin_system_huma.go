@@ -14,6 +14,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
+	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -320,6 +321,9 @@ func collectAdminStorage(ctx context.Context, app *service.App) adminStorageBody
 	}
 
 	if usage, err := app.ListLibraryDiskUsage(ctx); err == nil {
+		for i := range usage {
+			usage[i].Path = secrettext.Redact(usage[i].Path)
+		}
 		body.LibraryDiskUsage = usage
 	}
 	return body
@@ -329,10 +333,10 @@ func collectAdminStorage(ctx context.Context, app *service.App) adminStorageBody
 // Doesn't walk the directory — that would block on multi-TB libraries.
 // Filesystem totals come from statfs, which is the same data `df` reports.
 func pathStorage(label, p string) adminStoragePath {
-	out := adminStoragePath{Label: label, Path: p}
+	out := adminStoragePath{Label: label, Path: secrettext.Redact(p)}
 	info, err := os.Stat(p)
 	if err != nil {
-		out.Error = err.Error()
+		out.Error = secrettext.Redact(err.Error())
 		return out
 	}
 	out.Exists = true
@@ -340,7 +344,7 @@ func pathStorage(label, p string) adminStoragePath {
 
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(p, &stat); err != nil {
-		out.Error = err.Error()
+		out.Error = secrettext.Redact(err.Error())
 		return out
 	}
 	total := stat.Blocks * uint64(stat.Bsize)

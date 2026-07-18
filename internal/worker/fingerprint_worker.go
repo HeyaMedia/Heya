@@ -10,6 +10,7 @@ import (
 	"math"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,7 +18,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/queueops"
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
@@ -38,6 +41,10 @@ const (
 	// and ffmpeg's chromaprint muxer. Recorded per row so a future algorithm
 	// bump knows which fingerprints to regenerate.
 	chromaprintAlgorithm = 1
+	// fpcalc's CLI numbers algorithms from 1 while libchromaprint/FFmpeg use
+	// the zero-based enum stored in our database. CLI value 2 is therefore the
+	// same TEST2 algorithm as FFmpeg's muxer value 1.
+	fpcalcAlgorithm = chromaprintAlgorithm + 1
 	// chromaprintWindowSecs caps how much audio is decoded and fingerprinted.
 	chromaprintWindowSecs = 120
 )
@@ -138,30 +145,30 @@ func ensureLibraryFileFingerprint(ctx context.Context, q *sqlc.Queries, lf sqlc.
 	}
 
 	// Decoding ≤120s of audio is seconds of work; 2 minutes covers a wedged
-	// SMB read without holding a search worker indefinitely.
+	// network-mount read without holding a search worker indefinitely.
 	fpCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	fingerprint, err := computeChromaprint(fpCtx, lf.Path)
 	cancel()
 	if err != nil {
-		return sqlc.LibraryFileFingerprint{}, fmt.Errorf("chromaprint %s: %w", lf.Path, err)
+		return sqlc.LibraryFileFingerprint{}, fmt.Errorf("compute chromaprint: %w", err)
 	}
 	if sourceDuration <= 0 {
-		var info MediaInfo
+		var info mediaprobe.MediaInfo
 		if len(lf.MediaInfo) > 2 && json.Unmarshal(lf.MediaInfo, &info) == nil && info.Duration > 0 {
 			sourceDuration = int32(math.Round(info.Duration))
 		}
 	}
 	if sourceDuration <= 0 {
 		probeCtx, probeCancel := context.WithTimeout(ctx, 2*time.Minute)
-		info, probeErr := ProbeFile(probeCtx, lf.Path)
+		info, probeErr := mediaprobe.Probe(probeCtx, lf.Path)
 		probeCancel()
 		if probeErr != nil {
-			return sqlc.LibraryFileFingerprint{}, fmt.Errorf("probe duration %s: %w", lf.Path, probeErr)
+			return sqlc.LibraryFileFingerprint{}, fmt.Errorf("probe fingerprint source duration: %w", probeErr)
 		}
 		sourceDuration = int32(math.Round(info.Duration))
 	}
 	if sourceDuration <= 0 {
-		return sqlc.LibraryFileFingerprint{}, fmt.Errorf("fingerprint %s: source duration is unavailable", lf.Path)
+		return sqlc.LibraryFileFingerprint{}, errors.New("fingerprint source duration is unavailable")
 	}
 
 	stored, err = q.UpsertLibraryFileFingerprint(ctx, sqlc.UpsertLibraryFileFingerprintParams{
@@ -222,6 +229,10 @@ func chromaprintFile(ctx context.Context, path string) (string, error) {
 var computeChromaprint = chromaprintFile
 
 func chromaprintViaFFmpeg(ctx context.Context, path string) (string, error) {
+	if err := vfs.ValidateLocalPath(path); err != nil {
+		return "", fmt.Errorf("audio input: %w", err)
+	}
+
 	// -t before -i bounds the demux read itself. -vn/-sn/-dn plus an explicit
 	// audio map keep an embedded cover-art stream from reaching the
 	// audio-only chromaprint muxer.
@@ -231,7 +242,9 @@ func chromaprintViaFFmpeg(ctx context.Context, path string) (string, error) {
 		"-t", fmt.Sprint(chromaprintWindowSecs),
 		"-i", path,
 		"-vn", "-sn", "-dn", "-map", "0:a:0",
-		"-f", "chromaprint", "-fp_format", "base64", "-",
+		"-f", "chromaprint",
+		"-algorithm", strconv.Itoa(chromaprintAlgorithm),
+		"-fp_format", "base64", "-",
 	)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -243,9 +256,13 @@ func chromaprintViaFFmpeg(ctx context.Context, path string) (string, error) {
 }
 
 func chromaprintViaFpcalc(ctx context.Context, path string) (string, error) {
+	if err := vfs.ValidateLocalPath(path); err != nil {
+		return "", fmt.Errorf("audio input: %w", err)
+	}
 	cmd := exec.CommandContext(ctx, //nolint:gosec // path comes from library_files we control; fpcalc binary is fixed
 		"fpcalc",
 		"-length", fmt.Sprint(chromaprintWindowSecs),
+		"-algorithm", strconv.Itoa(fpcalcAlgorithm),
 		path,
 	)
 	var stdout, stderr bytes.Buffer

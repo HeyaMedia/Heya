@@ -53,7 +53,6 @@ var dashboardCmd = &cobra.Command{
 				ui.Error("Login failed: %v", err)
 				return err
 			}
-			token = client.GetToken()
 		} else {
 			client = dashboard.NewClientWithHTTP(serverURL, token, localtls.Client(cfg.DataDir.Value, 5*time.Second))
 		}

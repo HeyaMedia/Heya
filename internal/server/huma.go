@@ -13,6 +13,7 @@ import (
 	gojson "github.com/goccy/go-json"
 	"github.com/karbowiak/heya/internal/auth"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/images"
 )
 
 // goccyJSONFormat replaces Huma's encoding/json default with goccy/go-json,
@@ -65,11 +66,39 @@ func newHumaAPI(mux *http.ServeMux, sessions auth.SessionLookup) huma.API {
 		"application/json": goccyJSONFormat,
 		"json":             goccyJSONFormat,
 	}
+	// Treat serialization as the final credential boundary. Individual service
+	// mappers still redact intentionally, but legacy handlers that return an
+	// err.Error() directly cannot accidentally expose URL userinfo.
+	cfg.Transformers = append(cfg.Transformers, redactHumaErrorResponse)
 
 	api := humago.New(mux, cfg)
+	api.UseMiddleware(uploadBodyLimitMiddleware(api))
 	api.UseMiddleware(authMiddleware(api, sessions))
 	api.UseMiddleware(adminMiddleware(api))
 	return api
+}
+
+const maxImageMultipartBytes = images.MaxImageBytes + (1 << 20)
+
+// uploadBodyLimitMiddleware caps image multipart requests before Huma calls
+// ParseMultipartForm, which may otherwise spool an arbitrarily large body to
+// temporary disk before the image reader gets a chance to enforce its limit.
+func uploadBodyLimitMiddleware(api huma.API) func(huma.Context, func(huma.Context)) {
+	return func(ctx huma.Context, next func(huma.Context)) {
+		switch ctx.Operation().OperationID {
+		case "upload-media-asset", "upload-playlist-cover":
+		default:
+			next(ctx)
+			return
+		}
+		request, writer := humago.Unwrap(ctx)
+		if request.ContentLength > maxImageMultipartBytes {
+			_ = huma.WriteErr(api, ctx, http.StatusRequestEntityTooLarge, "image upload is too large")
+			return
+		}
+		request.Body = http.MaxBytesReader(writer, request.Body, maxImageMultipartBytes)
+		next(ctx)
+	}
 }
 
 type ctxKey string

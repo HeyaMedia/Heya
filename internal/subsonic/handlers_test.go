@@ -239,6 +239,7 @@ func TestManifestEndpointsAnswerInProtocol(t *testing.T) {
 func TestGetNowPlayingOwnOrAdmin(t *testing.T) {
 	f := newFakeBackend()
 	store := sessions.New(context.Background(), nil)
+	defer store.Close()
 	store.Upsert(sessions.Session{SessionID: "s-own", UserID: f.user.ID, Username: "admin",
 		MediaType: "music", EntityType: "track", EntityID: 100})
 	store.Upsert(sessions.Session{SessionID: "s-other", UserID: f.user.ID + 1, Username: "bob",

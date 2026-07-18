@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/karbowiak/heya/internal/safelog"
 	tsnetwrap "github.com/karbowiak/heya/internal/tailscale"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
@@ -87,7 +88,7 @@ var tailscaleLogoutCmd = &cobra.Command{
 }
 
 func newOneShotTailscale() *tsnetwrap.Server {
-	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
+	logger := zerolog.New(safelog.Redact(os.Stderr)).With().Timestamp().Logger()
 	return tsnetwrap.New(logger, nil, nil, nil)
 }
 

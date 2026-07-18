@@ -792,8 +792,8 @@ func (a *App) applySyncedPlaylist(ctx context.Context, userID, playlistID int64,
 }
 
 func (a *App) TriggerPlaylistSync(userID, playlistID int64) {
-	ctx := a.LifetimeContext()
-	go func() {
+	a.startBackground(func() {
+		ctx := a.LifetimeContext()
 		rows, err := a.db.Query(ctx, `SELECT service FROM user_playlist_syncs WHERE user_id = $1 AND playlist_id = $2`, userID, playlistID)
 		if err != nil {
 			return
@@ -811,19 +811,19 @@ func (a *App) TriggerPlaylistSync(userID, playlistID int64) {
 				log.Warn().Err(err).Str("service", service).Int64("playlist", playlistID).Msg("playlist sync failed")
 			}
 		}
-	}()
+	})
 }
 
-func (a *App) runPlaylistSyncLoop() {
+func (a *App) runPlaylistSyncLoop(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-a.LifetimeContext().Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			a.reconcileEnabledPlaylistCollections(a.LifetimeContext())
-			rows, err := a.db.Query(a.LifetimeContext(), `SELECT user_id, playlist_id, service FROM user_playlist_syncs ORDER BY last_synced_at NULLS FIRST`)
+			a.reconcileEnabledPlaylistCollections(ctx)
+			rows, err := a.db.Query(ctx, `SELECT user_id, playlist_id, service FROM user_playlist_syncs ORDER BY last_synced_at NULLS FIRST`)
 			if err != nil {
 				continue
 			}
@@ -840,7 +840,7 @@ func (a *App) runPlaylistSyncLoop() {
 			}
 			rows.Close()
 			for _, d := range links {
-				if err := a.SyncPlaylist(a.LifetimeContext(), d.userID, d.playlistID, d.service); err != nil {
+				if err := a.SyncPlaylist(ctx, d.userID, d.playlistID, d.service); err != nil {
 					log.Debug().Err(err).Str("service", d.service).Int64("playlist", d.playlistID).Msg("periodic playlist sync failed")
 				}
 			}

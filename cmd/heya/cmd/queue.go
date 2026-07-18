@@ -25,7 +25,7 @@ var queueProcessCmd = &cobra.Command{
 	Short: "Process queued jobs until empty",
 	Long:  "Start workers, drain all pending jobs, then exit. Use this after 'heya library scan' to process metadata, images, etc.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
 		if cfg.PassiveMode.Value {
@@ -35,13 +35,15 @@ var queueProcessCmd = &cobra.Command{
 			return err
 		}
 
-		app, err := service.NewWorker(ctx, cfg)
+		app, err := service.NewQueueProcessor(ctx, cfg)
 		if err != nil {
 			return err
 		}
 		defer app.Close()
+		riverCtx, cancelRiver := newRiverStartContext(ctx)
+		defer cancelRiver()
 
-		if err := app.StartWorkers(ctx); err != nil {
+		if err := app.StartWorkers(riverCtx); err != nil {
 			return err
 		}
 		log.Info().Msg("workers started, processing queue")
@@ -54,7 +56,9 @@ var queueProcessCmd = &cobra.Command{
 			select {
 			case <-ctx.Done():
 				log.Info().Msg("interrupted, stopping workers")
-				app.StopWorkers(context.Background())
+				if stopErr := stopRiverWorkers(app, cancelRiver); stopErr != nil {
+					log.Warn().Err(stopErr).Msg("queue worker shutdown error")
+				}
 				return nil
 			case <-ticker.C:
 				pending, running := app.QueueCounts(ctx)
@@ -62,7 +66,9 @@ var queueProcessCmd = &cobra.Command{
 					idleCount++
 					if idleCount >= 3 {
 						log.Info().Msg("queue drained, stopping workers")
-						app.StopWorkers(context.Background())
+						if stopErr := stopRiverWorkers(app, cancelRiver); stopErr != nil {
+							log.Warn().Err(stopErr).Msg("queue worker shutdown error")
+						}
 						ui.Success("All jobs processed")
 						return nil
 					}
@@ -79,7 +85,7 @@ var queueStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show job queue status",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
+		ctx := cmd.Context()
 		db, err := database.ConnectWithOptions(ctx, cfg.DatabaseURL.Value, database.Options{
 			MaxConns: int32(cfg.DatabaseMaxConns.Value),
 			MinConns: int32(cfg.DatabaseMinConns.Value),
@@ -100,9 +106,15 @@ var queueStatusCmd = &cobra.Command{
 		for rows.Next() {
 			var state, kind string
 			var count int
-			rows.Scan(&state, &kind, &count)
+			if err := rows.Scan(&state, &kind, &count); err != nil {
+				return fmt.Errorf("scan queue status: %w", err)
+			}
 			t.AddRow(state, kind, fmt.Sprintf("%d", count))
 			total += count
+		}
+
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("read queue status: %w", err)
 		}
 
 		if total == 0 {

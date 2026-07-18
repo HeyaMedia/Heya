@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,12 +14,18 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/jackc/pgx/v5"
+	"github.com/karbowiak/heya/internal/atomicfile"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata/opensubtitles"
+	"github.com/karbowiak/heya/internal/publichttp"
+	"github.com/karbowiak/heya/internal/safedial"
 	"github.com/karbowiak/heya/internal/service"
 )
 
 const maxSubtitleBytes = 10 << 20
+
+var subtitleDownloadFetcher = publichttp.NewFetcher(30 * time.Second)
 
 // registerOpenSubtitlesRoutes mounts /api/opensubtitles/*. Credentials come
 // from the system_settings KV under the "opensubtitles" key (admin-managed).
@@ -140,54 +147,114 @@ func registerOpenSubtitlesRoutes(api huma.API, app *service.App) {
 			if err != nil {
 				return nil, huma.Error502BadGateway("invalid subtitle download URL")
 			}
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+			resp, err := subtitleDownloadFetcher.Get(ctx, downloadURL, maxSubtitleBytes, nil)
 			if err != nil {
-				return nil, huma.Error502BadGateway("invalid subtitle download URL")
+				if errors.Is(err, publichttp.ErrBodyTooLarge) {
+					return nil, huma.Error400BadRequest("subtitle file is too large")
+				}
+				return nil, huma.Error502BadGateway("failed to download subtitle file")
 			}
-			httpClient := &http.Client{Timeout: 30 * time.Second}
-			resp, err := httpClient.Do(req)
-			if err != nil {
-				return nil, huma.Error500InternalServerError("failed to download subtitle file")
-			}
-			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusOK {
 				return nil, huma.Error502BadGateway("subtitle download returned " + resp.Status)
 			}
 
-			tmp, err := os.CreateTemp(subDir, "."+filename+"-*")
-			if err != nil {
-				return nil, huma.Error500InternalServerError("failed to save subtitle file")
-			}
-			tmpPath := tmp.Name()
-			size, copyErr := io.Copy(tmp, io.LimitReader(resp.Body, maxSubtitleBytes+1))
-			closeErr := tmp.Close()
-			if copyErr != nil || closeErr != nil {
-				_ = os.Remove(tmpPath)
-				return nil, huma.Error500InternalServerError("failed to save subtitle file")
-			}
-			if size > maxSubtitleBytes {
-				_ = os.Remove(tmpPath)
-				return nil, huma.Error400BadRequest("subtitle file is too large")
-			}
-			if err := os.Rename(tmpPath, destPath); err != nil {
-				_ = os.Remove(tmpPath)
-				return nil, huma.Error500InternalServerError("failed to save subtitle file")
-			}
-
-			asset, _ := q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+			asset, err := saveDownloadedSubtitle(ctx, q, destPath, resp.Body, sqlc.CreateMediaAssetParams{
 				MediaItemID: in.Body.MediaItemID,
 				AssetType:   sqlc.AssetTypeSubtitle,
 				Source:      "opensubtitles",
-				LocalPath:   destPath,
 				Language:    in.Body.Language,
-				FileSize:    size,
 			})
+			if err != nil {
+				return nil, huma.Error500InternalServerError("failed to save subtitle file")
+			}
 			return &JSONOutput[osDownloadBody]{Body: osDownloadBody{
 				Status:    "downloaded",
 				Asset:     asset,
 				Remaining: dl.Remaining,
 			}}, nil
 		})
+}
+
+type subtitleAssetQueries interface {
+	CreateMediaAsset(context.Context, sqlc.CreateMediaAssetParams) (sqlc.MediaAsset, error)
+	ListMediaAssets(context.Context, int64) ([]sqlc.MediaAsset, error)
+	UpdateMediaAssetMaterialization(context.Context, sqlc.UpdateMediaAssetMaterializationParams) (sqlc.MediaAsset, error)
+}
+
+// saveDownloadedSubtitle keeps publication and asset attachment consistent:
+// the new bytes remain rollback-capable until the insert succeeds (or an
+// idempotent conflict is resolved to the existing local-path asset).
+func saveDownloadedSubtitle(
+	ctx context.Context,
+	queries subtitleAssetQueries,
+	destination string,
+	body []byte,
+	params sqlc.CreateMediaAssetParams,
+) (asset sqlc.MediaAsset, returnErr error) {
+	if queries == nil {
+		return asset, errors.New("subtitle asset store is nil")
+	}
+	if len(body) == 0 {
+		return asset, errors.New("downloaded subtitle is empty")
+	}
+	pending, err := atomicfile.Create(destination, 0o640)
+	if err != nil {
+		return asset, err
+	}
+	defer func() { returnErr = errors.Join(returnErr, pending.Rollback()) }()
+
+	written, err := pending.Write(body)
+	if err != nil {
+		return asset, err
+	}
+	if written != len(body) {
+		return asset, io.ErrShortWrite
+	}
+	if err := pending.Close(); err != nil {
+		return asset, err
+	}
+	if err := pending.Publish(); err != nil {
+		return asset, err
+	}
+
+	params.LocalPath = destination
+	params.FileSize = int64(len(body))
+	asset, err = queries.CreateMediaAsset(ctx, params)
+	if errors.Is(err, pgx.ErrNoRows) {
+		assets, listErr := queries.ListMediaAssets(ctx, params.MediaItemID)
+		if listErr != nil {
+			return sqlc.MediaAsset{}, fmt.Errorf("resolve existing subtitle asset: %w", listErr)
+		}
+		found := false
+		for _, candidate := range assets {
+			if candidate.AssetType == params.AssetType && candidate.LocalPath == destination {
+				asset = candidate
+				found = true
+				break
+			}
+		}
+		if !found {
+			return sqlc.MediaAsset{}, errors.New("subtitle asset conflicted without a matching local-path row")
+		}
+		asset, err = queries.UpdateMediaAssetMaterialization(ctx, sqlc.UpdateMediaAssetMaterializationParams{
+			LocalPath:   destination,
+			ContentHash: asset.ContentHash,
+			VisualHash:  asset.VisualHash,
+			Width:       asset.Width,
+			Height:      asset.Height,
+			FileSize:    int64(len(body)),
+			ID:          asset.ID,
+		})
+		if err != nil {
+			return sqlc.MediaAsset{}, fmt.Errorf("update existing subtitle asset: %w", err)
+		}
+	} else if err != nil {
+		return sqlc.MediaAsset{}, fmt.Errorf("create subtitle asset: %w", err)
+	}
+	if err := pending.Commit(); err != nil {
+		return sqlc.MediaAsset{}, err
+	}
+	return asset, nil
 }
 
 func safeSubtitleFilename(name string) string {
@@ -230,6 +297,9 @@ func safeSubtitleDownloadURL(raw string) (string, error) {
 	}
 	if u.Scheme != "https" || u.Host == "" {
 		return "", fmt.Errorf("subtitle URL must be absolute HTTPS")
+	}
+	if err := safedial.ValidateHTTPURL(u); err != nil {
+		return "", fmt.Errorf("unsafe subtitle URL: %w", err)
 	}
 	return u.String(), nil
 }

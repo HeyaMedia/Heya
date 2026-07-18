@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -63,7 +64,7 @@ func TestEnsureLibraryFileFingerprintComputesOnDemandAndCaches(t *testing.T) {
 		ParseResult: []byte("{}"), Status: sqlc.FileStatusUnmatched,
 	})
 	require.NoError(t, err)
-	mediaInfo, err := json.Marshal(MediaInfo{Duration: 181.4, Streams: []StreamInfo{}})
+	mediaInfo, err := json.Marshal(mediaprobe.MediaInfo{Duration: 181.4, Streams: []mediaprobe.StreamInfo{}})
 	require.NoError(t, err)
 	require.NoError(t, q.UpdateLibraryFileMediaInfo(ctx, sqlc.UpdateLibraryFileMediaInfoParams{ID: file.ID, MediaInfo: mediaInfo}))
 	file, err = q.GetLibraryFileByID(ctx, file.ID)

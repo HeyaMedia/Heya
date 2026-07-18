@@ -486,7 +486,7 @@ func (DetectSeasonSegmentsArgs) InsertOpts() river.InsertOpts {
 // DetectMovieCreditsArgs runs ffmpeg blackdetect over one movie's tail
 // window to find its credits cut when the community databases had nothing.
 // DetectMovieCreditsWorker also overrides Timeout() to run unbounded — an
-// 8-minute tail window read over a slow SMB share can outlast River's
+// 8-minute tail window read over a slow network mount can outlast River's
 // default per-job deadline.
 type DetectMovieCreditsArgs struct {
 	LibraryFileID   int64  `json:"library_file_id" river:"unique"`

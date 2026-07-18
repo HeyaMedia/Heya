@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/saver"
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
@@ -48,7 +49,7 @@ func (w *SaveImagesWorker) Work(ctx context.Context, job *river.Job[SaveImagesAr
 	}
 
 	if err := saver.SaveImageToMediaDir(mediaDir, job.Args.CachedPath, job.Args.AssetType, job.Args.SortOrder); err != nil {
-		log.Warn().Err(err).Str("asset", job.Args.AssetType).Msg("failed to save image to media dir")
+		log.Warn().Err(vfs.RedactError(err)).Str("asset", job.Args.AssetType).Msg("failed to save image to media dir")
 	}
 
 	return nil
@@ -67,7 +68,7 @@ func (w *SaveImagesWorker) saveAlbumCover(ctx context.Context, job *river.Job[Sa
 	w.Progress.SetCurrentByKind(SaveImagesArgs{}.Kind(), "cover → "+filepath.Base(albumDir))
 
 	if err := saver.SaveAlbumCoverToDir(albumDir, job.Args.CachedPath); err != nil {
-		log.Warn().Err(err).Int64("album_id", job.Args.AlbumID).Str("dir", albumDir).Msg("failed to save album cover to release dir")
+		log.Warn().Err(vfs.RedactError(err)).Int64("album_id", job.Args.AlbumID).Str("dir", vfs.RedactPath(albumDir)).Msg("failed to save album cover to release dir")
 	}
 	return nil
 }

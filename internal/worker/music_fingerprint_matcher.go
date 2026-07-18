@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -16,7 +17,6 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/scanner"
-	"github.com/karbowiak/heya/internal/vfs"
 )
 
 const (
@@ -98,7 +98,7 @@ func (m *musicFingerprintMatcher) libraryFile(ctx context.Context, relPath strin
 	q := sqlc.New(m.db)
 	for _, root := range m.library.Paths {
 		file, err := q.GetLibraryFileByPath(ctx, sqlc.GetLibraryFileByPathParams{
-			LibraryID: m.library.ID, Path: vfs.Join(root, relPath),
+			LibraryID: m.library.ID, Path: filepath.Join(root, relPath),
 		})
 		if err == nil {
 			return file, nil

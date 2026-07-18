@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/scanner"
+	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/ui"
 	"github.com/karbowiak/heya/internal/worker"
@@ -56,7 +58,7 @@ var libraryAddCmd = &cobra.Command{
 
 			ui.Success("Created library: %s (id=%d)", lib.Name, lib.ID)
 			ui.Info("Type", ui.MediaBadge(string(lib.MediaType)))
-			ui.Info("Paths", strings.Join(lib.Paths, ", "))
+			ui.Info("Paths", strings.Join(secrettext.RedactStrings(lib.Paths), ", "))
 			printLibrarySettings(lib)
 			return nil
 		})
@@ -74,6 +76,9 @@ var libraryListCmd = &cobra.Command{
 			}
 
 			if ui.JSONMode {
+				for i := range libs {
+					libs[i].Paths = secrettext.RedactStrings(libs[i].Paths)
+				}
 				return ui.OutputJSON(libs)
 			}
 
@@ -88,7 +93,7 @@ var libraryListCmd = &cobra.Command{
 					strconv.FormatInt(lib.ID, 10),
 					lib.Name,
 					ui.MediaBadge(string(lib.MediaType)),
-					strings.Join(lib.Paths, ", "),
+					strings.Join(secrettext.RedactStrings(lib.Paths), ", "),
 				)
 			}
 			fmt.Println(t.Render())
@@ -159,7 +164,7 @@ var libraryScanCmd = &cobra.Command{
 					MovieSearcher:      app.Metadata(),
 					MovieFetcher:       app.Metadata(),
 					MovieMaterializer:  scanner.NewSQLMovieMaterializeStore(app.DBPool()),
-					MusicProbe:         worker.ProbeFile,
+					MusicProbe:         mediaprobe.Probe,
 					MusicFetcher:       app.Metadata(),
 					MusicMaterializer:  scanner.NewSQLMusicMaterializeStore(app.DBPool()),
 					MusicSearcher:      app.Metadata(),
@@ -370,7 +375,7 @@ var libraryWatchCmd = &cobra.Command{
 
 			t := ui.NewTable("LIBRARY", "PATH")
 			for _, watcher := range status.Watchers {
-				t.AddRow(strconv.FormatInt(watcher.LibraryID, 10), watcher.Path)
+				t.AddRow(strconv.FormatInt(watcher.LibraryID, 10), secrettext.Redact(watcher.Path))
 			}
 			fmt.Println(t.Render())
 			return nil
@@ -396,7 +401,7 @@ var libraryInfoCmd = &cobra.Command{
 			ui.Header(lib.Name)
 			ui.Info("ID", strconv.FormatInt(lib.ID, 10))
 			ui.Info("Type", ui.MediaBadge(string(lib.MediaType)))
-			ui.Info("Paths", strings.Join(lib.Paths, ", "))
+			ui.Info("Paths", strings.Join(secrettext.RedactStrings(lib.Paths), ", "))
 			printLibrarySettings(lib)
 			return nil
 		})
@@ -484,7 +489,7 @@ func printLibrarySettings(lib sqlc.Library) {
 func init() {
 	libraryAddCmd.Flags().String("name", "", "Library name")
 	libraryAddCmd.Flags().String("type", "", "Media type (movie, tv, music, book)")
-	libraryAddCmd.Flags().StringSlice("path", nil, "Filesystem paths to watch")
+	libraryAddCmd.Flags().StringSlice("path", nil, "Absolute filesystem paths to watch (mount network shares first)")
 	addSettingsFlags(libraryAddCmd)
 
 	libraryScanCmd.Flags().Int64("id", 0, "Library ID to scan")

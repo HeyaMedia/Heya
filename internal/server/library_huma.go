@@ -8,6 +8,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
+	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/karbowiak/heya/internal/service"
 )
 
@@ -52,7 +53,9 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 		})
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/libraries/{id}", "get-library", "Get a library", "Libraries")),
-		func(ctx context.Context, in *IDPath) (*JSONOutput[libraryView], error) {
+		func(ctx context.Context, in *struct {
+			IDPath
+		}) (*JSONOutput[libraryView], error) {
 			lib, err := app.GetLibrary(ctx, in.ID)
 			if err != nil {
 				return nil, huma.Error404NotFound("library not found")
@@ -65,7 +68,7 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			IDPath
 			Body struct {
 				Name  string   `json:"name" minLength:"1" maxLength:"128"`
-				Paths []string `json:"paths" minItems:"1"`
+				Paths []string `json:"paths" minItems:"1" doc:"Absolute filesystem directory paths visible to the Heya host or container; mount network shares before configuring them"`
 			}
 		}) (*JSONOutput[libraryView], error) {
 			if env, ok := app.EnvManagedLibraries()[in.ID]; ok {
@@ -171,6 +174,9 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			files, err := app.ListLibraryFiles(ctx, in.ID, in.Limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			for i := range files {
+				files[i] = redactLibraryFileForResponse(files[i])
 			}
 			return noStoreJSON(files), nil
 		})
@@ -366,6 +372,9 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
+			for i := range result {
+				result[i].File = redactLibraryFileForResponse(result[i].File)
+			}
 			return noStoreJSON(result), nil
 		})
 
@@ -412,11 +421,15 @@ type fieldSource struct {
 }
 
 func toLibraryView(lib sqlc.Library, env service.EnvManagedLibrary) libraryView {
+	return buildLibraryView(lib, env, secrettext.RedactStrings(lib.Paths))
+}
+
+func buildLibraryView(lib sqlc.Library, env service.EnvManagedLibrary, paths []string) libraryView {
 	v := libraryView{
 		ID:        lib.ID,
 		Name:      lib.Name,
 		MediaType: string(lib.MediaType),
-		Paths:     lib.Paths,
+		Paths:     paths,
 		CreatedBy: lib.CreatedBy,
 		Settings:  metadata.ParseSettings(lib.Settings),
 	}
@@ -428,11 +441,17 @@ func toLibraryView(lib sqlc.Library, env service.EnvManagedLibrary) libraryView 
 	return v
 }
 
+func redactLibraryFileForResponse(file sqlc.LibraryFile) sqlc.LibraryFile {
+	file.Path = secrettext.Redact(file.Path)
+	file.ErrorMessage = secrettext.Redact(file.ErrorMessage)
+	return file
+}
+
 type createLibraryInput struct {
 	Body struct {
 		Name      string                    `json:"name" minLength:"1" maxLength:"128" example:"Movies"`
 		MediaType string                    `json:"media_type" enum:"movie,tv,anime,music,book,comic,podcast,radio" example:"movie"`
-		Paths     []string                  `json:"paths" minItems:"1" doc:"Absolute filesystem paths or smb://… URIs"`
+		Paths     []string                  `json:"paths" minItems:"1" doc:"Absolute filesystem directory paths visible to the Heya host or container; mount network shares before configuring them"`
 		Settings  *metadata.LibrarySettings `json:"settings,omitempty"`
 	}
 }

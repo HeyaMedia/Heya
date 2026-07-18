@@ -1,7 +1,9 @@
 package sonicanalysis
 
 import (
+	"context"
 	"errors"
+	"sync"
 	"testing"
 )
 
@@ -87,5 +89,57 @@ func TestHolderPendingWaitsForLastLease(t *testing.T) {
 
 	if h.cfg.Accelerator != AccelCoreML || h.pendingCfg != nil {
 		t.Fatal("pending must apply when the last lease drains")
+	}
+}
+
+func TestHolderCloseDefersUnloadUntilLastLease(t *testing.T) {
+	a := NewAnalyzer(Config{Accelerator: AccelCPU})
+	a.state.Store(int32(StateReady))
+	h := NewHolder(Config{Accelerator: AccelCPU}, 0)
+	h.analyzer = a
+	h.refs = 1
+
+	h.Close()
+
+	if a.State() != StateReady {
+		t.Fatalf("analyzer state after Close with active lease = %s, want %s", a.State(), StateReady)
+	}
+	if _, err := h.Borrow(context.Background()); !errors.Is(err, ErrHolderClosed) {
+		t.Fatalf("Borrow after Close error = %v, want ErrHolderClosed", err)
+	}
+	if err := h.Reconfigure(Config{Accelerator: AccelCoreML}); !errors.Is(err, ErrHolderClosed) {
+		t.Fatalf("Reconfigure after Close error = %v, want ErrHolderClosed", err)
+	}
+
+	h.release()
+
+	if a.State() != StateUnloaded {
+		t.Fatalf("analyzer state after last release = %s, want %s", a.State(), StateUnloaded)
+	}
+	if h.analyzer != nil {
+		t.Fatal("holder retained analyzer after final release")
+	}
+
+	// Shutdown is idempotent after the deferred unload has completed.
+	h.Close()
+}
+
+func TestLeaseCloseIsConcurrentSafe(t *testing.T) {
+	h := NewHolder(Config{Accelerator: AccelCPU}, 0)
+	h.refs = 1
+	lease := &Lease{holder: h}
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			lease.Close()
+		}()
+	}
+	wg.Wait()
+
+	if h.refs != 0 {
+		t.Fatalf("refs after concurrent Lease.Close = %d, want 0", h.refs)
 	}
 }

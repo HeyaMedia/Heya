@@ -71,7 +71,7 @@ func (t *Table) renderPlain() string {
 		if i > 0 {
 			sb.WriteString("  ")
 		}
-		sb.WriteString(fmt.Sprintf("%-*s", widths[i], h))
+		fmt.Fprintf(&sb, "%-*s", widths[i], h)
 	}
 	sb.WriteString("\n")
 
@@ -81,7 +81,7 @@ func (t *Table) renderPlain() string {
 				sb.WriteString("  ")
 			}
 			if i < len(widths) {
-				sb.WriteString(fmt.Sprintf("%-*s", widths[i], cell))
+				fmt.Fprintf(&sb, "%-*s", widths[i], cell)
 			} else {
 				sb.WriteString(cell)
 			}

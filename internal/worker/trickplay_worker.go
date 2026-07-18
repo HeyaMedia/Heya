@@ -20,9 +20,7 @@ import (
 // per item — clicking "Cancel" on the tasks page cancels every queued
 // trickplay_file job at once.
 //
-// Skipped at insert time when:
-//   - library_files.path lives on an SMB share (vfs.IsSMBPath)
-//   - the file is already marked has_trickplay
+// Skipped at insert time when the file is already marked has_trickplay.
 //
 // The worker re-validates these conditions before running, so a stale
 // job that's been queued since the file was deleted is a safe no-op.
@@ -58,9 +56,6 @@ func (w *TrickplayFileWorker) Work(ctx context.Context, job *river.Job[Trickplay
 	if file.HasTrickplay {
 		return nil
 	}
-	if vfs.IsSMBPath(file.Path) {
-		return nil
-	}
 	if len(file.MediaInfo) == 0 {
 		return nil
 	}
@@ -92,7 +87,7 @@ func (w *TrickplayFileWorker) Work(ctx context.Context, job *river.Job[Trickplay
 
 	outDir := trickplay.SidecarDir(file.Path)
 	if _, err := trickplay.GenerateSprites(ctx, file.Path, info.Duration, outDir); err != nil {
-		log.Warn().Err(err).Str("file", file.Path).Msg("trickplay_file: generation failed")
+		log.Warn().Err(vfs.RedactError(err)).Str("file", vfs.RedactPath(file.Path)).Msg("trickplay_file: generation failed")
 		return fmt.Errorf("generate sprites: %w", err)
 	}
 

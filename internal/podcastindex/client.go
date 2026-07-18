@@ -19,12 +19,17 @@ import (
 	"net/url"
 	"sync"
 	"time"
+
+	"github.com/karbowiak/heya/internal/httpbodylimit"
 )
 
 const (
 	piBase    = "https://api.podcastindex.org/api/1.0"
 	userAgent = "Heya/0.1 (+https://heya.media)"
 	cacheTTL  = 15 * time.Minute
+	// Search/trending/category payloads are JSON and should remain far below
+	// this ceiling even for large result pages.
+	maxAPIResponseBytes int64 = 16 << 20
 )
 
 // ErrUnconfigured fires when the caller hits a method that needs PI auth
@@ -70,7 +75,10 @@ type cacheEntry struct {
 // return ErrUnconfigured rather than hitting the API with bad creds.
 func New(key, secret string) *Client {
 	return &Client{
-		http:   &http.Client{Timeout: 15 * time.Second},
+		http: &http.Client{
+			Timeout:   15 * time.Second,
+			Transport: httpbodylimit.NewTransport(nil, maxAPIResponseBytes),
+		},
 		key:    key,
 		secret: secret,
 		data:   make(map[string]cacheEntry),

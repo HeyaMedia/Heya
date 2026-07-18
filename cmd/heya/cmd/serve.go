@@ -14,6 +14,7 @@ import (
 	"github.com/karbowiak/heya/internal/ingress"
 	"github.com/karbowiak/heya/internal/logbuf"
 	"github.com/karbowiak/heya/internal/remote"
+	"github.com/karbowiak/heya/internal/safelog"
 	"github.com/karbowiak/heya/internal/scheduler"
 	"github.com/karbowiak/heya/internal/server"
 	"github.com/karbowiak/heya/internal/service"
@@ -27,24 +28,42 @@ import (
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start Heya with embedded Caddy",
-	Long:  "Start Heya's embedded Caddy ingress and background workers. With tailscale.enabled, also exposes the same application on the tailnet.",
+	Long:  "Start Heya's embedded Caddy ingress, API, frontend, and playback services. With tailscale.enabled, also expose the application on the tailnet.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		sigCtx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
 		appCtx, appCancel := context.WithCancel(context.Background())
 		defer appCancel()
+		var appLoops sync.WaitGroup
+		startAppLoop := func(work func()) {
+			appLoops.Add(1)
+			go func() {
+				defer appLoops.Done()
+				work()
+			}()
+		}
+
+		// Registered before runtime-resource defers so it is stopped only after
+		// those defers have completed. During ordinary operation it stays nil;
+		// shutdown installs the force-exit timer below.
+		var shutdownBackstop *time.Timer
+		defer func() {
+			if shutdownBackstop != nil {
+				shutdownBackstop.Stop()
+			}
+		}()
 
 		logRing := logbuf.New(2000)
 
 		var baseWriter zerolog.LevelWriter
 		if cfg.LogFormat.Value == "console" {
 			baseWriter = zerolog.MultiLevelWriter(
-				zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339},
+				safelog.Redact(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339}),
 				logRing,
 			)
 		} else {
-			baseWriter = zerolog.MultiLevelWriter(os.Stderr, logRing)
+			baseWriter = zerolog.MultiLevelWriter(safelog.Redact(os.Stderr), logRing)
 		}
 		log.Logger = zerolog.New(baseWriter).With().Timestamp().Logger()
 
@@ -75,7 +94,14 @@ var serveCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer app.Close()
+		// During partially-completed setup there may not yet be a later App
+		// cleanup defer ordered ahead of network-manager cleanup.
+		appCloseFallback := true
+		defer func() {
+			if appCloseFallback {
+				app.Close()
+			}
+		}()
 
 		// Serve is always queue-passive now: it owns ingress, APIs, WebSockets,
 		// casting and network control planes, while `heya worker` owns River,
@@ -128,19 +154,10 @@ var serveCmd = &cobra.Command{
 			app.SetTailscale(tsManager)
 			defer func() { _ = tsManager.Close() }()
 
-			if cfg.Tailscale.Enabled.Value {
-				go func() {
-					if err := tsManager.Enable(appCtx, tsnetwrap.Config{
-						Enabled:  true,
-						Hostname: cfg.Tailscale.Hostname.Value,
-						AuthKey:  cfg.Tailscale.AuthKey.Value,
-						StateDir: cfg.Tailscale.StateDir.Value,
-						HTTPS:    cfg.Tailscale.HTTPS.Value,
-						Funnel:   cfg.Tailscale.Funnel.Value,
-					}); err != nil {
-						tsLogger.Warn().Err(err).Msg("tailscale enable failed; LAN listener continues")
-					}
-				}()
+			if app.ConfigSnapshot().Tailscale.Enabled.Value {
+				if err := app.ApplyTailscaleRuntime(); err != nil {
+					tsLogger.Warn().Err(err).Msg("tailscale boot transition was not admitted; LAN listener continues")
+				}
 			}
 
 			remoteLogger := log.With().Str("subsystem", "remote").Logger()
@@ -158,31 +175,28 @@ var serveCmd = &cobra.Command{
 			app.SetRemote(remoteMgr)
 			defer func() { _ = remoteMgr.Close() }()
 
-			if cfg.Remote.Enabled.Value {
-				go func() {
-					rc, err := app.RemoteRuntimeConfig(appCtx)
-					if err != nil {
-						remoteLogger.Warn().Err(err).Msg("remote access boot config failed")
-						return
-					}
-					if err := remoteMgr.Enable(appCtx, rc); err != nil {
-						remoteLogger.Warn().Err(err).Msg("remote access enable failed; LAN listener continues")
-					}
-				}()
+			if app.ConfigSnapshot().Remote.Enabled.Value {
+				if err := app.ApplyRemoteRuntime(appCtx); err != nil {
+					remoteLogger.Warn().Err(err).Msg("remote access boot transition was not admitted; LAN listener continues")
+				}
 			}
 		}
+		// Registered after ingress/network defers so App cancellation + joins run
+		// first on unwind. The fallback above covers every earlier return path.
+		defer app.Close()
+		appCloseFallback = false
 
 		// No River queue, worker migration, or filesystem watcher is started in
 		// this process. Caddy therefore remains responsive even when the worker
 		// process is recovering a very large production backlog.
 		log.Info().Str("addr", cfg.Addr()).Bool("https", !devBackend).Msg("embedded Caddy ingress started")
 
-		bridgeLogToHub(appCtx, logRing, app.EventHub())
+		startAppLoop(func() { bridgeLogToHub(appCtx, logRing, app.EventHub()) })
 		app.EventHub().StartPeriodicEmitters(appCtx, app.DBPool())
 		// Bridge events published from other processes (e.g. a `heya library
 		// remove` CLI call) onto this process's live hub → WebSocket clients.
 		app.EventHub().StartCrossProcessRelay(appCtx, app.DBPool())
-		go logRuntimeStatsPeriodically(appCtx, app.EventHub())
+		startAppLoop(func() { logRuntimeStatsPeriodically(appCtx, app.EventHub()) })
 
 		// Cast discovery (mDNS browse + receiver sessions). Runs in
 		// passive mode too — casting streams local files and touches
@@ -201,16 +215,20 @@ var serveCmd = &cobra.Command{
 		// that can put the *next* start into a busy loop, which is
 		// almost certainly what's causing the 100% CPU after rapid
 		// air reloads).
-		go func() {
-			<-time.After(8 * time.Second)
+		shutdownBackstop = time.AfterFunc(8*time.Second, func() {
 			log.Warn().Msg("shutdown took >8s, forcing exit")
 			os.Exit(1)
-		}()
+		})
 
 		// Cancel appCtx first so every derived context (periodic emitters,
 		// network managers, bridgeLogToHub)
 		// observes cancellation before we touch their resources.
 		appCancel()
+		appLoops.Wait()
+		// Remote/Tailscale transitions are App-owned. Join them before closing
+		// the managers they are actively driving, while leaving DB/request
+		// resources intact for the network shutdown below.
+		app.QuiesceBackground()
 
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 		defer cancel()
@@ -250,12 +268,11 @@ var serveCmd = &cobra.Command{
 
 		// Bounded wait — give shutdown the full 6s budget plus a small
 		// grace before we trust waitWithDeadline to give up.
-		waitWithDeadline(&wg, 6500*time.Millisecond)
-
-		// Bypass the defer chain so a slow external runtime teardown cannot
-		// leave an orphan process holding the ingress port.
-		log.Info().Msg("clean shutdown complete")
-		os.Exit(0)
+		if waitWithDeadline(&wg, 6500*time.Millisecond) {
+			log.Info().Msg("clean shutdown complete")
+		} else {
+			log.Warn().Msg("network shutdown still in progress; waiting for deferred cleanup")
+		}
 		return nil
 	},
 }
@@ -265,15 +282,17 @@ func init() {
 		"Dev mode: run plaintext Caddy on this port and skip production-only Tailscale/remote access (used by `make dev`)")
 }
 
-// waitWithDeadline returns when wg.Wait() completes or when the deadline
-// elapses, whichever comes first. The wg goroutines keep running on
-// timeout — that's fine, we're about to os.Exit anyway.
-func waitWithDeadline(wg *sync.WaitGroup, d time.Duration) {
+// waitWithDeadline reports whether wg.Wait completed before the deadline.
+// On timeout the goroutines keep running while the command unwinds its
+// deferred cleanup; serve's force-exit backstop remains armed until then.
+func waitWithDeadline(wg *sync.WaitGroup, d time.Duration) bool {
 	done := make(chan struct{})
 	go func() { wg.Wait(); close(done) }()
 	select {
 	case <-done:
+		return true
 	case <-time.After(d):
+		return false
 	}
 }
 
@@ -303,22 +322,20 @@ func logRuntimeStatsPeriodically(ctx context.Context, hub *eventhub.Hub) {
 
 func bridgeLogToHub(ctx context.Context, ring *logbuf.RingBuffer, hub *eventhub.Hub) {
 	ch := ring.Subscribe()
-	go func() {
-		defer ring.Unsubscribe(ch)
-		for {
-			select {
-			case <-ctx.Done():
+	defer ring.Unsubscribe(ch)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case entry, ok := <-ch:
+			if !ok {
 				return
-			case entry, ok := <-ch:
-				if !ok {
-					return
-				}
-				hub.Emit(eventhub.EventLog, eventhub.LogPayload{
-					Level:   entry.Level,
-					Message: entry.Message,
-					Fields:  entry.Fields,
-				})
 			}
+			hub.Emit(eventhub.EventLog, eventhub.LogPayload{
+				Level:   entry.Level,
+				Message: entry.Message,
+				Fields:  entry.Fields,
+			})
 		}
-	}()
+	}
 }

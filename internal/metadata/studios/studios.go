@@ -3,35 +3,38 @@ package studios
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/karbowiak/heya/internal/images"
 	"github.com/rs/zerolog/log"
 )
 
 const (
-	repoBaseURL = "https://raw.githubusercontent.com/jellyfin/jellyfin-ux/master/branding/SVG"
 	fallbackURL = "https://raw.githubusercontent.com/JamsRepos/Jellyfin-Studio-Images/main/Studios"
 )
 
 type Resolver struct {
 	studioDir string
+	initErr   error
 }
 
 func NewResolver(dataDir string) *Resolver {
 	dir := filepath.Join(dataDir, "studios")
-	os.MkdirAll(dir, 0o755)
-	return &Resolver{studioDir: dir}
+	return &Resolver{
+		studioDir: dir,
+		initErr:   os.MkdirAll(dir, 0o750),
+	}
 }
 
 func (r *Resolver) HasLogo(name string) bool {
 	slug := Slugify(name)
-	for _, ext := range []string{".svg", ".png", ".jpg", ".webp"} {
+	for _, ext := range []string{".png", ".jpg", ".gif", ".webp"} {
 		if _, err := os.Stat(filepath.Join(r.studioDir, slug+ext)); err == nil {
 			return true
 		}
@@ -41,7 +44,7 @@ func (r *Resolver) HasLogo(name string) bool {
 
 func (r *Resolver) LogoPath(name string) string {
 	slug := Slugify(name)
-	for _, ext := range []string{".svg", ".png", ".jpg", ".webp"} {
+	for _, ext := range []string{".png", ".jpg", ".gif", ".webp"} {
 		path := filepath.Join(r.studioDir, slug+ext)
 		if _, err := os.Stat(path); err == nil {
 			return path
@@ -51,6 +54,10 @@ func (r *Resolver) LogoPath(name string) string {
 }
 
 func (r *Resolver) Sync(ctx context.Context, names []string) (downloaded, skipped int, err error) {
+	if r.initErr != nil {
+		return 0, 0, fmt.Errorf("create studio logo directory: %w", r.initErr)
+	}
+
 	for _, name := range names {
 		if ctx.Err() != nil {
 			return downloaded, skipped, ctx.Err()
@@ -76,9 +83,8 @@ func tryDownload(ctx context.Context, dir, slug, originalName string) bool {
 		url string
 		ext string
 	}{
-		{fmt.Sprintf("%s/%s.png", fallbackURL, originalName), ".png"},
+		{fmt.Sprintf("%s/%s.png", fallbackURL, url.PathEscape(originalName)), ".png"},
 		{fmt.Sprintf("%s/%s.png", fallbackURL, slug), ".png"},
-		{fmt.Sprintf("%s/%s.svg", repoBaseURL, slug), ".svg"},
 	}
 
 	for _, src := range sources {
@@ -102,24 +108,24 @@ func downloadFile(ctx context.Context, url, dest string) bool {
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return false
 	}
 
-	f, err := os.Create(dest)
+	dir := filepath.Dir(dest)
+	staged, err := images.StageRasterContext(ctx, dir, resp.Body)
 	if err != nil {
 		return false
 	}
-	defer f.Close()
-
-	_, err = io.Copy(f, resp.Body)
-	if err != nil {
-		os.Remove(dest)
+	defer func() { _ = staged.Rollback() }()
+	stem := strings.TrimSuffix(filepath.Base(dest), filepath.Ext(dest))
+	dest = filepath.Join(dir, stem+staged.Info.Extension)
+	if err := staged.Publish(dest); err != nil {
 		return false
 	}
-	return true
+	return staged.Commit() == nil
 }
 
 var nonAlphaNum = regexp.MustCompile(`[^a-z0-9]+`)

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/ui"
 )
@@ -68,7 +69,7 @@ func registerSystemRoutes(api huma.API, app *service.App) {
 				body.UpdatedAt = &status.HeartbeatAt
 			}
 			for _, watcher := range status.Watchers {
-				body.Watchers = append(body.Watchers, watcherEntry{LibraryID: watcher.LibraryID, Path: watcher.Path})
+				body.Watchers = append(body.Watchers, watcherEntry{LibraryID: watcher.LibraryID, Path: secrettext.Redact(watcher.Path)})
 			}
 			body.Count = len(body.Watchers)
 			return noStoreJSON(body), nil

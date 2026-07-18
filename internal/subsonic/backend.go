@@ -54,13 +54,13 @@ type Backend interface {
 	SaveSubsonicPlayQueue(ctx context.Context, userID int64, q service.SubsonicPlayQueue) error
 
 	// Playlists.
-	CreateUserPlaylist(ctx context.Context, userID int64, name, description, cover string) (sqlc.UserPlaylist, error)
+	CreateUserPlaylist(ctx context.Context, userID int64, name, description string) (sqlc.UserPlaylist, error)
 	ListUserPlaylists(ctx context.Context, userID int64) ([]sqlc.ListUserPlaylistsRow, error)
 	GetUserPlaylistDetail(ctx context.Context, userID, playlistID int64) (*service.PlaylistDetail, error)
 	AddTrackToPlaylist(ctx context.Context, userID, playlistID, trackID int64) error
 	RemoveTrackFromPlaylist(ctx context.Context, userID, playlistID, trackID int64) error
 	DeleteUserPlaylist(ctx context.Context, userID, playlistID int64) error
-	UpdateUserPlaylist(ctx context.Context, userID, playlistID int64, name, description, cover string, tags []string) error
+	UpdateUserPlaylist(ctx context.Context, userID, playlistID int64, name, description string, tags []string) error
 
 	// Discovery.
 	GetSimilarArtists(ctx context.Context, artistID int64) ([]service.SimilarArtistRow, error)

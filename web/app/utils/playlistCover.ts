@@ -1,8 +1,7 @@
 // The one way to turn a playlist list-row into a renderable cover URL.
 //
-// `cover_path` on the row is the custom cover's DISK path (server bookkeeping,
-// never renderable) — the servable bytes live behind the cover endpoint, keyed
-// by has_cover. Without a custom cover, the generated representation is the
+// The servable custom-cover bytes live behind the cover endpoint, keyed by
+// has_cover. Without a custom cover, the generated representation is the
 // first track's album cover, addressed canonically by the (artist, album)
 // slug pair (image URLs are unconditional — no cover_path gating).
 export function playlistCoverSrc(p: {

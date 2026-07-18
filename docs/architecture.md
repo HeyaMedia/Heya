@@ -29,7 +29,7 @@ External:
   • HeyaMetadata V2            — canonical metadata (TMDB, TVDB, AniDB, …)
   • Community segment APIs     — TheIntroDB, SkipMeDB, AniSkip
   • ffmpeg / ffprobe           — analysis + HLS transcoding
-  • SMB shares (optional)      — library sources
+  • Mounted media storage      — local disks or host/container-mounted shares
 ```
 
 ## Repo layout
@@ -63,7 +63,7 @@ internal/
   transcoder/       # ffmpeg HLS pipeline + decision matrix
   trickplay/        # scrubbing thumbnails (BIF/sprite generation)
   ui/               # lipgloss-based CLI UI (TUI dashboard, prompts)
-  vfs/              # SMB + local filesystem abstraction
+  vfs/              # validated filesystem boundary + reusable fs.FS sources
   watcher/          # filesystem change watching
   worker/           # River background jobs
 migrations/         # goose SQL migrations (numbered 00001_*)

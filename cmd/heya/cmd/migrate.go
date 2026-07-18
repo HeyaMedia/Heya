@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 
@@ -27,7 +26,7 @@ var migrateUpCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 
 		goose.SetBaseFS(migrations.FS)
 		if err := goose.SetDialect("postgres"); err != nil {
@@ -60,7 +59,7 @@ var migrateDownCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 
 		goose.SetBaseFS(migrations.FS)
 		if err := goose.SetDialect("postgres"); err != nil {
@@ -84,7 +83,7 @@ var migrateStatusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 
 		goose.SetBaseFS(migrations.FS)
 		if err := goose.SetDialect("postgres"); err != nil {
@@ -103,7 +102,7 @@ var migrateResetCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 
 		goose.SetBaseFS(migrations.FS)
 		if err := goose.SetDialect("postgres"); err != nil {
@@ -127,9 +126,6 @@ func init() {
 }
 
 func openMigrationDB() (*sql.DB, error) {
-	ctx := context.Background()
-	_ = ctx
-
 	db, err := sql.Open("pgx", cfg.DatabaseURL.Value)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to database: %w", err)

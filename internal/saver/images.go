@@ -2,12 +2,12 @@ package saver
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/karbowiak/heya/internal/atomicfile"
 	"github.com/karbowiak/heya/internal/images"
 	"github.com/rs/zerolog/log"
 )
@@ -99,20 +99,15 @@ func equivalentBackdropSidecarExists(mediaDir, candidatePath string) (bool, erro
 }
 
 func copyFile(src, dst string) error {
-	in, err := os.Open(src)
+	in, err := os.Open(src) //nolint:gosec // source is a database-backed media asset selected by the scanner
 	if err != nil {
 		return err
 	}
 	defer func() { _ = in.Close() }()
 
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = out.Close() }()
-
-	if _, err := io.Copy(out, in); err != nil {
-		_ = os.Remove(dst)
+	// dst is composed from the scanner-selected media directory and a fixed
+	// sidecar basename; cachedPath contributes only a file extension.
+	if _, err := atomicfile.Copy(dst, 0o644, in); err != nil {
 		return err
 	}
 

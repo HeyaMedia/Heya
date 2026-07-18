@@ -64,7 +64,7 @@
             </AppMenu>
             <!-- Hidden picker for the custom cover (same raw-multipart flow
                  as the metadata editor's artwork upload). -->
-            <input ref="coverInput" type="file" accept="image/*" class="pl-cover-input" @change="onCoverPicked" />
+            <input ref="coverInput" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" class="pl-cover-input" @change="onCoverPicked" />
           </div>
         </div>
       </div>
@@ -304,9 +304,23 @@ async function onCoverPicked(e: Event) {
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
-  await playlists.setCover(playlistId.value, file)
-  coverBust.value++
-  detailQuery.refetch()
+  // File.type is allowed to be empty. The server validates decoded image
+  // bytes; this check is only an early hint when the browser has a MIME type.
+  if (file.type && !['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+    flash.value = { kind: 'err', text: 'Choose a JPEG, PNG, or WebP image' }
+    return
+  }
+  if (file.size > 25 * 1024 * 1024) {
+    flash.value = { kind: 'err', text: 'Images must be 25 MiB or smaller' }
+    return
+  }
+  try {
+    await playlists.setCover(playlistId.value, file)
+    coverBust.value++
+    await detailQuery.refetch()
+  } catch (error: any) {
+    flash.value = { kind: 'err', text: error?.data?.detail || 'Could not upload the playlist cover' }
+  }
 }
 async function removeCover() {
   await playlists.clearCover(playlistId.value)

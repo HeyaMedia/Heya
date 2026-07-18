@@ -82,7 +82,11 @@ func (m *Matcher) createOrLinkMediaItem(ctx context.Context, detail *metadata.Me
 			}
 			return r, nil
 		})
-	m.q.UpdateMediaItemSlug(ctx, sqlc.UpdateMediaItemSlugParams{ID: item.ID, Slug: itemSlug})
+	if err := m.q.UpdateMediaItemSlug(ctx, sqlc.UpdateMediaItemSlugParams{ID: item.ID, Slug: itemSlug}); err != nil {
+		// The media item already exists at this point. Keep it usable and let a
+		// later maintenance pass repair the optional display slug.
+		log.Warn().Err(err).Int64("media_item_id", item.ID).Msg("update media item slug failed")
+	}
 
 	_ = m.q.MarkMatched(ctx, item.ID)
 
@@ -1029,9 +1033,13 @@ func (m *Matcher) createTVSeries(ctx context.Context, mediaItemID int64, d *meta
 	}
 
 	if !m.lockedFields(ctx, mediaItemID)["networks"] {
-		m.linkNetworks(ctx, series.ID, d.Networks)
+		if err := m.linkNetworks(ctx, series.ID, d.Networks); err != nil {
+			return err
+		}
 	}
-	m.linkCreators(ctx, series.ID, d.CreatedBy)
+	if err := m.linkCreators(ctx, series.ID, d.CreatedBy); err != nil {
+		return err
+	}
 
 	type seasonProjection struct {
 		SeasonNumber  int               `json:"season_number"`
@@ -1226,8 +1234,10 @@ func (m *Matcher) upsertTVSeriesRow(ctx context.Context, mediaItemID int64, d *m
 	}
 }
 
-func (m *Matcher) linkNetworks(ctx context.Context, seriesID int64, nets []metadata.NetworkDetail) {
-	m.q.DeleteNetworksForSeries(ctx, seriesID)
+func (m *Matcher) linkNetworks(ctx context.Context, seriesID int64, nets []metadata.NetworkDetail) error {
+	if err := m.q.DeleteNetworksForSeries(ctx, seriesID); err != nil {
+		return fmt.Errorf("deleting networks for series %d: %w", seriesID, err)
+	}
 	for i, n := range nets {
 		if n.Name == "" {
 			continue
@@ -1236,12 +1246,15 @@ func (m *Matcher) linkNetworks(ctx context.Context, seriesID int64, nets []metad
 		if err != nil || net.ID == 0 {
 			continue
 		}
-		m.q.AttachNetworkToSeries(ctx, sqlc.AttachNetworkToSeriesParams{
+		if err := m.q.AttachNetworkToSeries(ctx, sqlc.AttachNetworkToSeriesParams{
 			SeriesID:  seriesID,
 			NetworkID: net.ID,
 			SortOrder: int32(i),
-		})
+		}); err != nil {
+			return fmt.Errorf("attaching network %d to series %d: %w", net.ID, seriesID, err)
+		}
 	}
+	return nil
 }
 
 func (m *Matcher) upsertNetwork(ctx context.Context, n metadata.NetworkDetail) (sqlc.Network, error) {
@@ -1258,8 +1271,10 @@ func (m *Matcher) upsertNetwork(ctx context.Context, n metadata.NetworkDetail) (
 	})
 }
 
-func (m *Matcher) linkCreators(ctx context.Context, seriesID int64, creators []metadata.CreatorDetail) {
-	m.q.DeleteCreatorsForSeries(ctx, seriesID)
+func (m *Matcher) linkCreators(ctx context.Context, seriesID int64, creators []metadata.CreatorDetail) error {
+	if err := m.q.DeleteCreatorsForSeries(ctx, seriesID); err != nil {
+		return fmt.Errorf("deleting creators for series %d: %w", seriesID, err)
+	}
 	for i, c := range creators {
 		if c.Name == "" {
 			continue
@@ -1268,12 +1283,15 @@ func (m *Matcher) linkCreators(ctx context.Context, seriesID int64, creators []m
 		if err != nil || cr.ID == 0 {
 			continue
 		}
-		m.q.AttachCreatorToSeries(ctx, sqlc.AttachCreatorToSeriesParams{
+		if err := m.q.AttachCreatorToSeries(ctx, sqlc.AttachCreatorToSeriesParams{
 			SeriesID:  seriesID,
 			CreatorID: cr.ID,
 			SortOrder: int32(i),
-		})
+		}); err != nil {
+			return fmt.Errorf("attaching creator %d to series %d: %w", cr.ID, seriesID, err)
+		}
 	}
+	return nil
 }
 
 func (m *Matcher) upsertCreator(ctx context.Context, c metadata.CreatorDetail) (sqlc.Creator, error) {

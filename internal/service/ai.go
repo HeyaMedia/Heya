@@ -348,12 +348,14 @@ func (a *App) AIDownloadLocal(ctx context.Context) error {
 	if _, err := llm.ServerAssetFor(s.LocalBackend); err != nil {
 		return err
 	}
-	dlCtx := a.LifetimeContext()
-	go func() {
-		if err := a.llmLocal.Download(dlCtx, s.LocalModel, s.LocalBackend); err != nil {
+	if !a.startBackground(func() {
+		ctx := a.LifetimeContext()
+		if err := a.llmLocal.Download(ctx, s.LocalModel, s.LocalBackend); err != nil && ctx.Err() == nil {
 			log.Err(err).Msg("ai: local artifact download failed")
 		}
-	}()
+	}) {
+		return errAppClosing
+	}
 	return nil
 }
 

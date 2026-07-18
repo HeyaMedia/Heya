@@ -1,23 +1,38 @@
 package eventhub
 
 import (
+	"context"
 	"sync"
 	"time"
 )
 
 type Hub struct {
 	mu sync.RWMutex
-	// subs maps each subscriber channel to the user it belongs to. 0 means an
-	// anonymous/internal consumer (cross-process relay, periodic emitters,
-	// Jellyfin bridge) that receives every broadcast but no user-targeted
-	// event. Authenticated WebSocket connections register with their real
-	// user id via SubscribeUser so PublishToUser can reach only them.
-	subs    map[chan Event]int64
+	// Browser subscribers carry their authenticated principal so broadcast
+	// visibility can be enforced centrally. Trusted in-process consumers use
+	// Subscribe, which marks them Internal without pretending they are a user.
+	subs    map[chan Event]SubscriberPrincipal
 	devices map[int64]map[string]ClientDevice
 	// queueStatus is the last lower-cadence river_job snapshot. Both the live
 	// queue events and stats emitter consume it so they never run independent
 	// full-table counts over a large backlog.
 	queueStatus QueueStatusPayload
+
+	runtimeMu     sync.Mutex
+	runtimeCtx    context.Context
+	runtimeCancel context.CancelFunc
+	runtimeClosed bool
+	runtimeWG     sync.WaitGroup
+}
+
+// SubscriberPrincipal is the identity and trust level attached to one hub
+// subscription. Internal must only be set for trusted in-process consumers;
+// browser connections should set UserID and IsAdmin from their resolved
+// session.
+type SubscriberPrincipal struct {
+	UserID   int64
+	IsAdmin  bool
+	Internal bool
 }
 
 type ClientDevice struct {
@@ -30,7 +45,59 @@ type ClientDevice struct {
 }
 
 func New() *Hub {
-	return &Hub{subs: make(map[chan Event]int64), devices: make(map[int64]map[string]ClientDevice)}
+	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
+	return &Hub{
+		subs:          make(map[chan Event]SubscriberPrincipal),
+		devices:       make(map[int64]map[string]ClientDevice),
+		runtimeCtx:    runtimeCtx,
+		runtimeCancel: runtimeCancel,
+	}
+}
+
+func (h *Hub) startRuntime(parent context.Context, work func(context.Context)) bool {
+	if h == nil || work == nil {
+		return false
+	}
+	if parent == nil {
+		parent = context.Background()
+	}
+	h.runtimeMu.Lock()
+	if h.runtimeClosed {
+		h.runtimeMu.Unlock()
+		return false
+	}
+	h.runtimeWG.Add(1)
+	hubCtx := h.runtimeCtx
+	h.runtimeMu.Unlock()
+
+	go func() {
+		defer h.runtimeWG.Done()
+		ctx, cancel := context.WithCancel(parent)
+		stopHubCancel := context.AfterFunc(hubCtx, cancel)
+		defer func() {
+			stopHubCancel()
+			cancel()
+		}()
+		work(ctx)
+	}()
+	return true
+}
+
+// Close is terminal for Hub-owned relay/telemetry loops. It cancels and joins
+// them before App releases the database they query or LISTEN on.
+func (h *Hub) Close() {
+	if h == nil {
+		return
+	}
+	h.runtimeMu.Lock()
+	if !h.runtimeClosed {
+		h.runtimeClosed = true
+		if h.runtimeCancel != nil {
+			h.runtimeCancel()
+		}
+	}
+	h.runtimeMu.Unlock()
+	h.runtimeWG.Wait()
 }
 
 func (h *Hub) UpsertDevice(userID int64, device ClientDevice) {
@@ -72,7 +139,11 @@ func (h *Hub) ClientDevices(userID int64) []ClientDevice {
 func (h *Hub) Publish(event Event) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	for ch := range h.subs {
+	visibility := VisibilityFor(event.Type)
+	for ch, principal := range h.subs {
+		if !principal.receivesBroadcast(visibility) {
+			continue
+		}
 		select {
 		case ch <- event:
 		default:
@@ -84,49 +155,64 @@ func (h *Hub) Emit(t EventType, payload any) {
 	h.Publish(Event{Type: t, Timestamp: time.Now(), Payload: payload})
 }
 
-// PublishToUser delivers an event only to subscribers registered for userID
-// (via SubscribeUser). Anonymous/internal subscribers (Subscribe, id 0) never
-// receive it. Use this for anything carrying data one user must not see about
-// another: the global Publish fan-out has no per-recipient filtering, so a
-// broadcast would leak the payload to every connected client. Delivery is
-// in-process only — a userID's connection on another process (multi-pod) is
-// not reached; single-pod deployments (the norm) are unaffected.
+// PublishToUser delivers an event only to browser subscribers registered for
+// userID. Internal subscribers never receive it. Use this for payloads that
+// belong to one user; delivery is in-process only, so a connection owned by
+// another server process is not reached.
 func (h *Hub) PublishToUser(userID int64, event Event) {
-	if userID == 0 {
-		return
-	}
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	for ch, uid := range h.subs {
-		if uid != userID {
-			continue
-		}
-		select {
-		case ch <- event:
-		default:
-		}
-	}
+	h.publishToUser(userID, event, false)
 }
 
 func (h *Hub) EmitToUser(userID int64, t EventType, payload any) {
 	h.PublishToUser(userID, Event{Type: t, Timestamp: time.Now(), Payload: payload})
 }
 
-// PublishToUserAndInternal delivers an event to subscribers registered for
-// userID plus anonymous/internal subscribers (id 0). For per-user payloads
-// that protocol bridges must still observe: the Jellyfin socket bridge
-// subscribes anonymously and does its own per-user routing, so a plain
-// PublishToUser would starve it, while a global Publish would leak the
-// payload to every other user's browser socket (those always register with
-// their own user id via SubscribeUser, which is what keeps this safe).
+// PublishToUserAndInternal delivers an event to browser subscribers registered
+// for userID plus trusted internal subscribers. Use it for per-user payloads
+// that a protocol bridge must also observe: the bridge performs its own
+// user-scoped routing without exposing the payload to other browser users.
 func (h *Hub) PublishToUserAndInternal(userID int64, event Event) {
+	h.publishToUser(userID, event, true)
+}
+
+func (h *Hub) EmitToUserAndInternal(userID int64, t EventType, payload any) {
+	h.PublishToUserAndInternal(userID, Event{Type: t, Timestamp: time.Now(), Payload: payload})
+}
+
+// Subscribe registers a trusted internal consumer. It receives authenticated
+// and admin broadcasts, plus events explicitly sent with an AndInternal
+// method, but it does not receive ordinary user-targeted events.
+func (h *Hub) Subscribe() chan Event {
+	return h.SubscribePrincipal(SubscriberPrincipal{Internal: true})
+}
+
+// SubscribeUser registers a consumer bound to userID so it additionally
+// receives PublishToUser events aimed at that user. Used by authenticated
+// WebSocket connections.
+func (h *Hub) SubscribeUser(userID int64) chan Event {
+	return h.SubscribePrincipal(SubscriberPrincipal{UserID: userID})
+}
+
+// SubscribePrincipal registers an authenticated browser or another explicitly
+// described subscriber. WebSocket handlers should use this method so admin
+// visibility is derived from the resolved session rather than client input.
+func (h *Hub) SubscribePrincipal(principal SubscriberPrincipal) chan Event {
+	ch := make(chan Event, 256)
+	h.mu.Lock()
+	h.subs[ch] = principal
+	h.mu.Unlock()
+	return ch
+}
+
+func (h *Hub) publishToUser(userID int64, event Event, includeInternal bool) {
 	if userID == 0 {
 		return
 	}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	for ch, uid := range h.subs {
-		if uid != userID && uid != 0 {
+	visibility := VisibilityFor(event.Type)
+	for ch, principal := range h.subs {
+		if !principal.receivesTargeted(userID, visibility, includeInternal) {
 			continue
 		}
 		select {
@@ -136,30 +222,25 @@ func (h *Hub) PublishToUserAndInternal(userID int64, event Event) {
 	}
 }
 
-func (h *Hub) EmitToUserAndInternal(userID int64, t EventType, payload any) {
-	h.PublishToUserAndInternal(userID, Event{Type: t, Timestamp: time.Now(), Payload: payload})
+func (p SubscriberPrincipal) receivesBroadcast(visibility EventVisibility) bool {
+	switch visibility {
+	case VisibilityAdmin:
+		return p.Internal || p.IsAdmin
+	case VisibilityUserTargeted:
+		return false
+	default:
+		return true
+	}
 }
 
-// Subscribe registers an anonymous consumer that receives every broadcast
-// (Publish/Emit) but no user-targeted events. For internal consumers not tied
-// to a single user (relay, periodic emitters, the Jellyfin socket bridge).
-func (h *Hub) Subscribe() chan Event {
-	return h.subscribe(0)
-}
-
-// SubscribeUser registers a consumer bound to userID so it additionally
-// receives PublishToUser events aimed at that user. Used by authenticated
-// WebSocket connections.
-func (h *Hub) SubscribeUser(userID int64) chan Event {
-	return h.subscribe(userID)
-}
-
-func (h *Hub) subscribe(userID int64) chan Event {
-	ch := make(chan Event, 256)
-	h.mu.Lock()
-	h.subs[ch] = userID
-	h.mu.Unlock()
-	return ch
+func (p SubscriberPrincipal) receivesTargeted(userID int64, visibility EventVisibility, includeInternal bool) bool {
+	if p.Internal {
+		return includeInternal
+	}
+	if p.UserID != userID {
+		return false
+	}
+	return visibility != VisibilityAdmin || p.IsAdmin
 }
 
 func (h *Hub) Unsubscribe(ch chan Event) {

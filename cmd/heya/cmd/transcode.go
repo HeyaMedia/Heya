@@ -30,7 +30,7 @@ var transcodeProbeCmd = &cobra.Command{
 			return fmt.Errorf("ffprobe is not installed")
 		}
 
-		out, err := exec.Command("ffprobe",
+		out, err := exec.CommandContext(cmd.Context(), "ffprobe", //nolint:gosec // The executable is fixed; --file is an explicit ffprobe input argument.
 			"-v", "quiet",
 			"-print_format", "json",
 			"-show_format",
@@ -65,7 +65,9 @@ var transcodeProbeCmd = &cobra.Command{
 				ChannelLayout string `json:"channel_layout"`
 			} `json:"streams"`
 		}
-		json.Unmarshal(out, &probe)
+		if err := json.Unmarshal(out, &probe); err != nil {
+			return fmt.Errorf("decode ffprobe output: %w", err)
+		}
 
 		ui.Header("File Info")
 		ui.Info("File", probe.Format.Filename)
@@ -79,9 +81,10 @@ var transcodeProbeCmd = &cobra.Command{
 		t := ui.NewTable("#", "TYPE", "CODEC", "DETAILS")
 		for _, s := range probe.Streams {
 			detail := ""
-			if s.CodecType == "video" {
+			switch s.CodecType {
+			case "video":
 				detail = fmt.Sprintf("%dx%d", s.Width, s.Height)
-			} else if s.CodecType == "audio" {
+			case "audio":
 				detail = fmt.Sprintf("%s %dch", s.SampleRate, s.Channels)
 			}
 			t.AddRow(

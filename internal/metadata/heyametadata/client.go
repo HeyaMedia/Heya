@@ -11,8 +11,15 @@ import (
 
 	"github.com/google/uuid"
 	gen "github.com/karbowiak/heya/clients/heyametadata"
+	"github.com/karbowiak/heya/internal/httpbodylimit"
 	"github.com/karbowiak/heya/internal/metadata"
 )
+
+// Canonical documents and workflow pages are JSON, but can contain broad
+// provider projections. Keep enough room for unusually rich metadata while
+// preventing a configured service from making the generated client allocate
+// an unbounded response body.
+const maxHeyaMetadataResponseBytes int64 = 32 << 20
 
 // ProviderCredentials are forwarded only on the request that needs them. They
 // are intentionally never stored in workflow rows, cache keys, or logs.
@@ -34,20 +41,27 @@ type Client struct {
 }
 
 func NewClient(baseURL, apiKey string) (*Client, error) {
+	return newClientWithResponseLimit(baseURL, apiKey, maxHeyaMetadataResponseBytes)
+}
+
+func newClientWithResponseLimit(baseURL, apiKey string, maxResponseBytes int64) (*Client, error) {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
 		return nil, fmt.Errorf("heyametadata: base URL is required")
 	}
+	baseTransport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		MaxIdleConns:          64,
+		MaxIdleConnsPerHost:   32,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 45 * time.Second,
+	}
 	httpClient := &http.Client{
 		Timeout: 3 * time.Minute,
-		Transport: &http.Transport{
-			Proxy:                 http.ProxyFromEnvironment,
-			MaxIdleConns:          64,
-			MaxIdleConnsPerHost:   32,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ResponseHeaderTimeout: 45 * time.Second,
-		},
+		// This is intentionally a body-only policy rather than safedial's public
+		// address policy: users may point HeyaMetadata at localhost or a LAN host.
+		Transport: httpbodylimit.NewTransport(baseTransport, maxResponseBytes),
 	}
 	generated, err := gen.NewClientWithResponses(
 		baseURL,

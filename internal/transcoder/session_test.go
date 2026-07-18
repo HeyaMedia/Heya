@@ -2,6 +2,7 @@ package transcoder
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +27,7 @@ func makeFsSession(t *testing.T, totalSegs int) *TranscodeSession {
 	}
 	return &TranscodeSession{
 		Key:         "test",
+		FilePath:    filepath.Join(t.TempDir(), "input.mkv"),
 		OutputDir:   t.TempDir(),
 		SegExt:      ".m4s",
 		segPathFmt:  "seg_%d.m4s",
@@ -152,6 +154,21 @@ func (fakeBuilder) BuildHLSCommand(ctx context.Context, opts TranscodeOpts) (*ex
 func (fakeBuilder) IsAvailable() bool                  { return true }
 func (fakeBuilder) FormatCommand(cmd *exec.Cmd) string { return "fake" }
 
+type testCommandBuilder struct {
+	build func(context.Context, TranscodeOpts) (*exec.Cmd, error)
+}
+
+func (b testCommandBuilder) BuildHLSCommand(ctx context.Context, opts TranscodeOpts) (*exec.Cmd, error) {
+	return b.build(ctx, opts)
+}
+func (testCommandBuilder) IsAvailable() bool { return true }
+func (testCommandBuilder) FormatCommand(cmd *exec.Cmd) string {
+	if cmd == nil {
+		return "<nil>"
+	}
+	return "test-command"
+}
+
 // Livelock canary: the first request of a fresh session spawns a head for
 // exactly that segment. RequestSegment must settle into WaitForSegment and
 // time out cleanly — not kill/spawn the head it just created forever.
@@ -200,6 +217,265 @@ func TestRequestSegment_ReadyWithFileServesImmediately(t *testing.T) {
 	defer cancel()
 	assert.True(t, s.RequestSegment(ctx, 2))
 	assert.Equal(t, 2, s.LastRequestedSegment())
+}
+
+func TestEnsureSegmentRejectsInvalidIndex(t *testing.T) {
+	s := makeFsSession(t, 3)
+	assert.ErrorIs(t, s.EnsureSegment(context.Background(), -1), ErrInvalidSegment)
+	assert.ErrorIs(t, s.EnsureSegment(context.Background(), 3), ErrInvalidSegment)
+}
+
+func TestEnsureSegmentReturnsBuilderFailurePromptly(t *testing.T) {
+	want := errors.New("cannot construct encoder")
+	s := makeFsSession(t, 10)
+	s.builder = testCommandBuilder{build: func(context.Context, TranscodeOpts) (*exec.Cmd, error) {
+		return nil, want
+	}}
+	defer s.Kill()
+
+	started := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := s.EnsureSegment(ctx, 2)
+
+	assert.ErrorIs(t, err, ErrTranscodeFailed)
+	assert.ErrorIs(t, err, want)
+	assert.Less(t, time.Since(started), time.Second, "build failure must wake the request, not wait for its deadline")
+	assert.False(t, s.RequestSegment(context.Background(), 2), "compatibility API must preserve failure as false")
+}
+
+func TestEnsureSegmentReturnsStartFailurePromptly(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing-encoder")
+	s := makeFsSession(t, 10)
+	s.builder = testCommandBuilder{build: func(ctx context.Context, _ TranscodeOpts) (*exec.Cmd, error) {
+		return exec.CommandContext(ctx, missing), nil
+	}}
+	defer s.Kill()
+
+	started := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := s.EnsureSegment(ctx, 2)
+
+	assert.ErrorIs(t, err, ErrTranscodeFailed)
+	assert.Contains(t, err.Error(), "start encoder")
+	assert.Less(t, time.Since(started), time.Second, "start failure must wake the request, not wait for its deadline")
+}
+
+func TestEnsureSegmentReturnsEarlyExitPromptly(t *testing.T) {
+	s := makeFsSession(t, 10)
+	s.builder = testCommandBuilder{build: func(ctx context.Context, _ TranscodeOpts) (*exec.Cmd, error) {
+		return exec.CommandContext(ctx, "sh", "-c", "exit 17"), nil
+	}}
+	defer s.Kill()
+
+	started := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := s.EnsureSegment(ctx, 2)
+
+	assert.ErrorIs(t, err, ErrTranscodeFailed)
+	assert.Contains(t, err.Error(), "encoder exited")
+	assert.Less(t, time.Since(started), time.Second, "early exit must wake the request, not wait for its deadline")
+}
+
+func TestEnsureSegmentAcceptsFileFlushedImmediatelyBeforeExit(t *testing.T) {
+	s := makeFsSession(t, 10)
+	s.builder = testCommandBuilder{build: func(ctx context.Context, opts TranscodeOpts) (*exec.Cmd, error) {
+		return exec.CommandContext(ctx, "sh", "-c", `touch "$1/seg_2.m4s"`, "sh", opts.OutputDir), nil
+	}}
+	defer s.Kill()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, s.EnsureSegment(ctx, 2))
+	assert.True(t, s.IsSegmentReady(2))
+	assert.True(t, s.segmentFileExists(2))
+}
+
+func TestEnsureSegmentDoesNotRespawnAfterSessionKill(t *testing.T) {
+	built := make(chan struct{})
+	s := makeFsSession(t, 10)
+	s.builder = testCommandBuilder{build: func(ctx context.Context, _ TranscodeOpts) (*exec.Cmd, error) {
+		close(built)
+		return exec.CommandContext(ctx, "sleep", "60"), nil
+	}}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- s.EnsureSegment(context.Background(), 2)
+	}()
+	<-built
+	s.Kill()
+	assert.ErrorIs(t, <-done, ErrTranscodeSessionClosed)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	assert.Nil(t, s.head, "terminal session cleanup must not be mistaken for a seek replacement")
+}
+
+func TestSessionManagerEvictsPreviousSessionForSameFile(t *testing.T) {
+	cache := NewCacheManager(t.TempDir(), 0)
+	manager := NewSessionManager(cache, nil, nil)
+	defer manager.Close()
+
+	opts := TranscodeOpts{AudioTrack: 1, UseFMP4: true}
+	first := manager.GetOrCreate(context.Background(), 42, "/library/movie.mkv", opts, "viewer-a", 12, nil)
+	second := manager.GetOrCreate(context.Background(), 42, "/library/movie.mkv", opts, "viewer-b", 12, nil)
+
+	require.NotSame(t, first, second)
+	assert.NotEqual(t, first.Key, second.Key)
+	assert.NotEqual(t, first.OutputDir, second.OutputDir)
+	assert.Nil(t, manager.GetExistingSession(42, 1, "viewer-a"))
+	assert.Same(t, second, manager.GetExistingSession(42, 1, "viewer-b"))
+	assert.ErrorIs(t, first.EnsureSegment(context.Background(), 0), ErrTranscodeSessionClosed)
+	_, err := os.Stat(first.OutputDir)
+	assert.True(t, os.IsNotExist(err))
+	assert.DirExists(t, second.OutputDir)
+}
+
+func TestDetachedSessionCleanupPreservesRecreatedSameKeyDirectory(t *testing.T) {
+	cache := NewCacheManager(t.TempDir(), 1)
+	manager := NewSessionManager(cache, nil, nil)
+	defer manager.Close()
+
+	const key = "42:a1:viewer-a"
+	oldLease, err := cache.reserveSegmentDir(key)
+	require.NoError(t, err)
+	old := &TranscodeSession{Key: key, OutputDir: oldLease.Path(), cacheLease: oldLease}
+	newLease, err := cache.reserveSegmentDir(key)
+	require.NoError(t, err)
+	replacement := &TranscodeSession{Key: key, OutputDir: newLease.Path(), cacheLease: newLease}
+	manager.mu.Lock()
+	manager.sessions[key] = replacement
+	manager.mu.Unlock()
+
+	marker := filepath.Join(replacement.OutputDir, "replacement.m4s")
+	require.NoError(t, os.WriteFile(marker, []byte("new"), 0o644))
+	manager.disposeDetachedSessions([]*TranscodeSession{old})
+
+	assert.FileExists(t, marker)
+	cache.mu.RLock()
+	assert.Equal(t, 1, cache.pins[replacement.OutputDir], "old lease release must retain the replacement pin")
+	cache.mu.RUnlock()
+}
+
+func TestSessionManagerCloseJoinsInFlightEvictionTeardown(t *testing.T) {
+	cache := NewCacheManager(t.TempDir(), 1)
+	manager := NewSessionManager(cache, nil, nil)
+
+	oldLease, err := cache.reserveSegmentDir("42:a1:old")
+	require.NoError(t, err)
+	cancelled := make(chan struct{})
+	headDone := make(chan struct{})
+	old := &TranscodeSession{
+		Key:        "42:a1:old",
+		OutputDir:  oldLease.Path(),
+		cacheLease: oldLease,
+		head: &Head{
+			Cancel: func() { close(cancelled) },
+			Done:   headDone,
+		},
+	}
+	manager.mu.Lock()
+	manager.sessions[old.Key] = old
+	manager.mu.Unlock()
+
+	createDone := make(chan struct{})
+	go func() {
+		manager.GetOrCreate(context.Background(), 42, "/library/movie.mkv", TranscodeOpts{AudioTrack: 1, UseFMP4: true}, "new", 12, nil)
+		close(createDone)
+	}()
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("replacement did not begin reaping the evicted head")
+	}
+
+	closeDone := make(chan struct{})
+	go func() {
+		manager.Close()
+		close(closeDone)
+	}()
+	select {
+	case <-closeDone:
+		t.Fatal("SessionManager.Close returned while eviction teardown was still in flight")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(headDone)
+	select {
+	case <-createDone:
+	case <-time.After(time.Second):
+		t.Fatal("in-flight creation did not finish after the evicted head exited")
+	}
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		t.Fatal("SessionManager.Close did not finish after joined creation teardown")
+	}
+}
+
+func TestSessionManagerLeaseProtectsLiveOutputWithEmptySnapshot(t *testing.T) {
+	cache := NewCacheManager(t.TempDir(), 1)
+	cache.maxBytes = 1
+	manager := NewSessionManager(cache, nil, nil)
+
+	session := manager.GetOrCreate(context.Background(), 88, "/library/movie.mkv", TranscodeOpts{UseFMP4: true}, "viewer", 12, nil)
+	require.NoError(t, os.WriteFile(filepath.Join(session.OutputDir, "seg_0.m4s"), []byte("segment"), 0o644))
+
+	// The old cleanup code relied only on a separately-captured live map. A
+	// stale/empty snapshot must no longer be able to evict a registered session.
+	require.NoError(t, cache.EvictLRU(nil))
+	assert.FileExists(t, filepath.Join(session.OutputDir, "seg_0.m4s"))
+
+	manager.Close()
+	_, err := os.Stat(session.OutputDir)
+	assert.True(t, os.IsNotExist(err), "Close stops/removes the session before releasing its lease")
+	cache.mu.RLock()
+	assert.Empty(t, cache.pins)
+	cache.mu.RUnlock()
+}
+
+func TestSessionManagerCloseIsTerminalForNewSessions(t *testing.T) {
+	cache := NewCacheManager(t.TempDir(), 1)
+	manager := NewSessionManager(cache, nil, testCommandBuilder{build: func(context.Context, TranscodeOpts) (*exec.Cmd, error) {
+		t.Fatal("closed manager must not build an ffmpeg command")
+		return nil, nil
+	}})
+	manager.Close()
+
+	session := manager.GetOrCreate(context.Background(), 89, "/library/movie.mkv", TranscodeOpts{UseFMP4: true}, "viewer", 12, nil)
+	require.NotNil(t, session)
+	assert.Empty(t, session.OutputDir, "closed manager must not reserve a cache directory")
+	assert.ErrorIs(t, session.EnsureSegment(context.Background(), 0), ErrTranscodeSessionClosed)
+	assert.Nil(t, manager.GetExistingSession(89, 0, "viewer"))
+
+	cache.mu.RLock()
+	assert.Empty(t, cache.pins)
+	cache.mu.RUnlock()
+}
+
+func TestTranscodeHeadRecreatesLeasedOutputAfterExplicitClear(t *testing.T) {
+	cache := NewCacheManager(t.TempDir(), 1)
+	input := filepath.Join(t.TempDir(), "input.mkv")
+	require.NoError(t, os.WriteFile(input, []byte("input"), 0o644))
+	builder := testCommandBuilder{build: func(ctx context.Context, opts TranscodeOpts) (*exec.Cmd, error) {
+		return exec.CommandContext(ctx, "sh", "-c", `touch "$1/seg_0.m4s"`, "sh", opts.OutputDir), nil
+	}}
+	manager := NewSessionManager(cache, nil, builder)
+	defer manager.Close()
+
+	session := manager.GetOrCreate(context.Background(), 99, input, TranscodeOpts{UseFMP4: true}, "viewer", 6, nil)
+	require.DirExists(t, session.OutputDir)
+	require.NoError(t, cache.Clear())
+	_, err := os.Stat(session.OutputDir)
+	require.True(t, os.IsNotExist(err))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, session.EnsureSegment(ctx, 0))
+	assert.FileExists(t, session.SegmentPath(0))
 }
 
 func TestEvictLRU_SkipsLiveSessionDirs(t *testing.T) {

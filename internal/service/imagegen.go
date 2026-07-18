@@ -70,12 +70,14 @@ func (a *App) ImageDownload(model, backend string) error {
 	if _, err := imagegen.RuntimeArtifactFor(backend); err != nil {
 		return err
 	}
-	ctx := a.LifetimeContext()
-	go func() {
-		if err := a.imageRuntime.Download(ctx, model, backend); err != nil {
+	if !a.startBackground(func() {
+		ctx := a.LifetimeContext()
+		if err := a.imageRuntime.Download(ctx, model, backend); err != nil && ctx.Err() == nil {
 			log.Err(err).Msg("imagegen: artifact download failed")
 		}
-	}()
+	}) {
+		return errAppClosing
+	}
 	return nil
 }
 

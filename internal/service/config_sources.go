@@ -31,7 +31,7 @@ func (a *App) ConfigSources(ctx context.Context) ConfigSources {
 	// since they're tracked on the Field[T]s loaded at boot. After
 	// LoadTailscaleFromDB / LoadTranscoderFromDB ran, the Source on
 	// each field is either env / db / default.
-	for k, v := range a.config.Sources() {
+	for k, v := range a.ConfigSnapshot().Sources() {
 		out[k] = v
 	}
 

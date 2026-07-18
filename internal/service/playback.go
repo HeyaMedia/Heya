@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
-	"github.com/karbowiak/heya/internal/worker"
+	"github.com/karbowiak/heya/internal/mediaprobe"
 )
 
 // GetPlaybackPreference fetches a per-media playback preference for a user.
@@ -74,7 +74,7 @@ func (a *App) GetMediaLanguages(ctx context.Context, mediaItemID int64) (MediaLa
 		if len(f.MediaInfo) == 0 {
 			continue
 		}
-		var info worker.MediaInfo
+		var info mediaprobe.MediaInfo
 		if err := json.Unmarshal(f.MediaInfo, &info); err != nil {
 			continue
 		}

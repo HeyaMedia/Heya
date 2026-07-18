@@ -124,8 +124,9 @@ New package `internal/cast/`:
   `internal/transcoder/session.go`). Per-track ffmpeg processes writing
   sequentially into cliap2's persistent stdin (gapless). `-ss <sec>` for
   seek refeed. Short clips (< pre-roll) need `-re` or padding — see
-  research doc EOF-before-commence. v1 limitation: local paths only
-  (SMB sources rejected, same as `transcodePrimaryAndServe`).
+  research doc EOF-before-commence. Inputs are ordinary paths visible to the
+  Heya process, including OS/container-mounted network storage; library URL
+  transports are rejected at configuration time.
 - `session.go` — `CastSession`: device, user, queue (v1: single track;
   Phase 3: full queue), position clock (server-derived: track start
   time + elapsed, corrected on pause/seek), volume, state. Emits
@@ -329,9 +330,9 @@ blocked on the native provider contracts becoming stable.
   research doc); the embedded-binary story must eventually build
   static-ish or vendor the dylib set — container (Debian) builds are
   the deployment target and match the CI artifacts' Bookworm ABI.
-- **SMB-sourced tracks** can't feed ffmpeg by path in v1 (same
-  restriction as the AAC transcode path). Revisit with the vfs streaming
-  work.
+- **Mounted network storage** feeds ffmpeg through its ordinary filesystem
+  path. Deployments must expose the same mount to every Heya role that reads
+  media.
 - **Upstream divergence**: we intentionally do not report the
   commence-wedge bugs upstream; pin the exact cliairplay commit we
   embed and re-validate the stderr contract on any bump.

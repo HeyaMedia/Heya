@@ -114,10 +114,12 @@ func (a *App) AIRecommend(ctx context.Context, userID int64, in AIRecommendReque
 	}
 
 	// Fail fast on either missing prerequisite before spawning anything.
-	if emb, err := a.recEmbedderInstance(ctx); err != nil {
+	if lease, err := a.borrowRecEmbedder(ctx); err != nil {
 		return AIRecommendResult{}, fmt.Errorf("load embedder: %w", err)
-	} else if emb == nil {
+	} else if lease == nil {
 		return AIRecommendResult{}, ErrMLDisabled
+	} else {
+		lease.Close()
 	}
 	s := a.AISettings(ctx)
 	client, model, err := a.aiClient(ctx, s)

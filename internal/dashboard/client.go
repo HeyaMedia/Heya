@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -33,24 +34,41 @@ func NewClientWithHTTP(baseURL, token string, client *http.Client) *Client {
 func (c *Client) GetToken() string { return c.token }
 
 func (c *Client) Login(ctx context.Context, username, password string) error {
-	body := fmt.Sprintf(`{"username":%q,"password":%q}`, username, password)
-	req, _ := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/auth/login", strReader(body))
+	// The password is intentionally serialized into the authenticated login request body.
+	//nolint:gosec
+	body, err := json.Marshal(struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}{Username: username, Password: password})
+	if err != nil {
+		return fmt.Errorf("encode login request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/auth/login", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create login request: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("connection failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("login failed (HTTP %d)", resp.StatusCode)
 	}
 
 	var result struct {
 		Token string `json:"token"`
 	}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("decode login response: %w", err)
+	}
+	if result.Token == "" {
+		return fmt.Errorf("login response did not include a token")
+	}
 	c.token = result.Token
 	return nil
 }
@@ -124,32 +142,12 @@ func (c *Client) getJSON(ctx context.Context, path string, result any) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
 	return json.NewDecoder(resp.Body).Decode(result)
-}
-
-func strReader(s string) io.Reader {
-	return io.NopCloser(readString(s))
-}
-
-type stringReader struct {
-	s string
-	i int
-}
-
-func readString(s string) *stringReader { return &stringReader{s: s} }
-
-func (r *stringReader) Read(p []byte) (n int, err error) {
-	if r.i >= len(r.s) {
-		return 0, io.EOF
-	}
-	n = copy(p, r.s[r.i:])
-	r.i += n
-	return
 }

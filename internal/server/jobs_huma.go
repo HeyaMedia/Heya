@@ -6,11 +6,13 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/karbowiak/heya/internal/service"
 )
 
-// registerJobRoutes covers /api/jobs/* and /api/schedules — runtime queue
-// inspection and rescue/retry/cancel verbs.
+// registerJobRoutes covers /api/jobs/* runtime queue inspection and
+// rescue/retry/cancel verbs. Recurring work is exposed separately through the
+// durable global tasks under /api/tasks/*.
 func registerJobRoutes(api huma.API, app *service.App) {
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/jobs", "list-jobs", "List background jobs", "Jobs")),
 		func(ctx context.Context, in *struct {
@@ -89,9 +91,6 @@ func registerJobRoutes(api huma.API, app *service.App) {
 			}
 			return &JSONOutput[clearedBody]{Body: clearedBody{Cleared: n}}, nil
 		})
-
-	huma.Register(api, adminSecured(op(http.MethodGet, "/api/schedules", "list-schedules", "Periodic schedules computed from library settings", "Jobs")),
-		simpleGet(app.ListSchedules, 0))
 
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/jobs/queue/metadata", "metadata-queue-status", "Snapshot of the unified metadata enrich queue (pending counts by priority, current item, throughput)", "Jobs")),
 		simpleGet(app.MetadataQueueStatus, 0))
@@ -211,8 +210,21 @@ func registerTaskRoutes(api huma.API, app *service.App) {
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
-			return noStoreJSON(resp), nil
+			return noStoreJSON(redactTaskItemsForResponse(resp)), nil
 		})
+}
+
+func redactTaskItemsForResponse(result *service.TaskItemsResult) *service.TaskItemsResult {
+	if result == nil {
+		return nil
+	}
+	redacted := *result
+	redacted.Items = append([]service.TaskItem(nil), result.Items...)
+	for i := range redacted.Items {
+		redacted.Items[i].Path = secrettext.Redact(redacted.Items[i].Path)
+		redacted.Items[i].Error = secrettext.Redact(redacted.Items[i].Error)
+	}
+	return &redacted
 }
 
 type rescueBody struct {

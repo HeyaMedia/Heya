@@ -54,7 +54,7 @@ async function loadStatus() {
 watch(() => statusData.data.value, value => {
   if (!value) return
   form.hwAccel = value.config_mode || 'auto'
-  form.cacheMaxGB = value.cache_max_gb || 50
+  form.cacheMaxGB = value.cache_max_gb ?? 50
   dirty.value = false
 }, { immediate: true })
 
@@ -66,7 +66,7 @@ async function save() {
       method: 'PUT',
       body: { hw_accel: form.hwAccel, cache_max_gb: form.cacheMaxGB } as any,
     })
-    flash.value = { kind: 'warn', text: 'Saved. Restart the server to apply hardware-acceleration changes.' }
+    flash.value = { kind: 'ok', text: 'Saved. New transcode sessions will use these settings.' }
     await loadStatus()
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Save failed.' }
@@ -79,7 +79,7 @@ async function clearCache() {
   if (!status.value?.cache_items) return
   const ok = await confirm({
     title: 'Clear transcode cache?',
-    message: `Drop ${status.value.cache_items} segments (${fmtMB(status.value.cache_size_mb)}). Active sessions will need to re-transcode any sought-past segment.`,
+    message: `Drop ${status.value.cache_items} cached files (${fmtMB(status.value.cache_size_mb)}). Active sessions may need to recreate cleared output.`,
     destructive: true,
     confirmLabel: 'Clear cache',
   })
@@ -120,7 +120,7 @@ onMounted(async () => {
       title="Transcoding"
       icon="film"
       eyebrow="Media · Delivery pipeline"
-      description="Control hardware acceleration, the HLS quality ladder, and temporary segment storage used when clients cannot direct play."
+      description="Control hardware acceleration, the HLS quality ladder, and temporary transcode storage used when clients cannot direct play."
     />
 
     <div v-if="!status" class="loading-state"><Icon name="spinner" :size="14" /> Probing ffmpeg…</div>
@@ -149,7 +149,7 @@ onMounted(async () => {
           label="Cache"
           :value="fmtMB(status.cache_size_mb)"
           icon="hard-drives"
-          :sub="`${status.cache_items} segments · ${cachePct}% of cap`"
+          :sub="status.cache_max_gb === 0 ? `${status.cache_items} items · unlimited` : `${status.cache_items} items · ${cachePct}% of cap`"
         />
       </div>
 
@@ -181,7 +181,7 @@ onMounted(async () => {
 
         <SettingsField
           label="Transcode cache size"
-          description="Maximum disk used for cached HLS segments. Oldest segments are evicted when reached."
+          description="Maximum disk used for cached transcodes. Oldest items are evicted when reached; set 0 for unlimited."
           :lockedBy="isLocked('transcoder.cache_max_gb') ? lockTooltip('transcoder.cache_max_gb') : undefined"
           v-slot="{ fieldId }"
         >
@@ -189,7 +189,7 @@ onMounted(async () => {
             <input
               :id="fieldId"
               v-model.number="form.cacheMaxGB"
-              type="number" min="1" max="500"
+              type="number" min="0" max="500"
               class="sv2-input num"
               :disabled="isLocked('transcoder.cache_max_gb')"
               @input="dirty = true"
@@ -213,16 +213,19 @@ onMounted(async () => {
       <SettingsSection title="Cache" icon="hard-drives">
         <KVTable :rows="[
           { key: 'Location', value: status.cache_dir || '—', mono: true, copy: true },
-          { key: 'Used',     value: `${fmtMB(status.cache_size_mb)} of ${status.cache_max_gb} GB` },
-          { key: 'Segments', value: status.cache_items },
+          { key: 'Used',     value: status.cache_max_gb === 0 ? `${fmtMB(status.cache_size_mb)} · unlimited` : `${fmtMB(status.cache_size_mb)} of ${status.cache_max_gb} GB` },
+          { key: 'Items',    value: status.cache_items },
         ]" />
 
-        <div class="cache-bar">
+        <div v-if="status.cache_max_gb > 0" class="cache-bar">
           <div class="cache-fill" :class="{ warn: cachePct > 80, bad: cachePct >= 95 }" :style="{ width: cachePct + '%' }" />
         </div>
         <div class="cache-meta">
-          <span>{{ cachePct }}% used</span>
-          <span class="dim">· evicts oldest first</span>
+          <template v-if="status.cache_max_gb > 0">
+            <span>{{ cachePct }}% used</span>
+            <span class="dim">· evicts oldest first</span>
+          </template>
+          <span v-else>Unlimited · automatic eviction disabled</span>
         </div>
 
         <div class="save-bar">

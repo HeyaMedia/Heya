@@ -4,6 +4,26 @@ import "time"
 
 type EventType string
 
+// EventVisibility describes who may receive an event. It is deliberately a
+// property of the event type rather than the publisher: every delivery path
+// (local broadcast, targeted publish, and the cross-process relay) therefore
+// applies the same access policy.
+type EventVisibility uint8
+
+const (
+	// VisibilityAuthenticated is server-wide state safe for every signed-in
+	// browser as well as trusted internal subscribers.
+	VisibilityAuthenticated EventVisibility = iota
+	// VisibilityAdmin is operational state that may contain library paths,
+	// queue arguments, network details, or logs. Only admins and trusted
+	// internal subscribers receive it.
+	VisibilityAdmin
+	// VisibilityUserTargeted is per-user state. A plain Publish/Emit has no
+	// target and consequently delivers these events to nobody; callers must
+	// use PublishToUser/EmitToUser (or the AndInternal variant).
+	VisibilityUserTargeted
+)
+
 const (
 	EventLog            EventType = "log"
 	EventScanStarted    EventType = "scan.started"
@@ -48,6 +68,49 @@ const (
 	// playback without polling the device list.
 	EventDeviceState EventType = "device.state"
 )
+
+// VisibilityFor returns the delivery policy for an event type. Unknown event
+// types default to admin-only: adding a new event without classifying it must
+// not silently expose its payload to every signed-in user. Trusted internal
+// subscribers still receive that safe default, preserving relay/bridge use.
+func VisibilityFor(t EventType) EventVisibility {
+	switch t {
+	case EventMediaAdded,
+		EventMediaUpdated,
+		EventMediaRemoved,
+		EventLibraryChanged,
+		EventLibraryDeleted,
+		// session.update is declared by internal/sessions and is deliberately
+		// a payload-free cache-invalidation signal for every signed-in user.
+		EventType("session.update"):
+		return VisibilityAuthenticated
+	case EventLog,
+		EventScanStarted,
+		EventScanCompleted,
+		EventQueueStatus,
+		EventActiveJobs,
+		EventStatsUpdated,
+		EventScanProgress,
+		EventScannerEvent,
+		EventTaskProgress,
+		EventTailscale,
+		EventRemote:
+		return VisibilityAdmin
+	case EventMediaWatched,
+		EventRadioICY,
+		EventCastState,
+		EventQueueChanged,
+		EventDeviceCommand,
+		EventDeviceState,
+		// session.command is declared by internal/sessions to keep that
+		// package's protocol types together. List its wire type here so an
+		// accidental broadcast still fails closed.
+		EventType("session.command"):
+		return VisibilityUserTargeted
+	default:
+		return VisibilityAdmin
+	}
+}
 
 // RadioICYPayload is the per-user event body for EventRadioICY. UserID
 // scoping is done by the hub so the FE only sees its own station's

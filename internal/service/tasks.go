@@ -388,7 +388,7 @@ func (a *App) QueryThumbnailItems(ctx context.Context, status string, limit, off
 			Name:   name,
 			Path:   r.FilePath,
 			Status: s,
-			Detail: string(r.ExtraType) + " · " + r.MediaTitle,
+			Detail: r.ExtraType + " · " + r.MediaTitle,
 		})
 	}
 

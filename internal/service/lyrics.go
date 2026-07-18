@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -47,7 +46,7 @@ func (a *App) localTrackLyrics(ctx context.Context, trackID int64) ([]byte, erro
 		if strings.TrimSpace(file.LyricsPath) == "" {
 			continue
 		}
-		body, readErr := readTrackLyricsFile(file.LyricsPath)
+		body, readErr := readTrackLyricsFile(ctx, file.LyricsPath)
 		if readErr == nil {
 			return body, nil
 		}
@@ -108,34 +107,12 @@ func preferredRecordingLyrics(items []heyametadata.RecordingLyrics) ([]byte, boo
 	return nil, false
 }
 
-func readTrackLyricsFile(path string) ([]byte, error) {
-	if vfs.IsSMBPath(path) {
-		lastSlash := strings.LastIndex(path, "/")
-		if lastSlash < 0 {
-			return nil, errors.New("invalid smb lyrics path")
-		}
-		dir, err := vfs.Open(path[:lastSlash])
-		if err != nil {
-			return nil, err
-		}
-		defer func() { _ = dir.Close() }()
-		file, err := dir.FS.Open(path[lastSlash+1:])
-		if err != nil {
-			return nil, err
-		}
-		defer func() { _ = file.Close() }()
-
-		var body strings.Builder
-		scanner := bufio.NewScanner(file)
-		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-		for scanner.Scan() {
-			body.WriteString(scanner.Text())
-			body.WriteByte('\n')
-		}
-		if err := scanner.Err(); err != nil {
-			return nil, err
-		}
-		return []byte(body.String()), nil
+func readTrackLyricsFile(ctx context.Context, path string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := vfs.ValidateLocalPath(path); err != nil {
+		return nil, fmt.Errorf("lyrics input: %w", err)
 	}
 	return os.ReadFile(filepath.Clean(path)) //nolint:gosec // path comes from Heya's track rows
 }

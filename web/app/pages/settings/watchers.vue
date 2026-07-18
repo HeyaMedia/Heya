@@ -54,17 +54,19 @@ const rows = computed(() =>
   })),
 )
 
+const watchedLibraryIDs = computed(() => new Set((status.value?.watchers ?? []).map(w => w.library_id)))
+const watchedLibraryCount = computed(() => watchedLibraryIDs.value.size)
+
 const librariesWithoutWatcher = computed(() => {
   if (!status.value) return []
-  const watched = new Set((status.value.watchers ?? []).map(w => w.library_id))
-  return libraries.value.filter(l => !watched.has(l.id))
+  return libraries.value.filter(l => !watchedLibraryIDs.value.has(l.id))
 })
 
 const coverageTone = computed<'good' | 'warn' | 'bad'>(() => {
   if (status.value && !status.value.worker_online) return 'bad'
   const total = libraries.value.length
   if (total === 0) return 'warn'
-  const watched = status.value?.watchers?.length ?? 0
+  const watched = watchedLibraryCount.value
   if (watched === total) return 'good'
   if (watched === 0) return 'bad'
   return 'warn'
@@ -110,7 +112,7 @@ function workerHeartbeatText(): string {
       title="Filesystem watchers"
       icon="eye"
       eyebrow="Media · Live discovery"
-      description="Watch library roots for changes in real time. Paths without coverage safely fall back to scheduled rescans."
+      description="Watch library roots for changes in real time. The global Library scan task remains the periodic safety net for every library."
     />
 
     <div v-if="loading && !status" class="loading-state">
@@ -131,14 +133,14 @@ function workerHeartbeatText(): string {
           :value="status?.count ?? 0"
           icon="eye"
           :tone="coverageTone === 'good' ? 'good' : coverageTone === 'warn' ? 'warn' : 'bad'"
-          :sub="`of ${libraries.length} ${libraries.length === 1 ? 'library' : 'libraries'}`"
+          :sub="`across ${watchedLibraryCount} of ${libraries.length} ${libraries.length === 1 ? 'library' : 'libraries'}`"
         />
         <MetricTile
           label="Unwatched libraries"
           :value="librariesWithoutWatcher.length"
           icon="warning"
           :tone="!status?.worker_online ? 'bad' : librariesWithoutWatcher.length === 0 ? 'good' : 'warn'"
-          :sub="!status?.worker_online ? 'worker unavailable' : librariesWithoutWatcher.length === 0 ? 'full coverage' : 'falling back to periodic scan'"
+          :sub="!status?.worker_online ? 'worker unavailable' : librariesWithoutWatcher.length === 0 ? 'full coverage' : 'covered by Library scan task'"
         />
         <MetricTile
           label="Refreshed"
@@ -167,7 +169,7 @@ function workerHeartbeatText(): string {
         <div v-if="rows.length === 0" class="empty-state">
           <Icon name="info" :size="14" />
           {{ status?.worker_online
-            ? 'No watchers are currently active. Libraries fall back to the periodic rescan task.'
+            ? 'No watchers are currently active. Configure the global Library scan task as the periodic safety net.'
             : 'Watcher state is unavailable until the dedicated worker is online.' }}
         </div>
 
@@ -195,7 +197,7 @@ function workerHeartbeatText(): string {
         v-if="status?.worker_online && librariesWithoutWatcher.length"
         title="Libraries without a watcher"
         icon="warning"
-        description="Likely the watcher failed to start (path missing, EMFILE, permission). These libraries only update during the periodic rescan."
+        description="Likely the watcher failed to start (path missing, EMFILE, permission, or a stalled mount). These libraries still participate in the global Library scan task."
       >
         <div class="watcher-grid">
           <div v-for="l in librariesWithoutWatcher" :key="l.id" class="watcher-card dim">

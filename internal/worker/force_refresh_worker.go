@@ -16,7 +16,9 @@ import (
 
 func pickRefreshProvider(mediaType string, externalIDsJSON []byte, heyaSlug string) (string, string) {
 	var ids map[string]string
-	json.Unmarshal(externalIDsJSON, &ids)
+	if err := json.Unmarshal(externalIDsJSON, &ids); err != nil {
+		return "", ""
+	}
 
 	if pid := heyametadata.BuildLookupID(metadata.MediaKind(mediaType), ids, heyaSlug); pid != "" {
 		return "heya", pid

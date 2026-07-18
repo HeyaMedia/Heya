@@ -13,14 +13,16 @@ import (
 	"image"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
+	"strings"
 
 	"github.com/disintegration/imaging"
+	"github.com/karbowiak/heya/internal/atomicfile"
 	"golang.org/x/sync/singleflight"
 
 	// Decode-only WebP support — registers a decoder with the stdlib image
@@ -30,8 +32,9 @@ import (
 )
 
 const (
-	maxDimension   = 4096
-	defaultQuality = 85
+	maxDimension        = 4096
+	defaultQuality      = 85
+	maxConcurrentResize = 2
 )
 
 type Resizer struct {
@@ -47,11 +50,7 @@ func New(cacheDir string) (*Resizer, error) {
 	if err := os.MkdirAll(cacheDir, 0o750); err != nil {
 		return nil, fmt.Errorf("imageserve: mkdir %s: %w", cacheDir, err)
 	}
-	slots := runtime.GOMAXPROCS(0) / 2
-	if slots < 2 {
-		slots = 2
-	}
-	return &Resizer{cacheDir: cacheDir, sem: make(chan struct{}, slots)}, nil
+	return &Resizer{cacheDir: cacheDir, sem: make(chan struct{}, maxConcurrentResize)}, nil
 }
 
 type Params struct {
@@ -122,14 +121,24 @@ func (r *Resizer) Serve(w http.ResponseWriter, req *http.Request, srcPath string
 
 	// Coalesce concurrent identical requests so we don't encode the same
 	// variant twice under load.
-	_, err, _ = r.sf.Do(cachePath, func() (any, error) {
+	result := r.sf.DoChan(cachePath, func() (any, error) {
 		if _, err := os.Stat(cachePath); err == nil {
 			return nil, nil
 		}
-		r.sem <- struct{}{}
+		select {
+		case r.sem <- struct{}{}:
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
 		defer func() { <-r.sem }()
 		return nil, r.generate(srcPath, cachePath, params)
 	})
+	select {
+	case completed := <-result:
+		err = completed.Err
+	case <-req.Context().Done():
+		return
+	}
 	if err != nil {
 		// Fall back to the source — a broken resize shouldn't 500 the UI.
 		serveFile(w, req, srcPath, "")
@@ -175,37 +184,22 @@ func (r *Resizer) generate(srcPath, cachePath string, p Params) error {
 	if err := os.MkdirAll(filepath.Dir(cachePath), 0o750); err != nil {
 		return err
 	}
-	// Write to a temp file then rename so partial writes can't be served.
-	// tmp path is constructed from cachePath inside our own cacheDir, so
-	// the "potential file inclusion via variable" warning is a false
-	// positive — there's no user-controlled path here.
-	tmp := cachePath + ".tmp" //nolint:gosec // path is internal cache key
-	f, err := os.Create(tmp)  //nolint:gosec
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = f.Close()
-		_ = os.Remove(tmp)
-	}()
-
 	format := p.Format
 	if format == "" {
 		format = sourceExt(srcPath)
 	}
-	switch format {
-	case "png":
-		err = png.Encode(f, out)
-	default: // jpeg
-		err = jpeg.Encode(f, out, &jpeg.Options{Quality: p.Quality})
-	}
-	if err != nil {
-		return fmt.Errorf("encode: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, cachePath)
+	return atomicfile.Write(cachePath, 0o640, func(writer io.Writer) error {
+		switch format {
+		case "png":
+			err = png.Encode(writer, out)
+		default: // jpeg
+			err = jpeg.Encode(writer, out, &jpeg.Options{Quality: p.Quality})
+		}
+		if err != nil {
+			return fmt.Errorf("encode: %w", err)
+		}
+		return nil
+	})
 }
 
 func resize(src image.Image, p Params) image.Image {
@@ -257,10 +251,33 @@ func serveFile(w http.ResponseWriter, r *http.Request, path, contentType string)
 		return
 	}
 	defer func() { _ = f.Close() }()
-	stat, _ := f.Stat()
-	w.Header().Set("Cache-Control", "public, max-age=604800, immutable")
-	if contentType != "" {
-		w.Header().Set("Content-Type", contentType)
+	stat, err := f.Stat()
+	if err != nil || !stat.Mode().IsRegular() {
+		http.NotFound(w, r)
+		return
 	}
+	w.Header().Set("Cache-Control", "public, max-age=604800, immutable")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if contentType == "" {
+		contentType = ContentTypeForPath(path)
+	}
+	w.Header().Set("Content-Type", contentType)
 	http.ServeContent(w, r, filepath.Base(path), stat.ModTime(), f)
+}
+
+// ContentTypeForPath returns a fixed, non-sniffed MIME for supported raster
+// extensions and a safe binary fallback for everything else.
+func ContentTypeForPath(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	default:
+		return "application/octet-stream"
+	}
 }

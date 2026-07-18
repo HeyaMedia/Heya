@@ -262,11 +262,18 @@ func (a *App) ListMissingMedia(ctx context.Context) ([]MissingMediaItem, error) 
 	items := make([]MissingMediaItem, 0)
 	for rows.Next() {
 		var m MissingMediaItem
-		rows.Scan(&m.ID, &m.Title, &m.Year, &m.MediaType, &m.PosterPath, &m.Slug)
+		if err := rows.Scan(&m.ID, &m.Title, &m.Year, &m.MediaType, &m.PosterPath, &m.Slug); err != nil {
+			return nil, err
+		}
 		items = append(items, m)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	rows.Close()
-	_ = tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
 
 	return items, nil
 }

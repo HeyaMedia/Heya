@@ -23,3 +23,13 @@ func TestLibrarySettingsAllowsUseLocalDataFalse(t *testing.T) {
 		t.Fatal("UseLocalData=true, want explicit false to survive")
 	}
 }
+
+func TestParseSettingsMalformedJSONUsesSafeDefaults(t *testing.T) {
+	settings := ParseSettings([]byte(`{"watch":true`))
+	if !settings.UseLocalData {
+		t.Fatal("UseLocalData=false, want safe default for malformed settings")
+	}
+	if settings.Watch {
+		t.Fatal("Watch=true, want partially decoded malformed settings discarded")
+	}
+}

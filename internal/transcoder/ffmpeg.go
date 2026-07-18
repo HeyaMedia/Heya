@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/karbowiak/heya/internal/vfs"
 )
 
 // CommandBuilder abstracts how transcode commands are constructed.
@@ -13,8 +15,7 @@ import (
 type CommandBuilder interface {
 	// BuildHLSCommand returns an exec.Cmd that will transcode the input
 	// into HLS segments written to opts.OutputDir. The caller is responsible
-	// for wiring Stdin (e.g. for SMB pipe:0 inputs), starting the process,
-	// and reading the segment-list from Stdout.
+	// for starting the process and reading the segment list from Stdout.
 	BuildHLSCommand(ctx context.Context, opts TranscodeOpts) (*exec.Cmd, error)
 
 	// IsAvailable reports whether the underlying encoder binary can be found.
@@ -28,6 +29,12 @@ type CommandBuilder interface {
 // FFmpegBuilder implements CommandBuilder using ffmpeg / ffprobe.
 type FFmpegBuilder struct{}
 
+// ffmpegCommandContext constructs the fixed ffmpeg executable directly.
+// Arguments are discrete argv entries and are never interpreted by a shell.
+func ffmpegCommandContext(ctx context.Context, args ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, "ffmpeg", args...) //nolint:gosec // fixed executable with non-shell argv
+}
+
 // NewFFmpegBuilder returns a new FFmpegBuilder.
 func NewFFmpegBuilder() *FFmpegBuilder {
 	return &FFmpegBuilder{}
@@ -37,8 +44,11 @@ func (f *FFmpegBuilder) BuildHLSCommand(ctx context.Context, opts TranscodeOpts)
 	if opts.OutputDir == "" {
 		return nil, fmt.Errorf("BuildHLSCommand: OutputDir is required")
 	}
+	if err := vfs.ValidateLocalPath(opts.Input); err != nil {
+		return nil, fmt.Errorf("BuildHLSCommand: input: %w", err)
+	}
 	args := BuildHLSArgs(opts, opts.OutputDir)
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	cmd := ffmpegCommandContext(ctx, args...)
 	return cmd, nil
 }
 

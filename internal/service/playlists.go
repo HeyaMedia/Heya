@@ -2,14 +2,17 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/slug"
 )
 
@@ -25,6 +28,12 @@ type PlaylistDetail struct {
 	Syncs    []PlaylistSyncView           `json:"syncs"`
 }
 
+// Playlist cover mutations are rare and a single Heya process owns writes.
+// Serializing their file+database lifecycle prevents metadata updates from
+// resurrecting a concurrently-cleared path and cross-format uploads from
+// deleting one another's freshly-published files.
+var playlistCoverMutationMu sync.Mutex
+
 // userPlaylistSlugExists adapts UserPlaylistSlugExists to slug.ExistsFunc —
 // slug collisions are scoped per-user, not global (two users can each have
 // a playlist named "Focus" and both get the plain "focus" slug).
@@ -38,8 +47,9 @@ func userPlaylistSlugExists(q *sqlc.Queries, userID int64) slug.ExistsFunc {
 	}
 }
 
-// CreateUserPlaylist creates a new playlist for the user. cover is optional.
-func (a *App) CreateUserPlaylist(ctx context.Context, userID int64, name, description, cover string) (sqlc.UserPlaylist, error) {
+// CreateUserPlaylist creates a new playlist for the user. Cover paths are
+// server-owned and can only be set through SetUserPlaylistCover.
+func (a *App) CreateUserPlaylist(ctx context.Context, userID int64, name, description string) (sqlc.UserPlaylist, error) {
 	if name == "" {
 		return sqlc.UserPlaylist{}, fmt.Errorf("playlist name required")
 	}
@@ -50,7 +60,7 @@ func (a *App) CreateUserPlaylist(ctx context.Context, userID int64, name, descri
 		UserID:      userID,
 		Name:        name,
 		Description: description,
-		CoverPath:   cover,
+		CoverPath:   "",
 		Slug:        newSlug,
 	})
 }
@@ -146,9 +156,25 @@ func (a *App) RemoveTrackFromPlaylist(ctx context.Context, userID, playlistID, t
 	return nil
 }
 
-// DeleteUserPlaylist drops a playlist and its tracks (cascade).
+// DeleteUserPlaylist drops a playlist and its tracks (cascade), then removes
+// its server-managed custom cover on a best-effort basis.
 func (a *App) DeleteUserPlaylist(ctx context.Context, userID, playlistID int64) error {
-	return sqlc.New(a.db).DeleteUserPlaylist(ctx, sqlc.DeleteUserPlaylistParams{ID: playlistID, UserID: userID})
+	playlistCoverMutationMu.Lock()
+	defer playlistCoverMutationMu.Unlock()
+	q := sqlc.New(a.db)
+	playlist, err := q.GetUserPlaylist(ctx, sqlc.GetUserPlaylistParams{ID: playlistID, UserID: userID})
+	if err != nil {
+		return fmt.Errorf("playlist not found: %w", err)
+	}
+	if err := q.DeleteUserPlaylist(ctx, sqlc.DeleteUserPlaylistParams{ID: playlistID, UserID: userID}); err != nil {
+		return err
+	}
+	if a.config != nil && a.config.DataDir.Value != "" {
+		if path, ok := managedPlaylistCoverPath(a.config.DataDir.Value, userID, playlistID, playlist.CoverPath); ok {
+			_ = os.Remove(path)
+		}
+	}
+	return nil
 }
 
 // SetPlaylistPin toggles one of the two independent pin scopes: "page"
@@ -182,11 +208,14 @@ func (a *App) SetSidebarPlaylistOrder(ctx context.Context, userID int64, ids []i
 	return nil
 }
 
-// UpdateUserPlaylist renames / re-describes / re-covers an existing playlist.
+// UpdateUserPlaylist renames / re-describes an existing playlist. Dedicated
+// upload/clear methods exclusively own CoverPath.
 // Renaming regenerates the slug (dev-phase convention: no legacy-URL shims —
 // see CLAUDE.md) so the URL always reflects the current name; an unchanged
 // name keeps the existing slug rather than paying a needless collision check.
-func (a *App) UpdateUserPlaylist(ctx context.Context, userID, playlistID int64, name, description, cover string, tags []string) error {
+func (a *App) UpdateUserPlaylist(ctx context.Context, userID, playlistID int64, name, description string, tags []string) error {
+	playlistCoverMutationMu.Lock()
+	defer playlistCoverMutationMu.Unlock()
 	q := sqlc.New(a.db)
 	existing, err := q.GetUserPlaylist(ctx, sqlc.GetUserPlaylistParams{ID: playlistID, UserID: userID})
 	if err != nil {
@@ -214,7 +243,7 @@ func (a *App) UpdateUserPlaylist(ctx context.Context, userID, playlistID int64, 
 		UserID:      userID,
 		Name:        name,
 		Description: description,
-		CoverPath:   cover,
+		CoverPath:   existing.CoverPath,
 		Slug:        newSlug,
 		Tags:        cleaned,
 	}); err != nil {
@@ -231,67 +260,74 @@ func (a *App) UpdateUserPlaylist(ctx context.Context, userID, playlistID int64, 
 // on rename but the file must keep being found. cover_path is stored
 // relative to DataDir so it composes the same way as every other on-disk
 // asset path in the DB.
-func (a *App) SetUserPlaylistCover(ctx context.Context, userID, playlistID int64, file io.Reader, filename string) error {
+func (a *App) SetUserPlaylistCover(ctx context.Context, userID, playlistID int64, file io.Reader) error {
+	playlistCoverMutationMu.Lock()
+	defer playlistCoverMutationMu.Unlock()
 	q := sqlc.New(a.db)
 	pl, err := q.GetUserPlaylist(ctx, sqlc.GetUserPlaylistParams{ID: playlistID, UserID: userID})
 	if err != nil {
 		return fmt.Errorf("playlist not found: %w", err)
 	}
 
-	ext := strings.ToLower(filepath.Ext(filename))
-	if ext == "" {
-		ext = ".jpg"
-	}
-	destFilename := fmt.Sprintf("%d%s", playlistID, ext)
-
 	dir := filepath.Join(a.config.DataDir.Value, "images", "playlists", strconv.FormatInt(userID, 10))
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("failed to create cover dir: %w", err)
 	}
-	destPath := filepath.Join(dir, destFilename)
-
-	// A prior cover saved under a different extension (re-upload as a
-	// different format) would otherwise linger as an orphaned file.
-	if pl.CoverPath != "" {
-		if oldAbs := filepath.Join(a.config.DataDir.Value, pl.CoverPath); filepath.Base(oldAbs) != destFilename {
-			_ = os.Remove(oldAbs)
-		}
-	}
-
-	dst, err := os.Create(destPath)
+	staged, err := images.StageRasterContext(ctx, dir, file)
 	if err != nil {
-		return fmt.Errorf("failed to save cover: %w", err)
+		return fmt.Errorf("%w: %w", ErrInvalidImageUpload, err)
 	}
-	defer dst.Close()
-	if _, err := io.Copy(dst, file); err != nil {
-		return fmt.Errorf("failed to write cover: %w", err)
+	defer func() { _ = staged.Rollback() }()
+	destFilename := fmt.Sprintf("%d%s", playlistID, staged.Info.Extension)
+	destPath := filepath.Join(dir, destFilename)
+	if err := staged.Publish(destPath); err != nil {
+		return fmt.Errorf("publish uploaded cover: %w", err)
 	}
 
 	relPath := filepath.Join("images", "playlists", strconv.FormatInt(userID, 10), destFilename)
-	return q.UpdateUserPlaylistCoverPath(ctx, sqlc.UpdateUserPlaylistCoverPathParams{
+	if err := q.UpdateUserPlaylistCoverPath(ctx, sqlc.UpdateUserPlaylistCoverPathParams{
 		ID:        playlistID,
 		UserID:    userID,
 		CoverPath: relPath,
-	})
+	}); err != nil {
+		return err
+	}
+	if err := staged.Commit(); err != nil {
+		return fmt.Errorf("commit uploaded cover: %w", err)
+	}
+
+	// A prior cover saved under another extension is now unreferenced.
+	if pl.CoverPath != "" {
+		oldAbs, managed := managedPlaylistCoverPath(a.config.DataDir.Value, userID, playlistID, pl.CoverPath)
+		if managed && filepath.Clean(oldAbs) != filepath.Clean(destPath) {
+			_ = os.Remove(oldAbs)
+		}
+	}
+	return nil
 }
 
 // ClearUserPlaylistCover removes a playlist's custom cover, both the DB
 // pointer and the file on disk (a missing file is not an error — the DB
 // row is the source of truth for "has a cover").
 func (a *App) ClearUserPlaylistCover(ctx context.Context, userID, playlistID int64) error {
+	playlistCoverMutationMu.Lock()
+	defer playlistCoverMutationMu.Unlock()
 	q := sqlc.New(a.db)
 	pl, err := q.GetUserPlaylist(ctx, sqlc.GetUserPlaylistParams{ID: playlistID, UserID: userID})
 	if err != nil {
 		return fmt.Errorf("playlist not found: %w", err)
 	}
-	if pl.CoverPath != "" {
-		_ = os.Remove(filepath.Join(a.config.DataDir.Value, pl.CoverPath))
-	}
-	return q.UpdateUserPlaylistCoverPath(ctx, sqlc.UpdateUserPlaylistCoverPathParams{
+	if err := q.UpdateUserPlaylistCoverPath(ctx, sqlc.UpdateUserPlaylistCoverPathParams{
 		ID:        playlistID,
 		UserID:    userID,
 		CoverPath: "",
-	})
+	}); err != nil {
+		return err
+	}
+	if path, ok := managedPlaylistCoverPath(a.config.DataDir.Value, userID, playlistID, pl.CoverPath); ok {
+		_ = os.Remove(path)
+	}
+	return nil
 }
 
 // GetUserPlaylistCoverPath resolves the absolute path to a playlist's stored
@@ -319,5 +355,66 @@ func (a *App) GetUserPlaylistCoverPath(ctx context.Context, userID, playlistID i
 	if coverPath == "" {
 		return "", nil
 	}
-	return filepath.Join(a.config.DataDir.Value, coverPath), nil
+	resolved, ok := managedPlaylistCoverPath(a.config.DataDir.Value, userID, playlistID, coverPath)
+	if !ok {
+		return "", errors.New("playlist cover path is outside managed storage")
+	}
+	info, err := os.Lstat(resolved)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", errors.New("playlist cover is not a regular file")
+	}
+	// SetUserPlaylistCover fully decodes before publication. Avoid repeating a
+	// potentially expensive decode on this anonymous hot path; imageserve pins
+	// the raster MIME from this allow-listed extension and sends nosniff.
+	return resolved, nil
+}
+
+func managedPlaylistCoverPath(dataDir string, userID, playlistID int64, stored string) (string, bool) {
+	if stored == "" || filepath.IsAbs(stored) || userID < 0 || playlistID <= 0 {
+		return "", false
+	}
+	root, err := filepath.Abs(filepath.Join(dataDir, "images", "playlists"))
+	if err != nil {
+		return "", false
+	}
+	candidate, err := filepath.Abs(filepath.Join(dataDir, stored))
+	if err != nil {
+		return "", false
+	}
+	relative, err := filepath.Rel(root, candidate)
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	parts := strings.Split(filepath.Clean(relative), string(filepath.Separator))
+	if len(parts) != 2 {
+		return "", false
+	}
+	owner, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || owner <= 0 || (userID > 0 && owner != userID) {
+		return "", false
+	}
+	wantStem := strconv.FormatInt(playlistID, 10)
+	if strings.TrimSuffix(parts[1], filepath.Ext(parts[1])) != wantStem {
+		return "", false
+	}
+	switch strings.ToLower(filepath.Ext(parts[1])) {
+	case ".jpg", ".png", ".webp":
+		realRoot, rootErr := filepath.EvalSymlinks(root)
+		realCandidate, candidateErr := filepath.EvalSymlinks(candidate)
+		if rootErr != nil {
+			return "", false
+		}
+		if candidateErr == nil {
+			realRelative, relErr := filepath.Rel(realRoot, realCandidate)
+			if relErr != nil || realRelative == "." || realRelative == ".." || strings.HasPrefix(realRelative, ".."+string(filepath.Separator)) {
+				return "", false
+			}
+			candidate = realCandidate
+		} else if candidateErr != nil && !errors.Is(candidateErr, os.ErrNotExist) {
+			return "", false
+		}
+		return candidate, true
+	default:
+		return "", false
+	}
 }

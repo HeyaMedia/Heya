@@ -3,6 +3,7 @@ package transcoder
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -28,7 +29,22 @@ type Head struct {
 	Cancel     context.CancelFunc
 	Cmd        *exec.Cmd
 	Done       chan struct{}
+	// Err is the terminal failure for this exact head. It is written before
+	// Done is closed and must only be read after observing Done, which gives
+	// readers a race-free publication edge without another mutex.
+	Err error
 }
+
+var (
+	// ErrInvalidSegment identifies requests outside a session's segment range.
+	ErrInvalidSegment = errors.New("invalid transcode segment")
+	// ErrTranscodeFailed identifies a head that could not produce the requested
+	// segment. The returned error retains a more specific stage/cause.
+	ErrTranscodeFailed = errors.New("transcode failed")
+	// ErrTranscodeSessionClosed identifies a request interrupted by terminal
+	// session cleanup rather than a seek-driven head replacement.
+	ErrTranscodeSessionClosed = errors.New("transcode session closed")
+)
 
 type segReady struct {
 	once sync.Once
@@ -50,8 +66,10 @@ type TranscodeSession struct {
 	SegmentEnds []float64
 	Opts        TranscodeOpts
 	builder     CommandBuilder
+	cacheLease  *CacheLease
 
 	mu         sync.Mutex
+	closed     bool
 	head       *Head
 	segments   []*segReady
 	LastAccess time.Time
@@ -260,40 +278,112 @@ func (s *TranscodeSession) resetSegment(idx int) {
 		return
 	}
 	s.mu.Lock()
-	s.segments[idx] = newSegReady()
+	// Multiple requests can discover the same vanished file concurrently.
+	// Only the first may replace the closed latch; replacing its fresh latch a
+	// second time could strand a waiter on a channel the encoder will never
+	// close.
+	if isClosed(s.segments[idx].ch) {
+		s.segments[idx] = newSegReady()
+	}
 	s.mu.Unlock()
 }
 
-func (s *TranscodeSession) RequestSegment(ctx context.Context, idx int) bool {
+// EnsureSegment starts or follows the appropriate encode head and waits for
+// idx to become durable on disk. Unlike the historical boolean API, terminal
+// command construction/start/exit failures are returned immediately instead
+// of leaving the request blocked until its HTTP context expires.
+func (s *TranscodeSession) EnsureSegment(ctx context.Context, idx int) error {
 	if idx < 0 || idx >= s.TotalSegs {
-		return false
+		return fmt.Errorf("%w: %d", ErrInvalidSegment, idx)
 	}
 
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return ErrTranscodeSessionClosed
+	}
 	s.lastRequestedSeg = idx
 	s.mu.Unlock()
 
 	if s.IsSegmentReady(idx) {
 		if s.segmentFileExists(idx) {
-			return true
+			return nil
 		}
 		s.resetSegment(idx)
 	}
 
-	s.mu.Lock()
-	for s.needsNewHead(idx) {
-		if s.head != nil {
-			// killHead drops s.mu while waiting for the head goroutine, so a
-			// concurrent request may install its own head in that window.
-			// Re-evaluate instead of spawning a second head over it.
-			s.killHead()
-			continue
+	for {
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			return ErrTranscodeSessionClosed
 		}
-		s.spawnHead(idx)
-	}
-	s.mu.Unlock()
+		for s.needsNewHead(idx) {
+			if s.head != nil {
+				// killHead drops s.mu while waiting for the head goroutine, so a
+				// concurrent request may install its own head in that window.
+				// Re-evaluate instead of spawning a second head over it.
+				s.killHead()
+				continue
+			}
+			s.spawnHead(idx)
+		}
+		head := s.head
+		ready := s.segments[idx].ch
+		s.mu.Unlock()
 
-	return s.WaitForSegment(ctx, idx)
+		select {
+		case <-ready:
+			if s.segmentFileExists(idx) {
+				return nil
+			}
+			s.resetSegment(idx)
+			continue
+
+		case <-head.Done:
+			// ffmpeg can flush the requested file immediately before exiting.
+			// Always let a durable segment win over a terminal process result.
+			if s.IsSegmentReady(idx) && s.segmentFileExists(idx) {
+				return nil
+			}
+			if s.IsSegmentReady(idx) {
+				s.resetSegment(idx)
+			}
+
+			s.mu.Lock()
+			current := s.head
+			closed := s.closed
+			s.mu.Unlock()
+			if closed {
+				return ErrTranscodeSessionClosed
+			}
+			if current != head {
+				// A concurrent seek deliberately replaced this head. Follow the
+				// replacement rather than reporting the obsolete cancellation.
+				continue
+			}
+			if head.Err != nil {
+				return head.Err
+			}
+			return fmt.Errorf("%w: encoder exited before segment %d", ErrTranscodeFailed, idx)
+
+		case <-ctx.Done():
+			// Prefer a segment that became durable concurrently with caller
+			// cancellation; serving it is harmless and avoids a false failure.
+			if s.IsSegmentReady(idx) && s.segmentFileExists(idx) {
+				return nil
+			}
+			return ctx.Err()
+		}
+	}
+}
+
+// RequestSegment preserves the original boolean contract for callers that
+// have not yet migrated to EnsureSegment. New integrations should retain the
+// returned error so they can distinguish invalid requests, cancellation, and
+// encoder failure.
+func (s *TranscodeSession) RequestSegment(ctx context.Context, idx int) bool {
+	return s.EnsureSegment(ctx, idx) == nil
 }
 
 // headExceedsLeadCap reports whether the encoder is running far enough ahead
@@ -389,37 +479,61 @@ func (s *TranscodeSession) spawnHead(startSeg int) {
 }
 
 func (s *TranscodeSession) runHead(ctx context.Context, head *Head, opts TranscodeOpts) {
-	defer close(head.Done)
+	var terminalErr error
+	defer func() {
+		// All exits — including command-build and process-start failures — must
+		// publish a terminal result before waking segment waiters.
+		s.setStopReasonIfRunning(head, StopReasonExited)
+		head.Err = terminalErr
+		close(head.Done)
+	}()
 
 	label := fmt.Sprintf("head_%d", head.StartSeg)
+	// Explicit cache clears intentionally ignore leases. Recreate this still-
+	// leased session directory before every head so playback can recover on
+	// the next segment request instead of leaving ffmpeg pointed at a vanished
+	// OutputDir.
+	if err := os.MkdirAll(s.OutputDir, 0o750); err != nil {
+		log.Error().Err(err).Str("key", s.Key).Msg("recreate transcode output directory")
+		if ctx.Err() == nil {
+			terminalErr = transcodeHeadError("create output directory", err)
+		}
+		return
+	}
+	if err := vfs.ValidateLocalPath(s.FilePath); err != nil {
+		log.Error().Err(err).Str("key", s.Key).Msg("open media input for head")
+		if ctx.Err() == nil {
+			terminalErr = transcodeHeadError("open input", err)
+		}
+		return
+	}
+	opts.Input = s.FilePath
 
 	cmd, err := s.builder.BuildHLSCommand(ctx, opts)
 	if err != nil {
 		log.Error().Err(err).Str("key", s.Key).Msg(label + " build command failed")
+		if ctx.Err() == nil {
+			terminalErr = transcodeHeadError("build command", err)
+		}
+		return
+	}
+	if cmd == nil {
+		terminalErr = transcodeHeadError("build command", errors.New("builder returned nil command"))
 		return
 	}
 	head.Cmd = cmd
 
-	os.WriteFile(filepath.Join(s.OutputDir, label+"_cmd.txt"),
-		[]byte(s.builder.FormatCommand(cmd)+"\n"), 0644)
+	if err := os.WriteFile(filepath.Join(s.OutputDir, label+"_cmd.txt"),
+		[]byte(s.builder.FormatCommand(cmd)+"\n"), 0o600); err != nil {
+		log.Debug().Err(err).Str("key", s.Key).Msg("write ffmpeg command debug file")
+	}
 
 	logFilePath := filepath.Join(s.OutputDir, label+"_ffmpeg.log")
-	logFile, _ := os.Create(logFilePath) //nolint:gosec // path is inside Heya's generated transcode cache directory
-	stderr := newStderrTail(maxFFmpegStderrTail)
-
-	var smbCloser io.Closer
-	if vfs.IsSMBPath(s.FilePath) {
-		reader, closer, err := OpenSMBReader(s.FilePath)
-		if err != nil {
-			log.Error().Err(err).Str("key", s.Key).Msg("open smb for head")
-			if logFile != nil {
-				logFile.Close()
-			}
-			return
-		}
-		smbCloser = closer
-		cmd.Stdin = reader
+	logFile, logFileErr := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600) //nolint:gosec // generated cache path
+	if logFileErr != nil {
+		log.Debug().Err(logFileErr).Str("key", s.Key).Msg("create ffmpeg debug log")
 	}
+	stderr := newStderrTail(maxFFmpegStderrTail)
 
 	if logFile != nil {
 		cmd.Stderr = io.MultiWriter(logFile, stderr)
@@ -446,7 +560,7 @@ func (s *TranscodeSession) runHead(ctx context.Context, head *Head, opts Transco
 
 	if progressR != nil {
 		go func() {
-			defer progressR.Close()
+			defer func() { _ = progressR.Close() }()
 			progressReader(progressR, startedAt, func(apply func(*ProgressStats)) {
 				s.mu.Lock()
 				apply(&s.progress)
@@ -467,24 +581,25 @@ func (s *TranscodeSession) runHead(ctx context.Context, head *Head, opts Transco
 		Str("debug_dir", s.OutputDir).
 		Msg(label + " starting")
 
+	var cleanupOnce sync.Once
 	cleanup := func() {
-		if smbCloser != nil {
-			smbCloser.Close()
-		}
-		if logFile != nil {
-			logFile.Close()
-		}
-		// Closing the write end signals EOF to progressReader. Errors are
-		// fine — pipe may already be closed by the child process exiting.
-		if progressW != nil {
-			progressW.Close()
-		}
-		// Mark progress as not-running on head exit so the UI can show
-		// "idle" instead of stale numbers.
-		s.mu.Lock()
-		s.progress.Running = false
-		s.mu.Unlock()
+		cleanupOnce.Do(func() {
+			if logFile != nil {
+				_ = logFile.Close()
+			}
+			// Closing the write end signals EOF to progressReader. Errors are
+			// fine — pipe may already be closed by the child process exiting.
+			if progressW != nil {
+				_ = progressW.Close()
+			}
+			// Mark progress as not-running on head exit so the UI can show
+			// "idle" instead of stale numbers.
+			s.mu.Lock()
+			s.progress.Running = false
+			s.mu.Unlock()
+		})
 	}
+	defer cleanup()
 
 	logExit := func(cmdErr error) {
 		if cmdErr != nil && ctx.Err() == nil {
@@ -504,24 +619,39 @@ func (s *TranscodeSession) runHead(ctx context.Context, head *Head, opts Transco
 	}
 
 	if s.IsFMP4() {
-		s.runHeadFMP4(ctx, head, cmd, cleanup, logExit)
+		terminalErr = s.runHeadFMP4(ctx, head, cmd, cleanup, logExit)
 	} else {
-		s.runHeadTS(ctx, head, cmd, cleanup, logExit)
+		terminalErr = s.runHeadTS(ctx, head, cmd, cleanup, logExit)
 	}
 }
 
-func (s *TranscodeSession) runHeadTS(ctx context.Context, head *Head, cmd *exec.Cmd, cleanup func(), logExit func(error)) {
+func transcodeHeadError(stage string, err error) error {
+	if err == nil {
+		return fmt.Errorf("%w: %s", ErrTranscodeFailed, stage)
+	}
+	// Multiple %w verbs let callers match both the stable category and a
+	// builder/process-specific cause when that is useful to internal tests.
+	return fmt.Errorf("%w: %s: %w", ErrTranscodeFailed, stage, err)
+}
+
+func (s *TranscodeSession) runHeadTS(ctx context.Context, head *Head, cmd *exec.Cmd, cleanup func(), logExit func(error)) error {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		log.Error().Err(err).Str("key", s.Key).Msg("stdout pipe")
 		cleanup()
-		return
+		if ctx.Err() != nil {
+			return nil
+		}
+		return transcodeHeadError("open segment output", err)
 	}
 
 	if err := cmd.Start(); err != nil {
 		log.Error().Err(err).Str("key", s.Key).Msg("ffmpeg start failed")
 		cleanup()
-		return
+		if ctx.Err() != nil {
+			return nil
+		}
+		return transcodeHeadError("start encoder", err)
 	}
 
 	scanner := bufio.NewScanner(stdout)
@@ -540,7 +670,7 @@ func (s *TranscodeSession) runHeadTS(ctx context.Context, head *Head, cmd *exec.
 
 		if segIdx > head.StartSeg && s.segmentAlreadyDone(segIdx+1) {
 			log.Info().Str("key", s.Key).Int("seg", segIdx).Msg("head reached completed territory, stopping")
-			s.setStopReason(StopReasonCompleted)
+			s.setStopReason(head, StopReasonCompleted)
 			head.Cancel()
 			break
 		}
@@ -557,43 +687,67 @@ func (s *TranscodeSession) runHeadTS(ctx context.Context, head *Head, cmd *exec.
 				Int("last_requested", lastReq).
 				Float64("lead_cap_seconds", LeadCapSeconds).
 				Msg("head exceeded lead cap, stopping")
-			s.setStopReason(StopReasonLeadCap)
+			s.setStopReason(head, StopReasonLeadCap)
 			head.Cancel()
 			break
 		}
 	}
 
+	scanErr := scanner.Err()
+	// A genuine scanner failure means stdout is no longer being drained. Kill
+	// the child before Wait or a writer blocked on that pipe could deadlock us.
+	scanFailed := scanErr != nil && ctx.Err() == nil
+	if scanFailed {
+		head.Cancel()
+	}
 	cmdErr := cmd.Wait()
 	// If we exited the scanner loop without setting a reason, it's because
 	// ffmpeg ended its stdout (natural EOF / error / killed externally).
-	s.setStopReasonIfRunning(StopReasonExited)
+	s.setStopReasonIfRunning(head, StopReasonExited)
 	cleanup()
 	logExit(cmdErr)
+	if scanFailed {
+		return transcodeHeadError("read segment output", scanErr)
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	if cmdErr != nil {
+		return transcodeHeadError("encoder exited", cmdErr)
+	}
+	return nil
 }
 
-// setStopReason unconditionally records the head's stop reason.
-func (s *TranscodeSession) setStopReason(r HeadStopReason) {
+// setStopReason records a reason only while head is still the session's
+// current head. An obsolete head can finish after a concurrent seek installs
+// its replacement and must not overwrite the replacement's running status.
+func (s *TranscodeSession) setStopReason(head *Head, r HeadStopReason) {
 	s.mu.Lock()
-	s.headStopReason = r
+	if s.head == head {
+		s.headStopReason = r
+	}
 	s.mu.Unlock()
 }
 
 // setStopReasonIfRunning only writes if the reason is still "running",
 // preventing a generic-exit reason from clobbering a more specific one
 // already set by the loop (lead cap, completed, killed).
-func (s *TranscodeSession) setStopReasonIfRunning(r HeadStopReason) {
+func (s *TranscodeSession) setStopReasonIfRunning(head *Head, r HeadStopReason) {
 	s.mu.Lock()
-	if s.headStopReason == StopReasonRunning {
+	if s.head == head && s.headStopReason == StopReasonRunning {
 		s.headStopReason = r
 	}
 	s.mu.Unlock()
 }
 
-func (s *TranscodeSession) runHeadFMP4(ctx context.Context, head *Head, cmd *exec.Cmd, cleanup func(), logExit func(error)) {
+func (s *TranscodeSession) runHeadFMP4(ctx context.Context, head *Head, cmd *exec.Cmd, cleanup func(), logExit func(error)) error {
 	if err := cmd.Start(); err != nil {
 		log.Error().Err(err).Str("key", s.Key).Msg("ffmpeg start failed")
 		cleanup()
-		return
+		if ctx.Err() != nil {
+			return nil
+		}
+		return transcodeHeadError("start encoder", err)
 	}
 
 	waitDone := make(chan error, 1)
@@ -601,8 +755,19 @@ func (s *TranscodeSession) runHeadFMP4(ctx context.Context, head *Head, cmd *exe
 
 	watcher, werr := fsnotify.NewWatcher()
 	if werr == nil {
-		defer watcher.Close()
-		watcher.Add(s.OutputDir)
+		if err := watcher.Add(s.OutputDir); err != nil {
+			log.Warn().Err(err).Str("key", s.Key).Msg("watch transcode output directory; polling only")
+			if closeErr := watcher.Close(); closeErr != nil {
+				log.Debug().Err(closeErr).Str("key", s.Key).Msg("close unused transcode watcher")
+			}
+			watcher = nil
+		} else {
+			defer func() {
+				if err := watcher.Close(); err != nil {
+					log.Debug().Err(err).Str("key", s.Key).Msg("close transcode watcher")
+				}
+			}()
+		}
 	} else {
 		log.Warn().Err(werr).Str("key", s.Key).Msg("fsnotify watcher unavailable, polling only")
 	}
@@ -620,21 +785,27 @@ func (s *TranscodeSession) runHeadFMP4(ctx context.Context, head *Head, cmd *exe
 
 		select {
 		case <-ctx.Done():
-			<-waitDone
+			cmdErr := <-waitDone
 			s.reconcileSegmentsFromFS(head)
 			// Reason was set by whoever called Cancel (lead cap / completed /
 			// killHead). Default to "exited" only if nothing did.
-			s.setStopReasonIfRunning(StopReasonExited)
+			s.setStopReasonIfRunning(head, StopReasonExited)
 			cleanup()
-			logExit(nil)
-			return
+			logExit(cmdErr)
+			return nil
 
 		case cmdErr := <-waitDone:
 			s.reconcileSegmentsFromFS(head)
-			s.setStopReasonIfRunning(StopReasonExited)
+			s.setStopReasonIfRunning(head, StopReasonExited)
 			cleanup()
 			logExit(cmdErr)
-			return
+			if ctx.Err() != nil {
+				return nil
+			}
+			if cmdErr != nil {
+				return transcodeHeadError("encoder exited", cmdErr)
+			}
+			return nil
 
 		case ev := <-fsEvents:
 			if !ev.Has(fsnotify.Create) && !ev.Has(fsnotify.Rename) {
@@ -655,7 +826,7 @@ func (s *TranscodeSession) runHeadFMP4(ctx context.Context, head *Head, cmd *exe
 			s.setHeadCurrent(head, idx)
 			if idx > head.StartSeg && s.segmentAlreadyDone(idx+1) {
 				log.Info().Str("key", s.Key).Int("seg", idx).Msg("head reached completed territory, stopping")
-				s.setStopReason(StopReasonCompleted)
+				s.setStopReason(head, StopReasonCompleted)
 				head.Cancel()
 			}
 			// Lead-cap throttle (fMP4 path). Mirrors the TS path above.
@@ -670,7 +841,7 @@ func (s *TranscodeSession) runHeadFMP4(ctx context.Context, head *Head, cmd *exe
 					Int("last_requested", lastReq).
 					Float64("lead_cap_seconds", LeadCapSeconds).
 					Msg("head exceeded lead cap, stopping")
-				s.setStopReason(StopReasonLeadCap)
+				s.setStopReason(head, StopReasonLeadCap)
 				head.Cancel()
 			}
 
@@ -749,6 +920,7 @@ func (s *TranscodeSession) segmentAlreadyDone(idx int) bool {
 func (s *TranscodeSession) Kill() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.closed = true
 	s.killHead()
 }
 
@@ -772,34 +944,56 @@ type SessionManager struct {
 	builder CommandBuilder
 
 	mu          sync.Mutex
+	closed      bool
 	sessions    map[string]*TranscodeSession
+	createWG    sync.WaitGroup     // admitted under mu; Close sets closed before Wait
 	creating    singleflight.Group // deduplicate concurrent creation for the same session key
 	cleanupStop chan struct{}
+	cleanupDone chan struct{}
 	cleanupOnce sync.Once
+	closeOnce   sync.Once
 }
 
 func NewSessionManager(cache *CacheManager, hwAccel *HwAccelProvider, builder CommandBuilder) *SessionManager {
-	cache.Clear()
 	sm := &SessionManager{
 		cache:       cache,
 		hwAccel:     hwAccel,
 		builder:     builder,
 		sessions:    make(map[string]*TranscodeSession),
 		cleanupStop: make(chan struct{}),
+		cleanupDone: make(chan struct{}),
 	}
 	go sm.cleanupLoop()
 	return sm
 }
 
 func (m *SessionManager) Close() {
-	m.cleanupOnce.Do(func() { close(m.cleanupStop) })
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for key, s := range m.sessions {
-		s.Kill()
-		_ = os.RemoveAll(s.OutputDir)
-		delete(m.sessions, key)
+	if m == nil {
+		return
 	}
+	m.closeOnce.Do(func() {
+		// Publish the terminal state and detach every visible session before
+		// waiting on process teardown. A createSession already computing outside
+		// this lock will observe closed before it can reserve a cache directory or
+		// publish itself into the map.
+		m.mu.Lock()
+		m.closed = true
+		sessions := make([]*TranscodeSession, 0, len(m.sessions))
+		for key, session := range m.sessions {
+			delete(m.sessions, key)
+			sessions = append(sessions, session)
+		}
+		m.mu.Unlock()
+
+		m.cleanupOnce.Do(func() { close(m.cleanupStop) })
+		<-m.cleanupDone
+		// A create may already have published its replacement and be reaping the
+		// evicted ffmpeg outside m.mu. Join it before declaring process/cache
+		// ownership fully closed.
+		m.createWG.Wait()
+
+		m.disposeDetachedSessions(sessions)
+	})
 }
 
 func FormatKey(fileID int64, audioTrack int, sessionID string) string {
@@ -811,6 +1005,14 @@ func FormatKey(fileID int64, audioTrack int, sessionID string) string {
 
 func (m *SessionManager) HWAccel() HwAccelConfig {
 	return m.hwAccel.Get()
+}
+
+// ConfigureHWAccel applies a new mode to sessions created from this point on.
+// Running sessions already hold an immutable resolved config.
+func (m *SessionManager) ConfigureHWAccel(configured string) {
+	if m != nil && m.hwAccel != nil {
+		m.hwAccel.Configure(configured)
+	}
 }
 
 func (m *SessionManager) GetExisting(fileID int64) *TranscodeSession {
@@ -856,12 +1058,28 @@ func (m *SessionManager) GetOrCreate(ctx context.Context, fileID int64, filePath
 	// The playlist, init-segment and first media-segment requests arrive
 	// concurrently. Coalesce them so they all share one resulting session.
 	value, _, _ := m.creating.Do(key, func() (any, error) {
-		return m.createSession(ctx, key, fileID, filePath, opts, duration, kf), nil
+		if !m.beginCreate() {
+			// Preserve the historical return shape after Close. createSession sees
+			// the terminal flag and builds only an unpublished closed value.
+			return m.createSession(ctx, fileID, key, filePath, opts, duration, kf), nil
+		}
+		defer m.createWG.Done()
+		return m.createSession(ctx, fileID, key, filePath, opts, duration, kf), nil
 	})
 	return value.(*TranscodeSession)
 }
 
-func (m *SessionManager) createSession(ctx context.Context, key string, fileID int64, filePath string, opts TranscodeOpts, duration float64, kf *Keyframes) *TranscodeSession {
+func (m *SessionManager) beginCreate() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return false
+	}
+	m.createWG.Add(1)
+	return true
+}
+
+func (m *SessionManager) createSession(ctx context.Context, fileID int64, key, filePath string, opts TranscodeOpts, duration float64, kf *Keyframes) *TranscodeSession {
 	// A session may have appeared between GetOrCreate's fast-path check and
 	// this singleflight function starting.
 	if s := m.existingSession(key); s != nil {
@@ -884,8 +1102,6 @@ func (m *SessionManager) createSession(ctx context.Context, key string, fileID i
 		totalSegs = 1
 	}
 
-	outputDir := m.cache.SegmentDir(key)
-
 	segments := make([]*segReady, totalSegs)
 	for i := range segments {
 		segments[i] = newSegReady()
@@ -901,7 +1117,6 @@ func (m *SessionManager) createSession(ctx context.Context, key string, fileID i
 	session := &TranscodeSession{
 		Key:         key,
 		FilePath:    filePath,
-		OutputDir:   outputDir,
 		SegExt:      segExt,
 		segPathFmt:  segPathFmt,
 		Duration:    duration,
@@ -915,34 +1130,50 @@ func (m *SessionManager) createSession(ctx context.Context, key string, fileID i
 
 	m.mu.Lock()
 	// Re-check: a concurrent caller may have raced us to create this exact
-	// session (or a same-file/different-key one needing eviction) while we
-	// were computing boundaries without the lock held.
+	// session while we were computing boundaries without the lock held.
 	if s, ok := m.sessions[key]; ok {
 		s.Touch()
 		m.mu.Unlock()
 		return s
 	}
+	if m.closed {
+		// The manager may have closed while this singleflight call was computing
+		// segment boundaries. Return a terminal, unpublished session: callers
+		// already in flight receive the normal typed closed-session error, and no
+		// cache directory or ffmpeg process can outlive SessionManager.Close.
+		session.closed = true
+		m.mu.Unlock()
+		return session
+	}
+	// Heya deliberately admits only one live HLS session per source file for
+	// now. Session IDs make segment/status routing exact, but they are supplied
+	// by the client and therefore must not silently become an unbounded ffmpeg
+	// concurrency control. A future multi-viewer implementation should replace
+	// this eviction with explicit global/per-principal admission.
 	prefix := fmt.Sprintf("%d:", fileID)
 	var evicted []*TranscodeSession
-	for k, s := range m.sessions {
-		if strings.HasPrefix(k, prefix) {
-			evicted = append(evicted, s)
-			delete(m.sessions, k)
+	for existingKey, existing := range m.sessions {
+		if strings.HasPrefix(existingKey, prefix) {
+			delete(m.sessions, existingKey)
+			evicted = append(evicted, existing)
 		}
 	}
-	// MkdirAll inside the lock on purpose: SegmentDir is key-derived, and
-	// cleanupLoop's map-check + RemoveAll for dead sessions runs under this
-	// same mutex — creating the directory and inserting the session as one
-	// critical section is what makes that check race-free.
-	os.MkdirAll(outputDir, 0755)
+	// Directory creation and the eviction pin are one CacheManager critical
+	// section, nested inside the map insertion critical section. The session's
+	// OutputDir is therefore protected before it becomes visible to callers
+	// and stays protected for its entire map lifetime.
+	lease, reserveErr := m.cache.reserveSegmentDir(key)
+	session.OutputDir = lease.Path()
+	session.cacheLease = lease
 	m.sessions[key] = session
 	m.mu.Unlock()
 
-	// Kill evicted same-file sessions outside the lock: killHead blocks
-	// until their ffmpeg is reaped, and their output dirs are distinct from
-	// ours, so nothing here needs the mutex.
-	for _, s := range evicted {
-		s.Kill()
+	m.disposeDetachedSessions(evicted)
+	if reserveErr != nil {
+		// Preserve the historical constructor contract (GetOrCreate returns a
+		// session); runHead retries mkdir and reports a typed transcode error if
+		// the storage failure is persistent.
+		log.Warn().Err(reserveErr).Str("key", key).Msg("reserve transcode output directory")
 	}
 
 	log.Info().
@@ -955,6 +1186,30 @@ func (m *SessionManager) createSession(ctx context.Context, key string, fileID i
 		Msg("session created")
 
 	return session
+}
+
+// disposeDetachedSessions finishes sessions already removed from m.sessions.
+// Process reaping stays outside m.mu, but same-key directory removal must be
+// atomic with createSession publication: a client can retry an evicted sid
+// while Kill waits, recreating the exact key-derived cache path.
+func (m *SessionManager) disposeDetachedSessions(detached []*TranscodeSession) {
+	for _, session := range detached {
+		session.Kill()
+	}
+	if len(detached) == 0 {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, session := range detached {
+		current, recreated := m.sessions[session.Key]
+		if !recreated || current.OutputDir != session.OutputDir {
+			_ = os.RemoveAll(session.OutputDir)
+		}
+		// A same-key replacement has its own incremented cache pin, so releasing
+		// this exact old lease cannot expose the replacement to LRU eviction.
+		session.cacheLease.Release()
+	}
 }
 
 // existingSession returns the already-live session for key, if any, touching
@@ -972,6 +1227,7 @@ func (m *SessionManager) existingSession(key string) *TranscodeSession {
 }
 
 func (m *SessionManager) cleanupLoop() {
+	defer close(m.cleanupDone)
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -980,11 +1236,7 @@ func (m *SessionManager) cleanupLoop() {
 		case <-m.cleanupStop:
 			return
 		}
-		type deadSession struct {
-			key string
-			s   *TranscodeSession
-		}
-		var idle []deadSession
+		var idle []*TranscodeSession
 		m.mu.Lock()
 		for key, s := range m.sessions {
 			s.mu.Lock()
@@ -994,30 +1246,12 @@ func (m *SessionManager) cleanupLoop() {
 			if idleFor > 2*time.Minute {
 				log.Info().Str("key", key).Dur("idle", idleFor).Msg("cleaning up idle session")
 				delete(m.sessions, key)
-				idle = append(idle, deadSession{key: key, s: s})
+				idle = append(idle, s)
 			}
 		}
 		m.mu.Unlock()
 
-		// Kill outside m.mu: killHead blocks until the ffmpeg process is
-		// reaped — indefinitely if the source filesystem has wedged it in
-		// D-state — and holding the manager lock through that freezes
-		// GetOrCreate/GetExisting, i.e. every new playback request.
-		for _, d := range idle {
-			d.s.Kill()
-		}
-		// Directory removal goes back under m.mu: SegmentDir is key-derived,
-		// so the absent-from-map check and the RemoveAll must be atomic with
-		// createSession's MkdirAll+insert critical section, or we could
-		// delete the directory of a just-recreated same-key session. Local
-		// disk I/O, same cost the old code paid under the lock.
-		m.mu.Lock()
-		for _, d := range idle {
-			if _, exists := m.sessions[d.key]; !exists {
-				os.RemoveAll(d.s.OutputDir)
-			}
-		}
-		m.mu.Unlock()
+		m.disposeDetachedSessions(idle)
 
 		// Enforce the on-disk cache size cap. Without this the configured
 		// maxSizeGB was never applied (EvictLRU had no caller), so the
@@ -1036,43 +1270,4 @@ func (m *SessionManager) cleanupLoop() {
 			}
 		}
 	}
-}
-
-func OpenSMBReader(smbPath string) (io.Reader, io.Closer, error) {
-	lastSlash := strings.LastIndex(smbPath, "/")
-	if lastSlash < 0 {
-		return nil, nil, fmt.Errorf("invalid smb path: %s", smbPath)
-	}
-
-	source, err := vfs.Open(smbPath[:lastSlash])
-	if err != nil {
-		return nil, nil, fmt.Errorf("open smb dir: %w", err)
-	}
-
-	f, err := source.FS.Open(smbPath[lastSlash+1:])
-	if err != nil {
-		source.Close()
-		return nil, nil, fmt.Errorf("open smb file: %w", err)
-	}
-
-	reader, ok := f.(io.Reader)
-	if !ok {
-		_ = f.Close()
-		_ = source.Close()
-		return nil, nil, fmt.Errorf("smb file does not implement io.Reader: %s", smbPath)
-	}
-
-	closer := &multiCloser{closeFuncs: []func() error{f.Close, source.Close}}
-	return reader, closer, nil
-}
-
-type multiCloser struct {
-	closeFuncs []func() error
-}
-
-func (mc *multiCloser) Close() error {
-	for _, fn := range mc.closeFuncs {
-		fn()
-	}
-	return nil
 }

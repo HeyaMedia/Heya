@@ -13,11 +13,11 @@ import (
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/matcher"
+	"github.com/karbowiak/heya/internal/mediaanalysis"
 	"github.com/karbowiak/heya/internal/metadata"
 	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
-	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/rs/zerolog/log"
@@ -42,17 +42,16 @@ type EventPublisher interface {
 }
 
 type Config struct {
-	DB             *pgxpool.Pool
-	DataDir        string
-	HeyaMetadata   *heyametadata.Client
-	Heya           *heyametadata.HeyaProvider
-	AcoustID       *acoustid.Client
-	Segments       *communitysegments.Service
-	Matcher        MatchService
-	Downloader     *images.Downloader
-	TranscodeCache *transcoder.CacheManager
-	HWAccel        *transcoder.HwAccelProvider
-	Hub            EventPublisher
+	DB            *pgxpool.Pool
+	DataDir       string
+	HeyaMetadata  *heyametadata.Client
+	Heya          *heyametadata.HeyaProvider
+	AcoustID      *acoustid.Client
+	Segments      *communitysegments.Service
+	Matcher       MatchService
+	Downloader    *images.Downloader
+	MediaAnalysis *mediaanalysis.Service
+	Hub           EventPublisher
 	// SonicHolder is the singleton CLAP/Discogs model lessor used by
 	// the analyze_track_facets worker. Nil when sonic analysis is
 	// disabled — the worker errors fast in that case.
@@ -128,8 +127,8 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	river.AddWorker(workers, &EnrichMediaItemWorker{DB: cfg.DB, Matcher: cfg.Matcher, Heya: cfg.Heya, Hub: cfg.Hub, DataDir: cfg.DataDir, Progress: cfg.Progress})
 	river.AddWorker(workers, &DownloadImageWorker{DB: cfg.DB, Downloader: cfg.Downloader, Hub: cfg.Hub, Progress: cfg.Progress})
 	river.AddWorker(workers, &WarmPendingImagesWorker{DB: cfg.DB, DataDir: cfg.DataDir})
-	river.AddWorker(workers, &FFProbeWorker{DB: cfg.DB, Progress: cfg.Progress})
-	river.AddWorker(workers, &ScanKeyframesWorker{DB: cfg.DB, Progress: cfg.Progress})
+	river.AddWorker(workers, &FFProbeWorker{DB: cfg.DB, Analysis: cfg.MediaAnalysis, Progress: cfg.Progress})
+	river.AddWorker(workers, &ScanKeyframesWorker{Analysis: cfg.MediaAnalysis, Progress: cfg.Progress})
 	river.AddWorker(workers, &DetectLocalAssetsWorker{DB: cfg.DB, DataDir: cfg.DataDir, Hub: cfg.Hub, Progress: cfg.Progress})
 	river.AddWorker(workers, &PersonFetchWorker{DB: cfg.DB, HeyaMetadata: cfg.HeyaMetadata, Progress: cfg.Progress})
 	river.AddWorker(workers, &FetchArtworkWorker{DB: cfg.DB, Heya: cfg.Heya, Progress: cfg.Progress})
@@ -138,10 +137,10 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	river.AddWorker(workers, &SaveImagesWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &ForceRefreshMetadataWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &ForceRefreshImagesWorker{DB: cfg.DB, Progress: cfg.Progress})
-	river.AddWorker(workers, &TranscodeWorker{DB: cfg.DB, Cache: cfg.TranscodeCache, HWAccel: cfg.HWAccel, Progress: cfg.Progress})
+	river.AddWorker(workers, &TranscodeWorker{Progress: cfg.Progress})
 	river.AddWorker(workers, &SoftDeleteWorker{DB: cfg.DB, Hub: cfg.Hub, Progress: cfg.Progress})
 	river.AddWorker(workers, &SaveMusicNFOWorker{DB: cfg.DB, Progress: cfg.Progress})
-	river.AddWorker(workers, &ScanTrackLoudnessWorker{DB: cfg.DB, Progress: cfg.Progress})
+	river.AddWorker(workers, &ScanTrackLoudnessWorker{DB: cfg.DB, Analysis: cfg.MediaAnalysis, Progress: cfg.Progress})
 	river.AddWorker(workers, &ScanAlbumLoudnessWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &ScanTrackFingerprintWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &ScanMediaSegmentsFileWorker{DB: cfg.DB, Segments: cfg.Segments, Progress: cfg.Progress})
@@ -396,7 +395,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 		// Per-job context deadline. River's default JobTimeout is 1
 		// MINUTE — it silently wraps every Work(ctx) in a 60s
 		// context.WithTimeout, which killed essentially every heavy job
-		// here (SMB library scans, the 30-minute sonic model fetch,
+		// here (network-mounted library scans, the 30-minute sonic model fetch,
 		// loudness/transcode/trickplay/disk-walk) with "context deadline
 		// exceeded". queueops.JobTimeout (6h) is a generous ceiling no
 		// legitimate single job should hit; real bounds live where they

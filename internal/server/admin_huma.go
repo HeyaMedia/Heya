@@ -56,7 +56,7 @@ func registerAdminRoutes(api huma.API, app *service.App, buf *logbuf.RingBuffer)
 	// --- Sonic analysis ---
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/admin/sonicanalysis/status", "sonic-analysis-status", "Sonic-analysis runtime status", "Admin")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[map[string]any], error) {
-			return noStoreJSON(collectSonicAnalysisStatus(app)), nil
+			return noStoreJSON(collectSonicAnalysisStatus(ctx, app)), nil
 		})
 
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/admin/sonicanalysis/settings", "get-sonic-analysis-settings", "Sonic-analysis settings", "Admin")),
@@ -88,10 +88,9 @@ func registerAdminRoutes(api huma.API, app *service.App, buf *logbuf.RingBuffer)
 			if f == nil {
 				return nil, huma.Error503ServiceUnavailable("model fetcher not available")
 			}
-			// Detach from the request context — fetches take minutes; let the
-			// request return immediately. Bound to app lifetime so a graceful
-			// shutdown cancels in-flight downloads.
-			go func() { _ = f.Run(app.LifetimeContext()) }()
+			if !app.TriggerSonicAnalysisFetch() {
+				return nil, huma.Error503ServiceUnavailable("application is shutting down")
+			}
 			return statusOK("started"), nil
 		})
 
@@ -118,13 +117,17 @@ func registerAdminRoutes(api huma.API, app *service.App, buf *logbuf.RingBuffer)
 
 	huma.Register(api, adminSecured(op(http.MethodPost, "/api/admin/recommendations-ml/backfill", "recommendations-ml-backfill", "Re-embed the catalog", "Admin")),
 		func(ctx context.Context, _ *struct{}) (*StatusOutput, error) {
-			go func() { _, _, _ = app.BackfillVideoEmbeddings(app.LifetimeContext(), false) }()
+			if !app.TriggerRecommendationsMLBackfill(false) {
+				return nil, huma.Error503ServiceUnavailable("application is shutting down")
+			}
 			return statusOK("started"), nil
 		})
 
 	huma.Register(api, adminSecured(op(http.MethodPost, "/api/admin/recommendations-ml/fetch", "recommendations-ml-fetch", "Download the embedding model", "Admin")),
 		func(ctx context.Context, _ *struct{}) (*StatusOutput, error) {
-			app.TriggerRecommendationsMLFetch(app.LifetimeContext())
+			if !app.TriggerRecommendationsMLFetch() {
+				return nil, huma.Error503ServiceUnavailable("application is shutting down")
+			}
 			return statusOK("started"), nil
 		})
 

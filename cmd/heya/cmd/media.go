@@ -133,12 +133,13 @@ func renderMovieDetail(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItem
 		ui.Info("Rating", fmt.Sprintf("%.1f/10", f.Float64))
 	}
 	var extIDs map[string]string
-	json.Unmarshal(item.ExternalIds, &extIDs)
-	if extIDs["imdb"] != "" {
-		ui.Info("IMDB", extIDs["imdb"])
-	}
-	if extIDs["tmdb"] != "" {
-		ui.Info("TMDB", extIDs["tmdb"])
+	if err := json.Unmarshal(item.ExternalIds, &extIDs); err == nil {
+		if extIDs["imdb"] != "" {
+			ui.Info("IMDB", extIDs["imdb"])
+		}
+		if extIDs["tmdb"] != "" {
+			ui.Info("TMDB", extIDs["tmdb"])
+		}
 	}
 	if movie.Budget > 0 {
 		ui.Info("Budget", formatMoney(movie.Budget))

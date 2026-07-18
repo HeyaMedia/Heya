@@ -6,6 +6,8 @@ import (
 	"io"
 	"os/exec"
 	"strconv"
+
+	"github.com/karbowiak/heya/internal/vfs"
 )
 
 // pcmFormat is what every current transport consumes: cliap2's default
@@ -29,6 +31,9 @@ type pcmFeeder struct {
 // its StartAt offset. `-ss` before `-i` seeks on the demuxer — fast and
 // accurate enough for music.
 func newPCMFeeder(ctx context.Context, track TrackInfo) (*pcmFeeder, error) {
+	if err := vfs.ValidateLocalPath(track.Path); err != nil {
+		return nil, fmt.Errorf("cast audio input: %w", err)
+	}
 	// -re paces the decode at playback rate. Load-bearing, not an
 	// optimization: cliap2's ACTION=PAUSE only stops *reading stdin* —
 	// with an unthrottled feeder the entire track is already inside its

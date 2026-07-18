@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/transcoder"
-	"github.com/karbowiak/heya/internal/worker"
 )
 
 // registerStreamRoutes covers the JSON read-side of streaming: probe info,
@@ -64,7 +64,7 @@ func registerStreamRoutes(api huma.API, app *service.App) {
 			caps.SupportsDoVi = in.SupportsDoVi
 			caps.SupportsHEVCHev1 = in.SupportsHEVCHev1
 
-			var info worker.MediaInfo
+			var info mediaprobe.MediaInfo
 			if len(file.MediaInfo) > 0 {
 				_ = json.Unmarshal(file.MediaInfo, &info)
 			}
@@ -78,7 +78,9 @@ func registerStreamRoutes(api huma.API, app *service.App) {
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/stream/{file_id}/transcode-status", "stream-transcode-status", "Live ffmpeg session telemetry", "Streaming")),
 		func(ctx context.Context, in *struct {
-			FileID string `path:"file_id" maxLength:"64"`
+			FileID  string `path:"file_id" maxLength:"64"`
+			Audio   int    `query:"audio" minimum:"0" doc:"Zero-based audio track used by the HLS session"`
+			Session string `query:"sid" maxLength:"128" doc:"Playback session id carried by the HLS manifest"`
 		}) (*JSONOutput[transcodeProgressResponse], error) {
 			fileID, ok := app.ResolveLibraryFileID(ctx, in.FileID)
 			if !ok {
@@ -88,7 +90,7 @@ func registerStreamRoutes(api huma.API, app *service.App) {
 			if sessions == nil {
 				return noStoreJSON(transcodeProgressResponse{Active: false}), nil
 			}
-			sess := sessions.GetExisting(fileID)
+			sess := sessions.GetExistingSession(fileID, in.Audio, in.Session)
 			if sess == nil {
 				return noStoreJSON(transcodeProgressResponse{Active: false, State: "idle"}), nil
 			}
@@ -148,7 +150,7 @@ func registerStreamRoutes(api huma.API, app *service.App) {
 			if err != nil {
 				return nil, huma.Error404NotFound("file not found")
 			}
-			var info worker.MediaInfo
+			var info mediaprobe.MediaInfo
 			if len(file.MediaInfo) > 0 {
 				_ = json.Unmarshal(file.MediaInfo, &info)
 			}

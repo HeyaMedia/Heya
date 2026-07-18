@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"image"
@@ -206,12 +207,36 @@ func TestMetadataEditorCustomBackdropUploadMakesRoomForPrimary(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	result, err := app.UploadMediaAsset(ctx, item.ID, strings.NewReader("not-a-real-image"), "custom.jpg", "backdrop", "")
+	var upload bytes.Buffer
+	require.NoError(t, png.Encode(&upload, image.NewRGBA(image.Rect(0, 0, 4, 3))))
+	result, err := app.UploadMediaAsset(ctx, item.ID, &upload, "backdrop", "")
 	require.NoError(t, err)
 	require.NotNil(t, result.Asset)
 	require.Equal(t, "custom", result.Asset.Source)
+	require.Equal(t, int32(4), result.Asset.Width)
+	require.Equal(t, int32(3), result.Asset.Height)
+	require.Equal(t, ".png", filepath.Ext(result.Asset.LocalPath))
 	require.Equal(t, int32(0), result.Asset.SortOrder)
 	require.FileExists(t, result.Asset.LocalPath)
+
+	secondImage := image.NewRGBA(image.Rect(0, 0, 7, 5))
+	for y := 0; y < 5; y++ {
+		for x := 0; x < 7; x++ {
+			if (x+y)%2 == 0 {
+				secondImage.Set(x, y, color.White)
+			}
+		}
+	}
+	var secondUpload bytes.Buffer
+	require.NoError(t, png.Encode(&secondUpload, secondImage))
+	secondResult, err := app.UploadMediaAsset(ctx, item.ID, &secondUpload, "backdrop", "")
+	require.NoError(t, err)
+	require.NotNil(t, secondResult.Asset)
+	require.NotEqual(t, result.Asset.LocalPath, secondResult.Asset.LocalPath)
+	require.FileExists(t, result.Asset.LocalPath)
+	require.FileExists(t, secondResult.Asset.LocalPath)
+	result = secondResult
+
 	servedPath, ok := app.GetMediaImagePath(ctx, item.ID, "backdrop", 0, "")
 	require.True(t, ok)
 	require.Equal(t, result.Asset.LocalPath, servedPath)
@@ -220,10 +245,25 @@ func TestMetadataEditorCustomBackdropUploadMakesRoomForPrimary(t *testing.T) {
 		MediaItemID: item.ID, AssetType: sqlc.AssetTypeBackdrop,
 	})
 	require.NoError(t, err)
-	require.Len(t, backdrops, 3)
+	require.Len(t, backdrops, 4)
 	for i := range backdrops {
 		require.Equal(t, int32(i), backdrops[i].SortOrder)
 	}
+}
+
+func TestImageAssetLabelValidationAndFilename(t *testing.T) {
+	t.Parallel()
+	require.ErrorIs(t, validateImageAssetLabel(strings.Repeat("x", maxImageAssetLabelRunes+1)), ErrInvalidImageUpload)
+	require.ErrorIs(t, validateImageAssetLabel("season\n1"), ErrInvalidImageUpload)
+	require.NoError(t, validateImageAssetLabel("Season 1 / Director's Cut"))
+	name := customImageAssetFilename("poster", "Season 1 / Director's Cut", ".png")
+	require.Equal(t, ".png", filepath.Ext(name))
+	require.NotContains(t, name, "/")
+	require.Less(t, len(name), 64)
+	firstBackdrop := customImageAssetFilename("backdrop", "", ".png")
+	secondBackdrop := customImageAssetFilename("backdrop", "", ".png")
+	require.NotEqual(t, firstBackdrop, secondBackdrop)
+	require.Equal(t, ".png", filepath.Ext(firstBackdrop))
 }
 
 func TestMaterializedBackdropsDeduplicateToBestResolution(t *testing.T) {

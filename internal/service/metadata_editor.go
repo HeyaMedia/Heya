@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,12 +12,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
+	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/metadata"
 	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/karbowiak/heya/internal/worker"
@@ -1315,9 +1319,19 @@ type UploadMediaAssetResult struct {
 	Path  string           `json:"path,omitempty"`
 }
 
+var ErrInvalidImageUpload = errors.New("invalid image upload")
+
+const (
+	maxImageAssetLabelBytes = 512
+	maxImageAssetLabelRunes = 128
+)
+
 // UploadMediaAsset saves an uploaded file to disk and creates a media asset record.
-func (a *App) UploadMediaAsset(ctx context.Context, mediaItemID int64, file io.Reader, filename, assetType, label string) (UploadMediaAssetResult, error) {
+func (a *App) UploadMediaAsset(ctx context.Context, mediaItemID int64, file io.Reader, assetType, label string) (UploadMediaAssetResult, error) {
 	q := sqlc.New(a.db)
+	if err := validateImageAssetLabel(label); err != nil {
+		return UploadMediaAssetResult{}, err
+	}
 	validImageType := false
 	for _, candidate := range []sqlc.AssetType{
 		sqlc.AssetTypePoster, sqlc.AssetTypeBackdrop, sqlc.AssetTypeLogo,
@@ -1330,7 +1344,7 @@ func (a *App) UploadMediaAsset(ctx context.Context, mediaItemID int64, file io.R
 		}
 	}
 	if !validImageType {
-		return UploadMediaAssetResult{}, fmt.Errorf("unsupported image type %q", assetType)
+		return UploadMediaAssetResult{}, fmt.Errorf("%w: unsupported image type %q", ErrInvalidImageUpload, assetType)
 	}
 
 	item, err := q.GetMediaItemByID(ctx, mediaItemID)
@@ -1343,15 +1357,6 @@ func (a *App) UploadMediaAsset(ctx context.Context, mediaItemID int64, file io.R
 		dirName = item.Slug
 	}
 
-	ext := filepath.Ext(filepath.Base(filename))
-	if ext == "" {
-		ext = ".jpg"
-	}
-	destFilename := fmt.Sprintf("custom_%s%s", assetType, ext)
-	if label != "" {
-		destFilename = fmt.Sprintf("custom_%s_%s%s", assetType, strings.NewReplacer("/", "-", "\\", "-").Replace(label), ext)
-	}
-
 	cacheRoot, err := filepath.Abs(filepath.Join(a.config.DataDir.Value, "images"))
 	if err != nil {
 		return UploadMediaAssetResult{}, fmt.Errorf("resolve image cache: %w", err)
@@ -1361,21 +1366,25 @@ func (a *App) UploadMediaAsset(ctx context.Context, mediaItemID int64, file io.R
 		return UploadMediaAssetResult{}, fmt.Errorf("create image cache directory: %w", err)
 	}
 
-	localPath := filepath.Join(dirPath, destFilename)
-	// localPath is constructed from the absolute managed cache root, a closed
-	// asset-type enum, a path-separator-free slug, and a basename extension.
-	// #nosec G304 -- the components above cannot escape cacheRoot.
-	dst, err := os.Create(localPath)
+	staged, err := images.StageRasterContext(ctx, dirPath, file)
 	if err != nil {
-		return UploadMediaAssetResult{}, fmt.Errorf("failed to save file: %w", err)
+		return UploadMediaAssetResult{}, fmt.Errorf("%w: %w", ErrInvalidImageUpload, err)
 	}
+	defer func() { _ = staged.Rollback() }()
 
-	size, err := io.Copy(dst, file)
-	if closeErr := dst.Close(); err == nil {
-		err = closeErr
-	}
+	// The logical asset key is independent of the decoded extension. Keep the
+	// replacement lookup, publication, DB transaction, and stale-file cleanup
+	// together so concurrent PNG/JPEG uploads cannot strand either format.
+	a.mediaAssetUploadMu.Lock()
+	defer a.mediaAssetUploadMu.Unlock()
+	destFilename := customImageAssetFilename(assetType, label, staged.Info.Extension)
+	localPath := filepath.Join(dirPath, destFilename)
+	replacedPaths, err := replacedImageAssetPaths(ctx, q, mediaItemID, assetType, label)
 	if err != nil {
-		return UploadMediaAssetResult{}, fmt.Errorf("failed to write file: %w", err)
+		return UploadMediaAssetResult{}, fmt.Errorf("inspect replaced image assets: %w", err)
+	}
+	if err := staged.Publish(localPath); err != nil {
+		return UploadMediaAssetResult{}, fmt.Errorf("publish uploaded image: %w", err)
 	}
 
 	var asset sqlc.MediaAsset
@@ -1384,7 +1393,7 @@ func (a *App) UploadMediaAsset(ctx context.Context, mediaItemID int64, file io.R
 			var replaceErr error
 			asset, replaceErr = txq.ReplacePrimaryMediaAsset(ctx, sqlc.ReplacePrimaryMediaAssetParams{
 				MediaItemID: mediaItemID, AssetType: sqlc.AssetType(assetType), Source: "custom",
-				LocalPath: localPath, FileSize: size,
+				LocalPath: localPath, Width: int32(staged.Info.Width), Height: int32(staged.Info.Height), FileSize: staged.Info.Size,
 			})
 			return replaceErr
 		}
@@ -1415,18 +1424,27 @@ func (a *App) UploadMediaAsset(ctx context.Context, mediaItemID int64, file io.R
 		var createErr error
 		asset, createErr = txq.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
 			MediaItemID: mediaItemID, AssetType: sqlc.AssetType(assetType), Source: "custom",
-			LocalPath: localPath, Label: label, SortOrder: sortOrder, FileSize: size,
+			LocalPath: localPath, Label: label, SortOrder: sortOrder,
+			Width: int32(staged.Info.Width), Height: int32(staged.Info.Height), FileSize: staged.Info.Size,
 		})
 		return createErr
 	})
 	if err != nil {
-		return UploadMediaAssetResult{Path: localPath}, fmt.Errorf("record uploaded image: %w", err)
+		return UploadMediaAssetResult{}, fmt.Errorf("record uploaded image: %w", err)
+	}
+	if err := staged.Commit(); err != nil {
+		return UploadMediaAssetResult{}, fmt.Errorf("commit uploaded image: %w", err)
 	}
 	if representative, _, fingerprintErr := worker.MaterializeMediaAsset(ctx, a.db, asset, localPath, filepath.Join(a.config.DataDir.Value, "images")); fingerprintErr != nil {
 		return UploadMediaAssetResult{Path: localPath}, fmt.Errorf("fingerprint uploaded image: %w", fingerprintErr)
 	} else {
 		asset = representative
 		localPath = representative.LocalPath
+	}
+	for _, replacedPath := range replacedPaths {
+		if filepath.Clean(replacedPath) != filepath.Clean(localPath) {
+			removeUnreferencedUploadedImage(ctx, a, cacheRoot, replacedPath)
+		}
 	}
 	if assetType == "poster" && label == "" {
 		_ = q.UpdateMediaItemPosterPath(ctx, sqlc.UpdateMediaItemPosterPathParams{ID: mediaItemID, PosterPath: localPath})
@@ -1439,12 +1457,93 @@ func (a *App) UploadMediaAsset(ctx context.Context, mediaItemID int64, file io.R
 	return UploadMediaAssetResult{Asset: &asset}, nil
 }
 
+func validateImageAssetLabel(label string) error {
+	if !utf8.ValidString(label) || len(label) > maxImageAssetLabelBytes || utf8.RuneCountInString(label) > maxImageAssetLabelRunes {
+		return fmt.Errorf("%w: image label is too long or invalid UTF-8", ErrInvalidImageUpload)
+	}
+	for _, value := range label {
+		if unicode.IsControl(value) {
+			return fmt.Errorf("%w: image label contains control characters", ErrInvalidImageUpload)
+		}
+	}
+	return nil
+}
+
+func customImageAssetFilename(assetType, label, extension string) string {
+	if label == "" {
+		if !worker.SingleAssetTypes[assetType] {
+			return fmt.Sprintf("custom_%s_%s%s", assetType, uuid.NewString(), extension)
+		}
+		return "custom_" + assetType + extension
+	}
+	digest := sha256.Sum256([]byte(label))
+	return fmt.Sprintf("custom_%s_%x%s", assetType, digest[:8], extension)
+}
+
+func replacedImageAssetPaths(ctx context.Context, q *sqlc.Queries, mediaItemID int64, assetType, label string) ([]string, error) {
+	if label == "" && !worker.SingleAssetTypes[assetType] {
+		return nil, nil
+	}
+	assets, err := q.ListMediaAssetsByType(ctx, sqlc.ListMediaAssetsByTypeParams{
+		MediaItemID: mediaItemID, AssetType: sqlc.AssetType(assetType),
+	})
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, 1)
+	for _, asset := range assets {
+		if asset.Label == label && asset.LocalPath != "" {
+			paths = append(paths, asset.LocalPath)
+		}
+	}
+	return paths, nil
+}
+
+func removeUnreferencedUploadedImage(ctx context.Context, app *App, cacheRoot, path string) {
+	if path == "" || !pathInsideRoot(cacheRoot, path) {
+		return
+	}
+	var referenced bool
+	err := app.db.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM media_assets WHERE local_path = $1)
+		    OR EXISTS (SELECT 1 FROM media_item_profiles WHERE poster_path = $1 OR backdrop_path = $1)
+	`, path).Scan(&referenced)
+	if err == nil && !referenced {
+		_ = os.Remove(path)
+	}
+}
+
+func pathInsideRoot(root, path string) bool {
+	base, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	candidate, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	if realBase, evalErr := filepath.EvalSymlinks(base); evalErr == nil {
+		base = realBase
+	} else {
+		return false
+	}
+	if realCandidate, evalErr := filepath.EvalSymlinks(candidate); evalErr == nil {
+		candidate = realCandidate
+	} else {
+		return false
+	}
+	relative, err := filepath.Rel(base, candidate)
+	return err == nil && relative != "." && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+}
+
 // pgDateFromStr parses a date string into a pgtype.Date.
 func pgDateFromStr(s string) pgtype.Date {
 	if s == "" {
 		return pgtype.Date{}
 	}
 	var d pgtype.Date
-	d.Scan(s)
+	if err := d.Scan(s); err != nil {
+		return pgtype.Date{}
+	}
 	return d
 }

@@ -293,7 +293,7 @@ func (f *fakeBackend) SaveSubsonicPlayQueue(_ context.Context, _ int64, q servic
 
 // --- playlists (unused by current tests; explicit not-implemented) ---
 
-func (f *fakeBackend) CreateUserPlaylist(_ context.Context, _ int64, name, _, _ string) (sqlc.UserPlaylist, error) {
+func (f *fakeBackend) CreateUserPlaylist(_ context.Context, _ int64, name, _ string) (sqlc.UserPlaylist, error) {
 	return sqlc.UserPlaylist{ID: 1, Name: name}, nil
 }
 
@@ -308,7 +308,7 @@ func (f *fakeBackend) GetUserPlaylistDetail(_ context.Context, _, _ int64) (*ser
 func (f *fakeBackend) AddTrackToPlaylist(_ context.Context, _, _, _ int64) error      { return nil }
 func (f *fakeBackend) RemoveTrackFromPlaylist(_ context.Context, _, _, _ int64) error { return nil }
 func (f *fakeBackend) DeleteUserPlaylist(_ context.Context, _, _ int64) error         { return nil }
-func (f *fakeBackend) UpdateUserPlaylist(_ context.Context, _, _ int64, _, _, _ string, _ []string) error {
+func (f *fakeBackend) UpdateUserPlaylist(_ context.Context, _, _ int64, _, _ string, _ []string) error {
 	return nil
 }
 

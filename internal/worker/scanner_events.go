@@ -7,6 +7,7 @@ import (
 
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/scanner"
+	"github.com/karbowiak/heya/internal/secrettext"
 )
 
 const scannerFileEventInterval = 300 * time.Millisecond
@@ -38,18 +39,18 @@ func (b *scannerEventBridge) WriteEvent(ev scanner.Event) error {
 		Event:       ev.Event,
 		Severity:    string(ev.Severity),
 		LibraryID:   ev.LibraryID,
-		LibraryName: ev.LibraryName,
+		LibraryName: secrettext.Redact(ev.LibraryName),
 		LibraryType: ev.LibraryType,
-		Domain:      ev.Domain,
+		Domain:      secrettext.Redact(ev.Domain),
 		Worker:      b.worker,
-		Phase:       scannerEventPhase(ev),
-		Root:        ev.Root,
-		Path:        ev.Path,
-		RelPath:     ev.RelPath,
-		Kind:        ev.Kind,
-		Reason:      ev.Reason,
-		Message:     ev.Message,
-		Data:        ev.Data,
+		Phase:       secrettext.Redact(scannerEventPhase(ev)),
+		Root:        secrettext.Redact(ev.Root),
+		Path:        secrettext.Redact(ev.Path),
+		RelPath:     secrettext.Redact(ev.RelPath),
+		Kind:        secrettext.Redact(ev.Kind),
+		Reason:      secrettext.Redact(ev.Reason),
+		Message:     secrettext.Redact(ev.Message),
+		Data:        secrettext.RedactMap(ev.Data),
 	})
 	return nil
 }

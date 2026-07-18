@@ -298,24 +298,22 @@ func (c *Client) Tags(ctx context.Context, limit int) ([]Tag, error) {
 	return out, nil
 }
 
-// PostClick fires a fire-and-forget click event so radio-browser's
-// crowd-sourced popularity ranking sees our user's plays. Errors are
-// swallowed — the upstream stats degrade gracefully when we miss a beat.
+// PostClick reports a click event so radio-browser's crowd-sourced popularity
+// ranking sees our user's plays. It is synchronous and context-bound; the App
+// layer owns any fire-and-forget lifecycle. Errors are swallowed because the
+// upstream statistic is advisory.
 func (c *Client) PostClick(ctx context.Context, uuid string) {
-	//nolint:gosec // G118: detached ctx is intentional — fire-and-forget click telemetry
-	go func() {
-		baseURL := c.baseURL(ctx)
-		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, baseURL+"/json/url/"+url.PathEscape(uuid), nil)
-		if err != nil {
-			return
-		}
-		req.Header.Set("User-Agent", userAgent)
-		resp, err := c.http.Do(req)
-		if err != nil {
-			return
-		}
-		_ = resp.Body.Close()
-	}()
+	baseURL := c.baseURL(ctx)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/json/url/"+url.PathEscape(uuid), nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("User-Agent", userAgent)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return
+	}
+	_ = resp.Body.Close()
 }
 
 // readAll is a tiny wrapper around io.ReadAll that doesn't pull in the

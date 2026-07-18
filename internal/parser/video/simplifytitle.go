@@ -115,9 +115,7 @@ func ReleaseTitleCleaner(title string) string {
 		}
 	}
 
-	cleaned := strings.TrimFunc(result.String(), func(r rune) bool {
-		return unicode.IsSpace(r)
-	})
+	cleaned := strings.TrimFunc(result.String(), unicode.IsSpace)
 	if numericSuffix != "" {
 		cleaned = strings.TrimSpace(cleaned + " " + numericSuffix)
 	}

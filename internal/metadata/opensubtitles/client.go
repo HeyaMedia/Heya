@@ -9,9 +9,15 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/karbowiak/heya/internal/httpbodylimit"
 )
 
 const baseURL = "https://api.opensubtitles.com/api/v1"
+
+// OpenSubtitles API calls return JSON metadata; subtitle file bytes are
+// downloaded elsewhere from the URL returned by this client.
+const maxAPIResponseBytes int64 = 8 << 20
 
 type Client struct {
 	apiKey     string
@@ -28,7 +34,8 @@ func NewClient(apiKey string) *Client {
 	return &Client{
 		apiKey: apiKey,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:   30 * time.Second,
+			Transport: httpbodylimit.NewTransport(nil, maxAPIResponseBytes),
 		},
 	}
 }

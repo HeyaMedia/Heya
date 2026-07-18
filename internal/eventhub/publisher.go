@@ -2,6 +2,7 @@ package eventhub
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -18,10 +19,13 @@ import (
 // worker open behind a slow database notification. The queue is generously
 // sized and dropped telemetry is summarized instead of logging once per event.
 type RelayPublisher struct {
-	ctx     context.Context
-	db      *pgxpool.Pool
-	events  chan relayPublication
-	dropped atomic.Uint64
+	ctx       context.Context
+	cancel    context.CancelFunc
+	db        *pgxpool.Pool
+	events    chan relayPublication
+	dropped   atomic.Uint64
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 type relayPublication struct {
@@ -30,13 +34,34 @@ type relayPublication struct {
 }
 
 func NewRelayPublisher(ctx context.Context, db *pgxpool.Pool) *RelayPublisher {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	runCtx, cancel := context.WithCancel(ctx)
 	p := &RelayPublisher{
-		ctx:    ctx,
+		ctx:    runCtx,
+		cancel: cancel,
 		db:     db,
 		events: make(chan relayPublication, 1024),
+		done:   make(chan struct{}),
 	}
-	go p.run()
+	go func() {
+		defer close(p.done)
+		p.run()
+	}()
 	return p
+}
+
+// Close cancels and joins the notifier loop. It is safe to call repeatedly;
+// once closed, Emit drops new telemetry instead of touching the database.
+func (p *RelayPublisher) Close() {
+	if p == nil {
+		return
+	}
+	p.closeOnce.Do(func() {
+		p.cancel()
+		<-p.done
+	})
 }
 
 func (p *RelayPublisher) Emit(eventType EventType, payload any) {

@@ -82,9 +82,6 @@ func handleStudioImage(app *service.App) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-		// Studio logos are typically SVG/PNG — skip resize for SVG (imaging
-		// can't decode them). The resizer's passthrough on no params keeps
-		// this transparent.
 		app.ImageResizer().Serve(w, r, logoPath, imageserve.ParseQuery(r.URL.Query()))
 	}
 }

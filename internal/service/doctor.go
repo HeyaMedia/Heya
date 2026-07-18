@@ -18,6 +18,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/config"
 	"github.com/karbowiak/heya/internal/logbuf"
+	"github.com/karbowiak/heya/internal/secrettext"
+	"github.com/karbowiak/heya/internal/transcoder"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/rs/zerolog/log"
 )
@@ -88,23 +90,13 @@ func doctorSafe(errOut *string, fn func()) {
 
 // secretConfigKeyPattern flags config keys whose value must never be shown
 // verbatim, per the dotted key name (e.g. "tailscale.authkey" would match
-// on "key"). None of the keys config.Sources() currently returns happen to
-// match this — PodcastIndexKey/Secret and Tailscale.AuthKey are excluded
-// from Sources() entirely (see config.go) — but the check stays as a
-// name-based backstop for any field added later.
+// on "key"). It redacts remote.dns_token today and remains a backstop for
+// future fields; credentials such as PodcastIndexSecret and Tailscale.AuthKey
+// are excluded from Sources() entirely.
 var secretConfigKeyPattern = regexp.MustCompile(`(?i)token|key|secret|password|dsn`)
 
-// credentialURLPattern finds `scheme://user:pass@` segments. This is the
-// belt to secretConfigKeyPattern's suspenders: infra.database_url is a full
-// Postgres DSN with an embedded password, but the key name "database_url"
-// doesn't literally match token/key/secret/password/dsn. Every config
-// value — and every library path, which can be an smb://user:pass@host URL
-// — is run through this regardless of whether its key name tripped the
-// pattern above.
-var credentialURLPattern = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://)([^:/?#@\s]+):([^@/?#\s]+)@`)
-
 func scrubCredentials(s string) string {
-	return credentialURLPattern.ReplaceAllString(s, "$1$2:***@")
+	return secrettext.Redact(s)
 }
 
 func redactConfigValue(key, value string) string {
@@ -181,7 +173,10 @@ type DoctorConfigSection struct {
 // /api/config/sources use (config.Sources()), paired with each field's
 // current value — then redacts. See redactConfigValue for what gets hidden.
 func (a *App) doctorConfigSection() DoctorConfigSection {
-	cfg := a.config
+	cfg := a.ConfigSnapshot()
+	if cfg == nil {
+		return DoctorConfigSection{Error: "configuration unavailable"}
+	}
 	values := map[string]string{
 		"infra.database_url":        cfg.DatabaseURL.Value,
 		"infra.database_max_conns":  strconv.Itoa(cfg.DatabaseMaxConns.Value),
@@ -195,15 +190,36 @@ func (a *App) doctorConfigSection() DoctorConfigSection {
 		"infra.log_format":          cfg.LogFormat.Value,
 		"infra.data_dir":            cfg.DataDir.Value,
 		"infra.heya_metadata_url":   cfg.HeyaMetadataURL.Value,
-		"transcoder.hwaccel":        cfg.HWAccel.Value,
-		"transcoder.cache_dir":      cfg.TranscodeCacheDir.Value,
-		"transcoder.cache_max_gb":   strconv.Itoa(cfg.TranscodeCacheMaxGB.Value),
-		"jellyfin.enabled":          strconv.FormatBool(cfg.Jellyfin.Enabled.Value),
-		"tailscale.enabled":         strconv.FormatBool(cfg.Tailscale.Enabled.Value),
-		"tailscale.hostname":        cfg.Tailscale.Hostname.Value,
-		"tailscale.state_dir":       cfg.Tailscale.StateDir.Value,
-		"tailscale.https":           strconv.FormatBool(cfg.Tailscale.HTTPS.Value),
-		"tailscale.funnel":          strconv.FormatBool(cfg.Tailscale.Funnel.Value),
+		"infra.acoustid_base_url":   cfg.AcoustIDBaseURL.Value,
+		"infra.acoustid_requests_per_second": strconv.Itoa(
+			cfg.AcoustIDRequestsPerSecond.Value,
+		),
+		"transcoder.hwaccel":      cfg.HWAccel.Value,
+		"transcoder.cache_dir":    cfg.TranscodeCacheDir.Value,
+		"transcoder.cache_max_gb": strconv.Itoa(cfg.TranscodeCacheMaxGB.Value),
+		"jellyfin.enabled":        strconv.FormatBool(cfg.Jellyfin.Enabled.Value),
+		"subsonic.enabled":        strconv.FormatBool(cfg.Subsonic.Enabled.Value),
+		"cast.enabled":            strconv.FormatBool(cfg.Cast.Enabled.Value),
+		"cast.base_url":           cfg.Cast.BaseURL.Value,
+		"cast.devices":            cfg.Cast.Devices.Value,
+		"tailscale.enabled":       strconv.FormatBool(cfg.Tailscale.Enabled.Value),
+		"tailscale.hostname":      cfg.Tailscale.Hostname.Value,
+		"tailscale.state_dir":     cfg.Tailscale.StateDir.Value,
+		"tailscale.https":         strconv.FormatBool(cfg.Tailscale.HTTPS.Value),
+		"tailscale.funnel":        strconv.FormatBool(cfg.Tailscale.Funnel.Value),
+		"remote.enabled":          strconv.FormatBool(cfg.Remote.Enabled.Value),
+		"remote.port":             strconv.Itoa(cfg.Remote.Port.Value),
+		"remote.check_url":        cfg.Remote.CheckURL.Value,
+		"remote.cert_dir":         cfg.Remote.CertDir.Value,
+		"remote.acme_ca":          cfg.Remote.ACMECA.Value,
+		"remote.acme_email":       cfg.Remote.ACMEEmail.Value,
+		"remote.dns_provider":     cfg.Remote.DNSProvider.Value,
+		"remote.dns_token":        cfg.Remote.DNSToken.Value,
+		"remote.domain":           cfg.Remote.Domain.Value,
+		"remote.subdomain":        cfg.Remote.Subdomain.Value,
+	}
+	for kind, field := range cfg.Jobs.Workers {
+		values["jobs.workers."+kind] = strconv.Itoa(field.Value)
 	}
 
 	sources := cfg.Sources()
@@ -304,8 +320,7 @@ func doctorRowCounts(ctx context.Context, pool *pgxpool.Pool) map[string]int64 {
 // --- libraries ---
 
 type DoctorLibraryPath struct {
-	Path     string `json:"path" doc:"SMB credentials are redacted; see vfs.RedactPath"`
-	IsSMB    bool   `json:"is_smb,omitempty"`
+	Path     string `json:"path" doc:"Configured filesystem path; URL credentials are redacted in legacy invalid values"`
 	Exists   bool   `json:"exists"`
 	Readable bool   `json:"readable"`
 	Error    string `json:"error,omitempty"`
@@ -342,11 +357,9 @@ func (a *App) doctorLibrariesSection(ctx context.Context) DoctorLibrariesSection
 	}
 
 	out.Libraries = make([]DoctorLibrary, 0, len(libs))
-	// Path checks run concurrently: an unreachable SMB share can take up to
-	// vfs.Open's internal 15s dial timeout, and a bundle commonly covers
-	// several libraries with several paths each. Sequential would multiply
-	// that timeout by every broken path in the install — exactly the
-	// scenario this tool exists to diagnose quickly.
+	// Path checks run concurrently because mounted network filesystems and
+	// large directories can still respond slowly. One degraded mount must not
+	// delay diagnostics for every other library.
 	var wg sync.WaitGroup
 	for _, lib := range libs {
 		dl := DoctorLibrary{ID: lib.ID, Name: lib.Name, MediaType: string(lib.MediaType)}
@@ -355,7 +368,7 @@ func (a *App) doctorLibrariesSection(ctx context.Context) DoctorLibrariesSection
 			wg.Add(1)
 			go func(i int, p string) {
 				defer wg.Done()
-				dl.Paths[i] = doctorCheckLibraryPath(p)
+				dl.Paths[i] = doctorCheckLibraryPath(ctx, p)
 			}(i, p)
 		}
 
@@ -374,19 +387,16 @@ func (a *App) doctorLibrariesSection(ctx context.Context) DoctorLibrariesSection
 	return out
 }
 
-// doctorCheckLibraryPath reuses vfs.Open (the same entry point the scanner
-// uses for both local and smb:// paths) so "readable" here means the exact
-// same thing it means during a real scan. Local paths resolve instantly;
-// SMB paths dial the share (bounded by openSMB's 15s timeout) and mount it.
-// Either way this only stats/lists — never writes, never triggers a scan.
-func doctorCheckLibraryPath(p string) DoctorLibraryPath {
-	out := DoctorLibraryPath{Path: vfs.RedactPath(p), IsSMB: vfs.IsSMBPath(p)}
-	src, err := vfs.Open(p)
+// doctorCheckLibraryPath reuses the scanner's filesystem entry point so
+// "readable" has the same meaning as a real scan. It only stats/lists and
+// never writes or triggers a scan.
+func doctorCheckLibraryPath(ctx context.Context, p string) DoctorLibraryPath {
+	out := DoctorLibraryPath{Path: vfs.RedactPath(p)}
+	src, err := vfs.OpenContext(ctx, p)
 	if err != nil {
 		out.Error = scrubCredentials(err.Error())
 		return out
 	}
-	defer func() { _ = src.Close() }()
 	out.Exists = true
 
 	if _, err := fs.ReadDir(src.FS, "."); err != nil {
@@ -544,7 +554,10 @@ type DoctorStorageSection struct {
 }
 
 func (a *App) doctorStorageSection(ctx context.Context) DoctorStorageSection {
-	cfg := a.config
+	cfg := a.ConfigSnapshot()
+	if cfg == nil {
+		return DoctorStorageSection{Error: "configuration unavailable"}
+	}
 	out := DoctorStorageSection{
 		DataDir:      doctorPathUsage(cfg.DataDir.Value),
 		TranscodeDir: doctorPathUsage(cfg.TranscodeCacheDir.Value),
@@ -554,12 +567,22 @@ func (a *App) doctorStorageSection(ctx context.Context) DoctorStorageSection {
 		st := tc.Stats()
 		out.TranscodeUsedMB = st.TotalSize / (1024 * 1024)
 		out.TranscodeItems = int64(st.ItemCount)
+	} else {
+		// Command-mode apps intentionally do not construct playback/cache
+		// managers. Read the existing tree directly so doctor still reports
+		// useful usage without NewCacheManager's forbidden MkdirAll side effect.
+		st := transcoder.ReadCacheStats(cfg.TranscodeCacheDir.Value, cfg.TranscodeCacheMaxGB.Value)
+		out.TranscodeUsedMB = st.TotalSize / (1024 * 1024)
+		out.TranscodeItems = int64(st.ItemCount)
 	}
 
 	usage, err := a.ListLibraryDiskUsage(ctx)
 	if err != nil {
 		out.Error = err.Error()
 		return out
+	}
+	for i := range usage {
+		usage[i].Path = vfs.RedactPath(usage[i].Path)
 	}
 	out.LibraryDiskUsage = usage
 	return out
