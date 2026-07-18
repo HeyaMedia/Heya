@@ -436,6 +436,97 @@ func TestScannerInventoryPostApplyPaths(t *testing.T) {
 	}, scannerInventoryPostApplyPaths(inv))
 }
 
+func TestPostApplySonicDeduplicatesTracksWithMultipleFiles(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "post-apply-sonic-dedupe",
+		MediaType:    sqlc.MediaTypeMusic,
+		Paths:        []string{"/media/post-apply-sonic-dedupe"},
+		ScanInterval: pgtype.Interval{Microseconds: int64(time.Hour / time.Microsecond), Valid: true},
+		CreatedBy:    testutil.TestUserID(t, pool),
+		Settings:     []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	item, err := q.CreateMediaItem(ctx, sqlc.CreateMediaItemParams{
+		LibraryID: lib.ID, MediaType: sqlc.MediaTypeMusic,
+		Title: "Dedupe Artist", SortTitle: "Dedupe Artist", ExternalIds: []byte("{}"),
+	})
+	require.NoError(t, err)
+	artist, err := q.CreateArtist(ctx, sqlc.CreateArtistParams{MediaItemID: item.ID, Name: item.Title})
+	require.NoError(t, err)
+	album, err := q.CreateAlbum(ctx, sqlc.CreateAlbumParams{
+		ArtistID: artist.ID, Title: "Dedupe Album", Year: "2026", Genres: []string{}, Tags: []string{},
+	})
+	require.NoError(t, err)
+
+	paths := []string{
+		"/media/post-apply-sonic-dedupe/01 Track.flac",
+		"/media/post-apply-sonic-dedupe/01 Track.mp3",
+	}
+	track, err := q.CreateTrack(ctx, sqlc.CreateTrackParams{
+		AlbumID: album.ID, DiscNumber: 1, TrackNumber: 1, Title: "Track", FilePath: paths[0],
+	})
+	require.NoError(t, err)
+	fileIDs := make([]int64, 0, len(paths))
+	trackFileIDs := make([]int64, 0, len(paths))
+	for _, path := range paths {
+		file, err := q.UpsertLibraryFile(ctx, sqlc.UpsertLibraryFileParams{
+			LibraryID: lib.ID, Path: path, ParseResult: []byte("{}"), Status: sqlc.FileStatusMatched,
+		})
+		require.NoError(t, err)
+		trackFile, err := q.UpsertTrackFile(ctx, sqlc.UpsertTrackFileParams{
+			TrackID: track.ID, LibraryFileID: file.ID,
+		})
+		require.NoError(t, err)
+		fileIDs = append(fileIDs, file.ID)
+		trackFileIDs = append(trackFileIDs, trackFile.ID)
+	}
+	_, err = pool.Exec(ctx, `
+		UPDATE library_files
+		SET media_info = '{"streams":[{"codec_type":"audio"}]}'::jsonb
+		WHERE id = ANY($1::bigint[])`, fileIDs)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+		UPDATE track_files
+		SET integrated_lufs = -14, boundaries_analyzed_at = now(), fingerprinted_at = now()
+		WHERE id = ANY($1::bigint[])`, trackFileIDs)
+	require.NoError(t, err)
+
+	rc, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
+	require.NoError(t, err)
+	taskID := "post-apply-sonic-dedupe"
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE args->>'scheduled_task_id' = $1`, taskID)
+	})
+	result := scanner.Result{Inventory: scanner.Inventory{Roots: []scanner.InventoryRoot{{
+		Root: "/media/post-apply-sonic-dedupe",
+		Files: []scanner.InventoryFile{
+			{Path: paths[0], Class: scanner.ClassPrimaryMedia},
+			{Path: paths[1], Class: scanner.ClassPrimaryMedia},
+		},
+	}}}}
+	worker := &ApplyLibraryScanWorker{SonicEnabled: func(context.Context) bool { return true }}
+	fanout := worker.enqueuePostApplyWork(ctx, q, rc, lib, result, taskID, "")
+
+	require.Equal(t, 2, fanout.Files)
+	require.Equal(t, 1, fanout.Sonic)
+	require.Equal(t, 1, fanout.Skipped)
+	require.Zero(t, fanout.Failed)
+
+	var jobs int
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT count(*) FROM river_job
+		WHERE kind = 'analyze_track_facets'
+		  AND (args->>'track_id')::bigint = $1
+		  AND args->>'scheduled_task_id' = $2`, track.ID, taskID).Scan(&jobs))
+	require.Equal(t, 1, jobs)
+}
+
 func TestCompactScannerScopesDropsChildren(t *testing.T) {
 	require.Equal(t, []string{
 		"/library/Movie (2021)",

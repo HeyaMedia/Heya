@@ -1936,6 +1936,8 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 	saveMusicNFOQueued := map[int64]bool{}
 	trickplayQueued := map[int64]bool{}
 	segmentsQueued := map[int64]bool{}
+	sonicQueued := map[int64]bool{}
+	sonicEnabled := w.sonicEnabled(ctx)
 
 	// Every job below — across every file and, later, every media item — is
 	// accumulated here instead of inserted one row at a time; flush() does a
@@ -2063,8 +2065,17 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 				fanout.Loudness++
 			}
 		}
-		if w.sonicEnabled(ctx) && trackNeedsSonicAnalysis(ctx, q, trackFile.TrackID) {
-			enqueue(AnalyzeTrackFacetsArgs{TrackID: trackFile.TrackID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source), "sonic analysis", &fanout.Sonic)
+		if sonicEnabled {
+			if sonicQueued[trackFile.TrackID] {
+				// Sonic jobs are unique by track, while post-apply walks physical
+				// track files. A track can have multiple files (for example FLAC
+				// and MP3), and sending both copies through one InsertMany makes
+				// PostgreSQL's ON CONFLICT update the same River row twice.
+				fanout.Skipped++
+			} else if trackNeedsSonicAnalysis(ctx, q, trackFile.TrackID) {
+				enqueue(AnalyzeTrackFacetsArgs{TrackID: trackFile.TrackID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source), "sonic analysis", &fanout.Sonic)
+				sonicQueued[trackFile.TrackID] = true
+			}
 		}
 	}
 	for mediaItemID := range mediaItemIDs {
