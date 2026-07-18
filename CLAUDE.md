@@ -44,6 +44,9 @@ For deeper context, see `docs/`:
    everything else to Nuxt/Vite on `:3000`.
 2. `heya serve --dev-backend` on `:3050` (API + WS only), hot-reloaded by `air`.
 3. `heya worker` under a second Air process (River, scheduler, watchers, models).
+   Down by default in mprocs (`autostart: false`) — press `s` on the pane
+   when background work is needed. Not a prod-DB safety boundary: passive
+   mode is (see docs/development.md).
 4. Nuxt/Vite dev server on `:3000` (HMR).
 
 The front door is its own Go process *on purpose*: the backend restarts on

@@ -33,8 +33,18 @@ Prerequisite: `brew install mprocs`. `make dev` runs `make dev-stop` as a
 preflight — it reaps every layer a previous run may have left behind (air,
 `go run` wrappers, `tmp/heya*` binaries, and the `:8080`/`:3050`/`:3000`
 listeners) — then launches mprocs (config in `mprocs.yaml`) with four procs:
-`proxy`, `api`, `worker`, `web`. Quitting mprocs (`q` / Ctrl+C) tears all four
-down cleanly; press `r` on a pane to restart just that process.
+`proxy`, `api`, `worker`, `web`. The `worker` pane is **down by default**
+(`autostart: false`) — press `s` on it when a session actually needs
+background work (scans, enrichment, transcode). Quitting mprocs (`q` /
+Ctrl+C) tears the running procs down cleanly; press `r` on a pane to restart
+just that process.
+
+Keeping the worker down is a convenience, **not** a safety boundary for the
+prod-mirror DB: the queue lives in the database, so manual jobs the API
+inserts (scan/refresh triggers) are executed by *production's* worker, and
+passive mode is what suppresses schema/bootstrap writes and enables the
+image proxy. Don't treat "worker pane off" as a substitute for
+`HEYA_PASSIVE_MODE`.
 
 **Never clean up a dev stack by killing port listeners alone.** The air panes
 are a `sh → go run → air → heya` chain and `go run` does not forward SIGTERM —

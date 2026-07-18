@@ -35,6 +35,15 @@ procs:
     stop:
       send-keys: ["<C-c>"]
   worker:
+    # Down by default — press `s` on the pane when background work is
+    # actually needed. Most dev sessions are UI/API work where an idle
+    # worker only adds a second air rebuild per save; and against the
+    # prod-mirror DB there's nothing it should be consuming anyway.
+    # NOTE: this does NOT replace passive mode — serve still inserts
+    # manual River jobs into the SHARED DB (prod's worker executes them)
+    # and passive mode is what suppresses schema/bootstrap writes and
+    # enables the image proxy. See docs/development.md.
+    autostart: false
     shell: "mkdir -p tmp && exec go run github.com/air-verse/air@latest -c .air.worker.toml"
     stop:
       send-keys: ["<C-c>"]
