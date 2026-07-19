@@ -720,14 +720,15 @@ func canRepairMusicFileAttachment(existing sqlc.MediaItemCard, targetArtist stri
 	}
 	existingIDs := externalIDsFromMediaItem(existing)
 	shared, contradictory := compareStrongMusicArtistExternalIDs(existingIDs, targetExternalIDs)
-	if shared || sharedExternalID(existingIDs, targetExternalIDs) {
-		return false
-	}
-	// Contradictory stable artist IDs are stronger than a same-name title.
-	// This is the repair path that can safely unmerge files after an older
-	// scanner attached LISA to LiSA (or any equivalent namesake pair).
+	// MusicBrainz is the identity spine. A contradictory MBID proves these are
+	// different artists even when an older bad merge polluted the row with the
+	// target's Apple, Spotify, or other weaker provider ID. That is precisely
+	// the attachment this repair path exists to undo.
 	if contradictory {
 		return true
+	}
+	if shared || sharedExternalID(existingIDs, targetExternalIDs) {
+		return false
 	}
 	return normalizeSearchTitle(existing.Title) != normalizeSearchTitle(targetArtist)
 }

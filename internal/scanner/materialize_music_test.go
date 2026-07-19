@@ -91,6 +91,20 @@ func TestMusicMaterializeRepairsSameNameContradictoryArtistIDs(t *testing.T) {
 	}))
 }
 
+func TestMusicMaterializeRepairsContradictoryMBIDDespitePollutedProviderID(t *testing.T) {
+	existing := sqlc.MediaItemCard{
+		ID: 42, MediaType: sqlc.MediaTypeMusic, Title: "Binary",
+		ExternalIds: mustJSONBytes(map[string]string{
+			"mbid":  "88b010d7-af58-4498-8aac-025a466be90c",
+			"apple": "160783513",
+		}),
+	}
+	require.True(t, canRepairMusicFileAttachment(existing, "Binary", map[string]string{
+		"mbid":  "402073dc-d562-4661-8b3e-974edfa76687",
+		"apple": "160783513",
+	}))
+}
+
 func TestPlanMusicMaterializationCarriesOnlyExactRecordingEvidence(t *testing.T) {
 	const relPath = "Ado/Kyougen/01 - Readymade.flac"
 	evidence := MusicAcceptedRecordingEvidence{
