@@ -41,7 +41,7 @@
     <div v-else-if="!total" class="ml-empty page-pad">
       <Icon name="star" :size="40" />
       <h3>No loved tracks yet</h3>
-      <p>Heart a track from the <NuxtLink to="/music/songs">Songs page</NuxtLink>, the player, or an album page. It'll appear here as soon as you love something.</p>
+      <p>Heart or thumbs-up a track from the <NuxtLink to="/music/songs">Songs page</NuxtLink>, the player, or an album page. It'll appear here as soon as you love something.</p>
     </div>
 
     <!-- Sparse full-length list — the scrollbar spans every loved track;
@@ -124,7 +124,7 @@ const { total, pending, itemAt, ensureRange, loadedItems, reset } = useVirtualCa
   pageSize: 500,
   fetch: async (offset, limit) => {
     const r = await $heya('/api/me/ratings/tracks', {
-      query: { min_rating: 9, limit, offset },
+      query: { min_rating: 6, limit, offset },
     }) as unknown as { items: RatedTrackRow[]; total: number }
     const items = r.items ?? []
     trackRatings.primeMany(items.map((t) => [t.track_id, t.rating] as [number, number]))
@@ -147,7 +147,7 @@ const stats = ref<RatedTrackStats | null>(null)
 async function loadStats() {
   try {
     stats.value = await $heya('/api/me/ratings/track-stats', {
-      query: { min_rating: 9 },
+      query: { min_rating: 6 },
     }) as unknown as RatedTrackStats
   } catch { /* strip renders from list totals only */ }
 }

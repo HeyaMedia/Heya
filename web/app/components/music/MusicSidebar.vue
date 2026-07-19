@@ -156,7 +156,7 @@
           </div>
           <div class="ms-pl-meta">
             <div class="ms-pl-name">Loved Songs</div>
-            <div class="ms-pl-count">Tracks you've hearted</div>
+            <div class="ms-pl-count">Hearts and thumbs-ups</div>
           </div>
         </NuxtLink>
       </li>
