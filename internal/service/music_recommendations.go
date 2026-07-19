@@ -41,6 +41,12 @@ const (
 	candidateProviderChart
 	candidateAffinity
 	candidatePopular
+	// candidateSeedArtist marks tracks from a radio seed artist's own
+	// catalog; candidateSeedGenre marks thin-pool fill drawn from the seed's
+	// genres. Both are seed-anchored — eligible for the radio exploration
+	// tail, unlike the unanchored popularity floor.
+	candidateSeedArtist
+	candidateSeedGenre
 )
 
 type musicCandidateState struct {
@@ -433,6 +439,25 @@ func (a *App) buildSeededRadioPool(
 		}
 	}
 
+	// The seed artists' own catalog — for an artist station this is the
+	// definitionally most on-profile material, and for an UNANALYSED artist
+	// it's the only same-artist source at all (sonic KNN can't surface
+	// tracks that have no embedding; an Einaudi station with zero Einaudi
+	// was the observed result). Ranked by the same provider-rank/popularity
+	// ordering as everything else; the selection stage's artist cap keeps it
+	// from monopolizing the queue.
+	if len(artistIDs) > 0 {
+		rows, err := a.seedArtistCatalogTracks(ctx, userID, artistIDs, min(poolLimit/2, 40*len(artistIDs)))
+		if err != nil {
+			return nil, fmt.Errorf("seed catalog candidates: %w", err)
+		}
+		denom := math.Max(1, float64(len(rows)-1))
+		for i, row := range rows {
+			strength := 3.4 - 1.6*(float64(i)/denom)
+			add(row, candidateSeedArtist, strength)
+		}
+	}
+
 	if len(artistIDs) > 0 {
 		rows, err := a.externalMusicCandidates(ctx, userID, artistIDs, poolLimit)
 		if err != nil {
@@ -465,7 +490,55 @@ func (a *App) buildSeededRadioPool(
 		}
 	}
 
-	if len(candidates) < 40 {
+	// Thin pool: fill from the seeds' GENRES before touching global
+	// popularity. Even an artist with zero ML coverage usually has genre
+	// metadata ("we know he's classical"), and a station must stay in that
+	// area rather than flooding with the catalog's provider-chart kings.
+	// Thinness is measured in NON-seed-artist candidates — the seed catalog
+	// source above can fill the pool by itself, and a station needs
+	// neighbors, not forty more tracks by the same artist.
+	seedArtistSet := make(map[int64]bool, len(artistIDs))
+	for _, id := range artistIDs {
+		seedArtistSet[id] = true
+	}
+	nonSeedCount := func() int {
+		n := 0
+		for _, c := range candidates {
+			if !seedArtistSet[c.Track.ArtistID] {
+				n++
+			}
+		}
+		return n
+	}
+	if nonSeedCount() < 40 && len(artistIDs) > 0 {
+		profile := seedGenreProfile
+		if len(profile) == 0 {
+			raw, err := a.artistGenreProfile(ctx, artistIDs)
+			if err != nil {
+				return nil, fmt.Errorf("seed genre fallback profile: %w", err)
+			}
+			profile = normalizeGenreWeights(raw)
+		}
+		// Top 4 rather than 3: album genre tags arrive with case variants
+		// ("Classical" and "classical" are distinct exact-match tags that
+		// each cover different albums), so a slightly wider net keeps the
+		// fill from spending its slots on one genre's spelling twins.
+		for _, genre := range topGenreNames(profile, 4) {
+			rows, err := a.librarySamplerPool(ctx, userID, genre, poolLimit/2)
+			if err != nil {
+				return nil, fmt.Errorf("genre fill %q: %w", genre, err)
+			}
+			denom := math.Max(1, float64(len(rows)-1))
+			for i, row := range rows {
+				strength := 1.7 - 0.8*(float64(i)/denom)
+				add(row, candidateSeedGenre, strength)
+			}
+		}
+	}
+
+	// Global popularity is the true last resort — a genre-less seed in a
+	// cold library.
+	if nonSeedCount() < 40 {
 		rows, err := a.popularMusicCandidates(ctx, userID, poolLimit)
 		if err != nil {
 			return nil, fmt.Errorf("popular candidates: %w", err)
@@ -477,6 +550,56 @@ func (a *App) buildSeededRadioPool(
 	}
 
 	return a.finalizeMusicCandidates(ctx, userID, candidates, genreAffinity, seedGenreProfile)
+}
+
+// seedArtistCatalogTracks lists the seed artists' own eligible tracks in the
+// shared provider-rank/popularity ordering — the same ranking every other
+// no-user-signal source uses.
+func (a *App) seedArtistCatalogTracks(ctx context.Context, userID int64, artistIDs []int64, fetch int) ([]sqlc.ListArtistTopTracksForMixRow, error) {
+	return a.scanMixRows(ctx, `SELECT t.id, t.title, t.duration, t.disc_number, t.track_number,
+		       al.id, al.title, al.slug, al.cover_path, al.year,
+		       ar.id, ar.name, mi.slug,
+		       (SELECT count(*) FROM play_events pe WHERE pe.track_id = t.id AND pe.completed)
+		FROM tracks t
+		JOIN albums al ON al.id = t.album_id
+		JOIN artists ar ON ar.id = al.artist_id
+		JOIN media_item_cards mi ON mi.id = ar.media_item_id
+		WHERE al.artist_id = ANY($2::bigint[])
+		  AND `+musicVetoFilter+`
+		  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id
+		              WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+		ORDER BY COALESCE((
+			SELECT MIN(CASE WHEN att.provider_rank > 0 THEN att.provider_rank ELSE att.rank END)
+			FROM artist_top_tracks att
+			WHERE att.artist_id = ar.id
+			  AND ((att.mbid <> '' AND att.mbid = t.recording_mbid)
+			       OR lower(att.title) = lower(t.title))
+		), 10000), (al.popularity + ar.popularity) DESC, (al.playcount + ar.playcount) DESC
+		LIMIT $3`, userID, artistIDs, fetch)
+}
+
+// topGenreNames returns up to n genre names from a normalized profile,
+// heaviest first.
+func topGenreNames(profile map[string]float64, n int) []string {
+	type gw struct {
+		genre  string
+		weight float64
+	}
+	all := make([]gw, 0, len(profile))
+	for genre, weight := range profile {
+		all = append(all, gw{genre, weight})
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].weight == all[j].weight {
+			return all[i].genre < all[j].genre
+		}
+		return all[i].weight > all[j].weight
+	})
+	out := make([]string, 0, min(n, len(all)))
+	for _, g := range all[:min(n, len(all))] {
+		out = append(out, g.genre)
+	}
+	return out
 }
 
 // recommendSeededRadio ranks a seeded-radio pool. Radio has no regenerate
@@ -679,7 +802,7 @@ func selectMusicRecommendations(candidates []musicRecommendationCandidate, limit
 		// unrelated tracks were leaking in.
 		anchored := tail[:0]
 		for _, c := range tail {
-			if c.Sources&(candidateSonic|candidateExternal) != 0 {
+			if c.Sources&(candidateSonic|candidateExternal|candidateSeedArtist|candidateSeedGenre) != 0 {
 				anchored = append(anchored, c)
 			}
 		}
