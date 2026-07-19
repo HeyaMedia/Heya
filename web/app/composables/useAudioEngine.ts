@@ -145,13 +145,13 @@ function createEngine() {
     isPlaying.value = true
   }
 
-  function setActiveNormalization(integrated: number, truePeak: number) {
-    const gain = computeNormalizationGain(integrated, truePeak)
+  function setActiveNormalization(integrated: number, truePeak: number, targetLufs?: number) {
+    const gain = computeNormalizationGain(integrated, truePeak, targetLufs)
     alog('norm', `active gain ×${gain.toFixed(3)} (${(20 * Math.log10(gain || 1)).toFixed(1)} dB) — ${integrated.toFixed(1)} LUFS, peak ${truePeak.toFixed(1)} dB`)
     deckManager.setActiveNormalization(gain)
   }
-  function setPendingNormalization(integrated: number, truePeak: number) {
-    const gain = computeNormalizationGain(integrated, truePeak)
+  function setPendingNormalization(integrated: number, truePeak: number, targetLufs?: number) {
+    const gain = computeNormalizationGain(integrated, truePeak, targetLufs)
     alog('norm', `pending gain ×${gain.toFixed(3)} (${(20 * Math.log10(gain || 1)).toFixed(1)} dB)`)
     deckManager.setPendingNormalization(gain)
   }
@@ -204,8 +204,8 @@ type EngineStub = {
   setOnEnded: (cb: () => void) => void
   setOnError: (cb: (err: Error) => void) => void
   dispose: () => void
-  setActiveNormalization: (integrated: number, truePeak: number) => void
-  setPendingNormalization: (integrated: number, truePeak: number) => void
+  setActiveNormalization: (integrated: number, truePeak: number, targetLufs?: number) => void
+  setPendingNormalization: (integrated: number, truePeak: number, targetLufs?: number) => void
   resetActiveNormalization: () => void
   resetPendingNormalization: () => void
   // Present on every branch (graph, direct, SSR stub) so UI can read

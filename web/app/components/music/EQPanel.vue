@@ -186,6 +186,21 @@
             />
           </div>
         </div>
+
+        <div v-if="replayGain.mode !== 'off'" class="eq-extra-row">
+          <span class="eq-extra-label">Target level</span>
+          <div class="eq-select-wrap eq-select-wrap-wide">
+            <AppSelect
+              :model-value="String(replayGain.targetLufs)"
+              :options="RG_TARGET_OPTIONS"
+              aria-label="Replay gain target loudness"
+              @change="v => settings.setReplayGainTarget(Number(v))"
+            />
+          </div>
+        </div>
+        <div v-if="replayGain.mode !== 'off'" class="eq-extra-row">
+          <span class="eq-extra-hint">Louder targets sit closer to the un-normalized level; quiet tracks can only be boosted until their peaks hit the ceiling.</span>
+        </div>
       </div>
     </div>
 
@@ -410,6 +425,14 @@ const REPLAY_GAIN_OPTIONS: SelectOption[] = [
   { value: 'track', label: 'Track — each song normalized' },
   { value: 'album', label: 'Album — preserve album dynamics' },
   { value: 'auto',  label: 'Auto — track on shuffle, album otherwise' },
+]
+
+const RG_TARGET_OPTIONS: SelectOption[] = [
+  { value: '-11', label: '−11 LUFS — loud' },
+  { value: '-14', label: '−14 LUFS — streaming standard' },
+  { value: '-16', label: '−16 LUFS — moderate' },
+  { value: '-18', label: '−18 LUFS — classic ReplayGain' },
+  { value: '-23', label: '−23 LUFS — broadcast' },
 ]
 
 const CROSSFEED_OPTIONS: SelectOption[] = [

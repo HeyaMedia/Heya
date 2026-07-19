@@ -18,6 +18,7 @@ export function useAudioSettingsBindings() {
     setCrossfadeDuration: store.setCrossfadeDuration,
     setCrossfadeAlbumAware: store.setCrossfadeAlbumAware,
     setReplayGainMode: store.setReplayGainMode,
+    setReplayGainTarget: store.setReplayGainTarget,
     setCrossfeedEnabled: store.setCrossfeedEnabled,
     setCrossfeedPreset: store.setCrossfeedPreset,
     setLimiterEnabled: store.setLimiterEnabled,

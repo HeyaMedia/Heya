@@ -1,6 +1,7 @@
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import type { CrossfeedPreset } from '~~/shared/types/audio'
 import { BUILTIN_PRESETS } from '~/engine/dsp/equalizerPresets'
+import { clampTargetLufs, DEFAULT_TARGET_LUFS } from '~/engine/dsp/normalization'
 
 export const AUDIO_BANDS = 10
 const STORAGE_KEY = 'heya_audio_settings_v1'
@@ -21,6 +22,9 @@ export interface CrossfadeState {
 
 export interface ReplayGainState {
   mode: 'off' | 'track' | 'album' | 'auto'
+  // Loudness target in LUFS. Feeds computeNormalizationGain for the browser
+  // engines and the precomputed gainDb shipped to HeyaClient's Rust engine.
+  targetLufs: number
 }
 
 export interface CrossfeedState {
@@ -56,7 +60,7 @@ export interface StoredAudioSettings {
 const DEFAULTS: StoredAudioSettings = {
   eq: { enabled: false, preamp: 0, postgain: 0, bands: Array(AUDIO_BANDS).fill(0), presetName: 'Flat' },
   crossfade: { mode: 'gapless', durationSeconds: 3, albumAware: true },
-  replayGain: { mode: 'auto' },
+  replayGain: { mode: 'auto', targetLufs: DEFAULT_TARGET_LUFS },
   crossfeed: { enabled: false, preset: 'natural' },
   dspChain: { order: ['equalizer', 'crossfeed'], limiterEnabled: true },
 }
@@ -100,7 +104,10 @@ function loadInitial(): StoredAudioSettings {
     return {
       eq: { ...fallback.eq, ...parsed.eq, bands: (parsed.eq?.bands ?? fallback.eq.bands).slice(0, AUDIO_BANDS) },
       crossfade: { ...fallback.crossfade, ...parsed.crossfade },
-      replayGain: { ...fallback.replayGain, ...parsed.replayGain },
+      replayGain: {
+        mode: parsed.replayGain?.mode ?? fallback.replayGain.mode,
+        targetLufs: clampTargetLufs(parsed.replayGain?.targetLufs ?? fallback.replayGain.targetLufs),
+      },
       crossfeed: { ...fallback.crossfeed, ...parsed.crossfeed },
       dspChain: sanitizeChain(parsed.dspChain),
     }
@@ -168,7 +175,13 @@ export const useAudioSettingsStore = defineStore('audio-settings', () => {
     commit({ ...settings.value, crossfade: { ...settings.value.crossfade, albumAware } })
   }
   function setReplayGainMode(mode: ReplayGainState['mode']) {
-    commit({ ...settings.value, replayGain: { mode } })
+    commit({ ...settings.value, replayGain: { ...settings.value.replayGain, mode } })
+  }
+  function setReplayGainTarget(targetLufs: number) {
+    commit({
+      ...settings.value,
+      replayGain: { ...settings.value.replayGain, targetLufs: clampTargetLufs(targetLufs) },
+    })
   }
   function setCrossfeedEnabled(enabled: boolean) {
     commit({ ...settings.value, crossfeed: { ...settings.value.crossfeed, enabled } })
@@ -238,7 +251,7 @@ export const useAudioSettingsStore = defineStore('audio-settings', () => {
     presets: BUILTIN_PRESETS,
     setEQEnabled, setEQBand, setPreamp, setPostgain, applyPreset,
     setCrossfadeMode, setCrossfadeDuration, setCrossfadeAlbumAware,
-    setReplayGainMode, setCrossfeedEnabled, setCrossfeedPreset,
+    setReplayGainMode, setReplayGainTarget, setCrossfeedEnabled, setCrossfeedPreset,
     setLimiterEnabled, moveDspBlock,
     applyAudioProfile, currentAudioProfile, resetAudioProfile, registerEngineBridge,
   }

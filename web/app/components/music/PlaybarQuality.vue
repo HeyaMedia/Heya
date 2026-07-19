@@ -176,7 +176,11 @@ const nativeDspLabel = computed(() => {
 const eqLabel = computed(() => nativeState.value?.bitPerfectActive
   ? 'bypassed'
   : (eq.value.enabled ? `on (${eq.value.presetName || 'custom'})` : 'off'))
-const replayGainLabel = computed(() => nativeState.value?.bitPerfectActive ? 'bypassed' : rg.value.mode)
+const replayGainLabel = computed(() => {
+  if (nativeState.value?.bitPerfectActive) return 'bypassed'
+  if (rg.value.mode === 'off') return 'off'
+  return `${rg.value.mode} · ${rg.value.targetLufs} LUFS`
+})
 const effectiveCrossfadeLabel = computed(() => nativeState.value?.bitPerfectActive ? 'gapless (bit-perfect)' : crossfadeLabel.value)
 const effectiveCrossfeedLabel = computed(() => {
   if (nativeState.value?.bitPerfectActive) return 'bypassed'
@@ -212,7 +216,7 @@ const effective = computed<{ lufs: number; peak: number; source: 'track' | 'albu
 // applied (it reserves ~1 dB of true-peak headroom, then clamps ±12 dB).
 const appliedGainDb = computed<number | null>(() => {
   const eff = effective.value
-  return eff ? 20 * Math.log10(computeNormalizationGain(eff.lufs, eff.peak)) : null
+  return eff ? 20 * Math.log10(computeNormalizationGain(eff.lufs, eff.peak, rg.value.targetLufs)) : null
 })
 const appliedGainLabel = computed(() => {
   if (rg.value.mode === 'off') return 'off'

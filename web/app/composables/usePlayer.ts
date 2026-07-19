@@ -462,7 +462,7 @@ export const usePlayerStore = defineStore('player', () => {
   // --- Normalization (replay gain) -----------------------------------------
   // Mode lives in audio settings:
   //   off    => native level, no gain
-  //   track  => each track's own EBU R128 gain toward the -18 LUFS target
+  //   track  => each track's own EBU R128 gain toward the configured LUFS target
   //   album  => the album's gain applied to every track, preserving the
   //             mastered inter-track dynamics (loud songs stay louder)
   //   auto   => track gain when shuffled, album gain otherwise
@@ -549,7 +549,11 @@ export const usePlayerStore = defineStore('player', () => {
   function normalizationGainDb(track: Track): number | undefined {
     const loudness = effectiveLoudness(track)
     if (!loudness) return undefined
-    const gain = computeNormalizationGain(loudness.lufs, loudness.peak)
+    const gain = computeNormalizationGain(
+      loudness.lufs,
+      loudness.peak,
+      settings.replayGain.value.targetLufs,
+    )
     return Number.isFinite(gain) && gain > 0 ? 20 * Math.log10(gain) : undefined
   }
 
@@ -867,12 +871,12 @@ export const usePlayerStore = defineStore('player', () => {
 
   function applyActiveNorm(e: ReturnType<typeof useAudioEngine>, track: Track | null) {
     const eff = track ? effectiveLoudness(track) : null
-    if (eff) e.setActiveNormalization(eff.lufs, eff.peak)
+    if (eff) e.setActiveNormalization(eff.lufs, eff.peak, settings.replayGain.value.targetLufs)
     else e.resetActiveNormalization()
   }
   function applyPendingNorm(e: ReturnType<typeof useAudioEngine>, track: Track) {
     const eff = effectiveLoudness(track)
-    if (eff) e.setPendingNormalization(eff.lufs, eff.peak)
+    if (eff) e.setPendingNormalization(eff.lufs, eff.peak, settings.replayGain.value.targetLufs)
     else e.resetPendingNormalization()
   }
 

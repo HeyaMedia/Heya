@@ -208,13 +208,13 @@ export function createDirectEngine() {
     resetSlot(retired)
   }
 
-  function setActiveNormalization(integrated: number, truePeak: number) {
-    activeNormGain = computeNormalizationGain(integrated, truePeak)
+  function setActiveNormalization(integrated: number, truePeak: number, targetLufs?: number) {
+    activeNormGain = computeNormalizationGain(integrated, truePeak, targetLufs)
     alog('norm', `active gain ×${activeNormGain.toFixed(3)} (direct, element volume)`)
     applyActiveVolume()
   }
-  function setPendingNormalization(integrated: number, truePeak: number) {
-    pendingNormGain = computeNormalizationGain(integrated, truePeak)
+  function setPendingNormalization(integrated: number, truePeak: number, targetLufs?: number) {
+    pendingNormGain = computeNormalizationGain(integrated, truePeak, targetLufs)
     alog('norm', `pending gain ×${pendingNormGain.toFixed(3)} (direct, applied on swap)`)
   }
   function resetActiveNormalization() {
