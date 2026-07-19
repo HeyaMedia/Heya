@@ -13,24 +13,28 @@ Off by default. Two ways in, following the standard env-locks-UI provenance:
 - Settings → Jellyfin API (admin) — live toggle, no restart.
 - `HEYA_JELLYFIN_API_ENABLED=true` — locks the UI toggle.
 
-Then add a server in any Jellyfin app using Heya's `/jellyfin` address
-(for example `http://localhost:8080/jellyfin`) and sign in with a normal
-Heya account. Sessions minted by Jellyfin clients are ordinary Heya sessions:
-they appear under Settings → Sessions and can be revoked there.
+Then add Heya's origin as a server in any Jellyfin app (for example
+`http://localhost:8080`) and sign in with a normal Heya account. Sessions
+minted by Jellyfin clients are ordinary Heya sessions: they appear under
+Settings → Sessions and can be revoked there.
 
 ## Architecture
 
 Everything lives in `internal/jellyfin/` (see the package comment in
 `jellyfin.go` for the constraints). The high-order bits:
 
-- **Mount**: lives under `/jellyfin/*` in `internal/server/server.go`, keeping
-  Jellyfin's case-insensitive API routes out of Heya's SPA namespace. When
-  the toggle is off, the prefixed surface returns 404 and the normal web app
-  remains untouched.
+- **Root dispatch**: clients use the same origin as the Heya web app.
+  `internal/server/server.go` routes the complete registered Jellyfin surface
+  through the package's case-insensitive router. Canonical PascalCase misses
+  receive a protocol JSON 404 instead of SPA HTML. When the toggle is off,
+  protocol requests return 404 and the normal web app remains untouched.
 - **Router**: case-insensitive (ASP.NET legacy — clients are sloppy) with
-  the `/emby` prefix alias under `/jellyfin` (`/jellyfin/emby/...`); literal
-  segments beat param segments regardless of registration order. Patterns are
-  byte-identical to the upstream spec.
+  the standard `/emby` prefix alias; literal segments beat param segments
+  regardless of registration order. Patterns are byte-identical to the
+  upstream spec. Jellyfin's `/Movies/Recommendations` is the only exact Heya
+  page collision: canonical casing or Jellyfin request identity selects the
+  API, while a plain lowercase `/movies/recommendations` navigation stays in
+  Heya.
 - **Ids**: Jellyfin GUIDs are a reversible encoding of (entity kind, int64
   row id) — `ids.go`. No mapping table; foreign GUIDs decode to 404s.
 - **Auth**: `POST /Users/AuthenticateByName` mints a real Heya session.
@@ -75,7 +79,7 @@ absent/disabled" answers a stock Jellyfin gives — LiveTV off, no plugins…),
   server, so the same suite validates both sides:
 
   ```bash
-  bun tools/jellyfin-conformance.ts                       # Heya (:8080/jellyfin, admin/admin)
+  bun tools/jellyfin-conformance.ts                       # Heya (:8080, admin/admin)
   JF_URL=https://jf.example JF_USER=u JF_PASS=p \
     bun tools/jellyfin-conformance.ts                     # real Jellyfin oracle
   ```
@@ -96,10 +100,10 @@ absent/disabled" answers a stock Jellyfin gives — LiveTV off, no plugins…),
   Watching / Latest), series → season → episode browse, item detail,
   favorites, and actual `<video>` playback with progress reporting.
 
-Dev-topology note: in `make dev`, the front door is a pure shim:
-`/api/*` and `/jellyfin/*` go to the Go backend; everything else goes to
-Nuxt. Run Jellyfin protocol tests against `http://127.0.0.1:8080/jellyfin`
-(or the backend directly at `http://127.0.0.1:3050/jellyfin`).
+Dev-topology note: in `make dev`, the front door is a pure shim: `/api/*`,
+Jellyfin requests, and `/rest/*` go to the Go backend; Heya pages go to Nuxt.
+Run Jellyfin protocol tests against `http://127.0.0.1:8080` (or the backend
+directly at `http://127.0.0.1:3050`).
 
 ## Client matrix
 
@@ -136,7 +140,7 @@ Both servers are env-configured (never hardcode credentials):
 
 ```bash
 JF_REAL_URL=https://jf.example JF_REAL_USER=u JF_REAL_PASS=p \
-JF_HEYA_URL=http://127.0.0.1:8080/jellyfin bun tools/jellyfin-diff.ts
+JF_HEYA_URL=http://127.0.0.1:8080 bun tools/jellyfin-diff.ts
 ```
 
 This harness caught the Infuse breakers: `null` where upstream emits empty

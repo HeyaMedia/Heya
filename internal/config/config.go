@@ -89,7 +89,7 @@ type JellyfinConfig struct {
 }
 
 // SubsonicConfig gates the Subsonic/OpenSubsonic-compatible API surface
-// (internal/subsonic) mounted under /subsonic — lets stock Subsonic music
+// (internal/subsonic) served at the protocol-standard /rest paths — lets stock Subsonic music
 // clients (Symfonium, DSub, play:Sub, Tempo, Supersonic...) browse and
 // stream Heya's music libraries. Same provenance semantics as Jellyfin:
 // env > db > default, checked per-request so UI flips need no restart.

@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/karbowiak/heya/internal/jellyfin"
+	"github.com/karbowiak/heya/internal/subsonic"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/unix"
@@ -21,10 +23,10 @@ import (
 // user-facing port (:8080) and reverse-proxy to the two hot-reloading
 // downstreams:
 //
-//	/api/*       ──► HEYA_DEV_BACKEND (default :3050, run by air)
-//	/jellyfin/*  ──► HEYA_DEV_BACKEND
-//	/subsonic/*  ──► HEYA_DEV_BACKEND
-//	/*           ──► HEYA_DEV_PROXY   (default :3000, Nuxt/Vite)
+//	/api/*            ──► HEYA_DEV_BACKEND (default :3050, run by air)
+//	Jellyfin routes   ──► HEYA_DEV_BACKEND
+//	/rest/*           ──► HEYA_DEV_BACKEND
+//	all Heya pages    ──► HEYA_DEV_PROXY   (default :3000, Nuxt/Vite)
 //
 // Because this process never holds business logic, it doesn't restart when
 // you edit Go or Vue — in-flight WS/HMR sockets survive air rebuilds.
@@ -33,8 +35,8 @@ import (
 var devProxyCmd = &cobra.Command{
 	Use:   "dev-proxy",
 	Short: "Dev front door: reverse-proxy Nuxt + the API on one stable port",
-	Long: "Stable dev front door used by `make dev`. Reverse-proxies /api/* and /jellyfin/* to the air-run backend " +
-		"and every other path to the Nuxt dev server, so the browser-facing port never flaps during rebuilds.",
+	Long: "Stable dev front door used by `make dev`. Reverse-proxies /api/* and compatibility protocol requests " +
+		"to the air-run backend and Heya pages to Nuxt, so the browser-facing port never flaps during rebuilds.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
@@ -60,11 +62,13 @@ var devProxyCmd = &cobra.Command{
 
 		mux := http.NewServeMux()
 		mux.Handle("/api/", apiProxy)
-		mux.Handle("/jellyfin", apiProxy)
-		mux.Handle("/jellyfin/", apiProxy)
-		mux.Handle("/subsonic", apiProxy)
-		mux.Handle("/subsonic/", apiProxy)
-		mux.Handle("/", webProxy)
+		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if subsonic.ClaimsPath(r.URL.Path) || jellyfin.ClaimsRootRequest(r) {
+				apiProxy.ServeHTTP(w, r)
+				return
+			}
+			webProxy.ServeHTTP(w, r)
+		}))
 
 		ln, err := reuseAddrListen(cfg.Addr())
 		if err != nil {

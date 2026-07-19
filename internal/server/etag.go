@@ -9,6 +9,9 @@ import (
 	"net"
 	"net/http"
 	"strings"
+
+	"github.com/karbowiak/heya/internal/jellyfin"
+	"github.com/karbowiak/heya/internal/subsonic"
 )
 
 // etagBufferLimit caps how much body we'll buffer to compute an ETag. Above
@@ -30,11 +33,10 @@ func withETag(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		// The Jellyfin-compatible surface must never be ETagged: a real
-		// Jellyfin doesn't 304 its API JSON, and strict clients (Infuse)
-		// error on the empty conditional body they've never seen from a
-		// real server.
-		if isJellyfinPath(r.URL.Path) {
+		// Compatibility protocol responses must never inherit Heya API
+		// conditional caching. In particular, real Jellyfin doesn't 304 its
+		// API JSON, and strict clients (Infuse) reject the empty body.
+		if jellyfin.ClaimsRootRequest(r) || subsonic.ClaimsPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -42,13 +44,6 @@ func withETag(next http.Handler) http.Handler {
 		next.ServeHTTP(ew, r)
 		ew.finalize()
 	})
-}
-
-func isJellyfinPath(path string) bool {
-	if strings.EqualFold(path, "/jellyfin") {
-		return true
-	}
-	return strings.HasPrefix(strings.ToLower(path), "/jellyfin/")
 }
 
 type etagWriter struct {

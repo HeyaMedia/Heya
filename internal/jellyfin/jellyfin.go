@@ -5,8 +5,8 @@
 // Design constraints, in order:
 //
 //   - Everything lives in this package. The only hooks elsewhere are the
-//     prefixed mount in internal/server.New and the config/settings plumbing
-//     (internal/service/jellyfin_settings.go).
+//     root protocol dispatch in internal/server.New and the config/settings
+//     plumbing (internal/service/jellyfin_settings.go).
 //   - No huma. The generated OpenAPI client (web/shared/api.openapi.json)
 //     must not see this surface; the contract is Jellyfin's own vendored
 //     spec (spec/, enforced by the coverage manifest in manifest.go).
@@ -15,9 +15,8 @@
 //     huma-bound world).
 //   - The surface targets Jellyfin 10.11.11 semantics (see system.go).
 //
-// Requests are matched case-insensitively with an optional /emby prefix;
-// anything unmatched falls through to the wrapped handler (the SPA), so an
-// off toggle — or a miss — behaves exactly as if this package didn't exist.
+// Requests are matched case-insensitively with an optional /emby prefix.
+// Root dispatch uses ClaimsRootRequest to keep Heya SPA routes separate.
 package jellyfin
 
 import (
@@ -53,11 +52,11 @@ type Server struct {
 // is itself part of the mux).
 func (s *Server) SetNative(h http.Handler) { s.native = h }
 
-// NewMiddleware mounts the Jellyfin surface in front of next. The caller owns
-// namespacing; production mounts it under /jellyfin so the case-insensitive
-// Jellyfin route table cannot collide with Heya SPA paths. It also seeds the
-// enabled-flag's DB overlay — done here, not in service.App.New, to keep the
-// feature's boot footprint inside this package.
+// NewMiddleware builds the Jellyfin surface in front of next. The caller owns
+// root dispatch so the case-insensitive Jellyfin route table cannot steal a
+// colliding Heya SPA path. It also seeds the enabled-flag's DB overlay — done
+// here, not in service.App.New, to keep the feature's boot footprint inside
+// this package.
 func NewMiddleware(app *service.App, hub *eventhub.Hub, next http.Handler) *Server {
 	s := &Server{app: app, hub: hub, next: next}
 	s.rt = s.buildRouter()
@@ -83,16 +82,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h(w, r, p)
 		return
 	}
-	// A Jellyfin-shaped request (PascalCase first segment) we don't route
+	// A registered or Jellyfin-shaped request we don't route
 	// must NOT fall through to the SPA: an HTML body with a 200 makes strict
 	// clients (Infuse) throw "unexpected server response" when they try to
 	// parse it as JSON. Real Jellyfin answers unknown endpoints with a 404,
 	// which clients tolerate. Return that, and log at WARN so the specific
 	// endpoint the client needs is visible (implement it if load-bearing).
-	// SPA routes are all lowercase, so this never shadows the web app.
-	if jellyfinShaped(path) {
+	// Root dispatch resolves the one known SPA collision before entering this
+	// handler, so returning a protocol 404 here cannot shadow the web app.
+	if ClaimsPath(path) || hasJellyfinRequestIdentity(r) || strings.HasPrefix(strings.ToLower(r.URL.Path), "/emby/") {
 		log.Warn().Str("component", "jellyfin").Str("method", r.Method).Str("path", r.URL.Path).
-			Msg("unrouted Jellyfin-shaped request — returning 404 (client may need this endpoint)")
+			Msg("unrouted Jellyfin request — returning 404 (client may need this endpoint)")
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusNotFound)
 		return
@@ -100,9 +100,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.next.ServeHTTP(w, r)
 }
 
-// jellyfinShaped reports whether a path looks like a Jellyfin API call (first
-// segment starts with an uppercase letter) rather than an SPA route (all the
-// Nuxt pages are lowercase). Used only for diagnostic logging.
+// jellyfinShaped reports whether a path looks like a canonical Jellyfin API
+// call (first segment starts with an uppercase letter) rather than an SPA
+// route (Heya pages are lowercase).
 func jellyfinShaped(path string) bool {
 	p := strings.TrimPrefix(path, "/")
 	if p == "" {
@@ -318,9 +318,9 @@ func (s *Server) buildRouter() *router {
 	return rt
 }
 
-// ClaimsPath reports whether the Jellyfin surface would handle path after the
-// external /jellyfin mount prefix has been stripped. Method-agnostic and
-// independent of the enabled flag.
+// ClaimsPath reports whether the Jellyfin surface owns path. It is
+// method-agnostic and independent of the enabled flag so invalid methods on a
+// real protocol path still receive a protocol 404 instead of SPA HTML.
 func ClaimsPath(path string) bool {
 	p := stripEmbyPrefix(path)
 	// Claim registered routes AND any Jellyfin-shaped path (PascalCase first
@@ -329,12 +329,15 @@ func ClaimsPath(path string) bool {
 	return claimsRouter.claims(p) || jellyfinShaped(p)
 }
 
-// ClaimsRootRequest reports whether an unprefixed request should enter the
-// Jellyfin compatibility surface. Infuse normalizes a configured server URL
-// to its origin, so /jellyfin alone is insufficient for that client. The root
-// alias deliberately claims only PascalCase protocol paths, known anonymous
-// discovery paths, /emby, or authenticated registered routes; Heya's
-// lowercase SPA paths therefore remain untouched.
+// ClaimsRootRequest reports whether a request at Heya's origin belongs to the
+// Jellyfin protocol. The actual route table is the ownership manifest: every
+// registered path is accepted case-insensitively, and canonical PascalCase or
+// /emby-shaped misses enter the protocol too so clients receive a JSON 404.
+//
+// Jellyfin's GET /Movies/Recommendations is the sole route that collides with
+// a Heya page (/movies/recommendations). Canonical Jellyfin casing or
+// Jellyfin request identity selects the protocol; an ordinary lowercase
+// browser navigation stays with the SPA.
 func ClaimsRootRequest(r *http.Request) bool {
 	if r == nil || r.URL == nil {
 		return false
@@ -349,23 +352,26 @@ func ClaimsRootRequest(r *http.Request) bool {
 	}
 
 	lower := strings.ToLower(path)
-	switch lower {
-	case "/system/info/public", "/system/ping",
-		"/branding/configuration", "/branding/css", "/branding/css.css",
-		"/quickconnect/enabled", "/users/public", "/robots.txt",
-		"/api-docs/openapi.json":
-		return true
-	}
 	if strings.HasPrefix(lower, "/emby/") {
 		return true
 	}
-	if !hasJellyfinCredential(r) {
+	if hasJellyfinRequestIdentity(r) {
+		return true
+	}
+	if !ClaimsPath(path) {
 		return false
 	}
-	return ClaimsPath(path)
+	if strings.Trim(lower, "/") == "movies/recommendations" {
+		return false
+	}
+	return true
 }
 
-func hasJellyfinCredential(r *http.Request) bool {
+// hasJellyfinRequestIdentity recognizes both authenticated requests and the
+// client-identification header sent before login. Once a request identifies
+// itself as Jellyfin, even an unregistered lowercase path belongs to the
+// protocol and must receive JSON rather than SPA HTML.
+func hasJellyfinRequestIdentity(r *http.Request) bool {
 	if r.Header.Get("X-Emby-Authorization") != "" ||
 		r.Header.Get("X-Emby-Token") != "" ||
 		r.Header.Get("X-MediaBrowser-Token") != "" {

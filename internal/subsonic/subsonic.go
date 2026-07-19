@@ -6,7 +6,7 @@
 // Design constraints, in order (mirroring internal/jellyfin):
 //
 //   - Everything lives in this package. The only hooks elsewhere are the
-//     prefixed mount in internal/server.New, the settings plumbing
+//     root /rest dispatch in internal/server.New, the settings plumbing
 //     (internal/service/subsonic_settings.go), and the credential service
 //     (internal/service/subsonic_credentials.go).
 //   - No huma. The generated OpenAPI client must not see this surface; the
@@ -47,10 +47,10 @@ type Server struct {
 // the mux is assembled.
 func (s *Server) SetNative(h http.Handler) { s.native = h }
 
-// NewMiddleware mounts the Subsonic surface in front of next. The caller
-// owns namespacing; production mounts it under /subsonic. Also seeds the
-// enabled-flag's DB overlay — done here, not in service.App.New, to keep
-// the feature's boot footprint inside this package.
+// NewMiddleware builds the Subsonic surface in front of next. The caller
+// dispatches /rest requests to it. This also seeds the enabled-flag's DB
+// overlay — done here, not in service.App.New, to keep the feature's boot
+// footprint inside this package.
 func NewMiddleware(app Backend, next http.Handler) *Server {
 	s := &Server{app: app, next: next}
 	s.routes = s.buildRoutes()
@@ -90,15 +90,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // isn't a Subsonic REST call at all.
 func endpointName(path string) (string, bool) {
 	p := strings.ToLower(strings.Trim(path, "/"))
-	if !strings.HasPrefix(p, "rest") {
+	if !strings.HasPrefix(p, "rest/") {
 		return "", false
 	}
-	p = strings.TrimPrefix(p, "rest")
+	p = strings.TrimPrefix(p, "rest/")
 	p = strings.Trim(p, "/")
 	if p == "" || strings.Contains(p, "/") {
 		return "", false
 	}
 	return strings.TrimSuffix(p, ".view"), true
+}
+
+// ClaimsPath reports whether path is a Subsonic/OpenSubsonic REST call. It
+// deliberately claims unknown endpoint names too so they receive the
+// protocol's error envelope rather than the Heya SPA.
+func ClaimsPath(path string) bool {
+	_, ok := endpointName(path)
+	return ok
 }
 
 // buildRoutes maps lowercased endpoint names to handlers. Keys must match

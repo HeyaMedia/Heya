@@ -38,9 +38,9 @@ func (s *Server) publicInfo(r *http.Request) publicSystemInfo {
 	}
 }
 
-// requestBaseURL returns the client-facing Jellyfin base, including Heya's
-// required mount prefix. Forwarding headers keep discovery correct when Heya
-// is placed behind a conventional TLS-terminating reverse proxy.
+// requestBaseURL returns the client-facing Jellyfin origin. Forwarding headers
+// keep discovery correct when Heya is placed behind a conventional
+// TLS-terminating reverse proxy.
 func requestBaseURL(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil {
@@ -53,13 +53,7 @@ func requestBaseURL(r *http.Request) string {
 	if v := firstForwardedValue(r.Header.Get("X-Forwarded-Host")); v != "" {
 		host = v
 	}
-	base := scheme + "://" + host
-	requestPath, _, _ := strings.Cut(r.RequestURI, "?")
-	requestPath = strings.ToLower(requestPath)
-	if requestPath == "/jellyfin" || strings.HasPrefix(requestPath, "/jellyfin/") {
-		base += "/jellyfin"
-	}
-	return base
+	return scheme + "://" + host
 }
 
 func firstForwardedValue(value string) string {

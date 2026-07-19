@@ -94,7 +94,7 @@ var subsonicCredentialCmd = &cobra.Command{
 				}
 				ui.Success("Rotated Subsonic credential for %s", user.Username)
 				fmt.Printf("\n  username:     %s\n  app password: %s\n\n", user.Username, cred.Secret)
-				fmt.Println(ui.Dim("Point a Subsonic client at {server}/subsonic with these credentials."))
+				fmt.Println(ui.Dim("Point a Subsonic client at {server} with these credentials."))
 				return nil
 			default:
 				cred, err := app.GetSubsonicCredential(ctx, user.ID)

@@ -3,6 +3,7 @@ package jellyfin
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -108,9 +109,12 @@ func TestClaimsRootRequest(t *testing.T) {
 		{name: "Infuse discovery", path: "/System/Info/Public", want: true},
 		{name: "lowercase discovery", path: "/system/info/public", want: true},
 		{name: "Infuse login", path: "/Users/AuthenticateByName", want: true},
+		{name: "lowercase login", path: "/users/authenticatebyname", want: true},
 		{name: "Emby alias", path: "/emby/System/Info/Public", want: true},
 		{name: "authenticated lowercase route", path: "/items", header: `MediaBrowser Client="Infuse"`, want: true},
+		{name: "authenticated lowercase miss", path: "/future/endpoint", header: `MediaBrowser Client="Infuse"`, want: true},
 		{name: "Heya movies page", path: "/movies/recommendations", want: false},
+		{name: "removed mount", path: "/jellyfin/System/Info/Public", want: false},
 		{name: "Heya settings page", path: "/settings/users", want: false},
 		{name: "unknown lowercase path", path: "/something-else", want: false},
 	}
@@ -123,6 +127,24 @@ func TestClaimsRootRequest(t *testing.T) {
 			}
 			if got := ClaimsRootRequest(r); got != tt.want {
 				t.Fatalf("ClaimsRootRequest(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClaimsRootRequestCoversEveryRegisteredRoute(t *testing.T) {
+	for _, route := range claimsRouter.routes {
+		t.Run(route.method+" "+route.pattern, func(t *testing.T) {
+			canonical := httptest.NewRequest(route.method, route.pattern, nil)
+			if !ClaimsRootRequest(canonical) {
+				t.Fatalf("canonical route is not claimed: %s %s", route.method, route.pattern)
+			}
+
+			lowerPath := strings.ToLower(route.pattern)
+			lowercase := httptest.NewRequest(route.method, lowerPath, nil)
+			wantLowercase := strings.Trim(lowerPath, "/") != "movies/recommendations"
+			if got := ClaimsRootRequest(lowercase); got != wantLowercase {
+				t.Fatalf("uncredentialed lowercase route claim = %v, want %v: %s %s", got, wantLowercase, route.method, route.pattern)
 			}
 		})
 	}
@@ -165,7 +187,7 @@ func TestClaimsPathPrecision(t *testing.T) {
 		}
 	}
 	// ...near-misses are not.
-	for _, p := range []string{"/", "/search", "/movies", "/music/artists", "/settings/network", "/login", "/genre/action", "/person/12"} {
+	for _, p := range []string{"/", "/search", "/movies", "/music/artists", "/settings/network", "/login", "/genre/action", "/person/12", "/jellyfin/System/Info/Public"} {
 		if ClaimsPath(p) {
 			t.Errorf("ClaimsPath(%q) = true, want false", p)
 		}

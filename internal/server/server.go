@@ -38,55 +38,33 @@ func NewHandler(cfg *config.Config, app *service.App, opts ...Option) http.Handl
 
 	o := collectOptions(opts...)
 
-	// Keep the Jellyfin-compatible surface in its own namespace so its
-	// case-insensitive ASP.NET-style routes can never steal Heya SPA paths
-	// like /movies/recommendations. Clients should be pointed at
-	// {server}/jellyfin; the legacy /emby alias still works underneath that
-	// prefix as /jellyfin/emby/...
+	// Compatibility clients use Heya's origin as their server address.
+	// Jellyfin owns its registered root routes (plus canonical-shaped misses),
+	// while OpenSubsonic owns /rest/*. The dispatcher preserves Heya's one
+	// exact Jellyfin collision, /movies/recommendations, for ordinary browser
+	// navigation; Jellyfin casing or request identity selects the protocol.
 	jf := jellyfin.NewMiddleware(app, o.hub, http.NotFoundHandler())
-	jellyfinHandler := protocolMount("/jellyfin", "/System/Info/Public", jf)
-	mux.Handle("/jellyfin", jellyfinHandler)
-	mux.Handle("/jellyfin/", jellyfinHandler)
-	// Same treatment for the Subsonic-compatible surface: its own /subsonic
-	// namespace (clients are configured with {server}/subsonic), off by
-	// default, per-request toggle.
 	sub := subsonic.NewMiddleware(app, http.NotFoundHandler())
-	subsonicHandler := protocolMount("/subsonic", "/rest/ping.view", sub)
-	mux.Handle("/subsonic", subsonicHandler)
-	mux.Handle("/subsonic/", subsonicHandler)
-	spa := spaHandler()
-	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Infuse's server picker predates Jellyfin's configurable BaseUrl and
-		// normalizes custom server addresses back to their origin. Keep the
-		// explicit /jellyfin mount for modern clients, while accepting
-		// Jellyfin-shaped root requests without reclaiming Heya's lowercase SPA
-		// namespace (the reason the compatibility API was prefixed originally).
-		if jellyfin.ClaimsRootRequest(r) {
-			jf.ServeHTTP(w, r)
-			return
-		}
-		spa.ServeHTTP(w, r)
-	}))
+	mux.Handle("/", protocolRouter(jf, sub, spaHandler()))
 	jf.SetNative(mux)
 	sub.SetNative(mux)
 
 	return withMiddleware(mux)
 }
 
-// protocolMount strips a compatibility API's public namespace while serving
-// its standard discovery route in place at the configured base URL. Keeping
-// the URL stable avoids clients mistaking a redirect target for a new base.
-func protocolMount(prefix, landing string, handler http.Handler) http.Handler {
-	stripped := http.StripPrefix(prefix, handler)
+// protocolRouter dispatches the two compatibility protocols at Heya's origin
+// while leaving every other request to the SPA.
+func protocolRouter(jellyfinHandler, subsonicHandler, spa http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == prefix || r.URL.Path == prefix+"/" {
-			r = r.Clone(r.Context())
-			r.URL.Path = prefix + landing
-			r.URL.RawPath = ""
-			stripped.ServeHTTP(w, r)
+		if subsonic.ClaimsPath(r.URL.Path) {
+			subsonicHandler.ServeHTTP(w, r)
 			return
 		}
-		stripped.ServeHTTP(w, r)
+		if jellyfin.ClaimsRootRequest(r) {
+			jellyfinHandler.ServeHTTP(w, r)
+			return
+		}
+		spa.ServeHTTP(w, r)
 	})
 }
 

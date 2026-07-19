@@ -15,8 +15,8 @@
  *
  *   bun tools/subsonic-smoke.ts [baseUrl] [username] [password]
  *
- * Defaults: http://localhost:8080 admin admin. baseUrl is the HEYA root
- * (not .../subsonic). Exits non-zero on the first failed assertion.
+ * Defaults: http://localhost:8080 admin admin. baseUrl is the Heya root.
+ * Exits non-zero on the first failed assertion.
  */
 
 import { createHash } from 'node:crypto'
@@ -70,7 +70,7 @@ let appPassword = ''
   ok(typeof appPassword === 'string' && appPassword.length >= 16, 'app password minted')
 }
 
-const sub = `${base}/subsonic/rest`
+const sub = `${base}/rest`
 const authQ = `u=${encodeURIComponent(username)}&p=${encodeURIComponent(appPassword)}&v=1.16.1&c=heya-smoke`
 
 async function ss(endpoint: string, extra = '', format = 'json'): Promise<any> {

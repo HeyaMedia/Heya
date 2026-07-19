@@ -23,7 +23,7 @@ const credentialBusy = ref(false)
 const secretVisible = ref(false)
 
 const serverAddress = computed(() =>
-  import.meta.client ? `${window.location.origin}/subsonic` : '')
+  import.meta.client ? window.location.origin : '')
 
 async function load() {
   try {

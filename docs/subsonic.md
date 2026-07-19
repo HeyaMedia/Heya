@@ -49,25 +49,24 @@ three protocol auth forms verify against it:
 1. Heya: Settings → enable the Subsonic API, then create your app password
    (or `heya subsonic credential <user> --rotate`).
 2. Symfonium: Add media provider → **Subsonic**.
-3. Server address: `http://your-host:8080/subsonic` (the `/subsonic`
-   suffix matters).
+3. Server address: `http://your-host:8080` (the same origin as Heya).
 4. Username: your Heya username. Password: the **app password**.
 5. Leave "Force plaintext password" off — token auth works.
 
-Same recipe for DSub / Tempo / play:Sub / Supersonic: server URL ends in
-`/subsonic`, password is the app password.
+Same recipe for DSub / Tempo / play:Sub / Supersonic: use the Heya origin as
+the server URL and the app password as the password.
 
 ## Architecture
 
 Everything lives in `internal/subsonic/` (see the package comment in
 `subsonic.go` for the constraints). The high-order bits:
 
-- **Mount**: `/subsonic/*` in `internal/server/server.go`, exactly like the
-  `/jellyfin` mount — always mounted, per-request enabled check, disabled
-  surface falls through to 404. The dev front door (`heya dev-proxy`)
-  forwards `/subsonic/*` to the backend.
-- **Routing**: every endpoint answers at `/subsonic/rest/<name>` and
-  `<name>.view`, GET or POST (OpenSubsonic `formPost`), case-insensitive.
+- **Root dispatch**: the server address is Heya's origin; the dev and
+  production front doors both send protocol-standard `/rest/*` calls to the
+  Subsonic handler. The enabled flag is checked per request, and a disabled
+  surface returns 404.
+- **Routing**: every endpoint answers at `/rest/<name>` and `<name>.view`, GET
+  or POST (OpenSubsonic `formPost`), case-insensitive.
   Unknown `/rest/` views answer in-protocol error 0, never SPA HTML.
 - **Envelope**: one DTO set with dual `xml:`/`json:` tags
   (`envelope.go`/`dto.go`); XML default, `f=json`, `f=jsonp&callback=`
@@ -144,9 +143,9 @@ Notable triage calls:
   search3 → stream bytes (Range) → cover art → star/rating/scrobble →
   playlist CRUD → play queue → getUser.
 
-Dev-topology note: in `make dev` the front door forwards `/subsonic/*`;
-run protocol tests against `http://127.0.0.1:8080/subsonic` (or the
-backend directly at `http://127.0.0.1:3050/subsonic`).
+Dev-topology note: in `make dev` the front door forwards `/rest/*`; use
+`http://127.0.0.1:8080` as the client server address (or the backend origin
+directly at `http://127.0.0.1:3050`).
 
 ## Known gaps / follow-ups
 

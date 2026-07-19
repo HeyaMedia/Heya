@@ -5,7 +5,7 @@
 // are kept verbatim wherever possible; run the same suite against a real
 // Jellyfin (the oracle) and against Heya's compat surface and compare.
 //
-//   bun tools/jellyfin-conformance.ts                        # Heya on :8080/jellyfin, admin/admin
+//   bun tools/jellyfin-conformance.ts                        # Heya on :8080, admin/admin
 //   JF_URL=https://jf.example JF_USER=u JF_PASS=p bun tools/jellyfin-conformance.ts
 //   JF_ALLOW_MUTATIONS=1 ...                                 # enable state-changing tests
 //   JF_FILTER=UserController ...                             # substring filter on class/test
@@ -22,7 +22,7 @@
 //  - Tests requiring compiled-in test plugins (Dashboard TestPlugin pages,
 //    /Encoder echo endpoints) are not portable and are reported as skips.
 
-const BASE = (process.env.JF_URL ?? 'http://127.0.0.1:8080/jellyfin').replace(/\/$/, '')
+const BASE = (process.env.JF_URL ?? 'http://127.0.0.1:8080').replace(/\/$/, '')
 const USER = process.env.JF_USER ?? 'admin'
 const PASS = process.env.JF_PASS ?? 'admin'
 const MUTATE = process.env.JF_ALLOW_MUTATIONS === '1'

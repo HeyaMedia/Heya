@@ -1,7 +1,7 @@
 # Dev supervisor for `make dev`. Four processes, one front door:
 #
 #   proxy  heya dev-proxy — STABLE front door on :8080. Reverse-proxies
-#          /api/* + /jellyfin/* → :3050 and /* → Nuxt :3000.
+#          /api/* + Jellyfin routes + /rest/* → :3050; Heya pages → Nuxt :3000.
 #          Never restarts on a code save, so the stable origin and Vite HMR
 #          socket survive Air rebuilds. Press `r` on this pane to rebuild it
 #          after editing proxy code.

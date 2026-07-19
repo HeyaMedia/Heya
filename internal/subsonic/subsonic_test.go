@@ -63,12 +63,26 @@ func TestEndpointName(t *testing.T) {
 		{"/rest/", "", false},
 		{"/rest", "", false},
 		{"/other/ping", "", false},
+		{"/restaurant", "", false},
 		{"/rest/a/b", "", false},
 	}
 	for _, c := range cases {
 		got, ok := endpointName(c.path)
 		if ok != c.ok || (ok && got != c.want) {
 			t.Errorf("endpointName(%q) = (%q,%v), want (%q,%v)", c.path, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+func TestClaimsPath(t *testing.T) {
+	for _, path := range []string{"/rest/ping", "/rest/ping.view", "/REST/GetArtists.VIEW", "/rest/futureEndpoint"} {
+		if !ClaimsPath(path) {
+			t.Errorf("ClaimsPath(%q) = false, want true", path)
+		}
+	}
+	for _, path := range []string{"/", "/rest", "/restaurant", "/subsonic/rest/ping.view", "/music"} {
+		if ClaimsPath(path) {
+			t.Errorf("ClaimsPath(%q) = true, want false", path)
 		}
 	}
 }

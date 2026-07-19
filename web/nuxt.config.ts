@@ -94,8 +94,12 @@ export default defineNuxtConfig({
       // turn Jellyfin/Subsonic discovery URLs into the Nuxt 404 page.
       navigateFallbackDenylist: [
         /^\/api/,
-        /^\/jellyfin(?:\/|$)/,
-        /^\/subsonic(?:\/|$)/,
+        // Canonical Jellyfin routes are PascalCase; its lowercase legacy and
+        // web/socket routes are enumerated separately. The server performs
+        // exact case-insensitive route matching after the network request.
+        /^\/[A-Z]/,
+        /^\/(?:emby|socket|embywebsocket|web|api-docs|robots\.txt)(?:\/|$)/i,
+        /^\/rest(?:\/|$)/i,
       ],
       // The ONLY `/api/*` requests the SW may intercept: media images. Their
       // URLs are stable but the CONTENT is mutable — album covers especially

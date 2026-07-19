@@ -25,7 +25,7 @@ func (s *Server) artistInfoPayload(r *http.Request, key string) (*ArtistInfo2, b
 		return nil, false
 	}
 
-	imageURL := requestBaseURL(r) + "/subsonic/rest/getCoverArt?id=" + EncodeID(KindArtist, artistID)
+	imageURL := requestBaseURL(r) + "/rest/getCoverArt?id=" + EncodeID(KindArtist, artistID)
 	out := &ArtistInfo2{
 		XMLName:        xml.Name{Local: key},
 		Biography:      ar.Biography,
@@ -96,7 +96,7 @@ func (s *Server) handleGetAlbumInfo(w http.ResponseWriter, r *http.Request) {
 		respondError(w, r, errNotFound, "album not found")
 		return
 	}
-	coverURL := requestBaseURL(r) + "/subsonic/rest/getCoverArt?id=" + EncodeID(KindAlbum, albumID)
+	coverURL := requestBaseURL(r) + "/rest/getCoverArt?id=" + EncodeID(KindAlbum, albumID)
 	key := "albumInfo"
 	respond(w, r, key, &AlbumInfo{
 		XMLName:        xml.Name{Local: key},

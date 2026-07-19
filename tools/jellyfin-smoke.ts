@@ -11,11 +11,11 @@
  *
  *   bun tools/jellyfin-smoke.ts [baseUrl] [username] [password]
  *
- * Defaults: http://localhost:8080/jellyfin admin admin. Exits non-zero on the first
+ * Defaults: http://localhost:8080 admin admin. Exits non-zero on the first
  * failed assertion, so it's CI-able against a seeded dev server.
  */
 
-const base = (process.argv[2] ?? 'http://localhost:8080/jellyfin').replace(/\/$/, '')
+const base = (process.argv[2] ?? 'http://localhost:8080').replace(/\/$/, '')
 const username = process.argv[3] ?? 'admin'
 const password = process.argv[4] ?? 'admin'
 
