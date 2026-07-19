@@ -124,10 +124,6 @@ func (a *App) BuildRadio(ctx context.Context, userID int64, req RadioRequest) (*
 		}
 		embeddings = append(embeddings, f.TrackEmbedding)
 	}
-	sonicCentroid := pgvector.Vector{}
-	if len(embeddings) > 0 {
-		sonicCentroid = averageEmbeddings(embeddings)
-	}
 
 	metadataCentroid, seedMetadata, seedRecordingIDs, err := a.musicMetadataForTracks(ctx, seedIDs)
 	if err != nil {
@@ -159,7 +155,10 @@ func (a *App) BuildRadio(ctx context.Context, userID int64, req RadioRequest) (*
 		}
 	}
 
-	rows, err := a.recommendMusicAround(ctx, userID, sonicCentroid, metadataCentroid, artistIDs, recommendRadio, int(req.Limit), exclude, req.GenreAffinity, seedGenreProfile)
+	// Sonic-first, per-seed retrieval — see buildSeededRadioPool for why an
+	// explicit seed radio must not use the blended profile pool (averaged
+	// multi-seed centroids, taste bleed, text-embedding noise).
+	rows, err := a.recommendSeededRadio(ctx, userID, embeddings, metadataCentroid, artistIDs, int(req.Limit), exclude, req.GenreAffinity, seedGenreProfile)
 	if err != nil {
 		return nil, fmt.Errorf("recommend radio: %w", err)
 	}

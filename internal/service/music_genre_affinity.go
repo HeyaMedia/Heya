@@ -47,16 +47,20 @@ const neutralGenreOverlap = 0.35
 //     zero-overlap candidate (adjustment 0) ranks below any positive-overlap
 //     candidate of a similar base score — the overlap term dominates modest
 //     score gaps.
-//   - genreAffinity >= genreAffinityDropThreshold (0.9): candidates with a
-//     REAL zero overlap (seed and candidate both have genre data but share
-//     nothing — GenreOverlap == 0 exactly) are dropped from the ranked pool
-//     entirely, but only once at least `limit` overlapping candidates
-//     (GenreOverlap > 0, which includes neutralGenreOverlap) remain in the
-//     eligible pool — a sparse pool still fills the mix rather than coming
-//     back short.
+//   - genreAffinity >= genreAffinityDropThreshold (0.75 — the start of the
+//     Mix Builder slider's "Strict" band, so Strict actually enforces):
+//     candidates with a REAL zero overlap (seed and candidate both have genre
+//     data but share nothing — GenreOverlap == 0 exactly) are dropped from
+//     the ranked pool entirely, but only once at least `limit` overlapping
+//     candidates (GenreOverlap > 0, which includes neutralGenreOverlap)
+//     remain in the eligible pool — a sparse pool still fills the mix rather
+//     than coming back short. Additionally, when at least `limit` candidates
+//     have a real positive overlap, the no-genre-data crowd (neutral
+//     stand-in) is dropped too — neutral exists to protect sparse pools, not
+//     to dilute a queue that has genuine matches to spare.
 const (
 	genreAffinityScoreScale    = 4.0
-	genreAffinityDropThreshold = 0.9
+	genreAffinityDropThreshold = 0.75
 )
 
 // genreHistogramOverlap is the histogram-intersection kernel between two

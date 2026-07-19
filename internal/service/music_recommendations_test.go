@@ -150,15 +150,17 @@ func TestRankMusicRecommendationPoolHighGenreAffinityFavorsOverlap(t *testing.T)
 }
 
 // TestRankMusicRecommendationPoolDropsZeroOverlapWhenPoolIsRich covers the
-// genre_affinity >= 0.9 drop rule: a real zero-overlap candidate (not the
-// neutral-no-data value) is dropped once enough overlapping candidates
-// remain to still fill the requested limit.
+// genre_affinity >= genreAffinityDropThreshold drop rule: a real zero-overlap
+// candidate (genre data present, shares nothing) is dropped once enough
+// overlapping candidates remain to still fill the requested limit.
 func TestRankMusicRecommendationPoolDropsZeroOverlapWhenPoolIsRich(t *testing.T) {
 	pool := []musicRecommendationCandidate{recommendationCandidate(1, 1, "zero", 20, false)}
 	pool[0].GenreOverlap = 0
+	pool[0].GenreDataKnown = true
 	for i := int64(2); i <= 5; i++ {
 		c := recommendationCandidate(i, i, "overlap", float64(15-i), false)
 		c.GenreOverlap = 0.4
+		c.GenreDataKnown = true
 		pool = append(pool, c)
 	}
 
@@ -167,6 +169,35 @@ func TestRankMusicRecommendationPoolDropsZeroOverlapWhenPoolIsRich(t *testing.T)
 		if tr.TrackID == 1 {
 			t.Fatalf("zero-overlap candidate should be dropped once enough overlapping candidates satisfy the limit: %v", out)
 		}
+	}
+}
+
+// TestRankMusicRecommendationPoolStrictShedsNeutralWhenRealMatchesSuffice:
+// candidates with NO genre data (neutral stand-in overlap) are also dropped
+// under strict genre affinity once enough REAL positive-overlap candidates
+// can fill the limit on their own.
+func TestRankMusicRecommendationPoolStrictShedsNeutralWhenRealMatchesSuffice(t *testing.T) {
+	pool := []musicRecommendationCandidate{recommendationCandidate(1, 1, "neutral", 20, false)}
+	pool[0].GenreOverlap = neutralGenreOverlap // no genre data anywhere
+	for i := int64(2); i <= 6; i++ {
+		c := recommendationCandidate(i, i, "real", float64(15-i), false)
+		c.GenreOverlap = 0.5
+		c.GenreDataKnown = true
+		pool = append(pool, c)
+	}
+
+	out := rankMusicRecommendationPool(pool, 1, recommendRadio, 3, nil, 0, 0.8)
+	for _, tr := range out {
+		if tr.TrackID == 1 {
+			t.Fatalf("neutral no-data candidate should be shed when real matches can fill the limit: %v", out)
+		}
+	}
+
+	// Converse: with too few real matches, the neutral candidate survives.
+	sparse := []musicRecommendationCandidate{pool[0], pool[1]}
+	out = rankMusicRecommendationPool(sparse, 1, recommendRadio, 3, nil, 0, 0.8)
+	if len(out) != 2 {
+		t.Fatalf("sparse real-match pool must keep the neutral candidate: %v", out)
 	}
 }
 

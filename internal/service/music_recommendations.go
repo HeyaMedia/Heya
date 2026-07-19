@@ -62,6 +62,11 @@ type musicRecommendationCandidate struct {
 	// when genreAffinity > 0, and genreAffinity > 0 is exactly the condition
 	// buildMusicRecommendationPool used to decide whether to compute it.
 	GenreOverlap float64
+	// GenreDataKnown distinguishes a REAL overlap value (seed and candidate
+	// both have genre data) from the neutralGenreOverlap stand-in assigned
+	// when the candidate has no genre signal anywhere — the strict-mode drop
+	// logic treats those two very differently.
+	GenreDataKnown bool
 }
 
 type musicTasteProfile struct {
@@ -327,6 +332,14 @@ func (a *App) buildMusicRecommendationPool(
 		}
 	}
 
+	return a.finalizeMusicCandidates(ctx, userID, candidates, genreAffinity, seedGenreProfile)
+}
+
+// finalizeMusicCandidates attaches per-user candidate state and (when the
+// genre knob is active) genre overlap to a built candidate map, flattening it
+// for ranking. Shared by the blended profile pool above and the sonic-first
+// seeded-radio pool below.
+func (a *App) finalizeMusicCandidates(ctx context.Context, userID int64, candidates map[int64]*musicRecommendationCandidate, genreAffinity float64, seedGenreProfile map[string]float64) ([]musicRecommendationCandidate, error) {
 	ids := make([]int64, 0, len(candidates))
 	for id := range candidates {
 		ids = append(ids, id)
@@ -350,6 +363,7 @@ func (a *App) buildMusicRecommendationPool(
 		for i := range flat {
 			if cp, ok := genreProfiles[flat[i].Track.TrackID]; ok {
 				flat[i].GenreOverlap = genreHistogramOverlap(seedGenreProfile, cp)
+				flat[i].GenreDataKnown = true
 			} else {
 				// No genre signal anywhere for this track (neither
 				// album.genres nor track_facets.top_genres) — neutralGenreOverlap's
@@ -359,6 +373,123 @@ func (a *App) buildMusicRecommendationPool(
 		}
 	}
 	return flat, nil
+}
+
+// buildSeededRadioPool is the sonic-first candidate retrieval for explicit
+// seed radio (BuildRadio / the Mix Builder's manual tab). It deliberately
+// diverges from buildMusicRecommendationPool because a seeded build answers a
+// different question — "more that sounds like THESE" — where the blended
+// profile pool answers "what would this user enjoy today":
+//
+//   - Per-seed KNN, never an averaged centroid. Averaging six different
+//     bands' embeddings lands on a point that sounds like none of them (the
+//     exact whole-artist-mush failure mix-rules-plan documents); instead each
+//     seed contributes its own neighborhood and a track near several seeds
+//     accumulates score across them.
+//   - No affinity candidate source. Injecting the user's own unrelated
+//     favorites into an explicit seed radio is taste bleed, not relevance.
+//   - Metadata text-embedding neighbors are a FALLBACK only (unanalysed
+//     seeds), not a peer source — text-tag adjacency is far noisier than
+//     acoustic adjacency and was polluting seeded queues.
+//   - The external similar-artist graph stays: it is anchored to the seed
+//     artists themselves and supplies legitimate variety.
+//   - Provider popularity remains the cold-library floor, unchanged.
+func (a *App) buildSeededRadioPool(
+	ctx context.Context,
+	userID int64,
+	seedEmbeddings []pgvector.Vector,
+	metadataCentroid pgvector.Vector,
+	artistIDs []int64,
+	poolLimit int,
+	genreAffinity float64,
+	seedGenreProfile map[string]float64,
+) ([]musicRecommendationCandidate, error) {
+	candidates := map[int64]*musicRecommendationCandidate{}
+	add := func(row sqlc.ListArtistTopTracksForMixRow, source musicCandidateSource, score float64) {
+		candidate := candidates[row.TrackID]
+		if candidate == nil {
+			candidate = &musicRecommendationCandidate{Track: row}
+			candidates[row.TrackID] = candidate
+		}
+		candidate.Sources |= source
+		candidate.Score += score
+	}
+
+	perSeed := max(80, poolLimit/max(1, len(seedEmbeddings)))
+	sonicCount := 0
+	for _, emb := range seedEmbeddings {
+		if len(emb.Slice()) == 0 {
+			continue
+		}
+		rows, err := a.tasteNeighborTracks(ctx, userID, emb, perSeed)
+		if err != nil {
+			return nil, fmt.Errorf("seed sonic candidates: %w", err)
+		}
+		denom := math.Max(1, float64(len(rows)-1))
+		for i, row := range rows {
+			strength := 4.5 - 3.6*(float64(i)/denom)
+			add(row, candidateSonic, strength)
+			sonicCount++
+		}
+	}
+
+	if len(artistIDs) > 0 {
+		rows, err := a.externalMusicCandidates(ctx, userID, artistIDs, poolLimit)
+		if err != nil {
+			return nil, fmt.Errorf("provider candidates: %w", err)
+		}
+		for _, row := range rows {
+			source := candidateExternal
+			if row.chartRank > 0 {
+				source |= candidateProviderChart
+			}
+			score := row.relevance * 2.7
+			if row.chartRank > 0 {
+				score += 1.8 / math.Sqrt(float64(max(1, row.chartRank)))
+			}
+			add(row.track, source, score)
+		}
+	}
+
+	// Text-embedding fallback: only when the seeds' own acoustic neighborhood
+	// couldn't fill a meaningful pool (unanalysed seeds).
+	if sonicCount < poolLimit/3 && len(metadataCentroid.Slice()) > 0 {
+		rows, err := a.metadataNeighborTracks(ctx, userID, metadataCentroid, poolLimit)
+		if err != nil {
+			return nil, fmt.Errorf("metadata candidates: %w", err)
+		}
+		denom := math.Max(1, float64(len(rows)-1))
+		for i, row := range rows {
+			strength := 4.0 - 3.1*(float64(i)/denom)
+			add(row, candidateMetadata, strength)
+		}
+	}
+
+	if len(candidates) < 40 {
+		rows, err := a.popularMusicCandidates(ctx, userID, poolLimit)
+		if err != nil {
+			return nil, fmt.Errorf("popular candidates: %w", err)
+		}
+		for i, row := range rows {
+			strength := 1.6 - 0.8*(float64(i)/math.Max(1, float64(len(rows))))
+			add(row, candidatePopular|candidateProviderChart, strength)
+		}
+	}
+
+	return a.finalizeMusicCandidates(ctx, userID, candidates, genreAffinity, seedGenreProfile)
+}
+
+// recommendSeededRadio ranks a seeded-radio pool. Radio has no regenerate
+// concept, so variant stays 0 — rotation comes from the day bucket alone.
+func (a *App) recommendSeededRadio(ctx context.Context, userID int64, seedEmbeddings []pgvector.Vector, metadataCentroid pgvector.Vector, artistIDs []int64, limit int, exclude []int64, genreAffinity float64, seedGenreProfile map[string]float64) ([]sqlc.ListArtistTopTracksForMixRow, error) {
+	if limit <= 0 {
+		return []sqlc.ListArtistTopTracksForMixRow{}, nil
+	}
+	pool, err := a.buildSeededRadioPool(ctx, userID, seedEmbeddings, metadataCentroid, artistIDs, max(120, limit*10), genreAffinity, seedGenreProfile)
+	if err != nil {
+		return nil, err
+	}
+	return rankMusicRecommendationPool(pool, userID, recommendRadio, limit, exclude, 0, genreAffinity), nil
 }
 
 func rankMusicRecommendationPool(pool []musicRecommendationCandidate, userID int64, mode musicRecommendationMode, limit int, exclude []int64, variant int64, genreAffinity float64) []sqlc.ListArtistTopTracksForMixRow {
@@ -386,19 +517,32 @@ func rankMusicRecommendationPool(pool []musicRecommendationCandidate, userID int
 	// doesn't pass a positive genreAffinity (i.e. everyone except seed radio
 	// with the knob turned up).
 	dropZeroOverlap := false
+	dropNeutral := false
 	if genreAffinity >= genreAffinityDropThreshold {
 		overlapping := 0
+		realMatches := 0
 		for _, c := range eligible {
 			if c.GenreOverlap > 0 {
 				overlapping++
 			}
+			if c.GenreDataKnown && c.GenreOverlap > 0 {
+				realMatches++
+			}
 		}
 		dropZeroOverlap = overlapping >= limit
+		// When enough candidates GENUINELY share the seed's genres, strict
+		// mode also sheds the no-genre-data crowd — their neutral stand-in
+		// overlap exists to avoid emptying sparse pools, not to let unknown
+		// tracks ride into a queue that has real matches to spare.
+		dropNeutral = realMatches >= limit
 	}
 
 	ranked := make([]musicRecommendationCandidate, 0, len(eligible))
 	for _, base := range eligible {
-		if dropZeroOverlap && base.GenreOverlap == 0 {
+		if dropZeroOverlap && base.GenreDataKnown && base.GenreOverlap == 0 {
+			continue
+		}
+		if dropNeutral && !base.GenreDataKnown {
 			continue
 		}
 		candidate := base
@@ -520,6 +664,20 @@ func selectMusicRecommendations(candidates []musicRecommendationCandidate, limit
 	head := candidates[:headEnd]
 	tailEnd := min(len(candidates), headEnd+explorationTailWindow)
 	tail := append([]musicRecommendationCandidate{}, candidates[headEnd:tailEnd]...)
+	if mode == recommendRadio {
+		// Explicit seed radio: exploration may only branch within the
+		// seed-anchored sources (per-seed sonic KNN, similar-artist graph).
+		// The deep pool is where fallback text/popularity candidates live,
+		// and sampling those into a "sounds like these seeds" queue is how
+		// unrelated tracks were leaking in.
+		anchored := tail[:0]
+		for _, c := range tail {
+			if c.Sources&(candidateSonic|candidateExternal) != 0 {
+				anchored = append(anchored, c)
+			}
+		}
+		tail = anchored
+	}
 	if rng != nil && len(tail) > 1 {
 		rng.Shuffle(len(tail), func(i, j int) { tail[i], tail[j] = tail[j], tail[i] })
 	}
