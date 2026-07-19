@@ -98,6 +98,36 @@ func TestRouterCaseInsensitiveAndEmby(t *testing.T) {
 	}
 }
 
+func TestClaimsRootRequest(t *testing.T) {
+	tests := []struct {
+		name   string
+		path   string
+		header string
+		want   bool
+	}{
+		{name: "Infuse discovery", path: "/System/Info/Public", want: true},
+		{name: "lowercase discovery", path: "/system/info/public", want: true},
+		{name: "Infuse login", path: "/Users/AuthenticateByName", want: true},
+		{name: "Emby alias", path: "/emby/System/Info/Public", want: true},
+		{name: "authenticated lowercase route", path: "/items", header: `MediaBrowser Client="Infuse"`, want: true},
+		{name: "Heya movies page", path: "/movies/recommendations", want: false},
+		{name: "Heya settings page", path: "/settings/users", want: false},
+		{name: "unknown lowercase path", path: "/something-else", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			if tt.header != "" {
+				r.Header.Set("Authorization", tt.header)
+			}
+			if got := ClaimsRootRequest(r); got != tt.want {
+				t.Fatalf("ClaimsRootRequest(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestLiteralRoutePrecedence: literal paths must beat param siblings no
 // matter the registration order — regression for /Items/Filters2 being
 // swallowed by /Items/{itemId}.

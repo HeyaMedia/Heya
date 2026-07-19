@@ -329,6 +329,56 @@ func ClaimsPath(path string) bool {
 	return claimsRouter.claims(p) || jellyfinShaped(p)
 }
 
+// ClaimsRootRequest reports whether an unprefixed request should enter the
+// Jellyfin compatibility surface. Infuse normalizes a configured server URL
+// to its origin, so /jellyfin alone is insufficient for that client. The root
+// alias deliberately claims only PascalCase protocol paths, known anonymous
+// discovery paths, /emby, or authenticated registered routes; Heya's
+// lowercase SPA paths therefore remain untouched.
+func ClaimsRootRequest(r *http.Request) bool {
+	if r == nil || r.URL == nil {
+		return false
+	}
+	path := r.URL.Path
+	trimmed := strings.TrimPrefix(path, "/")
+	if trimmed == "" {
+		return false
+	}
+	if c := trimmed[0]; c >= 'A' && c <= 'Z' {
+		return true
+	}
+
+	lower := strings.ToLower(path)
+	switch lower {
+	case "/system/info/public", "/system/ping",
+		"/branding/configuration", "/branding/css", "/branding/css.css",
+		"/quickconnect/enabled", "/users/public", "/robots.txt",
+		"/api-docs/openapi.json":
+		return true
+	}
+	if strings.HasPrefix(lower, "/emby/") {
+		return true
+	}
+	if !hasJellyfinCredential(r) {
+		return false
+	}
+	return ClaimsPath(path)
+}
+
+func hasJellyfinCredential(r *http.Request) bool {
+	if r.Header.Get("X-Emby-Authorization") != "" ||
+		r.Header.Get("X-Emby-Token") != "" ||
+		r.Header.Get("X-MediaBrowser-Token") != "" {
+		return true
+	}
+	authorization := strings.ToLower(strings.TrimSpace(r.Header.Get("Authorization")))
+	if strings.HasPrefix(authorization, "mediabrowser ") || strings.HasPrefix(authorization, "emby ") {
+		return true
+	}
+	query := r.URL.Query()
+	return query.Get("api_key") != "" || query.Get("ApiKey") != "" || query.Get("token") != ""
+}
+
 // claimsRouter is a handler-less route table for ClaimsPath. Handlers bound
 // to the zero Server are never invoked through it.
 var claimsRouter = func() *router {

@@ -54,7 +54,19 @@ func NewHandler(cfg *config.Config, app *service.App, opts ...Option) http.Handl
 	subsonicHandler := protocolMount("/subsonic", "/rest/ping.view", sub)
 	mux.Handle("/subsonic", subsonicHandler)
 	mux.Handle("/subsonic/", subsonicHandler)
-	mux.Handle("/", spaHandler())
+	spa := spaHandler()
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Infuse's server picker predates Jellyfin's configurable BaseUrl and
+		// normalizes custom server addresses back to their origin. Keep the
+		// explicit /jellyfin mount for modern clients, while accepting
+		// Jellyfin-shaped root requests without reclaiming Heya's lowercase SPA
+		// namespace (the reason the compatibility API was prefixed originally).
+		if jellyfin.ClaimsRootRequest(r) {
+			jf.ServeHTTP(w, r)
+			return
+		}
+		spa.ServeHTTP(w, r)
+	}))
 	jf.SetNative(mux)
 	sub.SetNative(mux)
 

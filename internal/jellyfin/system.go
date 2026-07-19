@@ -53,7 +53,13 @@ func requestBaseURL(r *http.Request) string {
 	if v := firstForwardedValue(r.Header.Get("X-Forwarded-Host")); v != "" {
 		host = v
 	}
-	return scheme + "://" + host + "/jellyfin"
+	base := scheme + "://" + host
+	requestPath, _, _ := strings.Cut(r.RequestURI, "?")
+	requestPath = strings.ToLower(requestPath)
+	if requestPath == "/jellyfin" || strings.HasPrefix(requestPath, "/jellyfin/") {
+		base += "/jellyfin"
+	}
+	return base
 }
 
 func firstForwardedValue(value string) string {
