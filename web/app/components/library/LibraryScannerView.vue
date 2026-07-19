@@ -401,7 +401,6 @@ watch(issueCode, () => fetchIssuePage(true))
 
 // --- Derived state --------------------------------------------------------
 
-const summary = computed(() => overview.value?.latest_run?.summary ?? {})
 const pipelineFailures = computed(() => overview.value?.pipeline_failures ?? [])
 const issueCounts = computed(() => overview.value?.issue_counts ?? [])
 const issueTotal = computed(() => overview.value?.issue_total ?? 0)
@@ -655,15 +654,6 @@ function formatCount(value: number): string {
   return value.toLocaleString()
 }
 
-function summaryNumber(...keys: string[]): number {
-  for (const key of keys) {
-    const value = summary.value[key]
-    if (typeof value === 'number') return value
-    if (typeof value === 'string' && value !== '' && !Number.isNaN(Number(value))) return Number(value)
-  }
-  return 0
-}
-
 function selectedMatchLine(identity: ScanIdentity): string {
   const parts: string[] = []
   if (identity.selected_provider_id) parts.push(identity.selected_provider_id)
@@ -772,10 +762,9 @@ function latestRunStatus(): string {
       </div>
 
       <div v-if="!overview && overviewLoading" class="sv2-tiles">
-        <div v-for="n in 7" :key="n" class="tile-skeleton" />
+        <div v-for="n in 6" :key="n" class="tile-skeleton" />
       </div>
       <div v-else class="sv2-tiles">
-        <MetricTile label="Files" :value="summaryNumber('files', 'classified_files')" icon="folder" />
         <MetricTile label="Identities" :value="bucketCount('all')" icon="list" />
         <MetricTile label="Matched" :value="bucketCount('matched')" icon="check" tone="good" />
         <MetricTile label="Needs review" :value="bucketCount('needs_review')" icon="pencil" :tone="bucketCount('needs_review') ? 'warn' : 'neutral'" />
