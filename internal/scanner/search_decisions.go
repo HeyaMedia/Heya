@@ -29,6 +29,20 @@ type SearchDecisions map[string]SearchDecision
 // Manual approve/reject/ignore decisions are revision-independent.
 const scannerSearchMatcherRevision int32 = 4
 
+// Revision 5 deliberately revalidates every automatic music binding after
+// introducing authoritative namesake separation and file-level repair from
+// MusicBrainz/release/fingerprint evidence. Existing bindings stay materialized
+// until the fresh scan confirms or replaces them; manual decisions remain
+// revision-independent.
+const scannerMusicSearchMatcherRevision int32 = 5
+
+func searchMatcherRevision(mediaType sqlc.MediaType) int32 {
+	if mediaType == sqlc.MediaTypeMusic {
+		return scannerMusicSearchMatcherRevision
+	}
+	return scannerSearchMatcherRevision
+}
+
 func LoadScannerSearchDecisions(ctx context.Context, db *pgxpool.Pool, lib sqlc.Library) (SearchDecisions, error) {
 	if db == nil {
 		return nil, nil
@@ -37,7 +51,7 @@ func LoadScannerSearchDecisions(ctx context.Context, db *pgxpool.Pool, lib sqlc.
 		LibraryID:       lib.ID,
 		MediaType:       lib.MediaType,
 		ReviewStatuses:  []string{"accepted", "rejected", "ignored"},
-		MatcherRevision: scannerSearchMatcherRevision,
+		MatcherRevision: searchMatcherRevision(lib.MediaType),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("load scanner search decisions: %w", err)

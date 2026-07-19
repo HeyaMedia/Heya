@@ -134,6 +134,7 @@ func persistScanResultTx(ctx context.Context, q *sqlc.Queries, lib sqlc.Library,
 func persistLocalMediaIdentities(ctx context.Context, q *sqlc.Queries, lib sqlc.Library, scanRunID int64, result Result) (map[string]sqlc.LocalMediaIdentity, error) {
 	providerByKey, mediaItemByKey := scanIdentityTargets(result)
 	reviewByKey := scanIdentityReviewStatuses(result)
+	matcherRevision := searchMatcherRevision(lib.MediaType)
 	out := map[string]sqlc.LocalMediaIdentity{}
 
 	for _, match := range result.MovieMatches {
@@ -151,7 +152,7 @@ func persistLocalMediaIdentities(ctx context.Context, q *sqlc.Queries, lib sqlc.
 			FirstSeenScanRunID:      pgInt8(scanRunID),
 			LastSeenScanRunID:       pgInt8(scanRunID),
 			RawIdentity:             mustJSONBytes(match),
-			DecisionMatcherRevision: scannerSearchMatcherRevision,
+			DecisionMatcherRevision: matcherRevision,
 		})
 		if err != nil {
 			return out, fmt.Errorf("upsert movie local identity %s: %w", match.Key, err)
@@ -177,7 +178,7 @@ func persistLocalMediaIdentities(ctx context.Context, q *sqlc.Queries, lib sqlc.
 			FirstSeenScanRunID:      pgInt8(scanRunID),
 			LastSeenScanRunID:       pgInt8(scanRunID),
 			RawIdentity:             mustJSONBytes(match),
-			DecisionMatcherRevision: scannerSearchMatcherRevision,
+			DecisionMatcherRevision: matcherRevision,
 		})
 		if err != nil {
 			return out, fmt.Errorf("upsert TV local identity %s: %w", match.Key, err)
@@ -203,7 +204,7 @@ func persistLocalMediaIdentities(ctx context.Context, q *sqlc.Queries, lib sqlc.
 			FirstSeenScanRunID:      pgInt8(scanRunID),
 			LastSeenScanRunID:       pgInt8(scanRunID),
 			RawIdentity:             mustJSONBytes(artist),
-			DecisionMatcherRevision: scannerSearchMatcherRevision,
+			DecisionMatcherRevision: matcherRevision,
 		})
 		if err != nil {
 			return out, fmt.Errorf("upsert music local identity %s: %w", artist.Key, err)
@@ -229,7 +230,7 @@ func persistLocalMediaIdentities(ctx context.Context, q *sqlc.Queries, lib sqlc.
 			FirstSeenScanRunID:      pgInt8(scanRunID),
 			LastSeenScanRunID:       pgInt8(scanRunID),
 			RawIdentity:             mustJSONBytes(plan),
-			DecisionMatcherRevision: scannerSearchMatcherRevision,
+			DecisionMatcherRevision: matcherRevision,
 		})
 		if err != nil {
 			return out, fmt.Errorf("upsert book local identity %s: %w", plan.Key, err)
