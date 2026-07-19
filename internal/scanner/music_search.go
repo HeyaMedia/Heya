@@ -414,13 +414,14 @@ func resolveMusicArtistByFingerprint(ctx context.Context, artist MusicArtistPlan
 		return metadata.SearchResult{}, nil, false, nil
 	}
 	type support struct {
-		artist             MusicRecordingArtistEvidence
-		files              int
-		totalScore         float64
-		artistNameOverride bool
-		recordings         []string
-		recordingIDs       map[string]bool
-		evidence           []MusicAcceptedRecordingEvidence
+		artist               MusicRecordingArtistEvidence
+		files                int
+		totalScore           float64
+		artistNameOverride   bool
+		collaborationPrimary bool
+		recordings           []string
+		recordingIDs         map[string]bool
+		evidence             []MusicAcceptedRecordingEvidence
 	}
 	byArtist := map[string]*support{}
 	decisiveFiles := 0
@@ -442,6 +443,7 @@ func resolveMusicArtistByFingerprint(ctx context.Context, artist MusicArtistPlan
 		entry.files++
 		entry.totalScore += best.score
 		entry.artistNameOverride = entry.artistNameOverride || best.artistNameOverride
+		entry.collaborationPrimary = entry.collaborationPrimary || best.collaborationPrimary
 		entry.recordings = append(entry.recordings, best.recordingMBID)
 		if best.recordingIdentityAccepted {
 			entry.recordingIDs[strings.ToLower(strings.TrimSpace(best.recordingMBID))] = true
@@ -467,10 +469,12 @@ func resolveMusicArtistByFingerprint(ctx context.Context, artist MusicArtistPlan
 		return metadata.SearchResult{}, nil, false, nil
 	}
 	nameOverrideAllowed := musicFingerprintAllowsArtistNameOverride(artist)
-	if !nameOverrideAllowed && !musicSearchArtistExact(artist, winner.artist.Name) {
+	collaborationPrimaryAllowed := winner.collaborationPrimary &&
+		musicFingerprintAllowsCollaborationPrimary(artist, winner.artist.Name)
+	if !nameOverrideAllowed && !collaborationPrimaryAllowed && !musicSearchArtistExact(artist, winner.artist.Name) {
 		return metadata.SearchResult{}, nil, false, nil
 	}
-	if winner.artistNameOverride && (!nameOverrideAllowed || winner.files < 2 || len(winner.recordingIDs) < 2) {
+	if winner.artistNameOverride && ((!nameOverrideAllowed && !collaborationPrimaryAllowed) || winner.files < 2 || len(winner.recordingIDs) < 2) {
 		return metadata.SearchResult{}, nil, false, nil
 	}
 	average := winner.totalScore / float64(winner.files)
@@ -509,6 +513,7 @@ type scoredMusicRecordingEvidence struct {
 	sourceDuration            int
 	recordingDuration         int
 	artistNameOverride        bool
+	collaborationPrimary      bool
 	recordingIdentityAccepted bool
 	score                     float64
 }
@@ -524,7 +529,7 @@ func bestMusicRecordingEvidence(artist MusicArtistPlan, track MusicTrackPlan, va
 		}
 		_, canonicalRecordingErr := uuid.Parse(strings.TrimSpace(value.CanonicalRecordingID))
 		recordingIdentityAccepted := canonicalRecordingErr == nil
-		titleScore := musicNameSimilarity(track.TrackTitle, value.Title)
+		titleScore := musicRecordingTitleSimilarity(track.TrackTitle, value.Title)
 		if titleScore < musicArtistAutoMatchThreshold || !musicDurationsCompatible(value.SourceDuration, value.RecordingDuration) {
 			continue
 		}
@@ -542,6 +547,19 @@ func bestMusicRecordingEvidence(artist MusicArtistPlan, track MusicTrackPlan, va
 				sourceDuration: value.SourceDuration, recordingDuration: value.RecordingDuration,
 				recordingIdentityAccepted: recordingIdentityAccepted, score: score,
 			})
+		}
+		if !matchedArtist {
+			if credit, ok := musicRecordingCollaborationPrimary(artist.Artist, validCredits); ok {
+				matchedArtist = true
+				durationScore := musicDurationScore(value.SourceDuration, value.RecordingDuration)
+				score := value.FingerprintScore*.60 + titleScore*.25 + durationScore*.15
+				candidates = append(candidates, scoredMusicRecordingEvidence{
+					artist: credit, recordingMBID: value.RecordingMBID, canonicalRecordingID: value.CanonicalRecordingID,
+					sourceDuration: value.SourceDuration, recordingDuration: value.RecordingDuration,
+					artistNameOverride: true, collaborationPrimary: true,
+					recordingIdentityAccepted: recordingIdentityAccepted, score: score,
+				})
+			}
 		}
 		// Name evidence may itself be poisoned. Only expose a name-override
 		// candidate when the recording has one unambiguous canonical artist;
@@ -577,6 +595,57 @@ func bestMusicRecordingEvidence(artist MusicArtistPlan, track MusicTrackPlan, va
 func musicSameRecordingEvidence(left, right scoredMusicRecordingEvidence) bool {
 	return strings.EqualFold(strings.TrimSpace(left.recordingMBID), strings.TrimSpace(right.recordingMBID)) &&
 		strings.EqualFold(strings.TrimSpace(left.canonicalRecordingID), strings.TrimSpace(right.canonicalRecordingID))
+}
+
+// Fingerprints already prove the audio payload, while the title is only a
+// corroborating guard against a bad AcoustID row. Edition suffixes such as
+// "(Radio Edit)" and "(Smith & Pledger remix)" must therefore compare using
+// the shared recording-title rules instead of the stricter artist-name rules.
+func musicRecordingTitleSimilarity(local, canonical string) float64 {
+	if titlematch.FuzzyEqual(local, canonical) {
+		return 1
+	}
+	return musicNameSimilarity(local, canonical)
+}
+
+// A project credit such as "Lange Presents Firewall" is not necessarily a
+// standalone artist in MusicBrainz. When one recording explicitly credits
+// every named component, expose the primary credited artist as acoustic
+// evidence. The resolver still requires at least two distinct recordings to
+// converge before this can replace the literal local credit.
+func musicRecordingCollaborationPrimary(local string, credits []MusicRecordingArtistEvidence) (MusicRecordingArtistEvidence, bool) {
+	primary := musicPrimaryCollaborationArtist(local)
+	parts := musicCollaborationSeparatorRE.Split(strings.TrimSpace(local), -1)
+	if primary == "" || len(parts) < 2 {
+		return MusicRecordingArtistEvidence{}, false
+	}
+	var primaryCredit MusicRecordingArtistEvidence
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return MusicRecordingArtistEvidence{}, false
+		}
+		matched := false
+		for _, credit := range credits {
+			if musicNameSimilarity(part, credit.Name) < musicArtistAutoMatchThreshold {
+				continue
+			}
+			matched = true
+			if musicNameSimilarity(primary, credit.Name) >= musicArtistAutoMatchThreshold {
+				primaryCredit = credit
+			}
+			break
+		}
+		if !matched {
+			return MusicRecordingArtistEvidence{}, false
+		}
+	}
+	return primaryCredit, strings.TrimSpace(primaryCredit.CanonicalID) != ""
+}
+
+func musicFingerprintAllowsCollaborationPrimary(artist MusicArtistPlan, canonicalName string) bool {
+	primary := musicPrimaryCollaborationArtist(artist.Artist)
+	return primary != "" && musicNameSimilarity(primary, canonicalName) >= musicArtistAutoMatchThreshold
 }
 
 func musicUniqueRecordingArtistCredits(values []MusicRecordingArtistEvidence) []MusicRecordingArtistEvidence {

@@ -411,6 +411,80 @@ func TestMusicSearchFingerprintConsensusRepairsPoisonedArtistName(t *testing.T) 
 	})
 }
 
+func TestMusicSearchFingerprintIgnoresParentheticalTrackEditionForCorroboration(t *testing.T) {
+	const artistCanonical = "20000000-0000-4000-8000-000000000001"
+	credit := MusicRecordingArtistEvidence{
+		CanonicalID: artistCanonical, Name: "Joshua Radin", MBID: "24762087-34ce-4f65-b743-7d8402cf30dd",
+	}
+	search := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{"Joshua Ridin": nil}}
+	fingerprints := &fakeMusicFingerprintProvider{results: map[string][]MusicRecordingEvidence{
+		"Joshua Ridin/Simple Times/01.flac": {{
+			RecordingMBID: "10000000-0000-4000-8000-000000000001", CanonicalRecordingID: "30000000-0000-4000-8000-000000000001",
+			Title: "One of Those Days", FingerprintScore: .99, SourceDuration: 182, RecordingDuration: 182,
+			Artists: []MusicRecordingArtistEvidence{credit},
+		}},
+		"Joshua Ridin/Simple Times/02.flac": {{
+			RecordingMBID: "10000000-0000-4000-8000-000000000002", CanonicalRecordingID: "30000000-0000-4000-8000-000000000002",
+			Title: "I'd Rather Be With You", FingerprintScore: .99, SourceDuration: 169, RecordingDuration: 169,
+			Artists: []MusicRecordingArtistEvidence{credit},
+		}},
+	}}
+	artist := MusicArtistPlan{Key: "artist:joshua ridin", Artist: "Joshua Ridin", Albums: []MusicAlbumPlan{{
+		Album: "Simple Times", Tracks: []MusicTrackPlan{
+			{TrackTitle: "One of Those Days (Radio Edit)", RelPath: "Joshua Ridin/Simple Times/01.flac"},
+			{TrackTitle: "I'd Rather Be With You (Radio Edit)", RelPath: "Joshua Ridin/Simple Times/02.flac"},
+		},
+	}}}
+
+	results, err := SearchMusicArtistsWithFingerprints(context.Background(), []MusicArtistPlan{artist}, search, fingerprints, &captureEmitter{}, musicArtistAutoMatchThreshold)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.True(t, results[0].Accepted)
+	require.Equal(t, heyametadata.EncodeEntityProviderID(artistCanonical), results[0].ProviderID)
+	require.Equal(t, "Joshua Radin", results[0].Artist)
+}
+
+func TestMusicSearchFingerprintProvesPrimaryArtistFromFullProjectCredit(t *testing.T) {
+	const langeCanonical = "20000000-0000-4000-8000-000000000001"
+	credits := []MusicRecordingArtistEvidence{
+		{CanonicalID: langeCanonical, Name: "Lange", MBID: "f11c95b2-532a-4b4b-8550-07c6977082c4"},
+		{CanonicalID: "20000000-0000-4000-8000-000000000002", Name: "Firewall", MBID: "69785e6b-a0cd-4b19-8e3d-0a7907af91dd"},
+	}
+	search := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{
+		"Lange Presents Firewall": nil,
+		"Lange":                   nil,
+	}}
+	fingerprints := &fakeMusicFingerprintProvider{results: map[string][]MusicRecordingEvidence{
+		"Lange Presents Firewall/Kilimanjaro/01.flac": {{
+			RecordingMBID: "10000000-0000-4000-8000-000000000001", CanonicalRecordingID: "30000000-0000-4000-8000-000000000001",
+			Title: "Kilimanjaro (original mix)", FingerprintScore: .99, SourceDuration: 488, RecordingDuration: 488,
+			Artists: credits,
+		}},
+		"Lange Presents Firewall/Kilimanjaro/02.flac": {{
+			RecordingMBID: "10000000-0000-4000-8000-000000000002", CanonicalRecordingID: "30000000-0000-4000-8000-000000000002",
+			Title: "Kilimanjaro (Lange remix)", FingerprintScore: .99, SourceDuration: 561, RecordingDuration: 561,
+			Artists: credits,
+		}},
+	}}
+	paths := []string{
+		"Lange Presents Firewall/Kilimanjaro/01.flac",
+		"Lange Presents Firewall/Kilimanjaro/02.flac",
+	}
+	artist := MusicArtistPlan{Key: "artist:lange presents firewall", Artist: "Lange Presents Firewall", Files: paths, Albums: []MusicAlbumPlan{{
+		Album: "Kilimanjaro", Tracks: []MusicTrackPlan{
+			{TrackTitle: "Kilimanjaro (Original Mix)", RelPath: paths[0]},
+			{TrackTitle: "Kilimanjaro (Lange Remix)", RelPath: paths[1]},
+		},
+	}}}
+
+	results, err := SearchMusicArtistsWithFingerprints(context.Background(), []MusicArtistPlan{artist}, search, fingerprints, &captureEmitter{}, musicArtistAutoMatchThreshold)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.True(t, results[0].Accepted)
+	require.Equal(t, heyametadata.EncodeEntityProviderID(langeCanonical), results[0].ProviderID)
+	require.Equal(t, "Lange", results[0].Artist)
+}
+
 func TestMusicSearchFingerprintDoesNotOverrideArtistNameFromOneRecording(t *testing.T) {
 	search := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{"Wrongly Tagged": nil}}
 	fingerprints := &fakeMusicFingerprintProvider{results: map[string][]MusicRecordingEvidence{
