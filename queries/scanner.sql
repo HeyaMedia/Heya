@@ -131,7 +131,9 @@ LIMIT 1;
 -- name: ListScannerReviewsForRematch :many
 -- Matcher-upgrade replay for any scanner-backed library: reuse the retained
 -- local analysis artifact, bypassing inventory/analyze and enqueueing only
--- the normal search stage.
+-- the normal search stage. Rows already parked on an upstream workflow stay
+-- out of a manual replay so we cannot submit a duplicate discovery while the
+-- completion feed is still tracking the original request.
 SELECT
     entity.id AS scanner_entity_id,
     entity.library_id,
@@ -146,6 +148,11 @@ JOIN scanner_entity_artifacts artifact
 WHERE entity.library_id = sqlc.arg(library_id)
   AND entity.media_type = sqlc.arg(media_type)
   AND entity.status = 'needs_review'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM scanner_metadata_continuations continuation
+      WHERE continuation.scanner_entity_id = entity.id
+  )
 ORDER BY entity.id
 LIMIT sqlc.arg(row_limit);
 

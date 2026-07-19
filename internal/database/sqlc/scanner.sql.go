@@ -1679,6 +1679,11 @@ JOIN scanner_entity_artifacts artifact
 WHERE entity.library_id = $1
   AND entity.media_type = $2
   AND entity.status = 'needs_review'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM scanner_metadata_continuations continuation
+      WHERE continuation.scanner_entity_id = entity.id
+  )
 ORDER BY entity.id
 LIMIT $3
 `
@@ -1698,7 +1703,9 @@ type ListScannerReviewsForRematchRow struct {
 
 // Matcher-upgrade replay for any scanner-backed library: reuse the retained
 // local analysis artifact, bypassing inventory/analyze and enqueueing only
-// the normal search stage.
+// the normal search stage. Rows already parked on an upstream workflow stay
+// out of a manual replay so we cannot submit a duplicate discovery while the
+// completion feed is still tracking the original request.
 func (q *Queries) ListScannerReviewsForRematch(ctx context.Context, arg ListScannerReviewsForRematchParams) ([]ListScannerReviewsForRematchRow, error) {
 	rows, err := q.db.Query(ctx, listScannerReviewsForRematch, arg.LibraryID, arg.MediaType, arg.RowLimit)
 	if err != nil {

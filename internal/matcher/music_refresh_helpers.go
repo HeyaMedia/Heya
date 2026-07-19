@@ -109,6 +109,24 @@ func (m *Matcher) writeArtistTopTracks(ctx context.Context, artistID int64, enti
 }
 
 func (m *Matcher) writeArtistSimilarArtists(ctx context.Context, artistID int64, sims []metadata.SimilarArtistEntry) error {
+	if m.inTx {
+		return m.replaceArtistSimilarArtists(ctx, artistID, sims)
+	}
+	tx, err := m.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin artist similar-artists replacement: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := m.WithTx(tx).replaceArtistSimilarArtists(ctx, artistID, sims); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit artist similar-artists replacement: %w", err)
+	}
+	return nil
+}
+
+func (m *Matcher) replaceArtistSimilarArtists(ctx context.Context, artistID int64, sims []metadata.SimilarArtistEntry) error {
 	if err := m.q.ReplaceArtistSimilarArtists(ctx, artistID); err != nil {
 		return err
 	}
@@ -326,7 +344,7 @@ func pgNumericFromFloat(f float64) pgtype.Numeric {
 // formatFloatForNumeric renders the float without scientific notation so
 // pgtype.Numeric.Scan accepts it. strconv.FormatFloat with 'f' format is
 // the cleanest path; 4 digits of precision matches the column scales
-// (NUMERIC(4,2) for rating, NUMERIC(6,4) for match_score).
+// (NUMERIC(4,2) for rating, NUMERIC(23,4) for match_score).
 func formatFloatForNumeric(f float64) string {
 	return strconv.FormatFloat(f, 'f', 4, 64)
 }

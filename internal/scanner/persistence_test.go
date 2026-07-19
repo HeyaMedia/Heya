@@ -375,6 +375,20 @@ func TestMusicReviewRematchReusesRetainedAnalysisArtifact(t *testing.T) {
 	require.Equal(t, searchRefs[0].Entity.ID, rows[0].ScannerEntityID)
 	require.Equal(t, analysisRefs[0].Artifact.ID, rows[0].AnalysisArtifactID)
 	require.Equal(t, scope, rows[0].ScopePaths)
+
+	_, err = pool.Exec(ctx, `
+		INSERT INTO scanner_metadata_continuations (
+			kind, library_id, scanner_entity_id, artifact_id, args, next_attempt_at
+		) VALUES ('search_metadata', $1, $2, $3, '{}'::jsonb, now() + interval '1 hour')
+	`, lib.ID, searchRefs[0].Entity.ID, analysisRefs[0].Artifact.ID)
+	require.NoError(t, err)
+	rows, err = q.ListScannerReviewsForRematch(ctx, sqlc.ListScannerReviewsForRematchParams{
+		LibraryID: lib.ID,
+		MediaType: sqlc.MediaTypeMusic,
+		RowLimit:  10,
+	})
+	require.NoError(t, err)
+	require.Empty(t, rows, "parked upstream work must not be submitted twice")
 }
 
 func TestScannerEntityArtifactsCarryGenerationAndSourceLineage(t *testing.T) {
