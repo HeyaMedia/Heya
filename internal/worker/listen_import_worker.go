@@ -159,11 +159,40 @@ func (w *KickoffListenImportWorker) pager(svc, username, token string, cursor in
 		if cursor > 0 {
 			maxTS = time.Unix(cursor, 0)
 		}
+		// ListenBrainz can 504 deterministically on one specific max_ts
+		// window (observed twice at the same cursor on a 120k-listen
+		// history) — their gateway gives up before the page is served, so
+		// retrying the identical request can never succeed. Degrade instead
+		// of dying: consecutive failures first shrink the page (cheaper to
+		// serialize), then hop the cursor back one hour to leap over the
+		// poison window. The hop loses at most that hour of listens and is
+		// logged; a failed run's saved cursor already resumes here anyway.
+		failStreak, hopStreak := 0, 0
 		return func(ctx context.Context) ([]scrobble.Listen, bool, error) {
-			listens, next, err := lb.Listens(ctx, username, maxTS, 100)
+			count := 100
+			switch {
+			case failStreak >= 4:
+				// Hops double while consecutive windows keep failing (1h,
+				// 2h, 4h … capped at 64h) so a wide poison zone is crossed
+				// in a handful of hops instead of one crawl per hour.
+				hop := time.Hour << min(hopStreak, 6)
+				skipTo := maxTS.Add(-hop)
+				log.Warn().Time("from", maxTS).Time("to", skipTo).Str("user", username).
+					Msg("listen import: listenbrainz window keeps failing — hopping the cursor back")
+				maxTS = skipTo
+				failStreak = 0
+				hopStreak++
+			case failStreak == 3:
+				count = 5
+			case failStreak == 2:
+				count = 25
+			}
+			listens, next, err := lb.Listens(ctx, username, maxTS, count)
 			if err != nil {
+				failStreak++
 				return nil, false, err
 			}
+			failStreak, hopStreak = 0, 0
 			if next.IsZero() || !next.Before(maxTS) {
 				return listens, true, nil
 			}
