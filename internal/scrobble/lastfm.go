@@ -31,7 +31,11 @@ func (c *LastFM) http() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
-	return &http.Client{Timeout: 30 * time.Second}
+	// Same rationale as the ListenBrainz client: deep-history pages can be
+	// extremely slow, and the import job has no deadline of its own — be
+	// near-infinitely patient per request without allowing a hung socket to
+	// wedge the run forever.
+	return &http.Client{Timeout: 5 * time.Minute}
 }
 
 // sign computes the api_sig Last.fm requires on authenticated calls:

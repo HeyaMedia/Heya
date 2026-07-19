@@ -37,7 +37,12 @@ func (c *ListenBrainz) http() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
-	return &http.Client{Timeout: 30 * time.Second}
+	// Deep history pages (max_ts far in the past) can take ListenBrainz well
+	// over 30s to serve — a full-history import died on exactly that. 5min
+	// is "basically no timeout" for any healthy response while still
+	// unwedging a genuinely hung connection (the import job itself has no
+	// deadline, so a stuck request would otherwise stall it forever).
+	return &http.Client{Timeout: 5 * time.Minute}
 }
 
 func (c *ListenBrainz) req(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
