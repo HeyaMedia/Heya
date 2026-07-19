@@ -441,7 +441,7 @@ func TestApplyRichMetadataRematchBetweenLoadAndStoreCannotCommit(t *testing.T) {
 	// filesystem invalidation.
 	data, err := json.Marshal(map[string]any{
 		"schema_version":    1,
-		"pipeline_revision": 5,
+		"pipeline_revision": 6,
 		"source_set": map[string]any{"roots": []any{map[string]any{
 			"root": root, "rel_starts": []string{"."}, "count": 0,
 			"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",

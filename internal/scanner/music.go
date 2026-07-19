@@ -1126,9 +1126,15 @@ func groupMusicArtists(albums []MusicAlbumPlan) []MusicArtistPlan {
 		if artist == nil {
 			artist = newGroup(album, "")
 			nameOnly[nameKey] = artist
+			if strings.TrimSpace(album.ExternalIDs["musicbrainz_artist"]) != "" {
+				artist.Issues = appendMusicIssue(artist.Issues, "untrusted_track_artist_mbid")
+			}
 			continue
 		}
 		appendAlbum(artist, album)
+		if strings.TrimSpace(album.ExternalIDs["musicbrainz_artist"]) != "" {
+			artist.Issues = appendMusicIssue(artist.Issues, "untrusted_track_artist_mbid")
+		}
 	}
 
 	artists := make([]MusicArtistPlan, 0, len(grouped))

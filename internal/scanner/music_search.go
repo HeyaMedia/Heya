@@ -291,7 +291,9 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 	}
 
 	var acceptedRecordingEvidence []MusicAcceptedRecordingEvidence
-	if !musicSearchCanAutoAccept(scored, selectionArtist.Artist, threshold) && fingerprints != nil {
+	fingerprintValidationRequired := musicFingerprintValidationRequired(artist, scored)
+	fingerprintValidated := false
+	if (!musicSearchCanAutoAccept(scored, selectionArtist.Artist, threshold) || fingerprintValidationRequired) && fingerprints != nil {
 		// Acoustic consensus is evaluated against the literal local identity,
 		// never whichever collaboration component happened to be searched last.
 		// Otherwise a credit such as "Jax Jones, Ado" can silently collapse onto
@@ -313,7 +315,20 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 		} else if ok {
 			scored = []metadata.SearchResult{fingerprintMatch}
 			acceptedRecordingEvidence = recordingEvidence
+			fingerprintValidated = true
 		}
+	}
+	if fingerprintValidationRequired && !fingerprintValidated {
+		// A confident text/release result is still insufficient when the local
+		// evidence says this normalized name represents several artists. Keep
+		// the candidates visible for review, but do not let the same poisoned
+		// tag that caused the ambiguity silently choose one of them.
+		for i := range scored {
+			scored[i].RequiresReview = true
+		}
+		emit.Emit(Event{Event: "match.fingerprint_validation_inconclusive", Severity: SeverityInfo, Kind: "music", Data: map[string]any{
+			"key": artist.Key, "artist": artist.Artist,
+		}})
 	}
 
 	for _, candidate := range scored {
@@ -390,6 +405,36 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 		})
 	}
 	return search, nil
+}
+
+func musicFingerprintValidationRequired(artist MusicArtistPlan, candidates []metadata.SearchResult) bool {
+	if strings.TrimSpace(artist.ExternalIDs["mbid"]) != "" {
+		return false
+	}
+	for _, issue := range artist.Issues {
+		switch issue {
+		case "ambiguous_artist_identity_missing_album_artist_mbid", "untrusted_track_artist_mbid":
+			return true
+		}
+	}
+
+	// Two distinct canonical artists with the same normalized spelling are a
+	// namesake collision, not a runner-up spelling variant. Case/stylization
+	// (LISA vs LiSA) may be the only human-visible distinction.
+	first := -1
+	for i, candidate := range candidates {
+		if candidate.RequiresReview || !musicSearchArtistExact(artist, candidate.Title) {
+			continue
+		}
+		if first == -1 {
+			first = i
+			continue
+		}
+		if !musicSearchSameCanonicalIdentity(candidates[first], candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 type musicConfigurationError interface {

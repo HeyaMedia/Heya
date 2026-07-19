@@ -411,6 +411,61 @@ func TestMusicSearchFingerprintConsensusRepairsPoisonedArtistName(t *testing.T) 
 	})
 }
 
+func TestMusicSearchFingerprintChallengesConfidentNamesakeMatch(t *testing.T) {
+	const (
+		japaneseCanonical  = "20000000-0000-4000-8000-000000000001"
+		blackpinkCanonical = "20000000-0000-4000-8000-000000000002"
+	)
+	search := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{
+		"LISA": {{
+			ProviderID: heyametadata.EncodeEntityProviderID(japaneseCanonical), ProviderName: "heya",
+			Title: "LiSA", Confidence: .99, ExternalIDs: map[string]string{"mbid": "85d76093-9865-4605-97fa-8c910929d366"},
+		}},
+	}}
+	fingerprints := &fakeMusicFingerprintProvider{results: map[string][]MusicRecordingEvidence{
+		"LISA/Born Again/01.m4a": {{
+			RecordingMBID: "10000000-0000-4000-8000-000000000001", CanonicalRecordingID: "30000000-0000-4000-8000-000000000001",
+			Title: "Born Again", FingerprintScore: .99, SourceDuration: 180, RecordingDuration: 180,
+			Artists: []MusicRecordingArtistEvidence{{
+				CanonicalID: blackpinkCanonical, Name: "LISA", MBID: "30aeb57f-bb16-47fa-86ca-79fc57b4d12c",
+			}},
+		}},
+	}}
+	artist := MusicArtistPlan{
+		Key: "artist:lisa|unidentified_album:born-again", Artist: "LISA",
+		Issues: []string{"ambiguous_artist_identity_missing_album_artist_mbid"},
+		Albums: []MusicAlbumPlan{{Album: "Born Again", Tracks: []MusicTrackPlan{{
+			TrackTitle: "Born Again", RelPath: "LISA/Born Again/01.m4a",
+		}}}},
+	}
+
+	results, err := SearchMusicArtistsWithFingerprints(context.Background(), []MusicArtistPlan{artist}, search, fingerprints, &captureEmitter{}, musicArtistAutoMatchThreshold)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.True(t, results[0].Accepted)
+	require.Equal(t, heyametadata.EncodeEntityProviderID(blackpinkCanonical), results[0].ProviderID)
+	require.Equal(t, "fingerprint_match", results[0].Candidates[0].Recommendation)
+}
+
+func TestMusicSearchDoesNotTrustSuspiciousNamesakeWithoutAcousticProof(t *testing.T) {
+	search := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{
+		"LISA": {{ProviderID: "japanese-lisa", ProviderName: "heya", Title: "LiSA", Confidence: .99}},
+	}}
+	artist := MusicArtistPlan{
+		Key: "artist:lisa|unidentified_album:new-woman", Artist: "LISA",
+		Issues: []string{"ambiguous_artist_identity_missing_album_artist_mbid"},
+		Albums: []MusicAlbumPlan{{Album: "New Woman", Tracks: []MusicTrackPlan{{
+			TrackTitle: "New Woman", RelPath: "LISA/New Woman/01.mp3",
+		}}}},
+	}
+
+	results, err := SearchMusicArtistsWithFingerprints(context.Background(), []MusicArtistPlan{artist}, search, &fakeMusicFingerprintProvider{}, &captureEmitter{}, musicArtistAutoMatchThreshold)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.False(t, results[0].Accepted)
+	require.True(t, results[0].Candidates[0].RequiresReview)
+}
+
 func TestMusicSearchFingerprintIgnoresParentheticalTrackEditionForCorroboration(t *testing.T) {
 	const artistCanonical = "20000000-0000-4000-8000-000000000001"
 	credit := MusicRecordingArtistEvidence{
