@@ -525,6 +525,11 @@ func (m *Manager) buildConfig(generation uint64) (map[string]any, []ListenerStat
 	if host.HTTPS || remoteCfg != nil || (tailCfg != nil && tailCfg.HTTPS) {
 		tlsApp := map[string]any{
 			"automation": map[string]any{"policies": automationPolicies},
+			// Heya owns a single local file-system storage and keeps its
+			// certificates through normal renewal. Caddy's process-global storage
+			// cleaner is unnecessary here and, in Caddy 2.11, races asynchronous
+			// internal-certificate events during TLS app startup.
+			"disable_storage_clean": true,
 		}
 		if len(automate) > 0 {
 			tlsApp["certificates"] = map[string]any{"automate": automate}

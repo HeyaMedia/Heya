@@ -1003,7 +1003,9 @@ func sameMusicArtist(a, b string) bool {
 
 func groupMusicArtists(albums []MusicAlbumPlan) []MusicArtistPlan {
 	var grouped []*MusicArtistPlan
+	assigned := make([]bool, len(albums))
 	groupMBID := map[*MusicArtistPlan]string{}
+	unidentifiedAlbumKey := map[*MusicArtistPlan]string{}
 	byMBID := map[string]*MusicArtistPlan{}
 	byName := map[string][]*MusicArtistPlan{}
 	appendAlbum := func(artist *MusicArtistPlan, album MusicAlbumPlan) {
@@ -1038,7 +1040,7 @@ func groupMusicArtists(albums []MusicAlbumPlan) []MusicArtistPlan {
 	// A single MusicBrainz artist ID is the strongest local grouping spine.
 	// Process it first so spelling/localization drift cannot split one artist,
 	// while identical names carrying different MBIDs can never be collapsed.
-	for _, album := range albums {
+	for i, album := range albums {
 		mbid := trustworthyMusicArtistMBID(album)
 		if mbid == "" {
 			continue
@@ -1046,29 +1048,84 @@ func groupMusicArtists(albums []MusicAlbumPlan) []MusicArtistPlan {
 		artist := byMBID[mbid]
 		if artist == nil {
 			newGroup(album, mbid)
+			assigned[i] = true
 			continue
 		}
 		appendAlbum(artist, album)
+		assigned[i] = true
+	}
+
+	// A collaborative album may carry several album-artist IDs. Attach it only
+	// when exactly one of those IDs is already an independently established
+	// local artist spine; this preserves e.g. Alex Mind's solo + collaborations
+	// without arbitrarily choosing a member from a collaboration-only scope.
+	for i, album := range albums {
+		if assigned[i] {
+			continue
+		}
+		albumArtistIDs := splitMusicProviderIDs(album.ExternalIDs["musicbrainz_album_artist"])
+		var candidate *MusicArtistPlan
+		ambiguous := false
+		for mbid := range albumArtistIDs {
+			artist := byMBID[mbid]
+			if artist == nil {
+				continue
+			}
+			if candidate != nil && candidate != artist {
+				ambiguous = true
+				break
+			}
+			candidate = artist
+		}
+		if candidate == nil || ambiguous {
+			continue
+		}
+		appendAlbum(candidate, album)
+		assigned[i] = true
+	}
+
+	// Snapshot the names backed by an authoritative album-artist MBID before
+	// adding any name-only groups. A loose release sharing one of those names
+	// is not safe to attach to the sole known MBID: LISA and LiSA demonstrate
+	// that case differs while our normalised name key intentionally does not.
+	identifiedByName := make(map[string][]*MusicArtistPlan, len(byName))
+	for nameKey, candidates := range byName {
+		identifiedByName[nameKey] = append([]*MusicArtistPlan(nil), candidates...)
 	}
 
 	nameOnly := map[string]*MusicArtistPlan{}
-	for _, album := range albums {
-		if trustworthyMusicArtistMBID(album) != "" {
+	for i, album := range albums {
+		if assigned[i] {
 			continue
 		}
 		nameKey := musicArtistKey(album.Artist, album.ArtistDisambiguation)
-		candidates := byName[nameKey]
-		if len(candidates) == 1 {
-			appendAlbum(candidates[0], album)
+		identifiedCandidates := identifiedByName[nameKey]
+		if len(identifiedCandidates) == 1 &&
+			strings.TrimSpace(album.ExternalIDs["musicbrainz_artist"]) == "" &&
+			album.Artist == identifiedCandidates[0].Artist &&
+			album.ArtistDisambiguation == identifiedCandidates[0].ArtistDisambiguation {
+			// Truly untagged sibling releases can inherit one exact, case-sensitive
+			// local owner. A track-level artist ID, even a matching one, deliberately
+			// disables this shortcut so acoustic evidence gets a chance to challenge
+			// a poisoned tag.
+			appendAlbum(identifiedCandidates[0], album)
+			assigned[i] = true
+			continue
+		}
+		if len(identifiedCandidates) > 0 {
+			// Keep every unidentified release independently matchable. Search can
+			// then use its own release hints and, when necessary, Chromaprint to
+			// converge several plans back onto the same canonical artist. Grouping
+			// them here would let one mixed namesake release block all the others.
+			artist := newGroup(album, "")
+			unidentifiedAlbumKey[artist] = firstNonEmpty(album.Key, musicAlbumKey(album.Artist, album.Album, album.Year))
+			artist.Issues = appendMusicIssue(artist.Issues, "ambiguous_artist_identity_missing_album_artist_mbid")
 			continue
 		}
 		artist := nameOnly[nameKey]
 		if artist == nil {
 			artist = newGroup(album, "")
 			nameOnly[nameKey] = artist
-			if len(candidates) > 1 {
-				artist.Issues = appendMusicIssue(artist.Issues, "ambiguous_artist_identity_missing_mbid")
-			}
 			continue
 		}
 		appendAlbum(artist, album)
@@ -1084,6 +1141,8 @@ func groupMusicArtists(albums []MusicAlbumPlan) []MusicArtistPlan {
 		// folders and a decision made for one scope can poison the other later.
 		if mbid := groupMBID[artist]; mbid != "" {
 			artist.Key += "|mbid:" + mbid
+		} else if albumKey := unidentifiedAlbumKey[artist]; albumKey != "" {
+			artist.Key += "|unidentified_album:" + albumKey
 		} else if len(byName[baseKey]) > 1 {
 			artist.Key += "|unidentified"
 		}
@@ -1198,10 +1257,12 @@ func splitMusicProviderIDs(value string) map[string]struct{} {
 
 func musicArtistExternalIDsFromAlbum(album MusicAlbumPlan) map[string]string {
 	ids := map[string]string{}
+	// MUSICBRAINZ_ARTISTID describes the performing track credit, not the
+	// album artist. Promoting it here lets one mistagged loose track poison the
+	// identity of an entire artist before acoustic evidence is considered.
+	// Picard's MUSICBRAINZ_ALBUMARTISTID is the artist-level grouping spine.
 	if album.ExternalIDs["musicbrainz_album_artist"] != "" {
 		ids["mbid"] = album.ExternalIDs["musicbrainz_album_artist"]
-	} else if album.ExternalIDs["musicbrainz_artist"] != "" {
-		ids["mbid"] = album.ExternalIDs["musicbrainz_artist"]
 	}
 	if album.ExternalIDs["itunes_artist"] != "" {
 		ids["apple"] = album.ExternalIDs["itunes_artist"]

@@ -22,7 +22,7 @@ const (
 	// PipelineRevision is semantic compatibility, not JSON wire compatibility.
 	// Bump it whenever analysis/grouping rules change in a way that makes a
 	// retained analysis unsafe to replay through a newer matcher.
-	scanArtifactPipelineRevision = 4
+	scanArtifactPipelineRevision = 5
 	// PostgreSQL jsonb has a hard 256 MiB limit for the total size of array
 	// elements. Keep every artifact comfortably below that boundary; scanner
 	// entity artifacts are the durable hand-off for the worker pipeline.

@@ -1171,6 +1171,48 @@ func TestGroupMusicArtistsKeepsSameNameMBIDsDistinctAcrossIndependentScopes(t *t
 	}
 }
 
+func TestGroupMusicArtistsDoesNotPromoteLooseTrackArtistMBID(t *testing.T) {
+	const japaneseLiSA = "85d76093-9865-4605-97fa-8c910929d366"
+	albums := []MusicAlbumPlan{
+		{
+			Key: "album:lisa|lander|2022", Artist: "LiSA", Album: "LANDER", Confidence: 1,
+			ExternalIDs: map[string]string{"musicbrainz_album_artist": japaneseLiSA},
+		},
+		{
+			Key: "album:lisa|born-again|2025", Artist: "LISA", Album: "Born Again", Confidence: 1,
+			ExternalIDs: map[string]string{"musicbrainz_artist": japaneseLiSA},
+		},
+	}
+
+	artists := groupMusicArtists(albums)
+	if len(artists) != 2 {
+		t.Fatalf("loose track MBID collapsed namesakes: %#v", artists)
+	}
+	var loose MusicArtistPlan
+	for _, artist := range artists {
+		if len(artist.Albums) == 1 && artist.Albums[0].Album == "Born Again" {
+			loose = artist
+		}
+	}
+	if loose.Key != "artist:lisa|unidentified_album:album:lisa|born-again|2025" || loose.ExternalIDs["mbid"] != "" {
+		t.Fatalf("loose track MBID became artist identity: %#v", loose)
+	}
+	if !contains(loose.Issues, "ambiguous_artist_identity_missing_album_artist_mbid") {
+		t.Fatalf("loose namesake release missing ambiguity evidence: %#v", loose)
+	}
+}
+
+func TestGroupMusicArtistsStillGroupsNameOnlyAlbumsWithoutNamesakeEvidence(t *testing.T) {
+	albums := []MusicAlbumPlan{
+		{Key: "album:example|one", Artist: "Example", Album: "One", Confidence: 1, ExternalIDs: map[string]string{"musicbrainz_artist": "track-credit"}},
+		{Key: "album:example|two", Artist: "Example", Album: "Two", Confidence: 1},
+	}
+	artists := groupMusicArtists(albums)
+	if len(artists) != 1 || len(artists[0].Albums) != 2 || artists[0].ExternalIDs["mbid"] != "" {
+		t.Fatalf("ordinary name-only albums did not remain grouped: %#v", artists)
+	}
+}
+
 func TestGroupMusicAlbumsTreatsContradictoryReleaseIDsAsCannotLink(t *testing.T) {
 	tracks := []MusicTrackPlan{
 		{Artist: "Example", Album: "Same Album", Year: "2024", RelPath: "one.flac", Confidence: 1, ExternalIDs: map[string]string{"musicbrainz_album": "release-one"}},
