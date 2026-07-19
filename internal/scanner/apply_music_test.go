@@ -92,6 +92,63 @@ func TestApplyMusicArtistAdoptsExistingNameDisambiguation(t *testing.T) {
 	require.True(t, errors.Is(err, pgx.ErrNoRows), "duplicate media item should be removed after adopting canonical artist")
 }
 
+func TestApplyMusicArtistPreservesNamesakeMBIDMarkerOnUpdate(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	userID := testutil.TestUserID(t, pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "scanner-music-artist-namesake-update-test",
+		MediaType:    sqlc.MediaTypeMusic,
+		Paths:        []string{"/tmp/music-artist-namesake-update"},
+		ScanInterval: pgtype.Interval{Microseconds: int64(time.Hour / time.Microsecond), Valid: true},
+		CreatedBy:    userID,
+		Settings:     []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	const (
+		name       = "Scanner Halberd"
+		disambig   = "lo-fi"
+		firstMBID  = "87f6c612-f21c-4fdb-bb4c-2c117824dc2e"
+		secondMBID = "80bf51c9-2953-45c4-9b04-a7b2175e4cef"
+	)
+	firstItem, err := q.CreateMediaItem(ctx, sqlc.CreateMediaItemParams{
+		LibraryID: lib.ID, MediaType: sqlc.MediaTypeMusic, Title: name, SortTitle: name,
+	})
+	require.NoError(t, err)
+	firstArtist, err := q.CreateArtist(ctx, sqlc.CreateArtistParams{
+		MediaItemID: firstItem.ID, MusicbrainzID: firstMBID, Name: name, SortName: name, Disambiguation: disambig,
+	})
+	require.NoError(t, err)
+
+	secondItem, err := q.CreateMediaItem(ctx, sqlc.CreateMediaItemParams{
+		LibraryID: lib.ID, MediaType: sqlc.MediaTypeMusic, Title: name, SortTitle: name,
+	})
+	require.NoError(t, err)
+	marker := musicDisambiguationWithMBIDMarker(disambig, secondMBID)
+	secondArtist, err := q.CreateArtist(ctx, sqlc.CreateArtistParams{
+		MediaItemID: secondItem.ID, MusicbrainzID: secondMBID, Name: name, SortName: name, Disambiguation: marker,
+	})
+	require.NoError(t, err)
+
+	updated, action, err := applyMusicArtist(ctx, q, secondItem.ID, MusicMaterializePreview{Artist: name}, &metadata.MediaDetail{
+		ArtistName: name, ArtistSortName: name, ArtistDisambiguation: disambig,
+		ExternalIDs: map[string]string{"mbid": secondMBID}, ProviderKind: "heya",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "update_artist_row", action)
+	require.Equal(t, secondArtist.ID, updated.ID)
+	require.Equal(t, marker, updated.Disambiguation)
+
+	unchanged, err := q.GetArtistByID(ctx, firstArtist.ID)
+	require.NoError(t, err)
+	require.Equal(t, firstMBID, unchanged.MusicbrainzID)
+	require.Equal(t, disambig, unchanged.Disambiguation)
+}
+
 func TestApplyMusicRunsCommitGuardBeforeWritesAndCommit(t *testing.T) {
 	pool := testutil.SetupDB(t)
 	sentinel := errors.New("scanner source changed")

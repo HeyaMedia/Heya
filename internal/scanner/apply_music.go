@@ -342,12 +342,16 @@ func applyMusicArtist(ctx context.Context, q *sqlc.Queries, mediaItemID int64, p
 		if musicArtistMBIDContradicts(existing, mbid) {
 			return sqlc.Artist{}, "", fmt.Errorf("refusing to overwrite artist %d MusicBrainz ID %q with %q", existing.ID, existing.MusicbrainzID, mbid)
 		}
+		updateDisambig, err := musicArtistDisambiguationForUpdate(ctx, q, existing, name, mbid, disambig)
+		if err != nil {
+			return sqlc.Artist{}, "", err
+		}
 		updated, err := q.UpdateArtist(ctx, sqlc.UpdateArtistParams{
 			ID:             existing.ID,
 			MusicbrainzID:  firstNonEmpty(mbid, existing.MusicbrainzID),
 			Name:           name,
 			SortName:       sortName,
-			Disambiguation: firstNonEmpty(disambig, existing.Disambiguation),
+			Disambiguation: updateDisambig,
 			Biography:      firstNonEmpty(bio, existing.Biography),
 		})
 		if err != nil {
@@ -435,6 +439,28 @@ func musicArtistMBIDContradicts(existing sqlc.Artist, mbid string) bool {
 		existingMBID != mbid &&
 		!musicIsSyntheticMBID(mbid) &&
 		!musicIsSyntheticMBID(existingMBID)
+}
+
+func musicArtistDisambiguationForUpdate(ctx context.Context, q *sqlc.Queries, existing sqlc.Artist, name, mbid, disambig string) (string, error) {
+	desired := firstNonEmpty(disambig, existing.Disambiguation)
+	if desired == "" {
+		return "", nil
+	}
+	conflict, err := q.GetArtistByNameAndDisambiguationExcludingID(ctx, sqlc.GetArtistByNameAndDisambiguationExcludingIDParams{
+		Lower:     name,
+		Lower_2:   desired,
+		ExcludeID: existing.ID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return desired, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("check artist name/disambiguation conflict: %w", err)
+	}
+	if musicArtistMBIDContradicts(conflict, mbid) {
+		return musicDisambiguationWithMBIDMarker(desired, mbid), nil
+	}
+	return desired, nil
 }
 
 func musicIsSyntheticMBID(mbid string) bool {
