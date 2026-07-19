@@ -225,12 +225,26 @@ func (w *KickoffListenImportWorker) importReactions(ctx context.Context, userID 
 			if !ok {
 				continue
 			}
+			// created_at carries the ORIGINAL reaction date from the service
+			// (Last.fm loved-track uts / ListenBrainz feedback created), not
+			// the import time — "loved on" is a real fact worth preserving.
 			tag, err := w.DB.Exec(ctx, `
-				INSERT INTO user_track_ratings (user_id, track_id, rating)
-				VALUES ($1, $2, $3) ON CONFLICT (user_id, track_id) DO NOTHING`,
-				userID, trackID, rating)
+				INSERT INTO user_track_ratings (user_id, track_id, rating, created_at)
+				VALUES ($1, $2, $3, $4) ON CONFLICT (user_id, track_id) DO NOTHING`,
+				userID, trackID, rating, at)
 			if err == nil {
-				n += int(tag.RowsAffected())
+				if tag.RowsAffected() > 0 {
+					n++
+				} else {
+					// Already rated. Never override a DIFFERENT reaction the
+					// user made in Heya — but when it's the same value (e.g.
+					// this love arrived earlier stamped with the import time),
+					// heal created_at back to the genuine external date.
+					_, _ = w.DB.Exec(ctx, `
+						UPDATE user_track_ratings SET created_at = LEAST(created_at, $4)
+						WHERE user_id = $1 AND track_id = $2 AND rating = $3`,
+						userID, trackID, rating, at)
+				}
 			}
 		}
 		return n
@@ -411,9 +425,13 @@ func normalizeListenArtist(s string) string {
 }
 
 // fetchWithRetry retries one page fetch through transient upstream failures
-// (Last.fm's code 8/16, network blips) with growing backoff.
+// (Last.fm's code 8/16, network blips) with growing backoff. The chain is
+// deliberately long: Last.fm's code-8 streaks can outlast a short retry
+// budget mid-history, and a failed page aborts the whole run (the resume
+// cursor survives, but the run then reports failed and waits for a manual
+// re-kick — cheaper to just wait out the streak).
 func fetchWithRetry(ctx context.Context, fetch func(ctx context.Context) ([]scrobble.Listen, bool, error)) ([]scrobble.Listen, bool, error) {
-	backoffs := []time.Duration{0, 2 * time.Second, 8 * time.Second, 20 * time.Second}
+	backoffs := []time.Duration{0, 2 * time.Second, 8 * time.Second, 20 * time.Second, 45 * time.Second, 90 * time.Second}
 	var lastErr error
 	for _, wait := range backoffs {
 		if wait > 0 {

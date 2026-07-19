@@ -185,6 +185,7 @@ func (c *ListenBrainz) Feedback(ctx context.Context, user string, offset, count 
 		Feedback   []struct {
 			RecordingMBID string `json:"recording_mbid"`
 			Score         int    `json:"score"`
+			Created       int64  `json:"created"`
 			TrackMetadata *struct {
 				ArtistName string `json:"artist_name"`
 				TrackName  string `json:"track_name"`
@@ -196,6 +197,14 @@ func (c *ListenBrainz) Feedback(ctx context.Context, user string, offset, count 
 	}
 	for _, f := range out.Feedback {
 		l := Listen{RecordingMBID: f.RecordingMBID}
+		// `created` is when the user gave the feedback — verified present on
+		// real accounts back to 2011. Without it every imported love was
+		// stamped with the import time, which both wrecked "loved on" dates
+		// and broke the external_listens dedupe key across import runs
+		// (each run minted a fresh now(), duplicating every love).
+		if f.Created > 0 {
+			l.ListenedAt = time.Unix(f.Created, 0).UTC()
+		}
 		if f.TrackMetadata != nil {
 			l.ArtistName = f.TrackMetadata.ArtistName
 			l.TrackName = f.TrackMetadata.TrackName
