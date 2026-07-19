@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useDebounceFn, useIntersectionObserver } from '@vueuse/core'
 import type { Library } from '~~/shared/types'
 
 type ScanRun = {
@@ -37,12 +38,7 @@ type ScanFinding = {
   code: string
   rel_path?: string
   message: string
-  data: Record<string, any>
   created_at?: string
-  identity_key?: string
-  identity_title?: string
-  identity_year?: string
-  media_title?: string
 }
 
 type ScanIdentity = {
@@ -62,6 +58,9 @@ type ScanIdentity = {
   selected_score?: number
   candidate_count: number
   open_finding_count: number
+  main_finding_code?: string
+  main_finding_severity?: string
+  main_finding_message?: string
 }
 
 type ScanCandidate = {
@@ -121,13 +120,18 @@ type BucketCounts = {
   ignored: number
 }
 
-type ScannerView = {
+type IssueCount = {
+  code: string
+  severity: string
+  count: number
+}
+
+type ScannerOverview = {
   latest_run?: ScanRun
-  bucket_counts?: BucketCounts
+  bucket_counts: BucketCounts
   pipeline_failures: PipelineFailure[]
-  open_findings: ScanFinding[]
-  identities: ScanIdentity[]
-  candidates?: ScanCandidate[]
+  issue_counts: IssueCount[]
+  issue_total: number
 }
 
 // Buckets are computed server-side (identity.bucket) so the table and the
@@ -135,6 +139,14 @@ type ScannerView = {
 // reports as `unmatched` (no media_item_id) until a follow-up apply run — the
 // UI flags that as "awaiting apply" rather than pretending it is matched.
 type Bucket = 'matched' | 'needs_review' | 'unmatched' | 'rejected' | 'ignored'
+
+// The review dataset is served in pages — a production music library carries
+// five-figure identity counts and six-figure finding counts, so nothing here
+// may ever fetch a whole collection. Identities append onto a windowed
+// scroller; candidates and findings load per identity on expand.
+const PAGE_SIZE = 100
+const ISSUE_PAGE_SIZE = 50
+const IDENTITY_FINDINGS_LIMIT = 50
 
 const props = defineProps<{
   library: Library
@@ -146,19 +158,36 @@ const emit = defineEmits<{
 
 const { $heya } = useNuxtApp()
 
-const includeCandidates = ref(false)
-const loading = ref(false)
-const forceScanning = ref(false)
 const error = ref('')
-const view = ref<ScannerView | null>(null)
+const overview = ref<ScannerOverview | null>(null)
+const overviewLoading = ref(false)
 const runs = ref<ScanRun[]>([])
+const forceScanning = ref(false)
+
+const identityItems = ref<ScanIdentity[]>([])
+const listLoading = ref(false)
+const listLoadingMore = ref(false)
+const listHasMore = ref(false)
+const listError = ref('')
+
 const activeFilter = ref<'all' | Bucket>('all')
 const search = ref('')
+const appliedSearch = ref('')
+
 const expanded = ref<Set<number>>(new Set())
+const identityCandidates = ref<Record<number, ScanCandidate[]>>({})
+const identityFindings = ref<Record<number, ScanFinding[]>>({})
+const identityDetailLoading = ref<Set<number>>(new Set())
 const detailOpen = ref<Set<number>>(new Set())
 const candidateDetails = ref<Record<number, ScanCandidateDetail>>({})
 const candidateDetailLoading = ref<number | null>(null)
 const candidateDetailError = ref<Record<number, string>>({})
+
+const issueItems = ref<ScanFinding[]>([])
+const issueCode = ref('')
+const issuesLoading = ref(false)
+const issuesLoadingMore = ref(false)
+const issuesHaveMore = ref(false)
 
 // Human labels for the raw finding codes the scanner persists.
 const FINDING_LABELS: Record<string, string> = {
@@ -201,68 +230,195 @@ function bucketMeta(bucket: string) {
   return BUCKET_META[bucket as Bucket] ?? BUCKET_META.unmatched
 }
 
+const heya = $heya as any
+
+// --- Fetchers -------------------------------------------------------------
+
+async function fetchOverview(opts: { silent?: boolean } = {}) {
+  if (!opts.silent) overviewLoading.value = true
+  try {
+    overview.value = await heya('/api/libraries/{id}/scanner/overview', {
+      path: { id: props.library.id },
+    }) as ScannerOverview
+    error.value = ''
+  } catch (e: any) {
+    error.value = e?.data?.error || e?.message || 'Failed to load scanner state.'
+  } finally {
+    overviewLoading.value = false
+  }
+}
+
+async function fetchRuns() {
+  try {
+    runs.value = await heya('/api/libraries/{id}/scanner/runs', {
+      path: { id: props.library.id },
+      query: { limit: 10, offset: 0 },
+    }) as ScanRun[] ?? []
+  } catch {
+    // Non-fatal: the run history panel shows its empty state.
+  }
+}
+
+let identityFetchSeq = 0
+
+async function fetchIdentityPage(reset: boolean) {
+  const seq = ++identityFetchSeq
+  if (reset) listLoading.value = true
+  else listLoadingMore.value = true
+  listError.value = ''
+  try {
+    const offset = reset ? 0 : identityItems.value.length
+    const page = await heya('/api/libraries/{id}/scanner/identities', {
+      path: { id: props.library.id },
+      query: {
+        limit: PAGE_SIZE,
+        offset,
+        ...(activeFilter.value !== 'all' ? { bucket: activeFilter.value } : {}),
+        ...(appliedSearch.value ? { q: appliedSearch.value } : {}),
+      },
+    }) as ScanIdentity[] ?? []
+    if (seq !== identityFetchSeq) return
+    identityItems.value = reset ? page : [...identityItems.value, ...page]
+    listHasMore.value = page.length === PAGE_SIZE
+  } catch (e: any) {
+    if (seq !== identityFetchSeq) return
+    listError.value = e?.data?.error || e?.message || 'Failed to load identities.'
+  } finally {
+    if (seq === identityFetchSeq) {
+      listLoading.value = false
+      listLoadingMore.value = false
+    }
+  }
+}
+
+function resetIdentities() {
+  expanded.value = new Set()
+  return fetchIdentityPage(true)
+}
+
+function loadMoreIdentities() {
+  if (listLoading.value || listLoadingMore.value || !listHasMore.value) return
+  fetchIdentityPage(false)
+}
+
+let issueFetchSeq = 0
+
+async function fetchIssuePage(reset: boolean) {
+  const seq = ++issueFetchSeq
+  if (reset) issuesLoading.value = true
+  else issuesLoadingMore.value = true
+  try {
+    const offset = reset ? 0 : issueItems.value.length
+    const page = await heya('/api/libraries/{id}/scanner/issues', {
+      path: { id: props.library.id },
+      query: {
+        limit: ISSUE_PAGE_SIZE,
+        offset,
+        ...(issueCode.value ? { code: issueCode.value } : {}),
+      },
+    }) as ScanFinding[] ?? []
+    if (seq !== issueFetchSeq) return
+    issueItems.value = reset ? page : [...issueItems.value, ...page]
+    issuesHaveMore.value = page.length === ISSUE_PAGE_SIZE
+  } catch {
+    if (seq === issueFetchSeq) issuesHaveMore.value = false
+  } finally {
+    if (seq === issueFetchSeq) {
+      issuesLoading.value = false
+      issuesLoadingMore.value = false
+    }
+  }
+}
+
+function loadMoreIssues() {
+  if (issuesLoading.value || issuesLoadingMore.value || !issuesHaveMore.value) return
+  fetchIssuePage(false)
+}
+
+async function loadIdentityDetail(identity: ScanIdentity) {
+  if (identityDetailLoading.value.has(identity.id)) return
+  identityDetailLoading.value = new Set(identityDetailLoading.value).add(identity.id)
+  try {
+    const [candidates, findings] = await Promise.all([
+      heya('/api/libraries/{id}/scanner/identities/{identity_id}/candidates', {
+        path: { id: props.library.id, identity_id: identity.id },
+      }) as Promise<ScanCandidate[]>,
+      identity.open_finding_count > 0
+        ? heya('/api/libraries/{id}/scanner/identities/{identity_id}/findings', {
+            path: { id: props.library.id, identity_id: identity.id },
+            query: { limit: IDENTITY_FINDINGS_LIMIT, offset: 0 },
+          }) as Promise<ScanFinding[]>
+        : Promise.resolve([] as ScanFinding[]),
+    ])
+    identityCandidates.value = { ...identityCandidates.value, [identity.id]: candidates ?? [] }
+    identityFindings.value = { ...identityFindings.value, [identity.id]: findings ?? [] }
+  } catch {
+    // Leave the caches unset; the expanded row shows its loading/empty state
+    // and a re-expand retries.
+  } finally {
+    const next = new Set(identityDetailLoading.value)
+    next.delete(identity.id)
+    identityDetailLoading.value = next
+  }
+}
+
+async function refreshAll(opts: { silent?: boolean } = {}) {
+  identityCandidates.value = {}
+  identityFindings.value = {}
+  await Promise.all([
+    fetchOverview(opts),
+    fetchRuns(),
+    resetIdentities(),
+    fetchIssuePage(true),
+  ])
+}
+
 watch(() => props.library.id, () => {
+  error.value = ''
+  overview.value = null
+  runs.value = []
+  identityItems.value = []
+  issueItems.value = []
+  issueCode.value = ''
   activeFilter.value = 'all'
   search.value = ''
+  appliedSearch.value = ''
   expanded.value = new Set()
-  refresh()
+  refreshAll()
 }, { immediate: true })
 
-watch(includeCandidates, () => refresh())
+watch(activeFilter, () => resetIdentities())
 
-const summary = computed(() => view.value?.latest_run?.summary ?? {})
-const pipelineFailures = computed(() => view.value?.pipeline_failures ?? [])
-const identities = computed(() => view.value?.identities ?? [])
-const findings = computed(() => view.value?.open_findings ?? [])
-const candidates = computed(() => view.value?.candidates ?? [])
+const applySearch = useDebounceFn((value: string) => {
+  const trimmed = value.trim()
+  if (trimmed === appliedSearch.value) return
+  appliedSearch.value = trimmed
+  resetIdentities()
+}, 350)
+watch(search, value => applySearch(value))
 
-// Open findings keyed by the identity they attach to. Findings whose
-// identity_id never resolved at persist time land in `orphanFindings` instead
-// so they aren't silently dropped from the picture.
-const findingsByIdentity = computed(() => {
-  const map = new Map<number, ScanFinding[]>()
-  for (const f of findings.value) {
-    if (!f.identity_id) continue
-    const list = map.get(f.identity_id) ?? []
-    list.push(f)
-    map.set(f.identity_id, list)
-  }
-  return map
-})
+watch(issueCode, () => fetchIssuePage(true))
 
-const orphanFindings = computed(() => findings.value.filter(f => !f.identity_id))
+// --- Derived state --------------------------------------------------------
 
-const candidatesByIdentity = computed(() => {
-  const map = new Map<number, ScanCandidate[]>()
-  for (const c of candidates.value) {
-    const list = map.get(c.identity_id) ?? []
-    list.push(c)
-    map.set(c.identity_id, list)
-  }
-  for (const list of map.values()) list.sort((a, b) => a.rank - b.rank)
-  return map
-})
+const summary = computed(() => overview.value?.latest_run?.summary ?? {})
+const pipelineFailures = computed(() => overview.value?.pipeline_failures ?? [])
+const issueCounts = computed(() => overview.value?.issue_counts ?? [])
+const issueTotal = computed(() => overview.value?.issue_total ?? 0)
 
-// Counts come from the server's bucket_counts; the client tally is only a
-// fallback (keeps working if an older backend omits the field).
-const counts = computed<BucketCounts>(() => {
-  const bc = view.value?.bucket_counts
-  if (bc) return bc
-  const t: BucketCounts = { total: 0, matched: 0, needs_review: 0, rejected: 0, unmatched: 0, ignored: 0 }
-  for (const i of identities.value) {
-    t.total++
-    if (i.bucket === 'matched') t.matched++
-    else if (i.bucket === 'needs_review') t.needs_review++
-    else if (i.bucket === 'rejected') t.rejected++
-    else if (i.bucket === 'ignored') t.ignored++
-    else t.unmatched++
-  }
-  return t
-})
+const counts = computed<BucketCounts>(() =>
+  overview.value?.bucket_counts
+  ?? { total: 0, matched: 0, needs_review: 0, rejected: 0, unmatched: 0, ignored: 0 })
 
 function bucketCount(key: 'all' | Bucket): number {
   return key === 'all' ? counts.value.total : counts.value[key]
 }
+
+// The identity list's expected total for the current filter — unknown while a
+// text search is applied (the API has no filtered-count endpoint; the footer
+// falls back to "N loaded").
+const filteredTotal = computed<number | null>(() =>
+  appliedSearch.value ? null : bucketCount(activeFilter.value))
 
 // Approved but not yet materialized — has an accepted match but no media item
 // until a follow-up apply/scan run attaches files and fetches metadata.
@@ -274,109 +430,79 @@ function canApproveSelectedCandidate(identity: ScanIdentity, candidate: ScanCand
   return candidate.status === 'selected' && identity.bucket === 'needs_review'
 }
 
-const filteredIdentities = computed(() => {
-  const q = search.value.trim().toLowerCase()
-  return identities.value.filter((i) => {
-    if (activeFilter.value !== 'all' && i.bucket !== activeFilter.value) return false
-    if (!q) return true
-    return (
-      i.title.toLowerCase().includes(q) ||
-      i.identity_key.toLowerCase().includes(q) ||
-      (i.selected_title ?? '').toLowerCase().includes(q)
-    )
-  })
-})
-
-const severityRank: Record<string, number> = { error: 2, warn: 1, info: 0 }
-
-// The single most-severe open finding on an identity, used for the "main
-// issue" hint on the row.
-function mainFinding(identity: ScanIdentity): ScanFinding | null {
-  const fs = findingsByIdentity.value.get(identity.id) ?? []
-  if (!fs.length) return null
-  return [...fs].sort((a, b) => (severityRank[b.severity] ?? 0) - (severityRank[a.severity] ?? 0))[0]!
-}
-
 function findingLabel(code: string): string {
   return FINDING_LABELS[code] ?? code
 }
 
-async function refresh(opts: { silent?: boolean } = {}) {
-  if (!opts.silent) loading.value = true
-  error.value = ''
-  try {
-    const heya = $heya as any
-    const [scanView, runHistory] = await Promise.all([
-      heya('/api/libraries/{id}/scanner', {
-        path: { id: props.library.id },
-        query: { candidates: includeCandidates.value },
-      }) as Promise<ScannerView>,
-      heya('/api/libraries/{id}/scanner/runs', {
-        path: { id: props.library.id },
-        query: { limit: 10, offset: 0 },
-      }) as Promise<ScanRun[]>,
-    ])
-    view.value = scanView
-    runs.value = runHistory ?? []
-  } catch (e: any) {
-    error.value = e?.data?.error || e?.message || 'Failed to load scanner state.'
-  } finally {
-    if (!opts.silent) loading.value = false
-  }
+function issueChipLabel(issue: IssueCount): string {
+  return findingLabel(issue.code)
 }
 
-async function forceRescan() {
-  if (forceScanning.value) return
-  forceScanning.value = true
-  actionNote.value = ''
-  actionError.value = ''
-  try {
-    const heya = $heya as any
-    await heya('/api/libraries/{id}/scan', {
-      method: 'POST',
-      path: { id: props.library.id },
-      query: { force: true },
-    })
-    actionNote.value = `Forced rescan queued for ${props.library.name}. Existing identities will be re-evaluated.`
-  } catch (e: any) {
-    actionError.value = e?.data?.error || e?.message || 'Failed to queue forced rescan.'
-  } finally {
-    forceScanning.value = false
-  }
-}
+// --- Review actions -------------------------------------------------------
 
-// Manual review actions. These are review-state transitions, not full
-// materialization: approve-candidate marks the candidate selected + clears
-// findings, but files/metadata are attached by a later apply run — hence the
-// row lands in "unmatched / awaiting apply" until then.
 const busyId = ref<number | null>(null)
 const actionNote = ref('')
 const actionError = ref('')
 const bulkOpen = ref(false)
 const bulkConfidence = ref(0.95)
 const bulkBusy = ref(false)
+const bulkEligible = ref<number | null>(null)
+const bulkEligibleLoading = ref(false)
 
-const bulkEligibleCount = computed(() => identities.value.filter(identity =>
-  identity.bucket === 'needs_review' &&
-  identity.candidate_count === 1 &&
-  (identity.selected_score ?? -1) >= bulkConfidence.value,
-).length)
+async function fetchBulkEligible() {
+  bulkEligibleLoading.value = true
+  try {
+    const result = await heya('/api/libraries/{id}/scanner/bulk-eligible', {
+      path: { id: props.library.id },
+      query: { min_confidence: bulkConfidence.value },
+    }) as { eligible: number }
+    bulkEligible.value = result.eligible
+  } catch {
+    bulkEligible.value = null
+  } finally {
+    bulkEligibleLoading.value = false
+  }
+}
+
+const fetchBulkEligibleDebounced = useDebounceFn(fetchBulkEligible, 250)
+watch(bulkOpen, (open) => { if (open) fetchBulkEligible() })
+watch(bulkConfidence, () => { if (bulkOpen.value) fetchBulkEligibleDebounced() })
+
+// Replace the acted-on row with the server's fresh view of it — or drop it
+// when its new bucket no longer matches the active filter. Counts move via a
+// silent overview refresh; nothing refetches the whole list.
+function patchIdentity(updated: ScanIdentity) {
+  const idx = identityItems.value.findIndex(item => item.id === updated.id)
+  if (idx === -1) return
+  if (activeFilter.value !== 'all' && updated.bucket !== activeFilter.value) {
+    identityItems.value.splice(idx, 1)
+    const next = new Set(expanded.value)
+    next.delete(updated.id)
+    expanded.value = next
+  } else {
+    identityItems.value.splice(idx, 1, updated)
+  }
+}
+
+async function reloadIdentityDetail(identity: ScanIdentity) {
+  delete identityCandidates.value[identity.id]
+  delete identityFindings.value[identity.id]
+  if (expanded.value.has(identity.id)) await loadIdentityDetail(identity)
+}
 
 async function runAction(identity: ScanIdentity, action: string, body: Record<string, any> | undefined, describe: string) {
   busyId.value = identity.id
   actionNote.value = ''
   actionError.value = ''
   try {
-    const heya = $heya as any
-    await heya(`/api/libraries/{id}/scanner/identities/{identity_id}/${action}`, {
+    const updated = await heya(`/api/libraries/{id}/scanner/identities/{identity_id}/${action}`, {
       method: 'POST',
       path: { id: props.library.id, identity_id: identity.id },
       ...(body ? { body } : {}),
-    })
-    // Refetch silently so identities, candidates, findings and bucket_counts
-    // all move together and stay consistent with the server's bucket logic.
-    await refresh({ silent: true })
+    }) as ScanIdentity
+    patchIdentity(updated)
     actionNote.value = describe
+    await Promise.all([fetchOverview({ silent: true }), reloadIdentityDetail(updated)])
   } catch (e: any) {
     actionError.value = e?.data?.error || e?.message || 'Action failed.'
   } finally {
@@ -390,18 +516,18 @@ function approveCandidate(identity: ScanIdentity, candidate: ScanCandidate) {
 }
 
 async function bulkApproveSingleCandidates() {
-  if (!bulkEligibleCount.value || bulkBusy.value) return
+  if (bulkBusy.value) return
   bulkBusy.value = true
   actionNote.value = ''
   actionError.value = ''
   try {
-    const heya = $heya as any
     const result = await heya('/api/libraries/{id}/scanner/bulk-approve-single', {
       method: 'POST',
       path: { id: props.library.id },
       body: { min_confidence: bulkConfidence.value },
     }) as { approved: number }
-    await refresh({ silent: true })
+    // Bulk flips arbitrarily many rows; a targeted patch can't cover it.
+    await Promise.all([fetchOverview({ silent: true }), resetIdentities()])
     actionNote.value = `Approved ${result.approved} single-candidate match${result.approved === 1 ? '' : 'es'} at ${score(bulkConfidence.value)} confidence or higher — apply queued.`
     bulkOpen.value = false
   } catch (e: any) {
@@ -410,6 +536,7 @@ async function bulkApproveSingleCandidates() {
     bulkBusy.value = false
   }
 }
+
 function rejectIdentity(identity: ScanIdentity) {
   runAction(identity, 'reject', { reason: 'manual_rejected' }, `Rejected ${identity.title || identity.identity_key}.`)
 }
@@ -420,6 +547,25 @@ function rematchIdentity(identity: ScanIdentity) {
   runAction(identity, 'rematch', undefined, `Reset ${identity.title || identity.identity_key} for re-identify on the next scan.`)
 }
 
+async function forceRescan() {
+  if (forceScanning.value) return
+  forceScanning.value = true
+  actionNote.value = ''
+  actionError.value = ''
+  try {
+    await heya('/api/libraries/{id}/scan', {
+      method: 'POST',
+      path: { id: props.library.id },
+      query: { force: true },
+    })
+    actionNote.value = `Forced rescan queued for ${props.library.name}. Existing identities will be re-evaluated.`
+  } catch (e: any) {
+    actionError.value = e?.data?.error || e?.message || 'Failed to queue forced rescan.'
+  } finally {
+    forceScanning.value = false
+  }
+}
+
 // Manual "fix match": live provider search + assign an arbitrary result the
 // automated search never surfaced. The dialog posts to .../assign, which
 // rides the same approve flow as accepting a scanner-found candidate.
@@ -428,18 +574,30 @@ const searchDialogIdentity = ref<ScanIdentity | null>(null)
 async function onSearchAssigned(title: string) {
   const identity = searchDialogIdentity.value
   searchDialogIdentity.value = null
-  await refresh({ silent: true })
   actionError.value = ''
   actionNote.value = `Matched ${identity?.title || identity?.identity_key || 'identity'} as “${title}” — awaiting apply.`
+  if (!identity) return
+  try {
+    const updated = await heya('/api/libraries/{id}/scanner/identities/{identity_id}', {
+      path: { id: props.library.id, identity_id: identity.id },
+    }) as ScanIdentity
+    patchIdentity(updated)
+    await Promise.all([fetchOverview({ silent: true }), reloadIdentityDetail(updated)])
+  } catch {
+    // The assign itself succeeded; worst case the row shows stale state until
+    // the next refresh.
+  }
 }
 
-function toggleExpand(id: number) {
+// --- Expand / candidate detail --------------------------------------------
+
+function toggleExpand(identity: ScanIdentity) {
   const next = new Set(expanded.value)
-  if (next.has(id)) next.delete(id)
-  else {
-    next.add(id)
-    // Expanding a row is the trigger to pull candidate rows the first time.
-    if (!includeCandidates.value) includeCandidates.value = true
+  if (next.has(identity.id)) {
+    next.delete(identity.id)
+  } else {
+    next.add(identity.id)
+    if (!identityCandidates.value[identity.id]) loadIdentityDetail(identity)
   }
   expanded.value = next
 }
@@ -458,7 +616,6 @@ async function toggleCandidateDetail(identity: ScanIdentity, candidate: ScanCand
   candidateDetailLoading.value = candidate.id
   candidateDetailError.value = { ...candidateDetailError.value, [candidate.id]: '' }
   try {
-    const heya = $heya as any
     const detail = await heya('/api/libraries/{id}/scanner/identities/{identity_id}/candidates/{candidate_id}/detail', {
       path: { id: props.library.id, identity_id: identity.id, candidate_id: candidate.id },
     }) as ScanCandidateDetail
@@ -473,6 +630,15 @@ async function toggleCandidateDetail(identity: ScanIdentity, candidate: ScanCand
   }
 }
 
+// --- Infinite scroll ------------------------------------------------------
+
+const listSentinel = ref<HTMLElement | null>(null)
+useIntersectionObserver(listSentinel, (entries) => {
+  if (entries.some(entry => entry.isIntersecting)) loadMoreIdentities()
+}, { rootMargin: '400px' })
+
+// --- Formatting -----------------------------------------------------------
+
 function formatDate(value?: string): string {
   if (!value) return 'never'
   const d = new Date(value)
@@ -483,6 +649,10 @@ function formatDate(value?: string): string {
 function score(value?: number): string {
   if (value == null) return '—'
   return value.toFixed(2)
+}
+
+function formatCount(value: number): string {
+  return value.toLocaleString()
 }
 
 function summaryNumber(...keys: string[]): number {
@@ -541,7 +711,7 @@ function runFiles(run: ScanRun): number {
 function latestRunStatus(): string {
   const failures = pipelineFailures.value.length
   if (failures > 0) return `${failures} pipeline failure${failures === 1 ? '' : 's'}`
-  return view.value?.latest_run?.status ?? 'not run'
+  return overview.value?.latest_run?.status ?? 'not run'
 }
 </script>
 
@@ -560,8 +730,9 @@ function latestRunStatus(): string {
           <h2>{{ library.name }} · Scanner</h2>
           <p class="mono">
             {{ library.media_type }} ·
-            <template v-if="view?.latest_run">
-              last run {{ latestRunStatus() }} · {{ formatDate(view.latest_run.finished_at || view.latest_run.started_at) }}
+            <template v-if="overviewLoading && !overview">loading…</template>
+            <template v-else-if="overview?.latest_run">
+              last run {{ latestRunStatus() }} · {{ formatDate(overview.latest_run.finished_at || overview.latest_run.started_at) }}
             </template>
             <template v-else>no persisted run yet</template>
           </p>
@@ -572,12 +743,8 @@ function latestRunStatus(): string {
           <Icon :name="forceScanning ? 'spinner' : 'refresh'" :size="12" />
           {{ forceScanning ? 'Queuing…' : 'Force rescan' }}
         </button>
-        <button class="sv2-btn ghost" :class="{ active: includeCandidates }" @click="includeCandidates = !includeCandidates">
-          <Icon name="search" :size="12" />
-          Candidates
-        </button>
-        <button class="sv2-btn ghost" :disabled="loading" @click="refresh()">
-          <Icon :name="loading ? 'spinner' : 'refresh'" :size="12" />
+        <button class="sv2-btn ghost" :disabled="overviewLoading || listLoading" @click="refreshAll()">
+          <Icon :name="overviewLoading || listLoading ? 'spinner' : 'refresh'" :size="12" />
           Refresh
         </button>
       </div>
@@ -587,7 +754,7 @@ function latestRunStatus(): string {
       <Icon name="warning" :size="13" /> {{ error }}
     </div>
 
-    <div v-else class="sv2-body" :class="{ loading }">
+    <div v-else class="sv2-body">
       <div v-if="actionError" class="sv2-note error">
         <Icon name="warning" :size="13" /> {{ actionError }}
       </div>
@@ -604,7 +771,10 @@ function latestRunStatus(): string {
         </span>
       </div>
 
-      <div class="sv2-tiles">
+      <div v-if="!overview && overviewLoading" class="sv2-tiles">
+        <div v-for="n in 7" :key="n" class="tile-skeleton" />
+      </div>
+      <div v-else class="sv2-tiles">
         <MetricTile label="Files" :value="summaryNumber('files', 'classified_files')" icon="folder" />
         <MetricTile label="Identities" :value="bucketCount('all')" icon="list" />
         <MetricTile label="Matched" :value="bucketCount('matched')" icon="check" tone="good" />
@@ -612,12 +782,6 @@ function latestRunStatus(): string {
         <MetricTile label="Unmatched" :value="bucketCount('unmatched')" icon="info" :tone="bucketCount('unmatched') ? 'warn' : 'neutral'" />
         <MetricTile label="Rejected" :value="bucketCount('rejected')" icon="close" :tone="bucketCount('rejected') ? 'bad' : 'neutral'" />
         <MetricTile label="Ignored" :value="bucketCount('ignored')" icon="eye" tone="neutral" />
-      </div>
-
-      <div v-if="orphanFindings.length" class="sv2-note">
-        <Icon name="warning" :size="13" />
-        {{ orphanFindings.length }} scan issue{{ orphanFindings.length === 1 ? '' : 's' }} not tied to an identity
-        (parse or scan-level problems) — listed under Scan issues below.
       </div>
 
       <div class="filter-bar">
@@ -630,17 +794,16 @@ function latestRunStatus(): string {
             @click="activeFilter = f.key"
           >
             {{ f.label }}
-            <span class="chip-count">{{ bucketCount(f.key) }}</span>
+            <span class="chip-count">{{ formatCount(bucketCount(f.key)) }}</span>
           </button>
         </div>
         <div class="filter-search">
-          <Icon name="search" :size="13" />
+          <Icon :name="listLoading && appliedSearch ? 'spinner' : 'search'" :size="13" />
           <input v-model="search" placeholder="Filter by title or key…" />
         </div>
         <div class="bulk-accept">
           <button class="sv2-btn ghost" :class="{ active: bulkOpen }" @click="bulkOpen = !bulkOpen">
             <Icon name="check" :size="12" /> Accept confident singles
-            <span class="chip-count">{{ bulkEligibleCount }}</span>
           </button>
           <div v-if="bulkOpen" class="bulk-popover">
             <div class="bulk-title">Accept one-candidate matches</div>
@@ -650,267 +813,345 @@ function latestRunStatus(): string {
               <b class="mono">{{ score(bulkConfidence) }}</b>
             </label>
             <input v-model.number="bulkConfidence" type="range" min="0" max="1" step="0.01">
-            <button class="mini-btn accept" :disabled="bulkBusy || bulkEligibleCount === 0" @click="bulkApproveSingleCandidates">
-              <Icon :name="bulkBusy ? 'spinner' : 'check'" :size="11" />
-              {{ bulkBusy ? 'Applying…' : `Apply all ${bulkEligibleCount}` }}
+            <button class="mini-btn accept" :disabled="bulkBusy || bulkEligibleLoading || !bulkEligible" @click="bulkApproveSingleCandidates">
+              <Icon :name="bulkBusy || bulkEligibleLoading ? 'spinner' : 'check'" :size="11" />
+              {{ bulkBusy ? 'Applying…'
+                : bulkEligibleLoading ? 'Counting…'
+                : bulkEligible ? `Apply all ${formatCount(bulkEligible)}` : 'Nothing eligible' }}
             </button>
           </div>
         </div>
       </div>
 
       <section class="identity-panel">
-        <div v-if="identities.length === 0" class="panel-empty">
-          No persisted scanner identities for this library.
+        <div v-if="listError" class="panel-empty">
+          {{ listError }}
+          <button class="mini-btn retry-btn" @click="fetchIdentityPage(true)">Retry</button>
         </div>
-        <div v-else-if="filteredIdentities.length === 0" class="panel-empty">
-          No identities match this filter.
+        <div v-else-if="listLoading" class="row-skeletons">
+          <div v-for="n in 8" :key="n" class="row-skeleton" />
         </div>
-        <DynamicScroller
-          v-else
-          class="identity-scroller"
-          :items="filteredIdentities"
-          :min-item-size="61"
-          key-field="id"
-          page-mode
-        >
-          <template #default="{ item: identity, active }">
-            <DynamicScrollerItem
-              :item="identity"
-              :active="active"
-              :size-dependencies="[expanded.has(identity.id), detailOpen.size, candidateDetailLoading]"
-            >
-              <table class="idt">
-                <tbody>
-              <tr class="idt-row" :class="{ open: expanded.has(identity.id) }" @click="toggleExpand(identity.id)">
-                <td class="idt-chev">
-                  <button
-                    type="button"
-                    class="idt-toggle"
-                    :aria-expanded="expanded.has(identity.id)"
-                    :aria-label="`Toggle candidates for ${identity.title || identity.identity_key}`"
-                  >
-                    <Icon name="chevright" :size="13" class="chev" :class="{ rot: expanded.has(identity.id) }" />
-                  </button>
-                </td>
-                <td class="idt-status">
-                  <StatusBadge :state="bucketMeta(identity.bucket).state">
-                    {{ bucketMeta(identity.bucket).label }}
-                  </StatusBadge>
-                </td>
-                <td class="idt-local">
-                  <div class="cell-title">
-                    {{ identity.title || '(untitled)' }}
-                    <span v-if="identity.year" class="dim">({{ identity.year }})</span>
-                  </div>
-                  <div class="cell-sub mono">{{ identity.identity_key }}</div>
-                </td>
-                <td class="idt-match">
-                  <template v-if="identity.selected_title">
+        <div v-else-if="identityItems.length === 0" class="panel-empty">
+          {{ activeFilter !== 'all' || appliedSearch
+            ? 'No identities match this filter.'
+            : 'No persisted scanner identities for this library.' }}
+        </div>
+        <template v-else>
+          <DynamicScroller
+            class="identity-scroller"
+            :items="identityItems"
+            :min-item-size="61"
+            key-field="id"
+            page-mode
+          >
+            <template #default="{ item: identity, active }">
+              <DynamicScrollerItem
+                :item="identity"
+                :active="active"
+                :size-dependencies="[
+                  expanded.has(identity.id),
+                  identityCandidates[identity.id]?.length,
+                  identityFindings[identity.id]?.length,
+                  detailOpen.size,
+                  candidateDetailLoading,
+                ]"
+              >
+                <table class="idt">
+                  <tbody>
+                <tr class="idt-row" :class="{ open: expanded.has(identity.id) }" @click="toggleExpand(identity)">
+                  <td class="idt-chev">
+                    <button
+                      type="button"
+                      class="idt-toggle"
+                      :aria-expanded="expanded.has(identity.id)"
+                      :aria-label="`Toggle candidates for ${identity.title || identity.identity_key}`"
+                    >
+                      <Icon name="chevright" :size="13" class="chev" :class="{ rot: expanded.has(identity.id) }" />
+                    </button>
+                  </td>
+                  <td class="idt-status">
+                    <StatusBadge :state="bucketMeta(identity.bucket).state">
+                      {{ bucketMeta(identity.bucket).label }}
+                    </StatusBadge>
+                  </td>
+                  <td class="idt-local">
                     <div class="cell-title">
-                      <span class="arrow-in">→</span> {{ identity.selected_title }}
-                      <span v-if="identity.selected_year" class="dim">({{ identity.selected_year }})</span>
+                      {{ identity.title || '(untitled)' }}
+                      <span v-if="identity.year" class="dim">({{ identity.year }})</span>
                     </div>
-                    <div class="cell-sub mono">{{ selectedMatchLine(identity) }}</div>
-                  </template>
-                  <div v-else class="cell-title dim">no selected match</div>
-                </td>
-                <td class="idt-flags">
-                  <span class="flag">{{ identity.candidate_count }} cand</span>
-                  <span v-if="awaitingApply(identity)" class="flag apply">awaiting apply</span>
-                  <span v-else-if="mainFinding(identity)" class="flag issue">
-                    {{ findingLabel(mainFinding(identity)!.code) }}
-                  </span>
-                </td>
-                <td class="idt-spacer" />
-                <td class="idt-link">
-                  <NuxtLink
-                    v-if="identity.media_item_id"
-                    class="media-link"
-                    :to="`/media/${identity.media_item_id}`"
-                    :aria-label="`Open ${identity.selected_title || identity.title} detail`"
-                    @click.stop
-                  >
-                    <Icon name="arrow-right" :size="13" />
-                  </NuxtLink>
-                </td>
-              </tr>
-              <tr v-if="expanded.has(identity.id)" class="idt-detail-row">
-                <td colspan="7">
-                  <div class="identity-detail">
-                    <div v-if="mainFinding(identity)" class="detail-issue">
-                      <Icon name="warning" :size="12" />
-                      <span><b>{{ findingLabel(mainFinding(identity)!.code) }}:</b> {{ mainFinding(identity)!.message }}</span>
-                    </div>
+                    <div class="cell-sub mono">{{ identity.identity_key }}</div>
+                  </td>
+                  <td class="idt-match">
+                    <template v-if="identity.selected_title">
+                      <div class="cell-title">
+                        <span class="arrow-in">→</span> {{ identity.selected_title }}
+                        <span v-if="identity.selected_year" class="dim">({{ identity.selected_year }})</span>
+                      </div>
+                      <div class="cell-sub mono">{{ selectedMatchLine(identity) }}</div>
+                    </template>
+                    <div v-else class="cell-title dim">no selected match</div>
+                  </td>
+                  <td class="idt-flags">
+                    <span class="flag">{{ identity.candidate_count }} cand</span>
+                    <span v-if="awaitingApply(identity)" class="flag apply">awaiting apply</span>
+                    <span v-else-if="identity.main_finding_code" class="flag issue">
+                      {{ findingLabel(identity.main_finding_code) }}
+                    </span>
+                  </td>
+                  <td class="idt-spacer" />
+                  <td class="idt-link">
+                    <NuxtLink
+                      v-if="identity.media_item_id"
+                      class="media-link"
+                      :to="`/media/${identity.media_item_id}`"
+                      :aria-label="`Open ${identity.selected_title || identity.title} detail`"
+                      @click.stop
+                    >
+                      <Icon name="arrow-right" :size="13" />
+                    </NuxtLink>
+                  </td>
+                </tr>
+                <tr v-if="expanded.has(identity.id)" class="idt-detail-row">
+                  <td colspan="7">
+                    <div class="identity-detail">
+                      <div v-if="identity.main_finding_code" class="detail-issue">
+                        <Icon name="warning" :size="12" />
+                        <span><b>{{ findingLabel(identity.main_finding_code) }}:</b> {{ identity.main_finding_message }}</span>
+                      </div>
 
-                    <div class="detail-head">
-                      <span>Candidates</span>
-                      <span v-if="!includeCandidates" class="dim">loading…</span>
-                    </div>
-
-                    <div v-if="!includeCandidates" class="detail-empty">Loading candidate rows…</div>
-                    <div v-else-if="(candidatesByIdentity.get(identity.id) ?? []).length === 0" class="detail-empty">
-                      No provider candidates recorded for this identity.
-                    </div>
-                    <div v-else class="candidate-list">
-                      <div
-                        v-for="candidate in candidatesByIdentity.get(identity.id)"
-                        :key="candidate.id"
-                        class="candidate-row"
-                      >
-                        <div class="candidate-rank mono">{{ candidate.rank }}</div>
-                        <LoadingImage
-                          v-if="candidate.poster_url"
-                          class="candidate-poster"
-                          :src="candidate.poster_url"
-                          :persistent="candidate.poster_url.includes('/api/v2/images/')"
-                          alt=""
-                          loading="lazy"
-                        />
-                        <div class="candidate-main">
-                          <div class="candidate-title">
-                            {{ candidate.title }}
-                            <span v-if="candidate.year" class="dim">({{ candidate.year }})</span>
-                          </div>
-                          <div class="candidate-sub mono">{{ candidateSub(candidate) }}</div>
-                          <div v-if="candidate.description" class="candidate-description">
-                            {{ candidate.description }}
+                      <template v-if="(identityFindings[identity.id]?.length ?? 0) > 1">
+                        <div class="detail-head">
+                          <span>Open findings</span>
+                          <span v-if="identity.open_finding_count > (identityFindings[identity.id]?.length ?? 0)" class="dim">
+                            showing {{ identityFindings[identity.id]!.length }} of {{ formatCount(identity.open_finding_count) }}
+                          </span>
+                        </div>
+                        <div class="identity-finding-list">
+                          <div v-for="finding in identityFindings[identity.id]" :key="finding.id" class="identity-finding-row">
+                            <StatusBadge :state="finding.severity === 'error' ? 'error' : finding.severity === 'warn' ? 'warn' : 'idle'">
+                              {{ findingLabel(finding.code) }}
+                            </StatusBadge>
+                            <span class="identity-finding-msg">{{ finding.rel_path ? `${finding.rel_path} — ` : '' }}{{ finding.message }}</span>
                           </div>
                         </div>
-                        <StatusBadge :state="candidate.status === 'selected' ? 'ok' : candidate.status === 'review_candidate' ? 'warn' : candidate.status === 'rejected' ? 'error' : 'idle'">
-                          {{ candidate.status }}
-                        </StatusBadge>
-                        <div class="candidate-actions">
-                          <button
-                            class="mini-btn"
-                            :disabled="candidateDetailLoading === candidate.id"
-                            @click.stop="toggleCandidateDetail(identity, candidate)"
-                          >
-                            <Icon :name="candidateDetailLoading === candidate.id ? 'spinner' : 'info'" :size="11" />
-                            {{ detailOpen.has(candidate.id) ? 'Hide details' : 'Details' }}
-                          </button>
-                          <button
-                            v-if="canApproveSelectedCandidate(identity, candidate)"
-                            class="mini-btn accept"
-                            :disabled="busyId === identity.id"
-                            @click.stop="approveCandidate(identity, candidate)"
-                          >
-                            <Icon name="check" :size="11" /> Accept selected
-                          </button>
-                          <button
-                            v-else-if="candidate.status === 'selected'"
-                            class="mini-btn selected"
-                            disabled
-                          >
-                            <Icon name="check" :size="11" /> Selected
-                          </button>
-                          <button
-                            v-else
-                            class="mini-btn accept"
-                            :disabled="busyId === identity.id"
-                            @click.stop="approveCandidate(identity, candidate)"
-                          >
-                            Use this
-                          </button>
-                        </div>
-                        <div v-if="detailOpen.has(candidate.id)" class="candidate-detail">
-                          <div v-if="candidateDetailError[candidate.id]" class="candidate-detail-error">
-                            {{ candidateDetailError[candidate.id] }}
-                          </div>
-                          <div v-else-if="candidateDetails[candidate.id]" class="candidate-detail-body">
-                            <LoadingImage
-                              v-if="candidateDetails[candidate.id]!.poster_url"
-                              class="candidate-detail-poster"
-                              :src="candidateDetails[candidate.id]!.poster_url"
-                              :persistent="candidateDetails[candidate.id]!.poster_url?.includes('/api/v2/images/') ?? false"
-                              alt=""
-                              loading="lazy"
-                            />
-                            <div class="candidate-detail-main">
-                              <div class="candidate-detail-title">
-                                {{ candidateDetails[candidate.id]!.title }}
-                                <span v-if="candidateDetails[candidate.id]!.year" class="dim">({{ candidateDetails[candidate.id]!.year }})</span>
-                              </div>
-                              <div class="candidate-detail-sub mono">
-                                {{ candidateDetails[candidate.id]!.provider_id }}
-                              </div>
-                              <div v-if="candidateDetailFacts(candidateDetails[candidate.id]!).length" class="candidate-detail-facts">
-                                <span v-for="fact in candidateDetailFacts(candidateDetails[candidate.id]!)" :key="fact">{{ fact }}</span>
-                              </div>
-                              <p v-if="candidateDetails[candidate.id]!.description" class="candidate-detail-description">
-                                {{ candidateDetails[candidate.id]!.description }}
-                              </p>
-                              <div v-if="candidateDetailTags(candidateDetails[candidate.id]!).length" class="candidate-detail-genres">
-                                <span v-for="tag in candidateDetailTags(candidateDetails[candidate.id]!)" :key="tag">{{ tag }}</span>
-                              </div>
-                              <div v-if="candidateDetailProviderURL(candidateDetails[candidate.id]!)" class="candidate-detail-actions">
-                                <a
-                                  class="mini-btn link"
-                                  :href="candidateDetailProviderURL(candidateDetails[candidate.id]!)"
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  @click.stop
-                                >
-                                  <Icon name="link" :size="11" /> Open provider
-                                </a>
-                              </div>
+                      </template>
+
+                      <div class="detail-head">
+                        <span>Candidates</span>
+                        <span v-if="identityDetailLoading.has(identity.id)" class="dim">loading…</span>
+                      </div>
+
+                      <div v-if="identityDetailLoading.has(identity.id) && !identityCandidates[identity.id]" class="detail-empty">
+                        Loading candidate rows…
+                      </div>
+                      <div v-else-if="(identityCandidates[identity.id] ?? []).length === 0" class="detail-empty">
+                        No provider candidates recorded for this identity.
+                      </div>
+                      <div v-else class="candidate-list">
+                        <div
+                          v-for="candidate in identityCandidates[identity.id]"
+                          :key="candidate.id"
+                          class="candidate-row"
+                        >
+                          <div class="candidate-rank mono">{{ candidate.rank }}</div>
+                          <LoadingImage
+                            v-if="candidate.poster_url"
+                            class="candidate-poster"
+                            :src="candidate.poster_url"
+                            :persistent="candidate.poster_url.includes('/api/v2/images/')"
+                            alt=""
+                            loading="lazy"
+                          />
+                          <div class="candidate-main">
+                            <div class="candidate-title">
+                              {{ candidate.title }}
+                              <span v-if="candidate.year" class="dim">({{ candidate.year }})</span>
+                            </div>
+                            <div class="candidate-sub mono">{{ candidateSub(candidate) }}</div>
+                            <div v-if="candidate.description" class="candidate-description">
+                              {{ candidate.description }}
                             </div>
                           </div>
-                          <div v-else class="detail-empty">Fetching candidate detail…</div>
+                          <StatusBadge :state="candidate.status === 'selected' ? 'ok' : candidate.status === 'review_candidate' ? 'warn' : candidate.status === 'rejected' ? 'error' : 'idle'">
+                            {{ candidate.status }}
+                          </StatusBadge>
+                          <div class="candidate-actions">
+                            <button
+                              class="mini-btn"
+                              :disabled="candidateDetailLoading === candidate.id"
+                              @click.stop="toggleCandidateDetail(identity, candidate)"
+                            >
+                              <Icon :name="candidateDetailLoading === candidate.id ? 'spinner' : 'info'" :size="11" />
+                              {{ detailOpen.has(candidate.id) ? 'Hide details' : 'Details' }}
+                            </button>
+                            <button
+                              v-if="canApproveSelectedCandidate(identity, candidate)"
+                              class="mini-btn accept"
+                              :disabled="busyId === identity.id"
+                              @click.stop="approveCandidate(identity, candidate)"
+                            >
+                              <Icon name="check" :size="11" /> Accept selected
+                            </button>
+                            <button
+                              v-else-if="candidate.status === 'selected'"
+                              class="mini-btn selected"
+                              disabled
+                            >
+                              <Icon name="check" :size="11" /> Selected
+                            </button>
+                            <button
+                              v-else
+                              class="mini-btn accept"
+                              :disabled="busyId === identity.id"
+                              @click.stop="approveCandidate(identity, candidate)"
+                            >
+                              Use this
+                            </button>
+                          </div>
+                          <div v-if="detailOpen.has(candidate.id)" class="candidate-detail">
+                            <div v-if="candidateDetailError[candidate.id]" class="candidate-detail-error">
+                              {{ candidateDetailError[candidate.id] }}
+                            </div>
+                            <div v-else-if="candidateDetails[candidate.id]" class="candidate-detail-body">
+                              <LoadingImage
+                                v-if="candidateDetails[candidate.id]!.poster_url"
+                                class="candidate-detail-poster"
+                                :src="candidateDetails[candidate.id]!.poster_url"
+                                :persistent="candidateDetails[candidate.id]!.poster_url?.includes('/api/v2/images/') ?? false"
+                                alt=""
+                                loading="lazy"
+                              />
+                              <div class="candidate-detail-main">
+                                <div class="candidate-detail-title">
+                                  {{ candidateDetails[candidate.id]!.title }}
+                                  <span v-if="candidateDetails[candidate.id]!.year" class="dim">({{ candidateDetails[candidate.id]!.year }})</span>
+                                </div>
+                                <div class="candidate-detail-sub mono">
+                                  {{ candidateDetails[candidate.id]!.provider_id }}
+                                </div>
+                                <div v-if="candidateDetailFacts(candidateDetails[candidate.id]!).length" class="candidate-detail-facts">
+                                  <span v-for="fact in candidateDetailFacts(candidateDetails[candidate.id]!)" :key="fact">{{ fact }}</span>
+                                </div>
+                                <p v-if="candidateDetails[candidate.id]!.description" class="candidate-detail-description">
+                                  {{ candidateDetails[candidate.id]!.description }}
+                                </p>
+                                <div v-if="candidateDetailTags(candidateDetails[candidate.id]!).length" class="candidate-detail-genres">
+                                  <span v-for="tag in candidateDetailTags(candidateDetails[candidate.id]!)" :key="tag">{{ tag }}</span>
+                                </div>
+                                <div v-if="candidateDetailProviderURL(candidateDetails[candidate.id]!)" class="candidate-detail-actions">
+                                  <a
+                                    class="mini-btn link"
+                                    :href="candidateDetailProviderURL(candidateDetails[candidate.id]!)"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    @click.stop
+                                  >
+                                    <Icon name="link" :size="11" /> Open provider
+                                  </a>
+                                </div>
+                              </div>
+                            </div>
+                            <div v-else class="detail-empty">Fetching candidate detail…</div>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div class="detail-foot">
-                      <button class="mini-btn accept" :disabled="busyId === identity.id" @click.stop="searchDialogIdentity = identity">
-                        <Icon name="search" :size="11" /> Search match…
-                      </button>
-                      <button class="mini-btn" :disabled="busyId === identity.id" @click.stop="rematchIdentity(identity)">
-                        <Icon :name="busyId === identity.id ? 'spinner' : 'refresh'" :size="11" /> Reset / re-identify
-                      </button>
-                      <button
-                        class="mini-btn"
-                        :disabled="busyId === identity.id || identity.bucket === 'ignored'"
-                        @click.stop="ignoreIdentity(identity)"
-                      >
-                        Ignore
-                      </button>
-                      <button
-                        class="mini-btn danger"
-                        :disabled="busyId === identity.id || identity.bucket === 'rejected'"
-                        @click.stop="rejectIdentity(identity)"
-                      >
-                        Reject
-                      </button>
+                      <div class="detail-foot">
+                        <button class="mini-btn accept" :disabled="busyId === identity.id" @click.stop="searchDialogIdentity = identity">
+                          <Icon name="search" :size="11" /> Search match…
+                        </button>
+                        <button class="mini-btn" :disabled="busyId === identity.id" @click.stop="rematchIdentity(identity)">
+                          <Icon :name="busyId === identity.id ? 'spinner' : 'refresh'" :size="11" /> Reset / re-identify
+                        </button>
+                        <button
+                          class="mini-btn"
+                          :disabled="busyId === identity.id || identity.bucket === 'ignored'"
+                          @click.stop="ignoreIdentity(identity)"
+                        >
+                          Ignore
+                        </button>
+                        <button
+                          class="mini-btn danger"
+                          :disabled="busyId === identity.id || identity.bucket === 'rejected'"
+                          @click.stop="rejectIdentity(identity)"
+                        >
+                          Reject
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                </td>
-              </tr>
-                </tbody>
-              </table>
-            </DynamicScrollerItem>
-          </template>
-        </DynamicScroller>
+                  </td>
+                </tr>
+                  </tbody>
+                </table>
+              </DynamicScrollerItem>
+            </template>
+          </DynamicScroller>
+          <div class="list-foot">
+            <span class="list-progress mono">
+              {{ formatCount(identityItems.length) }}<template v-if="filteredTotal != null && filteredTotal > identityItems.length"> of {{ formatCount(filteredTotal) }}</template>
+              identit{{ identityItems.length === 1 ? 'y' : 'ies' }} loaded
+            </span>
+            <div ref="listSentinel" class="list-sentinel" aria-hidden="true" />
+            <button v-if="listHasMore" class="mini-btn" :disabled="listLoadingMore" @click="loadMoreIdentities">
+              <Icon :name="listLoadingMore ? 'spinner' : 'chevdown'" :size="11" />
+              {{ listLoadingMore ? 'Loading…' : 'Load more' }}
+            </button>
+          </div>
+        </template>
       </section>
 
       <!-- Only findings NOT tied to an identity live here — per-identity issues
-           are already surfaced inline in the table above (issue pill + expanded
-           detail), so this panel is purely the parse/scan-level leftovers. -->
-      <section v-if="orphanFindings.length" class="findings-panel">
+           are surfaced inline in the table above. The list is paginated and the
+           chips come from the overview's aggregate counts: a music library can
+           carry six-figure issue counts, which must never render as one list. -->
+      <section v-if="issueTotal > 0" class="findings-panel">
         <div class="panel-head">
           <h4>Scan issues</h4>
-          <span>{{ orphanFindings.length }} not tied to an identity</span>
+          <span>{{ formatCount(issueTotal) }} not tied to an identity</span>
         </div>
-        <div class="finding-list">
-          <div v-for="finding in orphanFindings" :key="finding.id" class="finding-row">
-            <StatusBadge :state="finding.severity === 'error' ? 'error' : finding.severity === 'warn' ? 'warn' : 'idle'">
-              {{ findingLabel(finding.code) }}
-            </StatusBadge>
-            <div class="finding-main">
-              <div class="finding-title">{{ finding.rel_path || finding.code }}</div>
-              <div class="finding-msg">{{ finding.message }}</div>
+        <div v-if="issueCounts.length > 1" class="issue-chips">
+          <button
+            class="filter-chip"
+            :class="{ active: issueCode === '' }"
+            @click="issueCode = ''"
+          >
+            All <span class="chip-count">{{ formatCount(issueTotal) }}</span>
+          </button>
+          <button
+            v-for="issue in issueCounts"
+            :key="issue.code"
+            class="filter-chip"
+            :class="{ active: issueCode === issue.code }"
+            @click="issueCode = issueCode === issue.code ? '' : issue.code"
+          >
+            {{ issueChipLabel(issue) }}
+            <span class="chip-count">{{ formatCount(issue.count) }}</span>
+          </button>
+        </div>
+        <div v-if="issuesLoading" class="row-skeletons">
+          <div v-for="n in 4" :key="n" class="row-skeleton" />
+        </div>
+        <div v-else-if="issueItems.length === 0" class="panel-empty">No issues match this filter.</div>
+        <template v-else>
+          <div class="finding-list">
+            <div v-for="finding in issueItems" :key="finding.id" class="finding-row">
+              <StatusBadge :state="finding.severity === 'error' ? 'error' : finding.severity === 'warn' ? 'warn' : 'idle'">
+                {{ findingLabel(finding.code) }}
+              </StatusBadge>
+              <div class="finding-main">
+                <div class="finding-title">{{ finding.rel_path || finding.message }}</div>
+                <div v-if="finding.rel_path" class="finding-msg">{{ finding.message }}</div>
+              </div>
             </div>
           </div>
-        </div>
+          <div v-if="issuesHaveMore" class="list-foot">
+            <span class="list-progress mono">{{ formatCount(issueItems.length) }} loaded</span>
+            <button class="mini-btn" :disabled="issuesLoadingMore" @click="loadMoreIssues">
+              <Icon :name="issuesLoadingMore ? 'spinner' : 'chevdown'" :size="11" />
+              {{ issuesLoadingMore ? 'Loading…' : 'Load more' }}
+            </button>
+          </div>
+        </template>
       </section>
 
       <section v-if="pipelineFailures.length" class="findings-panel pipeline-failures">
@@ -994,12 +1235,38 @@ function latestRunStatus(): string {
 .head-actions { display: flex; gap: 8px; flex-shrink: 0; }
 
 .sv2-body { display: flex; flex-direction: column; gap: 18px; }
-.sv2-body.loading { opacity: 0.6; pointer-events: none; }
 
 .sv2-tiles {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 8px;
+}
+
+.tile-skeleton {
+  height: 74px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: linear-gradient(100deg, var(--bg-2) 40%, rgb(var(--ink) / 0.05) 50%, var(--bg-2) 60%);
+  background-size: 200% 100%;
+  animation: sv2-shimmer 1.4s ease-in-out infinite;
+}
+
+.row-skeletons { display: flex; flex-direction: column; }
+.row-skeleton {
+  height: 52px;
+  border-top: 1px solid var(--border);
+  background: linear-gradient(100deg, transparent 40%, rgb(var(--ink) / 0.04) 50%, transparent 60%);
+  background-size: 200% 100%;
+  animation: sv2-shimmer 1.4s ease-in-out infinite;
+}
+.row-skeleton:first-child { border-top: 0; }
+
+@keyframes sv2-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile-skeleton, .row-skeleton { animation: none; }
 }
 
 .sv2-note {
@@ -1102,6 +1369,21 @@ function latestRunStatus(): string {
   font-size: 12.5px;
   text-align: center;
 }
+.retry-btn { margin-left: 10px; }
+
+.issue-chips {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.list-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 9px 14px;
+  border-top: 1px solid var(--border);
+}
+.list-progress { font-size: 10.5px; color: var(--fg-3); }
+.list-sentinel { flex: 1; height: 1px; }
 
 /* Aligned data table. Reka has no data-table primitive and our KVTable is
    key/value only, so this is a plain semantic <table>. A width:100% spacer
@@ -1197,6 +1479,16 @@ function latestRunStatus(): string {
   text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-3);
 }
 .detail-empty { font-size: 12px; color: var(--fg-3); padding: 4px 0; }
+
+.identity-finding-list {
+  display: flex; flex-direction: column; gap: 5px;
+}
+.identity-finding-row {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 11.5px; color: var(--fg-2);
+  min-width: 0;
+}
+.identity-finding-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .candidate-list {
   display: flex; flex-direction: column;

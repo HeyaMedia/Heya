@@ -275,6 +275,129 @@ func (q *Queries) BulkApproveSingleScannerCandidates(ctx context.Context, arg Bu
 	return items, nil
 }
 
+const countScannerBulkApproveEligible = `-- name: CountScannerBulkApproveEligible :one
+SELECT count(*) FROM (
+    SELECT lmi.id
+    FROM local_media_identities lmi
+    JOIN metadata_match_candidates mmc ON mmc.identity_id = lmi.id
+    WHERE lmi.library_id = $1
+      AND (
+        lmi.review_status IN ('needs_review', 'review', 'suspicious')
+        OR EXISTS (
+          SELECT 1 FROM scan_findings sf
+          WHERE sf.identity_id = lmi.id AND sf.resolved_at IS NULL
+        )
+    )
+    GROUP BY lmi.id
+    HAVING count(*) = 1
+       AND min(mmc.score) >= $2
+) eligible
+`
+
+type CountScannerBulkApproveEligibleParams struct {
+	LibraryID     int64          `json:"library_id"`
+	MinConfidence pgtype.Numeric `json:"min_confidence"`
+}
+
+// Mirror of BulkApproveSingleScannerCandidates' eligibility CTE so the UI can
+// show an exact "will approve N" count for a given threshold without loading
+// identities client-side.
+func (q *Queries) CountScannerBulkApproveEligible(ctx context.Context, arg CountScannerBulkApproveEligibleParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countScannerBulkApproveEligible, arg.LibraryID, arg.MinConfidence)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countScannerIdentityBucketsByLibrary = `-- name: CountScannerIdentityBucketsByLibrary :one
+SELECT
+    count(*) AS total,
+    count(*) FILTER (WHERE bucket = 'matched') AS matched,
+    count(*) FILTER (WHERE bucket = 'needs_review') AS needs_review,
+    count(*) FILTER (WHERE bucket = 'rejected') AS rejected,
+    count(*) FILTER (WHERE bucket = 'unmatched') AS unmatched,
+    count(*) FILTER (WHERE bucket = 'ignored') AS ignored
+FROM (
+    SELECT CASE
+        WHEN lmi.review_status = 'rejected' THEN 'rejected'
+        WHEN lmi.review_status = 'ignored' THEN 'ignored'
+        WHEN lmi.review_status IN ('needs_review', 'review', 'suspicious') THEN 'needs_review'
+        WHEN EXISTS (
+            SELECT 1 FROM scan_findings sf
+            WHERE sf.identity_id = lmi.id AND sf.resolved_at IS NULL
+        ) THEN 'needs_review'
+        WHEN lmi.media_item_id IS NOT NULL THEN 'matched'
+        ELSE 'unmatched'
+    END AS bucket
+    FROM local_media_identities lmi
+    WHERE lmi.library_id = $1
+) buckets
+`
+
+type CountScannerIdentityBucketsByLibraryRow struct {
+	Total       int64 `json:"total"`
+	Matched     int64 `json:"matched"`
+	NeedsReview int64 `json:"needs_review"`
+	Rejected    int64 `json:"rejected"`
+	Unmatched   int64 `json:"unmatched"`
+	Ignored     int64 `json:"ignored"`
+}
+
+// Aggregate bucket tallies for the scanner overview. The CASE must stay an
+// exact mirror of scannerIdentityBucket in internal/service/scanner.go — the
+// overview counters and the paged identity rows must never disagree.
+func (q *Queries) CountScannerIdentityBucketsByLibrary(ctx context.Context, libraryID int64) (CountScannerIdentityBucketsByLibraryRow, error) {
+	row := q.db.QueryRow(ctx, countScannerIdentityBucketsByLibrary, libraryID)
+	var i CountScannerIdentityBucketsByLibraryRow
+	err := row.Scan(
+		&i.Total,
+		&i.Matched,
+		&i.NeedsReview,
+		&i.Rejected,
+		&i.Unmatched,
+		&i.Ignored,
+	)
+	return i, err
+}
+
+const countScannerIssuesByLibrary = `-- name: CountScannerIssuesByLibrary :many
+SELECT sf.code, sf.severity, count(*)::bigint AS issue_count
+FROM scan_findings sf
+WHERE sf.library_id = $1
+  AND sf.resolved_at IS NULL
+  AND sf.identity_id IS NULL
+GROUP BY sf.code, sf.severity
+ORDER BY issue_count DESC, sf.code
+`
+
+type CountScannerIssuesByLibraryRow struct {
+	Code       string `json:"code"`
+	Severity   string `json:"severity"`
+	IssueCount int64  `json:"issue_count"`
+}
+
+// Orphan scan-issue tallies (findings with no identity) for the overview's
+// issue chips; the paged issue list below serves the actual rows.
+func (q *Queries) CountScannerIssuesByLibrary(ctx context.Context, libraryID int64) ([]CountScannerIssuesByLibraryRow, error) {
+	rows, err := q.db.Query(ctx, countScannerIssuesByLibrary, libraryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountScannerIssuesByLibraryRow{}
+	for rows.Next() {
+		var i CountScannerIssuesByLibraryRow
+		if err := rows.Scan(&i.Code, &i.Severity, &i.IssueCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createLibraryFileExtraLink = `-- name: CreateLibraryFileExtraLink :one
 INSERT INTO library_file_links (
     library_file_id, media_item_id, relation_type, extra_type,
@@ -832,6 +955,74 @@ func (q *Queries) GetMediaItemByNormalizedExternalID(ctx context.Context, arg Ge
 	return i, err
 }
 
+const getScannerCandidateForDetail = `-- name: GetScannerCandidateForDetail :one
+SELECT
+    mmc.id, mmc.identity_id, mmc.scan_run_id, mmc.provider_name, mmc.provider_id, mmc.provider_kind, mmc.title, mmc.year, mmc.score, mmc.rank, mmc.status, mmc.rejection_reason, mmc.external_ids, mmc.raw_data, mmc.created_at, mmc.updated_at,
+    lmi.identity_key,
+    lmi.title AS identity_title,
+    lmi.year AS identity_year
+FROM metadata_match_candidates mmc
+JOIN local_media_identities lmi ON lmi.id = mmc.identity_id
+WHERE mmc.id = $1
+  AND mmc.identity_id = $2
+  AND lmi.library_id = $3
+`
+
+type GetScannerCandidateForDetailParams struct {
+	CandidateID int64 `json:"candidate_id"`
+	IdentityID  int64 `json:"identity_id"`
+	LibraryID   int64 `json:"library_id"`
+}
+
+type GetScannerCandidateForDetailRow struct {
+	ID              int64              `json:"id"`
+	IdentityID      int64              `json:"identity_id"`
+	ScanRunID       pgtype.Int8        `json:"scan_run_id"`
+	ProviderName    string             `json:"provider_name"`
+	ProviderID      string             `json:"provider_id"`
+	ProviderKind    string             `json:"provider_kind"`
+	Title           string             `json:"title"`
+	Year            string             `json:"year"`
+	Score           pgtype.Numeric     `json:"score"`
+	Rank            int32              `json:"rank"`
+	Status          string             `json:"status"`
+	RejectionReason string             `json:"rejection_reason"`
+	ExternalIds     []byte             `json:"external_ids"`
+	RawData         []byte             `json:"raw_data"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	IdentityKey     string             `json:"identity_key"`
+	IdentityTitle   string             `json:"identity_title"`
+	IdentityYear    string             `json:"identity_year"`
+}
+
+func (q *Queries) GetScannerCandidateForDetail(ctx context.Context, arg GetScannerCandidateForDetailParams) (GetScannerCandidateForDetailRow, error) {
+	row := q.db.QueryRow(ctx, getScannerCandidateForDetail, arg.CandidateID, arg.IdentityID, arg.LibraryID)
+	var i GetScannerCandidateForDetailRow
+	err := row.Scan(
+		&i.ID,
+		&i.IdentityID,
+		&i.ScanRunID,
+		&i.ProviderName,
+		&i.ProviderID,
+		&i.ProviderKind,
+		&i.Title,
+		&i.Year,
+		&i.Score,
+		&i.Rank,
+		&i.Status,
+		&i.RejectionReason,
+		&i.ExternalIds,
+		&i.RawData,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.IdentityKey,
+		&i.IdentityTitle,
+		&i.IdentityYear,
+	)
+	return i, err
+}
+
 const getScannerEntity = `-- name: GetScannerEntity :one
 SELECT id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at, analysis_artifact_id, pipeline_generation FROM scanner_entities
 WHERE id = $1
@@ -899,7 +1090,10 @@ SELECT
     COALESCE(selected.year, '') AS selected_year,
     selected.score AS selected_score,
     COALESCE(candidate_counts.candidate_count, 0)::bigint AS candidate_count,
-    COALESCE(open_finding_counts.open_finding_count, 0)::bigint AS open_finding_count
+    COALESCE(open_finding_counts.open_finding_count, 0)::bigint AS open_finding_count,
+    COALESCE(main_finding.code, '') AS main_finding_code,
+    COALESCE(main_finding.severity, '') AS main_finding_severity,
+    COALESCE(main_finding.message, '') AS main_finding_message
 FROM local_media_identities lmi
 LEFT JOIN LATERAL (
     SELECT provider_id, title, year, score
@@ -920,6 +1114,14 @@ LEFT JOIN LATERAL (
     WHERE sf.identity_id = lmi.id
       AND sf.resolved_at IS NULL
 ) open_finding_counts ON true
+LEFT JOIN LATERAL (
+    SELECT sf.code, sf.severity, sf.message
+    FROM scan_findings sf
+    WHERE sf.identity_id = lmi.id
+      AND sf.resolved_at IS NULL
+    ORDER BY CASE sf.severity WHEN 'error' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END, sf.created_at DESC, sf.id DESC
+    LIMIT 1
+) main_finding ON true
 WHERE lmi.library_id = $1
   AND lmi.id = $2
 `
@@ -954,6 +1156,9 @@ type GetScannerIdentityForViewRow struct {
 	SelectedScore           pgtype.Numeric     `json:"selected_score"`
 	CandidateCount          int64              `json:"candidate_count"`
 	OpenFindingCount        int64              `json:"open_finding_count"`
+	MainFindingCode         string             `json:"main_finding_code"`
+	MainFindingSeverity     string             `json:"main_finding_severity"`
+	MainFindingMessage      string             `json:"main_finding_message"`
 }
 
 func (q *Queries) GetScannerIdentityForView(ctx context.Context, arg GetScannerIdentityForViewParams) (GetScannerIdentityForViewRow, error) {
@@ -984,6 +1189,9 @@ func (q *Queries) GetScannerIdentityForView(ctx context.Context, arg GetScannerI
 		&i.SelectedScore,
 		&i.CandidateCount,
 		&i.OpenFindingCount,
+		&i.MainFindingCode,
+		&i.MainFindingSeverity,
+		&i.MainFindingMessage,
 	)
 	return i, err
 }
@@ -1342,85 +1550,7 @@ func (q *Queries) ListMediaItemExternalIDs(ctx context.Context, mediaItemID int6
 	return items, nil
 }
 
-const listOpenScannerFindingsByLibrary = `-- name: ListOpenScannerFindingsByLibrary :many
-SELECT
-    sf.id, sf.scan_run_id, sf.library_id, sf.media_type, sf.identity_id, sf.media_item_id, sf.library_file_id, sf.severity, sf.code, sf.rel_path, sf.message, sf.data, sf.resolved_at, sf.created_at,
-    lmi.identity_key,
-    lmi.title AS identity_title,
-    lmi.year AS identity_year,
-    mi.title AS media_title
-FROM scan_findings sf
-LEFT JOIN local_media_identities lmi ON lmi.id = sf.identity_id
-LEFT JOIN media_item_cards mi ON mi.id = sf.media_item_id
-WHERE sf.library_id = $1
-  AND sf.resolved_at IS NULL
-ORDER BY
-    CASE sf.severity WHEN 'error' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END,
-    sf.created_at DESC,
-    sf.id DESC
-`
-
-type ListOpenScannerFindingsByLibraryRow struct {
-	ID            int64              `json:"id"`
-	ScanRunID     pgtype.Int8        `json:"scan_run_id"`
-	LibraryID     int64              `json:"library_id"`
-	MediaType     MediaType          `json:"media_type"`
-	IdentityID    pgtype.Int8        `json:"identity_id"`
-	MediaItemID   pgtype.Int8        `json:"media_item_id"`
-	LibraryFileID pgtype.Int8        `json:"library_file_id"`
-	Severity      string             `json:"severity"`
-	Code          string             `json:"code"`
-	RelPath       string             `json:"rel_path"`
-	Message       string             `json:"message"`
-	Data          []byte             `json:"data"`
-	ResolvedAt    pgtype.Timestamptz `json:"resolved_at"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	IdentityKey   pgtype.Text        `json:"identity_key"`
-	IdentityTitle pgtype.Text        `json:"identity_title"`
-	IdentityYear  pgtype.Text        `json:"identity_year"`
-	MediaTitle    pgtype.Text        `json:"media_title"`
-}
-
-func (q *Queries) ListOpenScannerFindingsByLibrary(ctx context.Context, libraryID int64) ([]ListOpenScannerFindingsByLibraryRow, error) {
-	rows, err := q.db.Query(ctx, listOpenScannerFindingsByLibrary, libraryID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListOpenScannerFindingsByLibraryRow{}
-	for rows.Next() {
-		var i ListOpenScannerFindingsByLibraryRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.ScanRunID,
-			&i.LibraryID,
-			&i.MediaType,
-			&i.IdentityID,
-			&i.MediaItemID,
-			&i.LibraryFileID,
-			&i.Severity,
-			&i.Code,
-			&i.RelPath,
-			&i.Message,
-			&i.Data,
-			&i.ResolvedAt,
-			&i.CreatedAt,
-			&i.IdentityKey,
-			&i.IdentityTitle,
-			&i.IdentityYear,
-			&i.MediaTitle,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listScannerCandidatesByLibrary = `-- name: ListScannerCandidatesByLibrary :many
+const listScannerCandidatesByIdentity = `-- name: ListScannerCandidatesByIdentity :many
 SELECT
     mmc.id, mmc.identity_id, mmc.scan_run_id, mmc.provider_name, mmc.provider_id, mmc.provider_kind, mmc.title, mmc.year, mmc.score, mmc.rank, mmc.status, mmc.rejection_reason, mmc.external_ids, mmc.raw_data, mmc.created_at, mmc.updated_at,
     lmi.identity_key,
@@ -1428,11 +1558,17 @@ SELECT
     lmi.year AS identity_year
 FROM metadata_match_candidates mmc
 JOIN local_media_identities lmi ON lmi.id = mmc.identity_id
-WHERE lmi.library_id = $1
-ORDER BY lmi.title, lmi.year, mmc.rank, mmc.id
+WHERE mmc.identity_id = $1
+  AND lmi.library_id = $2
+ORDER BY mmc.rank, mmc.id
 `
 
-type ListScannerCandidatesByLibraryRow struct {
+type ListScannerCandidatesByIdentityParams struct {
+	IdentityID int64 `json:"identity_id"`
+	LibraryID  int64 `json:"library_id"`
+}
+
+type ListScannerCandidatesByIdentityRow struct {
 	ID              int64              `json:"id"`
 	IdentityID      int64              `json:"identity_id"`
 	ScanRunID       pgtype.Int8        `json:"scan_run_id"`
@@ -1454,15 +1590,15 @@ type ListScannerCandidatesByLibraryRow struct {
 	IdentityYear    string             `json:"identity_year"`
 }
 
-func (q *Queries) ListScannerCandidatesByLibrary(ctx context.Context, libraryID int64) ([]ListScannerCandidatesByLibraryRow, error) {
-	rows, err := q.db.Query(ctx, listScannerCandidatesByLibrary, libraryID)
+func (q *Queries) ListScannerCandidatesByIdentity(ctx context.Context, arg ListScannerCandidatesByIdentityParams) ([]ListScannerCandidatesByIdentityRow, error) {
+	rows, err := q.db.Query(ctx, listScannerCandidatesByIdentity, arg.IdentityID, arg.LibraryID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListScannerCandidatesByLibraryRow{}
+	items := []ListScannerCandidatesByIdentityRow{}
 	for rows.Next() {
-		var i ListScannerCandidatesByLibraryRow
+		var i ListScannerCandidatesByIdentityRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.IdentityID,
@@ -1555,20 +1691,131 @@ func (q *Queries) ListScannerEntitiesForScopeForUpdate(ctx context.Context, arg 
 	return items, nil
 }
 
-const listScannerIdentitiesByLibrary = `-- name: ListScannerIdentitiesByLibrary :many
+const listScannerFindingsByIdentity = `-- name: ListScannerFindingsByIdentity :many
+SELECT sf.id, sf.scan_run_id, sf.library_id, sf.media_type, sf.identity_id,
+       sf.media_item_id, sf.library_file_id, sf.severity, sf.code, sf.rel_path,
+       sf.message, sf.created_at
+FROM scan_findings sf
+JOIN local_media_identities lmi ON lmi.id = sf.identity_id
+WHERE sf.identity_id = $1
+  AND lmi.library_id = $2
+  AND sf.resolved_at IS NULL
+ORDER BY
+    CASE sf.severity WHEN 'error' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END,
+    sf.created_at DESC,
+    sf.id DESC
+LIMIT $4 OFFSET $3
+`
+
+type ListScannerFindingsByIdentityParams struct {
+	IdentityID pgtype.Int8 `json:"identity_id"`
+	LibraryID  int64       `json:"library_id"`
+	PageOffset int32       `json:"page_offset"`
+	PageLimit  int32       `json:"page_limit"`
+}
+
+type ListScannerFindingsByIdentityRow struct {
+	ID            int64              `json:"id"`
+	ScanRunID     pgtype.Int8        `json:"scan_run_id"`
+	LibraryID     int64              `json:"library_id"`
+	MediaType     MediaType          `json:"media_type"`
+	IdentityID    pgtype.Int8        `json:"identity_id"`
+	MediaItemID   pgtype.Int8        `json:"media_item_id"`
+	LibraryFileID pgtype.Int8        `json:"library_file_id"`
+	Severity      string             `json:"severity"`
+	Code          string             `json:"code"`
+	RelPath       string             `json:"rel_path"`
+	Message       string             `json:"message"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+// Open findings for one identity's expanded row. The data blob is deliberately
+// excluded — evidence payloads ran to hundreds of MB per library when shipped
+// in bulk; nothing in the review UI renders them.
+func (q *Queries) ListScannerFindingsByIdentity(ctx context.Context, arg ListScannerFindingsByIdentityParams) ([]ListScannerFindingsByIdentityRow, error) {
+	rows, err := q.db.Query(ctx, listScannerFindingsByIdentity,
+		arg.IdentityID,
+		arg.LibraryID,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListScannerFindingsByIdentityRow{}
+	for rows.Next() {
+		var i ListScannerFindingsByIdentityRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ScanRunID,
+			&i.LibraryID,
+			&i.MediaType,
+			&i.IdentityID,
+			&i.MediaItemID,
+			&i.LibraryFileID,
+			&i.Severity,
+			&i.Code,
+			&i.RelPath,
+			&i.Message,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listScannerIdentitiesPageByLibrary = `-- name: ListScannerIdentitiesPageByLibrary :many
 SELECT
-    lmi.id, lmi.library_id, lmi.media_type, lmi.identity_key, lmi.title, lmi.year, lmi.confidence, lmi.source, lmi.review_status, lmi.metadata_provider_id, lmi.media_item_id, lmi.first_seen_scan_run_id, lmi.last_seen_scan_run_id, lmi.raw_identity, lmi.created_at, lmi.updated_at, lmi.decision_provenance, lmi.decision_matcher_revision,
+    page.id, page.library_id, page.media_type, page.identity_key, page.title, page.year, page.confidence, page.source, page.review_status, page.metadata_provider_id, page.media_item_id, page.first_seen_scan_run_id, page.last_seen_scan_run_id, page.raw_identity, page.created_at, page.updated_at, page.decision_provenance, page.decision_matcher_revision, page.bucket,
     COALESCE(selected.provider_id, '') AS selected_provider_id,
     COALESCE(selected.title, '') AS selected_title,
     COALESCE(selected.year, '') AS selected_year,
     selected.score AS selected_score,
     COALESCE(candidate_counts.candidate_count, 0)::bigint AS candidate_count,
-    COALESCE(open_finding_counts.open_finding_count, 0)::bigint AS open_finding_count
-FROM local_media_identities lmi
+    COALESCE(finding_counts.open_finding_count, 0)::bigint AS open_finding_count,
+    COALESCE(main_finding.code, '') AS main_finding_code,
+    COALESCE(main_finding.severity, '') AS main_finding_severity,
+    COALESCE(main_finding.message, '') AS main_finding_message
+FROM (
+    SELECT id, library_id, media_type, identity_key, title, year, confidence, source, review_status, metadata_provider_id, media_item_id, first_seen_scan_run_id, last_seen_scan_run_id, raw_identity, created_at, updated_at, decision_provenance, decision_matcher_revision, bucket FROM (
+        SELECT lmi.id, lmi.library_id, lmi.media_type, lmi.identity_key, lmi.title, lmi.year, lmi.confidence, lmi.source, lmi.review_status, lmi.metadata_provider_id, lmi.media_item_id, lmi.first_seen_scan_run_id, lmi.last_seen_scan_run_id, lmi.raw_identity, lmi.created_at, lmi.updated_at, lmi.decision_provenance, lmi.decision_matcher_revision,
+            CASE
+                WHEN lmi.review_status = 'rejected' THEN 'rejected'
+                WHEN lmi.review_status = 'ignored' THEN 'ignored'
+                WHEN lmi.review_status IN ('needs_review', 'review', 'suspicious') THEN 'needs_review'
+                WHEN EXISTS (
+                    SELECT 1 FROM scan_findings sf
+                    WHERE sf.identity_id = lmi.id AND sf.resolved_at IS NULL
+                ) THEN 'needs_review'
+                WHEN lmi.media_item_id IS NOT NULL THEN 'matched'
+                ELSE 'unmatched'
+            END AS bucket
+        FROM local_media_identities lmi
+        WHERE lmi.library_id = $1
+    ) all_rows
+    WHERE ($2::text = '' OR all_rows.bucket = $2::text)
+      AND (
+        $3::text = ''
+        OR all_rows.title ILIKE '%' || $3::text || '%'
+        OR all_rows.identity_key ILIKE '%' || $3::text || '%'
+      )
+    ORDER BY
+        CASE all_rows.review_status WHEN 'rejected' THEN 0 WHEN 'review' THEN 1 WHEN 'suspicious' THEN 2 ELSE 3 END,
+        all_rows.title,
+        all_rows.year,
+        all_rows.id
+    LIMIT $5 OFFSET $4
+) page
 LEFT JOIN LATERAL (
     SELECT provider_id, title, year, score
     FROM metadata_match_candidates mmc
-    WHERE mmc.identity_id = lmi.id
+    WHERE mmc.identity_id = page.id
       AND mmc.status = 'selected'
     ORDER BY mmc.rank, mmc.score DESC NULLS LAST, mmc.id
     LIMIT 1
@@ -1576,23 +1823,38 @@ LEFT JOIN LATERAL (
 LEFT JOIN LATERAL (
     SELECT count(*) AS candidate_count
     FROM metadata_match_candidates mmc
-    WHERE mmc.identity_id = lmi.id
+    WHERE mmc.identity_id = page.id
 ) candidate_counts ON true
 LEFT JOIN LATERAL (
     SELECT count(*) AS open_finding_count
     FROM scan_findings sf
-    WHERE sf.identity_id = lmi.id
+    WHERE sf.identity_id = page.id
       AND sf.resolved_at IS NULL
-) open_finding_counts ON true
-WHERE lmi.library_id = $1
+) finding_counts ON true
+LEFT JOIN LATERAL (
+    SELECT sf.code, sf.severity, sf.message
+    FROM scan_findings sf
+    WHERE sf.identity_id = page.id
+      AND sf.resolved_at IS NULL
+    ORDER BY CASE sf.severity WHEN 'error' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END, sf.created_at DESC, sf.id DESC
+    LIMIT 1
+) main_finding ON true
 ORDER BY
-    CASE lmi.review_status WHEN 'rejected' THEN 0 WHEN 'review' THEN 1 WHEN 'suspicious' THEN 2 ELSE 3 END,
-    lmi.title,
-    lmi.year,
-    lmi.id
+    CASE page.review_status WHEN 'rejected' THEN 0 WHEN 'review' THEN 1 WHEN 'suspicious' THEN 2 ELSE 3 END,
+    page.title,
+    page.year,
+    page.id
 `
 
-type ListScannerIdentitiesByLibraryRow struct {
+type ListScannerIdentitiesPageByLibraryParams struct {
+	LibraryID  int64  `json:"library_id"`
+	Bucket     string `json:"bucket"`
+	Search     string `json:"search"`
+	PageOffset int32  `json:"page_offset"`
+	PageLimit  int32  `json:"page_limit"`
+}
+
+type ListScannerIdentitiesPageByLibraryRow struct {
 	ID                      int64              `json:"id"`
 	LibraryID               int64              `json:"library_id"`
 	MediaType               MediaType          `json:"media_type"`
@@ -1611,23 +1873,37 @@ type ListScannerIdentitiesByLibraryRow struct {
 	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
 	DecisionProvenance      string             `json:"decision_provenance"`
 	DecisionMatcherRevision int32              `json:"decision_matcher_revision"`
+	Bucket                  string             `json:"bucket"`
 	SelectedProviderID      string             `json:"selected_provider_id"`
 	SelectedTitle           string             `json:"selected_title"`
 	SelectedYear            string             `json:"selected_year"`
 	SelectedScore           pgtype.Numeric     `json:"selected_score"`
 	CandidateCount          int64              `json:"candidate_count"`
 	OpenFindingCount        int64              `json:"open_finding_count"`
+	MainFindingCode         string             `json:"main_finding_code"`
+	MainFindingSeverity     string             `json:"main_finding_severity"`
+	MainFindingMessage      string             `json:"main_finding_message"`
 }
 
-func (q *Queries) ListScannerIdentitiesByLibrary(ctx context.Context, libraryID int64) ([]ListScannerIdentitiesByLibraryRow, error) {
-	rows, err := q.db.Query(ctx, listScannerIdentitiesByLibrary, libraryID)
+// Paged identity rows. The inner derived table filters and limits on cheap
+// columns only (bucket needs just an EXISTS probe); the selected-candidate /
+// candidate-count / finding laterals then run for the page, not the library.
+// Bucket CASE mirrors scannerIdentityBucket (see CountScannerIdentityBuckets).
+func (q *Queries) ListScannerIdentitiesPageByLibrary(ctx context.Context, arg ListScannerIdentitiesPageByLibraryParams) ([]ListScannerIdentitiesPageByLibraryRow, error) {
+	rows, err := q.db.Query(ctx, listScannerIdentitiesPageByLibrary,
+		arg.LibraryID,
+		arg.Bucket,
+		arg.Search,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListScannerIdentitiesByLibraryRow{}
+	items := []ListScannerIdentitiesPageByLibraryRow{}
 	for rows.Next() {
-		var i ListScannerIdentitiesByLibraryRow
+		var i ListScannerIdentitiesPageByLibraryRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.LibraryID,
@@ -1647,12 +1923,86 @@ func (q *Queries) ListScannerIdentitiesByLibrary(ctx context.Context, libraryID 
 			&i.UpdatedAt,
 			&i.DecisionProvenance,
 			&i.DecisionMatcherRevision,
+			&i.Bucket,
 			&i.SelectedProviderID,
 			&i.SelectedTitle,
 			&i.SelectedYear,
 			&i.SelectedScore,
 			&i.CandidateCount,
 			&i.OpenFindingCount,
+			&i.MainFindingCode,
+			&i.MainFindingSeverity,
+			&i.MainFindingMessage,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listScannerIssuesPageByLibrary = `-- name: ListScannerIssuesPageByLibrary :many
+SELECT sf.id, sf.scan_run_id, sf.library_id, sf.media_type, sf.severity,
+       sf.code, sf.rel_path, sf.message, sf.created_at
+FROM scan_findings sf
+WHERE sf.library_id = $1
+  AND sf.resolved_at IS NULL
+  AND sf.identity_id IS NULL
+  AND ($2::text = '' OR sf.code = $2::text)
+ORDER BY
+    CASE sf.severity WHEN 'error' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END,
+    sf.created_at DESC,
+    sf.id DESC
+LIMIT $4 OFFSET $3
+`
+
+type ListScannerIssuesPageByLibraryParams struct {
+	LibraryID  int64  `json:"library_id"`
+	Code       string `json:"code"`
+	PageOffset int32  `json:"page_offset"`
+	PageLimit  int32  `json:"page_limit"`
+}
+
+type ListScannerIssuesPageByLibraryRow struct {
+	ID        int64              `json:"id"`
+	ScanRunID pgtype.Int8        `json:"scan_run_id"`
+	LibraryID int64              `json:"library_id"`
+	MediaType MediaType          `json:"media_type"`
+	Severity  string             `json:"severity"`
+	Code      string             `json:"code"`
+	RelPath   string             `json:"rel_path"`
+	Message   string             `json:"message"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+// Paged orphan findings ("scan issues" panel) — same no-data-blob rule.
+func (q *Queries) ListScannerIssuesPageByLibrary(ctx context.Context, arg ListScannerIssuesPageByLibraryParams) ([]ListScannerIssuesPageByLibraryRow, error) {
+	rows, err := q.db.Query(ctx, listScannerIssuesPageByLibrary,
+		arg.LibraryID,
+		arg.Code,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListScannerIssuesPageByLibraryRow{}
+	for rows.Next() {
+		var i ListScannerIssuesPageByLibraryRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ScanRunID,
+			&i.LibraryID,
+			&i.MediaType,
+			&i.Severity,
+			&i.Code,
+			&i.RelPath,
+			&i.Message,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

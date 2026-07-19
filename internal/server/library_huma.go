@@ -190,16 +190,97 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(stats), nil
 		})
 
-	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/scanner", "library-scanner-view", "scanner latest run, findings, and identities", "Libraries")),
-		func(ctx context.Context, in *struct {
-			IDPath
-			Candidates bool `query:"candidates" doc:"Include all metadata match candidates for the library"`
-		}) (*JSONOutput[service.ScannerView], error) {
-			view, err := app.GetLibraryScannerView(ctx, in.ID, in.Candidates)
+	// --- Scanner review ---
+	// The review dataset scales with library size (a music library can carry
+	// tens of thousands of identities and six-figure finding counts), so the
+	// scanner state is served as a cheap aggregate overview plus individually
+	// paginated collections — never as one monolithic payload.
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/scanner/overview", "library-scanner-overview", "scanner run status, bucket tallies, and issue counts", "Libraries")),
+		func(ctx context.Context, in *IDPath) (*JSONOutput[service.ScannerOverview], error) {
+			overview, err := app.GetLibraryScannerOverview(ctx, in.ID)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
-			return noStoreJSON(view), nil
+			return noStoreJSON(overview), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/scanner/identities", "library-scanner-identities", "Paginated scanner identities", "Libraries")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			Pagination
+			Bucket string `query:"bucket" maxLength:"32" doc:"Filter by computed bucket: matched, needs_review, unmatched, rejected, ignored"`
+			Q      string `query:"q" maxLength:"200" doc:"Case-insensitive title / identity-key filter"`
+		}) (*JSONOutput[[]service.ScannerIdentityView], error) {
+			identities, err := app.ListScannerIdentitiesPage(ctx, in.ID, in.Bucket, in.Q, in.Limit, in.Offset)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(identities), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/scanner/identities/{identity_id}", "library-scanner-identity", "Single scanner identity", "Libraries")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			IdentityID int64 `path:"identity_id" minimum:"1"`
+		}) (*JSONOutput[service.ScannerIdentityView], error) {
+			identity, err := app.GetScannerIdentity(ctx, in.ID, in.IdentityID)
+			if err != nil {
+				if errors.Is(err, service.ErrScannerReviewTargetNotFound) {
+					return nil, huma.Error404NotFound("scanner identity not found")
+				}
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(identity), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/scanner/identities/{identity_id}/findings", "library-scanner-identity-findings", "Open findings for a scanner identity", "Libraries")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			IdentityID int64 `path:"identity_id" minimum:"1"`
+			Pagination
+		}) (*JSONOutput[[]service.ScannerFindingView], error) {
+			findings, err := app.ListScannerIdentityFindings(ctx, in.ID, in.IdentityID, in.Limit, in.Offset)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(findings), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/scanner/identities/{identity_id}/candidates", "library-scanner-identity-candidates", "Match candidates for a scanner identity", "Libraries")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			IdentityID int64 `path:"identity_id" minimum:"1"`
+		}) (*JSONOutput[[]service.ScannerCandidateView], error) {
+			candidates, err := app.ListScannerIdentityCandidates(ctx, in.ID, in.IdentityID)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(candidates), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/scanner/issues", "library-scanner-issues", "Paginated scan issues (findings without an identity)", "Libraries")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			Pagination
+			Code string `query:"code" maxLength:"64" doc:"Filter by finding code"`
+		}) (*JSONOutput[[]service.ScannerFindingView], error) {
+			issues, err := app.ListScannerIssuesPage(ctx, in.ID, in.Code, in.Limit, in.Offset)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(issues), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/scanner/bulk-eligible", "library-scanner-bulk-eligible", "Count identities eligible for bulk single-candidate approval", "Libraries")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			MinConfidence float64 `query:"min_confidence" minimum:"0" maximum:"1" default:"0.95"`
+		}) (*JSONOutput[service.ScannerBulkEligibleResult], error) {
+			count, err := app.CountScannerBulkApproveEligible(ctx, in.ID, in.MinConfidence)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(service.ScannerBulkEligibleResult{Eligible: count}), nil
 		})
 
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/libraries/{id}/scanner/runs", "library-scanner-runs", "scanner run history", "Libraries")),

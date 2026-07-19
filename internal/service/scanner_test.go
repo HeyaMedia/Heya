@@ -117,8 +117,20 @@ func TestScannerReviewViewBucketsAndActions(t *testing.T) {
 		Data:       []byte(`{}`),
 	})
 	require.NoError(t, err)
+	// Orphan finding (no identity) — must surface via issue counts + the paged
+	// issues list, never via identity findings.
+	_, err = q.CreateScanFinding(ctx, sqlc.CreateScanFindingParams{
+		ScanRunID: pgInt8ForTest(run.ID),
+		LibraryID: lib.ID,
+		MediaType: lib.MediaType,
+		Severity:  "warn",
+		Code:      "unplanned_media",
+		Message:   "stray file",
+		Data:      []byte(`{}`),
+	})
+	require.NoError(t, err)
 
-	view, err := app.GetLibraryScannerView(ctx, lib.ID, true)
+	overview, err := app.GetLibraryScannerOverview(ctx, lib.ID)
 	require.NoError(t, err)
 	require.Equal(t, ScannerBucketCounts{
 		Total:       4,
@@ -126,15 +138,9 @@ func TestScannerReviewViewBucketsAndActions(t *testing.T) {
 		NeedsReview: 1,
 		Rejected:    1,
 		Unmatched:   1,
-	}, view.BucketCounts)
-	require.Equal(t, map[int64]string{
-		matched.ID:   "matched",
-		review.ID:    "needs_review",
-		rejected.ID:  "rejected",
-		unmatched.ID: "unmatched",
-	}, scannerBucketsByID(view.Identities))
-	require.Len(t, view.Candidates, 2)
-	require.Len(t, view.OpenFindings, 1)
+	}, overview.BucketCounts)
+	require.Equal(t, []ScannerIssueCount{{Code: "unplanned_media", Severity: "warn", Count: 1}}, overview.IssueCounts)
+	require.EqualValues(t, 1, overview.IssueTotal)
 	redactedPipelineError := secrettext.Redact(pipelineFailure.ErrorMessage)
 	require.NotContains(t, redactedPipelineError, "super-secret")
 	require.Equal(t, []ScannerPipelineFailureView{{
@@ -145,10 +151,53 @@ func TestScannerReviewViewBucketsAndActions(t *testing.T) {
 		Stage:        "metadata apply",
 		ErrorMessage: redactedPipelineError,
 		UpdatedAt:    timePtr(pipelineFailure.UpdatedAt),
-	}}, view.PipelineFailures)
-	require.NotNil(t, view.LatestRun)
-	require.Equal(t, 1, view.LatestRun.PipelineFailureCount)
-	require.Equal(t, redactedPipelineError, view.LatestRun.PipelineErrorMessage)
+	}}, overview.PipelineFailures)
+	require.NotNil(t, overview.LatestRun)
+	require.Equal(t, 1, overview.LatestRun.PipelineFailureCount)
+	require.Equal(t, redactedPipelineError, overview.LatestRun.PipelineErrorMessage)
+
+	identities, err := app.ListScannerIdentitiesPage(ctx, lib.ID, "", "", 50, 0)
+	require.NoError(t, err)
+	require.Equal(t, map[int64]string{
+		matched.ID:   "matched",
+		review.ID:    "needs_review",
+		rejected.ID:  "rejected",
+		unmatched.ID: "unmatched",
+	}, scannerBucketsByID(identities))
+
+	reviewPage, err := app.ListScannerIdentitiesPage(ctx, lib.ID, "needs_review", "", 50, 0)
+	require.NoError(t, err)
+	require.Len(t, reviewPage, 1)
+	require.Equal(t, review.ID, reviewPage[0].ID)
+	require.Equal(t, "search_suspicious", reviewPage[0].MainFindingCode)
+	require.EqualValues(t, 2, reviewPage[0].CandidateCount)
+
+	searchPage, err := app.ListScannerIdentitiesPage(ctx, lib.ID, "", "unmatched movie", 50, 0)
+	require.NoError(t, err)
+	require.Len(t, searchPage, 1)
+	require.Equal(t, unmatched.ID, searchPage[0].ID)
+
+	pagedIdentities, err := app.ListScannerIdentitiesPage(ctx, lib.ID, "", "", 3, 3)
+	require.NoError(t, err)
+	require.Len(t, pagedIdentities, 1)
+
+	reviewCandidates, err := app.ListScannerIdentityCandidates(ctx, lib.ID, review.ID)
+	require.NoError(t, err)
+	require.Len(t, reviewCandidates, 2)
+	require.Equal(t, candidate.ProviderID, reviewCandidates[0].ProviderID)
+
+	reviewFindings, err := app.ListScannerIdentityFindings(ctx, lib.ID, review.ID, 50, 0)
+	require.NoError(t, err)
+	require.Len(t, reviewFindings, 1)
+	require.Equal(t, "search_suspicious", reviewFindings[0].Code)
+
+	issues, err := app.ListScannerIssuesPage(ctx, lib.ID, "", 50, 0)
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	require.Equal(t, "unplanned_media", issues[0].Code)
+	filteredIssues, err := app.ListScannerIssuesPage(ctx, lib.ID, "nfo_parse_failed", 50, 0)
+	require.NoError(t, err)
+	require.Empty(t, filteredIssues)
 
 	runs, err := app.ListLibraryScannerRuns(ctx, lib.ID, 10, 0)
 	require.NoError(t, err)
@@ -180,6 +229,9 @@ func TestScannerReviewViewBucketsAndActions(t *testing.T) {
 
 	// Bulk approval must count every candidate, not only candidates above the
 	// threshold: the two-candidate review identity is deliberately ineligible.
+	eligible, err := app.CountScannerBulkApproveEligible(ctx, lib.ID, 0.9)
+	require.NoError(t, err)
+	require.Zero(t, eligible)
 	bulk, err := app.BulkApproveSingleScannerCandidates(ctx, lib.ID, 0.9)
 	require.NoError(t, err)
 	require.Zero(t, bulk.Approved)
@@ -193,6 +245,9 @@ func TestScannerReviewViewBucketsAndActions(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	eligible, err = app.CountScannerBulkApproveEligible(ctx, lib.ID, 0.95)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, eligible)
 	bulk, err = app.BulkApproveSingleScannerCandidates(ctx, lib.ID, 0.95)
 	require.NoError(t, err)
 	require.Equal(t, 1, bulk.Approved)

@@ -173,8 +173,7 @@ func TestPersistScanResultPersistsMusicScannerReviewState(t *testing.T) {
 	require.NoError(t, err)
 	require.NotZero(t, scanRunID)
 
-	identities, err := q.ListScannerIdentitiesByLibrary(ctx, lib.ID)
-	require.NoError(t, err)
+	identities := listScannerIdentitiesForTest(t, ctx, q, lib.ID)
 	require.Len(t, identities, 4)
 	byKey := scannerIdentitiesByKey(identities)
 
@@ -185,21 +184,17 @@ func TestPersistScanResultPersistsMusicScannerReviewState(t *testing.T) {
 	require.Equal(t, "accepted", byKey["artist:mapping artist"].ReviewStatus)
 	require.Equal(t, "accepted", byKey["artist:local only"].ReviewStatus)
 
-	candidates, err := q.ListScannerCandidatesByLibrary(ctx, lib.ID)
-	require.NoError(t, err)
-	require.Len(t, candidates, 23)
-	require.Equal(t, 20, scannerCandidateCount(candidates, byKey["artist:ado"].ID))
-	require.Equal(t, 2, scannerCandidateCount(candidates, byKey["artist:broken artist"].ID))
-	require.Equal(t, 1, scannerCandidateCount(candidates, byKey["artist:mapping artist"].ID))
+	require.Len(t, listScannerCandidatesForTest(t, ctx, q, lib.ID, byKey["artist:ado"].ID), 20)
+	require.Len(t, listScannerCandidatesForTest(t, ctx, q, lib.ID, byKey["artist:broken artist"].ID), 2)
+	require.Len(t, listScannerCandidatesForTest(t, ctx, q, lib.ID, byKey["artist:mapping artist"].ID), 1)
+	require.Empty(t, listScannerCandidatesForTest(t, ctx, q, lib.ID, byKey["artist:local only"].ID))
 
-	findings, err := q.ListOpenScannerFindingsByLibrary(ctx, lib.ID)
-	require.NoError(t, err)
 	require.Equal(t, map[string]int{
 		"music_album_issue": 1,
 		"music_track_issue": 1,
 		"nfo_parse_failed":  1,
 		"search_rejected":   1,
-	}, scannerFindingCounts(findings))
+	}, scannerOpenFindingCounts(t, ctx, q, lib.ID))
 
 	// Stage retries and force scans can replay the same path-scoped parse
 	// event. It should replace the prior open finding instead of accumulating
@@ -211,16 +206,14 @@ func TestPersistScanResultPersistsMusicScannerReviewState(t *testing.T) {
 		RemoteSearch:       true,
 	}, pool, map[string]any{"music_artists": len(result.MusicArtists)})
 	require.NoError(t, err)
-	findings, err = q.ListOpenScannerFindingsByLibrary(ctx, lib.ID)
-	require.NoError(t, err)
-	require.Equal(t, 1, scannerFindingCounts(findings)["nfo_parse_failed"])
-	candidates, err = q.ListScannerCandidatesByLibrary(ctx, lib.ID)
-	require.NoError(t, err)
+	require.Equal(t, 1, scannerOpenFindingCounts(t, ctx, q, lib.ID)["nfo_parse_failed"])
+	brokenCandidates := listScannerCandidatesForTest(t, ctx, q, lib.ID, byKey["artist:broken artist"].ID)
+	require.NotEmpty(t, brokenCandidates)
 
 	approved, err := q.ApproveScannerCandidate(ctx, sqlc.ApproveScannerCandidateParams{
 		LibraryID:   lib.ID,
 		IdentityID:  byKey["artist:broken artist"].ID,
-		CandidateID: firstCandidateID(candidates, byKey["artist:broken artist"].ID),
+		CandidateID: brokenCandidates[0].ID,
 	})
 	require.NoError(t, err)
 	require.Equal(t, "accepted", approved.ReviewStatus)
@@ -627,37 +620,60 @@ func musicCandidates(prefix string, artist string, n int) []MusicSearchCandidate
 	return out
 }
 
-func scannerIdentitiesByKey(rows []sqlc.ListScannerIdentitiesByLibraryRow) map[string]sqlc.ListScannerIdentitiesByLibraryRow {
-	out := make(map[string]sqlc.ListScannerIdentitiesByLibraryRow, len(rows))
+// The production API only serves the review dataset in pages / per identity;
+// these helpers rebuild the whole-library views the assertions below need.
+func listScannerIdentitiesForTest(t *testing.T, ctx context.Context, q *sqlc.Queries, libraryID int64) []sqlc.ListScannerIdentitiesPageByLibraryRow {
+	t.Helper()
+	rows, err := q.ListScannerIdentitiesPageByLibrary(ctx, sqlc.ListScannerIdentitiesPageByLibraryParams{
+		LibraryID: libraryID,
+		PageLimit: 1000,
+	})
+	require.NoError(t, err)
+	return rows
+}
+
+func listScannerCandidatesForTest(t *testing.T, ctx context.Context, q *sqlc.Queries, libraryID, identityID int64) []sqlc.ListScannerCandidatesByIdentityRow {
+	t.Helper()
+	rows, err := q.ListScannerCandidatesByIdentity(ctx, sqlc.ListScannerCandidatesByIdentityParams{
+		LibraryID:  libraryID,
+		IdentityID: identityID,
+	})
+	require.NoError(t, err)
+	return rows
+}
+
+func scannerIdentitiesByKey(rows []sqlc.ListScannerIdentitiesPageByLibraryRow) map[string]sqlc.ListScannerIdentitiesPageByLibraryRow {
+	out := make(map[string]sqlc.ListScannerIdentitiesPageByLibraryRow, len(rows))
 	for _, row := range rows {
 		out[row.IdentityKey] = row
 	}
 	return out
 }
 
-func scannerCandidateCount(rows []sqlc.ListScannerCandidatesByLibraryRow, identityID int64) int {
-	n := 0
-	for _, row := range rows {
-		if row.IdentityID == identityID {
-			n++
+// scannerOpenFindingCounts tallies every open finding for the library by code:
+// identity-attached findings via the per-identity query plus orphan findings
+// via the issues page.
+func scannerOpenFindingCounts(t *testing.T, ctx context.Context, q *sqlc.Queries, libraryID int64) map[string]int {
+	t.Helper()
+	out := map[string]int{}
+	for _, identity := range listScannerIdentitiesForTest(t, ctx, q, libraryID) {
+		rows, err := q.ListScannerFindingsByIdentity(ctx, sqlc.ListScannerFindingsByIdentityParams{
+			LibraryID:  libraryID,
+			IdentityID: pgtype.Int8{Int64: identity.ID, Valid: true},
+			PageLimit:  1000,
+		})
+		require.NoError(t, err)
+		for _, row := range rows {
+			out[row.Code]++
 		}
 	}
-	return n
-}
-
-func scannerFindingCounts(rows []sqlc.ListOpenScannerFindingsByLibraryRow) map[string]int {
-	out := map[string]int{}
-	for _, row := range rows {
+	orphans, err := q.ListScannerIssuesPageByLibrary(ctx, sqlc.ListScannerIssuesPageByLibraryParams{
+		LibraryID: libraryID,
+		PageLimit: 1000,
+	})
+	require.NoError(t, err)
+	for _, row := range orphans {
 		out[row.Code]++
 	}
 	return out
-}
-
-func firstCandidateID(rows []sqlc.ListScannerCandidatesByLibraryRow, identityID int64) int64 {
-	for _, row := range rows {
-		if row.IdentityID == identityID {
-			return row.ID
-		}
-	}
-	return 0
 }

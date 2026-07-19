@@ -4871,6 +4871,14 @@ export type ScannerBulkApproveResult = {
     approved: number;
 };
 
+export type ScannerBulkEligibleResult = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    eligible: number;
+};
+
 export type ScannerCandidateDetailView = {
     /**
      * A URL to the JSON Schema for this object.
@@ -4965,6 +4973,9 @@ export type ScannerIdentityView = {
     identity_key: string;
     last_seen_scan_run_id?: number;
     library_id: number;
+    main_finding_code?: string;
+    main_finding_message?: string;
+    main_finding_severity?: string;
     media_item_id?: number;
     media_type: string;
     metadata_provider_id?: string;
@@ -4978,6 +4989,24 @@ export type ScannerIdentityView = {
     title: string;
     updated_at?: string;
     year?: string;
+};
+
+export type ScannerIssueCount = {
+    code: string;
+    count: number;
+    severity: string;
+};
+
+export type ScannerOverview = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    bucket_counts: ScannerBucketCounts;
+    issue_counts: Array<ScannerIssueCount> | null;
+    issue_total: number;
+    latest_run?: ScannerRunView;
+    pipeline_failures: Array<ScannerPipelineFailureView> | null;
 };
 
 export type ScannerPipelineFailureView = {
@@ -5006,19 +5035,6 @@ export type ScannerRunView = {
     summary: {
         [key: string]: unknown;
     };
-};
-
-export type ScannerView = {
-    /**
-     * A URL to the JSON Schema for this object.
-     */
-    readonly $schema?: string;
-    bucket_counts: ScannerBucketCounts;
-    candidates?: Array<ScannerCandidateView> | null;
-    identities: Array<ScannerIdentityView> | null;
-    latest_run?: ScannerRunView;
-    open_findings: Array<ScannerFindingView> | null;
-    pipeline_failures: Array<ScannerPipelineFailureView> | null;
 };
 
 export type SearchBucket = {
@@ -7947,6 +7963,10 @@ export type ScannerBulkApproveResultWritable = {
     approved: number;
 };
 
+export type ScannerBulkEligibleResultWritable = {
+    eligible: number;
+};
+
 export type ScannerCandidateDetailViewWritable = {
     author?: string;
     backdrop_url?: string;
@@ -7986,6 +8006,9 @@ export type ScannerIdentityViewWritable = {
     identity_key: string;
     last_seen_scan_run_id?: number;
     library_id: number;
+    main_finding_code?: string;
+    main_finding_message?: string;
+    main_finding_severity?: string;
     media_item_id?: number;
     media_type: string;
     metadata_provider_id?: string;
@@ -8001,12 +8024,11 @@ export type ScannerIdentityViewWritable = {
     year?: string;
 };
 
-export type ScannerViewWritable = {
+export type ScannerOverviewWritable = {
     bucket_counts: ScannerBucketCounts;
-    candidates?: Array<ScannerCandidateView> | null;
-    identities: Array<ScannerIdentityViewWritable> | null;
+    issue_counts: Array<ScannerIssueCount> | null;
+    issue_total: number;
     latest_run?: ScannerRunView;
-    open_findings: Array<ScannerFindingView> | null;
     pipeline_failures: Array<ScannerPipelineFailureView> | null;
 };
 
@@ -11560,41 +11582,6 @@ export type CancelLibraryScanResponses = {
 
 export type CancelLibraryScanResponse = CancelLibraryScanResponses[keyof CancelLibraryScanResponses];
 
-export type LibraryScannerViewData = {
-    body?: never;
-    path: {
-        /**
-         * Numeric ID
-         */
-        id: number;
-    };
-    query?: {
-        /**
-         * Include all metadata match candidates for the library
-         */
-        candidates?: boolean;
-    };
-    url: '/api/libraries/{id}/scanner';
-};
-
-export type LibraryScannerViewErrors = {
-    /**
-     * Error
-     */
-    default: ErrorModel;
-};
-
-export type LibraryScannerViewError = LibraryScannerViewErrors[keyof LibraryScannerViewErrors];
-
-export type LibraryScannerViewResponses = {
-    /**
-     * OK
-     */
-    200: ScannerView;
-};
-
-export type LibraryScannerViewResponse = LibraryScannerViewResponses[keyof LibraryScannerViewResponses];
-
 export type LibraryScannerBulkApproveSingleData = {
     body: LibraryScannerBulkApproveSingleRequestWritable;
     path: {
@@ -11624,6 +11611,116 @@ export type LibraryScannerBulkApproveSingleResponses = {
 };
 
 export type LibraryScannerBulkApproveSingleResponse = LibraryScannerBulkApproveSingleResponses[keyof LibraryScannerBulkApproveSingleResponses];
+
+export type LibraryScannerBulkEligibleData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: {
+        min_confidence?: number;
+    };
+    url: '/api/libraries/{id}/scanner/bulk-eligible';
+};
+
+export type LibraryScannerBulkEligibleErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type LibraryScannerBulkEligibleError = LibraryScannerBulkEligibleErrors[keyof LibraryScannerBulkEligibleErrors];
+
+export type LibraryScannerBulkEligibleResponses = {
+    /**
+     * OK
+     */
+    200: ScannerBulkEligibleResult;
+};
+
+export type LibraryScannerBulkEligibleResponse = LibraryScannerBulkEligibleResponses[keyof LibraryScannerBulkEligibleResponses];
+
+export type LibraryScannerIdentitiesData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: {
+        /**
+         * Max results
+         */
+        limit?: number;
+        /**
+         * Results offset
+         */
+        offset?: number;
+        /**
+         * Filter by computed bucket: matched, needs_review, unmatched, rejected, ignored
+         */
+        bucket?: string;
+        /**
+         * Case-insensitive title / identity-key filter
+         */
+        q?: string;
+    };
+    url: '/api/libraries/{id}/scanner/identities';
+};
+
+export type LibraryScannerIdentitiesErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type LibraryScannerIdentitiesError = LibraryScannerIdentitiesErrors[keyof LibraryScannerIdentitiesErrors];
+
+export type LibraryScannerIdentitiesResponses = {
+    /**
+     * OK
+     */
+    200: Array<ScannerIdentityView> | null;
+};
+
+export type LibraryScannerIdentitiesResponse = LibraryScannerIdentitiesResponses[keyof LibraryScannerIdentitiesResponses];
+
+export type LibraryScannerIdentityData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+        identity_id: number;
+    };
+    query?: never;
+    url: '/api/libraries/{id}/scanner/identities/{identity_id}';
+};
+
+export type LibraryScannerIdentityErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type LibraryScannerIdentityError = LibraryScannerIdentityErrors[keyof LibraryScannerIdentityErrors];
+
+export type LibraryScannerIdentityResponses = {
+    /**
+     * OK
+     */
+    200: ScannerIdentityView;
+};
+
+export type LibraryScannerIdentityResponse = LibraryScannerIdentityResponses[keyof LibraryScannerIdentityResponses];
 
 export type LibraryScannerApproveCandidateData = {
     body: LibraryScannerApproveCandidateRequestWritable;
@@ -11687,6 +11784,37 @@ export type LibraryScannerAssignIdentityResponses = {
 
 export type LibraryScannerAssignIdentityResponse = LibraryScannerAssignIdentityResponses[keyof LibraryScannerAssignIdentityResponses];
 
+export type LibraryScannerIdentityCandidatesData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+        identity_id: number;
+    };
+    query?: never;
+    url: '/api/libraries/{id}/scanner/identities/{identity_id}/candidates';
+};
+
+export type LibraryScannerIdentityCandidatesErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type LibraryScannerIdentityCandidatesError = LibraryScannerIdentityCandidatesErrors[keyof LibraryScannerIdentityCandidatesErrors];
+
+export type LibraryScannerIdentityCandidatesResponses = {
+    /**
+     * OK
+     */
+    200: Array<ScannerCandidateView> | null;
+};
+
+export type LibraryScannerIdentityCandidatesResponse = LibraryScannerIdentityCandidatesResponses[keyof LibraryScannerIdentityCandidatesResponses];
+
 export type LibraryScannerCandidateDetailData = {
     body?: never;
     path: {
@@ -11718,6 +11846,46 @@ export type LibraryScannerCandidateDetailResponses = {
 };
 
 export type LibraryScannerCandidateDetailResponse = LibraryScannerCandidateDetailResponses[keyof LibraryScannerCandidateDetailResponses];
+
+export type LibraryScannerIdentityFindingsData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+        identity_id: number;
+    };
+    query?: {
+        /**
+         * Max results
+         */
+        limit?: number;
+        /**
+         * Results offset
+         */
+        offset?: number;
+    };
+    url: '/api/libraries/{id}/scanner/identities/{identity_id}/findings';
+};
+
+export type LibraryScannerIdentityFindingsErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type LibraryScannerIdentityFindingsError = LibraryScannerIdentityFindingsErrors[keyof LibraryScannerIdentityFindingsErrors];
+
+export type LibraryScannerIdentityFindingsResponses = {
+    /**
+     * OK
+     */
+    200: Array<ScannerFindingView> | null;
+};
+
+export type LibraryScannerIdentityFindingsResponse = LibraryScannerIdentityFindingsResponses[keyof LibraryScannerIdentityFindingsResponses];
 
 export type LibraryScannerIgnoreIdentityData = {
     body: LibraryScannerIgnoreIdentityRequestWritable;
@@ -11851,6 +12019,79 @@ export type LibraryScannerIdentitySearchResponses = {
 };
 
 export type LibraryScannerIdentitySearchResponse = LibraryScannerIdentitySearchResponses[keyof LibraryScannerIdentitySearchResponses];
+
+export type LibraryScannerIssuesData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: {
+        /**
+         * Max results
+         */
+        limit?: number;
+        /**
+         * Results offset
+         */
+        offset?: number;
+        /**
+         * Filter by finding code
+         */
+        code?: string;
+    };
+    url: '/api/libraries/{id}/scanner/issues';
+};
+
+export type LibraryScannerIssuesErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type LibraryScannerIssuesError = LibraryScannerIssuesErrors[keyof LibraryScannerIssuesErrors];
+
+export type LibraryScannerIssuesResponses = {
+    /**
+     * OK
+     */
+    200: Array<ScannerFindingView> | null;
+};
+
+export type LibraryScannerIssuesResponse = LibraryScannerIssuesResponses[keyof LibraryScannerIssuesResponses];
+
+export type LibraryScannerOverviewData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/libraries/{id}/scanner/overview';
+};
+
+export type LibraryScannerOverviewErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type LibraryScannerOverviewError = LibraryScannerOverviewErrors[keyof LibraryScannerOverviewErrors];
+
+export type LibraryScannerOverviewResponses = {
+    /**
+     * OK
+     */
+    200: ScannerOverview;
+};
+
+export type LibraryScannerOverviewResponse = LibraryScannerOverviewResponses[keyof LibraryScannerOverviewResponses];
 
 export type LibraryScannerRunsData = {
     body?: never;

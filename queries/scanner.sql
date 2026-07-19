@@ -444,37 +444,115 @@ WHERE library_id = $1
   AND status IN ('metadata_error', 'apply_error', 'error', 'failed')
 ORDER BY updated_at DESC, id DESC;
 
--- name: ListOpenScannerFindingsByLibrary :many
+-- Aggregate bucket tallies for the scanner overview. The CASE must stay an
+-- exact mirror of scannerIdentityBucket in internal/service/scanner.go — the
+-- overview counters and the paged identity rows must never disagree.
+-- name: CountScannerIdentityBucketsByLibrary :one
 SELECT
-    sf.*,
-    lmi.identity_key,
-    lmi.title AS identity_title,
-    lmi.year AS identity_year,
-    mi.title AS media_title
+    count(*) AS total,
+    count(*) FILTER (WHERE bucket = 'matched') AS matched,
+    count(*) FILTER (WHERE bucket = 'needs_review') AS needs_review,
+    count(*) FILTER (WHERE bucket = 'rejected') AS rejected,
+    count(*) FILTER (WHERE bucket = 'unmatched') AS unmatched,
+    count(*) FILTER (WHERE bucket = 'ignored') AS ignored
+FROM (
+    SELECT CASE
+        WHEN lmi.review_status = 'rejected' THEN 'rejected'
+        WHEN lmi.review_status = 'ignored' THEN 'ignored'
+        WHEN lmi.review_status IN ('needs_review', 'review', 'suspicious') THEN 'needs_review'
+        WHEN EXISTS (
+            SELECT 1 FROM scan_findings sf
+            WHERE sf.identity_id = lmi.id AND sf.resolved_at IS NULL
+        ) THEN 'needs_review'
+        WHEN lmi.media_item_id IS NOT NULL THEN 'matched'
+        ELSE 'unmatched'
+    END AS bucket
+    FROM local_media_identities lmi
+    WHERE lmi.library_id = $1
+) buckets;
+
+-- Orphan scan-issue tallies (findings with no identity) for the overview's
+-- issue chips; the paged issue list below serves the actual rows.
+-- name: CountScannerIssuesByLibrary :many
+SELECT sf.code, sf.severity, count(*)::bigint AS issue_count
 FROM scan_findings sf
-LEFT JOIN local_media_identities lmi ON lmi.id = sf.identity_id
-LEFT JOIN media_item_cards mi ON mi.id = sf.media_item_id
 WHERE sf.library_id = $1
   AND sf.resolved_at IS NULL
-ORDER BY
-    CASE sf.severity WHEN 'error' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END,
-    sf.created_at DESC,
-    sf.id DESC;
+  AND sf.identity_id IS NULL
+GROUP BY sf.code, sf.severity
+ORDER BY issue_count DESC, sf.code;
 
--- name: ListScannerIdentitiesByLibrary :many
+-- Mirror of BulkApproveSingleScannerCandidates' eligibility CTE so the UI can
+-- show an exact "will approve N" count for a given threshold without loading
+-- identities client-side.
+-- name: CountScannerBulkApproveEligible :one
+SELECT count(*) FROM (
+    SELECT lmi.id
+    FROM local_media_identities lmi
+    JOIN metadata_match_candidates mmc ON mmc.identity_id = lmi.id
+    WHERE lmi.library_id = sqlc.arg(library_id)
+      AND (
+        lmi.review_status IN ('needs_review', 'review', 'suspicious')
+        OR EXISTS (
+          SELECT 1 FROM scan_findings sf
+          WHERE sf.identity_id = lmi.id AND sf.resolved_at IS NULL
+        )
+    )
+    GROUP BY lmi.id
+    HAVING count(*) = 1
+       AND min(mmc.score) >= sqlc.arg(min_confidence)
+) eligible;
+
+-- Paged identity rows. The inner derived table filters and limits on cheap
+-- columns only (bucket needs just an EXISTS probe); the selected-candidate /
+-- candidate-count / finding laterals then run for the page, not the library.
+-- Bucket CASE mirrors scannerIdentityBucket (see CountScannerIdentityBuckets).
+-- name: ListScannerIdentitiesPageByLibrary :many
 SELECT
-    lmi.*,
+    page.*,
     COALESCE(selected.provider_id, '') AS selected_provider_id,
     COALESCE(selected.title, '') AS selected_title,
     COALESCE(selected.year, '') AS selected_year,
     selected.score AS selected_score,
     COALESCE(candidate_counts.candidate_count, 0)::bigint AS candidate_count,
-    COALESCE(open_finding_counts.open_finding_count, 0)::bigint AS open_finding_count
-FROM local_media_identities lmi
+    COALESCE(finding_counts.open_finding_count, 0)::bigint AS open_finding_count,
+    COALESCE(main_finding.code, '') AS main_finding_code,
+    COALESCE(main_finding.severity, '') AS main_finding_severity,
+    COALESCE(main_finding.message, '') AS main_finding_message
+FROM (
+    SELECT * FROM (
+        SELECT lmi.*,
+            CASE
+                WHEN lmi.review_status = 'rejected' THEN 'rejected'
+                WHEN lmi.review_status = 'ignored' THEN 'ignored'
+                WHEN lmi.review_status IN ('needs_review', 'review', 'suspicious') THEN 'needs_review'
+                WHEN EXISTS (
+                    SELECT 1 FROM scan_findings sf
+                    WHERE sf.identity_id = lmi.id AND sf.resolved_at IS NULL
+                ) THEN 'needs_review'
+                WHEN lmi.media_item_id IS NOT NULL THEN 'matched'
+                ELSE 'unmatched'
+            END AS bucket
+        FROM local_media_identities lmi
+        WHERE lmi.library_id = sqlc.arg(library_id)
+    ) all_rows
+    WHERE (sqlc.arg(bucket)::text = '' OR all_rows.bucket = sqlc.arg(bucket)::text)
+      AND (
+        sqlc.arg(search)::text = ''
+        OR all_rows.title ILIKE '%' || sqlc.arg(search)::text || '%'
+        OR all_rows.identity_key ILIKE '%' || sqlc.arg(search)::text || '%'
+      )
+    ORDER BY
+        CASE all_rows.review_status WHEN 'rejected' THEN 0 WHEN 'review' THEN 1 WHEN 'suspicious' THEN 2 ELSE 3 END,
+        all_rows.title,
+        all_rows.year,
+        all_rows.id
+    LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset)
+) page
 LEFT JOIN LATERAL (
     SELECT provider_id, title, year, score
     FROM metadata_match_candidates mmc
-    WHERE mmc.identity_id = lmi.id
+    WHERE mmc.identity_id = page.id
       AND mmc.status = 'selected'
     ORDER BY mmc.rank, mmc.score DESC NULLS LAST, mmc.id
     LIMIT 1
@@ -482,20 +560,60 @@ LEFT JOIN LATERAL (
 LEFT JOIN LATERAL (
     SELECT count(*) AS candidate_count
     FROM metadata_match_candidates mmc
-    WHERE mmc.identity_id = lmi.id
+    WHERE mmc.identity_id = page.id
 ) candidate_counts ON true
 LEFT JOIN LATERAL (
     SELECT count(*) AS open_finding_count
     FROM scan_findings sf
-    WHERE sf.identity_id = lmi.id
+    WHERE sf.identity_id = page.id
       AND sf.resolved_at IS NULL
-) open_finding_counts ON true
-WHERE lmi.library_id = $1
+) finding_counts ON true
+LEFT JOIN LATERAL (
+    SELECT sf.code, sf.severity, sf.message
+    FROM scan_findings sf
+    WHERE sf.identity_id = page.id
+      AND sf.resolved_at IS NULL
+    ORDER BY CASE sf.severity WHEN 'error' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END, sf.created_at DESC, sf.id DESC
+    LIMIT 1
+) main_finding ON true
 ORDER BY
-    CASE lmi.review_status WHEN 'rejected' THEN 0 WHEN 'review' THEN 1 WHEN 'suspicious' THEN 2 ELSE 3 END,
-    lmi.title,
-    lmi.year,
-    lmi.id;
+    CASE page.review_status WHEN 'rejected' THEN 0 WHEN 'review' THEN 1 WHEN 'suspicious' THEN 2 ELSE 3 END,
+    page.title,
+    page.year,
+    page.id;
+
+-- Open findings for one identity's expanded row. The data blob is deliberately
+-- excluded — evidence payloads ran to hundreds of MB per library when shipped
+-- in bulk; nothing in the review UI renders them.
+-- name: ListScannerFindingsByIdentity :many
+SELECT sf.id, sf.scan_run_id, sf.library_id, sf.media_type, sf.identity_id,
+       sf.media_item_id, sf.library_file_id, sf.severity, sf.code, sf.rel_path,
+       sf.message, sf.created_at
+FROM scan_findings sf
+JOIN local_media_identities lmi ON lmi.id = sf.identity_id
+WHERE sf.identity_id = sqlc.arg(identity_id)
+  AND lmi.library_id = sqlc.arg(library_id)
+  AND sf.resolved_at IS NULL
+ORDER BY
+    CASE sf.severity WHEN 'error' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END,
+    sf.created_at DESC,
+    sf.id DESC
+LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
+
+-- Paged orphan findings ("scan issues" panel) — same no-data-blob rule.
+-- name: ListScannerIssuesPageByLibrary :many
+SELECT sf.id, sf.scan_run_id, sf.library_id, sf.media_type, sf.severity,
+       sf.code, sf.rel_path, sf.message, sf.created_at
+FROM scan_findings sf
+WHERE sf.library_id = sqlc.arg(library_id)
+  AND sf.resolved_at IS NULL
+  AND sf.identity_id IS NULL
+  AND (sqlc.arg(code)::text = '' OR sf.code = sqlc.arg(code)::text)
+ORDER BY
+    CASE sf.severity WHEN 'error' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END,
+    sf.created_at DESC,
+    sf.id DESC
+LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- name: GetScannerIdentityForView :one
 SELECT
@@ -505,7 +623,10 @@ SELECT
     COALESCE(selected.year, '') AS selected_year,
     selected.score AS selected_score,
     COALESCE(candidate_counts.candidate_count, 0)::bigint AS candidate_count,
-    COALESCE(open_finding_counts.open_finding_count, 0)::bigint AS open_finding_count
+    COALESCE(open_finding_counts.open_finding_count, 0)::bigint AS open_finding_count,
+    COALESCE(main_finding.code, '') AS main_finding_code,
+    COALESCE(main_finding.severity, '') AS main_finding_severity,
+    COALESCE(main_finding.message, '') AS main_finding_message
 FROM local_media_identities lmi
 LEFT JOIN LATERAL (
     SELECT provider_id, title, year, score
@@ -526,10 +647,18 @@ LEFT JOIN LATERAL (
     WHERE sf.identity_id = lmi.id
       AND sf.resolved_at IS NULL
 ) open_finding_counts ON true
+LEFT JOIN LATERAL (
+    SELECT sf.code, sf.severity, sf.message
+    FROM scan_findings sf
+    WHERE sf.identity_id = lmi.id
+      AND sf.resolved_at IS NULL
+    ORDER BY CASE sf.severity WHEN 'error' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END, sf.created_at DESC, sf.id DESC
+    LIMIT 1
+) main_finding ON true
 WHERE lmi.library_id = sqlc.arg(library_id)
   AND lmi.id = sqlc.arg(identity_id);
 
--- name: ListScannerCandidatesByLibrary :many
+-- name: ListScannerCandidatesByIdentity :many
 SELECT
     mmc.*,
     lmi.identity_key,
@@ -537,8 +666,21 @@ SELECT
     lmi.year AS identity_year
 FROM metadata_match_candidates mmc
 JOIN local_media_identities lmi ON lmi.id = mmc.identity_id
-WHERE lmi.library_id = $1
-ORDER BY lmi.title, lmi.year, mmc.rank, mmc.id;
+WHERE mmc.identity_id = sqlc.arg(identity_id)
+  AND lmi.library_id = sqlc.arg(library_id)
+ORDER BY mmc.rank, mmc.id;
+
+-- name: GetScannerCandidateForDetail :one
+SELECT
+    mmc.*,
+    lmi.identity_key,
+    lmi.title AS identity_title,
+    lmi.year AS identity_year
+FROM metadata_match_candidates mmc
+JOIN local_media_identities lmi ON lmi.id = mmc.identity_id
+WHERE mmc.id = sqlc.arg(candidate_id)
+  AND mmc.identity_id = sqlc.arg(identity_id)
+  AND lmi.library_id = sqlc.arg(library_id);
 
 -- name: ListScannerSearchDecisionsByLibrary :many
 SELECT

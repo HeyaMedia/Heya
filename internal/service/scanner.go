@@ -20,13 +20,25 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type ScannerView struct {
+// ScannerOverview is the cheap, always-loadable slice of scanner state: run
+// status, aggregate tallies, and the (small) terminal pipeline failures. The
+// heavy collections behind those tallies — identities, findings, candidates —
+// are served by their own paginated endpoints; a music library with 100k+
+// open findings must never travel as one response again.
+type ScannerOverview struct {
 	LatestRun        *ScannerRunView              `json:"latest_run,omitempty"`
 	BucketCounts     ScannerBucketCounts          `json:"bucket_counts"`
 	PipelineFailures []ScannerPipelineFailureView `json:"pipeline_failures"`
-	OpenFindings     []ScannerFindingView         `json:"open_findings"`
-	Identities       []ScannerIdentityView        `json:"identities"`
-	Candidates       []ScannerCandidateView       `json:"candidates,omitempty"`
+	IssueCounts      []ScannerIssueCount          `json:"issue_counts"`
+	IssueTotal       int64                        `json:"issue_total"`
+}
+
+// ScannerIssueCount tallies orphan findings (no identity) by code so the UI
+// can render filter chips without loading rows.
+type ScannerIssueCount struct {
+	Code     string `json:"code"`
+	Severity string `json:"severity"`
+	Count    int64  `json:"count"`
 }
 
 type ScannerBucketCounts struct {
@@ -85,26 +97,29 @@ type ScannerFindingView struct {
 }
 
 type ScannerIdentityView struct {
-	ID                 int64      `json:"id"`
-	LibraryID          int64      `json:"library_id"`
-	MediaType          string     `json:"media_type"`
-	IdentityKey        string     `json:"identity_key"`
-	Title              string     `json:"title"`
-	Year               string     `json:"year,omitempty"`
-	Confidence         float32    `json:"confidence"`
-	Source             string     `json:"source"`
-	ReviewStatus       string     `json:"review_status"`
-	Bucket             string     `json:"bucket"`
-	MetadataProviderID string     `json:"metadata_provider_id,omitempty"`
-	MediaItemID        *int64     `json:"media_item_id,omitempty"`
-	SelectedProviderID string     `json:"selected_provider_id,omitempty"`
-	SelectedTitle      string     `json:"selected_title,omitempty"`
-	SelectedYear       string     `json:"selected_year,omitempty"`
-	SelectedScore      *float64   `json:"selected_score,omitempty"`
-	CandidateCount     int64      `json:"candidate_count"`
-	OpenFindingCount   int64      `json:"open_finding_count"`
-	LastSeenScanRunID  *int64     `json:"last_seen_scan_run_id,omitempty"`
-	UpdatedAt          *time.Time `json:"updated_at,omitempty"`
+	ID                  int64      `json:"id"`
+	LibraryID           int64      `json:"library_id"`
+	MediaType           string     `json:"media_type"`
+	IdentityKey         string     `json:"identity_key"`
+	Title               string     `json:"title"`
+	Year                string     `json:"year,omitempty"`
+	Confidence          float32    `json:"confidence"`
+	Source              string     `json:"source"`
+	ReviewStatus        string     `json:"review_status"`
+	Bucket              string     `json:"bucket"`
+	MetadataProviderID  string     `json:"metadata_provider_id,omitempty"`
+	MediaItemID         *int64     `json:"media_item_id,omitempty"`
+	SelectedProviderID  string     `json:"selected_provider_id,omitempty"`
+	SelectedTitle       string     `json:"selected_title,omitempty"`
+	SelectedYear        string     `json:"selected_year,omitempty"`
+	SelectedScore       *float64   `json:"selected_score,omitempty"`
+	CandidateCount      int64      `json:"candidate_count"`
+	OpenFindingCount    int64      `json:"open_finding_count"`
+	MainFindingCode     string     `json:"main_finding_code,omitempty"`
+	MainFindingSeverity string     `json:"main_finding_severity,omitempty"`
+	MainFindingMessage  string     `json:"main_finding_message,omitempty"`
+	LastSeenScanRunID   *int64     `json:"last_seen_scan_run_id,omitempty"`
+	UpdatedAt           *time.Time `json:"updated_at,omitempty"`
 }
 
 type ScannerCandidateView struct {
@@ -163,68 +178,182 @@ type ScannerBulkApproveResult struct {
 	Approved int `json:"approved"`
 }
 
-func (a *App) GetLibraryScannerView(ctx context.Context, libraryID int64, includeCandidates bool) (ScannerView, error) {
+type ScannerBulkEligibleResult struct {
+	Eligible int64 `json:"eligible"`
+}
+
+func (a *App) GetLibraryScannerOverview(ctx context.Context, libraryID int64) (ScannerOverview, error) {
 	q := sqlc.New(a.db)
-	view := ScannerView{
+	overview := ScannerOverview{
 		PipelineFailures: []ScannerPipelineFailureView{},
-		OpenFindings:     []ScannerFindingView{},
-		Identities:       []ScannerIdentityView{},
+		IssueCounts:      []ScannerIssueCount{},
 	}
 
 	latest, err := q.GetLatestScannerRunByLibrary(ctx, libraryID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return view, err
+		return overview, err
 	}
 	if err == nil {
 		latestView := scannerRunView(latest)
-		view.LatestRun = &latestView
+		overview.LatestRun = &latestView
 	}
 
 	failures, err := q.ListFailedScannerEntitiesByLibrary(ctx, libraryID)
 	if err != nil {
-		return view, err
+		return overview, err
 	}
-	view.PipelineFailures = make([]ScannerPipelineFailureView, 0, len(failures))
+	overview.PipelineFailures = make([]ScannerPipelineFailureView, 0, len(failures))
 	for _, failure := range failures {
-		view.PipelineFailures = append(view.PipelineFailures, scannerPipelineFailureView(failure))
+		overview.PipelineFailures = append(overview.PipelineFailures, scannerPipelineFailureView(failure))
 	}
-	if view.LatestRun != nil && len(view.PipelineFailures) > 0 {
-		view.LatestRun.PipelineFailureCount = len(view.PipelineFailures)
-		view.LatestRun.PipelineErrorMessage = view.PipelineFailures[0].ErrorMessage
+	if overview.LatestRun != nil && len(overview.PipelineFailures) > 0 {
+		overview.LatestRun.PipelineFailureCount = len(overview.PipelineFailures)
+		overview.LatestRun.PipelineErrorMessage = overview.PipelineFailures[0].ErrorMessage
 	}
 
-	findings, err := q.ListOpenScannerFindingsByLibrary(ctx, libraryID)
+	buckets, err := q.CountScannerIdentityBucketsByLibrary(ctx, libraryID)
 	if err != nil {
-		return view, err
+		return overview, err
 	}
-	view.OpenFindings = make([]ScannerFindingView, 0, len(findings))
-	for _, finding := range findings {
-		view.OpenFindings = append(view.OpenFindings, scannerFindingView(finding))
+	overview.BucketCounts = ScannerBucketCounts{
+		Total:       int(buckets.Total),
+		Matched:     int(buckets.Matched),
+		NeedsReview: int(buckets.NeedsReview),
+		Rejected:    int(buckets.Rejected),
+		Unmatched:   int(buckets.Unmatched),
+		Ignored:     int(buckets.Ignored),
 	}
 
-	identities, err := q.ListScannerIdentitiesByLibrary(ctx, libraryID)
+	issues, err := q.CountScannerIssuesByLibrary(ctx, libraryID)
 	if err != nil {
-		return view, err
+		return overview, err
 	}
-	view.Identities = make([]ScannerIdentityView, 0, len(identities))
-	for _, identity := range identities {
-		identityView := scannerIdentityView(identity)
-		view.Identities = append(view.Identities, identityView)
-		addScannerBucketCount(&view.BucketCounts, identityView.Bucket)
-	}
-
-	if includeCandidates {
-		candidates, err := q.ListScannerCandidatesByLibrary(ctx, libraryID)
-		if err != nil {
-			return view, err
-		}
-		view.Candidates = make([]ScannerCandidateView, 0, len(candidates))
-		for _, candidate := range candidates {
-			view.Candidates = append(view.Candidates, scannerCandidateView(candidate))
-		}
+	for _, issue := range issues {
+		overview.IssueCounts = append(overview.IssueCounts, ScannerIssueCount{
+			Code:     issue.Code,
+			Severity: issue.Severity,
+			Count:    issue.IssueCount,
+		})
+		overview.IssueTotal += issue.IssueCount
 	}
 
-	return view, nil
+	return overview, nil
+}
+
+// scannerBuckets are the valid values for the identities-page bucket filter —
+// the computed CASE values of ListScannerIdentitiesPageByLibrary.
+var scannerBuckets = map[string]bool{
+	"matched": true, "needs_review": true, "unmatched": true,
+	"rejected": true, "ignored": true,
+}
+
+func (a *App) ListScannerIdentitiesPage(ctx context.Context, libraryID int64, bucket, search string, limit, offset int32) ([]ScannerIdentityView, error) {
+	if bucket != "" && !scannerBuckets[bucket] {
+		return []ScannerIdentityView{}, nil
+	}
+	q := sqlc.New(a.db)
+	rows, err := q.ListScannerIdentitiesPageByLibrary(ctx, sqlc.ListScannerIdentitiesPageByLibraryParams{
+		LibraryID:  libraryID,
+		Bucket:     bucket,
+		Search:     strings.TrimSpace(search),
+		PageLimit:  limit,
+		PageOffset: offset,
+	})
+	if err != nil {
+		return nil, err
+	}
+	views := make([]ScannerIdentityView, 0, len(rows))
+	for _, row := range rows {
+		views = append(views, scannerIdentityView(row))
+	}
+	return views, nil
+}
+
+func (a *App) GetScannerIdentity(ctx context.Context, libraryID, identityID int64) (ScannerIdentityView, error) {
+	return getScannerIdentityView(ctx, sqlc.New(a.db), libraryID, identityID)
+}
+
+func (a *App) ListScannerIdentityFindings(ctx context.Context, libraryID, identityID int64, limit, offset int32) ([]ScannerFindingView, error) {
+	q := sqlc.New(a.db)
+	rows, err := q.ListScannerFindingsByIdentity(ctx, sqlc.ListScannerFindingsByIdentityParams{
+		LibraryID:  libraryID,
+		IdentityID: pgtype.Int8{Int64: identityID, Valid: true},
+		PageLimit:  limit,
+		PageOffset: offset,
+	})
+	if err != nil {
+		return nil, err
+	}
+	views := make([]ScannerFindingView, 0, len(rows))
+	for _, row := range rows {
+		views = append(views, ScannerFindingView{
+			ID:            row.ID,
+			ScanRunID:     int8Ptr(row.ScanRunID),
+			LibraryID:     row.LibraryID,
+			MediaType:     string(row.MediaType),
+			IdentityID:    int8Ptr(row.IdentityID),
+			MediaItemID:   int8Ptr(row.MediaItemID),
+			LibraryFileID: int8Ptr(row.LibraryFileID),
+			Severity:      row.Severity,
+			Code:          row.Code,
+			RelPath:       secrettext.Redact(row.RelPath),
+			Message:       secrettext.Redact(row.Message),
+			CreatedAt:     timePtr(row.CreatedAt),
+		})
+	}
+	return views, nil
+}
+
+func (a *App) ListScannerIssuesPage(ctx context.Context, libraryID int64, code string, limit, offset int32) ([]ScannerFindingView, error) {
+	q := sqlc.New(a.db)
+	rows, err := q.ListScannerIssuesPageByLibrary(ctx, sqlc.ListScannerIssuesPageByLibraryParams{
+		LibraryID:  libraryID,
+		Code:       strings.TrimSpace(code),
+		PageLimit:  limit,
+		PageOffset: offset,
+	})
+	if err != nil {
+		return nil, err
+	}
+	views := make([]ScannerFindingView, 0, len(rows))
+	for _, row := range rows {
+		views = append(views, ScannerFindingView{
+			ID:        row.ID,
+			ScanRunID: int8Ptr(row.ScanRunID),
+			LibraryID: row.LibraryID,
+			MediaType: string(row.MediaType),
+			Severity:  row.Severity,
+			Code:      row.Code,
+			RelPath:   secrettext.Redact(row.RelPath),
+			Message:   secrettext.Redact(row.Message),
+			CreatedAt: timePtr(row.CreatedAt),
+		})
+	}
+	return views, nil
+}
+
+func (a *App) ListScannerIdentityCandidates(ctx context.Context, libraryID, identityID int64) ([]ScannerCandidateView, error) {
+	q := sqlc.New(a.db)
+	rows, err := q.ListScannerCandidatesByIdentity(ctx, sqlc.ListScannerCandidatesByIdentityParams{
+		LibraryID:  libraryID,
+		IdentityID: identityID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	views := make([]ScannerCandidateView, 0, len(rows))
+	for _, row := range rows {
+		views = append(views, scannerCandidateView(row))
+	}
+	return views, nil
+}
+
+func (a *App) CountScannerBulkApproveEligible(ctx context.Context, libraryID int64, minConfidence float64) (int64, error) {
+	q := sqlc.New(a.db)
+	return q.CountScannerBulkApproveEligible(ctx, sqlc.CountScannerBulkApproveEligibleParams{
+		LibraryID:     libraryID,
+		MinConfidence: scannerPgNumericFromFloat64(minConfidence),
+	})
 }
 
 var (
@@ -238,19 +367,16 @@ var (
 
 func (a *App) GetScannerCandidateDetail(ctx context.Context, libraryID, identityID, candidateID int64) (ScannerCandidateDetailView, error) {
 	q := sqlc.New(a.db)
-	candidates, err := q.ListScannerCandidatesByLibrary(ctx, libraryID)
+	candidate, err := q.GetScannerCandidateForDetail(ctx, sqlc.GetScannerCandidateForDetailParams{
+		LibraryID:   libraryID,
+		IdentityID:  identityID,
+		CandidateID: candidateID,
+	})
 	if err != nil {
-		return ScannerCandidateDetailView{}, err
-	}
-	var candidate *sqlc.ListScannerCandidatesByLibraryRow
-	for i := range candidates {
-		if candidates[i].ID == candidateID && candidates[i].IdentityID == identityID {
-			candidate = &candidates[i]
-			break
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ScannerCandidateDetailView{}, ErrScannerReviewTargetNotFound
 		}
-	}
-	if candidate == nil {
-		return ScannerCandidateDetailView{}, ErrScannerReviewTargetNotFound
+		return ScannerCandidateDetailView{}, err
 	}
 	if candidate.ProviderID == "" {
 		return ScannerCandidateDetailView{}, fmt.Errorf("scanner candidate has no provider id")
@@ -259,7 +385,7 @@ func (a *App) GetScannerCandidateDetail(ctx context.Context, libraryID, identity
 	if err != nil {
 		return ScannerCandidateDetailView{}, err
 	}
-	return scannerCandidateDetailView(*candidate, detail), nil
+	return scannerCandidateDetailView(candidate, detail), nil
 }
 
 func (a *App) ApproveScannerCandidate(ctx context.Context, libraryID, identityID, candidateID int64) (ScannerIdentityView, error) {
@@ -303,7 +429,7 @@ func (a *App) BulkApproveSingleScannerCandidates(ctx context.Context, libraryID 
 	return ScannerBulkApproveResult{Approved: len(ids)}, nil
 }
 
-func scannerCandidateDetailView(candidate sqlc.ListScannerCandidatesByLibraryRow, detail *metadata.MediaDetail) ScannerCandidateDetailView {
+func scannerCandidateDetailView(candidate sqlc.GetScannerCandidateForDetailRow, detail *metadata.MediaDetail) ScannerCandidateDetailView {
 	out := ScannerCandidateDetailView{
 		CandidateID:  candidate.ID,
 		ProviderID:   candidate.ProviderID,
@@ -707,77 +833,60 @@ func scannerPipelineFailureView(row sqlc.ScannerEntity) ScannerPipelineFailureVi
 	}
 }
 
-func scannerFindingView(row sqlc.ListOpenScannerFindingsByLibraryRow) ScannerFindingView {
-	return ScannerFindingView{
-		ID:            row.ID,
-		ScanRunID:     int8Ptr(row.ScanRunID),
-		LibraryID:     row.LibraryID,
-		MediaType:     string(row.MediaType),
-		IdentityID:    int8Ptr(row.IdentityID),
-		MediaItemID:   int8Ptr(row.MediaItemID),
-		LibraryFileID: int8Ptr(row.LibraryFileID),
-		Severity:      row.Severity,
-		Code:          row.Code,
-		RelPath:       secrettext.Redact(row.RelPath),
-		Message:       secrettext.Redact(row.Message),
-		Data:          secrettext.RedactMap(jsonMap(row.Data)),
-		CreatedAt:     timePtr(row.CreatedAt),
-		IdentityKey:   textValue(row.IdentityKey),
-		IdentityTitle: textValue(row.IdentityTitle),
-		IdentityYear:  textValue(row.IdentityYear),
-		MediaTitle:    textValue(row.MediaTitle),
-	}
-}
-
-func scannerIdentityView(row sqlc.ListScannerIdentitiesByLibraryRow) ScannerIdentityView {
-	bucket := scannerIdentityBucket(row.ReviewStatus, row.MediaItemID, row.SelectedProviderID, row.OpenFindingCount)
+func scannerIdentityView(row sqlc.ListScannerIdentitiesPageByLibraryRow) ScannerIdentityView {
 	return ScannerIdentityView{
-		ID:                 row.ID,
-		LibraryID:          row.LibraryID,
-		MediaType:          string(row.MediaType),
-		IdentityKey:        row.IdentityKey,
-		Title:              row.Title,
-		Year:               row.Year,
-		Confidence:         row.Confidence,
-		Source:             row.Source,
-		ReviewStatus:       row.ReviewStatus,
-		Bucket:             bucket,
-		MetadataProviderID: row.MetadataProviderID,
-		MediaItemID:        int8Ptr(row.MediaItemID),
-		SelectedProviderID: row.SelectedProviderID,
-		SelectedTitle:      row.SelectedTitle,
-		SelectedYear:       row.SelectedYear,
-		SelectedScore:      numericPtr(row.SelectedScore),
-		CandidateCount:     row.CandidateCount,
-		OpenFindingCount:   row.OpenFindingCount,
-		LastSeenScanRunID:  int8Ptr(row.LastSeenScanRunID),
-		UpdatedAt:          timePtr(row.UpdatedAt),
+		ID:                  row.ID,
+		LibraryID:           row.LibraryID,
+		MediaType:           string(row.MediaType),
+		IdentityKey:         row.IdentityKey,
+		Title:               row.Title,
+		Year:                row.Year,
+		Confidence:          row.Confidence,
+		Source:              row.Source,
+		ReviewStatus:        row.ReviewStatus,
+		Bucket:              row.Bucket,
+		MetadataProviderID:  row.MetadataProviderID,
+		MediaItemID:         int8Ptr(row.MediaItemID),
+		SelectedProviderID:  row.SelectedProviderID,
+		SelectedTitle:       row.SelectedTitle,
+		SelectedYear:        row.SelectedYear,
+		SelectedScore:       numericPtr(row.SelectedScore),
+		CandidateCount:      row.CandidateCount,
+		OpenFindingCount:    row.OpenFindingCount,
+		MainFindingCode:     row.MainFindingCode,
+		MainFindingSeverity: row.MainFindingSeverity,
+		MainFindingMessage:  secrettext.Redact(row.MainFindingMessage),
+		LastSeenScanRunID:   int8Ptr(row.LastSeenScanRunID),
+		UpdatedAt:           timePtr(row.UpdatedAt),
 	}
 }
 
 func scannerIdentityViewFromGet(row sqlc.GetScannerIdentityForViewRow) ScannerIdentityView {
 	bucket := scannerIdentityBucket(row.ReviewStatus, row.MediaItemID, row.SelectedProviderID, row.OpenFindingCount)
 	return ScannerIdentityView{
-		ID:                 row.ID,
-		LibraryID:          row.LibraryID,
-		MediaType:          string(row.MediaType),
-		IdentityKey:        row.IdentityKey,
-		Title:              row.Title,
-		Year:               row.Year,
-		Confidence:         row.Confidence,
-		Source:             row.Source,
-		ReviewStatus:       row.ReviewStatus,
-		Bucket:             bucket,
-		MetadataProviderID: row.MetadataProviderID,
-		MediaItemID:        int8Ptr(row.MediaItemID),
-		SelectedProviderID: row.SelectedProviderID,
-		SelectedTitle:      row.SelectedTitle,
-		SelectedYear:       row.SelectedYear,
-		SelectedScore:      numericPtr(row.SelectedScore),
-		CandidateCount:     row.CandidateCount,
-		OpenFindingCount:   row.OpenFindingCount,
-		LastSeenScanRunID:  int8Ptr(row.LastSeenScanRunID),
-		UpdatedAt:          timePtr(row.UpdatedAt),
+		ID:                  row.ID,
+		LibraryID:           row.LibraryID,
+		MediaType:           string(row.MediaType),
+		IdentityKey:         row.IdentityKey,
+		Title:               row.Title,
+		Year:                row.Year,
+		Confidence:          row.Confidence,
+		Source:              row.Source,
+		ReviewStatus:        row.ReviewStatus,
+		Bucket:              bucket,
+		MetadataProviderID:  row.MetadataProviderID,
+		MediaItemID:         int8Ptr(row.MediaItemID),
+		SelectedProviderID:  row.SelectedProviderID,
+		SelectedTitle:       row.SelectedTitle,
+		SelectedYear:        row.SelectedYear,
+		SelectedScore:       numericPtr(row.SelectedScore),
+		CandidateCount:      row.CandidateCount,
+		OpenFindingCount:    row.OpenFindingCount,
+		MainFindingCode:     row.MainFindingCode,
+		MainFindingSeverity: row.MainFindingSeverity,
+		MainFindingMessage:  secrettext.Redact(row.MainFindingMessage),
+		LastSeenScanRunID:   int8Ptr(row.LastSeenScanRunID),
+		UpdatedAt:           timePtr(row.UpdatedAt),
 	}
 }
 
@@ -992,22 +1101,6 @@ func scannerIdentityBucket(reviewStatus string, mediaItemID pgtype.Int8, selecte
 	return "unmatched"
 }
 
-func addScannerBucketCount(counts *ScannerBucketCounts, bucket string) {
-	counts.Total++
-	switch bucket {
-	case "matched":
-		counts.Matched++
-	case "needs_review":
-		counts.NeedsReview++
-	case "rejected":
-		counts.Rejected++
-	case "ignored":
-		counts.Ignored++
-	default:
-		counts.Unmatched++
-	}
-}
-
 func scannerReviewReason(reason, fallback string) string {
 	if reason == "" {
 		return fallback
@@ -1015,7 +1108,7 @@ func scannerReviewReason(reason, fallback string) string {
 	return reason
 }
 
-func scannerCandidateView(row sqlc.ListScannerCandidatesByLibraryRow) ScannerCandidateView {
+func scannerCandidateView(row sqlc.ListScannerCandidatesByIdentityRow) ScannerCandidateView {
 	raw := jsonMap(row.RawData)
 	return ScannerCandidateView{
 		ID:              row.ID,
