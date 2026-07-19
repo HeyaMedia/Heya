@@ -181,19 +181,20 @@ func (a *App) artistGenreProfile(ctx context.Context, artistIDs []int64) (map[st
 
 // radioSeedGenreProfile builds the union genre profile for a radio build's
 // seed(s):
-//   - artist seeds (kind=="artist", by id) pull the whole discography's
-//     genre frequency (artistGenreProfile) — an artist's range shouldn't
-//     collapse into whatever one representative seed track's album carries.
-//   - every resolved seed track (album/track/text seeds, and artist seeds by
-//     slug where the artist id wasn't directly available) contributes its
-//     own track+album genre signal via candidateGenreProfiles — the same
-//     function candidates are scored against, so seed and candidate weights
-//     are on one consistent scale.
+//   - artistIDs are the RESOLVED artists-table ids of the seed tracks
+//     (BuildRadio's artistIDsForTracks output — never raw request ids, which
+//     historically carried media-item ids and profiled the wrong artists).
+//     They pull the whole discography's genre frequency (artistGenreProfile)
+//     — an artist's range shouldn't collapse into whatever one
+//     representative seed track's album carries.
+//   - every resolved seed track contributes its own track+album genre signal
+//     via candidateGenreProfiles — the same function candidates are scored
+//     against, so seed and candidate weights are on one consistent scale.
 //
 // Each source is normalized on its own before merging so an artist with 40
 // albums doesn't drown out a single resolved seed track purely by raw count;
 // the merged total is renormalized once at the end.
-func (a *App) radioSeedGenreProfile(ctx context.Context, seeds []RadioSeed, seedIDs []int64) (map[string]float64, error) {
+func (a *App) radioSeedGenreProfile(ctx context.Context, artistIDs []int64, seedIDs []int64) (map[string]float64, error) {
 	raw := map[string]float64{}
 	merge := func(src map[string]float64) {
 		for genre, w := range src {
@@ -201,12 +202,6 @@ func (a *App) radioSeedGenreProfile(ctx context.Context, seeds []RadioSeed, seed
 		}
 	}
 
-	var artistIDs []int64
-	for _, s := range seeds {
-		if s.Kind == "artist" && s.ArtistID > 0 {
-			artistIDs = append(artistIDs, s.ArtistID)
-		}
-	}
 	if len(artistIDs) > 0 {
 		profile, err := a.artistGenreProfile(ctx, artistIDs)
 		if err != nil {

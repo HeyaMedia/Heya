@@ -283,6 +283,10 @@ interface Seed {
   kind: SeedKind
   /** Resolved entity ID — unused for kind=text */
   id?: number
+  /** Artist slug — the id from the search "music" bucket is a MEDIA ITEM id,
+   *  not an artists-table id, so artist seeds must address the backend by
+   *  slug (resolveRadioSeed's unambiguous artist path). */
+  slug?: string
   /** Free-form text — used only for kind=text */
   text?: string
   /** Human-readable label rendered in the chip */
@@ -321,7 +325,7 @@ const genrePullLabel = computed(() => {
 })
 
 // --- Autocomplete (when addKind is track/artist/album) ---
-interface AcRow { id: number; title: string; sub: string; cover: string | null }
+interface AcRow { id: number; title: string; sub: string; cover: string | null; slug?: string }
 
 // Maps a seed kind to the single-bucket /api/search `type` param. 'text'
 // (vibe) never autocompletes against the library.
@@ -332,7 +336,7 @@ function acSearchType(kind: SeedKind): 'music' | 'albums' | 'tracks' | null {
   return null
 }
 
-interface SearchArtistItem { id: number; public_id?: string; title: string }
+interface SearchArtistItem { id: number; public_id?: string; title: string; slug: string }
 interface SearchAlbumItem { id: number; title: string; year: string; artist_name: string; artist_slug: string; slug: string }
 interface SearchTrackItem { id: number; title: string; album_title: string; artist_name: string; artist_slug: string; album_slug: string }
 
@@ -351,7 +355,7 @@ const autocompleteQuery = useQuery(() => ({
     }) as unknown as { items: unknown[]; total: number }
     if (type === 'music') {
       return (r.items as SearchArtistItem[]).slice(0, 8).map((a) => ({
-        id: a.id, title: a.title, sub: '', cover: usePosterUrl(a),
+        id: a.id, title: a.title, sub: '', cover: usePosterUrl(a), slug: a.slug,
       } as AcRow))
     }
     if (type === 'albums') {
@@ -430,7 +434,7 @@ function addAutocompleteSeed(r: AcRow) {
   // De-dupe — same kind + same id should add only once.
   if (seeds.value.some((s) => s.kind === addKind.value && s.id === r.id)) return
   const label = r.sub ? `${r.title} — ${r.sub.split(' · ')[0]}` : r.title
-  seeds.value.push({ kind: addKind.value, id: r.id, label })
+  seeds.value.push({ kind: addKind.value, id: r.id, slug: r.slug, label })
   searchQ.value = ''
   searchInputEl.value?.focus()
 }
@@ -566,7 +570,14 @@ function rerollMix() {
 function seedToPayload(s: Seed) {
   if (s.kind === 'text') return { kind: 'text', text: s.text }
   if (s.kind === 'track') return { kind: 'track', track_id: s.id }
-  if (s.kind === 'artist') return { kind: 'artist', artist_id: s.id }
+  // Artist seeds MUST go by slug: s.id here is the search bucket's media-item
+  // id, and sending it as artist_id historically resolved to a completely
+  // unrelated artists-table row (the "seeded with Crystal Lake, got Tame
+  // Impala" bug). Slug resolution is unambiguous.
+  if (s.kind === 'artist') {
+    if (s.slug) return { kind: 'artist', artist_slug: s.slug }
+    return { kind: 'artist', artist_id: s.id }
+  }
   return { kind: 'album', album_id: s.id }
 }
 

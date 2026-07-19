@@ -143,13 +143,11 @@ func (a *App) BuildRadio(ctx context.Context, userID int64, req RadioRequest) (*
 
 	// Only pay for the extra genre-profile fetches when the caller actually
 	// opted in — genre_affinity == 0 must stay a true no-op, cost included.
+	// The profile derives from the RESOLVED seed artists, never the raw
+	// request ids (whose artist_id semantics proved unreliable).
 	var seedGenreProfile map[string]float64
 	if req.GenreAffinity > 0 {
-		seeds := req.Seeds
-		if len(seeds) == 0 {
-			seeds = []RadioSeed{req.Seed}
-		}
-		seedGenreProfile, err = a.radioSeedGenreProfile(ctx, seeds, seedIDs)
+		seedGenreProfile, err = a.radioSeedGenreProfile(ctx, artistIDs, seedIDs)
 		if err != nil {
 			return nil, fmt.Errorf("seed genre profile: %w", err)
 		}
@@ -429,23 +427,37 @@ func (a *App) resolveRadioSeed(ctx context.Context, seed RadioSeed) (int64, erro
 	case "artist":
 		switch {
 		case seed.ArtistID > 0:
-			var id int64
-			err := a.db.QueryRow(ctx, `SELECT t.id
-				FROM tracks t
-				JOIN albums al ON al.id = t.album_id
-				LEFT JOIN track_facets tf ON tf.track_id = t.id AND tf.track_embedding IS NOT NULL
-				WHERE al.artist_id = $1
-				  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id
-				              WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
-				ORDER BY (tf.track_id IS NOT NULL) DESC, random()
-				LIMIT 1`, seed.ArtistID).Scan(&id)
-			if err != nil {
-				if errors.Is(err, pgx.ErrNoRows) {
-					return 0, ErrNoRadioSeed
+			// artist_id is canonically an artists-table id (track rows, album
+			// menus, player sources all send that). Some callers historically
+			// sent a music MEDIA ITEM id here instead (the search "music"
+			// bucket only carries media-item identity), which silently
+			// resolved to an unrelated artist sharing the number — so when
+			// the artists-table interpretation finds nothing, retry the id as
+			// artists.media_item_id before giving up. The Mix Builder now
+			// seeds by slug, but stored payloads and older clients still
+			// benefit from the fallback.
+			for _, predicate := range []string{
+				`al.artist_id = $1`,
+				`al.artist_id = (SELECT ar2.id FROM artists ar2 WHERE ar2.media_item_id = $1)`,
+			} {
+				var id int64
+				err := a.db.QueryRow(ctx, `SELECT t.id
+					FROM tracks t
+					JOIN albums al ON al.id = t.album_id
+					LEFT JOIN track_facets tf ON tf.track_id = t.id AND tf.track_embedding IS NOT NULL
+					WHERE `+predicate+`
+					  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id
+					              WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+					ORDER BY (tf.track_id IS NOT NULL) DESC, random()
+					LIMIT 1`, seed.ArtistID).Scan(&id)
+				if err == nil {
+					return id, nil
 				}
-				return 0, fmt.Errorf("artist seed: %w", err)
+				if !errors.Is(err, pgx.ErrNoRows) {
+					return 0, fmt.Errorf("artist seed: %w", err)
+				}
 			}
-			return id, nil
+			return 0, ErrNoRadioSeed
 		case seed.ArtistSlug != "":
 			var id int64
 			err := a.db.QueryRow(ctx, `SELECT t.id
