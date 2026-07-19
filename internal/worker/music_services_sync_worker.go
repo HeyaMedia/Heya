@@ -109,6 +109,27 @@ func (w *KickoffMusicServicesSyncWorker) Work(ctx context.Context, job *river.Jo
 // library (bounded batch per run). Fresh matches materialize: listens become
 // play_events (±2min cross-service dedupe) and loves/hates become ratings —
 // never overriding an existing Heya reaction.
+// insertReaction mirrors the listen-import reaction write: created_at is the
+// date the reaction was given on the external service (external_listens
+// carries the real feedback/loved timestamp), never the sync time, and an
+// existing same-value rating gets its created_at healed backward while a
+// different reaction made in Heya stays untouched.
+func (w *KickoffMusicServicesSyncWorker) insertReaction(ctx context.Context, userID, trackID int64, rating int16, at time.Time) {
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	tag, err := w.DB.Exec(ctx, `
+		INSERT INTO user_track_ratings (user_id, track_id, rating, created_at)
+		VALUES ($1, $2, $3, $4) ON CONFLICT (user_id, track_id) DO NOTHING`,
+		userID, trackID, rating, at)
+	if err == nil && tag.RowsAffected() == 0 {
+		_, _ = w.DB.Exec(ctx, `
+			UPDATE user_track_ratings SET created_at = LEAST(created_at, $4)
+			WHERE user_id = $1 AND track_id = $2 AND rating = $3`,
+			userID, trackID, rating, at)
+	}
+}
+
 func (w *KickoffMusicServicesSyncWorker) rematchExternalListens(ctx context.Context) int {
 	const batch = 20000
 	rows, err := w.DB.Query(ctx, `
@@ -167,11 +188,9 @@ func (w *KickoffMusicServicesSyncWorker) rematchExternalListens(ctx context.Cont
 					                    AND $3::timestamptz + interval '120 seconds'
 				)`, r.userID, trackID, r.listen.ListenedAt, listened, r.service)
 		case "love":
-			_, _ = w.DB.Exec(ctx, `INSERT INTO user_track_ratings (user_id, track_id, rating)
-				VALUES ($1, $2, 10) ON CONFLICT (user_id, track_id) DO NOTHING`, r.userID, trackID)
+			w.insertReaction(ctx, r.userID, trackID, 10, r.listen.ListenedAt)
 		case "hate":
-			_, _ = w.DB.Exec(ctx, `INSERT INTO user_track_ratings (user_id, track_id, rating)
-				VALUES ($1, $2, 1) ON CONFLICT (user_id, track_id) DO NOTHING`, r.userID, trackID)
+			w.insertReaction(ctx, r.userID, trackID, 1, r.listen.ListenedAt)
 		}
 		matched++
 	}

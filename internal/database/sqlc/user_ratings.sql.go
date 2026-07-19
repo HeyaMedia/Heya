@@ -61,7 +61,7 @@ const getUserRatedTracksStats = `-- name: GetUserRatedTracksStats :one
 SELECT count(*)                             AS track_count,
        COALESCE(sum(t.duration), 0)::bigint AS total_duration,
        count(DISTINCT al.artist_id)         AS artist_count,
-       max(utr.updated_at)::timestamptz     AS last_rated_at
+       max(utr.created_at)::timestamptz     AS last_rated_at
 FROM user_track_ratings utr
 JOIN tracks t  ON t.id  = utr.track_id
 JOIN albums al ON al.id = t.album_id
@@ -173,7 +173,7 @@ SELECT t.id              AS track_id,
        a.name            AS artist_name,
        mi.slug           AS artist_slug,
        utr.rating        AS rating,
-       utr.updated_at    AS rated_at,
+       utr.created_at    AS rated_at,
        EXISTS (SELECT 1 FROM track_files tf JOIN library_files lf ON lf.id = tf.library_file_id WHERE tf.track_id = t.id AND lf.deleted_at IS NULL) AS available,
        bf.format          AS format,
        bf.bitrate_kbps    AS bitrate_kbps,
