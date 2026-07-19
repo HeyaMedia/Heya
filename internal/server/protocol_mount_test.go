@@ -6,13 +6,13 @@ import (
 	"testing"
 )
 
-func TestProtocolMountLandingRedirects(t *testing.T) {
+func TestProtocolMountLandings(t *testing.T) {
 	tests := []struct {
 		prefix  string
 		landing string
 	}{
-		{prefix: "/jellyfin", landing: "/jellyfin/System/Info/Public"},
-		{prefix: "/subsonic", landing: "/subsonic/rest/ping.view"},
+		{prefix: "/jellyfin", landing: "/System/Info/Public"},
+		{prefix: "/subsonic", landing: "/rest/ping.view"},
 	}
 
 	for _, tt := range tests {
@@ -26,11 +26,11 @@ func TestProtocolMountLandingRedirects(t *testing.T) {
 			for _, path := range []string{tt.prefix, tt.prefix + "/"} {
 				recorder := httptest.NewRecorder()
 				handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
-				if recorder.Code != http.StatusTemporaryRedirect {
-					t.Fatalf("GET %s status = %d, want %d", path, recorder.Code, http.StatusTemporaryRedirect)
+				if recorder.Code != http.StatusNoContent {
+					t.Fatalf("GET %s status = %d, want %d", path, recorder.Code, http.StatusNoContent)
 				}
-				if got := recorder.Header().Get("Location"); got != tt.landing {
-					t.Fatalf("GET %s Location = %q, want %q", path, got, tt.landing)
+				if downstreamPath != tt.landing {
+					t.Fatalf("GET %s downstream path = %q, want %q", path, downstreamPath, tt.landing)
 				}
 			}
 

@@ -89,7 +89,14 @@ export default defineNuxtConfig({
         { url: "/index.html", revision: Date.now().toString(36) },
       ],
       navigateFallback: "/index.html",
-      navigateFallbackDenylist: [/^\/api/],
+      // Compatibility APIs are separate protocol surfaces, not SPA routes.
+      // Let their network responses through so an installed Heya PWA cannot
+      // turn Jellyfin/Subsonic discovery URLs into the Nuxt 404 page.
+      navigateFallbackDenylist: [
+        /^\/api/,
+        /^\/jellyfin(?:\/|$)/,
+        /^\/subsonic(?:\/|$)/,
+      ],
       // The ONLY `/api/*` requests the SW may intercept: media images. Their
       // URLs are stable but the CONTENT is mutable — album covers especially
       // (re-identify/edit swaps the bytes behind the same
