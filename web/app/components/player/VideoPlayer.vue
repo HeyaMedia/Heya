@@ -1412,6 +1412,20 @@ function showCtrl() {
 function onControlsFocusIn() { controlsFocused.value = true; showCtrl() }
 function onControlsFocusOut() { controlsFocused.value = false; showCtrl() }
 
+// WebKit dispatches synthetic pointermove events at the last real coordinates
+// whenever hiding the controls changes the cursor style (`cursor: none`) or
+// the hit-test target under a stationary pointer. Counting those as activity
+// re-shows the bar the instant it fades — an endless show/hide loop until the
+// pointer leaves the window. Only genuine motion may reset the hide timer.
+let lastPointerX = Number.NaN
+let lastPointerY = Number.NaN
+function onPlayerPointerMove(event: PointerEvent) {
+  if (event.screenX === lastPointerX && event.screenY === lastPointerY) return
+  lastPointerX = event.screenX
+  lastPointerY = event.screenY
+  showCtrl()
+}
+
 function onPlayerPointerEnter() { showCtrl() }
 function onPlayerPointerLeave() {
   seekHover.value = null
@@ -1535,9 +1549,9 @@ onUnmounted(() => {
   <div
     class="p"
     :class="{ 'native-surface-active': nativeSurfaceActive, 'controls-shown': ctrlShown }"
-    @pointerenter.capture="onPlayerPointerEnter"
-    @pointermove.capture="showCtrl"
-    @pointerleave.capture="onPlayerPointerLeave"
+    @pointerenter="onPlayerPointerEnter"
+    @pointermove.capture="onPlayerPointerMove"
+    @pointerleave="onPlayerPointerLeave"
     @click="closeMenus"
   >
     <!-- Loading / Error -->

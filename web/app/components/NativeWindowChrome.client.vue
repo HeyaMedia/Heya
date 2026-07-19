@@ -8,7 +8,7 @@
     ]"
     :aria-hidden="videoActive && !videoControlsVisible ? 'true' : undefined"
     @pointerenter="refreshState"
-    @pointermove="requestVideoControls"
+    @pointermove="onChromePointerMove"
   >
     <div v-if="capabilities.customTitlebar" class="native-window-drag-strip" data-tauri-drag-region="deep" />
     <div v-if="capabilities.customTitlebar" class="native-window-controls">
@@ -54,8 +54,28 @@ function applyWindowState(state: { maximized: boolean, fullscreen: boolean } | n
   document.documentElement.classList.toggle('heya-native-window-fullscreen', state.fullscreen)
 }
 
+// Hiding the video controls toggles cursor style and pointer-events under a
+// stationary pointer, which makes WebKit emit synthetic pointermove events at
+// the last real coordinates. Requesting the controls back on those would
+// re-show them the moment they hide, looping forever — only genuine motion
+// counts. The document capture listener runs before the element listener, so
+// one shared position pair means each real move triggers exactly one reveal.
+let lastPointerX = Number.NaN
+let lastPointerY = Number.NaN
+function pointerActuallyMoved(event: PointerEvent): boolean {
+  if (event.screenX === lastPointerX && event.screenY === lastPointerY) return false
+  lastPointerX = event.screenX
+  lastPointerY = event.screenY
+  return true
+}
+
+function onChromePointerMove(event: PointerEvent) {
+  if (pointerActuallyMoved(event)) requestVideoControls()
+}
+
 function onDocumentPointerMove(event: PointerEvent) {
-  if (videoActive.value && event.clientY <= 46) requestVideoControls()
+  if (!videoActive.value || event.clientY > 46) return
+  if (pointerActuallyMoved(event)) requestVideoControls()
 }
 
 async function refreshState() {
