@@ -234,6 +234,13 @@ func applyMusicMediaItem(ctx context.Context, q *sqlc.Queries, lookupStore Music
 			found = true
 		}
 	}
+	// Materialization previews are durable artifacts and may predate stronger
+	// identity rules. Never let a stale same-name target force a contradictory
+	// MBID overwrite; resolve again and create a distinct artist when needed.
+	if found && !musicMediaItemIdentityCompatible(existing, detail.ExternalIDs) {
+		existing = sqlc.MediaItemCard{}
+		found = false
+	}
 	if !found {
 		item, ok, err := findMusicMaterializeMediaItem(ctx, lookupStore, libraryID, detail.ExternalIDs, firstNonEmpty(detail.ArtistName, detail.Title))
 		if err != nil {
@@ -244,10 +251,11 @@ func applyMusicMediaItem(ctx context.Context, q *sqlc.Queries, lookupStore Music
 			found = true
 		}
 	}
+	if found && !musicMediaItemIdentityCompatible(existing, detail.ExternalIDs) {
+		existing = sqlc.MediaItemCard{}
+		found = false
+	}
 	if found {
-		if _, contradictory := compareStrongMusicArtistExternalIDs(externalIDsFromMediaItem(existing), detail.ExternalIDs); contradictory {
-			return sqlc.MediaItemCard{}, "", fmt.Errorf("refusing to overwrite artist media item %d with contradictory external IDs", existing.ID)
-		}
 		updated, err := q.UpdateMediaItem(ctx, musicUpdateMediaItemParams(existing, detail))
 		if err != nil {
 			return sqlc.MediaItemCard{}, "", err

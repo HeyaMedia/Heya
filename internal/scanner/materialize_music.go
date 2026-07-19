@@ -45,7 +45,13 @@ func (s *SQLMusicMaterializeStore) FindMediaItemByExternalIDs(ctx context.Contex
 			ExternalID: value,
 		})
 		if err == nil {
-			return item, true, nil
+			// Provider IDs occasionally become polluted on an old same-name
+			// artist row. MusicBrainz is the identity spine: a weaker shared ID
+			// may never select a row whose MBID contradicts the target.
+			if musicMediaItemIdentityCompatible(item, ids) {
+				return item, true, nil
+			}
+			continue
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return sqlc.MediaItemCard{}, false, err
@@ -59,12 +65,20 @@ func (s *SQLMusicMaterializeStore) FindMediaItemByExternalIDs(ctx context.Contex
 		ExtFilter: mustJSONBytes(ids),
 	})
 	if err == nil {
-		return item, true, nil
+		if musicMediaItemIdentityCompatible(item, ids) {
+			return item, true, nil
+		}
+		return sqlc.MediaItemCard{}, false, nil
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sqlc.MediaItemCard{}, false, nil
 	}
 	return sqlc.MediaItemCard{}, false, err
+}
+
+func musicMediaItemIdentityCompatible(item sqlc.MediaItemCard, targetIDs map[string]string) bool {
+	_, contradictory := compareStrongMusicArtistExternalIDs(externalIDsFromMediaItem(item), targetIDs)
+	return !contradictory
 }
 
 func (s *SQLMusicMaterializeStore) FindMediaItemByIdentity(ctx context.Context, libraryID int64, title string) (sqlc.MediaItemCard, bool, error) {

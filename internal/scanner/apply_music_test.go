@@ -111,6 +111,55 @@ func TestApplyMusicRunsCommitGuardBeforeWritesAndCommit(t *testing.T) {
 	require.Equal(t, 2, calls)
 }
 
+func TestApplyMusicCreatesNamesakeWhenStalePreviewSharesOnlyWeakerProviderID(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	userID := testutil.TestUserID(t, pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name: fmt.Sprintf("scanner-music-namesake-test-%d", time.Now().UnixNano()), MediaType: sqlc.MediaTypeMusic,
+		Paths: []string{"/tmp/music-namesake"}, ScanInterval: pgtype.Interval{Microseconds: int64(time.Hour / time.Microsecond), Valid: true},
+		CreatedBy: userID, Settings: []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	poisonedIDs := map[string]string{"mbid": "10000000-0000-4000-8000-000000000001", "apple": "shared-apple-id"}
+	poisoned, err := q.CreateMediaItem(ctx, sqlc.CreateMediaItemParams{
+		LibraryID: lib.ID, MediaType: sqlc.MediaTypeMusic, Title: "Binary", SortTitle: "Binary",
+		ExternalIds: mustJSONBytes(poisonedIDs), ProviderKind: "heya",
+	})
+	require.NoError(t, err)
+	_, err = q.CreateArtist(ctx, sqlc.CreateArtistParams{
+		MediaItemID: poisoned.ID, MusicbrainzID: poisonedIDs["mbid"], Name: "Binary", SortName: "Binary",
+	})
+	require.NoError(t, err)
+
+	targetIDs := map[string]string{"mbid": "20000000-0000-4000-8000-000000000002", "apple": "shared-apple-id"}
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx)
+	qtx := sqlc.New(tx)
+	store := NewSQLMusicMaterializeStore(tx)
+	matched, found, err := store.FindMediaItemByExternalIDs(ctx, lib.ID, targetIDs)
+	require.NoError(t, err)
+	require.False(t, found, "shared weaker provider ID must not override a contradictory MBID")
+	require.Zero(t, matched.ID)
+
+	created, action, err := applyMusicMediaItem(ctx, qtx, store, lib.ID,
+		MusicMaterializePreview{MediaItemID: poisoned.ID, Artist: "Binary"},
+		&metadata.MediaDetail{ArtistName: "Binary", Title: "Binary", ExternalIDs: targetIDs, ProviderKind: "heya"},
+	)
+	require.NoError(t, err)
+	require.Equal(t, "create_media_item", action)
+	require.NotEqual(t, poisoned.ID, created.ID)
+	require.JSONEq(t, string(mustJSONBytes(targetIDs)), string(created.ExternalIds))
+
+	unchanged, err := qtx.GetMediaItemByID(ctx, poisoned.ID)
+	require.NoError(t, err)
+	require.JSONEq(t, string(mustJSONBytes(poisonedIDs)), string(unchanged.ExternalIds))
+}
+
 func TestApplyMusicAlbumPrefersExistingTupleOverSiblingMBID(t *testing.T) {
 	pool := testutil.SetupDB(t)
 	ctx := context.Background()
