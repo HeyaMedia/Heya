@@ -172,6 +172,33 @@ func TestRankMusicRecommendationPoolDropsZeroOverlapWhenPoolIsRich(t *testing.T)
 	}
 }
 
+// TestRankMusicRecommendationPoolBalancedPenalizesKnownOffGenre: the genre
+// term is centered at neutralGenreOverlap, so at a mid knob setting a KNOWN
+// off-genre candidate ranks below a no-genre-data candidate of equal base
+// score (and far below a real match) — off-genre must lose ground at every
+// pull level, not only under Strict's hard drop.
+func TestRankMusicRecommendationPoolBalancedPenalizesKnownOffGenre(t *testing.T) {
+	offGenre := recommendationCandidate(1, 1, "off-genre", 10, false)
+	offGenre.GenreOverlap = 0
+	offGenre.GenreDataKnown = true
+	neutral := recommendationCandidate(2, 2, "unknown", 10, false)
+	neutral.GenreOverlap = neutralGenreOverlap
+	match := recommendationCandidate(3, 3, "match", 10, false)
+	match.GenreOverlap = 1.0
+	match.GenreDataKnown = true
+
+	// 0.7 keeps this below the Strict drop threshold while leaving every
+	// pairwise genre-term gap (>=0.98) larger than the worst-case relative
+	// day-bucket jitter swing (2*0.35), so the assertion holds on any day.
+	out := rankMusicRecommendationPool([]musicRecommendationCandidate{offGenre, neutral, match}, 1, recommendRadio, 3, nil, 0, 0.7)
+	if len(out) != 3 {
+		t.Fatalf("expected all 3 candidates at balanced pull, got %v", out)
+	}
+	if out[0].TrackID != 3 || out[2].TrackID != 1 {
+		t.Fatalf("expected order match > unknown > off-genre at equal base score, got %v", out)
+	}
+}
+
 // TestRankMusicRecommendationPoolStrictShedsNeutralWhenRealMatchesSuffice:
 // candidates with NO genre data (neutral stand-in overlap) are also dropped
 // under strict genre affinity once enough REAL positive-overlap candidates

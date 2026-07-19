@@ -31,7 +31,14 @@ const neutralGenreOverlap = 0.35
 // genreAffinityScoreScale and genreAffinityDropThreshold implement
 // RadioRequest.GenreAffinity's contract:
 //
-//	score += genreAffinity * genreAffinityScoreScale * candidate.GenreOverlap
+//	score += genreAffinity * genreAffinityScoreScale * (GenreOverlap - neutralGenreOverlap)
+//
+// The term is centered at neutralGenreOverlap: overlap above neutral boosts,
+// a KNOWN off-genre candidate is pushed down, and a candidate with no genre
+// data (parked exactly at neutral) is untouched at every knob setting. A
+// side effect worth naming: a candidate with real-but-tiny overlap (< 0.35)
+// ranks slightly below an unknown one — "known mostly-different" loses to
+// "could be anything", which is the intended reading.
 //
 // Invariants (verified in music_recommendations_test.go):
 //   - genreAffinity <= 0: the term above is skipped entirely (rankMusicRecommendationPool
@@ -43,10 +50,10 @@ const neutralGenreOverlap = 0.35
 //     higher-overlap candidate never scores below an equal-base-score,
 //     lower-overlap one.
 //   - genreAffinity == 1: genreAffinityScoreScale (4.0) is large relative to
-//     the other additive bonuses in this function (0.35..2.5), so a
-//     zero-overlap candidate (adjustment 0) ranks below any positive-overlap
-//     candidate of a similar base score — the overlap term dominates modest
-//     score gaps.
+//     the other additive bonuses in this function (0.35..2.5), so a real
+//     zero-overlap candidate (adjustment -0.35*4 = -1.4) ranks below any
+//     above-neutral-overlap candidate of a similar base score — the overlap
+//     term dominates modest score gaps.
 //   - genreAffinity >= genreAffinityDropThreshold (0.75 — the start of the
 //     Mix Builder slider's "Strict" band, so Strict actually enforces):
 //     candidates with a REAL zero overlap (seed and candidate both have genre

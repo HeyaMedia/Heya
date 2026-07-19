@@ -562,7 +562,14 @@ func rankMusicRecommendationPool(pool []musicRecommendationCandidate, userID int
 			candidate.Score += math.Min(2.5, ageMonths/6)
 		}
 		if genreAffinity > 0 {
-			candidate.Score += genreAffinity * genreAffinityScoreScale * candidate.GenreOverlap
+			// Centered at neutralGenreOverlap so the knob pulls BOTH ways:
+			// above-neutral overlap is boosted, a known off-genre candidate
+			// is penalized, and no-genre-data candidates (parked exactly at
+			// neutral) are untouched. Boost-only proved insufficient in
+			// practice — CLAP hears big-room EDM as sonically adjacent to
+			// electronicore seeds, and with no downward force those tracks
+			// held mid-pool rank at any sub-Strict pull setting.
+			candidate.Score += genreAffinity * genreAffinityScoreScale * (candidate.GenreOverlap - neutralGenreOverlap)
 		}
 		// Small deterministic scoring jitter still breaks ties between
 		// near-identical candidates. It's intentionally too small to be the
