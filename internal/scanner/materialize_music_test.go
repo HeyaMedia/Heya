@@ -47,6 +47,50 @@ func (emptyMusicMaterializeStore) GetTrackFileByLibraryFileID(context.Context, i
 	return sqlc.TrackFile{}, false, nil
 }
 
+type trackingMusicMaterializeStore struct {
+	emptyMusicMaterializeStore
+	identityCalls int
+	identityItem  sqlc.MediaItemCard
+}
+
+func (s *trackingMusicMaterializeStore) FindMediaItemByIdentity(context.Context, int64, string) (sqlc.MediaItemCard, bool, error) {
+	s.identityCalls++
+	return s.identityItem, s.identityItem.ID != 0, nil
+}
+
+func TestMusicMaterializeDoesNotNameFallbackAfterStrongIDMiss(t *testing.T) {
+	store := &trackingMusicMaterializeStore{identityItem: sqlc.MediaItemCard{ID: 42, MediaType: sqlc.MediaTypeMusic, Title: "LiSA"}}
+	item, found, err := findMusicMaterializeMediaItem(context.Background(), store, 7,
+		map[string]string{"mbid": "30aeb57f-bb16-47fa-86ca-79fc57b4d12c"}, "LISA")
+	require.NoError(t, err)
+	require.False(t, found)
+	require.Zero(t, item.ID)
+	require.Zero(t, store.identityCalls)
+}
+
+func TestMusicMaterializeAllowsNameFallbackWithoutStrongID(t *testing.T) {
+	store := &trackingMusicMaterializeStore{identityItem: sqlc.MediaItemCard{ID: 42, MediaType: sqlc.MediaTypeMusic, Title: "Example"}}
+	item, found, err := findMusicMaterializeMediaItem(context.Background(), store, 7,
+		map[string]string{"lastfm": "Example"}, "Example")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, int64(42), item.ID)
+	require.Equal(t, 1, store.identityCalls)
+}
+
+func TestMusicMaterializeRepairsSameNameContradictoryArtistIDs(t *testing.T) {
+	existing := sqlc.MediaItemCard{
+		ID: 42, MediaType: sqlc.MediaTypeMusic, Title: "LiSA",
+		ExternalIds: mustJSONBytes(map[string]string{"musicbrainz:artist": "85d76093-9865-4605-97fa-8c910929d366"}),
+	}
+	require.True(t, canRepairMusicFileAttachment(existing, "LISA", map[string]string{
+		"mbid": "30aeb57f-bb16-47fa-86ca-79fc57b4d12c",
+	}))
+	require.False(t, canRepairMusicFileAttachment(existing, "LISA", map[string]string{
+		"musicbrainz_artist": "85D76093-9865-4605-97FA-8C910929D366",
+	}))
+}
+
 func TestPlanMusicMaterializationCarriesOnlyExactRecordingEvidence(t *testing.T) {
 	const relPath = "Ado/Kyougen/01 - Readymade.flac"
 	evidence := MusicAcceptedRecordingEvidence{

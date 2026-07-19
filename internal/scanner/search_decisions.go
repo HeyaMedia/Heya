@@ -27,7 +27,7 @@ type SearchDecisions map[string]SearchDecision
 // whenever normalization, candidate scoring, evidence weighting, or automatic
 // acceptance policy changes in a way that should reconsider prior matches.
 // Manual approve/reject/ignore decisions are revision-independent.
-const scannerSearchMatcherRevision int32 = 1
+const scannerSearchMatcherRevision int32 = 2
 
 func LoadScannerSearchDecisions(ctx context.Context, db *pgxpool.Pool, lib sqlc.Library) (SearchDecisions, error) {
 	if db == nil {

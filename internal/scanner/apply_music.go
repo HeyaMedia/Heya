@@ -245,6 +245,9 @@ func applyMusicMediaItem(ctx context.Context, q *sqlc.Queries, lookupStore Music
 		}
 	}
 	if found {
+		if _, contradictory := compareStrongMusicArtistExternalIDs(externalIDsFromMediaItem(existing), detail.ExternalIDs); contradictory {
+			return sqlc.MediaItemCard{}, "", fmt.Errorf("refusing to overwrite artist media item %d with contradictory external IDs", existing.ID)
+		}
 		updated, err := q.UpdateMediaItem(ctx, musicUpdateMediaItemParams(existing, detail))
 		if err != nil {
 			return sqlc.MediaItemCard{}, "", err
@@ -328,6 +331,9 @@ func applyMusicArtist(ctx context.Context, q *sqlc.Queries, mediaItemID int64, p
 
 	existing, err := q.GetArtistByMediaItemID(ctx, mediaItemID)
 	if err == nil {
+		if musicArtistMBIDContradicts(existing, mbid) {
+			return sqlc.Artist{}, "", fmt.Errorf("refusing to overwrite artist %d MusicBrainz ID %q with %q", existing.ID, existing.MusicbrainzID, mbid)
+		}
 		updated, err := q.UpdateArtist(ctx, sqlc.UpdateArtistParams{
 			ID:             existing.ID,
 			MusicbrainzID:  firstNonEmpty(mbid, existing.MusicbrainzID),
@@ -958,6 +964,11 @@ func applyMusicTrackFile(ctx context.Context, q *sqlc.Queries, libraryID, mediaI
 	if err != nil {
 		return counts, err
 	}
+	if existingTF && existingTrackFile.TrackID != trackID {
+		if err := pruneReassignedMusicTrack(ctx, q, existingTrackFile.TrackID, trackID); err != nil {
+			return counts, err
+		}
+	}
 	// The upsert resets loudness when the bytes changed; the
 	// sonic facets are keyed by track and need the same invalidation so the
 	// analysis pump re-measures instead of settling on data computed from
@@ -975,6 +986,76 @@ func applyMusicTrackFile(ctx context.Context, q *sqlc.Queries, libraryID, mediaI
 		counts.trackFilesCreated++
 	}
 	return counts, nil
+}
+
+// pruneReassignedMusicTrack closes the repair loop after a library file moves
+// between canonical artists. The old track/album must disappear once empty or
+// the UI keeps showing the poisoned release under both artists. User-owned
+// state is folded onto the replacement before deletion; a source track which
+// still has another file is left intact because the two copies may be distinct.
+func pruneReassignedMusicTrack(ctx context.Context, q *sqlc.Queries, sourceTrackID, targetTrackID int64) error {
+	source, err := q.GetTrackByIDForUpdate(ctx, sourceTrackID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("lock reassigned source track %d: %w", sourceTrackID, err)
+	}
+	hasFiles, err := q.TrackHasFiles(ctx, sourceTrackID)
+	if err != nil {
+		return fmt.Errorf("inspect reassigned source track %d: %w", sourceTrackID, err)
+	}
+	if hasFiles {
+		return nil
+	}
+	target, err := q.GetTrackByID(ctx, targetTrackID)
+	if err != nil {
+		return fmt.Errorf("load reassigned target track %d: %w", targetTrackID, err)
+	}
+	if err := q.MergeTrackRatingsInto(ctx, sqlc.MergeTrackRatingsIntoParams{DstTrackID: targetTrackID, SrcTrackID: sourceTrackID}); err != nil {
+		return fmt.Errorf("move reassigned track ratings: %w", err)
+	}
+	if err := q.MergeTrackPlaylistsInto(ctx, sqlc.MergeTrackPlaylistsIntoParams{DstTrackID: targetTrackID, SrcTrackID: sourceTrackID}); err != nil {
+		return fmt.Errorf("move reassigned track playlists: %w", err)
+	}
+	if err := q.MergeTrackFavoritesInto(ctx, sqlc.MergeTrackFavoritesIntoParams{DstTrackID: targetTrackID, SrcTrackID: sourceTrackID}); err != nil {
+		return fmt.Errorf("move reassigned track favorites: %w", err)
+	}
+	if err := q.ReparentPlayQueueItemsInto(ctx, sqlc.ReparentPlayQueueItemsIntoParams{DstTrackID: targetTrackID, SrcTrackID: sourceTrackID}); err != nil {
+		return fmt.Errorf("move reassigned play queue items: %w", err)
+	}
+	if err := q.ReparentExternalListensInto(ctx, sqlc.ReparentExternalListensIntoParams{DstTrackID: pgInt8(targetTrackID), SrcTrackID: pgInt8(sourceTrackID)}); err != nil {
+		return fmt.Errorf("move reassigned external listens: %w", err)
+	}
+	if err := q.ReparentTrackPlayEventsInto(ctx, sqlc.ReparentTrackPlayEventsIntoParams{DstTrackID: targetTrackID, SrcTrackID: sourceTrackID}); err != nil {
+		return fmt.Errorf("move reassigned track play events: %w", err)
+	}
+	if err := q.DeleteMetadataEntityBinding(ctx, sqlc.DeleteMetadataEntityBindingParams{LocalKind: "track", LocalID: sourceTrackID}); err != nil {
+		return fmt.Errorf("delete reassigned source track metadata binding: %w", err)
+	}
+	if err := q.DeleteTrackByID(ctx, sourceTrackID); err != nil {
+		return fmt.Errorf("delete empty reassigned source track: %w", err)
+	}
+	if source.AlbumID == target.AlbumID {
+		return nil
+	}
+	hasTracks, err := q.AlbumHasTracks(ctx, source.AlbumID)
+	if err != nil {
+		return fmt.Errorf("inspect reassigned source album %d: %w", source.AlbumID, err)
+	}
+	if hasTracks {
+		return nil
+	}
+	if err := q.MergeAlbumRatings(ctx, sqlc.MergeAlbumRatingsParams{DstAlbumID: target.AlbumID, SrcAlbumID: source.AlbumID}); err != nil {
+		return fmt.Errorf("move reassigned album ratings: %w", err)
+	}
+	if err := q.MergeAlbumFavorites(ctx, sqlc.MergeAlbumFavoritesParams{DstAlbumID: target.AlbumID, SrcAlbumID: source.AlbumID}); err != nil {
+		return fmt.Errorf("move reassigned album favorites: %w", err)
+	}
+	if err := q.DeleteAlbumByID(ctx, source.AlbumID); err != nil {
+		return fmt.Errorf("delete empty reassigned source album: %w", err)
+	}
+	return nil
 }
 
 func musicLibraryFileParseResult(local MusicTrackPlan) []byte {

@@ -270,6 +270,9 @@ SELECT EXISTS (
     AND sqlc.arg(folder) <> ALL(string_to_array(lf.path, '/'))
 );
 
+-- name: TrackHasFiles :one
+SELECT EXISTS (SELECT 1 FROM track_files WHERE track_id = sqlc.arg(track_id));
+
 -- name: MoveTrackToAlbum :exec
 -- Relocate a whole track row to another album. track_id is unchanged, so every
 -- track-owned row — ratings, playlist entries, play history, facets, metadata,
@@ -299,6 +302,23 @@ INSERT INTO user_playlist_tracks (playlist_id, track_id, position, added_at)
 SELECT p.playlist_id, sqlc.arg(dst_track_id), p.position, p.added_at
 FROM user_playlist_tracks p WHERE p.track_id = sqlc.arg(src_track_id)
 ON CONFLICT (playlist_id, track_id) DO NOTHING;
+
+-- name: MergeTrackFavoritesInto :exec
+WITH copied AS (
+  INSERT INTO user_favorites (user_id, entity_type, entity_id)
+  SELECT favorite.user_id, 'track', sqlc.arg(dst_track_id)
+  FROM user_favorites favorite
+  WHERE favorite.entity_type = 'track' AND favorite.entity_id = sqlc.arg(src_track_id)
+  ON CONFLICT (user_id, entity_type, entity_id) DO NOTHING
+)
+DELETE FROM user_favorites
+WHERE user_favorites.entity_type = 'track' AND user_favorites.entity_id = sqlc.arg(src_track_id);
+
+-- name: ReparentPlayQueueItemsInto :exec
+UPDATE play_queue_items SET track_id = sqlc.arg(dst_track_id) WHERE track_id = sqlc.arg(src_track_id);
+
+-- name: ReparentExternalListensInto :exec
+UPDATE external_listens SET matched_track_id = sqlc.arg(dst_track_id) WHERE matched_track_id = sqlc.arg(src_track_id);
 
 -- name: ReparentTrackPlayEventsInto :exec
 UPDATE play_events SET track_id = sqlc.arg(dst_track_id) WHERE track_id = sqlc.arg(src_track_id);
@@ -536,6 +556,9 @@ SELECT COALESCE((
 
 -- name: GetTrackByID :one
 SELECT * FROM tracks WHERE id = $1;
+
+-- name: GetTrackByIDForUpdate :one
+SELECT * FROM tracks WHERE id = $1 FOR UPDATE;
 
 -- name: GetTrackDetailByID :one
 -- One-shot track detail: track row + album + artist context. Pair with

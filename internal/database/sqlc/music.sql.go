@@ -1642,6 +1642,36 @@ func (q *Queries) GetTrackByID(ctx context.Context, id int64) (Track, error) {
 	return i, err
 }
 
+const getTrackByIDForUpdate = `-- name: GetTrackByIDForUpdate :one
+SELECT id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits FROM tracks WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) GetTrackByIDForUpdate(ctx context.Context, id int64) (Track, error) {
+	row := q.db.QueryRow(ctx, getTrackByIDForUpdate, id)
+	var i Track
+	err := row.Scan(
+		&i.ID,
+		&i.AlbumID,
+		&i.DiscNumber,
+		&i.TrackNumber,
+		&i.Title,
+		&i.Duration,
+		&i.SearchVector,
+		&i.ExternalIds,
+		&i.Isrc,
+		&i.RecordingMbid,
+		&i.PreviewUrl,
+		&i.Explicit,
+		&i.ArtistCredits,
+		&i.LyricsAvailable,
+		&i.SortArtist,
+		&i.SortAlbumYear,
+		&i.SortAlbum,
+		&i.Credits,
+	)
+	return i, err
+}
+
 const getTrackDetailByID = `-- name: GetTrackDetailByID :one
 SELECT t.id,
        t.album_id,
@@ -4107,6 +4137,28 @@ func (q *Queries) MergeCollidingAlbumTrackRatings(ctx context.Context, arg Merge
 	return err
 }
 
+const mergeTrackFavoritesInto = `-- name: MergeTrackFavoritesInto :exec
+WITH copied AS (
+  INSERT INTO user_favorites (user_id, entity_type, entity_id)
+  SELECT favorite.user_id, 'track', $2
+  FROM user_favorites favorite
+  WHERE favorite.entity_type = 'track' AND favorite.entity_id = $1
+  ON CONFLICT (user_id, entity_type, entity_id) DO NOTHING
+)
+DELETE FROM user_favorites
+WHERE user_favorites.entity_type = 'track' AND user_favorites.entity_id = $1
+`
+
+type MergeTrackFavoritesIntoParams struct {
+	SrcTrackID int64 `json:"src_track_id"`
+	DstTrackID int64 `json:"dst_track_id"`
+}
+
+func (q *Queries) MergeTrackFavoritesInto(ctx context.Context, arg MergeTrackFavoritesIntoParams) error {
+	_, err := q.db.Exec(ctx, mergeTrackFavoritesInto, arg.SrcTrackID, arg.DstTrackID)
+	return err
+}
+
 const mergeTrackPlaylistsInto = `-- name: MergeTrackPlaylistsInto :exec
 INSERT INTO user_playlist_tracks (playlist_id, track_id, position, added_at)
 SELECT p.playlist_id, $1, p.position, p.added_at
@@ -4335,6 +4387,34 @@ func (q *Queries) ReparentCollidingAlbumTrackPlayEvents(ctx context.Context, arg
 	return err
 }
 
+const reparentExternalListensInto = `-- name: ReparentExternalListensInto :exec
+UPDATE external_listens SET matched_track_id = $1 WHERE matched_track_id = $2
+`
+
+type ReparentExternalListensIntoParams struct {
+	DstTrackID pgtype.Int8 `json:"dst_track_id"`
+	SrcTrackID pgtype.Int8 `json:"src_track_id"`
+}
+
+func (q *Queries) ReparentExternalListensInto(ctx context.Context, arg ReparentExternalListensIntoParams) error {
+	_, err := q.db.Exec(ctx, reparentExternalListensInto, arg.DstTrackID, arg.SrcTrackID)
+	return err
+}
+
+const reparentPlayQueueItemsInto = `-- name: ReparentPlayQueueItemsInto :exec
+UPDATE play_queue_items SET track_id = $1 WHERE track_id = $2
+`
+
+type ReparentPlayQueueItemsIntoParams struct {
+	DstTrackID int64 `json:"dst_track_id"`
+	SrcTrackID int64 `json:"src_track_id"`
+}
+
+func (q *Queries) ReparentPlayQueueItemsInto(ctx context.Context, arg ReparentPlayQueueItemsIntoParams) error {
+	_, err := q.db.Exec(ctx, reparentPlayQueueItemsInto, arg.DstTrackID, arg.SrcTrackID)
+	return err
+}
+
 const reparentSimilarLocalRefs = `-- name: ReparentSimilarLocalRefs :exec
 UPDATE artist_similar_artists
 SET local_artist_id = $1
@@ -4427,6 +4507,17 @@ type TrackHasFileOutsideFolderParams struct {
 // be peeled, vs a whole-track move that can carry all its state along.
 func (q *Queries) TrackHasFileOutsideFolder(ctx context.Context, arg TrackHasFileOutsideFolderParams) (bool, error) {
 	row := q.db.QueryRow(ctx, trackHasFileOutsideFolder, arg.TrackID, arg.Folder)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const trackHasFiles = `-- name: TrackHasFiles :one
+SELECT EXISTS (SELECT 1 FROM track_files WHERE track_id = $1)
+`
+
+func (q *Queries) TrackHasFiles(ctx context.Context, trackID int64) (bool, error) {
+	row := q.db.QueryRow(ctx, trackHasFiles, trackID)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err

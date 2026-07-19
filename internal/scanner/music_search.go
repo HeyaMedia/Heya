@@ -890,7 +890,7 @@ func musicReleaseHintsWithoutIdentifiers(values []metadata.ReleaseHint) []metada
 // genuinely distinct same-name artists retain their separate canonical IDs
 // and stay in review.
 func resolveConvergedMusicCandidates(ctx context.Context, artist MusicArtistPlan, scored []metadata.SearchResult, provider MusicSearchProvider, threshold float64, emit Emitter) (metadata.SearchResult, bool, error) {
-	if len(scored) < 2 || scored[0].Recommendation != "conflicting_identifiers" ||
+	if len(scored) < 2 || !musicCandidateRecommendationCanConverge(scored[0].Recommendation) ||
 		scored[0].Confidence < threshold || !musicSearchArtistExact(artist, scored[0].Title) {
 		return metadata.SearchResult{}, false, nil
 	}
@@ -961,6 +961,15 @@ func resolveConvergedMusicCandidates(ctx context.Context, artist MusicArtistPlan
 		"key": artist.Key, "artist": artist.Artist, "canonical_id": canonicalID, "candidates": len(duplicates),
 	}})
 	return result, true, nil
+}
+
+func musicCandidateRecommendationCanConverge(recommendation string) bool {
+	switch recommendation {
+	case "ambiguous", "conflicting_identifiers":
+		return true
+	default:
+		return false
+	}
 }
 
 // musicReleaseHintIdentifiers keeps exact release/catalog identifiers while

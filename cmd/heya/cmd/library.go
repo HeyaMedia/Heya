@@ -313,6 +313,70 @@ var libraryRematchReviewsCmd = &cobra.Command{
 	},
 }
 
+var libraryReanalyzeScopesCmd = &cobra.Command{
+	Use:   "reanalyze-scopes",
+	Short: "Enqueue fresh scanner analysis for specific library directories",
+	Long: "Invalidates no unrelated work: every --scope is queued as its own scanner unit, " +
+		"so the resulting generation replaces the prior entity set for exactly that directory.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, _ := cmd.Flags().GetInt64("id")
+		scopes, _ := cmd.Flags().GetStringSlice("scope")
+		if id == 0 {
+			return fmt.Errorf("--id is required")
+		}
+		if len(scopes) == 0 {
+			return fmt.Errorf("at least one --scope is required")
+		}
+		return withApp(func(ctx context.Context, app *service.App) error {
+			lib, err := app.GetLibrary(ctx, id)
+			if err != nil {
+				return err
+			}
+			queued := 0
+			seen := map[string]bool{}
+			for _, value := range scopes {
+				scope := filepath.Clean(strings.TrimSpace(value))
+				if !filepath.IsAbs(scope) {
+					return fmt.Errorf("scope must be an absolute path: %q", value)
+				}
+				inside, root := libraryScopeRoot(lib.Paths, scope)
+				if !inside {
+					return fmt.Errorf("scope is outside library %d roots: %q", id, scope)
+				}
+				if scope == root {
+					return fmt.Errorf("scope is a complete library root; use the ordinary library scan instead: %q", scope)
+				}
+				if seen[scope] {
+					continue
+				}
+				seen[scope] = true
+				if err := worker.EnqueueProcessLibraryScan(ctx, app.RiverClient(), app.DBPool(), worker.ProcessLibraryScanArgs{
+					LibraryID: lib.ID, MediaType: lib.MediaType, ScopePaths: []string{scope}, Force: true,
+				}, worker.PriorityMatch, "manual_scope_reanalysis"); err != nil {
+					return fmt.Errorf("enqueue scope %q after %d scopes: %w", scope, queued, err)
+				}
+				queued++
+			}
+			ui.Success("Enqueued %d fresh scope analyses for %s", queued, lib.Name)
+			return nil
+		})
+	},
+}
+
+func libraryScopeRoot(roots []string, scope string) (bool, string) {
+	for _, value := range roots {
+		root := filepath.Clean(strings.TrimSpace(value))
+		if !filepath.IsAbs(root) {
+			continue
+		}
+		rel, err := filepath.Rel(root, scope)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true, root
+		}
+	}
+	return false, ""
+}
+
 var libraryFilesCmd = &cobra.Command{
 	Use:   "files",
 	Short: "List files in a library",
@@ -537,6 +601,8 @@ func init() {
 	libraryRemoveCmd.Flags().Int64("id", 0, "Library ID to remove")
 	libraryRematchReviewsCmd.Flags().Int64("id", 0, "Library ID")
 	libraryRematchReviewsCmd.Flags().Int32("limit", 10000, "Maximum review rows to enqueue")
+	libraryReanalyzeScopesCmd.Flags().Int64("id", 0, "Library ID")
+	libraryReanalyzeScopesCmd.Flags().StringSlice("scope", nil, "Absolute directory to reanalyze (repeatable)")
 
 	libraryFilesCmd.Flags().Int64("id", 0, "Library ID")
 	libraryFilesCmd.Flags().String("media", "", "Filter by media type")
@@ -556,6 +622,7 @@ func init() {
 	libraryCmd.AddCommand(libraryScanCmd)
 	libraryCmd.AddCommand(libraryRemoveCmd)
 	libraryCmd.AddCommand(libraryRematchReviewsCmd)
+	libraryCmd.AddCommand(libraryReanalyzeScopesCmd)
 	libraryCmd.AddCommand(libraryFilesCmd)
 	libraryCmd.AddCommand(libraryStatsCmd)
 	libraryCmd.AddCommand(libraryWatchCmd)

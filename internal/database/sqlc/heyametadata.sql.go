@@ -89,6 +89,20 @@ func (q *Queries) CompleteMetadataWorkflow(ctx context.Context, arg CompleteMeta
 	return i, err
 }
 
+const deleteMetadataEntityBinding = `-- name: DeleteMetadataEntityBinding :exec
+DELETE FROM metadata_entity_bindings WHERE local_kind = $1 AND local_id = $2
+`
+
+type DeleteMetadataEntityBindingParams struct {
+	LocalKind string `json:"local_kind"`
+	LocalID   int64  `json:"local_id"`
+}
+
+func (q *Queries) DeleteMetadataEntityBinding(ctx context.Context, arg DeleteMetadataEntityBindingParams) error {
+	_, err := q.db.Exec(ctx, deleteMetadataEntityBinding, arg.LocalKind, arg.LocalID)
+	return err
+}
+
 const failMetadataWorkflow = `-- name: FailMetadataWorkflow :one
 UPDATE metadata_resolution_workflows
 SET state = 'failed',

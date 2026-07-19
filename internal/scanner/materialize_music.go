@@ -415,6 +415,13 @@ func findMusicMaterializeMediaItem(ctx context.Context, store MusicMaterializeSt
 		if item, ok, err := store.FindMediaItemByExternalIDs(ctx, libraryID, ids); err != nil || ok {
 			return item, ok, err
 		}
+		// A stable provider identity which is new to this library must create a
+		// distinct artist. Falling back to a case-insensitive title lookup here
+		// merged unrelated same-name acts (most visibly LISA and LiSA) before the
+		// second artist's external-ID binding existed locally.
+		if len(strongMusicArtistExternalIDs(ids)) > 0 {
+			return sqlc.MediaItemCard{}, false, nil
+		}
 	}
 	if artist == "" {
 		return sqlc.MediaItemCard{}, false, nil
@@ -698,10 +705,88 @@ func canRepairMusicFileAttachment(existing sqlc.MediaItemCard, targetArtist stri
 		return false
 	}
 	existingIDs := externalIDsFromMediaItem(existing)
-	if sharedExternalID(existingIDs, targetExternalIDs) {
+	shared, contradictory := compareStrongMusicArtistExternalIDs(existingIDs, targetExternalIDs)
+	if shared || sharedExternalID(existingIDs, targetExternalIDs) {
 		return false
 	}
+	// Contradictory stable artist IDs are stronger than a same-name title.
+	// This is the repair path that can safely unmerge files after an older
+	// scanner attached LISA to LiSA (or any equivalent namesake pair).
+	if contradictory {
+		return true
+	}
 	return normalizeSearchTitle(existing.Title) != normalizeSearchTitle(targetArtist)
+}
+
+// strongMusicArtistExternalIDs normalizes the stable artist namespaces Heya
+// receives from local tags and HeyaMetadata. Aliases are folded together so a
+// legacy `musicbrainz_artist` binding compares correctly with a current `mbid`
+// result. Values remain sets because collaboration tags may carry several IDs.
+func strongMusicArtistExternalIDs(ids map[string]string) map[string]map[string]bool {
+	providers := map[string]string{
+		"mbid": "musicbrainz", "musicbrainz_artist": "musicbrainz", "musicbrainz:artist": "musicbrainz",
+		"apple": "apple", "apple_artist": "apple", "apple:artist": "apple", "itunes_artist": "apple",
+		"deezer": "deezer", "deezer_artist": "deezer", "deezer:artist": "deezer",
+		"discogs": "discogs", "discogs_artist": "discogs", "discogs:artist": "discogs",
+		"spotify": "spotify", "spotify_artist": "spotify", "spotify:artist": "spotify",
+	}
+	out := map[string]map[string]bool{}
+	for key, raw := range ids {
+		provider := providers[strings.ToLower(strings.TrimSpace(key))]
+		if provider == "" {
+			continue
+		}
+		for _, value := range strings.FieldsFunc(raw, func(r rune) bool { return r == ';' || r == ',' }) {
+			value = strings.ToLower(strings.TrimSpace(value))
+			if value == "" {
+				continue
+			}
+			if out[provider] == nil {
+				out[provider] = map[string]bool{}
+			}
+			out[provider][value] = true
+		}
+	}
+	return out
+}
+
+func compareStrongMusicArtistExternalIDs(left, right map[string]string) (shared, contradictory bool) {
+	leftIDs := strongMusicArtistExternalIDs(left)
+	rightIDs := strongMusicArtistExternalIDs(right)
+	// MusicBrainz is the artist spine. When both sides carry it, it decides the
+	// relation even if a weaker provider ID is stale or was later replaced.
+	if len(leftIDs["musicbrainz"]) > 0 && len(rightIDs["musicbrainz"]) > 0 {
+		for value := range leftIDs["musicbrainz"] {
+			if rightIDs["musicbrainz"][value] {
+				return true, false
+			}
+		}
+		return false, true
+	}
+	for provider, leftValues := range leftIDs {
+		if provider == "musicbrainz" {
+			continue
+		}
+		rightValues := rightIDs[provider]
+		if len(rightValues) == 0 {
+			continue
+		}
+		providerShared := false
+		for value := range leftValues {
+			if rightValues[value] {
+				providerShared = true
+				shared = true
+				break
+			}
+		}
+		if !providerShared {
+			contradictory = true
+		}
+	}
+	if shared {
+		return true, false
+	}
+	return shared, contradictory
 }
 
 func musicMappedRelPaths(mappings []MusicAlbumFetchMatch) []string {

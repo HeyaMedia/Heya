@@ -229,6 +229,69 @@ func TestApplyMusicFingerprintRecordingEvidenceFillsUnlistedTrack(t *testing.T) 
 	require.Equal(t, "recording", binding.EntityKind)
 }
 
+func TestPruneReassignedMusicTrackRemovesPoisonedReleaseAndPreservesRatings(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	userID := testutil.TestUserID(t, pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:      fmt.Sprintf("scanner-music-reassign-prune-test-%d", time.Now().UnixNano()),
+		MediaType: sqlc.MediaTypeMusic, Paths: []string{"/tmp/music-reassign-prune"},
+		ScanInterval: pgtype.Interval{Microseconds: int64(time.Hour / time.Microsecond), Valid: true},
+		CreatedBy:    userID, Settings: []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	makeTrack := func(name, disambiguation, albumTitle string) (sqlc.Album, sqlc.Track) {
+		item, createErr := q.CreateMediaItem(ctx, sqlc.CreateMediaItemParams{LibraryID: lib.ID, MediaType: sqlc.MediaTypeMusic, Title: name, SortTitle: name})
+		require.NoError(t, createErr)
+		artist, createErr := q.CreateArtist(ctx, sqlc.CreateArtistParams{MediaItemID: item.ID, Name: name, Disambiguation: disambiguation})
+		require.NoError(t, createErr)
+		album, createErr := q.CreateAlbum(ctx, sqlc.CreateAlbumParams{ArtistID: artist.ID, Title: albumTitle, Genres: []string{}, Tags: []string{}})
+		require.NoError(t, createErr)
+		track, createErr := q.GetOrCreateTrack(ctx, sqlc.GetOrCreateTrackParams{AlbumID: album.ID, DiscNumber: 1, TrackNumber: 1, Title: "Track"})
+		require.NoError(t, createErr)
+		return album, track
+	}
+	sourceAlbum, sourceTrack := makeTrack("LiSA", "Japanese pop/rock singer", "Poisoned LISA Release")
+	targetAlbum, targetTrack := makeTrack("LISA", "BLACKPINK", "Correct LISA Release")
+	_, err = pool.Exec(ctx, `INSERT INTO user_track_ratings(user_id,track_id,rating) VALUES($1,$2,8)`, userID, sourceTrack.ID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO user_album_ratings(user_id,album_id,rating) VALUES($1,$2,9)`, userID, sourceAlbum.ID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO user_favorites(user_id,entity_type,entity_id) VALUES($1,'album',$2)`, userID, sourceAlbum.ID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO user_favorites(user_id,entity_type,entity_id) VALUES($1,'track',$2)`, userID, sourceTrack.ID)
+	require.NoError(t, err)
+	_, err = q.UpsertMetadataEntityBinding(ctx, sqlc.UpsertMetadataEntityBindingParams{
+		LocalKind: "track", LocalID: sourceTrack.ID, EntityID: uuid.MustParse("10000000-0000-4000-8000-000000000001"), EntityKind: "recording", SchemaVersion: 1,
+	})
+	require.NoError(t, err)
+
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	require.NoError(t, pruneReassignedMusicTrack(ctx, sqlc.New(tx), sourceTrack.ID, targetTrack.ID))
+	require.NoError(t, tx.Commit(ctx))
+
+	_, err = q.GetTrackByID(ctx, sourceTrack.ID)
+	require.ErrorIs(t, err, pgx.ErrNoRows)
+	_, err = q.GetAlbumByID(ctx, sourceAlbum.ID)
+	require.ErrorIs(t, err, pgx.ErrNoRows)
+	var trackRating, albumRating int16
+	require.NoError(t, pool.QueryRow(ctx, `SELECT rating FROM user_track_ratings WHERE user_id=$1 AND track_id=$2`, userID, targetTrack.ID).Scan(&trackRating))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT rating FROM user_album_ratings WHERE user_id=$1 AND album_id=$2`, userID, targetAlbum.ID).Scan(&albumRating))
+	require.Equal(t, int16(8), trackRating)
+	require.Equal(t, int16(9), albumRating)
+	var favorite bool
+	require.NoError(t, pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM user_favorites WHERE user_id=$1 AND entity_type='album' AND entity_id=$2)`, userID, targetAlbum.ID).Scan(&favorite))
+	require.True(t, favorite)
+	require.NoError(t, pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM user_favorites WHERE user_id=$1 AND entity_type='track' AND entity_id=$2)`, userID, targetTrack.ID).Scan(&favorite))
+	require.True(t, favorite)
+	_, err = q.GetMetadataEntityBinding(ctx, sqlc.GetMetadataEntityBindingParams{LocalKind: "track", LocalID: sourceTrack.ID})
+	require.ErrorIs(t, err, pgx.ErrNoRows)
+}
+
 func TestApplyMusicFingerprintRecordingEvidencePreservesHardIdentityConflicts(t *testing.T) {
 	pool := testutil.SetupDB(t)
 	ctx := context.Background()

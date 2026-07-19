@@ -622,6 +622,16 @@ func TestSearchMusicArtistsAcceptsOnlyCanonicalCandidateConvergence(t *testing.T
 		t.Fatalf("converged candidates = %#v", results[0].Candidates)
 	}
 
+	// Provider-specific search hits are commonly returned as plain ambiguous
+	// candidates even when every opaque candidate resolves to the same entity.
+	// Canonical convergence is equally authoritative in that cohort.
+	search.results["$uicideboy$"][0].Recommendation = "ambiguous"
+	search.results["$uicideboy$"][1].Recommendation = "ambiguous"
+	results, err = SearchMusicArtists(context.Background(), []MusicArtistPlan{{Key: "artist:uicideboy", Artist: "$uicideboy$"}}, provider, &captureEmitter{}, 0)
+	if err != nil || len(results) != 1 || !results[0].Accepted || results[0].ProviderID != heyametadata.EncodeEntityProviderID(canonical) {
+		t.Fatalf("ambiguous canonical convergence = %#v err=%v", results, err)
+	}
+
 	provider.details[candidateB] = &metadata.MediaDetail{CanonicalID: "20000000-0000-4000-8000-000000000002", Title: "$uicideboy$"}
 	results, err = SearchMusicArtists(context.Background(), []MusicArtistPlan{{Key: "artist:uicideboy", Artist: "$uicideboy$"}}, provider, &captureEmitter{}, 0)
 	if err != nil {
@@ -1063,8 +1073,27 @@ func TestGroupMusicArtistsUsesTrustworthyMBIDBeforeName(t *testing.T) {
 		{Artist: "Beyonce", Album: "Two", ExternalIDs: map[string]string{"musicbrainz_album_artist": "ARTIST-MBID"}, Confidence: 1},
 	}
 	artists := groupMusicArtists(albums)
-	if len(artists) != 1 || len(artists[0].Albums) != 2 || artists[0].ExternalIDs["mbid"] != "artist-mbid" {
+	if len(artists) != 1 || len(artists[0].Albums) != 2 || artists[0].ExternalIDs["mbid"] != "artist-mbid" ||
+		artists[0].Key != "artist:beyonce|mbid:artist-mbid" {
 		t.Fatalf("MBID-first artist grouping = %#v", artists)
+	}
+}
+
+func TestGroupMusicArtistsKeepsSameNameMBIDsDistinctAcrossIndependentScopes(t *testing.T) {
+	blackpink := groupMusicArtists([]MusicAlbumPlan{{
+		Artist: "LISA", Album: "Alter Ego", Confidence: 1,
+		ExternalIDs: map[string]string{"musicbrainz_album_artist": "30aeb57f-bb16-47fa-86ca-79fc57b4d12c"},
+	}})
+	japanese := groupMusicArtists([]MusicAlbumPlan{{
+		Artist: "LiSA", Album: "LANDER", Confidence: 1,
+		ExternalIDs: map[string]string{"musicbrainz_album_artist": "85d76093-9865-4605-97fa-8c910929d366"},
+	}})
+	if len(blackpink) != 1 || len(japanese) != 1 || blackpink[0].Key == japanese[0].Key {
+		t.Fatalf("independent same-name scopes collapsed: blackpink=%#v japanese=%#v", blackpink, japanese)
+	}
+	if blackpink[0].Key != "artist:lisa|mbid:30aeb57f-bb16-47fa-86ca-79fc57b4d12c" ||
+		japanese[0].Key != "artist:lisa|mbid:85d76093-9865-4605-97fa-8c910929d366" {
+		t.Fatalf("stable MBID keys missing: blackpink=%#v japanese=%#v", blackpink, japanese)
 	}
 }
 

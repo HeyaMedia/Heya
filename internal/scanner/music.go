@@ -1074,20 +1074,18 @@ func groupMusicArtists(albums []MusicAlbumPlan) []MusicArtistPlan {
 		appendAlbum(artist, album)
 	}
 
-	baseKeyCount := map[string]int{}
-	for _, artist := range grouped {
-		baseKeyCount[musicArtistKey(artist.Artist, artist.ArtistDisambiguation)]++
-	}
 	artists := make([]MusicArtistPlan, 0, len(grouped))
 	for _, artist := range grouped {
 		baseKey := musicArtistKey(artist.Artist, artist.ArtistDisambiguation)
 		artist.Key = baseKey
-		if baseKeyCount[baseKey] > 1 {
-			if mbid := groupMBID[artist]; mbid != "" {
-				artist.Key += "|mbid:" + mbid
-			} else {
-				artist.Key += "|unidentified"
-			}
+		// A name is not an artist identity. Keep the authoritative MBID in the
+		// durable key even when this particular scope contains only one artist.
+		// Otherwise LISA and LiSA both become artist:lisa in their clean owner
+		// folders and a decision made for one scope can poison the other later.
+		if mbid := groupMBID[artist]; mbid != "" {
+			artist.Key += "|mbid:" + mbid
+		} else if len(byName[baseKey]) > 1 {
+			artist.Key += "|unidentified"
 		}
 		artist.ExternalIDs = consistentMusicArtistExternalIDs(artist.Albums, &artist.Issues)
 		sortMusicAlbums(artist.Albums)

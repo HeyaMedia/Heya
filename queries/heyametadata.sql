@@ -59,6 +59,9 @@ FROM metadata_entity_bindings
 WHERE local_kind = $1 AND local_id = $2
 FOR UPDATE;
 
+-- name: DeleteMetadataEntityBinding :exec
+DELETE FROM metadata_entity_bindings WHERE local_kind = $1 AND local_id = $2;
+
 -- name: UpsertMetadataProjectionState :one
 INSERT INTO metadata_projection_states (
   local_kind, local_id, scope, entity_id, entity_kind, projection_version
