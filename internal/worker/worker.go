@@ -35,6 +35,14 @@ type MatchService interface {
 	MediaItemIDForArtist(ctx context.Context, artistID int64) (int64, error)
 }
 
+// transactionalRichMetadataStore is deliberately narrower than MatchService:
+// only scanner rich-metadata jobs need to couple persistence to a locked
+// scanner generation. The production matcher implements it; keeping it
+// optional avoids widening every lightweight matcher fake.
+type transactionalRichMetadataStore interface {
+	StoreRichMetadataTx(ctx context.Context, tx pgx.Tx, mediaItemID int64, detail *metadata.MediaDetail) error
+}
+
 // EventPublisher abstracts the event-emitting side of the event hub so that
 // workers can be tested without a live Hub.
 type EventPublisher interface {
@@ -124,6 +132,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 
 	workers := river.NewWorkers()
 	continuationBackoff := newMetadataContinuationBackoff()
+	generatedWrites, _ := cfg.Watcher.(GeneratedWriteSuppressor)
 	river.AddWorker(workers, &EnrichMediaItemWorker{DB: cfg.DB, Matcher: cfg.Matcher, Heya: cfg.Heya, Hub: cfg.Hub, DataDir: cfg.DataDir, Progress: cfg.Progress})
 	river.AddWorker(workers, &DownloadImageWorker{DB: cfg.DB, Downloader: cfg.Downloader, Hub: cfg.Hub, Progress: cfg.Progress})
 	river.AddWorker(workers, &WarmPendingImagesWorker{DB: cfg.DB, DataDir: cfg.DataDir})
@@ -133,13 +142,13 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 	river.AddWorker(workers, &PersonFetchWorker{DB: cfg.DB, HeyaMetadata: cfg.HeyaMetadata, Progress: cfg.Progress})
 	river.AddWorker(workers, &FetchArtworkWorker{DB: cfg.DB, Heya: cfg.Heya, Progress: cfg.Progress})
 	river.AddWorker(workers, &RatingsFetchWorker{DB: cfg.DB, Heya: cfg.Heya, Hub: cfg.Hub, Progress: cfg.Progress})
-	river.AddWorker(workers, &SaveNFOWorker{DB: cfg.DB, Progress: cfg.Progress})
-	river.AddWorker(workers, &SaveImagesWorker{DB: cfg.DB, Progress: cfg.Progress})
+	river.AddWorker(workers, &SaveNFOWorker{DB: cfg.DB, Progress: cfg.Progress, GeneratedWrites: generatedWrites})
+	river.AddWorker(workers, &SaveImagesWorker{DB: cfg.DB, Progress: cfg.Progress, GeneratedWrites: generatedWrites})
 	river.AddWorker(workers, &ForceRefreshMetadataWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &ForceRefreshImagesWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &TranscodeWorker{Progress: cfg.Progress})
 	river.AddWorker(workers, &SoftDeleteWorker{DB: cfg.DB, Hub: cfg.Hub, Progress: cfg.Progress})
-	river.AddWorker(workers, &SaveMusicNFOWorker{DB: cfg.DB, Progress: cfg.Progress})
+	river.AddWorker(workers, &SaveMusicNFOWorker{DB: cfg.DB, Progress: cfg.Progress, GeneratedWrites: generatedWrites})
 	river.AddWorker(workers, &ScanTrackLoudnessWorker{DB: cfg.DB, Analysis: cfg.MediaAnalysis, Progress: cfg.Progress})
 	river.AddWorker(workers, &ScanAlbumLoudnessWorker{DB: cfg.DB, Progress: cfg.Progress})
 	river.AddWorker(workers, &ScanTrackFingerprintWorker{DB: cfg.DB, Progress: cfg.Progress})

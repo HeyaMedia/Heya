@@ -42,31 +42,36 @@ type Options struct {
 }
 
 type Result struct {
-	Inventory        Inventory                 `json:"-"`
-	Movies           []MoviePlan               `json:"movies,omitempty"`
-	MovieMatches     []MovieMatch              `json:"movie_matches,omitempty"`
-	MovieSearch      []MovieSearchMatch        `json:"movie_search,omitempty"`
-	MovieMetadata    []MovieFetchPreview       `json:"movie_metadata,omitempty"`
-	MovieMaterialize []MovieMaterializePreview `json:"movie_materialize,omitempty"`
-	MovieApply       []MovieApplyResult        `json:"movie_apply,omitempty"`
-	BookPlans        []BookPlan                `json:"book_plans,omitempty"`
-	BookSearch       []BookSearchMatch         `json:"book_search,omitempty"`
-	BookMetadata     []BookFetchPreview        `json:"book_metadata,omitempty"`
-	BookMaterialize  []BookMaterializePreview  `json:"book_materialize,omitempty"`
-	BookApply        []BookApplyResult         `json:"book_apply,omitempty"`
-	TVPlans          []TVPlan                  `json:"tv_plans,omitempty"`
-	TVMatches        []TVMatch                 `json:"tv_matches,omitempty"`
-	TVSearch         []TVSearchMatch           `json:"tv_search,omitempty"`
-	TVMetadata       []TVFetchPreview          `json:"tv_metadata,omitempty"`
-	TVMaterialize    []TVMaterializePreview    `json:"tv_materialize,omitempty"`
-	TVApply          []TVApplyResult           `json:"tv_apply,omitempty"`
-	MusicTracks      []MusicTrackPlan          `json:"music_tracks,omitempty"`
-	MusicAlbums      []MusicAlbumPlan          `json:"music_albums,omitempty"`
-	MusicArtists     []MusicArtistPlan         `json:"music_artists,omitempty"`
-	MusicSearch      []MusicSearchMatch        `json:"music_search,omitempty"`
-	MusicMetadata    []MusicFetchPreview       `json:"music_metadata,omitempty"`
-	MusicMaterialize []MusicMaterializePreview `json:"music_materialize,omitempty"`
-	MusicApply       []MusicApplyResult        `json:"music_apply,omitempty"`
+	// artifactSourceSet is the complete identity-relevant path set observed for
+	// the owner scope during analysis. It is carried across the durable stages
+	// outside Result's JSON so a newly added source cannot be invisible merely
+	// because it was absent from the narrow entity inventory.
+	artifactSourceSet sourceSetArtifact
+	Inventory         Inventory                 `json:"-"`
+	Movies            []MoviePlan               `json:"movies,omitempty"`
+	MovieMatches      []MovieMatch              `json:"movie_matches,omitempty"`
+	MovieSearch       []MovieSearchMatch        `json:"movie_search,omitempty"`
+	MovieMetadata     []MovieFetchPreview       `json:"movie_metadata,omitempty"`
+	MovieMaterialize  []MovieMaterializePreview `json:"movie_materialize,omitempty"`
+	MovieApply        []MovieApplyResult        `json:"movie_apply,omitempty"`
+	BookPlans         []BookPlan                `json:"book_plans,omitempty"`
+	BookSearch        []BookSearchMatch         `json:"book_search,omitempty"`
+	BookMetadata      []BookFetchPreview        `json:"book_metadata,omitempty"`
+	BookMaterialize   []BookMaterializePreview  `json:"book_materialize,omitempty"`
+	BookApply         []BookApplyResult         `json:"book_apply,omitempty"`
+	TVPlans           []TVPlan                  `json:"tv_plans,omitempty"`
+	TVMatches         []TVMatch                 `json:"tv_matches,omitempty"`
+	TVSearch          []TVSearchMatch           `json:"tv_search,omitempty"`
+	TVMetadata        []TVFetchPreview          `json:"tv_metadata,omitempty"`
+	TVMaterialize     []TVMaterializePreview    `json:"tv_materialize,omitempty"`
+	TVApply           []TVApplyResult           `json:"tv_apply,omitempty"`
+	MusicTracks       []MusicTrackPlan          `json:"music_tracks,omitempty"`
+	MusicAlbums       []MusicAlbumPlan          `json:"music_albums,omitempty"`
+	MusicArtists      []MusicArtistPlan         `json:"music_artists,omitempty"`
+	MusicSearch       []MusicSearchMatch        `json:"music_search,omitempty"`
+	MusicMetadata     []MusicFetchPreview       `json:"music_metadata,omitempty"`
+	MusicMaterialize  []MusicMaterializePreview `json:"music_materialize,omitempty"`
+	MusicApply        []MusicApplyResult        `json:"music_apply,omitempty"`
 }
 
 type Phase string
@@ -206,6 +211,7 @@ func (r *LibraryRun) ResumeFetchResult(ctx context.Context, result Result, artif
 		return true, err
 	}
 	applySearchDecisionsToResult(&result, r.lib, r.searchDecisions, r.sink)
+	retainFetchMetadataForAcceptedSearch(&result, r.lib)
 	if !fetchMetadataCoversAcceptedSearch(result, r.lib) {
 		r.sink.Emit(Event{Event: "scan.artifact_stale", Severity: SeverityInfo, Data: map[string]any{
 			"kind":        scanArtifactKindFetch,
@@ -269,6 +275,94 @@ func (r *LibraryRun) Finish(ctx context.Context) (Result, error) {
 	return r.result, nil
 }
 
+// FinishSearchEntity commits the user-visible scan projection and the search
+// artifact/status hand-off in one generation-checked transaction. The entity
+// row is locked before projection writes, so a superseded remote result can
+// never overwrite current review decisions or candidates.
+func (r *LibraryRun) FinishSearchEntity(ctx context.Context, entityID, expectedAnalysisArtifactID int64) (Result, ScannerEntityRef, bool, error) {
+	return r.FinishSearchEntityWithHandoff(ctx, entityID, expectedAnalysisArtifactID, nil)
+}
+
+func (r *LibraryRun) FinishSearchEntityWithHandoff(ctx context.Context, entityID, expectedAnalysisArtifactID int64, handoff ScannerSearchHandoff) (Result, ScannerEntityRef, bool, error) {
+	summary := scanSummaryData(r.lib, r.result)
+	r.sink.Emit(Event{Event: "scan.summary", Data: summary})
+	scan := r.scannerStagePersistence(summary)
+	ref, current, err := persistScannerSearchEntity(ctx, r.scannerStageDB(), r.lib, r.opts, entityID, expectedAnalysisArtifactID, r.result, 0, scan, handoff)
+	if err != nil {
+		r.sink.Emit(Event{Event: "scan.persist_failed", Severity: SeverityWarn, Message: err.Error()})
+		return r.result, ScannerEntityRef{}, false, err
+	}
+	r.completeScannerStageFinish(scan, current)
+	return r.result, ref, current, nil
+}
+
+func (r *LibraryRun) FinishFetchEntity(ctx context.Context, entityID, expectedSearchArtifactID int64) (Result, sqlc.ScannerEntityArtifact, bool, error) {
+	return r.FinishFetchEntityWithHandoff(ctx, entityID, expectedSearchArtifactID, nil)
+}
+
+func (r *LibraryRun) FinishFetchEntityWithHandoff(ctx context.Context, entityID, expectedSearchArtifactID int64, handoff ScannerFetchHandoff) (Result, sqlc.ScannerEntityArtifact, bool, error) {
+	summary := scanSummaryData(r.lib, r.result)
+	r.sink.Emit(Event{Event: "scan.summary", Data: summary})
+	scan := r.scannerStagePersistence(summary)
+	artifact, current, err := persistScannerFetchEntity(ctx, r.scannerStageDB(), entityID, expectedSearchArtifactID, r.result, 0, scan, handoff)
+	if err != nil {
+		r.sink.Emit(Event{Event: "scan.persist_failed", Severity: SeverityWarn, Message: err.Error()})
+		return r.result, sqlc.ScannerEntityArtifact{}, false, err
+	}
+	r.completeScannerStageFinish(scan, current)
+	return r.result, artifact, current, nil
+}
+
+func (r *LibraryRun) FinishApplyEntity(ctx context.Context, entityID, expectedMetadataArtifactID int64) (Result, sqlc.ScannerEntityArtifact, bool, error) {
+	return r.finishApplyEntity(ctx, entityID, expectedMetadataArtifactID, false)
+}
+
+// FinishApplyEntityPendingFanout persists the core apply result while keeping
+// the entity in applying. The worker later finalizes it transactionally with
+// every downstream River insert.
+func (r *LibraryRun) FinishApplyEntityPendingFanout(ctx context.Context, entityID, expectedMetadataArtifactID int64) (Result, sqlc.ScannerEntityArtifact, bool, error) {
+	return r.finishApplyEntity(ctx, entityID, expectedMetadataArtifactID, true)
+}
+
+func (r *LibraryRun) finishApplyEntity(ctx context.Context, entityID, expectedMetadataArtifactID int64, pendingFanout bool) (Result, sqlc.ScannerEntityArtifact, bool, error) {
+	summary := scanSummaryData(r.lib, r.result)
+	r.sink.Emit(Event{Event: "scan.summary", Data: summary})
+	scan := r.scannerStagePersistence(summary)
+	artifact, current, err := persistScannerApplyEntity(ctx, r.scannerStageDB(), entityID, expectedMetadataArtifactID, r.result, 0, scan, pendingFanout)
+	if err != nil {
+		r.sink.Emit(Event{Event: "scan.persist_failed", Severity: SeverityWarn, Message: err.Error()})
+		return r.result, sqlc.ScannerEntityArtifact{}, false, err
+	}
+	r.completeScannerStageFinish(scan, current)
+	return r.result, artifact, current, nil
+}
+
+func (r *LibraryRun) scannerStagePersistence(summary map[string]any) *scannerStageScanPersistence {
+	if !r.opts.PersistScan || r.opts.PersistenceDB == nil || !scanShouldPersist(r.opts) {
+		return nil
+	}
+	return &scannerStageScanPersistence{
+		Lib: r.lib, Events: r.recorder.Events, Options: r.opts, Summary: summary,
+	}
+}
+
+func (r *LibraryRun) scannerStageDB() *pgxpool.Pool {
+	if r.opts.PersistenceDB != nil {
+		return r.opts.PersistenceDB
+	}
+	return r.opts.ApplyDB
+}
+
+func (r *LibraryRun) completeScannerStageFinish(scan *scannerStageScanPersistence, current bool) {
+	if scan != nil && current {
+		r.scanRunID = scan.ScanRunID
+		r.sink.Emit(Event{Event: "scan.persisted", Data: map[string]any{"mode": scanRunMode(r.opts)}})
+	}
+	if r.opts.Report {
+		WriteReport(r.out, r.lib, r.result, r.recorder.Events)
+	}
+}
+
 func (r *LibraryRun) runAnalyze(ctx context.Context) error {
 	if r.analyzed {
 		return nil
@@ -287,6 +381,18 @@ func (r *LibraryRun) runAnalyze(ctx context.Context) error {
 	if err != nil {
 		r.result.Inventory = inv
 		return r.fail(err)
+	}
+	provenanceDB := r.opts.PersistenceDB
+	if provenanceDB == nil {
+		provenanceDB = r.opts.ApplyDB
+	}
+	generatedSidecars, err := markGeneratedSidecars(ctx, provenanceDB, lib.ID, &inv)
+	if err != nil {
+		r.result.Inventory = inv
+		return r.fail(err)
+	}
+	if generatedSidecars > 0 {
+		r.sink.Emit(Event{Event: "inventory.generated_sidecars", Data: map[string]any{"count": generatedSidecars}})
 	}
 
 	r.result = Result{Inventory: inv}

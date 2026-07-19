@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math"
+	"math/rand"
 	"sort"
 	"time"
 
@@ -54,6 +55,13 @@ type musicRecommendationCandidate struct {
 	Score   float64
 	Sources musicCandidateSource
 	State   musicCandidateState
+	// GenreOverlap is only populated when the caller opted into
+	// genre_affinity (see buildMusicRecommendationPool) — zero value means
+	// "not computed", which is indistinguishable from a real zero-overlap
+	// candidate, but that's fine: rankMusicRecommendationPool only reads it
+	// when genreAffinity > 0, and genreAffinity > 0 is exactly the condition
+	// buildMusicRecommendationPool used to decide whether to compute it.
+	GenreOverlap float64
 }
 
 type musicTasteProfile struct {
@@ -116,7 +124,9 @@ func (a *App) recommendMusicForUser(ctx context.Context, userID int64, mode musi
 	if err != nil {
 		return nil, fmt.Errorf("taste profile: %w", err)
 	}
-	return a.recommendMusicAround(ctx, userID, profile.SonicCentroid, profile.MetadataCentroid, profile.ArtistIDs, mode, limit, exclude)
+	// Library Radio / For You station callers don't expose the genre_affinity
+	// knob (that's a seed-radio-only dial) — always pass the no-op values.
+	return a.recommendMusicAround(ctx, userID, profile.SonicCentroid, profile.MetadataCentroid, profile.ArtistIDs, mode, limit, exclude, 0, nil)
 }
 
 type recommendationMixRule struct {
@@ -127,7 +137,10 @@ type recommendationMixRule struct {
 	mode        musicRecommendationMode
 }
 
-func (a *App) generateRecommendationMixes(ctx context.Context, userID int64, maxMixes, tracksPerMix int) ([]MusicMix, error) {
+// variant is 0 for the normal day-stable rotation, or a non-zero value
+// (folded into rankMusicRecommendationPool's dayBucket entropy) that lets an
+// explicit regenerate request break same-day determinism.
+func (a *App) generateRecommendationMixes(ctx context.Context, userID int64, maxMixes, tracksPerMix int, variant int64) ([]MusicMix, error) {
 	profile, err := a.musicTasteProfile(ctx, userID, 16)
 	if err != nil {
 		return nil, err
@@ -153,7 +166,9 @@ func (a *App) generateRecommendationMixes(ctx context.Context, userID int64, max
 
 	mixes := make([]MusicMix, 0, min(maxMixes, len(rules)))
 	used := make([]int64, 0, tracksPerMix*len(rules))
-	pool, err := a.buildMusicRecommendationPool(ctx, userID, profile.SonicCentroid, profile.MetadataCentroid, profile.ArtistIDs, max(120, tracksPerMix*10), 1.0)
+	// Profile archetypes don't use the genre_affinity knob (that's seed-radio
+	// only) — 0/nil keeps buildMusicRecommendationPool's genre fetch skipped.
+	pool, err := a.buildMusicRecommendationPool(ctx, userID, profile.SonicCentroid, profile.MetadataCentroid, profile.ArtistIDs, max(120, tracksPerMix*10), 1.0, 0, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +176,7 @@ func (a *App) generateRecommendationMixes(ctx context.Context, userID int64, max
 		if len(mixes) >= maxMixes {
 			break
 		}
-		tracks := rankMusicRecommendationPool(pool, userID, rule.mode, tracksPerMix, used)
+		tracks := rankMusicRecommendationPool(pool, userID, rule.mode, tracksPerMix, used, variant, 0)
 		if len(tracks) < 5 {
 			continue
 		}
@@ -180,6 +195,9 @@ func (a *App) generateRecommendationMixes(ctx context.Context, userID int64, max
 // sonic/metadata centroids and artist IDs may come from the user profile or an
 // instant-radio seed. Any source may be empty; provider popularity is the final
 // cold-start fallback.
+// genreAffinity/seedGenreProfile are the RadioRequest.GenreAffinity knob's
+// plumbing — see genreAffinityScoreScale's doc comment below for the
+// formula. Every non-radio caller passes 0/nil, which is a guaranteed no-op.
 func (a *App) recommendMusicAround(
 	ctx context.Context,
 	userID int64,
@@ -189,6 +207,8 @@ func (a *App) recommendMusicAround(
 	mode musicRecommendationMode,
 	limit int,
 	exclude []int64,
+	genreAffinity float64,
+	seedGenreProfile map[string]float64,
 ) ([]sqlc.ListArtistTopTracksForMixRow, error) {
 	if limit <= 0 {
 		return []sqlc.ListArtistTopTracksForMixRow{}, nil
@@ -197,17 +217,25 @@ func (a *App) recommendMusicAround(
 	if mode == recommendRadio {
 		affinityWeight = 0.22
 	}
-	pool, err := a.buildMusicRecommendationPool(ctx, userID, sonicCentroid, metadataCentroid, artistIDs, max(120, limit*10), affinityWeight)
+	pool, err := a.buildMusicRecommendationPool(ctx, userID, sonicCentroid, metadataCentroid, artistIDs, max(120, limit*10), affinityWeight, genreAffinity, seedGenreProfile)
 	if err != nil {
 		return nil, err
 	}
-	return rankMusicRecommendationPool(pool, userID, mode, limit, exclude), nil
+	// Radio/station callers don't have a regenerate concept, so variant is
+	// always 0 here — the head/tail exploration split still rotates day to
+	// day off dayBucket alone.
+	return rankMusicRecommendationPool(pool, userID, mode, limit, exclude, 0, genreAffinity), nil
 }
 
 // buildMusicRecommendationPool performs candidate retrieval once. Generated
 // mix slates reuse the resulting pool across every archetype; instant radio
 // builds one seed-specific pool. This keeps the model genuinely shared and
 // avoids repeating the same HNSW/provider queries four times per slate.
+// genreAffinity/seedGenreProfile: when genreAffinity > 0 and the seed
+// profile is non-empty, every candidate gets a batched GenreOverlap score
+// against seedGenreProfile (see genreHistogramOverlap). genreAffinity <= 0
+// or an empty seed profile skips the extra fetch entirely — the additive
+// no-op at genre_affinity=0 costs nothing, not just "scores nothing".
 func (a *App) buildMusicRecommendationPool(
 	ctx context.Context,
 	userID int64,
@@ -216,6 +244,8 @@ func (a *App) buildMusicRecommendationPool(
 	artistIDs []int64,
 	poolLimit int,
 	affinityWeight float64,
+	genreAffinity float64,
+	seedGenreProfile map[string]float64,
 ) ([]musicRecommendationCandidate, error) {
 	candidates := map[int64]*musicRecommendationCandidate{}
 	add := func(row sqlc.ListArtistTopTracksForMixRow, source musicCandidateSource, score float64) {
@@ -311,19 +341,64 @@ func (a *App) buildMusicRecommendationPool(
 		ptr.State = states[id]
 		flat = append(flat, *ptr)
 	}
+
+	if genreAffinity > 0 && len(seedGenreProfile) > 0 {
+		genreProfiles, err := a.candidateGenreProfiles(ctx, ids)
+		if err != nil {
+			return nil, fmt.Errorf("candidate genre profiles: %w", err)
+		}
+		for i := range flat {
+			if cp, ok := genreProfiles[flat[i].Track.TrackID]; ok {
+				flat[i].GenreOverlap = genreHistogramOverlap(seedGenreProfile, cp)
+			} else {
+				// No genre signal anywhere for this track (neither
+				// album.genres nor track_facets.top_genres) — neutralGenreOverlap's
+				// doc comment explains why this must not be 0.
+				flat[i].GenreOverlap = neutralGenreOverlap
+			}
+		}
+	}
 	return flat, nil
 }
 
-func rankMusicRecommendationPool(pool []musicRecommendationCandidate, userID int64, mode musicRecommendationMode, limit int, exclude []int64) []sqlc.ListArtistTopTracksForMixRow {
+func rankMusicRecommendationPool(pool []musicRecommendationCandidate, userID int64, mode musicRecommendationMode, limit int, exclude []int64, variant int64, genreAffinity float64) []sqlc.ListArtistTopTracksForMixRow {
 	excluded := make(map[int64]bool, len(exclude))
 	for _, id := range exclude {
 		excluded[id] = true
 	}
 	now := time.Now()
-	dayBucket := now.Unix() / 86400
-	ranked := make([]musicRecommendationCandidate, 0, len(pool))
+	// variant folds into the day bucket so an explicit regenerate (non-zero
+	// variant) can break same-day determinism; normal callers pass 0 and get
+	// the existing stable-until-tomorrow behavior.
+	dayBucket := (now.Unix() / 86400) ^ variant
+
+	eligible := make([]musicRecommendationCandidate, 0, len(pool))
 	for _, base := range pool {
 		if excluded[base.Track.TrackID] || !musicCandidateEligible(base, mode, now) {
+			continue
+		}
+		eligible = append(eligible, base)
+	}
+
+	// genreAffinityScoreScale's doc comment has the full formula and
+	// invariants. genreAffinity <= 0 leaves dropZeroOverlap false and the
+	// score term below inert, so this is a true no-op for every caller that
+	// doesn't pass a positive genreAffinity (i.e. everyone except seed radio
+	// with the knob turned up).
+	dropZeroOverlap := false
+	if genreAffinity >= genreAffinityDropThreshold {
+		overlapping := 0
+		for _, c := range eligible {
+			if c.GenreOverlap > 0 {
+				overlapping++
+			}
+		}
+		dropZeroOverlap = overlapping >= limit
+	}
+
+	ranked := make([]musicRecommendationCandidate, 0, len(eligible))
+	for _, base := range eligible {
+		if dropZeroOverlap && base.GenreOverlap == 0 {
 			continue
 		}
 		candidate := base
@@ -342,12 +417,30 @@ func rankMusicRecommendationPool(pool []musicRecommendationCandidate, userID int
 			ageMonths := now.Sub(candidate.State.LastPlayed).Hours() / (24 * 30)
 			candidate.Score += math.Min(2.5, ageMonths/6)
 		}
-		// Small deterministic exploration jitter rotates equal candidates
-		// daily without making a refresh reshuffle the queue underneath users.
+		if genreAffinity > 0 {
+			candidate.Score += genreAffinity * genreAffinityScoreScale * candidate.GenreOverlap
+		}
+		// Small deterministic scoring jitter still breaks ties between
+		// near-identical candidates. It's intentionally too small to be the
+		// rotation mechanism on its own (score spreads of several points
+		// swamp it) — selectMusicRecommendations' head/tail exploration
+		// sampling below is what actually makes the rail visibly rotate.
 		candidate.Score += musicRotationJitter(userID, candidate.Track.TrackID, string(mode), dayBucket) * 0.35
 		ranked = append(ranked, candidate)
 	}
-	return selectMusicRecommendations(ranked, limit, mode)
+	explorationRng := rand.New(rand.NewSource(musicExplorationSeed(userID, mode, dayBucket))) //nolint:gosec // rotation, not crypto
+	return selectMusicRecommendations(ranked, limit, mode, explorationRng)
+}
+
+// musicExplorationSeed derives a stable rng seed from (userID, mode,
+// dayBucket) — the same triple named in the mix-rules-plan doc — so the
+// exploration-tail shuffle in selectMusicRecommendations rotates once a day
+// per user/mode and immediately on an explicit regenerate (dayBucket already
+// carries the folded-in variant).
+func musicExplorationSeed(userID int64, mode musicRecommendationMode, dayBucket int64) int64 {
+	h := fnv.New64a()
+	_, _ = fmt.Fprintf(h, "%d:%s:%d", userID, mode, dayBucket)
+	return int64(h.Sum64()) //nolint:gosec // rotation seed, not crypto
 }
 
 func musicCandidateEligible(candidate musicRecommendationCandidate, mode musicRecommendationMode, now time.Time) bool {
@@ -366,10 +459,25 @@ func musicCandidateEligible(candidate musicRecommendationCandidate, mode musicRe
 	}
 }
 
+// explorationTailWindow bounds how far past the deterministic head
+// selectMusicRecommendations will look for exploration-tail picks — roughly
+// ranks 20-60 for a typical ~30-track mix (head ends at `limit`, tail runs
+// `limit`..`limit+explorationTailWindow`). Deep enough to feel like a real
+// alternate pick, shallow enough that everything sampled is still a
+// plausible recommendation rather than pool dregs.
+const explorationTailWindow = 40
+
 // selectMusicRecommendations applies product-independent safety rails:
 // recording/version dedupe, a soft artist cap, artist adjacency avoidance,
-// and a familiar/discovery blend for the main For You stream.
-func selectMusicRecommendations(candidates []musicRecommendationCandidate, limit int, mode musicRecommendationMode) []sqlc.ListArtistTopTracksForMixRow {
+// and a familiar/discovery blend for the main For You stream. It then fills
+// slots from a head/tail split — ~80% from the deterministic score-ranked
+// head, ~20% sampled from the deeper exploration tail via rng — the same
+// pattern proven in assembleTasteMix, so For You/Discovery/Rediscover/Deep
+// Cuts/Radio all visibly rotate day to day instead of re-surfacing the exact
+// same score order (the jitter in rankMusicRecommendationPool alone is too
+// small to do that once score spreads exceed a couple points). rng may be
+// nil (tests exercising a fixed order) — the tail is simply left unshuffled.
+func selectMusicRecommendations(candidates []musicRecommendationCandidate, limit int, mode musicRecommendationMode, rng *rand.Rand) []sqlc.ListArtistTopTracksForMixRow {
 	sort.SliceStable(candidates, func(i, j int) bool {
 		if candidates[i].Score == candidates[j].Score {
 			return candidates[i].Track.TrackID < candidates[j].Track.TrackID
@@ -403,6 +511,20 @@ func selectMusicRecommendations(candidates []musicRecommendationCandidate, limit
 		candidates = blended
 	}
 
+	// Split into the deterministic head (top `limit`) and the exploration
+	// tail (the next explorationTailWindow candidates beyond it), shuffled
+	// with the caller's seeded rng. Anything deeper than that is `rest` —
+	// untouched extra fill material for narrow libraries, same as before
+	// this change.
+	headEnd := min(len(candidates), limit)
+	head := candidates[:headEnd]
+	tailEnd := min(len(candidates), headEnd+explorationTailWindow)
+	tail := append([]musicRecommendationCandidate{}, candidates[headEnd:tailEnd]...)
+	if rng != nil && len(tail) > 1 {
+		rng.Shuffle(len(tail), func(i, j int) { tail[i], tail[j] = tail[j], tail[i] })
+	}
+	rest := candidates[tailEnd:]
+
 	seenTrack := map[int64]bool{}
 	seenSong := map[string]bool{}
 	artistCounts := map[int64]int{}
@@ -430,7 +552,37 @@ func selectMusicRecommendations(candidates []musicRecommendationCandidate, limit
 		return true
 	}
 
-	for _, candidate := range candidates {
+	// Interleave head and tail: 1 in 5 output slots (~20%) draws from the
+	// shuffled exploration tail, the rest come from the deterministic head
+	// in score order — mirrors assembleTasteMix's "every Nth slot branches
+	// out" pattern.
+	hi, ti := 0, 0
+	for len(selected) < limit && (hi < len(head) || ti < len(tail)) {
+		takeExploration := ti < len(tail) && len(selected)%5 == 4
+		if takeExploration {
+			if !push(tail[ti], true) {
+				deferred = append(deferred, tail[ti])
+			}
+			ti++
+			continue
+		}
+		if hi < len(head) {
+			if !push(head[hi], true) {
+				deferred = append(deferred, head[hi])
+			}
+			hi++
+			continue
+		}
+		if ti < len(tail) {
+			if !push(tail[ti], true) {
+				deferred = append(deferred, tail[ti])
+			}
+			ti++
+		}
+	}
+	// Still short (narrow head/tail pool)? Fall through to the untouched
+	// deeper pool before relaxing any constraints.
+	for _, candidate := range rest {
 		if len(selected) >= limit {
 			break
 		}

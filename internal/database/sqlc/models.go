@@ -396,6 +396,23 @@ type ExternalRating struct {
 	RawValue    string         `json:"raw_value"`
 }
 
+type GeneratedSidecarPublication struct {
+	Path                  string             `json:"path"`
+	PublishedSize         pgtype.Int8        `json:"published_size"`
+	PublishedMtime        pgtype.Timestamptz `json:"published_mtime"`
+	PublishedSha256       []byte             `json:"published_sha256"`
+	PublishedAt           pgtype.Timestamptz `json:"published_at"`
+	PendingIntentID       pgtype.UUID        `json:"pending_intent_id"`
+	PendingSize           pgtype.Int8        `json:"pending_size"`
+	PendingSha256         []byte             `json:"pending_sha256"`
+	PendingStagedPath     pgtype.Text        `json:"pending_staged_path"`
+	PendingPreviousPath   pgtype.Text        `json:"pending_previous_path"`
+	PendingLeaseExpiresAt pgtype.Timestamptz `json:"pending_lease_expires_at"`
+	GeneratedAt           pgtype.Timestamptz `json:"generated_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	VerifiedAt            pgtype.Timestamptz `json:"verified_at"`
+}
+
 type Keyword struct {
 	ID          int64  `json:"id"`
 	ExternalIds []byte `json:"external_ids"`
@@ -494,6 +511,12 @@ type LibraryFileLink struct {
 	Metadata       []byte             `json:"metadata"`
 }
 
+type LibraryGeneratedSidecar struct {
+	LibraryID int64              `json:"library_id"`
+	Path      string             `json:"path"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type LibraryNfoDir struct {
 	LibraryID int64              `json:"library_id"`
 	DirPath   string             `json:"dir_path"`
@@ -509,22 +532,24 @@ type LibraryScanBurst struct {
 }
 
 type LocalMediaIdentity struct {
-	ID                 int64              `json:"id"`
-	LibraryID          int64              `json:"library_id"`
-	MediaType          MediaType          `json:"media_type"`
-	IdentityKey        string             `json:"identity_key"`
-	Title              string             `json:"title"`
-	Year               string             `json:"year"`
-	Confidence         float32            `json:"confidence"`
-	Source             string             `json:"source"`
-	ReviewStatus       string             `json:"review_status"`
-	MetadataProviderID string             `json:"metadata_provider_id"`
-	MediaItemID        pgtype.Int8        `json:"media_item_id"`
-	FirstSeenScanRunID pgtype.Int8        `json:"first_seen_scan_run_id"`
-	LastSeenScanRunID  pgtype.Int8        `json:"last_seen_scan_run_id"`
-	RawIdentity        []byte             `json:"raw_identity"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ID                      int64              `json:"id"`
+	LibraryID               int64              `json:"library_id"`
+	MediaType               MediaType          `json:"media_type"`
+	IdentityKey             string             `json:"identity_key"`
+	Title                   string             `json:"title"`
+	Year                    string             `json:"year"`
+	Confidence              float32            `json:"confidence"`
+	Source                  string             `json:"source"`
+	ReviewStatus            string             `json:"review_status"`
+	MetadataProviderID      string             `json:"metadata_provider_id"`
+	MediaItemID             pgtype.Int8        `json:"media_item_id"`
+	FirstSeenScanRunID      pgtype.Int8        `json:"first_seen_scan_run_id"`
+	LastSeenScanRunID       pgtype.Int8        `json:"last_seen_scan_run_id"`
+	RawIdentity             []byte             `json:"raw_identity"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+	DecisionProvenance      string             `json:"decision_provenance"`
+	DecisionMatcherRevision int32              `json:"decision_matcher_revision"`
 }
 
 type LocalMediaIdentityExternalID struct {
@@ -1069,16 +1094,20 @@ type ScannerEntity struct {
 	FetchedAt          pgtype.Timestamptz `json:"fetched_at"`
 	AppliedAt          pgtype.Timestamptz `json:"applied_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	AnalysisArtifactID pgtype.Int8        `json:"analysis_artifact_id"`
+	PipelineGeneration int64              `json:"pipeline_generation"`
 }
 
 type ScannerEntityArtifact struct {
-	ID            int64              `json:"id"`
-	EntityID      int64              `json:"entity_id"`
-	Stage         string             `json:"stage"`
-	SchemaVersion int32              `json:"schema_version"`
-	ScanRunID     pgtype.Int8        `json:"scan_run_id"`
-	Data          []byte             `json:"data"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	ID                 int64              `json:"id"`
+	EntityID           int64              `json:"entity_id"`
+	Stage              string             `json:"stage"`
+	SchemaVersion      int32              `json:"schema_version"`
+	ScanRunID          pgtype.Int8        `json:"scan_run_id"`
+	Data               []byte             `json:"data"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	PipelineGeneration int64              `json:"pipeline_generation"`
+	SourceArtifactID   pgtype.Int8        `json:"source_artifact_id"`
 }
 
 type ScannerMetadataContinuation struct {

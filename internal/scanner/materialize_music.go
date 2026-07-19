@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 )
@@ -181,36 +182,37 @@ func (s *SQLMusicMaterializeStore) GetTrackFileByLibraryFileID(ctx context.Conte
 }
 
 type MusicMaterializePreview struct {
-	Key              string                        `json:"key"`
-	Action           string                        `json:"action"`
-	Reason           string                        `json:"reason,omitempty"`
-	Artist           string                        `json:"artist"`
-	SortName         string                        `json:"sort_name,omitempty"`
-	ProviderID       string                        `json:"provider_id,omitempty"`
-	MediaItemID      int64                         `json:"media_item_id,omitempty"`
-	ArtistID         int64                         `json:"artist_id,omitempty"`
-	MediaItemAction  string                        `json:"media_item_action,omitempty"`
-	ArtistRowAction  string                        `json:"artist_row_action,omitempty"`
-	AlbumActions     []MusicMaterializeAlbumAction `json:"album_actions,omitempty"`
-	AlbumMappings    []MusicAlbumFetchMatch        `json:"-"`
-	FileActions      []MovieMaterializeFileAction  `json:"file_actions,omitempty"`
-	ExternalIDs      map[string]string             `json:"external_ids,omitempty"`
-	MetadataFields   []string                      `json:"metadata_fields,omitempty"`
-	LocalAlbums      int                           `json:"local_albums,omitempty"`
-	MappedAlbums     int                           `json:"mapped_albums,omitempty"`
-	RemoteAlbums     int                           `json:"remote_albums,omitempty"`
-	LocalTracks      int                           `json:"local_tracks,omitempty"`
-	MappedTracks     int                           `json:"mapped_tracks,omitempty"`
-	RemoteTracks     int                           `json:"remote_tracks,omitempty"`
-	RemoteArtwork    int                           `json:"remote_artwork,omitempty"`
-	Tags             int                           `json:"tags,omitempty"`
-	AlbumsCreate     int                           `json:"albums_create,omitempty"`
-	AlbumsUpdate     int                           `json:"albums_update,omitempty"`
-	TracksCreate     int                           `json:"tracks_create,omitempty"`
-	TracksUpdate     int                           `json:"tracks_update,omitempty"`
-	TrackFilesCreate int                           `json:"track_files_create,omitempty"`
-	TrackFilesUpdate int                           `json:"track_files_update,omitempty"`
-	Issues           []string                      `json:"issues,omitempty"`
+	Key               string                           `json:"key"`
+	Action            string                           `json:"action"`
+	Reason            string                           `json:"reason,omitempty"`
+	Artist            string                           `json:"artist"`
+	SortName          string                           `json:"sort_name,omitempty"`
+	ProviderID        string                           `json:"provider_id,omitempty"`
+	MediaItemID       int64                            `json:"media_item_id,omitempty"`
+	ArtistID          int64                            `json:"artist_id,omitempty"`
+	MediaItemAction   string                           `json:"media_item_action,omitempty"`
+	ArtistRowAction   string                           `json:"artist_row_action,omitempty"`
+	AlbumActions      []MusicMaterializeAlbumAction    `json:"album_actions,omitempty"`
+	AlbumMappings     []MusicAlbumFetchMatch           `json:"-"`
+	FileActions       []MovieMaterializeFileAction     `json:"file_actions,omitempty"`
+	RecordingEvidence []MusicAcceptedRecordingEvidence `json:"recording_evidence,omitempty"`
+	ExternalIDs       map[string]string                `json:"external_ids,omitempty"`
+	MetadataFields    []string                         `json:"metadata_fields,omitempty"`
+	LocalAlbums       int                              `json:"local_albums,omitempty"`
+	MappedAlbums      int                              `json:"mapped_albums,omitempty"`
+	RemoteAlbums      int                              `json:"remote_albums,omitempty"`
+	LocalTracks       int                              `json:"local_tracks,omitempty"`
+	MappedTracks      int                              `json:"mapped_tracks,omitempty"`
+	RemoteTracks      int                              `json:"remote_tracks,omitempty"`
+	RemoteArtwork     int                              `json:"remote_artwork,omitempty"`
+	Tags              int                              `json:"tags,omitempty"`
+	AlbumsCreate      int                              `json:"albums_create,omitempty"`
+	AlbumsUpdate      int                              `json:"albums_update,omitempty"`
+	TracksCreate      int                              `json:"tracks_create,omitempty"`
+	TracksUpdate      int                              `json:"tracks_update,omitempty"`
+	TrackFilesCreate  int                              `json:"track_files_create,omitempty"`
+	TrackFilesUpdate  int                              `json:"track_files_update,omitempty"`
+	Issues            []string                         `json:"issues,omitempty"`
 }
 
 type MusicMaterializeAlbumAction struct {
@@ -259,6 +261,9 @@ func PlanMusicMaterialization(ctx context.Context, lib sqlc.Library, result Resu
 			),
 			LocalAlbums: len(local.Albums),
 			LocalTracks: countMusicArtistTracks(local),
+		}
+		if hasSearch && search.Accepted {
+			preview.RecordingEvidence = musicMaterializeRecordingEvidence(local, search.RecordingEvidence)
 		}
 		if !hasSearch {
 			preview.Reason = "local_only"
@@ -309,6 +314,53 @@ func PlanMusicMaterialization(ctx context.Context, lib sqlc.Library, result Resu
 	})
 	emit.Emit(Event{Event: "materialize.preview_summary", Kind: "music", Data: musicMaterializeSummary(previews)})
 	return previews, nil
+}
+
+// musicMaterializeRecordingEvidence narrows accepted acoustic evidence to the
+// exact paths owned by this artist. It deliberately does not clean, case-fold,
+// or slash-normalize paths: a fingerprint from one file must never migrate to
+// a merely similar path. Conflicting duplicate claims are discarded.
+func musicMaterializeRecordingEvidence(local MusicArtistPlan, values []MusicAcceptedRecordingEvidence) []MusicAcceptedRecordingEvidence {
+	localPaths := map[string]bool{}
+	for _, album := range local.Albums {
+		for _, track := range album.Tracks {
+			if track.RelPath != "" {
+				localPaths[track.RelPath] = true
+			}
+		}
+	}
+	byPath := map[string]MusicAcceptedRecordingEvidence{}
+	conflicted := map[string]bool{}
+	for _, value := range values {
+		if !localPaths[value.RelPath] || conflicted[value.RelPath] || value.Confidence <= 0 || value.SourceDuration <= 0 || value.RecordingDuration <= 0 {
+			continue
+		}
+		value.RecordingMBID = strings.TrimSpace(value.RecordingMBID)
+		value.CanonicalRecordingID = strings.TrimSpace(value.CanonicalRecordingID)
+		if _, err := uuid.Parse(value.RecordingMBID); err != nil {
+			continue
+		}
+		if _, err := uuid.Parse(value.CanonicalRecordingID); err != nil {
+			continue
+		}
+		if existing, ok := byPath[value.RelPath]; ok {
+			if !strings.EqualFold(existing.RecordingMBID, value.RecordingMBID) || !strings.EqualFold(existing.CanonicalRecordingID, value.CanonicalRecordingID) {
+				delete(byPath, value.RelPath)
+				conflicted[value.RelPath] = true
+				continue
+			}
+			if existing.Confidence >= value.Confidence {
+				continue
+			}
+		}
+		byPath[value.RelPath] = value
+	}
+	out := make([]MusicAcceptedRecordingEvidence, 0, len(byPath))
+	for _, value := range byPath {
+		out = append(out, value)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].RelPath < out[j].RelPath })
+	return out
 }
 
 func planMusicTarget(ctx context.Context, lib sqlc.Library, mappings []MusicAlbumFetchMatch, filesByRel map[string][]InventoryFile, store MusicMaterializeStore, preview *MusicMaterializePreview) error {

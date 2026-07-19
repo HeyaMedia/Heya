@@ -586,7 +586,7 @@ func TestMusicReleaseGroupDiscoveryPreservesUnifiedProviderEvidence(t *testing.T
 	}
 }
 
-func TestFetchMusicMetadataPreviewsReranksArtistByDiscography(t *testing.T) {
+func TestFetchMusicMetadataPreviewsDoesNotRerankAcrossArtistIdentities(t *testing.T) {
 	provider := &fakeMusicDetailProvider{details: map[string]*metadata.MediaDetail{
 		"heya:artist:mbid:wrong-ado": {
 			Title:          "ADO",
@@ -685,23 +685,23 @@ func TestFetchMusicMetadataPreviewsReranksArtistByDiscography(t *testing.T) {
 		t.Fatalf("previews: got %d, want 1", len(previews))
 	}
 	preview := previews[0]
-	if preview.ProviderID != "heya:artist:mbid:ado-jp" {
-		t.Fatalf("provider after rerank: got %s, want ado-jp: %#v", preview.ProviderID, preview)
+	if preview.ProviderID != "heya:artist:mbid:wrong-ado" {
+		t.Fatalf("fetch changed the selected artist identity: %#v", preview)
 	}
-	if preview.SearchProviderID != "heya:artist:mbid:wrong-ado" || preview.SelectionReason != "discography_reranked" {
-		t.Fatalf("rerank metadata: search_provider=%q reason=%q", preview.SearchProviderID, preview.SelectionReason)
+	if preview.SearchProviderID != "" || preview.SelectionReason != "search_selected" {
+		t.Fatalf("selection metadata: search_provider=%q reason=%q", preview.SearchProviderID, preview.SelectionReason)
 	}
-	if preview.MappedAlbums != 1 || preview.LocalAlbums != 1 || preview.MappedTracks != 2 || preview.LocalTracks != 2 {
-		t.Fatalf("mapping after rerank: albums=%d/%d tracks=%d/%d", preview.MappedAlbums, preview.LocalAlbums, preview.MappedTracks, preview.LocalTracks)
+	if preview.MappedAlbums != 0 || preview.LocalAlbums != 1 || preview.MappedTracks != 0 || preview.LocalTracks != 2 {
+		t.Fatalf("selected identity mapping: albums=%d/%d tracks=%d/%d", preview.MappedAlbums, preview.LocalAlbums, preview.MappedTracks, preview.LocalTracks)
 	}
-	if len(preview.Issues) != 0 {
-		t.Fatalf("clean rerank should not create mapping issues: %#v", preview.Issues)
+	if len(preview.Issues) == 0 {
+		t.Fatalf("unmapped selected identity should remain reviewable: %#v", preview)
 	}
-	if len(preview.CandidateEvaluations) != 2 {
+	if len(preview.CandidateEvaluations) != 1 {
 		t.Fatalf("candidate evaluations: %#v", preview.CandidateEvaluations)
 	}
-	if !eventSeen(emit.events, "metadata.selection_replaced") {
-		t.Fatalf("expected metadata.selection_replaced event")
+	if eventSeen(emit.events, "metadata.selection_replaced") {
+		t.Fatalf("distinct MBIDs must not emit metadata.selection_replaced")
 	}
 
 	var report bytes.Buffer
@@ -711,16 +711,72 @@ func TestFetchMusicMetadataPreviewsReranksArtistByDiscography(t *testing.T) {
 		MusicMetadata: previews,
 	}, emit.events)
 	for _, want := range []string{
-		"selected_after_fetch=discography_reranked previous=heya:artist:mbid:wrong-ado",
-		"candidates:",
-		"Ado provider=heya:artist:mbid:ado-jp mapped_albums=1/1 mapped_tracks=2/2 selected",
+		"ADO [artist:ado] provider=heya:artist:mbid:wrong-ado mapped_albums=0/1 mapped_tracks=0/2",
+		"Album mapping diagnostics (non-blocking)",
 	} {
 		if !strings.Contains(report.String(), want) {
-			t.Fatalf("music rerank report missing %q:\n%s", want, report.String())
+			t.Fatalf("music fetch report missing %q:\n%s", want, report.String())
 		}
 	}
-	if strings.Contains(report.String(), "Needs review: metadata mapping") {
-		t.Fatalf("clean rerank should not be listed as metadata mapping review:\n%s", report.String())
+	if strings.Contains(report.String(), "selected_after_fetch=discography_reranked") {
+		t.Fatalf("report claimed an unsafe identity replacement:\n%s", report.String())
+	}
+}
+
+func TestMusicFetchRerankRequiresApprovedCanonicalEquivalentCandidate(t *testing.T) {
+	selected := MusicSearchMatch{ProviderID: "selected", ExternalIDs: map[string]string{"mbid": "artist-one", "apple": "123"}}
+	tests := []struct {
+		name      string
+		candidate MusicSearchCandidate
+		want      bool
+	}{
+		{
+			name: "same hard identity",
+			candidate: MusicSearchCandidate{ProviderID: "alternate", Confidence: 0.99,
+				ExternalIDs: map[string]string{"mbid": "ARTIST-ONE", "apple": "123"}},
+			want: true,
+		},
+		{
+			name: "review only",
+			candidate: MusicSearchCandidate{ProviderID: "alternate", Confidence: 0.99, RequiresReview: true,
+				ExternalIDs: map[string]string{"mbid": "artist-one", "apple": "123"}},
+		},
+		{
+			name: "different mbid",
+			candidate: MusicSearchCandidate{ProviderID: "alternate", Confidence: 0.99,
+				ExternalIDs: map[string]string{"mbid": "artist-two", "apple": "123"}},
+		},
+		{
+			name:      "name only has no identity proof",
+			candidate: MusicSearchCandidate{ProviderID: "alternate", Artist: "Same Name", Confidence: 0.99},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := musicFetchCandidateEligibleForRerank(test.candidate, selected); got != test.want {
+				t.Fatalf("eligible = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestMusicFetchPreviewReranksOnlyCanonicalEquivalentCleanDetail(t *testing.T) {
+	selected := MusicSearchMatch{ProviderID: "selected", ExternalIDs: map[string]string{"mbid": "artist-one"}}
+	candidate := MusicSearchCandidate{
+		ProviderID: "alternate", Confidence: .99,
+		ExternalIDs: map[string]string{"mbid": "ARTIST-ONE"},
+	}
+	current := MusicFetchPreview{ProviderID: "selected", LocalAlbums: 1, LocalTracks: 2}
+	better := MusicFetchPreview{
+		ProviderID: "alternate", ExternalIDs: map[string]string{"mbid": "artist-one"},
+		LocalAlbums: 1, MappedAlbums: 1, LocalTracks: 2, MappedTracks: 2,
+	}
+	if !musicFetchPreviewBetter(better, current, candidate, selected) {
+		t.Fatal("clean detail for the same hard artist identity could not improve coverage")
+	}
+	better.Issues = []string{"artist_external_id_conflict local_mbid=artist-one remote_mbid=artist-two"}
+	if musicFetchPreviewBetter(better, current, candidate, selected) {
+		t.Fatal("detail with an artist hard-ID conflict replaced the search selection")
 	}
 }
 

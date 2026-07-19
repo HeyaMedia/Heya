@@ -67,6 +67,88 @@ func TestSearchArtifactRoundTripRestoresInventory(t *testing.T) {
 	require.Equal(t, result.MovieSearch[0].ProviderID, loaded.MovieSearch[0].ProviderID)
 }
 
+func TestMusicRecordingEvidenceSurvivesDurablePipelineArtifacts(t *testing.T) {
+	evidence := MusicAcceptedRecordingEvidence{
+		RelPath:              "Ado/Kyougen/01 - Readymade.flac",
+		RecordingMBID:        "10000000-0000-4000-8000-000000000001",
+		CanonicalRecordingID: "20000000-0000-4000-8000-000000000001",
+		Confidence:           .98, SourceDuration: 244, RecordingDuration: 243,
+	}
+	result := Result{
+		MusicSearch: []MusicSearchMatch{{
+			Key: "artist:ado", Accepted: true, ProviderID: "heyametadata:v2:entity:30000000-0000-4000-8000-000000000001",
+			Artist: "Ado", RecordingEvidence: []MusicAcceptedRecordingEvidence{evidence},
+		}},
+		MusicMaterialize: []MusicMaterializePreview{{
+			Key: "artist:ado", Artist: "Ado", RecordingEvidence: []MusicAcceptedRecordingEvidence{evidence},
+		}},
+	}
+
+	searchData, err := marshalSearchArtifact(Options{}, result)
+	require.NoError(t, err)
+	searchResult, err := unmarshalSearchArtifact(searchData)
+	require.NoError(t, err)
+	require.Equal(t, []MusicAcceptedRecordingEvidence{evidence}, searchResult.MusicSearch[0].RecordingEvidence)
+
+	fetchData, err := marshalFetchArtifact(Options{}, searchResult)
+	require.NoError(t, err)
+	fetchResult, err := unmarshalFetchArtifact(fetchData)
+	require.NoError(t, err)
+	require.Equal(t, []MusicAcceptedRecordingEvidence{evidence}, fetchResult.MusicSearch[0].RecordingEvidence)
+	require.Equal(t, []MusicAcceptedRecordingEvidence{evidence}, fetchResult.MusicMaterialize[0].RecordingEvidence)
+}
+
+func TestMusicRecordingEvidenceIsScopedWithItsExactSourcePath(t *testing.T) {
+	one := MusicAcceptedRecordingEvidence{RelPath: "Ado/One/01.flac", RecordingMBID: "10000000-0000-4000-8000-000000000001", CanonicalRecordingID: "20000000-0000-4000-8000-000000000001", Confidence: .99, SourceDuration: 180, RecordingDuration: 180}
+	two := MusicAcceptedRecordingEvidence{RelPath: "Ado/Two/01.flac", RecordingMBID: "10000000-0000-4000-8000-000000000002", CanonicalRecordingID: "20000000-0000-4000-8000-000000000002", Confidence: .99, SourceDuration: 200, RecordingDuration: 200}
+	oneTrack := MusicTrackPlan{Key: "track:one", Artist: "Ado", Album: "One", TrackTitle: "One", RelPath: one.RelPath}
+	twoTrack := MusicTrackPlan{Key: "track:two", Artist: "Ado", Album: "Two", TrackTitle: "Two", RelPath: two.RelPath}
+	result := Result{
+		Inventory: Inventory{Roots: []InventoryRoot{{
+			Root: "/music",
+			Files: []InventoryFile{
+				{Root: "/music", Path: "/music/" + one.RelPath, RelPath: one.RelPath, Class: ClassPrimaryMedia},
+				{Root: "/music", Path: "/music/" + two.RelPath, RelPath: two.RelPath, Class: ClassPrimaryMedia},
+			},
+		}}},
+		MusicTracks: []MusicTrackPlan{oneTrack, twoTrack},
+		MusicAlbums: []MusicAlbumPlan{
+			{Key: "album:one", Artist: "Ado", Album: "One", Tracks: []MusicTrackPlan{oneTrack}, Files: []string{one.RelPath}},
+			{Key: "album:two", Artist: "Ado", Album: "Two", Tracks: []MusicTrackPlan{twoTrack}, Files: []string{two.RelPath}},
+		},
+		MusicArtists: []MusicArtistPlan{{Key: "artist:ado", Artist: "Ado", Files: []string{one.RelPath, two.RelPath}, Albums: []MusicAlbumPlan{
+			{Key: "album:one", Artist: "Ado", Album: "One", Tracks: []MusicTrackPlan{oneTrack}, Files: []string{one.RelPath}},
+			{Key: "album:two", Artist: "Ado", Album: "Two", Tracks: []MusicTrackPlan{twoTrack}, Files: []string{two.RelPath}},
+		}}},
+		MusicSearch:      []MusicSearchMatch{{Key: "artist:ado", Accepted: true, RecordingEvidence: []MusicAcceptedRecordingEvidence{one, two}}},
+		MusicMaterialize: []MusicMaterializePreview{{Key: "artist:ado", Artist: "Ado", RecordingEvidence: []MusicAcceptedRecordingEvidence{one, two}}},
+	}
+
+	data, err := marshalSearchArtifact(Options{ScopePaths: []string{"/music/Ado/One"}}, result)
+	require.NoError(t, err)
+	loaded, err := unmarshalSearchArtifact(data)
+	require.NoError(t, err)
+	require.Equal(t, []MusicAcceptedRecordingEvidence{one}, loaded.MusicSearch[0].RecordingEvidence)
+	require.Equal(t, []MusicAcceptedRecordingEvidence{one}, loaded.MusicMaterialize[0].RecordingEvidence)
+}
+
+func TestManualMusicDecisionCannotMoveRecordingEvidenceToAnotherArtist(t *testing.T) {
+	evidence := MusicAcceptedRecordingEvidence{RelPath: "Ado/01.flac", RecordingMBID: "10000000-0000-4000-8000-000000000001", CanonicalRecordingID: "20000000-0000-4000-8000-000000000001", Confidence: .99, SourceDuration: 180, RecordingDuration: 180}
+	result := Result{MusicSearch: []MusicSearchMatch{{
+		Key: "artist:ado", Accepted: true, ProviderID: "heyametadata:v2:entity:30000000-0000-4000-8000-000000000001",
+		RecordingEvidence: []MusicAcceptedRecordingEvidence{evidence},
+		Candidates: []MusicSearchCandidate{
+			{ProviderID: "heyametadata:v2:entity:30000000-0000-4000-8000-000000000001", Artist: "Ado", Recommendation: "fingerprint_match"},
+			{ProviderID: "heyametadata:v2:entity:40000000-0000-4000-8000-000000000001", Artist: "Different Ado"},
+		},
+	}}}
+	decisions := SearchDecisions{"artist:ado": {Status: "accepted", ProviderID: "heyametadata:v2:entity:40000000-0000-4000-8000-000000000001"}}
+
+	applySearchDecisionsToResult(&result, sqlc.Library{MediaType: sqlc.MediaTypeMusic}, decisions, &captureEmitter{})
+	require.Equal(t, decisions["artist:ado"].ProviderID, result.MusicSearch[0].ProviderID)
+	require.Empty(t, result.MusicSearch[0].RecordingEvidence)
+}
+
 func TestFetchArtifactRoundTripRestoresMetadata(t *testing.T) {
 	result := Result{
 		Inventory: Inventory{Roots: []InventoryRoot{{
@@ -380,7 +462,25 @@ func TestFetchArtifactCoverageRequiresDetailForApply(t *testing.T) {
 
 	result.MovieMetadata[0].Detail = nil
 	result.MovieMetadata[0].Error = "upstream failed"
-	require.True(t, fetchMetadataCoversAcceptedSearch(result, sqlc.Library{MediaType: sqlc.MediaTypeMovie}))
+	require.False(t, fetchMetadataCoversAcceptedSearch(result, sqlc.Library{MediaType: sqlc.MediaTypeMovie}), "an error preview is not usable fetch coverage")
+}
+
+func TestRejectedDecisionPrunesPreviouslyFetchedMetadata(t *testing.T) {
+	const key = "title_year:dune|2021"
+	result := Result{
+		MovieSearch: []MovieSearchMatch{{Key: key, Accepted: true, ProviderID: "heya:movie:dune", Title: "Dune"}},
+		MovieMetadata: []MovieFetchPreview{{
+			Key: key, ProviderID: "heya:movie:dune", Detail: &metadata.MediaDetail{Title: "Dune"},
+		}},
+	}
+	applySearchDecisionsToResult(&result, sqlc.Library{MediaType: sqlc.MediaTypeMovie}, SearchDecisions{
+		key: {Key: key, Status: "rejected"},
+	}, NewEventSink(Event{}))
+	retainFetchMetadataForAcceptedSearch(&result, sqlc.Library{MediaType: sqlc.MediaTypeMovie})
+
+	require.False(t, result.MovieSearch[0].Accepted)
+	require.Empty(t, result.MovieMetadata, "detail fetched before the rejection must not survive into materialization")
+	require.True(t, fetchMetadataCoversAcceptedSearch(result, sqlc.Library{MediaType: sqlc.MediaTypeMovie}), "a rejected identity needs no replacement fetch")
 }
 
 func TestFetchArtifactCoverageAcceptsCandidateToCanonicalPromotion(t *testing.T) {

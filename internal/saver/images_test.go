@@ -65,11 +65,102 @@ func TestSaveImageToMediaDirDoesNotOverwrite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := SaveImageToMediaDir(mediaDir, cached, "poster", 0); err != nil {
+	output, err := SaveImageToMediaDirWithResult(mediaDir, cached, "poster", 0)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if output.Attested || output.Written {
+		t.Fatalf("mismatched existing image was attested: %+v", output)
 	}
 	if got, err := os.ReadFile(existing); err != nil || string(got) != "old" {
 		t.Fatalf("poster.jpg should not be overwritten: got=%q err=%v", got, err)
+	}
+}
+
+func TestSaveImageToMediaDirAttestsExactRetryWithoutRewrite(t *testing.T) {
+	dir := t.TempDir()
+	cached := filepath.Join(dir, "cache.jpg")
+	content := []byte("exact-image-bytes")
+	if err := os.WriteFile(cached, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mediaDir := filepath.Join(dir, "media")
+	if err := os.MkdirAll(mediaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := SaveImageToMediaDirWithResult(mediaDir, cached, "poster", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.Attested || !first.Written {
+		t.Fatalf("first image output = %+v, want published attestation", first)
+	}
+	before, err := os.Stat(first.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	retry, err := SaveImageToMediaDirWithResult(mediaDir, cached, "poster", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !retry.Attested || retry.Written {
+		t.Fatalf("retry image output = %+v, want attestation without write", retry)
+	}
+	after, err := os.Stat(first.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Fatalf("exact retry rewrote image: before=%s after=%s", before.ModTime(), after.ModTime())
+	}
+
+	userEdit := append([]byte(nil), content...)
+	userEdit[0] = 'U' // same size, different digest
+	if err := os.WriteFile(first.Path, userEdit, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mismatch, err := SaveImageToMediaDirWithResult(mediaDir, cached, "poster", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mismatch.Attested || mismatch.Written {
+		t.Fatalf("same-size user edit was attested: %+v", mismatch)
+	}
+	body, err := os.ReadFile(first.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != string(userEdit) {
+		t.Fatalf("same-size user edit was overwritten: got %q want %q", body, userEdit)
+	}
+}
+
+func TestSaveAlbumCoverDoesNotAttestArbitraryRecognizedArtwork(t *testing.T) {
+	dir := t.TempDir()
+	albumDir := filepath.Join(dir, "album")
+	if err := os.MkdirAll(albumDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cached := filepath.Join(dir, "cache.jpg")
+	content := []byte("same-cover")
+	if err := os.WriteFile(cached, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(albumDir, "folder.jpg"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := SaveAlbumCoverToDirWithResult(albumDir, cached)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output.Attested || output.Written {
+		t.Fatalf("arbitrary recognized artwork was attested: %+v", output)
+	}
+	if _, err := os.Stat(filepath.Join(albumDir, "cover.jpg")); !os.IsNotExist(err) {
+		t.Fatalf("cover.jpg unexpectedly written: %v", err)
 	}
 }
 

@@ -621,7 +621,7 @@ func (q *Queries) ListLibraryFilesByStatus(ctx context.Context, arg ListLibraryF
 }
 
 const listLibraryFilesForScan = `-- name: ListLibraryFilesForScan :many
-SELECT id, path, size, mtime, deleted_at, has_trickplay,
+SELECT id, path, size, mtime, status, deleted_at, has_trickplay,
        (parse_result ? 'nfo')::boolean AS has_nfo
 FROM library_files
 WHERE library_id = $1
@@ -632,6 +632,7 @@ type ListLibraryFilesForScanRow struct {
 	Path         string             `json:"path"`
 	Size         int64              `json:"size"`
 	Mtime        pgtype.Timestamptz `json:"mtime"`
+	Status       FileStatus         `json:"status"`
 	DeletedAt    pgtype.Timestamptz `json:"deleted_at"`
 	HasTrickplay bool               `json:"has_trickplay"`
 	HasNfo       bool               `json:"has_nfo"`
@@ -655,6 +656,7 @@ func (q *Queries) ListLibraryFilesForScan(ctx context.Context, libraryID int64) 
 			&i.Path,
 			&i.Size,
 			&i.Mtime,
+			&i.Status,
 			&i.DeletedAt,
 			&i.HasTrickplay,
 			&i.HasNfo,
@@ -914,6 +916,101 @@ func (q *Queries) ListUnprobedProbeableFiles(ctx context.Context, arg ListUnprob
 	return items, nil
 }
 
+const observePendingLibraryFile = `-- name: ObservePendingLibraryFile :one
+INSERT INTO library_files (library_id, path, size, mtime, parse_result, status)
+VALUES ($1, $2, $3, $4, '{}'::jsonb, 'pending')
+ON CONFLICT (library_id, path) DO UPDATE
+SET media_info = CASE WHEN library_files.size = EXCLUDED.size
+                       AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                      THEN library_files.media_info ELSE '{}'::jsonb END,
+    keyframes = CASE WHEN library_files.size = EXCLUDED.size
+                      AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                     THEN library_files.keyframes ELSE NULL END,
+    video_height = CASE WHEN library_files.size = EXCLUDED.size
+                         AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                        THEN library_files.video_height ELSE 0 END,
+    video_formats = CASE WHEN library_files.size = EXCLUDED.size
+                          AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                         THEN library_files.video_formats ELSE ARRAY[]::text[] END,
+    audio_formats = CASE WHEN library_files.size = EXCLUDED.size
+                          AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                         THEN library_files.audio_formats ELSE ARRAY[]::text[] END,
+    content_hash = CASE WHEN library_files.size = EXCLUDED.size
+                         AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                        THEN library_files.content_hash ELSE '' END,
+    has_trickplay = CASE WHEN library_files.size = EXCLUDED.size
+                          AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                         THEN library_files.has_trickplay ELSE false END,
+    segments_analyzed_at = CASE WHEN library_files.size = EXCLUDED.size
+                                 AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                                THEN library_files.segments_analyzed_at ELSE NULL END,
+    segments_detected_at = CASE WHEN library_files.size = EXCLUDED.size
+                                 AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                                THEN library_files.segments_detected_at ELSE NULL END,
+    size = EXCLUDED.size,
+    mtime = EXCLUDED.mtime,
+    status = CASE WHEN library_files.deleted_at IS NULL
+                       AND library_files.size = EXCLUDED.size
+                       AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                  THEN library_files.status ELSE 'pending'::file_status END,
+    error_message = CASE WHEN library_files.deleted_at IS NULL
+                              AND library_files.size = EXCLUDED.size
+                              AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                         THEN library_files.error_message ELSE '' END,
+    deleted_at = NULL,
+    updated_at = now()
+RETURNING id, public_id, library_id, path, size, mtime, media_item_id, parse_result, status, error_message, deleted_at, media_info, keyframes, has_trickplay, content_hash, created_at, updated_at, video_height, segments_analyzed_at, segments_detected_at, video_formats, audio_formats
+`
+
+type ObservePendingLibraryFileParams struct {
+	LibraryID int64              `json:"library_id"`
+	Path      string             `json:"path"`
+	Size      int64              `json:"size"`
+	Mtime     pgtype.Timestamptz `json:"mtime"`
+}
+
+// Records the current source tuple before remote matching starts. This makes a
+// brand-new music file addressable by the inline Chromaprint/AcoustID fallback
+// during its first search pass instead of only after apply or review parking.
+// A changed/restored source becomes pending so an interrupted pipeline is
+// rediscovered by the next kickoff; an unchanged matched/unmatched row keeps
+// its terminal status. Probe artifacts are invalidated exactly when bytes
+// changed, because the later apply upsert will compare against this new tuple.
+func (q *Queries) ObservePendingLibraryFile(ctx context.Context, arg ObservePendingLibraryFileParams) (LibraryFile, error) {
+	row := q.db.QueryRow(ctx, observePendingLibraryFile,
+		arg.LibraryID,
+		arg.Path,
+		arg.Size,
+		arg.Mtime,
+	)
+	var i LibraryFile
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.LibraryID,
+		&i.Path,
+		&i.Size,
+		&i.Mtime,
+		&i.MediaItemID,
+		&i.ParseResult,
+		&i.Status,
+		&i.ErrorMessage,
+		&i.DeletedAt,
+		&i.MediaInfo,
+		&i.Keyframes,
+		&i.HasTrickplay,
+		&i.ContentHash,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.VideoHeight,
+		&i.SegmentsAnalyzedAt,
+		&i.SegmentsDetectedAt,
+		&i.VideoFormats,
+		&i.AudioFormats,
+	)
+	return i, err
+}
+
 const parkUnmatchedLibraryFile = `-- name: ParkUnmatchedLibraryFile :exec
 INSERT INTO library_files (library_id, path, size, mtime, parse_result, status)
 VALUES ($1, $2, $3, $4, '{}'::jsonb, 'unmatched')
@@ -1108,6 +1205,15 @@ SET media_info = CASE WHEN library_files.size = $2
     video_height = CASE WHEN library_files.size = $2
                          AND library_files.mtime IS NOT DISTINCT FROM $3
                         THEN library_files.video_height ELSE 0 END,
+    video_formats = CASE WHEN library_files.size = $2
+                          AND library_files.mtime IS NOT DISTINCT FROM $3
+                         THEN library_files.video_formats ELSE ARRAY[]::text[] END,
+    audio_formats = CASE WHEN library_files.size = $2
+                          AND library_files.mtime IS NOT DISTINCT FROM $3
+                         THEN library_files.audio_formats ELSE ARRAY[]::text[] END,
+    content_hash = CASE WHEN library_files.size = $2
+                         AND library_files.mtime IS NOT DISTINCT FROM $3
+                        THEN library_files.content_hash ELSE '' END,
     has_trickplay = CASE WHEN library_files.size = $2
                           AND library_files.mtime IS NOT DISTINCT FROM $3
                          THEN library_files.has_trickplay ELSE false END,
@@ -1256,6 +1362,15 @@ SET size = EXCLUDED.size, mtime = EXCLUDED.mtime,
     video_height = CASE WHEN library_files.size = EXCLUDED.size
                          AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
                         THEN library_files.video_height ELSE 0 END,
+    video_formats = CASE WHEN library_files.size = EXCLUDED.size
+                          AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                         THEN library_files.video_formats ELSE ARRAY[]::text[] END,
+    audio_formats = CASE WHEN library_files.size = EXCLUDED.size
+                          AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                         THEN library_files.audio_formats ELSE ARRAY[]::text[] END,
+    content_hash = CASE WHEN library_files.size = EXCLUDED.size
+                         AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                        THEN library_files.content_hash ELSE '' END,
     has_trickplay = CASE WHEN library_files.size = EXCLUDED.size
                           AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
                          THEN library_files.has_trickplay ELSE false END,

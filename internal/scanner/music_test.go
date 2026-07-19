@@ -3,6 +3,7 @@ package scanner
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,11 +14,13 @@ import (
 
 	"github.com/karbowiak/heya/internal/audiotags"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/karbowiak/heya/internal/musicconsensus"
 	"github.com/karbowiak/heya/internal/nfo"
 	"github.com/karbowiak/heya/internal/titlematch"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMusicFixtureProducesLocalPlans(t *testing.T) {
@@ -189,8 +192,8 @@ func TestSearchMusicArtistsSelectsAndRejects(t *testing.T) {
 	for _, item := range search {
 		byKey[item.Key] = item
 	}
-	if !byKey["artist:ado"].Accepted || byKey["artist:ado"].ProviderID != "heyametadata:v2:entity:10000000-0000-4000-8000-000000000003" {
-		t.Fatalf("Ado search: %#v", byKey["artist:ado"])
+	if byKey["artist:ado"].Accepted {
+		t.Fatalf("distinct same-name Ado identities bypassed the runner-up gap: %#v", byKey["artist:ado"])
 	}
 	if score := musicNameSimilarity("Ado", "ADO (9)"); score >= musicArtistAutoMatchThreshold {
 		t.Fatalf("numbered disambiguation scored too high: %.2f", score)
@@ -221,15 +224,32 @@ func TestSearchMusicArtistsSelectsAndRejects(t *testing.T) {
 		MusicSearch:  search,
 	}, emit.events)
 	for _, want := range []string{
-		"Search selected:        2/3",
-		"Search review:          1 rejected, 0 suspicious selected",
+		"Search selected:        1/3",
+		"Search review:          2 rejected, 0 suspicious selected",
 		"Needs review: search rejected",
+		"Ado [artist:ado] rejected",
 		"Heya Test Tones [artist:heya test tones] rejected reason=no_candidates",
 		"Music search completed.",
 	} {
 		if !strings.Contains(report.String(), want) {
 			t.Fatalf("music search report missing %q:\n%s", want, report.String())
 		}
+	}
+}
+
+func TestMusicSearchClearGapTreatsSameNameCanonicalIDsAsCompetitors(t *testing.T) {
+	distinct := []metadata.SearchResult{
+		{ProviderID: "canonical-one", Title: "Ado", Confidence: .92, ExternalIDs: map[string]string{"mbid": "mbid-one"}},
+		{ProviderID: "canonical-two", Title: "ADO", Confidence: .88, ExternalIDs: map[string]string{"mbid": "mbid-two"}},
+	}
+	if musicSearchClearGap(distinct, "Ado") {
+		t.Fatalf("exact name bypassed the runner-up margin: %#v", distinct)
+	}
+
+	projections := append([]metadata.SearchResult(nil), distinct...)
+	projections[1].ExternalIDs = map[string]string{"mbid": "MBID-ONE"}
+	if !musicSearchClearGap(projections, "Ado") {
+		t.Fatalf("two projections of one hard identity were treated as competitors: %#v", projections)
 	}
 }
 
@@ -266,8 +286,41 @@ func TestMusicSearchPreservesStructuredCandidateConfidence(t *testing.T) {
 	}
 }
 
+func TestMusicSearchHardIdentifierConflictVetoesSharedIDAndExactName(t *testing.T) {
+	artist := MusicArtistPlan{
+		Artist:      "Ado",
+		ExternalIDs: map[string]string{"mbid": "local-mbid", "apple": "shared-apple"},
+	}
+
+	sharedButContradictory := metadata.SearchResult{
+		Title: "Ado", Confidence: .99,
+		ExternalIDs: map[string]string{"mbid": "different-mbid", "apple": "shared-apple"},
+	}
+	if score := scoreMusicSearchCandidate(artist, sharedButContradictory); score != 0 {
+		t.Fatalf("shared Apple ID overrode contradictory MBID: %.2f", score)
+	}
+
+	exactNameConflict := metadata.SearchResult{
+		Title: "Ado", Confidence: .99,
+		ExternalIDs: map[string]string{"musicbrainz_artist": "different-mbid"},
+	}
+	if score := scoreMusicSearchCandidate(artist, exactNameConflict); score != 0 {
+		t.Fatalf("exact artist name overrode contradictory MBID: %.2f", score)
+	}
+
+	canonicalEquivalent := metadata.SearchResult{
+		Title: "Unhelpful display label", Confidence: .10,
+		ExternalIDs: map[string]string{"musicbrainz_artist": "LOCAL-MBID"},
+	}
+	if score := scoreMusicSearchCandidate(artist, canonicalEquivalent); score != 1 {
+		t.Fatalf("canonical-equivalent hard ID did not receive authoritative score: %.2f", score)
+	}
+}
+
 func TestMusicSearchUsesConvergedFingerprintRecordingEvidence(t *testing.T) {
 	const canonical = "20000000-0000-4000-8000-000000000001"
+	const recordingCanonical = "30000000-0000-4000-8000-000000000001"
+	const recordingMBID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	search := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{
 		"$Not": {
 			{ProviderID: "opaque-mb", ProviderName: "heya", Title: "$Not", Confidence: .60, Recommendation: "ambiguous", RequiresReview: true},
@@ -276,7 +329,7 @@ func TestMusicSearchUsesConvergedFingerprintRecordingEvidence(t *testing.T) {
 	}}
 	fingerprints := &fakeMusicFingerprintProvider{results: map[string][]MusicRecordingEvidence{
 		"$Not/Ethereal/01.flac": {{
-			RecordingMBID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", Title: "Ethereal",
+			RecordingMBID: recordingMBID, CanonicalRecordingID: recordingCanonical, Title: "Ethereal",
 			FingerprintScore: .99, SourceDuration: 181, RecordingDuration: 180,
 			Artists: []MusicRecordingArtistEvidence{{CanonicalID: canonical, Name: "$Not", MBID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}},
 		}},
@@ -295,6 +348,111 @@ func TestMusicSearchUsesConvergedFingerprintRecordingEvidence(t *testing.T) {
 	if len(results[0].Candidates) != 1 || results[0].Candidates[0].Recommendation != "fingerprint_match" {
 		t.Fatalf("fingerprint candidate = %#v", results[0].Candidates)
 	}
+	if len(results[0].RecordingEvidence) != 1 {
+		t.Fatalf("recording evidence = %#v", results[0].RecordingEvidence)
+	}
+	recording := results[0].RecordingEvidence[0]
+	if recording.RelPath != "$Not/Ethereal/01.flac" || recording.RecordingMBID != recordingMBID || recording.CanonicalRecordingID != recordingCanonical || recording.Confidence < musicFingerprintMinimumScore || recording.SourceDuration != 181 || recording.RecordingDuration != 180 {
+		t.Fatalf("recording evidence = %#v", recording)
+	}
+}
+
+func TestMusicSearchDoesNotBindAmbiguousSameArtistRecording(t *testing.T) {
+	const artistCanonical = "20000000-0000-4000-8000-000000000001"
+	credit := MusicRecordingArtistEvidence{CanonicalID: artistCanonical, Name: "$Not", MBID: "40000000-0000-4000-8000-000000000001"}
+	search := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{"$Not": nil}}
+	fingerprints := &fakeMusicFingerprintProvider{results: map[string][]MusicRecordingEvidence{
+		"$Not/Ethereal/01.flac": {
+			{RecordingMBID: "10000000-0000-4000-8000-000000000001", CanonicalRecordingID: "30000000-0000-4000-8000-000000000001", Title: "Ethereal", FingerprintScore: .99, SourceDuration: 181, RecordingDuration: 180, Artists: []MusicRecordingArtistEvidence{credit}},
+			{RecordingMBID: "10000000-0000-4000-8000-000000000002", CanonicalRecordingID: "30000000-0000-4000-8000-000000000002", Title: "Ethereal", FingerprintScore: .98, SourceDuration: 181, RecordingDuration: 180, Artists: []MusicRecordingArtistEvidence{credit}},
+		},
+	}}
+	artist := MusicArtistPlan{Key: "artist:not", Artist: "$Not", Albums: []MusicAlbumPlan{{Album: "Ethereal", Tracks: []MusicTrackPlan{{TrackTitle: "Ethereal", RelPath: "$Not/Ethereal/01.flac"}}}}}
+
+	results, err := SearchMusicArtistsWithFingerprints(context.Background(), []MusicArtistPlan{artist}, search, fingerprints, &captureEmitter{}, musicArtistAutoMatchThreshold)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.True(t, results[0].Accepted, "both recordings still prove the same canonical artist")
+	require.Empty(t, results[0].RecordingEvidence, "near-tied recording identities must not bind an arbitrary local track")
+}
+
+func TestMusicSearchFingerprintConsensusRepairsPoisonedArtistName(t *testing.T) {
+	const artistCanonical = "20000000-0000-4000-8000-000000000001"
+	search := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{"Wrongly Tagged": nil}}
+	fingerprints := &fakeMusicFingerprintProvider{results: map[string][]MusicRecordingEvidence{
+		"Unknown/Album/01.flac": {{
+			RecordingMBID: "10000000-0000-4000-8000-000000000001", CanonicalRecordingID: "30000000-0000-4000-8000-000000000001",
+			Title: "Readymade", FingerprintScore: .99, SourceDuration: 244, RecordingDuration: 243,
+			Artists: []MusicRecordingArtistEvidence{{CanonicalID: artistCanonical, Name: "Ado", MBID: "40000000-0000-4000-8000-000000000001"}},
+		}},
+		"Unknown/Album/02.flac": {{
+			RecordingMBID: "10000000-0000-4000-8000-000000000002", CanonicalRecordingID: "30000000-0000-4000-8000-000000000002",
+			Title: "Usseewa", FingerprintScore: .98, SourceDuration: 239, RecordingDuration: 238,
+			Artists: []MusicRecordingArtistEvidence{{CanonicalID: artistCanonical, Name: "Ado", MBID: "40000000-0000-4000-8000-000000000001"}},
+		}},
+	}}
+	artist := MusicArtistPlan{Key: "artist:wrong", Artist: "Wrongly Tagged", Albums: []MusicAlbumPlan{{
+		Album: "Album", Tracks: []MusicTrackPlan{
+			{TrackTitle: "Readymade", RelPath: "Unknown/Album/01.flac"},
+			{TrackTitle: "Usseewa", RelPath: "Unknown/Album/02.flac"},
+		},
+	}}}
+
+	results, err := SearchMusicArtistsWithFingerprints(context.Background(), []MusicArtistPlan{artist}, search, fingerprints, &captureEmitter{}, musicArtistAutoMatchThreshold)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.True(t, results[0].Accepted)
+	require.Equal(t, heyametadata.EncodeEntityProviderID(artistCanonical), results[0].ProviderID)
+	require.Equal(t, "Ado", results[0].Artist)
+	require.Len(t, results[0].RecordingEvidence, 2)
+	require.Contains(t, results[0].Candidates[0].Evidence, metadata.SearchEvidence{
+		Field: "artist_name", Outcome: "overridden_by_recordings", Weight: results[0].Confidence,
+		Detail: "At least two independent recording fingerprints converge despite the local artist name",
+	})
+}
+
+func TestMusicSearchFingerprintDoesNotOverrideArtistNameFromOneRecording(t *testing.T) {
+	search := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{"Wrongly Tagged": nil}}
+	fingerprints := &fakeMusicFingerprintProvider{results: map[string][]MusicRecordingEvidence{
+		"Unknown/01.flac": {{
+			RecordingMBID: "10000000-0000-4000-8000-000000000001", CanonicalRecordingID: "30000000-0000-4000-8000-000000000001",
+			Title: "Readymade", FingerprintScore: .99, SourceDuration: 244, RecordingDuration: 243,
+			Artists: []MusicRecordingArtistEvidence{{CanonicalID: "20000000-0000-4000-8000-000000000001", Name: "Ado"}},
+		}},
+	}}
+	artist := MusicArtistPlan{Key: "artist:wrong", Artist: "Wrongly Tagged", Albums: []MusicAlbumPlan{{Album: "Album", Tracks: []MusicTrackPlan{{TrackTitle: "Readymade", RelPath: "Unknown/01.flac"}}}}}
+
+	results, err := SearchMusicArtistsWithFingerprints(context.Background(), []MusicArtistPlan{artist}, search, fingerprints, &captureEmitter{}, musicArtistAutoMatchThreshold)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.False(t, results[0].Accepted)
+	require.Empty(t, results[0].RecordingEvidence)
+}
+
+func TestMusicSearchFingerprintDoesNotPickCollaborationComponent(t *testing.T) {
+	search := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{"Jax Jones, Ado": nil, "Ado": nil}}
+	fingerprints := &fakeMusicFingerprintProvider{results: map[string][]MusicRecordingEvidence{
+		"Ado/Collaborations/01.flac": {{
+			RecordingMBID: "10000000-0000-4000-8000-000000000001", CanonicalRecordingID: "30000000-0000-4000-8000-000000000001",
+			Title: "One", FingerprintScore: .99, SourceDuration: 180, RecordingDuration: 180,
+			Artists: []MusicRecordingArtistEvidence{{CanonicalID: "20000000-0000-4000-8000-000000000001", Name: "Ado"}},
+		}},
+		"Ado/Collaborations/02.flac": {{
+			RecordingMBID: "10000000-0000-4000-8000-000000000002", CanonicalRecordingID: "30000000-0000-4000-8000-000000000002",
+			Title: "Two", FingerprintScore: .99, SourceDuration: 200, RecordingDuration: 200,
+			Artists: []MusicRecordingArtistEvidence{{CanonicalID: "20000000-0000-4000-8000-000000000001", Name: "Ado"}},
+		}},
+	}}
+	paths := []string{"Ado/Collaborations/01.flac", "Ado/Collaborations/02.flac"}
+	artist := MusicArtistPlan{Key: "artist:collaboration", Artist: "Jax Jones, Ado", Files: paths, Albums: []MusicAlbumPlan{{
+		Album: "Collaborations", Tracks: []MusicTrackPlan{{TrackTitle: "One", RelPath: paths[0]}, {TrackTitle: "Two", RelPath: paths[1]}},
+	}}}
+
+	results, err := SearchMusicArtistsWithFingerprints(context.Background(), []MusicArtistPlan{artist}, search, fingerprints, &captureEmitter{}, musicArtistAutoMatchThreshold)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.False(t, results[0].Accepted)
+	require.Empty(t, results[0].RecordingEvidence)
 }
 
 func TestMusicSearchRejectsConflictingFingerprintArtists(t *testing.T) {
@@ -313,6 +471,94 @@ func TestMusicSearchRejectsConflictingFingerprintArtists(t *testing.T) {
 	if len(results) != 1 || results[0].Accepted {
 		t.Fatalf("conflicting fingerprint artists were accepted: %#v", results)
 	}
+}
+
+func TestMusicSearchSurfacesFingerprintConfigurationFailure(t *testing.T) {
+	search := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{"Example": nil}}
+	fingerprints := &fakeMusicFingerprintProvider{errors: map[string]error{
+		"Example/Album/01.flac": fakeMusicConfigurationError("invalid AcoustID client key"),
+	}}
+	artist := MusicArtistPlan{Key: "artist:example", Artist: "Example", Albums: []MusicAlbumPlan{{Album: "Album", Tracks: []MusicTrackPlan{{
+		TrackTitle: "Song", RelPath: "Example/Album/01.flac",
+	}}}}}
+	emit := &captureEmitter{}
+	_, err := SearchMusicArtistsWithFingerprints(context.Background(), []MusicArtistPlan{artist}, search, fingerprints, emit, musicArtistAutoMatchThreshold)
+	if err == nil || !musicFingerprintConfigurationFailure(err) {
+		t.Fatalf("configuration failure was swallowed into review: %v", err)
+	}
+	if eventSeen(emit.events, "match.fingerprint_failed") {
+		t.Fatal("global fingerprint configuration failure was emitted as a per-artist soft failure")
+	}
+}
+
+func TestMusicSearchPropagatesContextTermination(t *testing.T) {
+	t.Run("primary search", func(t *testing.T) {
+		provider := &fakeMusicSearchProvider{errors: map[string]error{"Example": context.DeadlineExceeded}}
+		_, err := SearchMusicArtists(context.Background(), []MusicArtistPlan{{Key: "artist:example", Artist: "Example"}}, provider, &captureEmitter{}, musicArtistAutoMatchThreshold)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+
+	t.Run("collaboration fallback", func(t *testing.T) {
+		provider := &fakeMusicSearchProvider{
+			results: map[string][]metadata.SearchResult{"Jax Jones, Ado": nil},
+			errors:  map[string]error{"Jax Jones": context.Canceled, "Ado": context.Canceled},
+		}
+		artist := MusicArtistPlan{
+			Key: "artist:collab", Artist: "Jax Jones, Ado", Files: []string{"Ado/Collaborations/01.flac"},
+			Albums: []MusicAlbumPlan{{Album: "Collaborations", Tracks: []MusicTrackPlan{{TrackTitle: "Song", RelPath: "Ado/Collaborations/01.flac"}}}},
+		}
+		_, err := SearchMusicArtists(context.Background(), []MusicArtistPlan{artist}, provider, &captureEmitter{}, musicArtistAutoMatchThreshold)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("fingerprint", func(t *testing.T) {
+		provider := &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{"Example": nil}}
+		fingerprints := &fakeMusicFingerprintProvider{errors: map[string]error{"Example/Album/01.flac": context.DeadlineExceeded}}
+		artist := MusicArtistPlan{Key: "artist:example", Artist: "Example", Albums: []MusicAlbumPlan{{Album: "Album", Tracks: []MusicTrackPlan{{
+			TrackTitle: "Song", RelPath: "Example/Album/01.flac",
+		}}}}}
+		_, err := SearchMusicArtistsWithFingerprints(context.Background(), []MusicArtistPlan{artist}, provider, fingerprints, &captureEmitter{}, musicArtistAutoMatchThreshold)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+
+	t.Run("candidate convergence detail", func(t *testing.T) {
+		provider := &convergingMusicSearchProvider{
+			fakeMusicSearchProvider: &fakeMusicSearchProvider{results: map[string][]metadata.SearchResult{
+				"Example": {
+					{ProviderID: "candidate-one", Title: "Example", Confidence: .95, Recommendation: "conflicting_identifiers", RequiresReview: true},
+					{ProviderID: "candidate-two", Title: "Example", Confidence: .94, Recommendation: "conflicting_identifiers", RequiresReview: true},
+				},
+			}},
+			detailErrors: map[string]error{"candidate-one": context.DeadlineExceeded},
+		}
+		_, err := SearchMusicArtists(context.Background(), []MusicArtistPlan{{Key: "artist:example", Artist: "Example"}}, provider, &captureEmitter{}, musicArtistAutoMatchThreshold)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+}
+
+func TestAnalyzeMusicPropagatesProbeCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	done := make(chan error, 1)
+	inv := Inventory{Roots: []InventoryRoot{{
+		Root: "/music",
+		Files: []InventoryFile{{
+			Root: "/music", Path: "/music/Example/Album/01 - Song.flac",
+			RelPath: "Example/Album/01 - Song.flac", Name: "01 - Song.flac",
+			Ext: ".flac", Class: ClassPrimaryMedia,
+		}},
+	}}}
+	go func() {
+		_, _, _, err := AnalyzeMusicWithOptions(ctx, inv, &captureEmitter{}, MusicAnalysisOptions{Probe: func(probeCtx context.Context, _ string) (*mediaprobe.MediaInfo, error) {
+			close(started)
+			<-probeCtx.Done()
+			return nil, fmt.Errorf("probe process exited: %w", probeCtx.Err())
+		}})
+		done <- err
+	}()
+	<-started
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
 }
 
 func TestSearchMusicArtistsUsesConsistentMusicBrainzSpine(t *testing.T) {
@@ -605,6 +851,70 @@ func TestMusicTagTitleRejectsSyntheticProbeTitles(t *testing.T) {
 	}
 }
 
+func TestAnalyzeMusicPlansFullyTaggedRootAudio(t *testing.T) {
+	inv := Inventory{Roots: []InventoryRoot{{Root: "/music", Files: []InventoryFile{
+		{
+			Root: "/music", Path: "/music/01 - Root Song.flac", RelPath: "01 - Root Song.flac",
+			Name: "01 - Root Song.flac", Ext: ".flac", Class: ClassPrimaryMedia,
+		},
+		{
+			Root: "/music", Path: "/music/01 - Other Song.flac", RelPath: "01 - Other Song.flac",
+			Name: "01 - Other Song.flac", Ext: ".flac", Class: ClassPrimaryMedia,
+		},
+	}}}}
+	probe := func(_ context.Context, path string) (*mediaprobe.MediaInfo, error) {
+		tags := map[string]string{
+			"ALBUMARTIST":                "Root Artist",
+			"ALBUM":                      "Root Album",
+			"TITLE":                      "Root Song",
+			"TRACKNUMBER":                "1",
+			"DATE":                       "2024",
+			"MUSICBRAINZ_ALBUMARTISTID":  "artist-mbid",
+			"MUSICBRAINZ_RELEASEGROUPID": "release-group",
+			"MUSICBRAINZ_ALBUMID":        "release-id",
+		}
+		if strings.Contains(path, "Other") {
+			tags = map[string]string{
+				"ALBUMARTIST": "Other Artist", "ALBUM": "Other Album", "TITLE": "Other Song",
+				"TRACKNUMBER": "1", "DATE": "2023", "MUSICBRAINZ_ALBUMARTISTID": "other-artist-mbid",
+				"MUSICBRAINZ_RELEASEGROUPID": "other-release-group", "MUSICBRAINZ_ALBUMID": "other-release-id",
+			}
+		}
+		return &mediaprobe.MediaInfo{Format: mediaprobe.FormatInfo{Tags: tags}}, nil
+	}
+
+	tracks, albums, artists, err := AnalyzeMusicWithOptions(context.Background(), inv, &captureEmitter{}, MusicAnalysisOptions{Probe: probe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tracks) != 2 || len(albums) != 2 || len(artists) != 2 {
+		t.Fatalf("root tagged analysis = tracks:%#v albums:%#v artists:%#v", tracks, albums, artists)
+	}
+	byPath := map[string]MusicTrackPlan{}
+	for _, track := range tracks {
+		byPath[track.RelPath] = track
+	}
+	rootTrack := byPath["01 - Root Song.flac"]
+	if rootTrack.Artist != "Root Artist" || rootTrack.Album != "Root Album" || rootTrack.TrackTitle != "Root Song" {
+		t.Fatalf("root tagged plan = %#v", rootTrack)
+	}
+	otherTrack := byPath["01 - Other Song.flac"]
+	if otherTrack.Artist != "Other Artist" || otherTrack.Album != "Other Album" || otherTrack.TrackTitle != "Other Song" {
+		t.Fatalf("root releases poisoned one another through consensus: %#v", tracks)
+	}
+	artistIDs := map[string]bool{}
+	for _, artist := range artists {
+		artistIDs[artist.ExternalIDs["mbid"]] = true
+	}
+	if !artistIDs["artist-mbid"] || !artistIDs["other-artist-mbid"] {
+		t.Fatalf("root tagged artist IDs = %#v", artists)
+	}
+
+	if _, ok := planMusicTrack(InventoryFile{Name: "Loose.flac", RelPath: "Loose.flac", Ext: ".flac"}, nil, audiotags.Tags{Artist: "Artist"}); ok {
+		t.Fatal("incompletely tagged root audio was assigned an invented album")
+	}
+}
+
 func TestApplyMusicReleaseConsensusRejectsAsacoOutlierAndPoisonedNFO(t *testing.T) {
 	evidence := make([]musicconsensus.Evidence, 0, 10)
 	for range 9 {
@@ -726,20 +1036,107 @@ func TestApplyMusicStorageOwnerDoesNotRewriteMisfiledArtist(t *testing.T) {
 	}
 }
 
-func TestGroupMusicArtistsRejectsInconsistentProviderIDs(t *testing.T) {
+func TestGroupMusicArtistsSplitsSameNameWithDistinctMBIDs(t *testing.T) {
 	albums := []MusicAlbumPlan{
 		{Artist: "Example", Album: "One", ExternalIDs: map[string]string{"musicbrainz_album_artist": "mbid-one", "itunes_artist": "apple-one"}, Confidence: 1},
 		{Artist: "Example", Album: "Two", ExternalIDs: map[string]string{"musicbrainz_album_artist": "mbid-two", "itunes_artist": "apple-one"}, Confidence: 1},
 	}
 	artists := groupMusicArtists(albums)
-	if len(artists) != 1 {
+	if len(artists) != 2 {
 		t.Fatalf("artists = %#v", artists)
 	}
-	if artists[0].ExternalIDs["mbid"] != "" || artists[0].ExternalIDs["apple"] != "apple-one" {
-		t.Fatalf("consistent IDs = %#v", artists[0].ExternalIDs)
+	seen := map[string]bool{}
+	for _, artist := range artists {
+		seen[artist.ExternalIDs["mbid"]] = true
+		if len(artist.Albums) != 1 || artist.Key == "artist:example" {
+			t.Fatalf("distinct MBID artist group = %#v", artist)
+		}
 	}
-	if !contains(artists[0].Issues, "conflicting_artist_mbid_ids") {
-		t.Fatalf("artist issues = %#v", artists[0].Issues)
+	if !seen["mbid-one"] || !seen["mbid-two"] {
+		t.Fatalf("artist MBID groups = %#v", artists)
+	}
+}
+
+func TestGroupMusicArtistsUsesTrustworthyMBIDBeforeName(t *testing.T) {
+	albums := []MusicAlbumPlan{
+		{Artist: "Beyoncé", Album: "One", ExternalIDs: map[string]string{"musicbrainz_album_artist": "artist-mbid"}, Confidence: 1},
+		{Artist: "Beyonce", Album: "Two", ExternalIDs: map[string]string{"musicbrainz_album_artist": "ARTIST-MBID"}, Confidence: 1},
+	}
+	artists := groupMusicArtists(albums)
+	if len(artists) != 1 || len(artists[0].Albums) != 2 || artists[0].ExternalIDs["mbid"] != "artist-mbid" {
+		t.Fatalf("MBID-first artist grouping = %#v", artists)
+	}
+}
+
+func TestGroupMusicAlbumsTreatsContradictoryReleaseIDsAsCannotLink(t *testing.T) {
+	tracks := []MusicTrackPlan{
+		{Artist: "Example", Album: "Same Album", Year: "2024", RelPath: "one.flac", Confidence: 1, ExternalIDs: map[string]string{"musicbrainz_album": "release-one"}},
+		{Artist: "Example", Album: "Same Album", Year: "2024", RelPath: "two.flac", Confidence: 1, ExternalIDs: map[string]string{"musicbrainz_album": "release-two"}},
+	}
+	for i := range tracks {
+		tracks[i].IdentityKeys = musicAlbumIdentityKeys(tracks[i])
+		tracks[i].Key = tracks[i].IdentityKeys[0]
+	}
+	albums := groupMusicAlbums(tracks)
+	if len(albums) != 2 || albums[0].Key == albums[1].Key {
+		t.Fatalf("contradictory hard release IDs merged through fallback identity: %#v", albums)
+	}
+}
+
+func TestGroupMusicAlbumsDoesNotAttachUntaggedTrackAcrossCannotLinkGroups(t *testing.T) {
+	tracks := []MusicTrackPlan{
+		{Artist: "Example", Album: "Same Album", Year: "2024", RelPath: "tagged-one.flac", Confidence: 1, ExternalIDs: map[string]string{"musicbrainz_album": "release-one"}},
+		{Artist: "Example", Album: "Same Album", Year: "2024", RelPath: "tagged-two.flac", Confidence: 1, ExternalIDs: map[string]string{"musicbrainz_album": "release-two"}},
+		{Artist: "Example", Album: "Same Album", Year: "2024", RelPath: "untagged.flac", Confidence: .5},
+	}
+	for i := range tracks {
+		tracks[i].IdentityKeys = musicAlbumIdentityKeys(tracks[i])
+	}
+	albums := groupMusicAlbums(tracks)
+	if len(albums) != 3 {
+		t.Fatalf("untagged track arbitrarily joined a contradictory release: %#v", albums)
+	}
+	for _, album := range albums {
+		if len(album.Tracks) != 1 {
+			t.Fatalf("cannot-link album absorbed ambiguous untagged track: %#v", albums)
+		}
+	}
+}
+
+func TestGroupMusicAlbumsAllowsEditionsInSharedReleaseGroup(t *testing.T) {
+	tracks := []MusicTrackPlan{
+		{Artist: "Example", Album: "Album", Year: "2024", RelPath: "one.flac", Confidence: 1, ExternalIDs: map[string]string{"musicbrainz_release_group": "shared-group", "musicbrainz_album": "release-one"}},
+		{Artist: "Example", Album: "Album (Deluxe)", Year: "2024", RelPath: "two.flac", Confidence: 1, ExternalIDs: map[string]string{"musicbrainz_release_group": "SHARED-GROUP", "musicbrainz_album": "release-two"}},
+	}
+	for i := range tracks {
+		tracks[i].IdentityKeys = musicAlbumIdentityKeys(tracks[i])
+		tracks[i].Key = tracks[i].IdentityKeys[0]
+	}
+	albums := groupMusicAlbums(tracks)
+	if len(albums) != 1 || len(albums[0].Tracks) != 2 {
+		t.Fatalf("shared release-group editions were split: %#v", albums)
+	}
+	if albums[0].ExternalIDs["musicbrainz_album"] != "" {
+		t.Fatalf("shared release group retained an arbitrary edition ID: %#v", albums[0].ExternalIDs)
+	}
+}
+
+func TestGroupMusicAlbumsDoesNotPromoteConflictingTrackArtistMBIDs(t *testing.T) {
+	tracks := []MusicTrackPlan{
+		{Artist: "Example", Album: "Album", Year: "2024", RelPath: "one.flac", Confidence: 1, ExternalIDs: map[string]string{"musicbrainz_album": "release", "musicbrainz_album_artist": "artist-one"}},
+		{Artist: "Example", Album: "Album", Year: "2024", RelPath: "two.flac", Confidence: 1, ExternalIDs: map[string]string{"musicbrainz_album": "release", "musicbrainz_album_artist": "artist-two"}},
+	}
+	for i := range tracks {
+		tracks[i].IdentityKeys = musicAlbumIdentityKeys(tracks[i])
+	}
+	albums := groupMusicAlbums(tracks)
+	artists := groupMusicArtists(albums)
+	if len(albums) != 1 || albums[0].ExternalIDs["musicbrainz_album_artist"] != "" ||
+		!contains(albums[0].Issues, "conflicting_musicbrainz_album_artist_ids") {
+		t.Fatalf("conflicting track artist IDs became album identity: %#v", albums)
+	}
+	if len(artists) != 1 || artists[0].ExternalIDs["mbid"] != "" {
+		t.Fatalf("conflicting track artist IDs became artist identity: %#v", artists)
 	}
 }
 
@@ -889,24 +1286,38 @@ func musicUnplannedPaths(events []Event) []string {
 type fakeMusicSearchProvider struct {
 	mu      sync.Mutex
 	results map[string][]metadata.SearchResult
+	errors  map[string]error
 	calls   map[string]int
 	queries map[string]metadata.SearchQuery
 }
 
 type convergingMusicSearchProvider struct {
 	*fakeMusicSearchProvider
-	details map[string]*metadata.MediaDetail
+	details      map[string]*metadata.MediaDetail
+	detailErrors map[string]error
 }
 
 type fakeMusicFingerprintProvider struct {
 	results map[string][]MusicRecordingEvidence
+	errors  map[string]error
 }
 
+type fakeMusicConfigurationError string
+
+func (e fakeMusicConfigurationError) Error() string            { return string(e) }
+func (fakeMusicConfigurationError) IsConfigurationError() bool { return true }
+
 func (f *fakeMusicFingerprintProvider) MatchTrack(_ context.Context, track MusicTrackPlan) ([]MusicRecordingEvidence, error) {
+	if err := f.errors[track.RelPath]; err != nil {
+		return nil, err
+	}
 	return f.results[track.RelPath], nil
 }
 
 func (f *convergingMusicSearchProvider) GetDetail(_ context.Context, providerID string, _ *metadata.FetchOptions) (*metadata.MediaDetail, error) {
+	if err := f.detailErrors[providerID]; err != nil {
+		return nil, err
+	}
 	return f.details[providerID], nil
 }
 
@@ -924,5 +1335,8 @@ func (f *fakeMusicSearchProvider) Search(_ context.Context, kind metadata.MediaK
 	}
 	f.calls[query.Title]++
 	f.queries[query.Title] = query
+	if err := f.errors[query.Title]; err != nil {
+		return nil, err
+	}
 	return f.results[query.Title], nil
 }

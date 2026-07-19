@@ -23,6 +23,72 @@ const defaultBaseURL = "https://api.acoustid.org"
 
 var ErrDisabled = errors.New("acoustid lookup is disabled")
 
+type ErrorClass string
+
+const (
+	ErrorPermanent     ErrorClass = "permanent"
+	ErrorTransient     ErrorClass = "transient"
+	ErrorConfiguration ErrorClass = "configuration"
+)
+
+// LookupError classifies an AcoustID failure so durable scanner callers can
+// distinguish a service/network outage from a bad application key or invalid
+// fingerprint. RetryAfter is populated when the server supplies one.
+type LookupError struct {
+	Class      ErrorClass
+	Message    string
+	StatusCode int
+	RetryAfter time.Duration
+	Underlying error
+}
+
+func (e *LookupError) Error() string {
+	if e == nil {
+		return "acoustid lookup failed"
+	}
+	if e.Message != "" {
+		return e.Message
+	}
+	if e.Underlying != nil {
+		return e.Underlying.Error()
+	}
+	return "acoustid lookup failed"
+}
+
+func (e *LookupError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Underlying
+}
+
+// IsConfigurationError lets higher-level scanner code surface a global bad
+// key/base configuration as a job error without importing this package.
+func (e *LookupError) IsConfigurationError() bool {
+	return e != nil && e.Class == ErrorConfiguration
+}
+
+func IsTransient(err error) bool {
+	var lookupErr *LookupError
+	return errors.As(err, &lookupErr) && lookupErr.Class == ErrorTransient
+}
+
+func IsConfiguration(err error) bool {
+	if errors.Is(err, ErrDisabled) {
+		return true
+	}
+	var lookupErr *LookupError
+	return errors.As(err, &lookupErr) && lookupErr.Class == ErrorConfiguration
+}
+
+func ErrorRetryAfter(err error) time.Duration {
+	var lookupErr *LookupError
+	if errors.As(err, &lookupErr) {
+		return lookupErr.RetryAfter
+	}
+	return 0
+}
+
 type Match struct {
 	AcoustID      string  `json:"acoustid"`
 	RecordingMBID string  `json:"recording_mbid"`
@@ -101,15 +167,48 @@ func (c *Client) Lookup(ctx context.Context, fingerprint string, durationSecs in
 
 	response, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("acoustid lookup: %w", err)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		return nil, &LookupError{Class: ErrorTransient, Message: "acoustid lookup: " + err.Error(), Underlying: err}
 	}
 	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 2<<20))
 	if err != nil {
-		return nil, fmt.Errorf("read acoustid response: %w", err)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		return nil, &LookupError{Class: ErrorTransient, Message: "read acoustid response: " + err.Error(), Underlying: err}
 	}
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("acoustid lookup: HTTP %d", response.StatusCode)
+		var errorEnvelope struct {
+			Status string `json:"status"`
+			Error  struct {
+				Code    int    `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(body, &errorEnvelope) == nil && errorEnvelope.Status != "ok" &&
+			(errorEnvelope.Error.Code != 0 || strings.TrimSpace(errorEnvelope.Error.Message) != "") {
+			return nil, &LookupError{
+				Class:      acoustIDEnvelopeErrorClass(errorEnvelope.Error.Code, errorEnvelope.Error.Message),
+				StatusCode: response.StatusCode,
+				RetryAfter: parseRetryAfter(response.Header.Get("Retry-After"), time.Now()),
+				Message:    fmt.Sprintf("acoustid lookup failed (%d): %s", errorEnvelope.Error.Code, errorEnvelope.Error.Message),
+			}
+		}
+		class := ErrorPermanent
+		switch {
+		case response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden:
+			class = ErrorConfiguration
+		case response.StatusCode == http.StatusRequestTimeout || response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= 500:
+			class = ErrorTransient
+		}
+		return nil, &LookupError{
+			Class: class, StatusCode: response.StatusCode,
+			RetryAfter: parseRetryAfter(response.Header.Get("Retry-After"), time.Now()),
+			Message:    fmt.Sprintf("acoustid lookup: HTTP %d", response.StatusCode),
+		}
 	}
 	var envelope struct {
 		Status string `json:"status"`
@@ -126,10 +225,14 @@ func (c *Client) Lookup(ctx context.Context, fingerprint string, durationSecs in
 		} `json:"results"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		return nil, fmt.Errorf("decode acoustid response: %w", err)
+		return nil, &LookupError{Class: ErrorTransient, Message: "decode acoustid response: " + err.Error(), Underlying: err}
 	}
 	if envelope.Status != "ok" {
-		return nil, fmt.Errorf("acoustid lookup failed (%d): %s", envelope.Error.Code, envelope.Error.Message)
+		class := acoustIDEnvelopeErrorClass(envelope.Error.Code, envelope.Error.Message)
+		return nil, &LookupError{
+			Class:   class,
+			Message: fmt.Sprintf("acoustid lookup failed (%d): %s", envelope.Error.Code, envelope.Error.Message),
+		}
 	}
 
 	byRecording := map[string]Match{}
@@ -156,4 +259,44 @@ func (c *Client) Lookup(ctx context.Context, fingerprint string, durationSecs in
 		return matches[i].RecordingMBID < matches[j].RecordingMBID
 	})
 	return matches, nil
+}
+
+func acoustIDEnvelopeErrorClass(code int, message string) ErrorClass {
+	// AcoustID code 4 is an invalid client/application key; codes 5 and 9 are
+	// invalid user credentials used by submission endpoints. Treat all three
+	// as configuration so they never masquerade as an ordinary no-match.
+	switch code {
+	case 4, 5, 9:
+		return ErrorConfiguration
+	case 10:
+		return ErrorTransient
+	}
+	lower := strings.ToLower(message)
+	if strings.Contains(lower, "client key") || strings.Contains(lower, "api key") || strings.Contains(lower, "authentication") {
+		return ErrorConfiguration
+	}
+	for _, fragment := range []string{"internal error", "temporarily", "rate limit", "too many", "unavailable", "timeout"} {
+		if strings.Contains(lower, fragment) {
+			return ErrorTransient
+		}
+	}
+	return ErrorPermanent
+}
+
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+		return 0
+	}
+	when, err := http.ParseTime(value)
+	if err != nil || !when.After(now) {
+		return 0
+	}
+	return when.Sub(now)
 }

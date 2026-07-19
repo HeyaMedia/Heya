@@ -19,6 +19,10 @@ const (
 	scanArtifactKindSearch  = "search_result"
 	scanArtifactKindFetch   = "fetch_result"
 	scanArtifactSchemaV1    = int32(1)
+	// PipelineRevision is semantic compatibility, not JSON wire compatibility.
+	// Bump it whenever analysis/grouping rules change in a way that makes a
+	// retained analysis unsafe to replay through a newer matcher.
+	scanArtifactPipelineRevision = 3
 	// PostgreSQL jsonb has a hard 256 MiB limit for the total size of array
 	// elements. Keep every artifact comfortably below that boundary; scanner
 	// entity artifacts are the durable hand-off for the worker pipeline.
@@ -38,10 +42,12 @@ func (e *ArtifactTooLargeError) Error() string {
 }
 
 type scanRunArtifact struct {
-	SchemaVersion int               `json:"schema_version"`
-	ScopePaths    []string          `json:"scope_paths,omitempty"`
-	Inventory     inventoryArtifact `json:"inventory"`
-	Result        Result            `json:"result"`
+	SchemaVersion    int               `json:"schema_version"`
+	PipelineRevision int               `json:"pipeline_revision,omitempty"`
+	ScopePaths       []string          `json:"scope_paths,omitempty"`
+	SourceSet        sourceSetArtifact `json:"source_set"`
+	Inventory        inventoryArtifact `json:"inventory"`
+	Result           Result            `json:"result"`
 }
 
 type inventoryArtifact struct {
@@ -63,11 +69,17 @@ func marshalFetchArtifact(opts Options, result Result) ([]byte, error) {
 
 func marshalResultArtifact(kind string, opts Options, result Result) ([]byte, error) {
 	result = filterResultToScopes(result, opts.ScopePaths, nil)
+	sourceSet := result.artifactSourceSet
+	if len(sourceSet.Roots) == 0 {
+		sourceSet = sourceSetFromInventory(result.Inventory, opts.ScopePaths)
+	}
 	artifact := scanRunArtifact{
-		SchemaVersion: int(scanArtifactSchemaV1),
-		ScopePaths:    normalizedScopePaths(opts.ScopePaths),
-		Inventory:     inventoryToArtifact(result.Inventory),
-		Result:        result,
+		SchemaVersion:    int(scanArtifactSchemaV1),
+		PipelineRevision: scanArtifactPipelineRevision,
+		ScopePaths:       normalizedScopePaths(opts.ScopePaths),
+		SourceSet:        sourceSet,
+		Inventory:        inventoryToArtifact(result.Inventory),
+		Result:           result,
 	}
 	data, err := json.Marshal(artifact)
 	if err != nil {
@@ -104,6 +116,7 @@ func unmarshalResultArtifact(kind string, data []byte) (Result, error) {
 	}
 	result := artifact.Result
 	result.Inventory = artifact.Inventory.toInventory()
+	result.artifactSourceSet = artifact.SourceSet
 	return result, nil
 }
 
@@ -167,6 +180,91 @@ func fetchMetadataCoversAcceptedSearch(result Result, lib sqlc.Library) bool {
 	return true
 }
 
+// retainFetchMetadataForAcceptedSearch removes detail fetched for a provider
+// that a newer manual decision no longer accepts. Coverage alone is
+// insufficient when the accepted set becomes empty: without pruning, stale
+// detail survives into materialization even though the overlaid search row is
+// rejected.
+func retainFetchMetadataForAcceptedSearch(result *Result, lib sqlc.Library) {
+	if result == nil {
+		return
+	}
+	allowed := map[string]bool{}
+	addAllowed := func(key, providerID string) {
+		if strings.TrimSpace(providerID) != "" {
+			allowed[searchFetchKey(key, providerID)] = true
+		}
+	}
+	switch {
+	case lib.MediaType == sqlc.MediaTypeMovie:
+		for _, match := range result.MovieSearch {
+			if match.Accepted {
+				addAllowed(match.Key, match.ProviderID)
+			}
+		}
+		kept := result.MovieMetadata[:0]
+		for _, item := range result.MovieMetadata {
+			if fetchPreviewAllowed(allowed, item.Key, item.ProviderID, "", item.Detail) {
+				kept = append(kept, item)
+			}
+		}
+		result.MovieMetadata = kept
+	case lib.MediaType == sqlc.MediaTypeBook:
+		for _, match := range result.BookSearch {
+			if match.Accepted {
+				addAllowed(match.Key, match.ProviderID)
+			}
+		}
+		kept := result.BookMetadata[:0]
+		for _, item := range result.BookMetadata {
+			if fetchPreviewAllowed(allowed, item.Key, item.ProviderID, "", item.Detail) {
+				kept = append(kept, item)
+			}
+		}
+		result.BookMetadata = kept
+	case lib.MediaType == sqlc.MediaTypeMusic:
+		for _, match := range result.MusicSearch {
+			if match.Accepted {
+				addAllowed(match.Key, match.ProviderID)
+			}
+		}
+		kept := result.MusicMetadata[:0]
+		for _, item := range result.MusicMetadata {
+			if fetchPreviewAllowed(allowed, item.Key, item.ProviderID, item.SearchProviderID, item.Detail) {
+				kept = append(kept, item)
+			}
+		}
+		result.MusicMetadata = kept
+	case mediatype.IsTVLike(lib.MediaType):
+		for _, match := range result.TVSearch {
+			if match.Accepted {
+				addAllowed(match.Key, match.ProviderID)
+			}
+		}
+		kept := result.TVMetadata[:0]
+		for _, item := range result.TVMetadata {
+			keys := item.Keys
+			if len(keys) == 0 {
+				keys = []string{item.Key}
+			}
+			for _, key := range keys {
+				if fetchPreviewAllowed(allowed, key, item.ProviderID, "", item.Detail) {
+					kept = append(kept, item)
+					break
+				}
+			}
+		}
+		result.TVMetadata = kept
+	}
+}
+
+func fetchPreviewAllowed(allowed map[string]bool, key, providerID, searchProviderID string, detail *metadata.MediaDetail) bool {
+	if allowed[searchFetchKey(key, providerID)] || (searchProviderID != "" && allowed[searchFetchKey(key, searchProviderID)]) {
+		return true
+	}
+	return detail != nil && strings.TrimSpace(detail.CanonicalID) != "" && allowed[searchFetchKey(key, heyametadata.EncodeEntityProviderID(detail.CanonicalID))]
+}
+
 func acceptedSearchNeedsFetch(accepted bool, providerID string) bool {
 	return accepted && strings.TrimSpace(providerID) != ""
 }
@@ -174,7 +272,7 @@ func acceptedSearchNeedsFetch(accepted bool, providerID string) bool {
 func movieFetchCoverage(items []MovieFetchPreview) map[string]bool {
 	out := make(map[string]bool, len(items))
 	for _, item := range items {
-		if strings.TrimSpace(item.Error) == "" && item.Detail == nil {
+		if strings.TrimSpace(item.Error) != "" || item.Detail == nil {
 			continue
 		}
 		addFetchCoverage(out, item.Key, item.ProviderID, item.Detail)
@@ -185,7 +283,7 @@ func movieFetchCoverage(items []MovieFetchPreview) map[string]bool {
 func bookFetchCoverage(items []BookFetchPreview) map[string]bool {
 	out := make(map[string]bool, len(items))
 	for _, item := range items {
-		if strings.TrimSpace(item.Error) == "" && item.Detail == nil {
+		if strings.TrimSpace(item.Error) != "" || item.Detail == nil {
 			continue
 		}
 		addFetchCoverage(out, item.Key, item.ProviderID, item.Detail)
@@ -196,7 +294,7 @@ func bookFetchCoverage(items []BookFetchPreview) map[string]bool {
 func musicFetchCoverage(items []MusicFetchPreview) map[string]bool {
 	out := make(map[string]bool, len(items))
 	for _, item := range items {
-		if strings.TrimSpace(item.Error) == "" && item.Detail == nil {
+		if strings.TrimSpace(item.Error) != "" || item.Detail == nil {
 			continue
 		}
 		addFetchCoverage(out, item.Key, item.ProviderID, item.Detail)
@@ -210,7 +308,7 @@ func musicFetchCoverage(items []MusicFetchPreview) map[string]bool {
 func tvFetchCoverage(items []TVFetchPreview) map[string]bool {
 	out := make(map[string]bool, len(items))
 	for _, item := range items {
-		if strings.TrimSpace(item.Error) == "" && item.Detail == nil {
+		if strings.TrimSpace(item.Error) != "" || item.Detail == nil {
 			continue
 		}
 		addFetchCoverage(out, item.Key, item.ProviderID, item.Detail)

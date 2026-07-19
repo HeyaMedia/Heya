@@ -132,6 +132,52 @@ func (q *Queries) CountTracksByMood(ctx context.Context, arg CountTracksByMoodPa
 	return column_1, err
 }
 
+const countTracksByMoods = `-- name: CountTracksByMoods :many
+SELECT bucket_key::text AS bucket_key,
+       count(DISTINCT (al.artist_id, lower(t.title), t.duration / 15))::bigint AS track_count
+FROM track_facets tf
+JOIN tracks t  ON t.id = tf.track_id
+JOIN albums al ON al.id = t.album_id
+CROSS JOIN LATERAL unnest($1::text[]) AS bucket_key
+WHERE (tf.mood_tags->>bucket_key)::real > $2::real
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+GROUP BY bucket_key
+`
+
+type CountTracksByMoodsParams struct {
+	MoodKeys  []string `json:"mood_keys"`
+	Threshold float32  `json:"threshold"`
+}
+
+type CountTracksByMoodsRow struct {
+	BucketKey  string `json:"bucket_key"`
+	TrackCount int64  `json:"track_count"`
+}
+
+// Collapsed sibling of CountTracksByMood: computes every Browse > Moods tile
+// count (one row per key in mood_keys) in a single track_facets pass instead
+// of the caller looping one full-scan query per mood tag. Same
+// distinct-recording counting and threshold predicate as CountTracksByMood.
+func (q *Queries) CountTracksByMoods(ctx context.Context, arg CountTracksByMoodsParams) ([]CountTracksByMoodsRow, error) {
+	rows, err := q.db.Query(ctx, countTracksByMoods, arg.MoodKeys, arg.Threshold)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountTracksByMoodsRow{}
+	for rows.Next() {
+		var i CountTracksByMoodsRow
+		if err := rows.Scan(&i.BucketKey, &i.TrackCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countTracksByTempoBand = `-- name: CountTracksByTempoBand :one
 SELECT count(DISTINCT (al.artist_id, lower(t.title), t.duration / 15))::bigint
 FROM track_facets tf
@@ -156,6 +202,72 @@ func (q *Queries) CountTracksByTempoBand(ctx context.Context, arg CountTracksByT
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const countTracksByTempoBands = `-- name: CountTracksByTempoBands :many
+SELECT
+    (CASE
+        WHEN tf.bpm < $1::real THEN 0
+        WHEN tf.bpm < $2::real THEN 1
+        WHEN tf.bpm < $3::real THEN 2
+        WHEN tf.bpm < $4::real THEN 3
+        ELSE 4
+    END)::int AS band_index,
+    count(DISTINCT (al.artist_id, lower(t.title), t.duration / 15))::bigint AS track_count
+FROM track_facets tf
+JOIN tracks t  ON t.id = tf.track_id
+JOIN albums al ON al.id = t.album_id
+WHERE tf.bpm IS NOT NULL
+  AND tf.bpm >= $5::real
+  AND tf.bpm <  $6::real
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+GROUP BY band_index
+`
+
+type CountTracksByTempoBandsParams struct {
+	Edge1  float32 `json:"edge1"`
+	Edge2  float32 `json:"edge2"`
+	Edge3  float32 `json:"edge3"`
+	Edge4  float32 `json:"edge4"`
+	MinBpm float32 `json:"min_bpm"`
+	MaxBpm float32 `json:"max_bpm"`
+}
+
+type CountTracksByTempoBandsRow struct {
+	BandIndex  int32 `json:"band_index"`
+	TrackCount int64 `json:"track_count"`
+}
+
+// Collapsed sibling of CountTracksByTempoBand: buckets every analyzed track
+// into one of the 5 fixed BPM bands (edges mirror tempoBands in
+// music_browse.go) and counts each in one pass instead of 5 range-scoped
+// full scans. band_index is 0..4 in the same ascending order as tempoBands,
+// so the caller can zip it straight back onto that slice.
+func (q *Queries) CountTracksByTempoBands(ctx context.Context, arg CountTracksByTempoBandsParams) ([]CountTracksByTempoBandsRow, error) {
+	rows, err := q.db.Query(ctx, countTracksByTempoBands,
+		arg.Edge1,
+		arg.Edge2,
+		arg.Edge3,
+		arg.Edge4,
+		arg.MinBpm,
+		arg.MaxBpm,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountTracksByTempoBandsRow{}
+	for rows.Next() {
+		var i CountTracksByTempoBandsRow
+		if err := rows.Scan(&i.BandIndex, &i.TrackCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getAlbumCentroid = `-- name: GetAlbumCentroid :one
@@ -1475,6 +1587,233 @@ func (q *Queries) SonicAnalysisThroughput(ctx context.Context, hours int32) ([]S
 	for rows.Next() {
 		var i SonicAnalysisThroughputRow
 		if err := rows.Scan(&i.Bucket, &i.Analyzed); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const topArtistsByGenres = `-- name: TopArtistsByGenres :many
+SELECT genre_name, media_item_id, media_item_public_id, track_count
+FROM (
+    SELECT (elem->>'name')::text AS genre_name,
+           mi.id        AS media_item_id,
+           mi.public_id AS media_item_public_id,
+           count(*)::bigint AS track_count,
+           row_number() OVER (PARTITION BY (elem->>'name') ORDER BY count(*) DESC, mi.id ASC) AS rn
+    FROM track_facets tf
+    JOIN tracks      t  ON t.id = tf.track_id
+    JOIN albums      al ON al.id = t.album_id
+    JOIN artists     a  ON a.id  = al.artist_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
+    CROSS JOIN LATERAL jsonb_array_elements(tf.top_genres) AS elem
+    WHERE (elem->>'score')::real >= $1::real
+      AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+    GROUP BY (elem->>'name'), mi.id, mi.public_id
+) ranked
+WHERE rn <= $2::int
+ORDER BY genre_name, track_count DESC, media_item_id ASC
+`
+
+type TopArtistsByGenresParams struct {
+	MinScore float32 `json:"min_score"`
+	TopN     int32   `json:"top_n"`
+}
+
+type TopArtistsByGenresRow struct {
+	GenreName         string    `json:"genre_name"`
+	MediaItemID       int64     `json:"media_item_id"`
+	MediaItemPublicID uuid.UUID `json:"media_item_public_id"`
+	TrackCount        int64     `json:"track_count"`
+}
+
+// Top-N artists per genre bucket, ranked by in-bucket track count. Companion
+// to ListGenreBuckets for the per-tile artist imagery on Browse > Genres.
+// Deliberately NOT filtered down to the caller's already-capped top-N genre
+// name list (ListGenreBuckets' LIMIT genreBucketLimit) — that selection
+// isn't known until ListGenreBuckets returns, and the two are meant to run
+// concurrently. The Discogs-400 vocabulary is small (a few hundred labels
+// once the score floor applies), so ranking every genre's top artists here
+// and letting the service layer join against the capped bucket list
+// afterward is cheap enough to skip a second, dependent round trip.
+func (q *Queries) TopArtistsByGenres(ctx context.Context, arg TopArtistsByGenresParams) ([]TopArtistsByGenresRow, error) {
+	rows, err := q.db.Query(ctx, topArtistsByGenres, arg.MinScore, arg.TopN)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TopArtistsByGenresRow{}
+	for rows.Next() {
+		var i TopArtistsByGenresRow
+		if err := rows.Scan(
+			&i.GenreName,
+			&i.MediaItemID,
+			&i.MediaItemPublicID,
+			&i.TrackCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const topArtistsByMood = `-- name: TopArtistsByMood :many
+SELECT bucket_key::text AS bucket_key, media_item_id, media_item_public_id, track_count
+FROM (
+    SELECT bucket_key,
+           mi.id        AS media_item_id,
+           mi.public_id AS media_item_public_id,
+           count(*)::bigint AS track_count,
+           row_number() OVER (PARTITION BY bucket_key ORDER BY count(*) DESC, mi.id ASC) AS rn
+    FROM track_facets tf
+    JOIN tracks      t  ON t.id = tf.track_id
+    JOIN albums      al ON al.id = t.album_id
+    JOIN artists     a  ON a.id  = al.artist_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
+    CROSS JOIN LATERAL unnest($1::text[]) AS bucket_key
+    WHERE (tf.mood_tags->>bucket_key)::real > $2::real
+      AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+    GROUP BY bucket_key, mi.id, mi.public_id
+) ranked
+WHERE rn <= $3::int
+ORDER BY bucket_key, track_count DESC, media_item_id ASC
+`
+
+type TopArtistsByMoodParams struct {
+	MoodKeys  []string `json:"mood_keys"`
+	Threshold float32  `json:"threshold"`
+	TopN      int32    `json:"top_n"`
+}
+
+type TopArtistsByMoodRow struct {
+	BucketKey         string    `json:"bucket_key"`
+	MediaItemID       int64     `json:"media_item_id"`
+	MediaItemPublicID uuid.UUID `json:"media_item_public_id"`
+	TrackCount        int64     `json:"track_count"`
+}
+
+// Top-N artists per mood bucket, ranked by in-bucket track count. Powers the
+// per-tile artist imagery on Browse > Moods. Reuses ListTracksByMood's join
+// path (track_facets -> tracks -> albums -> artists -> media_item_cards) for
+// the artist's routable identity (media item id + public id — the shape the
+// FE image composables expect). Ranks on a raw track count rather than the
+// distinct-recording dedup the tile counts use — good enough for "who's
+// prominent in this mood" and keeps this a single pass.
+func (q *Queries) TopArtistsByMood(ctx context.Context, arg TopArtistsByMoodParams) ([]TopArtistsByMoodRow, error) {
+	rows, err := q.db.Query(ctx, topArtistsByMood, arg.MoodKeys, arg.Threshold, arg.TopN)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TopArtistsByMoodRow{}
+	for rows.Next() {
+		var i TopArtistsByMoodRow
+		if err := rows.Scan(
+			&i.BucketKey,
+			&i.MediaItemID,
+			&i.MediaItemPublicID,
+			&i.TrackCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const topArtistsByTempoBands = `-- name: TopArtistsByTempoBands :many
+SELECT band_index, media_item_id, media_item_public_id, track_count
+FROM (
+    SELECT
+        (CASE
+            WHEN tf.bpm < $1::real THEN 0
+            WHEN tf.bpm < $2::real THEN 1
+            WHEN tf.bpm < $3::real THEN 2
+            WHEN tf.bpm < $4::real THEN 3
+            ELSE 4
+        END)::int AS band_index,
+        mi.id        AS media_item_id,
+        mi.public_id AS media_item_public_id,
+        count(*)::bigint AS track_count,
+        row_number() OVER (
+            PARTITION BY (CASE
+                WHEN tf.bpm < $1::real THEN 0
+                WHEN tf.bpm < $2::real THEN 1
+                WHEN tf.bpm < $3::real THEN 2
+                WHEN tf.bpm < $4::real THEN 3
+                ELSE 4
+            END)
+            ORDER BY count(*) DESC, mi.id ASC
+        ) AS rn
+    FROM track_facets tf
+    JOIN tracks      t  ON t.id = tf.track_id
+    JOIN albums      al ON al.id = t.album_id
+    JOIN artists     a  ON a.id  = al.artist_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
+    WHERE tf.bpm IS NOT NULL
+      AND tf.bpm >= $5::real
+      AND tf.bpm <  $6::real
+      AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+    GROUP BY band_index, mi.id, mi.public_id
+) ranked
+WHERE rn <= $7::int
+ORDER BY band_index, track_count DESC, media_item_id ASC
+`
+
+type TopArtistsByTempoBandsParams struct {
+	Edge1  float32 `json:"edge1"`
+	Edge2  float32 `json:"edge2"`
+	Edge3  float32 `json:"edge3"`
+	Edge4  float32 `json:"edge4"`
+	MinBpm float32 `json:"min_bpm"`
+	MaxBpm float32 `json:"max_bpm"`
+	TopN   int32   `json:"top_n"`
+}
+
+type TopArtistsByTempoBandsRow struct {
+	BandIndex         int32     `json:"band_index"`
+	MediaItemID       int64     `json:"media_item_id"`
+	MediaItemPublicID uuid.UUID `json:"media_item_public_id"`
+	TrackCount        int64     `json:"track_count"`
+}
+
+// Top-N artists per BPM band, ranked by in-bucket track count. Powers the
+// per-tile artist imagery on Browse > Tempo. Same band_index convention and
+// edge params as CountTracksByTempoBands.
+func (q *Queries) TopArtistsByTempoBands(ctx context.Context, arg TopArtistsByTempoBandsParams) ([]TopArtistsByTempoBandsRow, error) {
+	rows, err := q.db.Query(ctx, topArtistsByTempoBands,
+		arg.Edge1,
+		arg.Edge2,
+		arg.Edge3,
+		arg.Edge4,
+		arg.MinBpm,
+		arg.MaxBpm,
+		arg.TopN,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TopArtistsByTempoBandsRow{}
+	for rows.Next() {
+		var i TopArtistsByTempoBandsRow
+		if err := rows.Scan(
+			&i.BandIndex,
+			&i.MediaItemID,
+			&i.MediaItemPublicID,
+			&i.TrackCount,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

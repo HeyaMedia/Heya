@@ -227,7 +227,14 @@ func (a *App) GetLibraryScannerView(ctx context.Context, libraryID int64, includ
 	return view, nil
 }
 
-var ErrScannerReviewTargetNotFound = errors.New("scanner review target not found")
+var (
+	ErrScannerReviewTargetNotFound = errors.New("scanner review target not found")
+	// Terminal reject/ignore cannot safely detach a media item once scanner
+	// apply has bound files to it: legacy file links do not retain enough
+	// per-identity provenance to distinguish shared canonical items. Require a
+	// rematch instead, which reassigns files through the normal apply pipeline.
+	ErrScannerReviewIdentityApplied = errors.New("scanner identity is already applied; rematch it instead of rejecting or ignoring it")
+)
 
 func (a *App) GetScannerCandidateDetail(ctx context.Context, libraryID, identityID, candidateID int64) (ScannerCandidateDetailView, error) {
 	q := sqlc.New(a.db)
@@ -392,12 +399,38 @@ func (a *App) SearchScannerIdentity(ctx context.Context, libraryID, identityID i
 		}
 	}
 
-	results, err := a.heya.Search(ctx, kind, metadata.SearchQuery{
+	searchQuery := metadata.SearchQuery{
 		Title:    query,
 		Year:     year,
 		Language: settings.PreferredLanguage,
 		Country:  settings.PreferredCountry,
-	})
+	}
+	if row.MediaType == sqlc.MediaTypeBook {
+		var bookEvidence struct {
+			Author      string            `json:"author"`
+			Format      string            `json:"format"`
+			ExternalIDs map[string]string `json:"external_ids"`
+		}
+		if json.Unmarshal(row.RawIdentity, &bookEvidence) == nil {
+			searchQuery.Author = strings.TrimSpace(bookEvidence.Author)
+			searchQuery.Format = strings.TrimSpace(bookEvidence.Format)
+			if len(bookEvidence.ExternalIDs) > 0 {
+				searchQuery.Identifiers = make(map[string]string, len(bookEvidence.ExternalIDs))
+				for key, value := range bookEvidence.ExternalIDs {
+					if value = strings.TrimSpace(value); value != "" {
+						searchQuery.Identifiers[key] = value
+					}
+				}
+			}
+			for _, key := range []string{"isbn", "isbn13", "isbn_13", "isbn10", "isbn_10"} {
+				if value := strings.TrimSpace(bookEvidence.ExternalIDs[key]); value != "" {
+					searchQuery.ISBN = value
+					break
+				}
+			}
+		}
+	}
+	results, err := a.heya.Search(ctx, kind, searchQuery)
 	if err != nil {
 		log.Debug().Err(err).Msg("scanner identity search failed")
 		results = nil
@@ -526,34 +559,68 @@ func scannerPgNumericFromFloat64(f float64) pgtype.Numeric {
 
 func (a *App) RejectScannerIdentity(ctx context.Context, libraryID, identityID int64, reason string) (ScannerIdentityView, error) {
 	q := sqlc.New(a.db)
-	_, err := q.RejectScannerIdentity(ctx, sqlc.RejectScannerIdentityParams{
+	row, _, err := getScannerIdentityRowAndView(ctx, q, libraryID, identityID)
+	if err != nil {
+		return ScannerIdentityView{}, err
+	}
+	if row.MediaItemID.Valid {
+		return ScannerIdentityView{}, ErrScannerReviewIdentityApplied
+	}
+	_, err = q.RejectScannerIdentity(ctx, sqlc.RejectScannerIdentityParams{
 		LibraryID:  libraryID,
 		IdentityID: identityID,
 		Reason:     scannerReviewReason(reason, "manual_rejected"),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			if current, _, loadErr := getScannerIdentityRowAndView(ctx, q, libraryID, identityID); loadErr == nil && current.MediaItemID.Valid {
+				return ScannerIdentityView{}, ErrScannerReviewIdentityApplied
+			}
 			return ScannerIdentityView{}, ErrScannerReviewTargetNotFound
 		}
 		return ScannerIdentityView{}, err
 	}
-	return getScannerIdentityView(ctx, q, libraryID, identityID)
+	row, view, err := getScannerIdentityRowAndView(ctx, q, libraryID, identityID)
+	if err != nil {
+		return ScannerIdentityView{}, err
+	}
+	if err := a.enqueueScannerReviewReidentify(ctx, q, row); err != nil {
+		log.Warn().Err(err).Int64("library_id", libraryID).Int64("identity_id", identityID).Msg("scanner review rejection: enqueue re-identify failed")
+	}
+	return view, nil
 }
 
 func (a *App) IgnoreScannerIdentity(ctx context.Context, libraryID, identityID int64, reason string) (ScannerIdentityView, error) {
 	q := sqlc.New(a.db)
-	_, err := q.IgnoreScannerIdentity(ctx, sqlc.IgnoreScannerIdentityParams{
+	row, _, err := getScannerIdentityRowAndView(ctx, q, libraryID, identityID)
+	if err != nil {
+		return ScannerIdentityView{}, err
+	}
+	if row.MediaItemID.Valid {
+		return ScannerIdentityView{}, ErrScannerReviewIdentityApplied
+	}
+	_, err = q.IgnoreScannerIdentity(ctx, sqlc.IgnoreScannerIdentityParams{
 		LibraryID:  libraryID,
 		IdentityID: identityID,
 		Reason:     scannerReviewReason(reason, "manual_ignored"),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			if current, _, loadErr := getScannerIdentityRowAndView(ctx, q, libraryID, identityID); loadErr == nil && current.MediaItemID.Valid {
+				return ScannerIdentityView{}, ErrScannerReviewIdentityApplied
+			}
 			return ScannerIdentityView{}, ErrScannerReviewTargetNotFound
 		}
 		return ScannerIdentityView{}, err
 	}
-	return getScannerIdentityView(ctx, q, libraryID, identityID)
+	row, view, err := getScannerIdentityRowAndView(ctx, q, libraryID, identityID)
+	if err != nil {
+		return ScannerIdentityView{}, err
+	}
+	if err := a.enqueueScannerReviewReidentify(ctx, q, row); err != nil {
+		log.Warn().Err(err).Int64("library_id", libraryID).Int64("identity_id", identityID).Msg("scanner review ignore: enqueue re-identify failed")
+	}
+	return view, nil
 }
 
 func (a *App) ResetScannerIdentityReview(ctx context.Context, libraryID, identityID int64) (ScannerIdentityView, error) {

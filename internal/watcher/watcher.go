@@ -2,6 +2,7 @@ package watcher
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/karbowiak/heya/internal/atomicfile"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/mediafile"
 	"github.com/karbowiak/heya/internal/metadata"
@@ -30,7 +32,10 @@ var (
 	rescanDebounceDelay        = 5 * time.Second
 	softDeleteDebounceDelay    = 2 * time.Second
 	sidecarRescanDebounceDelay = 2 * time.Second
+	generatedWriteTTL          = 2 * time.Minute
 )
+
+const maxGeneratedWriteSuppressions = 10_000
 
 // watchWalkStallTimeout bounds *stalls* in the recursive directory walk when
 // arming a watcher — not total walk time. A big tree under heavy I/O pressure
@@ -52,7 +57,15 @@ type LibraryWatcher struct {
 	generation uint64
 	pauseDepth atomic.Int32
 	pendingMu  sync.Mutex
-	pending    map[string]*time.Timer
+	pending    map[string]*pendingWatcherEvent
+}
+
+// pendingWatcherEvent keeps every path that contributed to one directory's
+// debounce window. A generated sidecar must not hide a real audio/video edit
+// merely because the sidecar happened to be the last event in that directory.
+type pendingWatcherEvent struct {
+	paths map[string]struct{}
+	timer *time.Timer
 }
 
 type ScanFunc func(libraryID int64, force bool)
@@ -87,6 +100,18 @@ type generationActivity struct {
 // The original walk goroutine removes its own attempt when it eventually exits.
 type watchWalkAttempt struct{}
 
+type generatedWriteSignature struct {
+	size         int64
+	modTimeNanos int64
+	sha256       [sha256.Size]byte
+}
+
+type generatedWriteSuppression struct {
+	signature generatedWriteSignature
+	expiresAt time.Time
+	recorded  time.Time
+}
+
 type Manager struct {
 	reconcileMu         sync.Mutex
 	mu                  sync.Mutex
@@ -108,22 +133,27 @@ type Manager struct {
 	sidecarRescanInsert func(context.Context, int64, []string) error
 	rescanMu            sync.Mutex
 	rescanTimers        map[int64]*pendingRescan
+	generatedWriteMu    sync.Mutex
+	generatedWrites     map[string]generatedWriteSuppression
+	now                 func() time.Time
 }
 
 func NewManager(db *pgxpool.Pool, riverClient *river.Client[pgx.Tx], onScan ScanFunc) *Manager {
 	m := &Manager{
-		watchers:       make(map[string]*LibraryWatcher),
-		watchWalks:     make(map[string]*watchWalkAttempt),
-		desiredRoots:   make(map[int64]map[string]struct{}),
-		pauseDepths:    make(map[int64]int32),
-		generations:    make(map[int64]uint64),
-		activities:     make(map[int64]map[uint64]*generationActivity),
-		db:             db,
-		river:          riverClient,
-		onScan:         onScan,
-		softDeletes:    make(map[int64]*pendingSoftDelete),
-		sidecarRescans: make(map[int64]*pendingSoftDelete),
-		rescanTimers:   make(map[int64]*pendingRescan),
+		watchers:        make(map[string]*LibraryWatcher),
+		watchWalks:      make(map[string]*watchWalkAttempt),
+		desiredRoots:    make(map[int64]map[string]struct{}),
+		pauseDepths:     make(map[int64]int32),
+		generations:     make(map[int64]uint64),
+		activities:      make(map[int64]map[uint64]*generationActivity),
+		db:              db,
+		river:           riverClient,
+		onScan:          onScan,
+		softDeletes:     make(map[int64]*pendingSoftDelete),
+		sidecarRescans:  make(map[int64]*pendingSoftDelete),
+		rescanTimers:    make(map[int64]*pendingRescan),
+		generatedWrites: make(map[string]generatedWriteSuppression),
+		now:             time.Now,
 	}
 	if riverClient != nil {
 		m.softDeleteInsert = func(ctx context.Context, args worker.SoftDeleteArgs) error {
@@ -718,6 +748,9 @@ func (m *Manager) eventLoop(ctx context.Context, lw *LibraryWatcher) {
 
 func (m *Manager) handleEvent(ctx context.Context, lw *LibraryWatcher, event fsnotify.Event) {
 	path := event.Name
+	if atomicfile.IsInternalPath(path) {
+		return
+	}
 
 	if event.Has(fsnotify.Create) {
 		info, err := os.Stat(path)
@@ -768,10 +801,16 @@ func (m *Manager) handleEvent(ctx context.Context, lw *LibraryWatcher, event fsn
 		key := strconv.FormatInt(lw.libraryID, 10) + "\x00" + dir
 		lw.pendingMu.Lock()
 		if lw.pending == nil {
-			lw.pending = make(map[string]*time.Timer)
+			lw.pending = make(map[string]*pendingWatcherEvent)
 		}
-		if t, ok := lw.pending[key]; ok {
-			t.Stop()
+		pending := lw.pending[key]
+		if pending == nil {
+			pending = &pendingWatcherEvent{paths: make(map[string]struct{})}
+			lw.pending[key] = pending
+		}
+		pending.paths[path] = struct{}{}
+		if pending.timer != nil {
+			pending.timer.Stop()
 		}
 		var timer *time.Timer
 		timer = time.AfterFunc(eventDebounceDelay, func() {
@@ -782,23 +821,38 @@ func (m *Manager) handleEvent(ctx context.Context, lw *LibraryWatcher, event fsn
 			defer activity.wg.Done()
 
 			lw.pendingMu.Lock()
-			if lw.pending[key] != timer {
+			if lw.pending[key] != pending || pending.timer != timer {
 				lw.pendingMu.Unlock()
 				return
 			}
+			paths := make([]string, 0, len(pending.paths))
+			for pendingPath := range pending.paths {
+				paths = append(paths, pendingPath)
+			}
 			delete(lw.pending, key)
 			lw.pendingMu.Unlock()
-			m.enqueueScannerRescan(ctx, lw.libraryID, path, lw.generation)
+
+			sort.Strings(paths)
+			for _, triggerPath := range paths {
+				if m.shouldSuppressGeneratedEvent(triggerPath) {
+					log.Debug().Str("path", vfs.RedactPath(triggerPath)).Int64("library_id", lw.libraryID).Msg("suppressed scanner-generated sidecar event")
+					continue
+				}
+				m.enqueueScannerRescan(ctx, lw.libraryID, triggerPath, lw.generation)
+				return
+			}
 		})
-		lw.pending[key] = timer
+		pending.timer = timer
 		lw.pendingMu.Unlock()
 	}
 }
 
 func (lw *LibraryWatcher) stopPendingEvents() {
 	lw.pendingMu.Lock()
-	for key, timer := range lw.pending {
-		timer.Stop()
+	for key, pending := range lw.pending {
+		if pending.timer != nil {
+			pending.timer.Stop()
+		}
 		delete(lw.pending, key)
 	}
 	lw.pendingMu.Unlock()
@@ -924,9 +978,16 @@ func (m *Manager) flushSidecarRescans(libraryID int64, batch *pendingSoftDelete,
 	}
 	paths := make([]string, 0, len(batch.paths))
 	for path := range batch.paths {
+		if m.shouldSuppressGeneratedEvent(path) {
+			log.Debug().Str("path", vfs.RedactPath(path)).Int64("library_id", libraryID).Msg("suppressed scanner-generated sidecar rename event")
+			continue
+		}
 		paths = append(paths, path)
 	}
 	sort.Strings(paths)
+	if len(paths) == 0 {
+		return
+	}
 	ctx, cancel := context.WithTimeout(batch.ctx, 30*time.Second)
 	defer cancel()
 	if err := m.sidecarRescanInsert(ctx, libraryID, paths); err != nil {

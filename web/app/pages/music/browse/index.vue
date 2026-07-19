@@ -28,6 +28,8 @@
           class="bp-tile card-tile mood"
           :style="{ background: moodGradient(i) }"
         >
+          <BrowseTileArt :artists="m.artists" :alt="m.label" />
+          <div class="bp-tile-scrim" />
           <div class="bp-tile-body">
             <div class="bp-tile-label">{{ m.label }}</div>
             <div class="bp-tile-count">{{ m.track_count.toLocaleString() }} tracks</div>
@@ -47,6 +49,8 @@
           class="bp-tile card-tile tempo"
           :style="{ background: tempoGradient(i), '--bpm': midBpm(b) }"
         >
+          <BrowseTileArt :artists="b.artists" :alt="b.label" />
+          <div class="bp-tile-scrim" />
           <!-- The dot beats at the band's actual BPM — the tile demonstrates
                its own tempo. Pure CSS; the global reduced-motion reset stills
                it for users who've asked for that. -->
@@ -71,6 +75,8 @@
           class="bp-tile card-tile genre"
           :style="{ background: genreGradient(i) }"
         >
+          <BrowseTileArt :artists="g.artists" :alt="g.label" />
+          <div class="bp-tile-scrim" />
           <div class="bp-tile-body">
             <div class="bp-tile-label">{{ g.label }}</div>
             <div v-if="g.parent" class="bp-tile-sub">{{ g.parent }}</div>
@@ -94,32 +100,17 @@
 
 <script setup lang="ts">
 import { useQuery } from '@pinia/colada'
+import { musicBrowseGenresQuery, musicBrowseMoodsQuery, musicBrowseTempoQuery, type GenreBucket, type MoodBucket, type TempoBucket } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
 
-interface MoodBucket { key: string; label: string; threshold: number; track_count: number }
-interface GenreBucket { name: string; label: string; parent: string; track_count: number }
-interface TempoBucket { key: string; label: string; min_bpm: number; max_bpm: number; track_count: number }
-
-const { $heya } = useNuxtApp()
-
-// Three independent queries fire in parallel (Pinia Colada handles concurrency
-// natively). Each is cached separately so revisiting this page is instant.
-const moodsQuery = useQuery({
-  key: ['music', 'browse', 'moods'],
-  query: async () => ((await $heya('/api/music/browse/moods')) as { items: MoodBucket[] }).items ?? [],
-  staleTime: 1000 * 60 * 5,
-})
-const genresQuery = useQuery({
-  key: ['music', 'browse', 'genres'],
-  query: async () => ((await $heya('/api/music/browse/genres')) as { items: GenreBucket[] }).items ?? [],
-  staleTime: 1000 * 60 * 5,
-})
-const tempoQuery = useQuery({
-  key: ['music', 'browse', 'tempo'],
-  query: async () => ((await $heya('/api/music/browse/tempo')) as { items: TempoBucket[] }).items ?? [],
-  staleTime: 1000 * 60 * 5,
-})
+// Three independent, device-persisted queries fire in parallel (Pinia Colada
+// handles concurrency natively) — see queries/music.ts. Each is cached
+// separately so revisiting this page paints instantly from the last-known
+// snapshot instead of refetching cold.
+const moodsQuery = useQuery(musicBrowseMoodsQuery())
+const genresQuery = useQuery(musicBrowseGenresQuery())
+const tempoQuery = useQuery(musicBrowseTempoQuery())
 await Promise.all([waitForQuery(moodsQuery), waitForQuery(genresQuery), waitForQuery(tempoQuery)])
 
 const moods = computed<MoodBucket[]>(() => (moodsQuery.data.value ?? []).filter(x => x.track_count > 0))
@@ -207,7 +198,19 @@ function genreGradient(i: number) { return GENRE_GRADIENTS[i % GENRE_GRADIENTS.l
   transform: translateY(-2px);
   box-shadow: 0 12px 24px rgb(var(--shade) / 0.5);
 }
-.bp-tile-body { width: 100%; }
+/* Literal dark scrim over the (optional) BrowseTileArt cycler — allowed
+   exception for artwork per CLAUDE.md. Sits above the art layer, below the
+   label text; a no-op when the tile has no artists (art layer is unmounted,
+   the gradient background alone still reads fine under it). */
+.bp-tile-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.75) 0%, rgba(0, 0, 0, 0.32) 45%, rgba(0, 0, 0, 0.08) 75%, transparent 100%);
+  pointer-events: none;
+}
+
+.bp-tile-body { position: relative; z-index: 2; width: 100%; }
 .bp-tile-label {
   font-size: 17px; font-weight: 700; letter-spacing: -0.005em;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); /* on gradient — literal */
@@ -220,6 +223,7 @@ function genreGradient(i: number) { return GENRE_GRADIENTS[i % GENRE_GRADIENTS.l
    pulse rather than a blink. Stilled by the global reduced-motion reset. */
 .bp-beat {
   position: absolute;
+  z-index: 2;
   top: 14px;
   right: 14px;
   width: 7px;

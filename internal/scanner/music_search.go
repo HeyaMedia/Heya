@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/karbowiak/heya/internal/titlematch"
@@ -41,12 +43,13 @@ type MusicFingerprintEvidenceProvider interface {
 }
 
 type MusicRecordingEvidence struct {
-	RecordingMBID     string
-	Title             string
-	FingerprintScore  float64
-	SourceDuration    int
-	RecordingDuration int
-	Artists           []MusicRecordingArtistEvidence
+	RecordingMBID        string
+	CanonicalRecordingID string
+	Title                string
+	FingerprintScore     float64
+	SourceDuration       int
+	RecordingDuration    int
+	Artists              []MusicRecordingArtistEvidence
 }
 
 type MusicRecordingArtistEvidence struct {
@@ -56,18 +59,32 @@ type MusicRecordingArtistEvidence struct {
 }
 
 type MusicSearchMatch struct {
-	Key            string                 `json:"key"`
-	Query          MusicSearchQuery       `json:"query"`
-	Accepted       bool                   `json:"accepted"`
-	Reason         string                 `json:"reason,omitempty"`
-	Error          string                 `json:"error,omitempty"`
-	ProviderID     string                 `json:"provider_id,omitempty"`
-	Provider       string                 `json:"provider,omitempty"`
-	Artist         string                 `json:"artist,omitempty"`
-	Confidence     float64                `json:"confidence"`
-	Candidates     []MusicSearchCandidate `json:"candidates,omitempty"`
-	ExternalIDs    map[string]string      `json:"external_ids,omitempty"`
-	ManualDecision string                 `json:"manual_decision,omitempty"`
+	Key               string                           `json:"key"`
+	Query             MusicSearchQuery                 `json:"query"`
+	Accepted          bool                             `json:"accepted"`
+	Reason            string                           `json:"reason,omitempty"`
+	Error             string                           `json:"error,omitempty"`
+	ProviderID        string                           `json:"provider_id,omitempty"`
+	Provider          string                           `json:"provider,omitempty"`
+	Artist            string                           `json:"artist,omitempty"`
+	Confidence        float64                          `json:"confidence"`
+	Candidates        []MusicSearchCandidate           `json:"candidates,omitempty"`
+	ExternalIDs       map[string]string                `json:"external_ids,omitempty"`
+	RecordingEvidence []MusicAcceptedRecordingEvidence `json:"recording_evidence,omitempty"`
+	ManualDecision    string                           `json:"manual_decision,omitempty"`
+}
+
+// MusicAcceptedRecordingEvidence is the durable, per-file recording identity
+// proved while AcoustID is resolving an otherwise ambiguous artist. RelPath is
+// intentionally kept verbatim: apply may use this evidence only for the exact
+// file that produced the fingerprint.
+type MusicAcceptedRecordingEvidence struct {
+	RelPath              string  `json:"rel_path"`
+	RecordingMBID        string  `json:"recording_mbid"`
+	CanonicalRecordingID string  `json:"canonical_recording_id"`
+	Confidence           float64 `json:"confidence"`
+	SourceDuration       int     `json:"source_duration"`
+	RecordingDuration    int     `json:"recording_duration"`
 }
 
 type MusicSearchQuery struct {
@@ -193,8 +210,12 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 
 	searchCtx, cancel := context.WithTimeout(ctx, musicArtistSearchTimeout)
 	candidates, err := provider.Search(searchCtx, metadata.KindMusic, query)
+	searchCtxErr := searchCtx.Err()
 	cancel()
 	if err != nil {
+		if terminal := providerContextTermination(searchCtxErr, err); terminal != nil {
+			return search, terminal
+		}
 		if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
 			return search, err
 		}
@@ -224,8 +245,12 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 			fallbackQuery := metadata.SearchQuery{Title: fallbackName, Releases: releases}
 			fallbackCtx, fallbackCancel := context.WithTimeout(ctx, musicArtistSearchTimeout)
 			fallbackCandidates, fallbackErr := provider.Search(fallbackCtx, metadata.KindMusic, fallbackQuery)
+			fallbackCtxErr := fallbackCtx.Err()
 			fallbackCancel()
 			if fallbackErr != nil {
+				if terminal := providerContextTermination(fallbackCtxErr, fallbackErr); terminal != nil {
+					return search, terminal
+				}
 				if _, deferred := metadata.DeferredWorkRetryAfter(fallbackErr); deferred {
 					return search, fallbackErr
 				}
@@ -265,10 +290,21 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 		}
 	}
 
+	var acceptedRecordingEvidence []MusicAcceptedRecordingEvidence
 	if !musicSearchCanAutoAccept(scored, selectionArtist.Artist, threshold) && fingerprints != nil {
-		fingerprintMatch, ok, fingerprintErr := resolveMusicArtistByFingerprint(ctx, selectionArtist, fingerprints, threshold, emit)
+		// Acoustic consensus is evaluated against the literal local identity,
+		// never whichever collaboration component happened to be searched last.
+		// Otherwise a credit such as "Jax Jones, Ado" can silently collapse onto
+		// Ado merely because that owner fallback was tried before fingerprinting.
+		fingerprintMatch, recordingEvidence, ok, fingerprintErr := resolveMusicArtistByFingerprint(ctx, artist, fingerprints, threshold, emit)
 		if fingerprintErr != nil {
+			if terminal := providerContextTermination(ctx.Err(), fingerprintErr); terminal != nil {
+				return search, terminal
+			}
 			if _, deferred := metadata.DeferredWorkRetryAfter(fingerprintErr); deferred {
+				return search, fingerprintErr
+			}
+			if musicFingerprintConfigurationFailure(fingerprintErr) {
 				return search, fingerprintErr
 			}
 			emit.Emit(Event{Event: "match.fingerprint_failed", Severity: SeverityInfo, Kind: "music", Message: fingerprintErr.Error(), Data: map[string]any{
@@ -276,6 +312,7 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 			}})
 		} else if ok {
 			scored = []metadata.SearchResult{fingerprintMatch}
+			acceptedRecordingEvidence = recordingEvidence
 		}
 	}
 
@@ -323,6 +360,9 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 		search.Artist = top.Title
 		search.Confidence = top.Confidence
 		search.ExternalIDs = top.ExternalIDs
+		if top.Recommendation == "fingerprint_match" {
+			search.RecordingEvidence = append([]MusicAcceptedRecordingEvidence{}, acceptedRecordingEvidence...)
+		}
 		emit.Emit(Event{
 			Event: "match.selected",
 			Kind:  "music",
@@ -352,28 +392,42 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 	return search, nil
 }
 
+type musicConfigurationError interface {
+	IsConfigurationError() bool
+}
+
+func musicFingerprintConfigurationFailure(err error) bool {
+	var configurationErr musicConfigurationError
+	return errors.As(err, &configurationErr) && configurationErr.IsConfigurationError()
+}
+
 const (
-	musicFingerprintTrackLimit   = 3
-	musicFingerprintMinimumScore = .90
+	musicFingerprintTrackLimit           = 3
+	musicFingerprintMinimumScore         = .90
+	musicFingerprintOverrideMinimumScore = .95
+	musicFingerprintOverrideMinimumTitle = .90
 )
 
-func resolveMusicArtistByFingerprint(ctx context.Context, artist MusicArtistPlan, provider MusicFingerprintEvidenceProvider, threshold float64, emit Emitter) (metadata.SearchResult, bool, error) {
+func resolveMusicArtistByFingerprint(ctx context.Context, artist MusicArtistPlan, provider MusicFingerprintEvidenceProvider, threshold float64, emit Emitter) (metadata.SearchResult, []MusicAcceptedRecordingEvidence, bool, error) {
 	tracks := representativeFingerprintTracks(artist)
 	if len(tracks) == 0 {
-		return metadata.SearchResult{}, false, nil
+		return metadata.SearchResult{}, nil, false, nil
 	}
 	type support struct {
-		artist     MusicRecordingArtistEvidence
-		files      int
-		totalScore float64
-		recordings []string
+		artist             MusicRecordingArtistEvidence
+		files              int
+		totalScore         float64
+		artistNameOverride bool
+		recordings         []string
+		recordingIDs       map[string]bool
+		evidence           []MusicAcceptedRecordingEvidence
 	}
 	byArtist := map[string]*support{}
 	decisiveFiles := 0
 	for _, track := range tracks {
 		values, err := provider.MatchTrack(ctx, track)
 		if err != nil {
-			return metadata.SearchResult{}, false, err
+			return metadata.SearchResult{}, nil, false, err
 		}
 		best, ok := bestMusicRecordingEvidence(artist, track, values)
 		if !ok {
@@ -382,15 +436,24 @@ func resolveMusicArtistByFingerprint(ctx context.Context, artist MusicArtistPlan
 		decisiveFiles++
 		entry := byArtist[best.artist.CanonicalID]
 		if entry == nil {
-			entry = &support{artist: best.artist}
+			entry = &support{artist: best.artist, recordingIDs: map[string]bool{}}
 			byArtist[best.artist.CanonicalID] = entry
 		}
 		entry.files++
 		entry.totalScore += best.score
+		entry.artistNameOverride = entry.artistNameOverride || best.artistNameOverride
 		entry.recordings = append(entry.recordings, best.recordingMBID)
+		if best.recordingIdentityAccepted {
+			entry.recordingIDs[strings.ToLower(strings.TrimSpace(best.recordingMBID))] = true
+			entry.evidence = append(entry.evidence, MusicAcceptedRecordingEvidence{
+				RelPath: track.RelPath, RecordingMBID: best.recordingMBID,
+				CanonicalRecordingID: best.canonicalRecordingID, Confidence: best.score,
+				SourceDuration: best.sourceDuration, RecordingDuration: best.recordingDuration,
+			})
+		}
 	}
 	if decisiveFiles == 0 || len(byArtist) != 1 {
-		return metadata.SearchResult{}, false, nil
+		return metadata.SearchResult{}, nil, false, nil
 	}
 	var winner *support
 	for _, value := range byArtist {
@@ -401,16 +464,29 @@ func resolveMusicArtistByFingerprint(ctx context.Context, artist MusicArtistPlan
 		required = min(2, len(tracks))
 	}
 	if winner.files < required || winner.files != decisiveFiles {
-		return metadata.SearchResult{}, false, nil
+		return metadata.SearchResult{}, nil, false, nil
+	}
+	nameOverrideAllowed := musicFingerprintAllowsArtistNameOverride(artist)
+	if !nameOverrideAllowed && !musicSearchArtistExact(artist, winner.artist.Name) {
+		return metadata.SearchResult{}, nil, false, nil
+	}
+	if winner.artistNameOverride && (!nameOverrideAllowed || winner.files < 2 || len(winner.recordingIDs) < 2) {
+		return metadata.SearchResult{}, nil, false, nil
 	}
 	average := winner.totalScore / float64(winner.files)
 	if average < musicFingerprintMinimumScore {
-		return metadata.SearchResult{}, false, nil
+		return metadata.SearchResult{}, nil, false, nil
 	}
 	confidence := math.Min(.99, math.Max(threshold, average))
 	evidence := []metadata.SearchEvidence{
 		{Field: "chromaprint", Outcome: fmt.Sprintf("%d_of_%d", winner.files, len(tracks)), Weight: confidence, Detail: "AcoustID recording matches converge on one canonical artist"},
 		{Field: "musicbrainz_recordings", Outcome: "matched", Weight: confidence, Detail: strings.Join(cleanSortedStrings(winner.recordings), ",")},
+	}
+	if winner.artistNameOverride {
+		evidence = append(evidence, metadata.SearchEvidence{
+			Field: "artist_name", Outcome: "overridden_by_recordings", Weight: confidence,
+			Detail: "At least two independent recording fingerprints converge despite the local artist name",
+		})
 	}
 	result := metadata.SearchResult{
 		ProviderID: heyametadata.EncodeEntityProviderID(winner.artist.CanonicalID), ProviderName: "heya",
@@ -420,44 +496,123 @@ func resolveMusicArtistByFingerprint(ctx context.Context, artist MusicArtistPlan
 	}
 	emit.Emit(Event{Event: "match.fingerprint_selected", Kind: "music", Data: map[string]any{
 		"key": artist.Key, "artist": artist.Artist, "canonical_id": winner.artist.CanonicalID,
-		"recordings": winner.files, "confidence": confidence,
+		"recordings": winner.files, "confidence": confidence, "artist_name_override": winner.artistNameOverride,
 	}})
-	return result, true, nil
+	sort.Slice(winner.evidence, func(i, j int) bool { return winner.evidence[i].RelPath < winner.evidence[j].RelPath })
+	return result, winner.evidence, true, nil
 }
 
 type scoredMusicRecordingEvidence struct {
-	artist        MusicRecordingArtistEvidence
-	recordingMBID string
-	score         float64
+	artist                    MusicRecordingArtistEvidence
+	recordingMBID             string
+	canonicalRecordingID      string
+	sourceDuration            int
+	recordingDuration         int
+	artistNameOverride        bool
+	recordingIdentityAccepted bool
+	score                     float64
 }
 
 func bestMusicRecordingEvidence(artist MusicArtistPlan, track MusicTrackPlan, values []MusicRecordingEvidence) (scoredMusicRecordingEvidence, bool) {
 	var candidates []scoredMusicRecordingEvidence
 	for _, value := range values {
-		if value.FingerprintScore < musicFingerprintMinimumScore || value.RecordingMBID == "" {
+		if value.FingerprintScore < musicFingerprintMinimumScore {
 			continue
 		}
+		if _, err := uuid.Parse(strings.TrimSpace(value.RecordingMBID)); err != nil {
+			continue
+		}
+		_, canonicalRecordingErr := uuid.Parse(strings.TrimSpace(value.CanonicalRecordingID))
+		recordingIdentityAccepted := canonicalRecordingErr == nil
 		titleScore := musicNameSimilarity(track.TrackTitle, value.Title)
 		if titleScore < musicArtistAutoMatchThreshold || !musicDurationsCompatible(value.SourceDuration, value.RecordingDuration) {
 			continue
 		}
-		for _, credit := range value.Artists {
-			if credit.CanonicalID == "" || musicNameSimilarity(artist.Artist, credit.Name) < musicArtistAutoMatchThreshold {
+		validCredits := musicUniqueRecordingArtistCredits(value.Artists)
+		matchedArtist := false
+		for _, credit := range validCredits {
+			if musicNameSimilarity(artist.Artist, credit.Name) < musicArtistAutoMatchThreshold {
 				continue
 			}
+			matchedArtist = true
 			durationScore := musicDurationScore(value.SourceDuration, value.RecordingDuration)
 			score := value.FingerprintScore*.60 + titleScore*.25 + durationScore*.15
-			candidates = append(candidates, scoredMusicRecordingEvidence{artist: credit, recordingMBID: value.RecordingMBID, score: score})
+			candidates = append(candidates, scoredMusicRecordingEvidence{
+				artist: credit, recordingMBID: value.RecordingMBID, canonicalRecordingID: value.CanonicalRecordingID,
+				sourceDuration: value.SourceDuration, recordingDuration: value.RecordingDuration,
+				recordingIdentityAccepted: recordingIdentityAccepted, score: score,
+			})
+		}
+		// Name evidence may itself be poisoned. Only expose a name-override
+		// candidate when the recording has one unambiguous canonical artist;
+		// the resolver still requires two distinct recordings to converge before
+		// it can auto-accept that candidate.
+		if !matchedArtist && len(validCredits) == 1 && value.FingerprintScore >= musicFingerprintOverrideMinimumScore && titleScore >= musicFingerprintOverrideMinimumTitle {
+			credit := validCredits[0]
+			durationScore := musicDurationScore(value.SourceDuration, value.RecordingDuration)
+			score := value.FingerprintScore*.60 + titleScore*.25 + durationScore*.15
+			candidates = append(candidates, scoredMusicRecordingEvidence{
+				artist: credit, recordingMBID: value.RecordingMBID, canonicalRecordingID: value.CanonicalRecordingID,
+				sourceDuration: value.SourceDuration, recordingDuration: value.RecordingDuration,
+				artistNameOverride: true, recordingIdentityAccepted: recordingIdentityAccepted, score: score,
+			})
 		}
 	}
 	if len(candidates) == 0 {
 		return scoredMusicRecordingEvidence{}, false
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].score > candidates[j].score })
-	if len(candidates) > 1 && candidates[0].artist.CanonicalID != candidates[1].artist.CanonicalID && candidates[0].score-candidates[1].score < .05 {
-		return scoredMusicRecordingEvidence{}, false
+	best := candidates[0]
+	if len(candidates) > 1 && best.score-candidates[1].score < .05 && !musicSameRecordingEvidence(best, candidates[1]) {
+		if best.artist.CanonicalID != candidates[1].artist.CanonicalID || best.artistNameOverride {
+			return scoredMusicRecordingEvidence{}, false
+		}
+		// Both candidates still prove the same artist, but not one exact local
+		// recording. Keep the artist vote and deliberately omit per-file binding.
+		best.recordingIdentityAccepted = false
 	}
-	return candidates[0], true
+	return best, true
+}
+
+func musicSameRecordingEvidence(left, right scoredMusicRecordingEvidence) bool {
+	return strings.EqualFold(strings.TrimSpace(left.recordingMBID), strings.TrimSpace(right.recordingMBID)) &&
+		strings.EqualFold(strings.TrimSpace(left.canonicalRecordingID), strings.TrimSpace(right.canonicalRecordingID))
+}
+
+func musicUniqueRecordingArtistCredits(values []MusicRecordingArtistEvidence) []MusicRecordingArtistEvidence {
+	seen := map[string]bool{}
+	out := make([]MusicRecordingArtistEvidence, 0, len(values))
+	for _, value := range values {
+		key := strings.ToLower(strings.TrimSpace(value.CanonicalID))
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+func musicFingerprintAllowsArtistNameOverride(artist MusicArtistPlan) bool {
+	if len(musicSearchFallbackArtists(artist)) > 0 {
+		return false
+	}
+	value := strings.TrimSpace(artist.Artist)
+	switch normalizeMusicKeyPart(value) {
+	case "various artists", "various", "va", "unknown artist", "unknown", "soundtrack", "original soundtrack":
+		return false
+	}
+	if musicPrimaryCollaborationArtist(value) != "" {
+		return false
+	}
+	parts := strings.Split(value, ",")
+	nonEmpty := 0
+	for _, part := range parts {
+		if strings.TrimSpace(part) != "" {
+			nonEmpty++
+		}
+	}
+	return nonEmpty <= 1
 }
 
 func representativeFingerprintTracks(artist MusicArtistPlan) []MusicTrackPlan {
@@ -768,8 +923,12 @@ func resolveConvergedMusicCandidates(ctx context.Context, artist MusicArtistPlan
 	for _, candidate := range duplicates {
 		fetchCtx, cancel := context.WithTimeout(ctx, musicMetadataFetchTimeout)
 		detail, err := detailProvider.GetDetail(fetchCtx, candidate.ProviderID, nil)
+		fetchCtxErr := fetchCtx.Err()
 		cancel()
 		if err != nil {
+			if terminal := providerContextTermination(fetchCtxErr, err); terminal != nil {
+				return metadata.SearchResult{}, false, terminal
+			}
 			if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
 				return metadata.SearchResult{}, false, err
 			}
@@ -901,7 +1060,14 @@ func applyMusicSearchDecision(artist MusicArtistPlan, search MusicSearchMatch, d
 }
 
 func scoreMusicSearchCandidate(artist MusicArtistPlan, candidate metadata.SearchResult) float64 {
-	if sharedExternalID(artist.ExternalIDs, candidate.ExternalIDs) {
+	// A hard identifier is a constraint, not merely another positive feature.
+	// One shared provider ID can never cancel a contradictory ID in another
+	// namespace (for example Apple A paired with local MBID X and remote MBID Y),
+	// and an exact label cannot override that contradiction either.
+	if musicArtistHardIDsConflict(artist.ExternalIDs, candidate.ExternalIDs) {
+		return 0
+	}
+	if musicArtistHardIDsCanonicalEquivalent(artist.ExternalIDs, candidate.ExternalIDs) {
 		return 1
 	}
 	primary := musicNameSimilarity(artist.Artist, candidate.Title)
@@ -936,6 +1102,24 @@ func scoreMusicSearchCandidate(artist MusicArtistPlan, candidate metadata.Search
 		best = minFloat(best, musicQueryOnlyCanonicalConfidence)
 	}
 	return best
+}
+
+func musicArtistHardIDsConflict(a, b map[string]string) bool {
+	for _, compare := range []musicIDCompare{
+		{Local: []string{"mbid", "musicbrainz", "musicbrainz_artist", "musicbrainz_album_artist"}, Remote: []string{"mbid", "musicbrainz", "musicbrainz_artist", "musicbrainz_album_artist"}},
+		{Local: []string{"apple", "itunes_artist", "apple_artist"}, Remote: []string{"apple", "itunes_artist", "apple_artist"}},
+		{Local: []string{"deezer", "deezer_artist"}, Remote: []string{"deezer", "deezer_artist"}},
+		{Local: []string{"discogs", "discogs_artist"}, Remote: []string{"discogs", "discogs_artist"}},
+		{Local: []string{"spotify", "spotify_artist"}, Remote: []string{"spotify", "spotify_artist"}},
+		{Local: []string{"audiodb", "audiodb_artist"}, Remote: []string{"audiodb", "audiodb_artist"}},
+	} {
+		_, left := firstMusicID(a, compare.Local)
+		_, right := firstMusicID(b, compare.Remote)
+		if left != "" && right != "" && !strings.EqualFold(strings.TrimSpace(left), strings.TrimSpace(right)) {
+			return true
+		}
+	}
+	return false
 }
 
 func musicShortAliasNeedsPrimarySupport(query, primaryTitle string) bool {
@@ -1025,22 +1209,37 @@ func musicSearchClearGap(results []metadata.SearchResult, queryArtist string) bo
 		return true
 	}
 	top := results[0]
-	secondDifferent := -1
+	secondIdentity := -1
 	for i := 1; i < len(results); i++ {
 		if !top.RequiresReview && results[i].RequiresReview {
 			// Provider-approved discovery evidence outranks query-only canonical
-			// suggestions which the provider explicitly marked for review.
+			// suggestions which the provider explicitly marked for review. The
+			// identity-aware gap below applies among auto-acceptable candidates.
 			continue
 		}
-		if normalizeMusicKeyPart(results[i].Title) != normalizeMusicKeyPart(top.Title) {
-			secondDifferent = i
-			break
+		if musicSearchSameCanonicalIdentity(top, results[i]) {
+			// Multiple provider projections of the same hard identity are not
+			// independent alternatives. A same-name result with a different
+			// provider/canonical identity is, however, a real competitor.
+			continue
 		}
+		secondIdentity = i
+		break
 	}
-	if secondDifferent == -1 || top.Confidence-results[secondDifferent].Confidence > 0.10 {
+	if secondIdentity == -1 {
 		return true
 	}
-	return musicSearchArtistExact(MusicArtistPlan{Artist: queryArtist}, top.Title)
+	// An exact spelling is useful scoring evidence, not proof that two
+	// same-name canonical artists are the same person. Always require the
+	// ordinary runner-up margin between distinct identities.
+	return top.Confidence-results[secondIdentity].Confidence > 0.10
+}
+
+func musicSearchSameCanonicalIdentity(a, b metadata.SearchResult) bool {
+	if a.ProviderID != "" && b.ProviderID != "" && strings.EqualFold(strings.TrimSpace(a.ProviderID), strings.TrimSpace(b.ProviderID)) {
+		return true
+	}
+	return musicArtistHardIDsCanonicalEquivalent(a.ExternalIDs, b.ExternalIDs)
 }
 
 func musicSearchArtistExact(artist MusicArtistPlan, candidate string) bool {

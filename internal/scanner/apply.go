@@ -68,6 +68,9 @@ func ApplyMovieMaterialization(ctx context.Context, lib sqlc.Library, result Res
 		return nil, fmt.Errorf("begin movie apply: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // No-op after Commit; rollback is best-effort cleanup on early returns.
+	if err := runScannerApplyPreflightGuard(ctx); err != nil {
+		return nil, fmt.Errorf("validate movie sources before apply: %w", err)
+	}
 
 	q := sqlc.New(tx)
 	txMatcher := matcher.New(db, matcher.MatchOptions{}, nil, nil).WithTx(tx)
@@ -214,6 +217,9 @@ func ApplyMovieMaterialization(ctx context.Context, lib sqlc.Library, result Res
 		emitMovieApplyResult(applied, emit)
 	}
 
+	if err := runScannerApplyCommitGuard(ctx, tx); err != nil {
+		return results, fmt.Errorf("validate movie sources before commit: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return results, fmt.Errorf("commit movie apply: %w", err)
 	}

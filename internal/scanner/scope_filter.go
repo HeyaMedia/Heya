@@ -1,5 +1,7 @@
 package scanner
 
+import "path/filepath"
+
 func filterResultToScopes(result Result, scopes []string, emit Emitter) Result {
 	if len(normalizedScopeDirs(scopes)) == 0 {
 		return result
@@ -8,7 +10,7 @@ func filterResultToScopes(result Result, scopes []string, emit Emitter) Result {
 	result.Inventory = FilterInventoryToScopes(result.Inventory, scopes, emit)
 	relPaths := inventoryRelPathSet(result.Inventory)
 	if len(relPaths) == 0 {
-		return Result{Inventory: result.Inventory}
+		return Result{Inventory: result.Inventory, artifactSourceSet: result.artifactSourceSet}
 	}
 
 	result = filterMovieResultToRelPaths(result, relPaths)
@@ -24,6 +26,7 @@ func filterResultToIdentityKey(result Result, key string) Result {
 	}
 	relPaths := resultRelPathsForIdentityKey(result, key)
 	if len(relPaths) > 0 {
+		addOwnerSidecarSources(result.Inventory, relPaths)
 		result.Inventory = filterInventoryToRelPaths(result.Inventory, relPaths)
 		result = filterMovieResultToRelPaths(result, relPaths)
 		result = filterTVResultToRelPaths(result, relPaths)
@@ -47,6 +50,44 @@ func filterResultToIdentityKey(result Result, key string) Result {
 	result.BookMetadata = filterBookMetadataToKeys(result.BookMetadata, keys)
 	result.BookApply = filterBookApplyToKeys(result.BookApply, keys)
 	return result
+}
+
+// addOwnerSidecarSources keeps every potential owner-side input in the narrow
+// entity artifact, including malformed/unparsed files that produced no plan.
+// A sidecar belongs to an entity when its directory is the same as, or an
+// ancestor of, one of that entity's selected source files (for example
+// artist.nfo above albums or tvshow.nfo above Season 01).
+func addOwnerSidecarSources(inv Inventory, relPaths map[string]bool) {
+	ownerDirs := make([]string, 0, len(relPaths))
+	for relPath := range relPaths {
+		if relPath == "" {
+			continue
+		}
+		ownerDirs = append(ownerDirs, filepath.Clean(filepath.Dir(relPath)))
+	}
+	for _, root := range inv.Roots {
+		for _, file := range root.Files {
+			if !isIdentityAffectingSidecar(file) || file.RelPath == "" {
+				continue
+			}
+			sidecarDir := filepath.Clean(filepath.Dir(file.RelPath))
+			for _, ownerDir := range ownerDirs {
+				rel, err := filepath.Rel(sidecarDir, ownerDir)
+				if err == nil && rel != ".." && (rel == "." || !startsWithParentDir(rel)) {
+					relPaths[file.RelPath] = true
+					break
+				}
+			}
+		}
+	}
+}
+
+func isIdentityAffectingSidecar(file InventoryFile) bool {
+	return file.Class == ClassNFO || file.Class == ClassPlexmatch || file.Class == ClassArtwork
+}
+
+func startsWithParentDir(path string) bool {
+	return len(path) > 2 && path[:2] == ".." && path[2] == filepath.Separator
 }
 
 func resultRelPathsForIdentityKey(result Result, key string) map[string]bool {
@@ -378,6 +419,7 @@ func filterMusicResultToRelPaths(result Result, relPaths map[string]bool) Result
 	result.MusicAlbums = filterMusicAlbumsToRelPaths(result.MusicAlbums, relPaths, albumKeys)
 	result.MusicArtists = filterMusicArtistsToRelPaths(result.MusicArtists, relPaths, artistKeys, albumKeys)
 	result.MusicSearch = filterMusicSearchToKeys(result.MusicSearch, artistKeys)
+	result.MusicSearch = filterMusicSearchRecordingEvidenceToRelPaths(result.MusicSearch, relPaths)
 	result.MusicMetadata = filterMusicMetadataToKeys(result.MusicMetadata, artistKeys, albumKeys, relPaths)
 	result.MusicMaterialize = filterMusicMaterializeToRelPaths(result.MusicMaterialize, relPaths, artistKeys, albumKeys)
 	result.MusicApply = filterMusicApplyToKeys(result.MusicApply, artistKeys)
@@ -433,6 +475,25 @@ func filterMusicSearchToKeys(items []MusicSearchMatch, keys map[string]bool) []M
 	return out
 }
 
+func filterMusicSearchRecordingEvidenceToRelPaths(items []MusicSearchMatch, relPaths map[string]bool) []MusicSearchMatch {
+	out := make([]MusicSearchMatch, 0, len(items))
+	for _, item := range items {
+		item.RecordingEvidence = filterMusicRecordingEvidenceToRelPaths(item.RecordingEvidence, relPaths)
+		out = append(out, item)
+	}
+	return out
+}
+
+func filterMusicRecordingEvidenceToRelPaths(items []MusicAcceptedRecordingEvidence, relPaths map[string]bool) []MusicAcceptedRecordingEvidence {
+	out := make([]MusicAcceptedRecordingEvidence, 0, len(items))
+	for _, item := range items {
+		if relPaths[item.RelPath] {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
 func filterMusicMetadataToKeys(items []MusicFetchPreview, keys, albumKeys, relPaths map[string]bool) []MusicFetchPreview {
 	out := make([]MusicFetchPreview, 0, len(items))
 	for _, item := range items {
@@ -477,6 +538,7 @@ func filterMusicMaterializeToRelPaths(items []MusicMaterializePreview, relPaths 
 	out := make([]MusicMaterializePreview, 0, len(items))
 	for _, item := range items {
 		item.FileActions = filterMovieFileActionsToRelPaths(item.FileActions, relPaths)
+		item.RecordingEvidence = filterMusicRecordingEvidenceToRelPaths(item.RecordingEvidence, relPaths)
 		item.AlbumMappings = filterMusicAlbumFetchMatchesToScopes(item.AlbumMappings, albumKeys, relPaths)
 		item.AlbumActions = filterMusicAlbumActionsToKeys(item.AlbumActions, albumKeys)
 		if len(item.FileActions) == 0 && len(item.AlbumMappings) == 0 && !artistKeys[item.Key] {

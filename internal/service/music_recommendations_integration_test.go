@@ -31,7 +31,7 @@ func TestMusicRecommendationsIntegration(t *testing.T) {
 	// Ask for the API maximum; the service intentionally caps the useful slate
 	// to four archetypes + six artist mixes so this also guards against an
 	// accidental N+1/per-mix performance blowup.
-	mixes, err := app.GenerateMixesForUser(ctx, userID, 20, 30)
+	mixes, err := app.GenerateMixesForUser(ctx, userID, 20, 30, 0)
 	if err != nil {
 		t.Fatalf("generate mixes: %v", err)
 	}
@@ -117,5 +117,31 @@ func TestMusicRecommendationsIntegration(t *testing.T) {
 	}
 	if len(radio.Tracks) < 5 {
 		t.Fatalf("metadata-fallback radio returned %d tracks", len(radio.Tracks))
+	}
+
+	// Exercise genre_affinity end-to-end against real album.genres/top_genres
+	// data: an artist seed with a genre-tagged discography should still
+	// return a full queue with the knob maxed out (drop-when-rich only fires
+	// once enough overlapping candidates exist to still hit the limit).
+	var genreArtistID int64
+	if err := pool.QueryRow(ctx, `SELECT al.artist_id
+		FROM albums al
+		WHERE array_length(al.genres, 1) > 0
+		  AND EXISTS (SELECT 1 FROM tracks t JOIN track_files atf ON atf.track_id = t.id
+		              JOIN library_files alf ON alf.id = atf.library_file_id
+		              WHERE t.album_id = al.id AND alf.deleted_at IS NULL)
+		LIMIT 1`).Scan(&genreArtistID); err != nil {
+		t.Fatal(err)
+	}
+	genreRadio, err := app.BuildRadio(ctx, userID, RadioRequest{
+		Seed:          RadioSeed{Kind: "artist", ArtistID: genreArtistID},
+		Limit:         20,
+		GenreAffinity: 1.0,
+	})
+	if err != nil {
+		t.Fatalf("genre_affinity=1 radio: %v", err)
+	}
+	if len(genreRadio.Tracks) == 0 {
+		t.Fatal("genre_affinity=1 radio returned no tracks")
 	}
 }

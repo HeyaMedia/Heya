@@ -122,6 +122,7 @@ func applyMusicSearchDecisions(searches []MusicSearchMatch, decisions SearchDeci
 		}
 		switch decision.Status {
 		case "accepted":
+			recordingEvidenceProviderID := searches[i].ProviderID
 			candidate := musicCandidateForDecision(searches[i], decision)
 			searches[i].Accepted = true
 			searches[i].Reason = ""
@@ -131,6 +132,9 @@ func applyMusicSearchDecisions(searches []MusicSearchMatch, decisions SearchDeci
 			searches[i].Artist = candidate.Artist
 			searches[i].Confidence = candidate.Confidence
 			searches[i].ExternalIDs = candidate.ExternalIDs
+			if candidate.ProviderID == "" || candidate.ProviderID != recordingEvidenceProviderID {
+				searches[i].RecordingEvidence = nil
+			}
 			searches[i].ManualDecision = decision.Status
 			emitDecisionOverlay(emit, "music", searches[i].Key, decision)
 		case "rejected", "ignored":
@@ -139,6 +143,7 @@ func applyMusicSearchDecisions(searches []MusicSearchMatch, decisions SearchDeci
 			searches[i].ProviderID = ""
 			searches[i].Provider = ""
 			searches[i].ExternalIDs = nil
+			searches[i].RecordingEvidence = nil
 			searches[i].ManualDecision = decision.Status
 			emitDecisionOverlay(emit, "music", searches[i].Key, decision)
 		}

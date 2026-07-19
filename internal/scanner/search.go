@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,6 +12,20 @@ import (
 )
 
 const movieAutoMatchThreshold = 0.85
+
+// providerContextTermination keeps lifecycle cancellation and provider-side
+// timeouts out of durable match/fetch results. A provider may return a wrapped
+// context error even when the caller's context has not yet observed it; a
+// child timeout may also be visible only through the child context.
+func providerContextTermination(contextErr, operationErr error) error {
+	if contextErr != nil {
+		return contextErr
+	}
+	if errors.Is(operationErr, context.Canceled) || errors.Is(operationErr, context.DeadlineExceeded) {
+		return operationErr
+	}
+	return nil
+}
 
 type MovieSearchProvider interface {
 	Search(context.Context, metadata.MediaKind, metadata.SearchQuery) ([]metadata.SearchResult, error)
@@ -95,6 +110,9 @@ func SearchMovieMatches(ctx context.Context, matches []MovieMatch, provider Movi
 
 		candidates, err := provider.Search(ctx, metadata.KindMovie, query)
 		if err != nil {
+			if terminal := providerContextTermination(ctx.Err(), err); terminal != nil {
+				return results, terminal
+			}
 			if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
 				return results, err
 			}

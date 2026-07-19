@@ -284,6 +284,15 @@ type ListArtistTopTracksForMixRow struct {
 // to `tracks_per_artist` tracks per artist ordered by play_count desc.
 // diversifyByArtist in the service shuffles them inter-artist so the mix
 // doesn't run six tracks of the same artist back-to-back.
+//
+// The generated Go function itself has no direct caller anymore (the legacy
+// server-wide-play-count mix generator that called it was deleted) — this
+// query is kept solely because ListArtistTopTracksForMixRow is the shared
+// "playable mix track" row shape that every hand-written recommendation
+// query in internal/service (scanMixRows, tasteSeedTracks, positiveMusicCandidates,
+// externalMusicCandidates, popularMusicCandidates, ...) scans into. Deleting
+// this query definition would delete that struct and break the whole
+// recommendation engine.
 func (q *Queries) ListArtistTopTracksForMix(ctx context.Context, arg ListArtistTopTracksForMixParams) ([]ListArtistTopTracksForMixRow, error) {
 	rows, err := q.db.Query(ctx, listArtistTopTracksForMix, arg.TracksPerArtist, arg.ArtistIds)
 	if err != nil {
@@ -902,79 +911,6 @@ func (q *Queries) ListRecentlyPlayedArtists(ctx context.Context, arg ListRecentl
 			&i.AlbumCount,
 			&i.TrackCount,
 			&i.Available,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listUserSeedArtistsForMixes = `-- name: ListUserSeedArtistsForMixes :many
-WITH ranked AS (
-    SELECT a.id                AS artist_id,
-           a.name              AS artist_name,
-           mi.id               AS media_item_id,
-           mi.public_id        AS media_item_public_id,
-           mi.slug             AS artist_slug,
-           count(*)            AS play_count,
-           max(pe.played_at)   AS last_played_at
-    FROM play_events pe
-    JOIN tracks      t  ON t.id  = pe.track_id
-    JOIN albums      al ON al.id = t.album_id
-    JOIN artists     a  ON a.id  = al.artist_id
-    JOIN media_item_cards mi ON mi.id = a.media_item_id
-    WHERE pe.user_id = $2
-      AND pe.played_at >= $3
-      AND pe.completed
-      AND EXISTS (SELECT 1 FROM library_files alf WHERE alf.media_item_id = a.media_item_id AND alf.deleted_at IS NULL)
-    GROUP BY a.id, a.name, mi.id, mi.public_id, mi.slug
-)
-SELECT artist_id, artist_name, media_item_id, media_item_public_id, artist_slug, play_count, last_played_at
-FROM ranked
-ORDER BY play_count DESC, last_played_at DESC
-LIMIT $1
-`
-
-type ListUserSeedArtistsForMixesParams struct {
-	Picks   int32              `json:"picks"`
-	UserID  int64              `json:"user_id"`
-	SinceAt pgtype.Timestamptz `json:"since_at"`
-}
-
-type ListUserSeedArtistsForMixesRow struct {
-	ArtistID          int64       `json:"artist_id"`
-	ArtistName        string      `json:"artist_name"`
-	MediaItemID       int64       `json:"media_item_id"`
-	MediaItemPublicID uuid.UUID   `json:"media_item_public_id"`
-	ArtistSlug        string      `json:"artist_slug"`
-	PlayCount         int64       `json:"play_count"`
-	LastPlayedAt      interface{} `json:"last_played_at"`
-}
-
-// "Mixes for You" seeds — top-N artists by play volume in the last `since_days`.
-// Each row becomes one mix; the service then runs SimilarArtists against the
-// artist_centroids index to flesh out the mix from sonic-similar artists.
-func (q *Queries) ListUserSeedArtistsForMixes(ctx context.Context, arg ListUserSeedArtistsForMixesParams) ([]ListUserSeedArtistsForMixesRow, error) {
-	rows, err := q.db.Query(ctx, listUserSeedArtistsForMixes, arg.Picks, arg.UserID, arg.SinceAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListUserSeedArtistsForMixesRow{}
-	for rows.Next() {
-		var i ListUserSeedArtistsForMixesRow
-		if err := rows.Scan(
-			&i.ArtistID,
-			&i.ArtistName,
-			&i.MediaItemID,
-			&i.MediaItemPublicID,
-			&i.ArtistSlug,
-			&i.PlayCount,
-			&i.LastPlayedAt,
 		); err != nil {
 			return nil, err
 		}

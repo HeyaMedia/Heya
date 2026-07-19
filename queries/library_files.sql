@@ -20,6 +20,15 @@ SET size = EXCLUDED.size, mtime = EXCLUDED.mtime,
     video_height = CASE WHEN library_files.size = EXCLUDED.size
                          AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
                         THEN library_files.video_height ELSE 0 END,
+    video_formats = CASE WHEN library_files.size = EXCLUDED.size
+                          AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                         THEN library_files.video_formats ELSE ARRAY[]::text[] END,
+    audio_formats = CASE WHEN library_files.size = EXCLUDED.size
+                          AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                         THEN library_files.audio_formats ELSE ARRAY[]::text[] END,
+    content_hash = CASE WHEN library_files.size = EXCLUDED.size
+                         AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                        THEN library_files.content_hash ELSE '' END,
     has_trickplay = CASE WHEN library_files.size = EXCLUDED.size
                           AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
                          THEN library_files.has_trickplay ELSE false END,
@@ -30,6 +39,58 @@ SET size = EXCLUDED.size, mtime = EXCLUDED.mtime,
                                  AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
                                 THEN library_files.segments_detected_at ELSE NULL END,
     deleted_at = NULL, updated_at = now()
+RETURNING *;
+
+-- name: ObservePendingLibraryFile :one
+-- Records the current source tuple before remote matching starts. This makes a
+-- brand-new music file addressable by the inline Chromaprint/AcoustID fallback
+-- during its first search pass instead of only after apply or review parking.
+-- A changed/restored source becomes pending so an interrupted pipeline is
+-- rediscovered by the next kickoff; an unchanged matched/unmatched row keeps
+-- its terminal status. Probe artifacts are invalidated exactly when bytes
+-- changed, because the later apply upsert will compare against this new tuple.
+INSERT INTO library_files (library_id, path, size, mtime, parse_result, status)
+VALUES ($1, $2, $3, $4, '{}'::jsonb, 'pending')
+ON CONFLICT (library_id, path) DO UPDATE
+SET media_info = CASE WHEN library_files.size = EXCLUDED.size
+                       AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                      THEN library_files.media_info ELSE '{}'::jsonb END,
+    keyframes = CASE WHEN library_files.size = EXCLUDED.size
+                      AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                     THEN library_files.keyframes ELSE NULL END,
+    video_height = CASE WHEN library_files.size = EXCLUDED.size
+                         AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                        THEN library_files.video_height ELSE 0 END,
+    video_formats = CASE WHEN library_files.size = EXCLUDED.size
+                          AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                         THEN library_files.video_formats ELSE ARRAY[]::text[] END,
+    audio_formats = CASE WHEN library_files.size = EXCLUDED.size
+                          AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                         THEN library_files.audio_formats ELSE ARRAY[]::text[] END,
+    content_hash = CASE WHEN library_files.size = EXCLUDED.size
+                         AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                        THEN library_files.content_hash ELSE '' END,
+    has_trickplay = CASE WHEN library_files.size = EXCLUDED.size
+                          AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                         THEN library_files.has_trickplay ELSE false END,
+    segments_analyzed_at = CASE WHEN library_files.size = EXCLUDED.size
+                                 AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                                THEN library_files.segments_analyzed_at ELSE NULL END,
+    segments_detected_at = CASE WHEN library_files.size = EXCLUDED.size
+                                 AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                                THEN library_files.segments_detected_at ELSE NULL END,
+    size = EXCLUDED.size,
+    mtime = EXCLUDED.mtime,
+    status = CASE WHEN library_files.deleted_at IS NULL
+                       AND library_files.size = EXCLUDED.size
+                       AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                  THEN library_files.status ELSE 'pending'::file_status END,
+    error_message = CASE WHEN library_files.deleted_at IS NULL
+                              AND library_files.size = EXCLUDED.size
+                              AND library_files.mtime IS NOT DISTINCT FROM EXCLUDED.mtime
+                         THEN library_files.error_message ELSE '' END,
+    deleted_at = NULL,
+    updated_at = now()
 RETURNING *;
 
 -- name: ListSeriesWithUnresolvedAbsoluteFiles :many
@@ -81,7 +142,7 @@ WHERE id = $1;
 -- needs those for the restore path) so the walk does map lookups instead of
 -- one SELECT per file. has_nfo says whether local metadata was ever applied,
 -- without shipping the whole parse_result across.
-SELECT id, path, size, mtime, deleted_at, has_trickplay,
+SELECT id, path, size, mtime, status, deleted_at, has_trickplay,
        (parse_result ? 'nfo')::boolean AS has_nfo
 FROM library_files
 WHERE library_id = $1;
@@ -303,6 +364,15 @@ SET media_info = CASE WHEN library_files.size = $2
     video_height = CASE WHEN library_files.size = $2
                          AND library_files.mtime IS NOT DISTINCT FROM $3
                         THEN library_files.video_height ELSE 0 END,
+    video_formats = CASE WHEN library_files.size = $2
+                          AND library_files.mtime IS NOT DISTINCT FROM $3
+                         THEN library_files.video_formats ELSE ARRAY[]::text[] END,
+    audio_formats = CASE WHEN library_files.size = $2
+                          AND library_files.mtime IS NOT DISTINCT FROM $3
+                         THEN library_files.audio_formats ELSE ARRAY[]::text[] END,
+    content_hash = CASE WHEN library_files.size = $2
+                         AND library_files.mtime IS NOT DISTINCT FROM $3
+                        THEN library_files.content_hash ELSE '' END,
     has_trickplay = CASE WHEN library_files.size = $2
                           AND library_files.mtime IS NOT DISTINCT FROM $3
                          THEN library_files.has_trickplay ELSE false END,

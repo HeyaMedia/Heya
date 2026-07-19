@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -44,24 +43,33 @@ func shelfSeed(userID int64) string {
 // themselves through Kind/Description. Slug is the stable route identity and
 // is intentionally not coupled to an artist slug.
 type MusicMix struct {
-	Slug                        string                              `json:"slug"`
-	Kind                        string                              `json:"kind"`
-	Description                 string                              `json:"description"`
-	SeedArtistID                int64                               `json:"seed_artist_id"`
-	SeedArtistName              string                              `json:"seed_artist_name"`
-	SeedArtistSlug              string                              `json:"seed_artist_slug"`
-	SeedArtistMediaItemID       int64                               `json:"seed_artist_media_item_id"`
-	SeedArtistMediaItemPublicID string                              `json:"seed_artist_media_item_public_id,omitempty"`
-	Name                        string                              `json:"name"`
-	Tracks                      []sqlc.ListArtistTopTracksForMixRow `json:"tracks"`
+	Slug                        string `json:"slug"`
+	Kind                        string `json:"kind"`
+	Description                 string `json:"description"`
+	SeedArtistID                int64  `json:"seed_artist_id"`
+	SeedArtistName              string `json:"seed_artist_name"`
+	SeedArtistSlug              string `json:"seed_artist_slug"`
+	SeedArtistMediaItemID       int64  `json:"seed_artist_media_item_id"`
+	SeedArtistMediaItemPublicID string `json:"seed_artist_media_item_public_id,omitempty"`
+	// SeedGenre is set for Kind == "genre" mixes (generateGenreMixes) and
+	// genre-seeded Kind == "library" sampler mixes (generateLibrarySampler-
+	// Mixes) — the genre name backing the title, so the FE can render a
+	// genre chip without parsing Name.
+	SeedGenre string                              `json:"seed_genre,omitempty"`
+	Name      string                              `json:"name"`
+	Tracks    []sqlc.ListArtistTopTracksForMixRow `json:"tracks"`
 }
 
 // GenerateMixesForUser assembles one bounded slate from the shared music
 // recommendation pool: four profile archetypes followed by up to six
 // per-artist taste mixes. Provider/catalog popularity keeps cold-start users
-// useful; the legacy generator at the bottom is only a compatibility fallback
-// for installations with sparse older metadata.
-func (a *App) GenerateMixesForUser(ctx context.Context, userID int64, maxMixes, tracksPerMix int) ([]MusicMix, error) {
+// useful even with no explicit taste yet.
+//
+// variant is 0 for the normal cached daily slate (stable within a day) or a
+// caller-supplied non-zero value (e.g. a regenerate request's timestamp) that
+// folds into both generators' rotation entropy so the same day can still
+// produce a visibly different slate on demand.
+func (a *App) GenerateMixesForUser(ctx context.Context, userID int64, maxMixes, tracksPerMix int, variant int64) ([]MusicMix, error) {
 	if maxMixes <= 0 {
 		maxMixes = 10
 	} else if maxMixes > 10 {
@@ -75,122 +83,75 @@ func (a *App) GenerateMixesForUser(ctx context.Context, userID int64, maxMixes, 
 	// For You, discovery, rediscovery, and deep cuts. These blend sonic KNN,
 	// explicit taste, completion signals, provider charts, and the external
 	// similar-artist graph. Cold users still get a provider-popularity mix.
-	mixes, err := a.generateRecommendationMixes(ctx, userID, maxMixes, tracksPerMix)
+	mixes, err := a.generateRecommendationMixes(ctx, userID, maxMixes, tracksPerMix, variant)
 	if err != nil {
 		log.Warn().Err(err).Msg("recommendation mixes failed — trying artist mixes")
 		mixes = nil
 	}
 
+	// usedTrackIDs accumulates across every generator below so a track never
+	// appears in two mixes in the same slate (docs/mix-rules-plan.md layer-1:
+	// "a track appears in at most one mix per slate").
+	usedTrackIDs := make([]int64, 0, maxMixes*tracksPerMix)
+	for _, m := range mixes {
+		for _, t := range m.Tracks {
+			usedTrackIDs = append(usedTrackIDs, t.TrackID)
+		}
+	}
+
+	// Genre archetype (mix-rules-plan layer-1 #2): "<Genre> Mix" seeded from
+	// the user's top 1-2 genres by recent affinity. Self-gates when the
+	// affinity distribution is too sparse/flat to name a genre honestly —
+	// see genreMixMinAffinityTracks/genreMixMinShare.
+	if genreSlots := maxMixes - len(mixes); genreSlots > 0 {
+		genreMixes, genreErr := a.generateGenreMixes(ctx, userID, genreSlots, tracksPerMix, variant, usedTrackIDs)
+		if genreErr != nil {
+			log.Warn().Err(genreErr).Msg("genre mixes failed")
+		} else if len(genreMixes) > 0 {
+			mixes = append(mixes, genreMixes...)
+			for _, m := range genreMixes {
+				for _, t := range m.Tracks {
+					usedTrackIDs = append(usedTrackIDs, t.TrackID)
+				}
+			}
+		}
+	}
+
 	artistSlots := maxMixes - len(mixes)
 	artistSlots = min(artistSlots, maxArtistMixesInSlate)
 	if artistSlots > 0 {
-		artistMixes, artistErr := a.generateTasteMixes(ctx, userID, artistSlots, tracksPerMix)
+		artistMixes, artistErr := a.generateTasteMixes(ctx, userID, artistSlots, tracksPerMix, variant, usedTrackIDs)
 		if artistErr != nil {
-			log.Warn().Err(artistErr).Msg("taste mixes failed — using legacy generator")
+			log.Warn().Err(artistErr).Msg("taste mixes failed")
 		} else if len(artistMixes) > 0 {
 			mixes = append(mixes, artistMixes...)
-			return mixes, nil
-		}
-	}
-	if len(mixes) > 0 {
-		return mixes, nil
-	}
-
-	// Last-resort compatibility path for installations whose older metadata
-	// has neither provider popularity nor usable explicit taste yet.
-	if _, err := a.generateTasteMixes(ctx, userID, maxMixes, tracksPerMix); err != nil {
-		log.Warn().Err(err).Msg("taste mixes failed — using legacy generator")
-	}
-
-	q := sqlc.New(a.db)
-
-	// Top-N seed artists from the user's recent listening. 30-day window
-	// captures the current taste arc without dragging in dormant phases.
-	since := time.Now().AddDate(0, 0, -30)
-	seeds, err := q.ListUserSeedArtistsForMixes(ctx, sqlc.ListUserSeedArtistsForMixesParams{
-		UserID:  userID,
-		SinceAt: pgTimestamptz(since),
-		Picks:   int32(maxMixes),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("mix seeds: %w", err)
-	}
-	if len(seeds) == 0 {
-		return []MusicMix{}, nil
-	}
-
-	mixes = make([]MusicMix, 0, len(seeds))
-	for _, seed := range seeds {
-		// Pull sonic neighbors — up to 10 similar artists. ErrNoFacets
-		// (no centroid for the seed yet) → skip this seed rather than
-		// failing the whole shelf.
-		neighbors, err := a.SimilarMusicArtists(ctx, seed.ArtistID, 10)
-		if err != nil && !errors.Is(err, ErrNoFacets) {
-			return nil, fmt.Errorf("similar artists for %d: %w", seed.ArtistID, err)
-		}
-
-		// Build artist-id list: seed first, then neighbors. The query
-		// pulls up to tracks-per-artist tracks per id; we then
-		// diversifyMix to shuffle them inter-artist.
-		artistIDs := make([]int64, 0, len(neighbors)+1)
-		artistIDs = append(artistIDs, seed.ArtistID)
-		for _, n := range neighbors {
-			artistIDs = append(artistIDs, n.ID)
-		}
-
-		// Aim for ~3 tracks per artist when we have neighbors, more
-		// when we don't (cold-start fallback — at least play the seed
-		// artist's own catalog).
-		perArtist := 3
-		if len(artistIDs) <= 2 {
-			perArtist = tracksPerMix
-		}
-
-		tracks, err := q.ListArtistTopTracksForMix(ctx, sqlc.ListArtistTopTracksForMixParams{
-			ArtistIds:       artistIDs,
-			TracksPerArtist: int32(perArtist),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("mix tracks for seed %d: %w", seed.ArtistID, err)
-		}
-		if len(tracks) == 0 {
-			continue
-		}
-		ids := make([]int64, len(tracks))
-		for i, track := range tracks {
-			ids[i] = track.TrackID
-		}
-		vetoed, err := a.vetoedMusicTrackSet(ctx, userID, ids)
-		if err != nil {
-			return nil, fmt.Errorf("mix vetoes for seed %d: %w", seed.ArtistID, err)
-		}
-		if len(vetoed) > 0 {
-			filtered := tracks[:0]
-			for _, track := range tracks {
-				if !vetoed[track.TrackID] {
-					filtered = append(filtered, track)
+			for _, m := range artistMixes {
+				for _, t := range m.Tracks {
+					usedTrackIDs = append(usedTrackIDs, t.TrackID)
 				}
 			}
-			tracks = filtered
 		}
-		if len(tracks) == 0 {
-			continue
+	}
+
+	// Library Sampler — the cold-start floor (mix-rules-plan cold ladder):
+	// genre tours seeded from the library's own composition rather than
+	// listening history. Runs last on purpose and self-devalues via its
+	// signal ladder, so it only carries the slate while the personal
+	// archetypes above have nothing to work with — see music_mixes_sampler.go.
+	if samplerSlots := maxMixes - len(mixes); samplerSlots > 0 {
+		samplerMixes, samplerErr := a.generateLibrarySamplerMixes(ctx, userID, samplerSlots, tracksPerMix, variant, usedTrackIDs)
+		if samplerErr != nil {
+			log.Warn().Err(samplerErr).Msg("library sampler mixes failed")
+		} else if len(samplerMixes) > 0 {
+			mixes = append(mixes, samplerMixes...)
 		}
+	}
 
-		tracks = diversifyMixByArtist(tracks, tracksPerMix)
-
-		mixes = append(mixes, MusicMix{
-			Slug:                        "artist-" + seed.ArtistSlug,
-			Kind:                        "artist",
-			Description:                 "A personal blend of this artist, sonic neighbors, and provider favorites.",
-			SeedArtistID:                seed.ArtistID,
-			SeedArtistName:              seed.ArtistName,
-			SeedArtistSlug:              seed.ArtistSlug,
-			SeedArtistMediaItemID:       seed.MediaItemID,
-			SeedArtistMediaItemPublicID: seed.MediaItemPublicID.String(),
-			Name:                        "Inspired by " + seed.ArtistName,
-			Tracks:                      tracks,
-		})
+	// A cold user with no analyzed tracks, no explicit ratings, and no
+	// provider popularity yet legitimately produces nothing from either
+	// generator — an empty slate is fine, the FE hides the empty rail.
+	if mixes == nil {
+		mixes = []MusicMix{}
 	}
 	return mixes, nil
 }

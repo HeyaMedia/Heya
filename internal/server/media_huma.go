@@ -225,7 +225,7 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 	huma.Register(api, secured(op(http.MethodGet, "/api/search", "search-all", "Full-text search across all media", "Search")),
 		func(ctx context.Context, in *struct {
 			Q    string `query:"q" minLength:"1" maxLength:"200" example:"godfather"`
-			Type string `query:"type" enum:"movie,tv,music,book,comic,podcast,radio,episode,person" example:"movie" doc:"Optional bucket"`
+			Type string `query:"type" enum:"movie,tv,music,book,comic,podcast,radio,episode,person,albums,tracks" example:"movie" doc:"Optional bucket"`
 			Pagination
 		}) (*JSONOutput[service.SearchBucket], error) {
 			q := strings.TrimSpace(in.Q)

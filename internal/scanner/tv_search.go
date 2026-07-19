@@ -110,6 +110,9 @@ func searchTVLikeMatches(ctx context.Context, matches []TVMatch, provider TVSear
 
 		candidates, err := provider.Search(ctx, metadata.KindTV, query)
 		if err != nil {
+			if terminal := providerContextTermination(ctx.Err(), err); terminal != nil {
+				return results, terminal
+			}
 			if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
 				return results, err
 			}

@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
-	"github.com/karbowiak/heya/internal/metadata"
 	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/karbowiak/heya/internal/metadatasync"
 	"github.com/riverqueue/river"
@@ -18,7 +17,7 @@ import (
 )
 
 type metadataTopTracksSource interface {
-	ArtistTopTrackEntries(context.Context, string, ...heyametadata.ProviderCredentials) ([]metadata.TopTrackEntry, error)
+	ArtistTopTracksProjection(context.Context, string, ...heyametadata.ProviderCredentials) (heyametadata.ArtistTopTracksProjection, error)
 }
 
 // ReconcileMetadataScopeWorker is the retryable bridge between canonical
@@ -29,6 +28,9 @@ type ReconcileMetadataScopeWorker struct {
 	river.WorkerDefaults[ReconcileMetadataScopeArgs]
 	DB     *pgxpool.Pool
 	Source metadataTopTracksSource
+	// BeforeStoreTransaction is a deterministic race-test seam. Production
+	// leaves it nil.
+	BeforeStoreTransaction func()
 }
 
 func (w *ReconcileMetadataScopeWorker) Work(ctx context.Context, job *river.Job[ReconcileMetadataScopeArgs]) error {
@@ -75,7 +77,7 @@ func (w *ReconcileMetadataScopeWorker) Work(ctx context.Context, job *river.Job[
 		return fmt.Errorf("reconcile metadata scope: read checkpoint: %w", stateErr)
 	}
 
-	tracks, err := w.Source.ArtistTopTrackEntries(ctx, args.EntityID)
+	projection, err := w.Source.ArtistTopTracksProjection(ctx, args.EntityID)
 	if err != nil {
 		var apiErr *heyametadata.APIError
 		if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound {
@@ -98,6 +100,12 @@ func (w *ReconcileMetadataScopeWorker) Work(ctx context.Context, job *river.Job[
 		}
 		return fmt.Errorf("reconcile metadata scope: fetch artist top tracks: %w", err)
 	}
+	if args.ProjectionVersion > 0 && projection.ProjectionVersion < args.ProjectionVersion {
+		return fmt.Errorf("reconcile metadata scope: top-tracks payload projection %d is older than requested projection %d", projection.ProjectionVersion, args.ProjectionVersion)
+	}
+	if w.BeforeStoreTransaction != nil {
+		w.BeforeStoreTransaction()
+	}
 
 	tx, err := w.DB.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -117,22 +125,22 @@ func (w *ReconcileMetadataScopeWorker) Work(ctx context.Context, job *river.Job[
 	if lockedBinding.EntityID != entityID || lockedBinding.EntityKind != args.EntityKind {
 		return nil
 	}
-	desiredVersion = max(args.ProjectionVersion, lockedBinding.ProjectionVersion)
+	payloadVersion := projection.ProjectionVersion
 	if state, stateErr := qtx.GetMetadataProjectionState(ctx, sqlc.GetMetadataProjectionStateParams{
 		LocalKind: args.LocalKind, LocalID: args.LocalID, Scope: args.Scope,
-	}); stateErr == nil && args.ProjectionVersion > 0 && state.EntityID == entityID && state.ProjectionVersion >= desiredVersion {
+	}); stateErr == nil && state.EntityID == entityID && state.ProjectionVersion >= payloadVersion {
 		return nil
 	} else if stateErr != nil && !errors.Is(stateErr, pgx.ErrNoRows) {
 		return fmt.Errorf("reconcile metadata scope: recheck checkpoint: %w", stateErr)
 	}
-	if err := metadatasync.ReplaceArtistTopTracks(ctx, qtx, args.LocalID, entityID, args.EntityKind, desiredVersion, tracks); err != nil {
+	if err := metadatasync.ReplaceArtistTopTracks(ctx, qtx, args.LocalID, entityID, args.EntityKind, payloadVersion, projection.Entries); err != nil {
 		return fmt.Errorf("reconcile metadata scope: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("reconcile metadata scope: commit: %w", err)
 	}
 	log.Info().Int64("local_id", args.LocalID).Str("entity_id", args.EntityID).
-		Str("scope", args.Scope).Int("rows", len(tracks)).Int64("projection_version", desiredVersion).
+		Str("scope", args.Scope).Int("rows", len(projection.Entries)).Int64("projection_version", payloadVersion).
 		Msg("canonical metadata scope reconciled")
 	return nil
 }

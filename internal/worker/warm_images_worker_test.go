@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -135,6 +136,63 @@ func TestMaterializePendingAssetDropsRowWhenUpstreamSays404(t *testing.T) {
 
 	_, err = q.GetMediaAssetByID(ctx, asset.ID)
 	require.Error(t, err, "dead pending row must be deleted so sweeps converge")
+}
+
+func TestDownloadImageWorkerBackdropConflictDoesNotReplaceCurrentProfile(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	img := tinyJPEG(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(img)
+	}))
+	defer server.Close()
+
+	userID := testutil.TestUserID(t, pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name: "backdrop-conflict-test", MediaType: sqlc.MediaTypeMovie, Paths: []string{"/movies"},
+		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy:    userID, Settings: []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	item, err := q.CreateMediaItem(ctx, sqlc.CreateMediaItemParams{
+		LibraryID: lib.ID, MediaType: sqlc.MediaTypeMovie, Title: "Current Backdrop", SortTitle: "Current Backdrop",
+		ExternalIds: []byte("{}"),
+	})
+	require.NoError(t, err)
+	currentPath := filepath.Join(t.TempDir(), "current-backdrop.jpg")
+	require.NoError(t, os.WriteFile(currentPath, img, 0o644))
+	require.NoError(t, q.UpdateMediaItemBackdropPath(ctx, sqlc.UpdateMediaItemBackdropPathParams{ID: item.ID, BackdropPath: currentPath}))
+
+	remoteURL := server.URL + "/backdrop.jpg"
+	_, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+		MediaItemID: item.ID, AssetType: sqlc.AssetTypeBackdrop, Source: "remote",
+		LocalPath: currentPath, RemoteUrl: remoteURL,
+	})
+	require.NoError(t, err)
+
+	w := &DownloadImageWorker{
+		DB:         pool,
+		Downloader: images.NewDownloader(t.TempDir(), images.TrustedSource{BaseURL: server.URL}),
+		Progress:   NewTaskProgressBroadcaster(nil),
+	}
+	job := &river.Job[DownloadImageArgs]{
+		JobRow: &rivertype.JobRow{},
+		Args: DownloadImageArgs{
+			MediaItemID: item.ID, EntityType: "media", URL: remoteURL,
+			AssetType: "backdrop", MediaType: "movie", SortOrder: 0,
+		},
+	}
+	require.NoError(t, w.Work(ctx, job), "the duplicate remote identity is a stale loser, not a retryable failure")
+
+	updated, err := q.GetMediaItemByID(ctx, item.ID)
+	require.NoError(t, err)
+	require.Equal(t, currentPath, updated.BackdropPath,
+		"a conflicting stale download must not replace the current backdrop profile path")
 }
 
 func TestDownloadAlbumCoverWarmsRemoteCoverPath(t *testing.T) {

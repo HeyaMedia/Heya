@@ -53,13 +53,10 @@ func ReplaceArtistTopTracks(
 	if binding.EntityID != entityID || binding.EntityKind != entityKind {
 		return fmt.Errorf("artist metadata binding changed while applying top tracks")
 	}
-	if binding.ProjectionVersion > projectionVersion {
-		return nil
-	}
 	state, err := q.GetMetadataProjectionState(ctx, sqlc.GetMetadataProjectionStateParams{
 		LocalKind: "artist", LocalID: artistID, Scope: ArtistTopTracksScope,
 	})
-	if err == nil && state.EntityID == entityID && state.ProjectionVersion > projectionVersion {
+	if err == nil && state.EntityID == entityID && state.ProjectionVersion >= projectionVersion {
 		return nil
 	}
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {

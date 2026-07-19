@@ -490,16 +490,12 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 		func(ctx context.Context, in *struct {
 			Mood string `path:"mood" pattern:"^[a-z_]+$" maxLength:"40" example:"mood_happy"`
 			Pagination
-		}) (*JSONOutput[moodTracksBody], error) {
-			rows, err := app.ListTracksByMood(ctx, in.Mood, in.Limit, in.Offset)
+		}) (*JSONOutput[*service.MusicListPage[sqlc.ListTracksByMoodRow]], error) {
+			page, err := app.ListMoodTracksPage(ctx, in.Mood, in.Limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error400BadRequest(err.Error())
 			}
-			total, err := app.CountTracksForMood(ctx, in.Mood)
-			if err != nil {
-				return nil, huma.Error400BadRequest(err.Error())
-			}
-			return cachedJSON(moodTracksBody{Items: rows, Total: total}, 60), nil
+			return cachedJSON(page, 60), nil
 		})
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/browse/genres", "browse-music-genres", "Genre-tile buckets ranked by track count", "Music")),
@@ -515,16 +511,12 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 		func(ctx context.Context, in *struct {
 			Name string `path:"name" maxLength:"160" example:"Electronic---Techno"`
 			Pagination
-		}) (*JSONOutput[genreTracksBody], error) {
-			rows, err := app.ListTracksByGenre(ctx, in.Name, in.Limit, in.Offset)
+		}) (*JSONOutput[*service.MusicListPage[sqlc.ListTracksByGenreRow]], error) {
+			page, err := app.ListGenreTracksPage(ctx, in.Name, in.Limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error400BadRequest(err.Error())
 			}
-			total, err := app.CountTracksForGenre(ctx, in.Name)
-			if err != nil {
-				return nil, huma.Error400BadRequest(err.Error())
-			}
-			return cachedJSON(genreTracksBody{Items: rows, Total: total}, 60), nil
+			return cachedJSON(page, 60), nil
 		})
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/browse/tempo", "browse-music-tempo", "BPM-band tile buckets", "Music")),
@@ -540,20 +532,16 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 		func(ctx context.Context, in *struct {
 			Band string `path:"band" pattern:"^[0-9]+-[0-9]+$" maxLength:"20" example:"110-130"`
 			Pagination
-		}) (*JSONOutput[tempoTracksBody], error) {
+		}) (*JSONOutput[*service.MusicListPage[sqlc.ListTracksByTempoBandRow]], error) {
 			minBPM, maxBPM, ok := app.LookupTempoBand(in.Band)
 			if !ok {
 				return nil, huma.Error404NotFound("unknown tempo band")
 			}
-			rows, err := app.ListTracksByTempoBand(ctx, minBPM, maxBPM, in.Limit, in.Offset)
+			page, err := app.ListTempoTracksPage(ctx, minBPM, maxBPM, in.Limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
-			total, err := app.CountTracksForTempoBand(ctx, minBPM, maxBPM)
-			if err != nil {
-				return nil, huma.Error500InternalServerError(err.Error())
-			}
-			return cachedJSON(tempoTracksBody{Items: rows, Total: total}, 60), nil
+			return cachedJSON(page, 60), nil
 		})
 
 	huma.Register(api, secured(op(http.MethodPost, "/api/music/radio", "build-music-radio", "Build seed radio with sonic and metadata fallbacks", "Music")),

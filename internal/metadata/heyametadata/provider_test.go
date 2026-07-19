@@ -25,7 +25,16 @@ const (
 	testAuthorID  = "66666666-6666-4666-8666-666666666666"
 	testSeriesID  = "77777777-7777-4777-8777-777777777777"
 	testRecordID  = "88888888-8888-4888-8888-888888888888"
+	testArtistID  = "99999999-9999-4999-8999-999999999999"
 )
+
+func TestLocalBookIndexCannotSuppressAuthorDiscovery(t *testing.T) {
+	query := metadata.SearchQuery{CanonicalKind: "book_work", Title: "Artemis", Author: "Andy Weir", Format: "audiobook"}
+	results := []metadata.SearchResult{{ProviderID: "canonical-book", Title: "Artemis", Confidence: 1}}
+	if localSearchSufficient(results, query, "book_work") {
+		t.Fatal("same-title local book summary without author evidence suppressed discovery")
+	}
+}
 
 func TestMapDiscoveryPreservesRecommendationEvidenceAndReviewGate(t *testing.T) {
 	evidence := []gen.Evidence{{Field: "title", Outcome: "exact", Weight: .5}, {Field: "year", Outcome: "exact", Weight: .2}}
@@ -381,7 +390,7 @@ func TestArtistTopTracksUseCanonicalRecordingIDs(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/top-tracks"):
-			_, _ = w.Write([]byte(`{"artist_id":"` + testMovieID + `","results":[{"rank":1,"title":"Song","provider":"lastfm","external_ids":[{"provider":"musicbrainz","namespace":"recording","value":"mbid"}],"recording_entity_id":"` + testRecordID + `","playcount":20,"listeners":10}],"sources":[],"total":1,"offset":0,"limit":100}`))
+			_, _ = w.Write([]byte(`{"artist_id":"` + testMovieID + `","results":[{"rank":1,"title":"Song","provider":"lastfm","external_ids":[{"provider":"musicbrainz","namespace":"recording","value":"mbid"}],"recording_entity_id":"` + testRecordID + `","playcount":20,"listeners":10}],"sources":[{"provider":"lastfm","item_count":1,"reported_total":1,"truncated":false,"observed_at":"2026-07-01T00:00:00Z","projection_version":11}],"total":1,"offset":0,"limit":100}`))
 		case strings.HasSuffix(r.URL.Path, "/relations"):
 			_, _ = w.Write([]byte(`{"relations":[],"total":0,"offset":0,"limit":100}`))
 		default:
@@ -397,6 +406,9 @@ func TestArtistTopTracksUseCanonicalRecordingIDs(t *testing.T) {
 	artist := mustMapDocument(t, provider, `{"schema_version":1,"projection_version":2,"id":"`+testMovieID+`","kind":"artist","external_ids":[],"display":{"name":"Artist"},"data":{"classification":{},"lifecycle":{},"names":[],"images":[]}}`)
 	if !artist.ArtistTopTracksLoaded || len(artist.ArtistTopTracks) != 1 || artist.ArtistTopTracks[0].Rank != 1 || artist.ArtistTopTracks[0].RecordingEntityID != testRecordID || artist.ArtistTopTracks[0].MBID != "mbid" {
 		t.Fatalf("top tracks mapping: %#v", artist.ArtistTopTracks)
+	}
+	if artist.ArtistTopTracksProjectionVersion != 11 {
+		t.Fatalf("top tracks projection version = %d, want 11", artist.ArtistTopTracksProjectionVersion)
 	}
 }
 
@@ -591,6 +603,37 @@ func TestQueryOnlyExactLocalHitDoesNotCreateDiscovery(t *testing.T) {
 	}
 }
 
+func TestQueryOnlyExactArtistHitStillCreatesIdentityDiscovery(t *testing.T) {
+	var discoveries int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/search":
+			_, _ = w.Write([]byte(`{"results":[{"schema_version":1,"projection_version":1,"id":"` + testArtistID + `","kind":"artist","display":{"title":"Minnie"},"external_ids":[]}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/discoveries":
+			discoveries++
+			_, _ = w.Write([]byte(`{"id":"99999999-9999-4999-8999-999999999998","state":"completed","expires_at":"2099-01-01T00:00:00Z","result":{"kind":"artist","query":"Minnie","recommendation":"ambiguous","status":"needs_selection","schema_version":1,"observed_at":"2026-01-01T00:00:00Z","candidates":[{"candidate_ref":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","rank":1,"confidence":0.85,"match":"strong","display":{"title":"Minnie"},"evidence":[]}]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	results, err := NewHeyaProvider(client).Search(context.Background(), metadata.KindMusic, metadata.SearchQuery{Title: "Minnie"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if discoveries != 1 || len(results) != 2 {
+		t.Fatalf("discoveries=%d results=%#v", discoveries, results)
+	}
+	if !results[0].RequiresReview {
+		t.Fatalf("exact-name local artist escaped the review gate: %#v", results[0])
+	}
+}
+
 func TestCreditsReadsEveryPage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -716,9 +759,9 @@ func TestTopTracksReadEveryPage(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Query().Get("offset") {
 		case "0":
-			_, _ = w.Write([]byte(`{"artist_id":"` + testMovieID + `","results":[{"rank":1,"title":"One","provider":"lastfm"}],"sources":[],"total":2,"offset":0,"limit":1}`))
+			_, _ = w.Write([]byte(`{"artist_id":"` + testMovieID + `","results":[{"rank":1,"title":"One","provider":"lastfm"}],"sources":[{"provider":"lastfm","item_count":1,"reported_total":1,"truncated":false,"observed_at":"2026-07-01T00:00:00Z","projection_version":7}],"total":2,"offset":0,"limit":1}`))
 		case "1":
-			_, _ = w.Write([]byte(`{"artist_id":"` + testMovieID + `","results":[{"rank":1,"title":"Two","provider":"apple"}],"sources":[],"total":2,"offset":1,"limit":1}`))
+			_, _ = w.Write([]byte(`{"artist_id":"` + testMovieID + `","results":[{"rank":1,"title":"Two","provider":"apple"}],"sources":[{"provider":"apple","item_count":1,"reported_total":1,"truncated":false,"observed_at":"2026-07-01T00:00:00Z","projection_version":9}],"total":2,"offset":1,"limit":1}`))
 		default:
 			http.Error(w, "unexpected offset", http.StatusBadRequest)
 		}
@@ -728,12 +771,16 @@ func TestTopTracksReadEveryPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tracks, err := client.TopTracks(context.Background(), testMovieID)
+	snapshot, err := client.topTracksSnapshot(context.Background(), testMovieID)
 	if err != nil {
 		t.Fatal(err)
 	}
+	tracks := snapshot.Tracks
 	if len(tracks) != 2 || tracks[0].Title != "One" || tracks[1].Title != "Two" {
 		t.Fatalf("top tracks = %#v", tracks)
+	}
+	if snapshot.ProjectionVersion != 9 {
+		t.Fatalf("top tracks projection version = %d, want 9", snapshot.ProjectionVersion)
 	}
 }
 
@@ -1024,6 +1071,27 @@ func TestTransientDiscoveryCreateIsDeferredForDurableScannerWork(t *testing.T) {
 	}
 	if retryAfter, ok := metadata.DeferredWorkRetryAfter(err); !ok || retryAfter != 45*time.Second {
 		t.Fatalf("transient create error = %v, retry_after = %s, ok = %v", err, retryAfter, ok)
+	}
+}
+
+func TestTransientEntityDetailIsDeferredForDurableScannerWork(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "45")
+		http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := metadata.WithDeferredRemoteWork(context.Background(), 30*time.Second)
+
+	detail, err := NewHeyaProvider(client).GetDetail(ctx, EncodeEntityProviderID(testMovieID), nil)
+	if detail != nil {
+		t.Fatalf("transient detail = %#v, want nil", detail)
+	}
+	if retryAfter, ok := metadata.DeferredWorkRetryAfter(err); !ok || retryAfter != 30*time.Second {
+		t.Fatalf("transient detail error = %v, retry_after = %s, ok = %v", err, retryAfter, ok)
 	}
 }
 

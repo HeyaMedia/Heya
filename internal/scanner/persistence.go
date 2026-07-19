@@ -36,7 +36,20 @@ func PersistScanResult(ctx context.Context, lib sqlc.Library, result Result, eve
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	q := sqlc.New(tx)
+	scanRunID, err := persistScanResultTx(ctx, sqlc.New(tx), lib, result, events, opts, summary)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit scan persistence: %w", err)
+	}
+	return scanRunID, nil
+}
+
+// persistScanResultTx writes the user-visible scanner projection through an
+// existing transaction. Entity-stage finalization uses this so the projection
+// and the generation-checked artifact hand-off commit atomically.
+func persistScanResultTx(ctx context.Context, q *sqlc.Queries, lib sqlc.Library, result Result, events []Event, opts Options, summary map[string]any) (int64, error) {
 	run, err := q.CreateScanRun(ctx, sqlc.CreateScanRunParams{
 		LibraryID:      lib.ID,
 		MediaType:      lib.MediaType,
@@ -115,9 +128,6 @@ func PersistScanResult(ctx context.Context, lib sqlc.Library, result Result, eve
 	}); err != nil {
 		return 0, fmt.Errorf("finish scan run: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("commit scan persistence: %w", err)
-	}
 	return run.ID, nil
 }
 
@@ -128,19 +138,20 @@ func persistLocalMediaIdentities(ctx context.Context, q *sqlc.Queries, lib sqlc.
 
 	for _, match := range result.MovieMatches {
 		identity, err := q.UpsertLocalMediaIdentity(ctx, sqlc.UpsertLocalMediaIdentityParams{
-			LibraryID:          lib.ID,
-			MediaType:          lib.MediaType,
-			IdentityKey:        match.Key,
-			Title:              match.Title,
-			Year:               match.Year,
-			Confidence:         float32(match.Confidence),
-			Source:             "scanner",
-			ReviewStatus:       firstNonEmpty(reviewByKey[match.Key], "accepted"),
-			MetadataProviderID: providerByKey[match.Key],
-			MediaItemID:        pgInt8(mediaItemByKey[match.Key]),
-			FirstSeenScanRunID: pgInt8(scanRunID),
-			LastSeenScanRunID:  pgInt8(scanRunID),
-			RawIdentity:        mustJSONBytes(match),
+			LibraryID:               lib.ID,
+			MediaType:               lib.MediaType,
+			IdentityKey:             match.Key,
+			Title:                   match.Title,
+			Year:                    match.Year,
+			Confidence:              float32(match.Confidence),
+			Source:                  "scanner",
+			ReviewStatus:            firstNonEmpty(reviewByKey[match.Key], "accepted"),
+			MetadataProviderID:      providerByKey[match.Key],
+			MediaItemID:             pgInt8(mediaItemByKey[match.Key]),
+			FirstSeenScanRunID:      pgInt8(scanRunID),
+			LastSeenScanRunID:       pgInt8(scanRunID),
+			RawIdentity:             mustJSONBytes(match),
+			DecisionMatcherRevision: scannerSearchMatcherRevision,
 		})
 		if err != nil {
 			return out, fmt.Errorf("upsert movie local identity %s: %w", match.Key, err)
@@ -153,19 +164,20 @@ func persistLocalMediaIdentities(ctx context.Context, q *sqlc.Queries, lib sqlc.
 
 	for _, match := range result.TVMatches {
 		identity, err := q.UpsertLocalMediaIdentity(ctx, sqlc.UpsertLocalMediaIdentityParams{
-			LibraryID:          lib.ID,
-			MediaType:          lib.MediaType,
-			IdentityKey:        match.Key,
-			Title:              match.Title,
-			Year:               match.Year,
-			Confidence:         float32(match.Confidence),
-			Source:             "scanner",
-			ReviewStatus:       firstNonEmpty(reviewByKey[match.Key], "accepted"),
-			MetadataProviderID: providerByKey[match.Key],
-			MediaItemID:        pgInt8(mediaItemByKey[match.Key]),
-			FirstSeenScanRunID: pgInt8(scanRunID),
-			LastSeenScanRunID:  pgInt8(scanRunID),
-			RawIdentity:        mustJSONBytes(match),
+			LibraryID:               lib.ID,
+			MediaType:               lib.MediaType,
+			IdentityKey:             match.Key,
+			Title:                   match.Title,
+			Year:                    match.Year,
+			Confidence:              float32(match.Confidence),
+			Source:                  "scanner",
+			ReviewStatus:            firstNonEmpty(reviewByKey[match.Key], "accepted"),
+			MetadataProviderID:      providerByKey[match.Key],
+			MediaItemID:             pgInt8(mediaItemByKey[match.Key]),
+			FirstSeenScanRunID:      pgInt8(scanRunID),
+			LastSeenScanRunID:       pgInt8(scanRunID),
+			RawIdentity:             mustJSONBytes(match),
+			DecisionMatcherRevision: scannerSearchMatcherRevision,
 		})
 		if err != nil {
 			return out, fmt.Errorf("upsert TV local identity %s: %w", match.Key, err)
@@ -178,19 +190,20 @@ func persistLocalMediaIdentities(ctx context.Context, q *sqlc.Queries, lib sqlc.
 
 	for _, artist := range result.MusicArtists {
 		identity, err := q.UpsertLocalMediaIdentity(ctx, sqlc.UpsertLocalMediaIdentityParams{
-			LibraryID:          lib.ID,
-			MediaType:          lib.MediaType,
-			IdentityKey:        artist.Key,
-			Title:              artist.Artist,
-			Year:               "",
-			Confidence:         float32(artist.Confidence),
-			Source:             "scanner",
-			ReviewStatus:       firstNonEmpty(reviewByKey[artist.Key], "accepted"),
-			MetadataProviderID: providerByKey[artist.Key],
-			MediaItemID:        pgInt8(mediaItemByKey[artist.Key]),
-			FirstSeenScanRunID: pgInt8(scanRunID),
-			LastSeenScanRunID:  pgInt8(scanRunID),
-			RawIdentity:        mustJSONBytes(artist),
+			LibraryID:               lib.ID,
+			MediaType:               lib.MediaType,
+			IdentityKey:             artist.Key,
+			Title:                   artist.Artist,
+			Year:                    "",
+			Confidence:              float32(artist.Confidence),
+			Source:                  "scanner",
+			ReviewStatus:            firstNonEmpty(reviewByKey[artist.Key], "accepted"),
+			MetadataProviderID:      providerByKey[artist.Key],
+			MediaItemID:             pgInt8(mediaItemByKey[artist.Key]),
+			FirstSeenScanRunID:      pgInt8(scanRunID),
+			LastSeenScanRunID:       pgInt8(scanRunID),
+			RawIdentity:             mustJSONBytes(artist),
+			DecisionMatcherRevision: scannerSearchMatcherRevision,
 		})
 		if err != nil {
 			return out, fmt.Errorf("upsert music local identity %s: %w", artist.Key, err)
@@ -203,19 +216,20 @@ func persistLocalMediaIdentities(ctx context.Context, q *sqlc.Queries, lib sqlc.
 
 	for _, plan := range result.BookPlans {
 		identity, err := q.UpsertLocalMediaIdentity(ctx, sqlc.UpsertLocalMediaIdentityParams{
-			LibraryID:          lib.ID,
-			MediaType:          lib.MediaType,
-			IdentityKey:        plan.Key,
-			Title:              plan.Title,
-			Year:               plan.Year,
-			Confidence:         float32(plan.Confidence),
-			Source:             "scanner",
-			ReviewStatus:       firstNonEmpty(reviewByKey[plan.Key], "accepted"),
-			MetadataProviderID: providerByKey[plan.Key],
-			MediaItemID:        pgInt8(mediaItemByKey[plan.Key]),
-			FirstSeenScanRunID: pgInt8(scanRunID),
-			LastSeenScanRunID:  pgInt8(scanRunID),
-			RawIdentity:        mustJSONBytes(plan),
+			LibraryID:               lib.ID,
+			MediaType:               lib.MediaType,
+			IdentityKey:             plan.Key,
+			Title:                   plan.Title,
+			Year:                    plan.Year,
+			Confidence:              float32(plan.Confidence),
+			Source:                  "scanner",
+			ReviewStatus:            firstNonEmpty(reviewByKey[plan.Key], "accepted"),
+			MetadataProviderID:      providerByKey[plan.Key],
+			MediaItemID:             pgInt8(mediaItemByKey[plan.Key]),
+			FirstSeenScanRunID:      pgInt8(scanRunID),
+			LastSeenScanRunID:       pgInt8(scanRunID),
+			RawIdentity:             mustJSONBytes(plan),
+			DecisionMatcherRevision: scannerSearchMatcherRevision,
 		})
 		if err != nil {
 			return out, fmt.Errorf("upsert book local identity %s: %w", plan.Key, err)

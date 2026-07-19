@@ -139,6 +139,70 @@ func TestWritePreservesDestinationWhenWriterFails(t *testing.T) {
 	assertNoTemporaryFiles(t, filepath.Dir(destination))
 }
 
+func TestWriteIfAbsentNeverReplacesDestination(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "metadata.nfo")
+	if err := os.WriteFile(destination, []byte("user-owned"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	created, err := WriteIfAbsent(destination, 0o644, func(writer io.Writer) error {
+		_, err := io.WriteString(writer, "generated")
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created {
+		t.Fatal("WriteIfAbsent reported replacing an existing destination")
+	}
+	body, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "user-owned" {
+		t.Fatalf("destination contents = %q, want user-owned", body)
+	}
+	assertNoTemporaryFiles(t, filepath.Dir(destination))
+}
+
+func TestWriteIfAbsentPublishesCompleteNewFile(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "metadata.nfo")
+	created, err := WriteIfAbsent(destination, 0o644, func(writer io.Writer) error {
+		_, err := io.WriteString(writer, "generated")
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created {
+		t.Fatal("WriteIfAbsent did not create an absent destination")
+	}
+	body, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "generated" {
+		t.Fatalf("destination contents = %q, want generated", body)
+	}
+	assertNoTemporaryFiles(t, filepath.Dir(destination))
+}
+
+func TestInternalPathPredicateIsNarrow(t *testing.T) {
+	for _, path := range []string{
+		"/library/.heya-atomic-album.nfo.123.tmp",
+		"/library/.heya-atomic-cover.jpg.456.previous",
+		"/library/.heya-generated-550e8400-e29b-41d4-a716-446655440000.previous",
+	} {
+		if !IsInternalPath(path) {
+			t.Fatalf("expected internal path: %s", path)
+		}
+	}
+	for _, path := range []string{"/library/album.nfo", "/library/.album.nfo.tmp", "/library/.heya-not-ours.previous"} {
+		if IsInternalPath(path) {
+			t.Fatalf("unexpected internal path: %s", path)
+		}
+	}
+}
+
 func TestProduceRejectsMissingOrNonRegularOutput(t *testing.T) {
 	dir := t.TempDir()
 	destination := filepath.Join(dir, "output.bin")

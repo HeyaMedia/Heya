@@ -270,8 +270,12 @@ func (a *App) scanMixRows(ctx context.Context, query string, args ...any) ([]sql
 }
 
 // generateTasteMixes is the affinity-driven path. Empty result (not an
-// error) means "no usable taste yet" — the caller falls back to legacy.
-func (a *App) generateTasteMixes(ctx context.Context, userID int64, maxMixes, tracksPerMix int) ([]MusicMix, error) {
+// error) means "no usable taste yet". variant is 0 for the normal
+// day-stable rotation, or a non-zero value (folded into dayBucket below)
+// that lets an explicit regenerate request break same-day determinism.
+// exclude is every track id already placed in an earlier mix this slate
+// (recommendation + genre archetypes) so artist mixes don't repeat them.
+func (a *App) generateTasteMixes(ctx context.Context, userID int64, maxMixes, tracksPerMix int, variant int64, exclude []int64) ([]MusicMix, error) {
 	// Over-fetch seeds because a top artist can legitimately have no analyzed
 	// tracks yet. Keep walking the ranked taste list until the requested mix
 	// slots are filled instead of letting one cold artist erase the rail.
@@ -292,8 +296,15 @@ func (a *App) generateTasteMixes(ctx context.Context, userID int64, maxMixes, tr
 	}
 
 	// Day-bucketed exploration seed: stable across a day per user, fresh
-	// tomorrow — mixes rotate without churning on every request.
-	dayBucket := time.Now().Unix() / 86400
+	// tomorrow — mixes rotate without churning on every request. variant
+	// folds in on top so an explicit regenerate can break same-day
+	// determinism without disturbing the normal (variant == 0) callers.
+	dayBucket := (time.Now().Unix() / 86400) ^ variant
+
+	excludeSet := make(map[int64]bool, len(exclude))
+	for _, id := range exclude {
+		excludeSet[id] = true
+	}
 
 	mixes := make([]MusicMix, 0, len(seeds))
 	for _, seed := range seeds {
@@ -324,7 +335,7 @@ func (a *App) generateTasteMixes(ctx context.Context, userID int64, maxMixes, tr
 		}
 
 		rng := rand.New(rand.NewSource(userID ^ seed.ArtistID<<20 ^ dayBucket)) //nolint:gosec // rotation, not crypto
-		tracks := assembleTasteMix(core, neighbors, tracksPerMix, rng)
+		tracks := assembleTasteMix(core, neighbors, tracksPerMix, excludeSet, rng)
 		if len(tracks) < 5 {
 			continue // too thin to feel like a mix
 		}
@@ -341,6 +352,9 @@ func (a *App) generateTasteMixes(ctx context.Context, userID int64, maxMixes, tr
 			Name:                        "Inspired by " + seed.ArtistName,
 			Tracks:                      tracks,
 		})
+		for _, track := range tracks {
+			excludeSet[track.TrackID] = true
+		}
 	}
 	if len(mixes) > 0 {
 		log.Debug().Int64("user", userID).Int("mixes", len(mixes)).Msg("mixes: taste-driven path")
@@ -351,8 +365,11 @@ func (a *App) generateTasteMixes(ctx context.Context, userID int64, maxMixes, tr
 // assembleTasteMix merges the personal core with KNN neighbors: dedup by
 // track and by song version, a per-artist cap for variety, and ~25% of the
 // neighbor slots drawn from deeper ranks (the exploration share) so the mix
-// branches out instead of hugging its seed.
-func assembleTasteMix(core, neighbors []sqlc.ListArtistTopTracksForMixRow, tracksPerMix int, rng *rand.Rand) []sqlc.ListArtistTopTracksForMixRow {
+// branches out instead of hugging its seed. exclude is every track id
+// already used elsewhere in this slate (other archetypes, earlier artist
+// mixes) — checked the same as an internal dedup so a track never appears
+// twice across the whole Mixes for You payload.
+func assembleTasteMix(core, neighbors []sqlc.ListArtistTopTracksForMixRow, tracksPerMix int, exclude map[int64]bool, rng *rand.Rand) []sqlc.ListArtistTopTracksForMixRow {
 	seenTrack := map[int64]bool{}
 	seenSong := map[string]bool{}
 	artistCounts := map[int64]int{}
@@ -360,7 +377,7 @@ func assembleTasteMix(core, neighbors []sqlc.ListArtistTopTracksForMixRow, track
 	out := make([]sqlc.ListArtistTopTracksForMixRow, 0, tracksPerMix)
 
 	push := func(r sqlc.ListArtistTopTracksForMixRow, capped bool) bool {
-		if len(out) >= tracksPerMix || seenTrack[r.TrackID] || seenSong[mixSongKey(r)] {
+		if len(out) >= tracksPerMix || exclude[r.TrackID] || seenTrack[r.TrackID] || seenSong[mixSongKey(r)] {
 			return false
 		}
 		if capped && artistCounts[r.ArtistID] >= artistCap {

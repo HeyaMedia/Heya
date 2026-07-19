@@ -24,11 +24,28 @@ updated_identity AS (
     UPDATE local_media_identities lmi
     SET review_status = 'accepted',
         metadata_provider_id = candidate.provider_id,
+        decision_provenance = 'manual',
+        decision_matcher_revision = 0,
         updated_at = now()
     FROM candidate
     WHERE lmi.id = $2
       AND lmi.library_id = $3
-    RETURNING lmi.id, lmi.library_id, lmi.media_type, lmi.identity_key, lmi.title, lmi.year, lmi.confidence, lmi.source, lmi.review_status, lmi.metadata_provider_id, lmi.media_item_id, lmi.first_seen_scan_run_id, lmi.last_seen_scan_run_id, lmi.raw_identity, lmi.created_at, lmi.updated_at
+    RETURNING lmi.id, lmi.library_id, lmi.media_type, lmi.identity_key, lmi.title, lmi.year, lmi.confidence, lmi.source, lmi.review_status, lmi.metadata_provider_id, lmi.media_item_id, lmi.first_seen_scan_run_id, lmi.last_seen_scan_run_id, lmi.raw_identity, lmi.created_at, lmi.updated_at, lmi.decision_provenance, lmi.decision_matcher_revision
+),
+invalidated_entities AS (
+    UPDATE scanner_entities entity
+    SET status = 'discovered', provider_id = '',
+        pipeline_generation = entity.pipeline_generation + 1,
+        search_scan_run_id = NULL, fetch_scan_run_id = NULL,
+        analysis_artifact_id = NULL, search_artifact_id = NULL,
+        metadata_artifact_id = NULL, apply_artifact_id = NULL,
+        error_message = '', searched_at = NULL, fetched_at = NULL,
+        applied_at = NULL, updated_at = now()
+    FROM updated_identity identity
+    WHERE entity.library_id = identity.library_id
+      AND entity.media_type = identity.media_type
+      AND entity.identity_key = identity.identity_key
+    RETURNING entity.id
 ),
 demoted AS (
     UPDATE metadata_match_candidates
@@ -58,10 +75,11 @@ resolved AS (
       AND EXISTS (SELECT 1 FROM candidate)
     RETURNING 1
 )
-SELECT updated_identity.id, updated_identity.library_id, updated_identity.media_type, updated_identity.identity_key, updated_identity.title, updated_identity.year, updated_identity.confidence, updated_identity.source, updated_identity.review_status, updated_identity.metadata_provider_id, updated_identity.media_item_id, updated_identity.first_seen_scan_run_id, updated_identity.last_seen_scan_run_id, updated_identity.raw_identity, updated_identity.created_at, updated_identity.updated_at
+SELECT updated_identity.id, updated_identity.library_id, updated_identity.media_type, updated_identity.identity_key, updated_identity.title, updated_identity.year, updated_identity.confidence, updated_identity.source, updated_identity.review_status, updated_identity.metadata_provider_id, updated_identity.media_item_id, updated_identity.first_seen_scan_run_id, updated_identity.last_seen_scan_run_id, updated_identity.raw_identity, updated_identity.created_at, updated_identity.updated_at, updated_identity.decision_provenance, updated_identity.decision_matcher_revision
 FROM updated_identity
 CROSS JOIN (SELECT count(*) FROM demoted) demoted_count
 CROSS JOIN (SELECT count(*) FROM selected) selected_count
+CROSS JOIN (SELECT count(*) FROM invalidated_entities) invalidated_count
 CROSS JOIN (SELECT count(*) FROM resolved) resolved_count
 `
 
@@ -72,22 +90,24 @@ type ApproveScannerCandidateParams struct {
 }
 
 type ApproveScannerCandidateRow struct {
-	ID                 int64              `json:"id"`
-	LibraryID          int64              `json:"library_id"`
-	MediaType          MediaType          `json:"media_type"`
-	IdentityKey        string             `json:"identity_key"`
-	Title              string             `json:"title"`
-	Year               string             `json:"year"`
-	Confidence         float32            `json:"confidence"`
-	Source             string             `json:"source"`
-	ReviewStatus       string             `json:"review_status"`
-	MetadataProviderID string             `json:"metadata_provider_id"`
-	MediaItemID        pgtype.Int8        `json:"media_item_id"`
-	FirstSeenScanRunID pgtype.Int8        `json:"first_seen_scan_run_id"`
-	LastSeenScanRunID  pgtype.Int8        `json:"last_seen_scan_run_id"`
-	RawIdentity        []byte             `json:"raw_identity"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ID                      int64              `json:"id"`
+	LibraryID               int64              `json:"library_id"`
+	MediaType               MediaType          `json:"media_type"`
+	IdentityKey             string             `json:"identity_key"`
+	Title                   string             `json:"title"`
+	Year                    string             `json:"year"`
+	Confidence              float32            `json:"confidence"`
+	Source                  string             `json:"source"`
+	ReviewStatus            string             `json:"review_status"`
+	MetadataProviderID      string             `json:"metadata_provider_id"`
+	MediaItemID             pgtype.Int8        `json:"media_item_id"`
+	FirstSeenScanRunID      pgtype.Int8        `json:"first_seen_scan_run_id"`
+	LastSeenScanRunID       pgtype.Int8        `json:"last_seen_scan_run_id"`
+	RawIdentity             []byte             `json:"raw_identity"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+	DecisionProvenance      string             `json:"decision_provenance"`
+	DecisionMatcherRevision int32              `json:"decision_matcher_revision"`
 }
 
 func (q *Queries) ApproveScannerCandidate(ctx context.Context, arg ApproveScannerCandidateParams) (ApproveScannerCandidateRow, error) {
@@ -110,6 +130,56 @@ func (q *Queries) ApproveScannerCandidate(ctx context.Context, arg ApproveScanne
 		&i.RawIdentity,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DecisionProvenance,
+		&i.DecisionMatcherRevision,
+	)
+	return i, err
+}
+
+const attachScannerEntityAnalysisArtifact = `-- name: AttachScannerEntityAnalysisArtifact :one
+UPDATE scanner_entities
+SET analysis_artifact_id = $1,
+    updated_at = now()
+WHERE scanner_entities.id = $2
+  AND scanner_entities.pipeline_generation = $3
+  AND status = 'discovered'
+RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at, analysis_artifact_id, pipeline_generation
+`
+
+type AttachScannerEntityAnalysisArtifactParams struct {
+	AnalysisArtifactID pgtype.Int8 `json:"analysis_artifact_id"`
+	EntityID           int64       `json:"entity_id"`
+	PipelineGeneration int64       `json:"pipeline_generation"`
+}
+
+func (q *Queries) AttachScannerEntityAnalysisArtifact(ctx context.Context, arg AttachScannerEntityAnalysisArtifactParams) (ScannerEntity, error) {
+	row := q.db.QueryRow(ctx, attachScannerEntityAnalysisArtifact, arg.AnalysisArtifactID, arg.EntityID, arg.PipelineGeneration)
+	var i ScannerEntity
+	err := row.Scan(
+		&i.ID,
+		&i.LibraryID,
+		&i.MediaType,
+		&i.ScopeKey,
+		&i.ScopePaths,
+		&i.IdentityKey,
+		&i.Title,
+		&i.Year,
+		&i.ProviderID,
+		&i.Status,
+		&i.SearchScanRunID,
+		&i.FetchScanRunID,
+		&i.SearchArtifactID,
+		&i.MetadataArtifactID,
+		&i.ApplyArtifactID,
+		&i.ErrorMessage,
+		&i.Data,
+		&i.DiscoveredAt,
+		&i.SearchedAt,
+		&i.FetchedAt,
+		&i.AppliedAt,
+		&i.UpdatedAt,
+		&i.AnalysisArtifactID,
+		&i.PipelineGeneration,
 	)
 	return i, err
 }
@@ -135,10 +205,27 @@ updated_identities AS (
     UPDATE local_media_identities lmi
     SET review_status = 'accepted',
         metadata_provider_id = eligible.provider_id,
+        decision_provenance = 'manual',
+        decision_matcher_revision = 0,
         updated_at = now()
     FROM eligible
     WHERE lmi.id = eligible.identity_id
-    RETURNING lmi.id
+    RETURNING lmi.id, lmi.library_id, lmi.media_type, lmi.identity_key
+),
+invalidated_entities AS (
+    UPDATE scanner_entities entity
+    SET status = 'discovered', provider_id = '',
+        pipeline_generation = entity.pipeline_generation + 1,
+        search_scan_run_id = NULL, fetch_scan_run_id = NULL,
+        analysis_artifact_id = NULL, search_artifact_id = NULL,
+        metadata_artifact_id = NULL, apply_artifact_id = NULL,
+        error_message = '', searched_at = NULL, fetched_at = NULL,
+        applied_at = NULL, updated_at = now()
+    FROM updated_identities identity
+    WHERE entity.library_id = identity.library_id
+      AND entity.media_type = identity.media_type
+      AND entity.identity_key = identity.identity_key
+    RETURNING entity.id
 ),
 selected AS (
     UPDATE metadata_match_candidates mmc
@@ -158,6 +245,7 @@ resolved AS (
 )
 SELECT id FROM updated_identities
 CROSS JOIN (SELECT count(*) FROM selected) selected_count
+CROSS JOIN (SELECT count(*) FROM invalidated_entities) invalidated_count
 CROSS JOIN (SELECT count(*) FROM resolved) resolved_count
 ORDER BY id
 `
@@ -185,111 +273,6 @@ func (q *Queries) BulkApproveSingleScannerCandidates(ctx context.Context, arg Bu
 		return nil, err
 	}
 	return items, nil
-}
-
-const cleanupAppliedScannerEntityArtifactsOlderThan = `-- name: CleanupAppliedScannerEntityArtifactsOlderThan :one
-WITH target AS (
-    UPDATE scanner_entities
-    SET search_artifact_id = NULL,
-        metadata_artifact_id = NULL,
-        apply_artifact_id = NULL,
-        updated_at = now()
-    WHERE status = 'applied'
-      AND applied_at IS NOT NULL
-      AND applied_at < $1
-    RETURNING id
-),
-deleted AS (
-    DELETE FROM scanner_entity_artifacts artifact
-    USING target
-    WHERE artifact.entity_id = target.id
-    RETURNING artifact.id
-)
-SELECT count(*)::bigint AS deleted_count FROM deleted
-`
-
-func (q *Queries) CleanupAppliedScannerEntityArtifactsOlderThan(ctx context.Context, cutoffAt pgtype.Timestamptz) (int64, error) {
-	row := q.db.QueryRow(ctx, cleanupAppliedScannerEntityArtifactsOlderThan, cutoffAt)
-	var deleted_count int64
-	err := row.Scan(&deleted_count)
-	return deleted_count, err
-}
-
-const cleanupStaleInFlightScannerEntitiesOlderThan = `-- name: CleanupStaleInFlightScannerEntitiesOlderThan :one
-WITH target AS (
-    SELECT entity.id
-	FROM scanner_entities entity
-	WHERE entity.status IN ('matched', 'fetching')
-	  AND entity.updated_at < $1
-	  AND NOT EXISTS (
-	      SELECT 1
-	      FROM scanner_metadata_continuations continuation
-	      WHERE continuation.scanner_entity_id = entity.id
-	  )
-),
-entity_artifacts_deleted AS (
-    DELETE FROM scanner_entity_artifacts artifact
-    USING target
-    WHERE artifact.entity_id = target.id
-    RETURNING artifact.id
-),
-entities_deleted AS (
-    DELETE FROM scanner_entities entity
-    USING target
-    WHERE entity.id = target.id
-    RETURNING entity.id
-)
-SELECT
-    (SELECT count(*) FROM entities_deleted)::bigint AS entities_deleted,
-    (SELECT count(*) FROM entity_artifacts_deleted)::bigint AS entity_artifacts_deleted
-`
-
-type CleanupStaleInFlightScannerEntitiesOlderThanRow struct {
-	EntitiesDeleted        int64 `json:"entities_deleted"`
-	EntityArtifactsDeleted int64 `json:"entity_artifacts_deleted"`
-}
-
-func (q *Queries) CleanupStaleInFlightScannerEntitiesOlderThan(ctx context.Context, cutoffAt pgtype.Timestamptz) (CleanupStaleInFlightScannerEntitiesOlderThanRow, error) {
-	row := q.db.QueryRow(ctx, cleanupStaleInFlightScannerEntitiesOlderThan, cutoffAt)
-	var i CleanupStaleInFlightScannerEntitiesOlderThanRow
-	err := row.Scan(&i.EntitiesDeleted, &i.EntityArtifactsDeleted)
-	return i, err
-}
-
-const compactAppliedScannerArtifactsForEntity = `-- name: CompactAppliedScannerArtifactsForEntity :one
-WITH target AS (
-    SELECT entity.id
-    FROM scanner_entities entity
-    WHERE entity.id = $1
-      AND entity.status = 'applied'
-),
-entity_artifacts_deleted AS (
-    DELETE FROM scanner_entity_artifacts artifact
-    USING target
-    WHERE artifact.entity_id = target.id
-    RETURNING artifact.id
-),
-updated AS (
-    UPDATE scanner_entities entity
-    SET search_artifact_id = NULL,
-        metadata_artifact_id = NULL,
-        apply_artifact_id = NULL,
-        updated_at = now()
-    FROM target
-    WHERE entity.id = target.id
-    RETURNING entity.id
-)
-SELECT (SELECT count(*) FROM entity_artifacts_deleted)::bigint AS entity_artifacts_deleted
-`
-
-// Drops the heavy per-stage JSON blobs for an applied entity, keeping the
-// lightweight scanner_entities row. The caller guards on no in-flight
-// fetch/apply/rich job for the entity (see activeScannerJobsForEntity).
-func (q *Queries) CompactAppliedScannerArtifactsForEntity(ctx context.Context, id int64) (int64, error) {
-	row := q.db.QueryRow(ctx, compactAppliedScannerArtifactsForEntity, id)
-	var entity_artifacts_deleted int64
-	err := row.Scan(&entity_artifacts_deleted)
-	return entity_artifacts_deleted, err
 }
 
 const createLibraryFileExtraLink = `-- name: CreateLibraryFileExtraLink :one
@@ -512,17 +495,22 @@ func (q *Queries) CreateScanRun(ctx context.Context, arg CreateScanRunParams) (S
 }
 
 const createScannerEntityArtifact = `-- name: CreateScannerEntityArtifact :one
-INSERT INTO scanner_entity_artifacts (entity_id, stage, schema_version, scan_run_id, data)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, entity_id, stage, schema_version, scan_run_id, data, created_at
+INSERT INTO scanner_entity_artifacts (
+    entity_id, stage, schema_version, scan_run_id, data,
+    pipeline_generation, source_artifact_id
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, entity_id, stage, schema_version, scan_run_id, data, created_at, pipeline_generation, source_artifact_id
 `
 
 type CreateScannerEntityArtifactParams struct {
-	EntityID      int64       `json:"entity_id"`
-	Stage         string      `json:"stage"`
-	SchemaVersion int32       `json:"schema_version"`
-	ScanRunID     pgtype.Int8 `json:"scan_run_id"`
-	Data          []byte      `json:"data"`
+	EntityID           int64       `json:"entity_id"`
+	Stage              string      `json:"stage"`
+	SchemaVersion      int32       `json:"schema_version"`
+	ScanRunID          pgtype.Int8 `json:"scan_run_id"`
+	Data               []byte      `json:"data"`
+	PipelineGeneration int64       `json:"pipeline_generation"`
+	SourceArtifactID   pgtype.Int8 `json:"source_artifact_id"`
 }
 
 func (q *Queries) CreateScannerEntityArtifact(ctx context.Context, arg CreateScannerEntityArtifactParams) (ScannerEntityArtifact, error) {
@@ -532,6 +520,8 @@ func (q *Queries) CreateScannerEntityArtifact(ctx context.Context, arg CreateSca
 		arg.SchemaVersion,
 		arg.ScanRunID,
 		arg.Data,
+		arg.PipelineGeneration,
+		arg.SourceArtifactID,
 	)
 	var i ScannerEntityArtifact
 	err := row.Scan(
@@ -542,6 +532,8 @@ func (q *Queries) CreateScannerEntityArtifact(ctx context.Context, arg CreateSca
 		&i.ScanRunID,
 		&i.Data,
 		&i.CreatedAt,
+		&i.PipelineGeneration,
+		&i.SourceArtifactID,
 	)
 	return i, err
 }
@@ -562,6 +554,48 @@ DELETE FROM metadata_match_candidates WHERE identity_id = $1
 func (q *Queries) DeleteMetadataMatchCandidatesByIdentity(ctx context.Context, identityID int64) error {
 	_, err := q.db.Exec(ctx, deleteMetadataMatchCandidatesByIdentity, identityID)
 	return err
+}
+
+const deleteScannerEntitiesForScopeExcept = `-- name: DeleteScannerEntitiesForScopeExcept :many
+DELETE FROM scanner_entities
+WHERE library_id = $1
+  AND media_type = $2
+  AND scope_key = $3
+  AND NOT (identity_key = ANY($4::text[]))
+  AND status <> 'applying'
+RETURNING id
+`
+
+type DeleteScannerEntitiesForScopeExceptParams struct {
+	LibraryID    int64     `json:"library_id"`
+	MediaType    MediaType `json:"media_type"`
+	ScopeKey     string    `json:"scope_key"`
+	IdentityKeys []string  `json:"identity_keys"`
+}
+
+func (q *Queries) DeleteScannerEntitiesForScopeExcept(ctx context.Context, arg DeleteScannerEntitiesForScopeExceptParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, deleteScannerEntitiesForScopeExcept,
+		arg.LibraryID,
+		arg.MediaType,
+		arg.ScopeKey,
+		arg.IdentityKeys,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const finishScanRun = `-- name: FinishScanRun :exec
@@ -590,8 +624,49 @@ func (q *Queries) FinishScanRun(ctx context.Context, arg FinishScanRunParams) er
 	return err
 }
 
+const getCurrentScannerEntityArtifact = `-- name: GetCurrentScannerEntityArtifact :one
+SELECT artifact.id, artifact.entity_id, artifact.stage, artifact.schema_version, artifact.scan_run_id, artifact.data, artifact.created_at, artifact.pipeline_generation, artifact.source_artifact_id
+FROM scanner_entity_artifacts artifact
+JOIN scanner_entities entity ON entity.id = artifact.entity_id
+WHERE entity.id = $1
+  AND artifact.id = $2
+  AND artifact.stage = $3
+  AND artifact.pipeline_generation = entity.pipeline_generation
+  AND CASE artifact.stage
+      WHEN 'analysis_result' THEN entity.analysis_artifact_id = artifact.id
+      WHEN 'search_result' THEN entity.search_artifact_id = artifact.id
+      WHEN 'fetch_result' THEN entity.metadata_artifact_id = artifact.id
+      WHEN 'apply_result' THEN entity.apply_artifact_id = artifact.id
+      ELSE false
+  END
+FOR UPDATE OF entity
+`
+
+type GetCurrentScannerEntityArtifactParams struct {
+	EntityID   int64  `json:"entity_id"`
+	ArtifactID int64  `json:"artifact_id"`
+	Stage      string `json:"stage"`
+}
+
+func (q *Queries) GetCurrentScannerEntityArtifact(ctx context.Context, arg GetCurrentScannerEntityArtifactParams) (ScannerEntityArtifact, error) {
+	row := q.db.QueryRow(ctx, getCurrentScannerEntityArtifact, arg.EntityID, arg.ArtifactID, arg.Stage)
+	var i ScannerEntityArtifact
+	err := row.Scan(
+		&i.ID,
+		&i.EntityID,
+		&i.Stage,
+		&i.SchemaVersion,
+		&i.ScanRunID,
+		&i.Data,
+		&i.CreatedAt,
+		&i.PipelineGeneration,
+		&i.SourceArtifactID,
+	)
+	return i, err
+}
+
 const getLatestScannerEntityArtifact = `-- name: GetLatestScannerEntityArtifact :one
-SELECT id, entity_id, stage, schema_version, scan_run_id, data, created_at FROM scanner_entity_artifacts
+SELECT id, entity_id, stage, schema_version, scan_run_id, data, created_at, pipeline_generation, source_artifact_id FROM scanner_entity_artifacts
 WHERE entity_id = $1
   AND stage = $2
 ORDER BY id DESC
@@ -614,6 +689,8 @@ func (q *Queries) GetLatestScannerEntityArtifact(ctx context.Context, arg GetLat
 		&i.ScanRunID,
 		&i.Data,
 		&i.CreatedAt,
+		&i.PipelineGeneration,
+		&i.SourceArtifactID,
 	)
 	return i, err
 }
@@ -756,7 +833,7 @@ func (q *Queries) GetMediaItemByNormalizedExternalID(ctx context.Context, arg Ge
 }
 
 const getScannerEntity = `-- name: GetScannerEntity :one
-SELECT id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at FROM scanner_entities
+SELECT id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at, analysis_artifact_id, pipeline_generation FROM scanner_entities
 WHERE id = $1
 `
 
@@ -786,12 +863,14 @@ func (q *Queries) GetScannerEntity(ctx context.Context, id int64) (ScannerEntity
 		&i.FetchedAt,
 		&i.AppliedAt,
 		&i.UpdatedAt,
+		&i.AnalysisArtifactID,
+		&i.PipelineGeneration,
 	)
 	return i, err
 }
 
 const getScannerEntityArtifact = `-- name: GetScannerEntityArtifact :one
-SELECT id, entity_id, stage, schema_version, scan_run_id, data, created_at FROM scanner_entity_artifacts
+SELECT id, entity_id, stage, schema_version, scan_run_id, data, created_at, pipeline_generation, source_artifact_id FROM scanner_entity_artifacts
 WHERE id = $1
 `
 
@@ -806,13 +885,15 @@ func (q *Queries) GetScannerEntityArtifact(ctx context.Context, id int64) (Scann
 		&i.ScanRunID,
 		&i.Data,
 		&i.CreatedAt,
+		&i.PipelineGeneration,
+		&i.SourceArtifactID,
 	)
 	return i, err
 }
 
 const getScannerIdentityForView = `-- name: GetScannerIdentityForView :one
 SELECT
-    lmi.id, lmi.library_id, lmi.media_type, lmi.identity_key, lmi.title, lmi.year, lmi.confidence, lmi.source, lmi.review_status, lmi.metadata_provider_id, lmi.media_item_id, lmi.first_seen_scan_run_id, lmi.last_seen_scan_run_id, lmi.raw_identity, lmi.created_at, lmi.updated_at,
+    lmi.id, lmi.library_id, lmi.media_type, lmi.identity_key, lmi.title, lmi.year, lmi.confidence, lmi.source, lmi.review_status, lmi.metadata_provider_id, lmi.media_item_id, lmi.first_seen_scan_run_id, lmi.last_seen_scan_run_id, lmi.raw_identity, lmi.created_at, lmi.updated_at, lmi.decision_provenance, lmi.decision_matcher_revision,
     COALESCE(selected.provider_id, '') AS selected_provider_id,
     COALESCE(selected.title, '') AS selected_title,
     COALESCE(selected.year, '') AS selected_year,
@@ -849,28 +930,30 @@ type GetScannerIdentityForViewParams struct {
 }
 
 type GetScannerIdentityForViewRow struct {
-	ID                 int64              `json:"id"`
-	LibraryID          int64              `json:"library_id"`
-	MediaType          MediaType          `json:"media_type"`
-	IdentityKey        string             `json:"identity_key"`
-	Title              string             `json:"title"`
-	Year               string             `json:"year"`
-	Confidence         float32            `json:"confidence"`
-	Source             string             `json:"source"`
-	ReviewStatus       string             `json:"review_status"`
-	MetadataProviderID string             `json:"metadata_provider_id"`
-	MediaItemID        pgtype.Int8        `json:"media_item_id"`
-	FirstSeenScanRunID pgtype.Int8        `json:"first_seen_scan_run_id"`
-	LastSeenScanRunID  pgtype.Int8        `json:"last_seen_scan_run_id"`
-	RawIdentity        []byte             `json:"raw_identity"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	SelectedProviderID string             `json:"selected_provider_id"`
-	SelectedTitle      string             `json:"selected_title"`
-	SelectedYear       string             `json:"selected_year"`
-	SelectedScore      pgtype.Numeric     `json:"selected_score"`
-	CandidateCount     int64              `json:"candidate_count"`
-	OpenFindingCount   int64              `json:"open_finding_count"`
+	ID                      int64              `json:"id"`
+	LibraryID               int64              `json:"library_id"`
+	MediaType               MediaType          `json:"media_type"`
+	IdentityKey             string             `json:"identity_key"`
+	Title                   string             `json:"title"`
+	Year                    string             `json:"year"`
+	Confidence              float32            `json:"confidence"`
+	Source                  string             `json:"source"`
+	ReviewStatus            string             `json:"review_status"`
+	MetadataProviderID      string             `json:"metadata_provider_id"`
+	MediaItemID             pgtype.Int8        `json:"media_item_id"`
+	FirstSeenScanRunID      pgtype.Int8        `json:"first_seen_scan_run_id"`
+	LastSeenScanRunID       pgtype.Int8        `json:"last_seen_scan_run_id"`
+	RawIdentity             []byte             `json:"raw_identity"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+	DecisionProvenance      string             `json:"decision_provenance"`
+	DecisionMatcherRevision int32              `json:"decision_matcher_revision"`
+	SelectedProviderID      string             `json:"selected_provider_id"`
+	SelectedTitle           string             `json:"selected_title"`
+	SelectedYear            string             `json:"selected_year"`
+	SelectedScore           pgtype.Numeric     `json:"selected_score"`
+	CandidateCount          int64              `json:"candidate_count"`
+	OpenFindingCount        int64              `json:"open_finding_count"`
 }
 
 func (q *Queries) GetScannerIdentityForView(ctx context.Context, arg GetScannerIdentityForViewParams) (GetScannerIdentityForViewRow, error) {
@@ -893,6 +976,8 @@ func (q *Queries) GetScannerIdentityForView(ctx context.Context, arg GetScannerI
 		&i.RawIdentity,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DecisionProvenance,
+		&i.DecisionMatcherRevision,
 		&i.SelectedProviderID,
 		&i.SelectedTitle,
 		&i.SelectedYear,
@@ -907,10 +992,28 @@ const ignoreScannerIdentity = `-- name: IgnoreScannerIdentity :one
 WITH updated_identity AS (
     UPDATE local_media_identities lmi
     SET review_status = 'ignored',
+        decision_provenance = 'manual',
+        decision_matcher_revision = 0,
         updated_at = now()
     WHERE lmi.library_id = $1
       AND lmi.id = $2
-    RETURNING lmi.id, lmi.library_id, lmi.media_type, lmi.identity_key, lmi.title, lmi.year, lmi.confidence, lmi.source, lmi.review_status, lmi.metadata_provider_id, lmi.media_item_id, lmi.first_seen_scan_run_id, lmi.last_seen_scan_run_id, lmi.raw_identity, lmi.created_at, lmi.updated_at
+      AND lmi.media_item_id IS NULL
+    RETURNING lmi.id, lmi.library_id, lmi.media_type, lmi.identity_key, lmi.title, lmi.year, lmi.confidence, lmi.source, lmi.review_status, lmi.metadata_provider_id, lmi.media_item_id, lmi.first_seen_scan_run_id, lmi.last_seen_scan_run_id, lmi.raw_identity, lmi.created_at, lmi.updated_at, lmi.decision_provenance, lmi.decision_matcher_revision
+),
+invalidated_entities AS (
+    UPDATE scanner_entities entity
+    SET status = 'discovered', provider_id = '',
+        pipeline_generation = entity.pipeline_generation + 1,
+        search_scan_run_id = NULL, fetch_scan_run_id = NULL,
+        analysis_artifact_id = NULL, search_artifact_id = NULL,
+        metadata_artifact_id = NULL, apply_artifact_id = NULL,
+        error_message = '', searched_at = NULL, fetched_at = NULL,
+        applied_at = NULL, updated_at = now()
+    FROM updated_identity identity
+    WHERE entity.library_id = identity.library_id
+      AND entity.media_type = identity.media_type
+      AND entity.identity_key = identity.identity_key
+    RETURNING entity.id
 ),
 candidates AS (
     UPDATE metadata_match_candidates
@@ -929,9 +1032,10 @@ resolved AS (
       AND EXISTS (SELECT 1 FROM updated_identity)
     RETURNING 1
 )
-SELECT updated_identity.id, updated_identity.library_id, updated_identity.media_type, updated_identity.identity_key, updated_identity.title, updated_identity.year, updated_identity.confidence, updated_identity.source, updated_identity.review_status, updated_identity.metadata_provider_id, updated_identity.media_item_id, updated_identity.first_seen_scan_run_id, updated_identity.last_seen_scan_run_id, updated_identity.raw_identity, updated_identity.created_at, updated_identity.updated_at
+SELECT updated_identity.id, updated_identity.library_id, updated_identity.media_type, updated_identity.identity_key, updated_identity.title, updated_identity.year, updated_identity.confidence, updated_identity.source, updated_identity.review_status, updated_identity.metadata_provider_id, updated_identity.media_item_id, updated_identity.first_seen_scan_run_id, updated_identity.last_seen_scan_run_id, updated_identity.raw_identity, updated_identity.created_at, updated_identity.updated_at, updated_identity.decision_provenance, updated_identity.decision_matcher_revision
 FROM updated_identity
 CROSS JOIN (SELECT count(*) FROM candidates) candidate_count
+CROSS JOIN (SELECT count(*) FROM invalidated_entities) invalidated_count
 CROSS JOIN (SELECT count(*) FROM resolved) resolved_count
 `
 
@@ -942,22 +1046,24 @@ type IgnoreScannerIdentityParams struct {
 }
 
 type IgnoreScannerIdentityRow struct {
-	ID                 int64              `json:"id"`
-	LibraryID          int64              `json:"library_id"`
-	MediaType          MediaType          `json:"media_type"`
-	IdentityKey        string             `json:"identity_key"`
-	Title              string             `json:"title"`
-	Year               string             `json:"year"`
-	Confidence         float32            `json:"confidence"`
-	Source             string             `json:"source"`
-	ReviewStatus       string             `json:"review_status"`
-	MetadataProviderID string             `json:"metadata_provider_id"`
-	MediaItemID        pgtype.Int8        `json:"media_item_id"`
-	FirstSeenScanRunID pgtype.Int8        `json:"first_seen_scan_run_id"`
-	LastSeenScanRunID  pgtype.Int8        `json:"last_seen_scan_run_id"`
-	RawIdentity        []byte             `json:"raw_identity"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ID                      int64              `json:"id"`
+	LibraryID               int64              `json:"library_id"`
+	MediaType               MediaType          `json:"media_type"`
+	IdentityKey             string             `json:"identity_key"`
+	Title                   string             `json:"title"`
+	Year                    string             `json:"year"`
+	Confidence              float32            `json:"confidence"`
+	Source                  string             `json:"source"`
+	ReviewStatus            string             `json:"review_status"`
+	MetadataProviderID      string             `json:"metadata_provider_id"`
+	MediaItemID             pgtype.Int8        `json:"media_item_id"`
+	FirstSeenScanRunID      pgtype.Int8        `json:"first_seen_scan_run_id"`
+	LastSeenScanRunID       pgtype.Int8        `json:"last_seen_scan_run_id"`
+	RawIdentity             []byte             `json:"raw_identity"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+	DecisionProvenance      string             `json:"decision_provenance"`
+	DecisionMatcherRevision int32              `json:"decision_matcher_revision"`
 }
 
 func (q *Queries) IgnoreScannerIdentity(ctx context.Context, arg IgnoreScannerIdentityParams) (IgnoreScannerIdentityRow, error) {
@@ -980,12 +1086,14 @@ func (q *Queries) IgnoreScannerIdentity(ctx context.Context, arg IgnoreScannerId
 		&i.RawIdentity,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DecisionProvenance,
+		&i.DecisionMatcherRevision,
 	)
 	return i, err
 }
 
 const listFailedScannerEntitiesByLibrary = `-- name: ListFailedScannerEntitiesByLibrary :many
-SELECT id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at FROM scanner_entities
+SELECT id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at, analysis_artifact_id, pipeline_generation FROM scanner_entities
 WHERE library_id = $1
   AND error_message <> ''
   AND status IN ('metadata_error', 'apply_error', 'error', 'failed')
@@ -1028,6 +1136,8 @@ func (q *Queries) ListFailedScannerEntitiesByLibrary(ctx context.Context, librar
 			&i.FetchedAt,
 			&i.AppliedAt,
 			&i.UpdatedAt,
+			&i.AnalysisArtifactID,
+			&i.PipelineGeneration,
 		); err != nil {
 			return nil, err
 		}
@@ -1384,9 +1494,70 @@ func (q *Queries) ListScannerCandidatesByLibrary(ctx context.Context, libraryID 
 	return items, nil
 }
 
+const listScannerEntitiesForScopeForUpdate = `-- name: ListScannerEntitiesForScopeForUpdate :many
+SELECT id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at, analysis_artifact_id, pipeline_generation
+FROM scanner_entities
+WHERE library_id = $1
+  AND media_type = $2
+  AND scope_key = $3
+ORDER BY id
+FOR UPDATE
+`
+
+type ListScannerEntitiesForScopeForUpdateParams struct {
+	LibraryID int64     `json:"library_id"`
+	MediaType MediaType `json:"media_type"`
+	ScopeKey  string    `json:"scope_key"`
+}
+
+func (q *Queries) ListScannerEntitiesForScopeForUpdate(ctx context.Context, arg ListScannerEntitiesForScopeForUpdateParams) ([]ScannerEntity, error) {
+	rows, err := q.db.Query(ctx, listScannerEntitiesForScopeForUpdate, arg.LibraryID, arg.MediaType, arg.ScopeKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ScannerEntity{}
+	for rows.Next() {
+		var i ScannerEntity
+		if err := rows.Scan(
+			&i.ID,
+			&i.LibraryID,
+			&i.MediaType,
+			&i.ScopeKey,
+			&i.ScopePaths,
+			&i.IdentityKey,
+			&i.Title,
+			&i.Year,
+			&i.ProviderID,
+			&i.Status,
+			&i.SearchScanRunID,
+			&i.FetchScanRunID,
+			&i.SearchArtifactID,
+			&i.MetadataArtifactID,
+			&i.ApplyArtifactID,
+			&i.ErrorMessage,
+			&i.Data,
+			&i.DiscoveredAt,
+			&i.SearchedAt,
+			&i.FetchedAt,
+			&i.AppliedAt,
+			&i.UpdatedAt,
+			&i.AnalysisArtifactID,
+			&i.PipelineGeneration,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listScannerIdentitiesByLibrary = `-- name: ListScannerIdentitiesByLibrary :many
 SELECT
-    lmi.id, lmi.library_id, lmi.media_type, lmi.identity_key, lmi.title, lmi.year, lmi.confidence, lmi.source, lmi.review_status, lmi.metadata_provider_id, lmi.media_item_id, lmi.first_seen_scan_run_id, lmi.last_seen_scan_run_id, lmi.raw_identity, lmi.created_at, lmi.updated_at,
+    lmi.id, lmi.library_id, lmi.media_type, lmi.identity_key, lmi.title, lmi.year, lmi.confidence, lmi.source, lmi.review_status, lmi.metadata_provider_id, lmi.media_item_id, lmi.first_seen_scan_run_id, lmi.last_seen_scan_run_id, lmi.raw_identity, lmi.created_at, lmi.updated_at, lmi.decision_provenance, lmi.decision_matcher_revision,
     COALESCE(selected.provider_id, '') AS selected_provider_id,
     COALESCE(selected.title, '') AS selected_title,
     COALESCE(selected.year, '') AS selected_year,
@@ -1422,28 +1593,30 @@ ORDER BY
 `
 
 type ListScannerIdentitiesByLibraryRow struct {
-	ID                 int64              `json:"id"`
-	LibraryID          int64              `json:"library_id"`
-	MediaType          MediaType          `json:"media_type"`
-	IdentityKey        string             `json:"identity_key"`
-	Title              string             `json:"title"`
-	Year               string             `json:"year"`
-	Confidence         float32            `json:"confidence"`
-	Source             string             `json:"source"`
-	ReviewStatus       string             `json:"review_status"`
-	MetadataProviderID string             `json:"metadata_provider_id"`
-	MediaItemID        pgtype.Int8        `json:"media_item_id"`
-	FirstSeenScanRunID pgtype.Int8        `json:"first_seen_scan_run_id"`
-	LastSeenScanRunID  pgtype.Int8        `json:"last_seen_scan_run_id"`
-	RawIdentity        []byte             `json:"raw_identity"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	SelectedProviderID string             `json:"selected_provider_id"`
-	SelectedTitle      string             `json:"selected_title"`
-	SelectedYear       string             `json:"selected_year"`
-	SelectedScore      pgtype.Numeric     `json:"selected_score"`
-	CandidateCount     int64              `json:"candidate_count"`
-	OpenFindingCount   int64              `json:"open_finding_count"`
+	ID                      int64              `json:"id"`
+	LibraryID               int64              `json:"library_id"`
+	MediaType               MediaType          `json:"media_type"`
+	IdentityKey             string             `json:"identity_key"`
+	Title                   string             `json:"title"`
+	Year                    string             `json:"year"`
+	Confidence              float32            `json:"confidence"`
+	Source                  string             `json:"source"`
+	ReviewStatus            string             `json:"review_status"`
+	MetadataProviderID      string             `json:"metadata_provider_id"`
+	MediaItemID             pgtype.Int8        `json:"media_item_id"`
+	FirstSeenScanRunID      pgtype.Int8        `json:"first_seen_scan_run_id"`
+	LastSeenScanRunID       pgtype.Int8        `json:"last_seen_scan_run_id"`
+	RawIdentity             []byte             `json:"raw_identity"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+	DecisionProvenance      string             `json:"decision_provenance"`
+	DecisionMatcherRevision int32              `json:"decision_matcher_revision"`
+	SelectedProviderID      string             `json:"selected_provider_id"`
+	SelectedTitle           string             `json:"selected_title"`
+	SelectedYear            string             `json:"selected_year"`
+	SelectedScore           pgtype.Numeric     `json:"selected_score"`
+	CandidateCount          int64              `json:"candidate_count"`
+	OpenFindingCount        int64              `json:"open_finding_count"`
 }
 
 func (q *Queries) ListScannerIdentitiesByLibrary(ctx context.Context, libraryID int64) ([]ListScannerIdentitiesByLibraryRow, error) {
@@ -1472,6 +1645,8 @@ func (q *Queries) ListScannerIdentitiesByLibrary(ctx context.Context, libraryID 
 			&i.RawIdentity,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DecisionProvenance,
+			&i.DecisionMatcherRevision,
 			&i.SelectedProviderID,
 			&i.SelectedTitle,
 			&i.SelectedYear,
@@ -1496,14 +1671,11 @@ SELECT
     entity.scope_paths,
     artifact.id AS analysis_artifact_id
 FROM scanner_entities entity
-JOIN LATERAL (
-    SELECT id
-    FROM scanner_entity_artifacts
-    WHERE entity_id = entity.id
-      AND stage = 'analysis_result'
-    ORDER BY id DESC
-    LIMIT 1
-) artifact ON true
+JOIN scanner_entity_artifacts artifact
+  ON artifact.id = entity.analysis_artifact_id
+ AND artifact.entity_id = entity.id
+ AND artifact.pipeline_generation = entity.pipeline_generation
+ AND artifact.stage = 'analysis_result'
 WHERE entity.library_id = $1
   AND entity.media_type = $2
   AND entity.status = 'needs_review'
@@ -1628,13 +1800,30 @@ LEFT JOIN LATERAL (
 WHERE lmi.library_id = $1
   AND lmi.media_type = $2
   AND lmi.review_status = ANY($3::text[])
+  AND (
+      lmi.decision_provenance = 'manual'
+      OR (
+          lmi.decision_provenance = 'automatic'
+          AND lmi.decision_matcher_revision = $4
+      )
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM scanner_entities entity
+      WHERE entity.library_id = lmi.library_id
+        AND entity.media_type = lmi.media_type
+        AND entity.identity_key = lmi.identity_key
+      GROUP BY entity.identity_key
+      HAVING count(DISTINCT entity.scope_key) > 1
+  )
 ORDER BY lmi.identity_key
 `
 
 type ListScannerSearchDecisionsByLibraryParams struct {
-	LibraryID      int64     `json:"library_id"`
-	MediaType      MediaType `json:"media_type"`
-	ReviewStatuses []string  `json:"review_statuses"`
+	LibraryID       int64     `json:"library_id"`
+	MediaType       MediaType `json:"media_type"`
+	ReviewStatuses  []string  `json:"review_statuses"`
+	MatcherRevision int32     `json:"matcher_revision"`
 }
 
 type ListScannerSearchDecisionsByLibraryRow struct {
@@ -1650,7 +1839,12 @@ type ListScannerSearchDecisionsByLibraryRow struct {
 }
 
 func (q *Queries) ListScannerSearchDecisionsByLibrary(ctx context.Context, arg ListScannerSearchDecisionsByLibraryParams) ([]ListScannerSearchDecisionsByLibraryRow, error) {
-	rows, err := q.db.Query(ctx, listScannerSearchDecisionsByLibrary, arg.LibraryID, arg.MediaType, arg.ReviewStatuses)
+	rows, err := q.db.Query(ctx, listScannerSearchDecisionsByLibrary,
+		arg.LibraryID,
+		arg.MediaType,
+		arg.ReviewStatuses,
+		arg.MatcherRevision,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1721,28 +1915,35 @@ func (q *Queries) ListTVEpisodeLinkTargetsByMediaItem(ctx context.Context, media
 
 const markScannerEntityApplied = `-- name: MarkScannerEntityApplied :one
 UPDATE scanner_entities
-SET status = $2,
-    apply_artifact_id = $3,
-    error_message = $4,
-    applied_at = CASE WHEN $2 = 'applied' THEN now() ELSE applied_at END,
+SET status = $1,
+    apply_artifact_id = $2,
+    error_message = $3,
+    applied_at = CASE WHEN $1 = 'applied' THEN now() ELSE applied_at END,
     updated_at = now()
-WHERE id = $1
-RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at
+WHERE id = $4
+  AND pipeline_generation = $5
+  AND metadata_artifact_id = $6
+  AND status = 'applying'
+RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at, analysis_artifact_id, pipeline_generation
 `
 
 type MarkScannerEntityAppliedParams struct {
-	ID              int64       `json:"id"`
-	Status          string      `json:"status"`
-	ApplyArtifactID pgtype.Int8 `json:"apply_artifact_id"`
-	ErrorMessage    string      `json:"error_message"`
+	Status                     string      `json:"status"`
+	ApplyArtifactID            pgtype.Int8 `json:"apply_artifact_id"`
+	ErrorMessage               string      `json:"error_message"`
+	EntityID                   int64       `json:"entity_id"`
+	PipelineGeneration         int64       `json:"pipeline_generation"`
+	ExpectedMetadataArtifactID pgtype.Int8 `json:"expected_metadata_artifact_id"`
 }
 
 func (q *Queries) MarkScannerEntityApplied(ctx context.Context, arg MarkScannerEntityAppliedParams) (ScannerEntity, error) {
 	row := q.db.QueryRow(ctx, markScannerEntityApplied,
-		arg.ID,
 		arg.Status,
 		arg.ApplyArtifactID,
 		arg.ErrorMessage,
+		arg.EntityID,
+		arg.PipelineGeneration,
+		arg.ExpectedMetadataArtifactID,
 	)
 	var i ScannerEntity
 	err := row.Scan(
@@ -1768,6 +1969,8 @@ func (q *Queries) MarkScannerEntityApplied(ctx context.Context, arg MarkScannerE
 		&i.FetchedAt,
 		&i.AppliedAt,
 		&i.UpdatedAt,
+		&i.AnalysisArtifactID,
+		&i.PipelineGeneration,
 	)
 	return i, err
 }
@@ -1778,11 +1981,20 @@ SET status = 'applying',
     error_message = '',
     updated_at = now()
 WHERE id = $1
-RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at
+  AND pipeline_generation = $2
+  AND metadata_artifact_id = $3
+  AND status IN ('fetched', 'applying', 'apply_error')
+RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at, analysis_artifact_id, pipeline_generation
 `
 
-func (q *Queries) MarkScannerEntityApplying(ctx context.Context, id int64) (ScannerEntity, error) {
-	row := q.db.QueryRow(ctx, markScannerEntityApplying, id)
+type MarkScannerEntityApplyingParams struct {
+	EntityID                   int64       `json:"entity_id"`
+	PipelineGeneration         int64       `json:"pipeline_generation"`
+	ExpectedMetadataArtifactID pgtype.Int8 `json:"expected_metadata_artifact_id"`
+}
+
+func (q *Queries) MarkScannerEntityApplying(ctx context.Context, arg MarkScannerEntityApplyingParams) (ScannerEntity, error) {
+	row := q.db.QueryRow(ctx, markScannerEntityApplying, arg.EntityID, arg.PipelineGeneration, arg.ExpectedMetadataArtifactID)
 	var i ScannerEntity
 	err := row.Scan(
 		&i.ID,
@@ -1807,27 +2019,51 @@ func (q *Queries) MarkScannerEntityApplying(ctx context.Context, id int64) (Scan
 		&i.FetchedAt,
 		&i.AppliedAt,
 		&i.UpdatedAt,
+		&i.AnalysisArtifactID,
+		&i.PipelineGeneration,
 	)
 	return i, err
 }
 
 const markScannerEntityFailed = `-- name: MarkScannerEntityFailed :one
 UPDATE scanner_entities
-SET status = $2,
-    error_message = $3,
+SET status = $1,
+    error_message = $2,
     updated_at = now()
-WHERE id = $1
-RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at
+WHERE scanner_entities.id = $3
+  AND scanner_entities.pipeline_generation = $4
+  AND EXISTS (
+      SELECT 1
+      FROM scanner_entity_artifacts artifact
+      WHERE artifact.id = $5
+        AND artifact.entity_id = scanner_entities.id
+        AND artifact.pipeline_generation = scanner_entities.pipeline_generation
+        AND CASE artifact.stage
+            WHEN 'analysis_result' THEN scanner_entities.analysis_artifact_id = artifact.id
+            WHEN 'search_result' THEN scanner_entities.search_artifact_id = artifact.id
+            WHEN 'fetch_result' THEN scanner_entities.metadata_artifact_id = artifact.id
+            ELSE false
+        END
+  )
+RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at, analysis_artifact_id, pipeline_generation
 `
 
 type MarkScannerEntityFailedParams struct {
-	ID           int64  `json:"id"`
-	Status       string `json:"status"`
-	ErrorMessage string `json:"error_message"`
+	Status             string `json:"status"`
+	ErrorMessage       string `json:"error_message"`
+	EntityID           int64  `json:"entity_id"`
+	PipelineGeneration int64  `json:"pipeline_generation"`
+	ExpectedArtifactID int64  `json:"expected_artifact_id"`
 }
 
 func (q *Queries) MarkScannerEntityFailed(ctx context.Context, arg MarkScannerEntityFailedParams) (ScannerEntity, error) {
-	row := q.db.QueryRow(ctx, markScannerEntityFailed, arg.ID, arg.Status, arg.ErrorMessage)
+	row := q.db.QueryRow(ctx, markScannerEntityFailed,
+		arg.Status,
+		arg.ErrorMessage,
+		arg.EntityID,
+		arg.PipelineGeneration,
+		arg.ExpectedArtifactID,
+	)
 	var i ScannerEntity
 	err := row.Scan(
 		&i.ID,
@@ -1852,37 +2088,46 @@ func (q *Queries) MarkScannerEntityFailed(ctx context.Context, arg MarkScannerEn
 		&i.FetchedAt,
 		&i.AppliedAt,
 		&i.UpdatedAt,
+		&i.AnalysisArtifactID,
+		&i.PipelineGeneration,
 	)
 	return i, err
 }
 
 const markScannerEntityFetched = `-- name: MarkScannerEntityFetched :one
 UPDATE scanner_entities
-SET status = $2,
-    fetch_scan_run_id = $3,
-    metadata_artifact_id = $4,
-    error_message = $5,
+SET status = $1,
+    fetch_scan_run_id = $2,
+    metadata_artifact_id = $3,
+    error_message = $4,
     fetched_at = now(),
     updated_at = now()
-WHERE id = $1
-RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at
+WHERE id = $5
+  AND pipeline_generation = $6
+  AND search_artifact_id = $7
+  AND status = 'fetching'
+RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at, analysis_artifact_id, pipeline_generation
 `
 
 type MarkScannerEntityFetchedParams struct {
-	ID                 int64       `json:"id"`
-	Status             string      `json:"status"`
-	FetchScanRunID     pgtype.Int8 `json:"fetch_scan_run_id"`
-	MetadataArtifactID pgtype.Int8 `json:"metadata_artifact_id"`
-	ErrorMessage       string      `json:"error_message"`
+	Status                   string      `json:"status"`
+	FetchScanRunID           pgtype.Int8 `json:"fetch_scan_run_id"`
+	MetadataArtifactID       pgtype.Int8 `json:"metadata_artifact_id"`
+	ErrorMessage             string      `json:"error_message"`
+	EntityID                 int64       `json:"entity_id"`
+	PipelineGeneration       int64       `json:"pipeline_generation"`
+	ExpectedSearchArtifactID pgtype.Int8 `json:"expected_search_artifact_id"`
 }
 
 func (q *Queries) MarkScannerEntityFetched(ctx context.Context, arg MarkScannerEntityFetchedParams) (ScannerEntity, error) {
 	row := q.db.QueryRow(ctx, markScannerEntityFetched,
-		arg.ID,
 		arg.Status,
 		arg.FetchScanRunID,
 		arg.MetadataArtifactID,
 		arg.ErrorMessage,
+		arg.EntityID,
+		arg.PipelineGeneration,
+		arg.ExpectedSearchArtifactID,
 	)
 	var i ScannerEntity
 	err := row.Scan(
@@ -1908,6 +2153,8 @@ func (q *Queries) MarkScannerEntityFetched(ctx context.Context, arg MarkScannerE
 		&i.FetchedAt,
 		&i.AppliedAt,
 		&i.UpdatedAt,
+		&i.AnalysisArtifactID,
+		&i.PipelineGeneration,
 	)
 	return i, err
 }
@@ -1918,11 +2165,20 @@ SET status = 'fetching',
     error_message = '',
     updated_at = now()
 WHERE id = $1
-RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at
+  AND pipeline_generation = $2
+  AND search_artifact_id = $3
+  AND status <> 'applying'
+RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at, analysis_artifact_id, pipeline_generation
 `
 
-func (q *Queries) MarkScannerEntityFetching(ctx context.Context, id int64) (ScannerEntity, error) {
-	row := q.db.QueryRow(ctx, markScannerEntityFetching, id)
+type MarkScannerEntityFetchingParams struct {
+	EntityID                 int64       `json:"entity_id"`
+	PipelineGeneration       int64       `json:"pipeline_generation"`
+	ExpectedSearchArtifactID pgtype.Int8 `json:"expected_search_artifact_id"`
+}
+
+func (q *Queries) MarkScannerEntityFetching(ctx context.Context, arg MarkScannerEntityFetchingParams) (ScannerEntity, error) {
+	row := q.db.QueryRow(ctx, markScannerEntityFetching, arg.EntityID, arg.PipelineGeneration, arg.ExpectedSearchArtifactID)
 	var i ScannerEntity
 	err := row.Scan(
 		&i.ID,
@@ -1947,18 +2203,151 @@ func (q *Queries) MarkScannerEntityFetching(ctx context.Context, id int64) (Scan
 		&i.FetchedAt,
 		&i.AppliedAt,
 		&i.UpdatedAt,
+		&i.AnalysisArtifactID,
+		&i.PipelineGeneration,
 	)
 	return i, err
+}
+
+const markScannerEntitySearched = `-- name: MarkScannerEntitySearched :one
+UPDATE scanner_entities
+SET title = $1,
+    year = $2,
+    provider_id = $3,
+    status = $4,
+    search_scan_run_id = $5,
+    search_artifact_id = $6,
+    fetch_scan_run_id = NULL,
+    metadata_artifact_id = NULL,
+    apply_artifact_id = NULL,
+    error_message = $7,
+    data = $8,
+    searched_at = now(),
+    fetched_at = NULL,
+    applied_at = NULL,
+    updated_at = now()
+WHERE id = $9
+  AND pipeline_generation = $10
+  AND analysis_artifact_id = $11
+  AND status IN ('discovered', 'needs_review', 'unmatched', 'error')
+RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at, analysis_artifact_id, pipeline_generation
+`
+
+type MarkScannerEntitySearchedParams struct {
+	Title                      string      `json:"title"`
+	Year                       string      `json:"year"`
+	ProviderID                 string      `json:"provider_id"`
+	Status                     string      `json:"status"`
+	SearchScanRunID            pgtype.Int8 `json:"search_scan_run_id"`
+	SearchArtifactID           pgtype.Int8 `json:"search_artifact_id"`
+	ErrorMessage               string      `json:"error_message"`
+	Data                       []byte      `json:"data"`
+	EntityID                   int64       `json:"entity_id"`
+	PipelineGeneration         int64       `json:"pipeline_generation"`
+	ExpectedAnalysisArtifactID pgtype.Int8 `json:"expected_analysis_artifact_id"`
+}
+
+func (q *Queries) MarkScannerEntitySearched(ctx context.Context, arg MarkScannerEntitySearchedParams) (ScannerEntity, error) {
+	row := q.db.QueryRow(ctx, markScannerEntitySearched,
+		arg.Title,
+		arg.Year,
+		arg.ProviderID,
+		arg.Status,
+		arg.SearchScanRunID,
+		arg.SearchArtifactID,
+		arg.ErrorMessage,
+		arg.Data,
+		arg.EntityID,
+		arg.PipelineGeneration,
+		arg.ExpectedAnalysisArtifactID,
+	)
+	var i ScannerEntity
+	err := row.Scan(
+		&i.ID,
+		&i.LibraryID,
+		&i.MediaType,
+		&i.ScopeKey,
+		&i.ScopePaths,
+		&i.IdentityKey,
+		&i.Title,
+		&i.Year,
+		&i.ProviderID,
+		&i.Status,
+		&i.SearchScanRunID,
+		&i.FetchScanRunID,
+		&i.SearchArtifactID,
+		&i.MetadataArtifactID,
+		&i.ApplyArtifactID,
+		&i.ErrorMessage,
+		&i.Data,
+		&i.DiscoveredAt,
+		&i.SearchedAt,
+		&i.FetchedAt,
+		&i.AppliedAt,
+		&i.UpdatedAt,
+		&i.AnalysisArtifactID,
+		&i.PipelineGeneration,
+	)
+	return i, err
+}
+
+const pruneUnclaimedScannerReviewIdentities = `-- name: PruneUnclaimedScannerReviewIdentities :execrows
+DELETE FROM local_media_identities identity
+WHERE identity.library_id = $1
+  AND identity.media_type = $2
+  AND identity.media_item_id IS NULL
+  AND identity.review_status IN ('needs_review', 'review', 'suspicious', 'rejected', 'ignored')
+  AND NOT EXISTS (
+      SELECT 1
+      FROM scanner_entities entity
+      WHERE entity.library_id = identity.library_id
+        AND entity.media_type = identity.media_type
+        AND entity.identity_key = identity.identity_key
+  )
+`
+
+type PruneUnclaimedScannerReviewIdentitiesParams struct {
+	LibraryID int64     `json:"library_id"`
+	MediaType MediaType `json:"media_type"`
+}
+
+// Scope reconciliation can remove or rename the last scanner entity that
+// claimed a review row. Keep accepted/bound history, but remove unbound
+// terminal review decisions once no current scanner scope owns the key.
+func (q *Queries) PruneUnclaimedScannerReviewIdentities(ctx context.Context, arg PruneUnclaimedScannerReviewIdentitiesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneUnclaimedScannerReviewIdentities, arg.LibraryID, arg.MediaType)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const rejectScannerIdentity = `-- name: RejectScannerIdentity :one
 WITH updated_identity AS (
     UPDATE local_media_identities lmi
     SET review_status = 'rejected',
+        decision_provenance = 'manual',
+        decision_matcher_revision = 0,
         updated_at = now()
     WHERE lmi.library_id = $1
       AND lmi.id = $2
-    RETURNING lmi.id, lmi.library_id, lmi.media_type, lmi.identity_key, lmi.title, lmi.year, lmi.confidence, lmi.source, lmi.review_status, lmi.metadata_provider_id, lmi.media_item_id, lmi.first_seen_scan_run_id, lmi.last_seen_scan_run_id, lmi.raw_identity, lmi.created_at, lmi.updated_at
+      AND lmi.media_item_id IS NULL
+    RETURNING lmi.id, lmi.library_id, lmi.media_type, lmi.identity_key, lmi.title, lmi.year, lmi.confidence, lmi.source, lmi.review_status, lmi.metadata_provider_id, lmi.media_item_id, lmi.first_seen_scan_run_id, lmi.last_seen_scan_run_id, lmi.raw_identity, lmi.created_at, lmi.updated_at, lmi.decision_provenance, lmi.decision_matcher_revision
+),
+invalidated_entities AS (
+    UPDATE scanner_entities entity
+    SET status = 'discovered', provider_id = '',
+        pipeline_generation = entity.pipeline_generation + 1,
+        search_scan_run_id = NULL, fetch_scan_run_id = NULL,
+        analysis_artifact_id = NULL, search_artifact_id = NULL,
+        metadata_artifact_id = NULL, apply_artifact_id = NULL,
+        error_message = '', searched_at = NULL, fetched_at = NULL,
+        applied_at = NULL, updated_at = now()
+    FROM updated_identity identity
+    WHERE entity.library_id = identity.library_id
+      AND entity.media_type = identity.media_type
+      AND entity.identity_key = identity.identity_key
+    RETURNING entity.id
 ),
 candidates AS (
     UPDATE metadata_match_candidates
@@ -1977,9 +2366,10 @@ resolved AS (
       AND EXISTS (SELECT 1 FROM updated_identity)
     RETURNING 1
 )
-SELECT updated_identity.id, updated_identity.library_id, updated_identity.media_type, updated_identity.identity_key, updated_identity.title, updated_identity.year, updated_identity.confidence, updated_identity.source, updated_identity.review_status, updated_identity.metadata_provider_id, updated_identity.media_item_id, updated_identity.first_seen_scan_run_id, updated_identity.last_seen_scan_run_id, updated_identity.raw_identity, updated_identity.created_at, updated_identity.updated_at
+SELECT updated_identity.id, updated_identity.library_id, updated_identity.media_type, updated_identity.identity_key, updated_identity.title, updated_identity.year, updated_identity.confidence, updated_identity.source, updated_identity.review_status, updated_identity.metadata_provider_id, updated_identity.media_item_id, updated_identity.first_seen_scan_run_id, updated_identity.last_seen_scan_run_id, updated_identity.raw_identity, updated_identity.created_at, updated_identity.updated_at, updated_identity.decision_provenance, updated_identity.decision_matcher_revision
 FROM updated_identity
 CROSS JOIN (SELECT count(*) FROM candidates) candidate_count
+CROSS JOIN (SELECT count(*) FROM invalidated_entities) invalidated_count
 CROSS JOIN (SELECT count(*) FROM resolved) resolved_count
 `
 
@@ -1990,22 +2380,24 @@ type RejectScannerIdentityParams struct {
 }
 
 type RejectScannerIdentityRow struct {
-	ID                 int64              `json:"id"`
-	LibraryID          int64              `json:"library_id"`
-	MediaType          MediaType          `json:"media_type"`
-	IdentityKey        string             `json:"identity_key"`
-	Title              string             `json:"title"`
-	Year               string             `json:"year"`
-	Confidence         float32            `json:"confidence"`
-	Source             string             `json:"source"`
-	ReviewStatus       string             `json:"review_status"`
-	MetadataProviderID string             `json:"metadata_provider_id"`
-	MediaItemID        pgtype.Int8        `json:"media_item_id"`
-	FirstSeenScanRunID pgtype.Int8        `json:"first_seen_scan_run_id"`
-	LastSeenScanRunID  pgtype.Int8        `json:"last_seen_scan_run_id"`
-	RawIdentity        []byte             `json:"raw_identity"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ID                      int64              `json:"id"`
+	LibraryID               int64              `json:"library_id"`
+	MediaType               MediaType          `json:"media_type"`
+	IdentityKey             string             `json:"identity_key"`
+	Title                   string             `json:"title"`
+	Year                    string             `json:"year"`
+	Confidence              float32            `json:"confidence"`
+	Source                  string             `json:"source"`
+	ReviewStatus            string             `json:"review_status"`
+	MetadataProviderID      string             `json:"metadata_provider_id"`
+	MediaItemID             pgtype.Int8        `json:"media_item_id"`
+	FirstSeenScanRunID      pgtype.Int8        `json:"first_seen_scan_run_id"`
+	LastSeenScanRunID       pgtype.Int8        `json:"last_seen_scan_run_id"`
+	RawIdentity             []byte             `json:"raw_identity"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+	DecisionProvenance      string             `json:"decision_provenance"`
+	DecisionMatcherRevision int32              `json:"decision_matcher_revision"`
 }
 
 func (q *Queries) RejectScannerIdentity(ctx context.Context, arg RejectScannerIdentityParams) (RejectScannerIdentityRow, error) {
@@ -2028,6 +2420,8 @@ func (q *Queries) RejectScannerIdentity(ctx context.Context, arg RejectScannerId
 		&i.RawIdentity,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DecisionProvenance,
+		&i.DecisionMatcherRevision,
 	)
 	return i, err
 }
@@ -2038,10 +2432,27 @@ WITH updated_identity AS (
     SET review_status = 'needs_review',
         metadata_provider_id = '',
         media_item_id = NULL,
+        decision_provenance = 'legacy',
+        decision_matcher_revision = 0,
         updated_at = now()
     WHERE lmi.library_id = $1
       AND lmi.id = $2
-    RETURNING lmi.id, lmi.library_id, lmi.media_type, lmi.identity_key, lmi.title, lmi.year, lmi.confidence, lmi.source, lmi.review_status, lmi.metadata_provider_id, lmi.media_item_id, lmi.first_seen_scan_run_id, lmi.last_seen_scan_run_id, lmi.raw_identity, lmi.created_at, lmi.updated_at
+    RETURNING lmi.id, lmi.library_id, lmi.media_type, lmi.identity_key, lmi.title, lmi.year, lmi.confidence, lmi.source, lmi.review_status, lmi.metadata_provider_id, lmi.media_item_id, lmi.first_seen_scan_run_id, lmi.last_seen_scan_run_id, lmi.raw_identity, lmi.created_at, lmi.updated_at, lmi.decision_provenance, lmi.decision_matcher_revision
+),
+invalidated_entities AS (
+    UPDATE scanner_entities entity
+    SET status = 'discovered', provider_id = '',
+        pipeline_generation = entity.pipeline_generation + 1,
+        search_scan_run_id = NULL, fetch_scan_run_id = NULL,
+        analysis_artifact_id = NULL, search_artifact_id = NULL,
+        metadata_artifact_id = NULL, apply_artifact_id = NULL,
+        error_message = '', searched_at = NULL, fetched_at = NULL,
+        applied_at = NULL, updated_at = now()
+    FROM updated_identity identity
+    WHERE entity.library_id = identity.library_id
+      AND entity.media_type = identity.media_type
+      AND entity.identity_key = identity.identity_key
+    RETURNING entity.id
 ),
 candidates AS (
     UPDATE metadata_match_candidates
@@ -2060,9 +2471,10 @@ resolved AS (
       AND EXISTS (SELECT 1 FROM updated_identity)
     RETURNING 1
 )
-SELECT updated_identity.id, updated_identity.library_id, updated_identity.media_type, updated_identity.identity_key, updated_identity.title, updated_identity.year, updated_identity.confidence, updated_identity.source, updated_identity.review_status, updated_identity.metadata_provider_id, updated_identity.media_item_id, updated_identity.first_seen_scan_run_id, updated_identity.last_seen_scan_run_id, updated_identity.raw_identity, updated_identity.created_at, updated_identity.updated_at
+SELECT updated_identity.id, updated_identity.library_id, updated_identity.media_type, updated_identity.identity_key, updated_identity.title, updated_identity.year, updated_identity.confidence, updated_identity.source, updated_identity.review_status, updated_identity.metadata_provider_id, updated_identity.media_item_id, updated_identity.first_seen_scan_run_id, updated_identity.last_seen_scan_run_id, updated_identity.raw_identity, updated_identity.created_at, updated_identity.updated_at, updated_identity.decision_provenance, updated_identity.decision_matcher_revision
 FROM updated_identity
 CROSS JOIN (SELECT count(*) FROM candidates) candidate_count
+CROSS JOIN (SELECT count(*) FROM invalidated_entities) invalidated_count
 CROSS JOIN (SELECT count(*) FROM resolved) resolved_count
 `
 
@@ -2072,22 +2484,24 @@ type ResetScannerIdentityReviewParams struct {
 }
 
 type ResetScannerIdentityReviewRow struct {
-	ID                 int64              `json:"id"`
-	LibraryID          int64              `json:"library_id"`
-	MediaType          MediaType          `json:"media_type"`
-	IdentityKey        string             `json:"identity_key"`
-	Title              string             `json:"title"`
-	Year               string             `json:"year"`
-	Confidence         float32            `json:"confidence"`
-	Source             string             `json:"source"`
-	ReviewStatus       string             `json:"review_status"`
-	MetadataProviderID string             `json:"metadata_provider_id"`
-	MediaItemID        pgtype.Int8        `json:"media_item_id"`
-	FirstSeenScanRunID pgtype.Int8        `json:"first_seen_scan_run_id"`
-	LastSeenScanRunID  pgtype.Int8        `json:"last_seen_scan_run_id"`
-	RawIdentity        []byte             `json:"raw_identity"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ID                      int64              `json:"id"`
+	LibraryID               int64              `json:"library_id"`
+	MediaType               MediaType          `json:"media_type"`
+	IdentityKey             string             `json:"identity_key"`
+	Title                   string             `json:"title"`
+	Year                    string             `json:"year"`
+	Confidence              float32            `json:"confidence"`
+	Source                  string             `json:"source"`
+	ReviewStatus            string             `json:"review_status"`
+	MetadataProviderID      string             `json:"metadata_provider_id"`
+	MediaItemID             pgtype.Int8        `json:"media_item_id"`
+	FirstSeenScanRunID      pgtype.Int8        `json:"first_seen_scan_run_id"`
+	LastSeenScanRunID       pgtype.Int8        `json:"last_seen_scan_run_id"`
+	RawIdentity             []byte             `json:"raw_identity"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
+	DecisionProvenance      string             `json:"decision_provenance"`
+	DecisionMatcherRevision int32              `json:"decision_matcher_revision"`
 }
 
 func (q *Queries) ResetScannerIdentityReview(ctx context.Context, arg ResetScannerIdentityReviewParams) (ResetScannerIdentityReviewRow, error) {
@@ -2110,6 +2524,8 @@ func (q *Queries) ResetScannerIdentityReview(ctx context.Context, arg ResetScann
 		&i.RawIdentity,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DecisionProvenance,
+		&i.DecisionMatcherRevision,
 	)
 	return i, err
 }
@@ -2223,37 +2639,53 @@ const upsertLocalMediaIdentity = `-- name: UpsertLocalMediaIdentity :one
 INSERT INTO local_media_identities (
     library_id, media_type, identity_key, title, year, confidence, source,
     review_status, metadata_provider_id, media_item_id,
-    first_seen_scan_run_id, last_seen_scan_run_id, raw_identity
+    first_seen_scan_run_id, last_seen_scan_run_id, raw_identity,
+    decision_provenance, decision_matcher_revision
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'automatic', $14)
 ON CONFLICT (library_id, media_type, identity_key) DO UPDATE
 SET title = EXCLUDED.title,
     year = EXCLUDED.year,
     confidence = EXCLUDED.confidence,
     source = EXCLUDED.source,
-    review_status = EXCLUDED.review_status,
-    metadata_provider_id = COALESCE(NULLIF(EXCLUDED.metadata_provider_id, ''), local_media_identities.metadata_provider_id),
+    review_status = CASE
+        WHEN local_media_identities.decision_provenance = 'manual' THEN local_media_identities.review_status
+        ELSE EXCLUDED.review_status
+    END,
+    metadata_provider_id = CASE
+        WHEN local_media_identities.decision_provenance = 'manual' THEN local_media_identities.metadata_provider_id
+        ELSE EXCLUDED.metadata_provider_id
+    END,
     media_item_id = COALESCE(EXCLUDED.media_item_id, local_media_identities.media_item_id),
     last_seen_scan_run_id = EXCLUDED.last_seen_scan_run_id,
     raw_identity = EXCLUDED.raw_identity,
+    decision_provenance = CASE
+        WHEN local_media_identities.decision_provenance = 'manual' THEN 'manual'
+        ELSE EXCLUDED.decision_provenance
+    END,
+    decision_matcher_revision = CASE
+        WHEN local_media_identities.decision_provenance = 'manual' THEN local_media_identities.decision_matcher_revision
+        ELSE EXCLUDED.decision_matcher_revision
+    END,
     updated_at = now()
-RETURNING id, library_id, media_type, identity_key, title, year, confidence, source, review_status, metadata_provider_id, media_item_id, first_seen_scan_run_id, last_seen_scan_run_id, raw_identity, created_at, updated_at
+RETURNING id, library_id, media_type, identity_key, title, year, confidence, source, review_status, metadata_provider_id, media_item_id, first_seen_scan_run_id, last_seen_scan_run_id, raw_identity, created_at, updated_at, decision_provenance, decision_matcher_revision
 `
 
 type UpsertLocalMediaIdentityParams struct {
-	LibraryID          int64       `json:"library_id"`
-	MediaType          MediaType   `json:"media_type"`
-	IdentityKey        string      `json:"identity_key"`
-	Title              string      `json:"title"`
-	Year               string      `json:"year"`
-	Confidence         float32     `json:"confidence"`
-	Source             string      `json:"source"`
-	ReviewStatus       string      `json:"review_status"`
-	MetadataProviderID string      `json:"metadata_provider_id"`
-	MediaItemID        pgtype.Int8 `json:"media_item_id"`
-	FirstSeenScanRunID pgtype.Int8 `json:"first_seen_scan_run_id"`
-	LastSeenScanRunID  pgtype.Int8 `json:"last_seen_scan_run_id"`
-	RawIdentity        []byte      `json:"raw_identity"`
+	LibraryID               int64       `json:"library_id"`
+	MediaType               MediaType   `json:"media_type"`
+	IdentityKey             string      `json:"identity_key"`
+	Title                   string      `json:"title"`
+	Year                    string      `json:"year"`
+	Confidence              float32     `json:"confidence"`
+	Source                  string      `json:"source"`
+	ReviewStatus            string      `json:"review_status"`
+	MetadataProviderID      string      `json:"metadata_provider_id"`
+	MediaItemID             pgtype.Int8 `json:"media_item_id"`
+	FirstSeenScanRunID      pgtype.Int8 `json:"first_seen_scan_run_id"`
+	LastSeenScanRunID       pgtype.Int8 `json:"last_seen_scan_run_id"`
+	RawIdentity             []byte      `json:"raw_identity"`
+	DecisionMatcherRevision int32       `json:"decision_matcher_revision"`
 }
 
 func (q *Queries) UpsertLocalMediaIdentity(ctx context.Context, arg UpsertLocalMediaIdentityParams) (LocalMediaIdentity, error) {
@@ -2271,6 +2703,7 @@ func (q *Queries) UpsertLocalMediaIdentity(ctx context.Context, arg UpsertLocalM
 		arg.FirstSeenScanRunID,
 		arg.LastSeenScanRunID,
 		arg.RawIdentity,
+		arg.DecisionMatcherRevision,
 	)
 	var i LocalMediaIdentity
 	err := row.Scan(
@@ -2290,6 +2723,8 @@ func (q *Queries) UpsertLocalMediaIdentity(ctx context.Context, arg UpsertLocalM
 		&i.RawIdentity,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DecisionProvenance,
+		&i.DecisionMatcherRevision,
 	)
 	return i, err
 }
@@ -2431,12 +2866,13 @@ const upsertScannerEntity = `-- name: UpsertScannerEntity :one
 INSERT INTO scanner_entities (
     library_id, media_type, scope_key, scope_paths, identity_key,
     title, year, provider_id, status, search_scan_run_id,
-    search_artifact_id, error_message, data
+    analysis_artifact_id, search_artifact_id, error_message, data,
+    pipeline_generation
 )
 VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
-    $11, $12, $13
+    NULL, $11, $12, $13, 1
 )
 ON CONFLICT (library_id, media_type, scope_key, identity_key) DO UPDATE
 SET scope_paths = EXCLUDED.scope_paths,
@@ -2444,18 +2880,20 @@ SET scope_paths = EXCLUDED.scope_paths,
     year = EXCLUDED.year,
     provider_id = EXCLUDED.provider_id,
     status = EXCLUDED.status,
+    pipeline_generation = scanner_entities.pipeline_generation + 1,
     search_scan_run_id = EXCLUDED.search_scan_run_id,
+    analysis_artifact_id = NULL,
     search_artifact_id = EXCLUDED.search_artifact_id,
     fetch_scan_run_id = NULL,
     metadata_artifact_id = NULL,
     apply_artifact_id = NULL,
     error_message = EXCLUDED.error_message,
     data = EXCLUDED.data,
-    searched_at = CASE WHEN EXCLUDED.search_artifact_id IS NOT NULL THEN now() ELSE scanner_entities.searched_at END,
+    searched_at = NULL,
     fetched_at = NULL,
     applied_at = NULL,
     updated_at = now()
-RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at
+RETURNING id, library_id, media_type, scope_key, scope_paths, identity_key, title, year, provider_id, status, search_scan_run_id, fetch_scan_run_id, search_artifact_id, metadata_artifact_id, apply_artifact_id, error_message, data, discovered_at, searched_at, fetched_at, applied_at, updated_at, analysis_artifact_id, pipeline_generation
 `
 
 type UpsertScannerEntityParams struct {
@@ -2514,6 +2952,8 @@ func (q *Queries) UpsertScannerEntity(ctx context.Context, arg UpsertScannerEnti
 		&i.FetchedAt,
 		&i.AppliedAt,
 		&i.UpdatedAt,
+		&i.AnalysisArtifactID,
+		&i.PipelineGeneration,
 	)
 	return i, err
 }

@@ -391,7 +391,7 @@ func emitTVParse(file InventoryFile, release *parser.SceneReleaseParse, domain s
 func parseTVNFOs(root InventoryRoot, emit Emitter) map[string]tvNFOEntry {
 	out := make(map[string]tvNFOEntry)
 	for _, f := range root.Files {
-		if f.Class != ClassNFO || f.Kind != "tvshow" {
+		if f.Generated || f.Class != ClassNFO || f.Kind != "tvshow" {
 			continue
 		}
 		parsed := nfo.ParseFile(root.FS, f.RelPath, "tvshow")
@@ -959,7 +959,7 @@ func nearestTVPlexmatch(dir string, plexmatches map[string]tvPlexmatchEntry) (tv
 func groupTVAssets(files []InventoryFile) map[string][]TVAssetPlan {
 	out := make(map[string][]TVAssetPlan)
 	for _, f := range files {
-		if f.Class != ClassArtwork {
+		if f.Generated || f.Class != ClassArtwork {
 			continue
 		}
 		dir := filepath.Dir(f.RelPath)

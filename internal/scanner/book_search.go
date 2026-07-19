@@ -103,6 +103,9 @@ func SearchBookPlans(ctx context.Context, plans []BookPlan, provider BookSearchP
 
 		candidates, err := searchBookCandidates(ctx, provider, query, search.Query.Aliases)
 		if err != nil {
+			if terminal := providerContextTermination(ctx.Err(), err); terminal != nil {
+				return results, terminal
+			}
 			if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
 				return results, err
 			}
@@ -174,7 +177,7 @@ func SearchBookPlans(ctx context.Context, plans []BookPlan, provider BookSearchP
 		}
 
 		top := scored[0]
-		if !top.RequiresReview && top.Confidence >= threshold && bookTitleAcceptable(plan.Title, top.Title) {
+		if !top.RequiresReview && top.Confidence >= threshold && bookTitleAcceptable(plan.Title, top.Title) && bookAuthorCorroborated(plan.Author, bookCandidateAuthor(top)) {
 			search.Accepted = true
 			search.ProviderID = top.ProviderID
 			search.Provider = top.ProviderName
@@ -355,7 +358,7 @@ func scoreBookSearchCandidate(plan BookPlan, candidate metadata.SearchResult) fl
 	}
 	candidateAuthor := bookCandidateAuthor(candidate)
 	if plan.Author != "" && candidateAuthor != "" {
-		if strings.Contains(normalizeSearchTitle(candidateAuthor), normalizeSearchTitle(plan.Author)) {
+		if bookAuthorCorroborated(plan.Author, candidateAuthor) {
 			score += 0.03
 		} else {
 			score -= 0.25
@@ -384,6 +387,61 @@ func bookCandidateAuthor(candidate metadata.SearchResult) string {
 
 func bookTitleAcceptable(localTitle, remoteTitle string) bool {
 	return normalizeSearchTitle(localTitle) == normalizeSearchTitle(remoteTitle) || stringSimilarity(localTitle, remoteTitle) >= 0.78 || substringSearchTitleMatch(localTitle, remoteTitle)
+}
+
+func bookAuthorCorroborated(localAuthor, remoteAuthor string) bool {
+	local := compactPersonNameTokens(localAuthor)
+	remote := compactPersonNameTokens(remoteAuthor)
+	if len(local) == 0 {
+		return true
+	}
+	if len(remote) < len(local) {
+		return false
+	}
+	// HeyaMetadata may return a structured author list as comma-joined evidence.
+	// A local author is corroborated when their complete token sequence appears
+	// anywhere in that list; requiring equal total token counts rejected valid
+	// works merely because they had a coauthor.
+	for start := 0; start+len(local) <= len(remote); start++ {
+		matched := true
+		for i := range local {
+			remoteToken := remote[start+i]
+			if local[i] == remoteToken {
+				continue
+			}
+			// A spelled given name and its initial corroborate one another, but
+			// arbitrary substrings do not (Ann must never match Joanne).
+			if (len([]rune(local[i])) == 1 && strings.HasPrefix(remoteToken, local[i])) ||
+				(len([]rune(remoteToken)) == 1 && strings.HasPrefix(local[i], remoteToken)) {
+				continue
+			}
+			matched = false
+			break
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+func compactPersonNameTokens(value string) []string {
+	fields := strings.Fields(normalizeIdentityTitle(value))
+	out := make([]string, 0, len(fields))
+	for i := 0; i < len(fields); {
+		if len([]rune(fields[i])) != 1 {
+			out = append(out, fields[i])
+			i++
+			continue
+		}
+		var initials strings.Builder
+		for i < len(fields) && len([]rune(fields[i])) == 1 {
+			initials.WriteString(fields[i])
+			i++
+		}
+		out = append(out, initials.String())
+	}
+	return out
 }
 
 func maxFloat64(a, b float64) float64 {

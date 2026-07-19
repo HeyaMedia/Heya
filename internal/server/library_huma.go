@@ -275,6 +275,9 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 				if errors.Is(err, service.ErrScannerReviewTargetNotFound) {
 					return nil, huma.Error404NotFound("scanner identity not found")
 				}
+				if errors.Is(err, service.ErrScannerReviewIdentityApplied) {
+					return nil, huma.Error409Conflict(err.Error())
+				}
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
 			return noStoreJSON(identity), nil
@@ -292,6 +295,9 @@ func registerLibraryRoutes(api huma.API, app *service.App) {
 			if err != nil {
 				if errors.Is(err, service.ErrScannerReviewTargetNotFound) {
 					return nil, huma.Error404NotFound("scanner identity not found")
+				}
+				if errors.Is(err, service.ErrScannerReviewIdentityApplied) {
+					return nil, huma.Error409Conflict(err.Error())
 				}
 				return nil, huma.Error500InternalServerError(err.Error())
 			}

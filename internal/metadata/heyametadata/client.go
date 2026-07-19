@@ -519,48 +519,80 @@ func (c *Client) Ratings(ctx context.Context, entityID string, credentials ...Pr
 	}
 }
 
-func (c *Client) TopTracks(ctx context.Context, entityID string, credentials ...ProviderCredentials) ([]gen.TopTrack, error) {
+// TopTracksSnapshot is one complete canonical top-tracks projection. Its
+// projection version comes from the endpoint's source snapshots rather than
+// the parent artist document: top tracks are refreshed independently and the
+// two versions are deliberately allowed to differ.
+type TopTracksSnapshot struct {
+	Tracks            []gen.TopTrack
+	ProjectionVersion int64
+}
+
+func (c *Client) topTracksSnapshot(ctx context.Context, entityID string, credentials ...ProviderCredentials) (TopTracksSnapshot, error) {
 	id, err := uuid.Parse(entityID)
 	if err != nil {
-		return nil, fmt.Errorf("heyametadata top tracks: invalid UUID %q: %w", entityID, err)
+		return TopTracksSnapshot{}, fmt.Errorf("heyametadata top tracks: invalid UUID %q: %w", entityID, err)
 	}
 	const pageSize = int64(100)
 	var result []gen.TopTrack
+	var projectionVersion int64
 	for offset := int64(0); ; {
 		limit := pageSize
 		response, err := c.gen.ArtistTopTracksWithResponse(ctx, id, &gen.ArtistTopTracksParams{Offset: &offset, Limit: &limit}, c.credentialEditor(firstCredentials(credentials)))
 		if err != nil {
-			return nil, fmt.Errorf("read canonical artist top tracks %s: %w", entityID, err)
+			return TopTracksSnapshot{}, fmt.Errorf("read canonical artist top tracks %s: %w", entityID, err)
 		}
 		if response.StatusCode() != http.StatusOK || response.JSON200 == nil {
-			return nil, responseError("read canonical artist top tracks", response.StatusCode(), response.Body)
+			return TopTracksSnapshot{}, responseError("read canonical artist top tracks", response.StatusCode(), response.Body)
 		}
 		page := response.JSON200
+		if page.Sources != nil {
+			for _, source := range *page.Sources {
+				projectionVersion = max(projectionVersion, source.ProjectionVersion)
+			}
+		}
 		pageTracks := []gen.TopTrack(nil)
 		if page.Results != nil {
 			pageTracks = *page.Results
 		}
 		result = append(result, pageTracks...)
 		if int64(len(result)) >= page.Total {
-			return result, nil
+			return TopTracksSnapshot{Tracks: result, ProjectionVersion: projectionVersion}, nil
 		}
 		if len(pageTracks) == 0 {
-			return nil, fmt.Errorf("read canonical artist top tracks: page at offset %d returned no results before total %d", offset, page.Total)
+			return TopTracksSnapshot{}, fmt.Errorf("read canonical artist top tracks: page at offset %d returned no results before total %d", offset, page.Total)
 		}
 		offset += int64(len(pageTracks))
 	}
+}
+
+func (c *Client) TopTracks(ctx context.Context, entityID string, credentials ...ProviderCredentials) ([]gen.TopTrack, error) {
+	snapshot, err := c.topTracksSnapshot(ctx, entityID, credentials...)
+	return snapshot.Tracks, err
+}
+
+// ArtistTopTracksProjection is the provider-neutral form consumed by local
+// writers. ProjectionVersion describes these entries, not the artist spine.
+type ArtistTopTracksProjection struct {
+	Entries           []metadata.TopTrackEntry
+	ProjectionVersion int64
 }
 
 // ArtistTopTrackEntries returns the provider-neutral top-track projection used
 // by local read-model writers. Unlike an empty result, a transport or decode
 // failure is returned to the caller so it cannot erase the last good ranking.
 func (c *Client) ArtistTopTrackEntries(ctx context.Context, entityID string, credentials ...ProviderCredentials) ([]metadata.TopTrackEntry, error) {
-	tracks, err := c.TopTracks(ctx, entityID, credentials...)
+	projection, err := c.ArtistTopTracksProjection(ctx, entityID, credentials...)
+	return projection.Entries, err
+}
+
+func (c *Client) ArtistTopTracksProjection(ctx context.Context, entityID string, credentials ...ProviderCredentials) (ArtistTopTracksProjection, error) {
+	snapshot, err := c.topTracksSnapshot(ctx, entityID, credentials...)
 	if err != nil {
-		return nil, err
+		return ArtistTopTracksProjection{}, err
 	}
-	result := make([]metadata.TopTrackEntry, 0, len(tracks))
-	for _, track := range tracks {
+	result := make([]metadata.TopTrackEntry, 0, len(snapshot.Tracks))
+	for _, track := range snapshot.Tracks {
 		recordingEntityID := ""
 		if track.RecordingEntityId != nil {
 			recordingEntityID = track.RecordingEntityId.String()
@@ -580,7 +612,7 @@ func (c *Client) ArtistTopTrackEntries(ctx context.Context, entityID string, cre
 		}
 		result = append(result, entry)
 	}
-	return result, nil
+	return ArtistTopTracksProjection{Entries: result, ProjectionVersion: snapshot.ProjectionVersion}, nil
 }
 
 func (c *Client) RecordingLyrics(ctx context.Context, entityID string, credentials ...ProviderCredentials) ([]RecordingLyrics, error) {

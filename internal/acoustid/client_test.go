@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestLookupReturnsUniqueRecordingMBIDsByScore(t *testing.T) {
@@ -42,5 +43,60 @@ func TestLookupRequiresConfiguredApplicationKey(t *testing.T) {
 	}
 	if _, err := client.Lookup(context.Background(), "fingerprint", 123); err != ErrDisabled {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLookupClassifiesTransientAndConfigurationFailures(t *testing.T) {
+	tests := []struct {
+		name          string
+		status        int
+		body          string
+		retryAfter    string
+		transient     bool
+		configuration bool
+	}{
+		{name: "service unavailable", status: http.StatusServiceUnavailable, retryAfter: "17", transient: true},
+		{name: "bad HTTP credentials", status: http.StatusForbidden, configuration: true},
+		{name: "bad application key HTTP 400 envelope", status: http.StatusBadRequest, body: `{"status":"error","error":{"code":4,"message":"invalid client key"}}`, configuration: true},
+		{name: "bad application key envelope", status: http.StatusOK, body: `{"status":"error","error":{"code":4,"message":"invalid client key"}}`, configuration: true},
+		{name: "internal envelope failure", status: http.StatusOK, body: `{"status":"error","error":{"code":10,"message":"internal error"}}`, transient: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if test.retryAfter != "" {
+					w.Header().Set("Retry-After", test.retryAfter)
+				}
+				w.WriteHeader(test.status)
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+			client, err := New(Options{BaseURL: server.URL, APIKey: "client-key", RequestsPerSecond: 3, HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.Lookup(context.Background(), "fingerprint", 123)
+			if err == nil || IsTransient(err) != test.transient || IsConfiguration(err) != test.configuration {
+				t.Fatalf("error classification = %v transient=%v configuration=%v", err, IsTransient(err), IsConfiguration(err))
+			}
+			if test.retryAfter != "" && ErrorRetryAfter(err) != 17*time.Second {
+				t.Fatalf("retry after = %s", ErrorRetryAfter(err))
+			}
+		})
+	}
+}
+
+func TestLookupNoMatchIsSuccessfulEmptyEvidence(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"ok","results":[]}`))
+	}))
+	defer server.Close()
+	client, err := New(Options{BaseURL: server.URL, APIKey: "client-key", RequestsPerSecond: 3, HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches, err := client.Lookup(context.Background(), "fingerprint", 123)
+	if err != nil || len(matches) != 0 {
+		t.Fatalf("no-match lookup = %#v, %v", matches, err)
 	}
 }

@@ -23,14 +23,21 @@ type SearchDecision struct {
 
 type SearchDecisions map[string]SearchDecision
 
+// scannerSearchMatcherRevision versions automatic accept decisions. Bump it
+// whenever normalization, candidate scoring, evidence weighting, or automatic
+// acceptance policy changes in a way that should reconsider prior matches.
+// Manual approve/reject/ignore decisions are revision-independent.
+const scannerSearchMatcherRevision int32 = 1
+
 func LoadScannerSearchDecisions(ctx context.Context, db *pgxpool.Pool, lib sqlc.Library) (SearchDecisions, error) {
 	if db == nil {
 		return nil, nil
 	}
 	rows, err := sqlc.New(db).ListScannerSearchDecisionsByLibrary(ctx, sqlc.ListScannerSearchDecisionsByLibraryParams{
-		LibraryID:      lib.ID,
-		MediaType:      lib.MediaType,
-		ReviewStatuses: []string{"accepted", "rejected", "ignored"},
+		LibraryID:       lib.ID,
+		MediaType:       lib.MediaType,
+		ReviewStatuses:  []string{"accepted", "rejected", "ignored"},
+		MatcherRevision: scannerSearchMatcherRevision,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("load scanner search decisions: %w", err)

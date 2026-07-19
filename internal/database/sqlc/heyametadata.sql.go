@@ -408,7 +408,9 @@ type ListMetadataChangeTargetsByEntitiesRow struct {
 
 // Resolve a complete change-feed page to refresh targets in one round trip.
 // One canonical author may own multiple local books, hence UNION ALL rather
-// than a scalar CASE. The worker deduplicates final target IDs across pages.
+// than a scalar CASE. The worker deduplicates final target IDs inside each
+// feed-page transaction; a later page intentionally schedules a trailing
+// refresh for the same target.
 func (q *Queries) ListMetadataChangeTargetsByEntities(ctx context.Context, entityIds []uuid.UUID) ([]ListMetadataChangeTargetsByEntitiesRow, error) {
 	rows, err := q.db.Query(ctx, listMetadataChangeTargetsByEntities, entityIds)
 	if err != nil {
@@ -769,6 +771,30 @@ ON CONFLICT (request_key) DO UPDATE SET
   query = CASE WHEN EXCLUDED.query <> '' THEN EXCLUDED.query ELSE metadata_resolution_workflows.query END,
   hints = CASE WHEN EXCLUDED.hints <> '{}'::jsonb THEN EXCLUDED.hints ELSE metadata_resolution_workflows.hints END,
   selected_resolution = CASE WHEN EXCLUDED.selected_resolution <> '{}'::jsonb THEN EXCLUDED.selected_resolution ELSE metadata_resolution_workflows.selected_resolution END,
+	-- A terminal upstream job ID is not a reusable resolution. Reset failed
+	-- workflows on the next durable request so a repaired provider, refreshed
+	-- candidate, or transient upstream outage gets a genuinely new attempt
+	-- instead of polling the same failed job forever.
+	state = CASE
+	  WHEN metadata_resolution_workflows.state = 'failed' THEN EXCLUDED.state
+	  ELSE metadata_resolution_workflows.state
+	END,
+	job_id = CASE
+	  WHEN metadata_resolution_workflows.state = 'failed' THEN NULL
+	  ELSE metadata_resolution_workflows.job_id
+	END,
+	discovery_id = CASE
+	  WHEN metadata_resolution_workflows.state = 'failed' THEN NULL
+	  ELSE metadata_resolution_workflows.discovery_id
+	END,
+	last_error = CASE
+	  WHEN metadata_resolution_workflows.state = 'failed' THEN ''
+	  ELSE metadata_resolution_workflows.last_error
+	END,
+	completed_at = CASE
+	  WHEN metadata_resolution_workflows.state = 'failed' THEN NULL
+	  ELSE metadata_resolution_workflows.completed_at
+	END,
   updated_at = now()
 RETURNING id, request_key, identity_id, kind, query, hints, selected_resolution, discovery_id, job_id, entity_id, state, last_error, created_at, updated_at, completed_at
 `

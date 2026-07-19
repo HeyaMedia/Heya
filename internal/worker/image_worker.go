@@ -160,7 +160,7 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 	}
 	if assetErr != nil {
 		if !errors.Is(assetErr, pgx.ErrNoRows) {
-			log.Debug().Err(assetErr).Str("path", localPath).Msg("failed to create media asset")
+			return fmt.Errorf("persist downloaded %s asset: %w", job.Args.AssetType, assetErr)
 		}
 	}
 	if assetErr == nil {
@@ -191,7 +191,7 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 		}
 	}
 
-	if job.Args.AssetType == "backdrop" && job.Args.SortOrder == 0 {
+	if assetErr == nil && job.Args.AssetType == "backdrop" && job.Args.SortOrder == 0 {
 		item, err := q.GetMediaItemByID(ctx, job.Args.MediaItemID)
 		if err == nil {
 			updateArtworkPathColumns(ctx, q, item, item.PosterPath, localPath)
@@ -209,13 +209,18 @@ func (w *DownloadImageWorker) Work(ctx context.Context, job *river.Job[DownloadI
 		})
 	}
 
-	w.maybeSaveToMediaDir(ctx, job, localPath)
+	if assetErr == nil {
+		w.maybeSaveToMediaDirFor(
+			ctx,
+			storedAsset.MediaItemID,
+			string(storedAsset.AssetType),
+			int(storedAsset.SortOrder),
+			storedAsset.Label,
+			storedAsset.LocalPath,
+		)
+	}
 
 	return nil
-}
-
-func (w *DownloadImageWorker) maybeSaveToMediaDir(ctx context.Context, job *river.Job[DownloadImageArgs], localPath string) {
-	w.maybeSaveToMediaDirFor(ctx, job.Args.MediaItemID, job.Args.AssetType, job.Args.SortOrder, job.Args.Label, localPath)
 }
 
 func (w *DownloadImageWorker) maybeSaveToMediaDirFor(ctx context.Context, mediaItemID int64, assetType string, sortOrder int, label, localPath string) {
@@ -330,6 +335,8 @@ func (w *DownloadImageWorker) materializePendingAsset(ctx context.Context, job *
 	representative, deduped, err := MaterializeMediaAsset(ctx, w.DB, asset, localPath, filepath.Join(w.Downloader.CacheDir(), "images"))
 	if err != nil {
 		log.Debug().Err(err).Int64("asset_id", asset.ID).Msg("image warm: fingerprint failed")
+		representative = asset
+		representative.LocalPath = localPath
 		if updateErr := q.UpdateMediaAssetLocalPath(ctx, sqlc.UpdateMediaAssetLocalPathParams{
 			ID: asset.ID, LocalPath: localPath,
 		}); updateErr != nil {
@@ -358,7 +365,7 @@ func (w *DownloadImageWorker) materializePendingAsset(ctx context.Context, job *
 		})
 	}
 
-	w.maybeSaveToMediaDirFor(ctx, item.ID, string(asset.AssetType), int(asset.SortOrder), asset.Label, localPath)
+	w.maybeSaveToMediaDirFor(ctx, item.ID, string(representative.AssetType), int(representative.SortOrder), representative.Label, representative.LocalPath)
 	return nil
 }
 

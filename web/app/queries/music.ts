@@ -120,6 +120,70 @@ export interface MusicBrowseTrack {
   artist_slug: string
 }
 
+// Browse landing (moods/genres/tempo) — up to 6 top artists per bucket, for
+// the tile's rotating background art. {id, public_id} matches MediaImageRef,
+// so usePosterUrl(entry) works directly.
+export interface BrowseBucketArtist {
+  id: number
+  public_id: string
+}
+export interface MoodBucket {
+  key: string
+  label: string
+  threshold: number
+  track_count: number
+  artists: BrowseBucketArtist[]
+}
+export interface GenreBucket {
+  name: string
+  label: string
+  parent: string
+  track_count: number
+  artists: BrowseBucketArtist[]
+}
+export interface TempoBucket {
+  key: string
+  label: string
+  min_bpm: number
+  max_bpm: number
+  track_count: number
+  artists: BrowseBucketArtist[]
+}
+
+// Three independent, device-persisted queries — a repeat visit to
+// /music/browse paints instantly from cache instead of refetching cold.
+const browseMeta = { prefetch: 'none', persistence: 'device', sensitivity: 'normal' } as const
+
+export const musicBrowseMoodsQuery = defineQueryOptions(() => ({
+  key: ['music', 'browse', 'moods'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return ((await $heya('/api/music/browse/moods')) as { items: MoodBucket[] }).items ?? []
+  },
+  staleTime: 1000 * 60 * 5,
+  meta: browseMeta,
+}))
+
+export const musicBrowseGenresQuery = defineQueryOptions(() => ({
+  key: ['music', 'browse', 'genres'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return ((await $heya('/api/music/browse/genres')) as { items: GenreBucket[] }).items ?? []
+  },
+  staleTime: 1000 * 60 * 5,
+  meta: browseMeta,
+}))
+
+export const musicBrowseTempoQuery = defineQueryOptions(() => ({
+  key: ['music', 'browse', 'tempo'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return ((await $heya('/api/music/browse/tempo')) as { items: TempoBucket[] }).items ?? []
+  },
+  staleTime: 1000 * 60 * 5,
+  meta: browseMeta,
+}))
+
 const intentMeta = {
   prefetch: 'intent',
   persistence: 'device',
@@ -479,26 +543,3 @@ export const trackLyricsQuery = defineQueryOptions((trackId: number) => ({
   meta: { prefetch: 'none', persistence: 'device', sensitivity: 'normal' },
 }))
 
-export const musicBrowseTracksQuery = defineQueryOptions((target: { kind: MusicBrowseKind, key: string }) => ({
-  key: ['music', 'browse', target.kind, target.key, 'tracks'],
-  query: async () => {
-    const { $heya } = useNuxtApp()
-    let response: { items: MusicBrowseTrack[] }
-    if (target.kind === 'mood') {
-      response = await $heya('/api/music/browse/moods/{mood}/tracks', {
-        path: { mood: target.key }, query: { limit: 500 },
-      }) as { items: MusicBrowseTrack[] }
-    } else if (target.kind === 'genre') {
-      response = await $heya('/api/music/browse/genres/{name}/tracks', {
-        path: { name: target.key }, query: { limit: 500 },
-      }) as { items: MusicBrowseTrack[] }
-    } else {
-      response = await $heya('/api/music/browse/tempo/{band}/tracks', {
-        path: { band: target.key }, query: { limit: 500 },
-      }) as { items: MusicBrowseTrack[] }
-    }
-    return response.items ?? []
-  },
-  staleTime: 1000 * 60 * 10,
-  meta: { prefetch: 'intent', persistence: 'device', sensitivity: 'normal' },
-}))

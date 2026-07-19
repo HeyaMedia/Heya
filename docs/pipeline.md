@@ -33,6 +33,19 @@ cost near-zero I/O beyond the directory walk itself:
   `media_info`/`keyframes` only when size or µs-mtime actually changed;
   re-applies of unchanged files (force rescans, review re-identifies,
   relocated scopes) keep their probe artifacts.
+- **First-pass matchers can address new files.** Immediately after local
+  analysis, every primary/extra media file is observed in `library_files`
+  with the exact size+mtime tuple used by the artifact. New/restored/changed
+  rows stay `pending`; unchanged terminal rows stay terminal. This lets the
+  inline Chromaprint/AcoustID fallback run during the first search instead of
+  waiting for an apply or review-parking pass. Changed bytes invalidate probe,
+  format, hash, trickplay, and segment-derived state at the same boundary.
+- **Pending is a recoverable lease, not a perpetual change.** An unchanged
+  pending tuple is ignored while its owner scope still has a live River stage
+  job or parked metadata continuation. This prevents a scheduled kickoff from
+  superseding a slow generation over and over. A real size/mtime change always
+  supersedes immediately; when the job/continuation disappears, the pending
+  tuple becomes eligible again so a crashed pipeline self-heals.
 - **Deletions are soft, cleanup is manual — by design.** Kickoff soft-deletes
   rows for files gone from disk so the UI can show what's missing; media
   items themselves are only removed by the user-triggered
@@ -60,6 +73,21 @@ hold the whole library scan hostage:
   `library_file_links`, and fans out post-apply jobs such as ffprobe, ratings,
   NFO saves, thumbnails, chromaprint, loudness, and sonic analysis.
 
+Every owner scope has a monotonically increasing pipeline generation. Each
+stage artifact records that generation and its exact predecessor; finalizing a
+stage locks the current entity, validates the source snapshot again, writes
+the scan/review projection, creates the next artifact, and advances the entity
+in one transaction. An older worker therefore becomes a successful no-op
+instead of overwriting a newer review or apply result. A retained artifact is
+replayable only when its semantic pipeline revision is current and every
+captured file still has the same size and µs-mtime. Removed NFO/artwork,
+replaced audio, and older matcher artifacts trigger fresh owner-scope analysis.
+The apply worker validates that snapshot before entering the domain apply and
+again inside the movie/TV/book/music transaction immediately before commit;
+a source changed during apply therefore rolls the catalog write back. The
+post-commit finalizer validates once more and schedules corrective analysis for
+the unavoidable filesystem/transaction boundary race.
+
 The scanner emits structured events and records local
 identities/candidates/findings for the admin review UI.
 
@@ -74,13 +102,16 @@ walk), identity grouping, and the provider search. Mixed directories
 ("Loose Tracks", loose fansubs) stay one scan unit; identify re-fans them
 into per-identity work.
 
-**Known units skip the search.** Every auto- or manually-accepted identity
-persists in `local_media_identities` with its provider id; the decisions
-overlay is loaded before each search pass and short-circuits *before* the
-HeyaMetadata call. Re-scanning an artist to pick up a new album costs zero
-provider searches — the search stage resolves the persisted decision without
-remote discovery and continues to `fetch_metadata` / `apply_metadata`, which
-always fan out per identity. Root or multi-owner
+**Known units usually skip the search.** Every accepted identity persists in
+`local_media_identities` with its provider id and decision provenance. Manual
+approve/reject/ignore choices are durable across matcher upgrades. Automatic
+accepts are reused only when their stored matcher revision equals the current
+revision; changing normalization, scoring, or acceptance policy deliberately
+reconsiders older automatic decisions once. The overlay short-circuits
+*before* the HeyaMetadata call, so an unchanged accepted artist still costs
+zero provider searches. A local key simultaneously claimed by more than one
+owner scope bypasses the global overlay because applying one same-name decision
+to multiple possible artists is unsafe. Root or multi-owner
 scoped jobs (legacy batches, pruner requeues) re-fan into per-owner jobs
 before running, so one slow unit can never hold up others and unique args
 stay stable per unit across scans.
@@ -89,6 +120,15 @@ stay stable per unit across scans.
   locally, and apply V2's recommendation as a hard safety gate. Strong matches
   may auto-select; ambiguous/no-match results remain manual even when the local
   title scorer is high.
+- **Music escalation**: name/release/provider evidence gets the cheap first
+  attempt. If it is still ambiguous, independently fetched candidate details
+  may converge hard IDs. Only then are up to three representative files
+  fingerprinted/looked up through AcoustID. Multiple high-quality recordings
+  must converge on one canonical artist; configuration and transient failures
+  remain typed job failures rather than fake no-matches. Accepted acoustic
+  evidence retains the exact file path, recording MBID, canonical recording
+  UUID, score, and durations through materialize/apply. It may fill an empty
+  track identity but can never replace a conflicting fetched or stored one.
 - **Threshold**: `MatchOptions.AutoMatchThreshold` (default `0.85`) —
   `internal/matcher/matcher.go::autoMatchThresholdFor` lowers it to `0.75`
   when the hit is `enriched` (HeyaMetadata has it canonical and warm-cached and
@@ -318,6 +358,12 @@ attributed to a different dead `attempted_by` client.
   500. River refresh inserts and cursor advancement share one pgx transaction.
   The same worker gradually binds pre-V2 local rows that still have only
   provider evidence.
+- **`metadata_scope_worker.go`** routes independently fetched child scopes
+  from that same feed. Artist `top_tracks` is the first scope: its own
+  projection checkpoint makes a successful empty list durable and ensures a
+  parent projection version cannot falsely suppress it. The dispatcher/feed
+  are shared with movies, TV, books, recordings, and people; future child
+  scopes do not need another cursor.
 - **`metadata_workflow_events_worker.go`** consumes the independent workflow
   cursor in pages of 500. It filters the global stream against locally known
   discovery IDs and commits the inbox wake plus cursor in one transaction;
@@ -336,8 +382,10 @@ attributed to a different dead `attempted_by` client.
 - Canonical bindings cover media items, artists, release groups, recordings,
   people, authors, seasons, and episodes. Provider IDs remain evidence only.
 - Artist top-track refreshes retain provider ranking/metrics and canonical
-  recording UUIDs. A successful response replaces the local ranking in one SQL
-  statement; an endpoint failure preserves the last known ranking.
+  recording UUIDs. Newer successful observations replace the provider snapshot;
+  identical content only advances freshness, older observations are ignored,
+  and endpoint failure preserves the last known ranking while scheduling its
+  own bounded retry independently of the general artist refresh.
 
 ### Images and refresh
 

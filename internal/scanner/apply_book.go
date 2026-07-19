@@ -65,6 +65,9 @@ func ApplyBookMaterialization(ctx context.Context, lib sqlc.Library, result Resu
 		return nil, fmt.Errorf("begin book apply: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := runScannerApplyPreflightGuard(ctx); err != nil {
+		return nil, fmt.Errorf("validate book sources before apply: %w", err)
+	}
 
 	q := sqlc.New(tx)
 	lookupStore := NewSQLBookMaterializeStore(tx)
@@ -192,6 +195,9 @@ func ApplyBookMaterialization(ctx context.Context, lib sqlc.Library, result Resu
 		emitBookApplyResult(applied, emit)
 	}
 
+	if err := runScannerApplyCommitGuard(ctx, tx); err != nil {
+		return results, fmt.Errorf("validate book sources before commit: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return results, fmt.Errorf("commit book apply: %w", err)
 	}

@@ -32,8 +32,9 @@ type metadataChangeSource interface {
 // crash can produce neither a lost change nor an unbounded duplicate fanout.
 type SyncMetadataChangesWorker struct {
 	river.WorkerDefaults[SyncMetadataChangesArgs]
-	DB     *pgxpool.Pool
-	Source metadataChangeSource
+	DB       *pgxpool.Pool
+	Source   metadataChangeSource
+	Consumer string
 }
 
 func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncMetadataChangesArgs]) error {
@@ -43,6 +44,10 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 	rc := river.ClientFromContext[pgx.Tx](ctx)
 	if rc == nil {
 		return fmt.Errorf("sync metadata changes: river client unavailable")
+	}
+	consumerName := w.Consumer
+	if consumerName == "" {
+		consumerName = metadataChangeConsumer
 	}
 	// Older builds allowed every feed tick to enqueue another forced refresh
 	// for the same parent while HeyaMetadata was still publishing child changes.
@@ -55,7 +60,7 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 	}
 
 	q := sqlc.New(w.DB)
-	consumer, err := q.GetMetadataChangeCursor(ctx, metadataChangeConsumer)
+	consumer, err := q.GetMetadataChangeCursor(ctx, consumerName)
 	if err != nil {
 		return fmt.Errorf("read metadata change cursor: %w", err)
 	}
@@ -65,8 +70,6 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 		log.Warn().Int64("old_cursor", cursor).Msg("heyametadata legacy cursor has no stream identity; replaying from zero")
 		cursor = 0
 	}
-	seenMedia := make(map[int64]struct{})
-	seenPeople := make(map[int64]struct{})
 	pages, changes, enqueued := 0, 0, 0
 	backfillChecked := false
 
@@ -80,7 +83,7 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 					return fmt.Errorf("reset metadata change cursor: %w", parseErr)
 				}
 				if resetErr := q.ResetMetadataChangeCursor(ctx, sqlc.ResetMetadataChangeCursorParams{
-					Consumer: metadataChangeConsumer, StreamID: stream,
+					Consumer: consumerName, StreamID: stream,
 				}); resetErr != nil {
 					return fmt.Errorf("reset metadata change cursor: %w", resetErr)
 				}
@@ -116,10 +119,18 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 		pageErr := func() error {
 			defer func() { _ = tx.Rollback(ctx) }()
 			qtx := sqlc.New(tx)
+			// Deduplicate only inside this transaction/page. A later page can
+			// contain a newer projection for the same local target after the job
+			// from an earlier page has already started. It must enqueue a trailing
+			// refresh before advancing that later cursor; carrying these sets
+			// across pages could otherwise acknowledge the change without any
+			// worker left to observe it.
+			seenMedia := make(map[int64]struct{})
+			seenPeople := make(map[int64]struct{})
 			type pageChange struct {
-				change heyametadata.Change
-				force  bool
-				scopes map[string]struct{}
+				change        heyametadata.Change
+				force         bool
+				scopeVersions map[string]int64
 			}
 			changesByEntity := make(map[uuid.UUID]pageChange, len(page.Entries))
 			entityIDs := make([]uuid.UUID, 0, len(page.Entries))
@@ -136,11 +147,11 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 					state.change = change
 				}
 				state.force = state.force || change.ChangeType == "redirected"
-				if state.scopes == nil {
-					state.scopes = make(map[string]struct{}, len(change.ChangedScopes))
+				if state.scopeVersions == nil {
+					state.scopeVersions = make(map[string]int64, len(change.ChangedScopes))
 				}
 				for _, scope := range change.ChangedScopes {
-					state.scopes[scope] = struct{}{}
+					state.scopeVersions[scope] = max(state.scopeVersions[scope], change.ProjectionVersion)
 				}
 				changesByEntity[entityID] = state
 			}
@@ -201,18 +212,19 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 				}
 				for _, target := range scopeTargets {
 					changeState := changesByEntity[target.EntityID]
-					if _, changed := changeState.scopes[metadatasync.ArtistTopTracksScope]; !changed || target.LocalKind != "artist" || target.EntityKind != "artist" {
+					scopeVersion, changed := changeState.scopeVersions[metadatasync.ArtistTopTracksScope]
+					if !changed || target.LocalKind != "artist" || target.EntityKind != "artist" {
 						continue
 					}
 					checkpoint, exists := checkpoints[checkpointKey{target.LocalKind, target.LocalID, metadatasync.ArtistTopTracksScope}]
-					if exists && checkpoint.EntityID == target.EntityID && changeState.change.ProjectionVersion > 0 && checkpoint.ProjectionVersion >= changeState.change.ProjectionVersion {
+					if exists && checkpoint.EntityID == target.EntityID && scopeVersion > 0 && checkpoint.ProjectionVersion >= scopeVersion {
 						continue
 					}
 					args := ReconcileMetadataScopeArgs{
 						LocalKind: target.LocalKind, LocalID: target.LocalID,
 						EntityID: target.EntityID.String(), EntityKind: target.EntityKind,
 						Scope:             metadatasync.ArtistTopTracksScope,
-						ProjectionVersion: changeState.change.ProjectionVersion,
+						ProjectionVersion: scopeVersion,
 					}
 					opts := args.InsertOpts()
 					jobs = append(jobs, river.InsertManyParams{Args: args, InsertOpts: &opts})
@@ -251,7 +263,7 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 				backfillChecked = true
 			}
 			if err := qtx.CommitMetadataChangeCursor(ctx, sqlc.CommitMetadataChangeCursorParams{
-				Consumer: metadataChangeConsumer, NextCursor: page.NextCursor,
+				Consumer: consumerName, NextCursor: page.NextCursor,
 				StreamID: pageStream,
 			}); err != nil {
 				return fmt.Errorf("commit metadata change cursor: %w", err)
@@ -340,7 +352,7 @@ func enqueueOneMetadataBindingBackfill(ctx context.Context, tx pgx.Tx, rc *river
 func enqueueMetadataScopeBackfill(ctx context.Context, tx pgx.Tx, rc *river.Client[pgx.Tx], limit int) (int, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT binding.local_kind, binding.local_id, binding.entity_id,
-		       binding.entity_kind, binding.projection_version
+		       binding.entity_kind
 		FROM metadata_entity_bindings binding
 		JOIN artists artist ON artist.id = binding.local_id
 		LEFT JOIN metadata_projection_states state
@@ -352,7 +364,6 @@ func enqueueMetadataScopeBackfill(ctx context.Context, tx pgx.Tx, rc *river.Clie
 		  AND (
 		    state.local_id IS NULL
 		    OR state.entity_id <> binding.entity_id
-		    OR state.projection_version < binding.projection_version
 		  )
 		  AND NOT EXISTS (
 		    SELECT 1
@@ -374,7 +385,7 @@ func enqueueMetadataScopeBackfill(ctx context.Context, tx pgx.Tx, rc *river.Clie
 	for rows.Next() {
 		var args ReconcileMetadataScopeArgs
 		var entityID uuid.UUID
-		if err := rows.Scan(&args.LocalKind, &args.LocalID, &entityID, &args.EntityKind, &args.ProjectionVersion); err != nil {
+		if err := rows.Scan(&args.LocalKind, &args.LocalID, &entityID, &args.EntityKind); err != nil {
 			return 0, fmt.Errorf("scan metadata scope backfill: %w", err)
 		}
 		args.EntityID = entityID.String()

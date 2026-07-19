@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -35,6 +36,7 @@ type Pending struct {
 	closed      bool
 	closeErr    error
 	published   bool
+	exchanged   bool
 	done        bool
 	lockKey     string
 	lock        *destinationLockEntry
@@ -47,7 +49,7 @@ func Create(destination string, mode fs.FileMode) (*Pending, error) {
 		return nil, errors.New("atomicfile: empty destination")
 	}
 	dir := filepath.Dir(destination)
-	file, err := os.CreateTemp(dir, "."+filepath.Base(destination)+".*.tmp")
+	file, err := os.CreateTemp(dir, ".heya-atomic-"+filepath.Base(destination)+".*.tmp")
 	if err != nil {
 		return nil, fmt.Errorf("atomicfile: create temporary file: %w", err)
 	}
@@ -126,7 +128,7 @@ func (p *Pending) Publish() error {
 	p.lock = acquireDestinationLock(p.lockKey)
 
 	if _, err := os.Stat(p.destination); err == nil {
-		backup, backupErr := reservePath(filepath.Dir(p.destination), "."+filepath.Base(p.destination)+".*.previous")
+		backup, backupErr := reservePath(filepath.Dir(p.destination), ".heya-atomic-"+filepath.Base(p.destination)+".*.previous")
 		if backupErr != nil {
 			p.unlock()
 			return fmt.Errorf("atomicfile: reserve backup: %w", backupErr)
@@ -152,6 +154,92 @@ func (p *Pending) Publish() error {
 	return nil
 }
 
+// PublishIfAbsent atomically publishes the completed temporary file only when
+// destination does not already exist. It never replaces source data that may
+// have appeared after the caller began staging its output.
+//
+// The temporary and destination live in the same directory, so a hard link is
+// both atomic and no-clobber: the kernel either installs the complete inode at
+// destination or reports that another file already owns the name.
+func (p *Pending) PublishIfAbsent() (bool, error) {
+	if p == nil || p.done {
+		return false, errors.New("atomicfile: publication already completed")
+	}
+	if p.published {
+		return false, errors.New("atomicfile: file already published")
+	}
+	if !p.closed {
+		return false, errors.New("atomicfile: close temporary file before publishing")
+	}
+	if p.closeErr != nil {
+		return false, fmt.Errorf("atomicfile: temporary file close failed: %w", p.closeErr)
+	}
+
+	p.lockKey = filepath.Clean(p.destination)
+	p.lock = acquireDestinationLock(p.lockKey)
+	if err := os.Link(p.temporary, p.destination); err != nil {
+		p.unlock()
+		if errors.Is(err, fs.ErrExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("atomicfile: publish without replacement: %w", err)
+	}
+	if err := os.Remove(p.temporary); err != nil {
+		// Undo the destination link while the in-process destination lock is
+		// still held. Deferred Rollback then owns the original temporary.
+		removeErr := os.Remove(p.destination)
+		p.unlock()
+		return false, errors.Join(fmt.Errorf("atomicfile: remove linked temporary: %w", err), removeErr)
+	}
+	p.published = true
+	return true, nil
+}
+
+// Exchange atomically swaps the completed temporary file with an existing
+// destination. After it returns, destination contains the staged bytes and
+// TempPath contains the exact predecessor. Keeping the predecessor addressable
+// lets a caller validate it before Commit or restore it with Rollback.
+func (p *Pending) Exchange() error {
+	if p == nil || p.done {
+		return errors.New("atomicfile: publication already completed")
+	}
+	if p.published {
+		return errors.New("atomicfile: file already published")
+	}
+	if !p.closed {
+		return errors.New("atomicfile: close temporary file before publishing")
+	}
+	if p.closeErr != nil {
+		return fmt.Errorf("atomicfile: temporary file close failed: %w", p.closeErr)
+	}
+
+	p.lockKey = filepath.Clean(p.destination)
+	p.lock = acquireDestinationLock(p.lockKey)
+	if err := exchangePaths(p.temporary, p.destination); err != nil {
+		p.unlock()
+		return fmt.Errorf("atomicfile: exchange publication: %w", err)
+	}
+	p.published = true
+	p.exchanged = true
+	return nil
+}
+
+// RelocateExchangedPrevious moves the displaced predecessor to another unique
+// name in the same directory while retaining Rollback/Commit ownership.
+func (p *Pending) RelocateExchangedPrevious(path string) error {
+	if p == nil || !p.exchanged || !p.published || p.done {
+		return errors.New("atomicfile: no exchanged predecessor to relocate")
+	}
+	if filepath.Clean(filepath.Dir(path)) != filepath.Clean(filepath.Dir(p.temporary)) {
+		return errors.New("atomicfile: predecessor path must share temporary directory")
+	}
+	if err := os.Rename(p.temporary, path); err != nil {
+		return fmt.Errorf("atomicfile: relocate exchanged predecessor: %w", err)
+	}
+	p.temporary = path
+	return nil
+}
+
 // Commit accepts the published file and removes its rollback backup.
 func (p *Pending) Commit() error {
 	if p == nil || p.done {
@@ -160,7 +248,11 @@ func (p *Pending) Commit() error {
 	if !p.published {
 		return errors.New("atomicfile: cannot commit unpublished file")
 	}
-	err := removeIfPresent(p.backup)
+	cleanupPath := p.backup
+	if p.exchanged {
+		cleanupPath = p.temporary
+	}
+	err := removeIfPresent(cleanupPath)
 	if err == nil {
 		p.backup = ""
 	}
@@ -185,6 +277,12 @@ func (p *Pending) Rollback() error {
 			err = closeErr
 		}
 		err = errors.Join(err, removeIfPresent(p.temporary))
+	} else if p.exchanged {
+		if exchangeErr := exchangePaths(p.temporary, p.destination); exchangeErr != nil {
+			err = fmt.Errorf("atomicfile: restore exchanged destination: %w", exchangeErr)
+		} else {
+			err = removeIfPresent(p.temporary)
+		}
 	} else if p.backup != "" {
 		if renameErr := os.Rename(p.backup, p.destination); renameErr != nil {
 			err = fmt.Errorf("atomicfile: restore destination: %w", renameErr)
@@ -199,6 +297,44 @@ func (p *Pending) Rollback() error {
 	}
 	p.unlock()
 	return err
+}
+
+// ExchangePaths atomically swaps two existing directory entries. It is used
+// by crash reconciliation when a process died after publishing a replacement
+// but before proving whether the displaced predecessor was Heya-owned.
+func ExchangePaths(left, right string) error {
+	if left == "" || right == "" {
+		return errors.New("atomicfile: exchange path is empty")
+	}
+	if filepath.Clean(filepath.Dir(left)) != filepath.Clean(filepath.Dir(right)) {
+		return errors.New("atomicfile: exchanged paths must share a directory")
+	}
+	return exchangePaths(left, right)
+}
+
+// SyncParent flushes a publication's directory entry. The staged file itself
+// is synced before publication; syncing the parent closes the power-loss gap
+// before durable provenance is finalized.
+func SyncParent(path string) error {
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("atomicfile: open parent directory: %w", err)
+	}
+	defer func() { _ = dir.Close() }()
+	if err := dir.Sync(); err != nil {
+		return fmt.Errorf("atomicfile: sync parent directory: %w", err)
+	}
+	return nil
+}
+
+// IsInternalPath recognizes only temporary names minted by this package or by
+// the generated-sidecar exchange protocol. Watchers may ignore these hidden
+// implementation entries; final destination events remain independently
+// signature-guarded.
+func IsInternalPath(path string) bool {
+	name := filepath.Base(path)
+	return strings.HasPrefix(name, ".heya-atomic-") && (strings.HasSuffix(name, ".tmp") || strings.HasSuffix(name, ".previous")) ||
+		strings.HasPrefix(name, ".heya-generated-") && strings.HasSuffix(name, ".previous")
 }
 
 func (p *Pending) unlock() {
@@ -232,6 +368,32 @@ func Write(destination string, mode fs.FileMode, write func(io.Writer) error) (r
 	return pending.Commit()
 }
 
+// WriteIfAbsent stages complete bytes and atomically installs them without
+// replacing an existing destination. created is false when another file owns
+// destination; in that case the existing file is left untouched.
+func WriteIfAbsent(destination string, mode fs.FileMode, write func(io.Writer) error) (created bool, returnErr error) {
+	if write == nil {
+		return false, errors.New("atomicfile: nil writer")
+	}
+	pending, err := Create(destination, mode)
+	if err != nil {
+		return false, err
+	}
+	defer func() { returnErr = errors.Join(returnErr, pending.Rollback()) }()
+
+	if err := write(pending); err != nil {
+		return false, err
+	}
+	if err := pending.Close(); err != nil {
+		return false, err
+	}
+	created, err = pending.PublishIfAbsent()
+	if err != nil || !created {
+		return created, err
+	}
+	return true, pending.Commit()
+}
+
 // Copy atomically replaces destination with source.
 func Copy(destination string, mode fs.FileMode, source io.Reader) (int64, error) {
 	var size int64
@@ -241,6 +403,16 @@ func Copy(destination string, mode fs.FileMode, source io.Reader) (int64, error)
 		return err
 	})
 	return size, err
+}
+
+// CopyIfAbsent is Copy's no-clobber counterpart.
+func CopyIfAbsent(destination string, mode fs.FileMode, source io.Reader) (size int64, created bool, err error) {
+	created, err = WriteIfAbsent(destination, mode, func(writer io.Writer) error {
+		var copyErr error
+		size, copyErr = io.Copy(writer, source)
+		return copyErr
+	})
+	return size, created, err
 }
 
 // Reserve creates and closes a unique same-directory temporary file for a

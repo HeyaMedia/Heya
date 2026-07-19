@@ -229,9 +229,10 @@ var libraryRemoveCmd = &cobra.Command{
 var libraryRematchReviewsCmd = &cobra.Command{
 	Use:     "rematch-reviews",
 	Aliases: []string{"rematch-music-reviews"},
-	Short:   "Replay retained review rows through the current matcher",
-	Long: "Enqueues only the normal metadata-search stage for entities currently in Needs Review. " +
-		"It reuses retained local analysis artifacts, so it does not walk or re-analyze the library.",
+	Short:   "Rematch review rows using current, source-valid analysis",
+	Long: "Replays a retained local analysis only when it was produced by the current scanner rules " +
+		"and every captured source file is unchanged. Stale revisions, removed sidecars, and replaced " +
+		"media are sent through fresh scoped analysis instead of resurrecting old evidence.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id, _ := cmd.Flags().GetInt64("id")
 		limit, _ := cmd.Flags().GetInt32("limit")
@@ -260,8 +261,40 @@ var libraryRematchReviewsCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
+			staleByScope := make(map[string]bool)
+			reanalysisScopes := make(map[string][]string)
+			for _, row := range rows {
+				scopeKey := strings.Join(row.ScopePaths, "\x00")
+				if staleByScope[scopeKey] {
+					continue
+				}
+				artifact, artifactErr := q.GetScannerEntityArtifact(ctx, row.AnalysisArtifactID)
+				if artifactErr != nil {
+					return fmt.Errorf("load retained analysis artifact %d: %w", row.AnalysisArtifactID, artifactErr)
+				}
+				if replayErr := scanner.ValidateScannerAnalysisArtifactReplayWithDB(ctx, app.DBPool(), artifact); replayErr != nil {
+					staleByScope[scopeKey] = true
+					reanalysisScopes[scopeKey] = row.ScopePaths
+					continue
+				}
+			}
+
+			reanalyzed := 0
+			for _, scopePaths := range reanalysisScopes {
+				if err := worker.EnqueueProcessLibraryScan(ctx, app.RiverClient(), app.DBPool(), worker.ProcessLibraryScanArgs{
+					LibraryID: lib.ID, MediaType: lib.MediaType, ScopePaths: scopePaths, Force: true,
+				}, worker.PriorityMatch, "rematch_reviews_stale_analysis"); err != nil {
+					return fmt.Errorf("enqueue fresh scanner analysis after %d scopes: %w", reanalyzed, err)
+				}
+				reanalyzed++
+			}
+
 			enqueued := 0
 			for _, row := range rows {
+				scopeKey := strings.Join(row.ScopePaths, "\x00")
+				if staleByScope[scopeKey] {
+					continue
+				}
 				if err := worker.EnqueueSearchLibraryMetadata(ctx, app.RiverClient(), app.DBPool(), worker.SearchLibraryMetadataArgs{
 					LibraryID:          row.LibraryID,
 					MediaType:          lib.MediaType,
@@ -274,7 +307,7 @@ var libraryRematchReviewsCmd = &cobra.Command{
 				}
 				enqueued++
 			}
-			ui.Success("Enqueued %d review rematches for %s", enqueued, lib.Name)
+			ui.Success("Enqueued %d review rematches and %d fresh scope analyses for %s", enqueued, reanalyzed, lib.Name)
 			return nil
 		})
 	},

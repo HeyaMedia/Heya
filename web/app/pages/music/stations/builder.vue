@@ -96,7 +96,7 @@
             :aria-label="`Search for an ${addKind} to add`"
             role="combobox"
             aria-autocomplete="list"
-            :aria-expanded="autocompleteResults.length > 0"
+            :aria-expanded="autocompleteResults.length > 0 || acLoading || acNoResults || acError"
             aria-controls="ms-mb-ac-list"
             :aria-activedescendant="acActiveIdx !== null ? `ms-mb-ac-opt-${acActiveIdx}` : undefined"
             autocomplete="off"
@@ -107,7 +107,17 @@
         </div>
 
         <!-- Autocomplete dropdown -->
-        <ul v-if="autocompleteResults.length" id="ms-mb-ac-list" class="ms-mb-ac" role="listbox" aria-label="Search results">
+        <ul
+          v-if="autocompleteResults.length || acLoading || acNoResults || acError"
+          id="ms-mb-ac-list"
+          class="ms-mb-ac"
+          role="listbox"
+          aria-label="Search results"
+        >
+          <li v-if="acLoading" class="ms-mb-ac-row ms-mb-ac-status" role="presentation">
+            <Icon name="loading" :size="14" class="ms-mb-ac-spin" />
+            <span>Searching…</span>
+          </li>
           <li
             v-for="(r, i) in autocompleteResults"
             :id="`ms-mb-ac-opt-${i}`"
@@ -125,6 +135,12 @@
               <div v-if="r.sub" class="ms-mb-ac-sub">{{ r.sub }}</div>
             </div>
             <Icon name="plus" :size="14" class="ms-mb-ac-add" />
+          </li>
+          <li v-if="acNoResults" class="ms-mb-ac-row ms-mb-ac-status" role="presentation">
+            <span>No matches</span>
+          </li>
+          <li v-if="acError" class="ms-mb-ac-row ms-mb-ac-status ms-mb-ac-status-error" role="presentation">
+            <span>Search failed — try again</span>
           </li>
         </ul>
       </template>
@@ -162,6 +178,11 @@
         <label class="ms-mb-label">Tracks</label>
         <input v-model.number="trackCount" type="range" min="10" max="100" step="5" class="ms-mb-range" aria-label="Number of tracks" />
         <span class="ms-mb-count">{{ trackCount }}</span>
+      </div>
+      <div class="ms-mb-control" title="How tightly the mix sticks to the seeds' genres">
+        <label class="ms-mb-label">Genre pull</label>
+        <input v-model.number="genrePull" type="range" min="0" max="100" step="5" class="ms-mb-range" aria-label="Genre pull strength" />
+        <span class="ms-mb-count">{{ genrePullLabel }}</span>
       </div>
       <button
         class="ms-mb-build-btn"
@@ -289,47 +310,77 @@ const seeds = ref<Seed[]>([])
 
 const trackCount = ref(30)
 
+// Genre-stickiness slider (manual build only) — sent as genre_affinity
+// (0..1) on POST /api/music/radio. 0 is an exact additive no-op server-side.
+const genrePull = ref(50)
+const genrePullLabel = computed(() => {
+  const v = genrePull.value
+  if (v <= 24) return 'Loose'
+  if (v <= 74) return 'Balanced'
+  return 'Strict'
+})
+
 // --- Autocomplete (when addKind is track/artist/album) ---
 interface AcRow { id: number; title: string; sub: string; cover: string | null }
 
-const autocompleteQuery = useQuery({
-  key: ['mix-builder', 'autocomplete', addKind, searchQDebounced],
+// Maps a seed kind to the single-bucket /api/search `type` param. 'text'
+// (vibe) never autocompletes against the library.
+function acSearchType(kind: SeedKind): 'music' | 'albums' | 'tracks' | null {
+  if (kind === 'artist') return 'music'
+  if (kind === 'album') return 'albums'
+  if (kind === 'track') return 'tracks'
+  return null
+}
+
+interface SearchArtistItem { id: number; public_id?: string; title: string }
+interface SearchAlbumItem { id: number; title: string; year: string; artist_name: string; artist_slug: string; slug: string }
+interface SearchTrackItem { id: number; title: string; album_title: string; artist_name: string; artist_slug: string; album_slug: string }
+
+// Wrap the WHOLE options object in a getter — Colada's key/enabled resolver
+// never dereferences refs nested inside a plain options object, so a bare
+// `key: [..., addKind, searchQDebounced]` array stops re-deriving after the
+// first fetch. Wrapping in `() => ({ ... })` and unwrapping `.value` inside
+// mirrors useSearch.ts's useQuickSearch and AmbientBackdrop's poolQuery.
+const autocompleteQuery = useQuery(() => ({
+  key: ['mix-builder', 'autocomplete', addKind.value, searchQDebounced.value],
   query: async () => {
-    if (searchQDebounced.value.length < 2) return [] as AcRow[]
-    const r = await $heya('/api/search/quick', { query: { q: searchQDebounced.value } }) as unknown as {
-      buckets: {
-        music?: { items: { id: number; public_id?: string; title: string }[] }
-        albums?: { items: { id: number; title: string; year: string; artist_name: string; artist_slug: string; slug: string }[] }
-        tracks?: { items: { id: number; title: string; album_title: string; artist_name: string; artist_slug: string; album_slug: string }[] }
-      }
-    }
-    if (addKind.value === 'artist') {
-      return (r.buckets?.music?.items ?? []).slice(0, 8).map((a) => ({
+    const type = acSearchType(addKind.value)
+    if (!type || searchQDebounced.value.length < 2) return [] as AcRow[]
+    const r = await $heya('/api/search', {
+      query: { q: searchQDebounced.value, type: type as any, limit: 8 },
+    }) as unknown as { items: unknown[]; total: number }
+    if (type === 'music') {
+      return (r.items as SearchArtistItem[]).slice(0, 8).map((a) => ({
         id: a.id, title: a.title, sub: '', cover: usePosterUrl(a),
       } as AcRow))
     }
-    if (addKind.value === 'album') {
-      return (r.buckets?.albums?.items ?? []).slice(0, 8).map((al) => ({
+    if (type === 'albums') {
+      return (r.items as SearchAlbumItem[]).slice(0, 8).map((al) => ({
         id: al.id,
         title: al.title,
         sub: `${al.artist_name}${al.year ? ' · ' + al.year : ''}`,
         cover: useAlbumCoverUrl(al.artist_slug, al.slug),
       } as AcRow))
     }
-    if (addKind.value === 'track') {
-      return (r.buckets?.tracks?.items ?? []).slice(0, 8).map((t) => ({
-        id: t.id,
-        title: t.title,
-        sub: `${t.artist_name} · ${t.album_title}`,
-        cover: useAlbumCoverUrl(t.artist_slug, t.album_slug),
-      } as AcRow))
-    }
-    return [] as AcRow[]
+    return (r.items as SearchTrackItem[]).slice(0, 8).map((t) => ({
+      id: t.id,
+      title: t.title,
+      sub: `${t.artist_name} · ${t.album_title}`,
+      cover: useAlbumCoverUrl(t.artist_slug, t.album_slug),
+    } as AcRow))
   },
-  enabled: () => addKind.value !== 'text' && searchQDebounced.value.length >= 2,
+  enabled: addKind.value !== 'text' && searchQDebounced.value.length >= 2,
+  placeholderData: (prev: AcRow[] | undefined) => prev,
   staleTime: 1000 * 30,
-})
+}))
 const autocompleteResults = computed<AcRow[]>(() => autocompleteQuery.data.value ?? [])
+
+// Dropdown affordances — only meaningful while there's an active >=2-char
+// query for a resolvable kind (never for the free-text vibe tab).
+const acHasQuery = computed(() => acSearchType(addKind.value) !== null && searchQDebounced.value.length >= 2)
+const acLoading = computed(() => acHasQuery.value && autocompleteQuery.isPending.value)
+const acNoResults = computed(() => acHasQuery.value && autocompleteQuery.status.value === 'success' && autocompleteResults.value.length === 0)
+const acError = computed(() => acHasQuery.value && autocompleteQuery.status.value === 'error')
 
 // Keyboard nav over the autocomplete dropdown (combobox/listbox pattern) —
 // arrow keys move a highlighted option, Enter adds it. Mirrors search.vue's
@@ -477,6 +528,7 @@ async function buildMix() {
       limit: trackCount.value,
       seed: payloadSeeds[0] as never,
       seeds: payloadSeeds as never,
+      genre_affinity: genrePull.value / 100,
     }
     const res = await $heya('/api/music/radio', {
       method: 'POST',
@@ -808,6 +860,23 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
+/* Dropdown status rows — searching / no-matches / error. Non-interactive,
+   so they drop the pointer cursor + hover wash the real option rows get. */
+.ms-mb-ac-row.ms-mb-ac-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 8px;
+  color: var(--fg-3);
+  font-size: 12px;
+  cursor: default;
+}
+.ms-mb-ac-row.ms-mb-ac-status:hover { background: transparent; }
+.ms-mb-ac-status-error { color: var(--bad); }
+.ms-mb-ac-spin { animation: ms-mb-ac-spin 0.8s linear infinite; }
+@keyframes ms-mb-ac-spin { to { transform: rotate(360deg); } }
+
 /* Chips */
 .ms-mb-chips {
   display: flex; align-items: flex-start; gap: 12px;
@@ -900,6 +969,7 @@ function formatTotalDuration(rows: RichTrackRow[]): string {
   font-size: 13px;
   font-weight: 700;
   color: var(--gold);
+  white-space: nowrap;
 }
 .ms-mb-build-btn {
   display: inline-flex; align-items: center; gap: 8px;

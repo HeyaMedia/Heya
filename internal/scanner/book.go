@@ -48,7 +48,9 @@ var (
 	bookYearTailRE      = regexp.MustCompile(`(?i)\s*[\[(]((?:18|19|20)\d{2})[\])]\s*(?:[-_. ]*(?:epub|pdf|mobi|azw3?|cbr|cbz|djvu|audiobook|unabridged|retail|ebook).*)?$`)
 	bookBracketNoiseRE  = regexp.MustCompile(`(?i)\s*[\[(](?:epub|pdf|mobi|azw3?|cbr|cbz|djvu|retail|ebook|audiobook|unabridged|audible|m4b|mp3|m4a|flac|aac)[\])]\s*`)
 	bookReleaseNoiseRE  = regexp.MustCompile(`(?i)\b(?:epub|pdf|mobi|azw3?|cbr|cbz|djvu|retail|ebook|audiobook|unabridged|audible|m4b|mp3|m4a|flac|aac)\b`)
-	bookChapterNameRE   = regexp.MustCompile(`(?i)^(?:chapter|chap|part|cd|disc|track)\s*[\d._ -]+$`)
+	bookChapterNameRE   = regexp.MustCompile(`(?i)^(?:(?:chapter|chap|part|cd|disc|track)\s*[\d._ -]+(?:[-–—:]\s*.+)?|prologue|epilogue|introduction|foreword|afterword)$`)
+	bookNumberedTrackRE = regexp.MustCompile(`(?i)^\d{1,4}(?:\s*[-–—:._]\s*.+)?$`)
+	bookDiscContainerRE = regexp.MustCompile(`(?i)^(?:cd|disc|disk)\s*0*\d+$`)
 	bookDuplicateDashRE = regexp.MustCompile(`\s+[-–—]\s+$`)
 )
 
@@ -56,6 +58,7 @@ func AnalyzeBooks(ctx context.Context, inv Inventory, emit Emitter) ([]BookPlan,
 	plansByKey := map[string]*BookPlan{}
 	for _, root := range inv.Roots {
 		assetsByDir := groupBookAssets(root.Files)
+		audioFilesByDir := countAudiobookFilesByDir(root.Files)
 		for _, file := range root.Files {
 			if err := ctx.Err(); err != nil {
 				return bookPlansFromMap(plansByKey), err
@@ -63,7 +66,7 @@ func AnalyzeBooks(ctx context.Context, inv Inventory, emit Emitter) ([]BookPlan,
 			if file.Class != ClassPrimaryMedia || !isBookScannerMediaFile(file) {
 				continue
 			}
-			identity, ok := parseBookIdentity(file)
+			identity, ok := parseBookIdentityWithSiblingCount(file, audioFilesByDir[audiobookWorkRelDir(file)])
 			if !ok {
 				emit.Emit(Event{
 					Event:    "book.file.unplanned",
@@ -154,6 +157,10 @@ func bookPlansFromMap(plansByKey map[string]*BookPlan) []BookPlan {
 }
 
 func parseBookIdentity(file InventoryFile) (bookIdentity, bool) {
+	return parseBookIdentityWithSiblingCount(file, 1)
+}
+
+func parseBookIdentityWithSiblingCount(file InventoryFile, siblingAudioFiles int) (bookIdentity, bool) {
 	format := "book"
 	if mediafile.IsAudioExt(file.Ext) {
 		format = "audiobook"
@@ -167,7 +174,9 @@ func parseBookIdentity(file InventoryFile) (bookIdentity, bool) {
 	var title, author, year, source string
 	var confidence float64
 	if format == "audiobook" {
-		title, author, year, source, confidence = parseAudiobookPathIdentity(segments)
+		var discContainer bool
+		segments, discContainer = stripAudiobookDiscContainer(segments)
+		title, author, year, source, confidence = parseAudiobookPathIdentity(segments, siblingAudioFiles, discContainer)
 	} else {
 		title, author, year, source, confidence = parseEbookPathIdentity(segments)
 	}
@@ -245,7 +254,8 @@ func parseEbookPathIdentity(segments []string) (title, author, year, source stri
 	return title, author, year, source, confidence
 }
 
-func parseAudiobookPathIdentity(segments []string) (title, author, year, source string, confidence float64) {
+func parseAudiobookPathIdentity(segments []string, siblingAudioFiles int, discContainer bool) (title, author, year, source string, confidence float64) {
+	leaf := strings.TrimSuffix(segments[len(segments)-1], filepath.Ext(segments[len(segments)-1]))
 	parent := ""
 	grandparent := ""
 	if len(segments) >= 2 {
@@ -260,19 +270,99 @@ func parseAudiobookPathIdentity(segments []string) (title, author, year, source 
 			return t, a, y, "audiobook_folder_author_title", bookConfidence(t, a, y)
 		}
 	}
+	// A directory containing multiple audio files is one audiobook work, not a
+	// collection of books named "01 - Prologue", "002", and so on. Use the
+	// containing folder as the work title and only infer the bounded outer
+	// author segment; this is the common Author/Title/chapters layout.
+	if siblingAudioFiles > 1 && parent != "" {
+		t, y := splitBookTitleYear(parent)
+		switch {
+		case len(segments) == 2:
+			return t, "", y, "audiobook_folder", minFloat64(bookConfidence(t, "", y), 0.55)
+		case len(segments) == 3:
+			a := cleanBookValue(segments[0])
+			return t, a, y, "audiobook_author_folder", bookConfidence(t, a, y)
+		case len(segments) == 4:
+			a := cleanBookValue(segments[0])
+			return t, a, y, "audiobook_author_series_folder", minFloat64(bookConfidence(t, a, y), 0.72)
+		default:
+			return t, "", y, "audiobook_nested_folder", minFloat64(bookConfidence(t, "", y), 0.55)
+		}
+	}
+	leafTitle, leafYear := splitBookTitleYear(leaf)
+	cleanLeaf := cleanBookValue(leaf)
+	leafIsChapter := bookChapterNameRE.MatchString(cleanLeaf) || ((siblingAudioFiles > 1 || discContainer) && len(segments) >= 3 && bookNumberedTrackRE.MatchString(cleanLeaf))
+
+	// The library root is already stripped from RelPath, so Author/Title.m4b
+	// is an unambiguous two-segment layout. Previously it fell through to a
+	// title-only filename identity and sent every such audiobook to review.
+	if len(segments) == 2 && parent != "" && !looksLikeBookContainer(parent) && !leafIsChapter {
+		return leafTitle, parent, leafYear, "audiobook_author_file", bookConfidence(leafTitle, parent, leafYear)
+	}
+
+	// Bounded series layout: Author/Series/Title/Chapter. The former generic
+	// parent/grandparent rule called Series the author. Exactly four relative
+	// segments give us a safe outer author boundary; deeper nesting remains
+	// intentionally uncertain instead of inventing an identity.
+	if leafIsChapter && len(segments) == 4 {
+		t, y := splitBookTitleYear(parent)
+		a := cleanBookValue(segments[0])
+		return t, a, y, "audiobook_author_series_folder", minFloat64(bookConfidence(t, a, y), 0.72)
+	}
+	if leafIsChapter && len(segments) > 4 {
+		t, y := splitBookTitleYear(parent)
+		return t, "", y, "audiobook_nested_folder", minFloat64(bookConfidence(t, "", y), 0.55)
+	}
+
+	// Author/Series/Title.m4b: use the leaf as the work and the bounded outer
+	// segment as author. Confidence stays review-level because the middle
+	// folder's role is inferred rather than tagged.
+	if !leafIsChapter && len(segments) == 3 && grandparent != "" {
+		parentTitle, _ := splitBookTitleYear(parent)
+		if normalizeIdentityTitle(parentTitle) != normalizeIdentityTitle(leafTitle) {
+			return leafTitle, grandparent, leafYear, "audiobook_author_series_file", minFloat64(bookConfidence(leafTitle, grandparent, leafYear), 0.72)
+		}
+	}
 	if parent != "" && grandparent != "" {
 		t, y := splitBookTitleYear(parent)
 		if t != "" {
 			return t, grandparent, y, "audiobook_author_folder", bookConfidence(t, grandparent, y)
 		}
 	}
-	leaf := strings.TrimSuffix(segments[len(segments)-1], filepath.Ext(segments[len(segments)-1]))
 	a, t, y, ok := splitBookAuthorTitleYear(leaf)
 	if ok {
 		return t, a, y, "audiobook_filename_author_title", bookConfidence(t, a, y)
 	}
 	t, y = splitBookTitleYear(leaf)
 	return t, "", y, "audiobook_filename", bookConfidence(t, "", y)
+}
+
+func countAudiobookFilesByDir(files []InventoryFile) map[string]int {
+	counts := make(map[string]int)
+	for _, file := range files {
+		if file.Class == ClassPrimaryMedia && mediafile.IsAudioExt(file.Ext) {
+			counts[audiobookWorkRelDir(file)]++
+		}
+	}
+	return counts
+}
+
+func audiobookWorkRelDir(file InventoryFile) string {
+	dir := filepath.Dir(file.RelPath)
+	if bookDiscContainerRE.MatchString(cleanBookValue(filepath.Base(dir))) {
+		dir = filepath.Dir(dir)
+	}
+	return filepath.Clean(dir)
+}
+
+func stripAudiobookDiscContainer(segments []string) ([]string, bool) {
+	if len(segments) < 3 || !bookDiscContainerRE.MatchString(cleanBookValue(segments[len(segments)-2])) {
+		return segments, false
+	}
+	out := make([]string, 0, len(segments)-1)
+	out = append(out, segments[:len(segments)-2]...)
+	out = append(out, segments[len(segments)-1])
+	return out, true
 }
 
 func splitBookAuthorTitleYear(value string) (author, title, year string, ok bool) {
@@ -349,8 +439,8 @@ func bookIdentityIssues(title, author, year string) []string {
 func bookIdentityKey(author, title, year, format string) string {
 	parts := []string{
 		firstNonEmpty(format, "book"),
-		normalizeSearchTitle(author),
-		normalizeSearchTitle(title),
+		normalizeIdentityTitle(author),
+		normalizeIdentityTitle(title),
 		year,
 	}
 	return "book:" + strings.Join(parts, "|")
@@ -390,7 +480,7 @@ func isEbookExt(ext string) bool {
 func groupBookAssets(files []InventoryFile) map[string][]BookAssetPlan {
 	out := map[string][]BookAssetPlan{}
 	for _, file := range files {
-		if file.Class != ClassArtwork {
+		if file.Generated || file.Class != ClassArtwork {
 			continue
 		}
 		assetType := file.AssetType

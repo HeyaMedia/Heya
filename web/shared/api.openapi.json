@@ -3138,6 +3138,23 @@
         ],
         "type": "object"
       },
+      "BrowseBucketArtist": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "public_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "public_id"
+        ],
+        "type": "object"
+      },
       "CancelBody": {
         "additionalProperties": false,
         "properties": {
@@ -5839,6 +5856,15 @@
       "GenreBucket": {
         "additionalProperties": false,
         "properties": {
+          "artists": {
+            "items": {
+              "$ref": "#/components/schemas/BrowseBucketArtist"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "label": {
             "type": "string"
           },
@@ -5857,7 +5883,8 @@
           "name",
           "label",
           "parent",
-          "track_count"
+          "track_count",
+          "artists"
         ],
         "type": "object"
       },
@@ -5945,38 +5972,6 @@
         "required": [
           "name",
           "score"
-        ],
-        "type": "object"
-      },
-      "GenreTracksBody": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": [
-              "https://example.com/schemas/GenreTracksBody.json"
-            ],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ListTracksByGenreRow"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          },
-          "total": {
-            "format": "int64",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "items",
-          "total"
         ],
         "type": "object"
       },
@@ -13067,6 +13062,15 @@
       "MoodBucket": {
         "additionalProperties": false,
         "properties": {
+          "artists": {
+            "items": {
+              "$ref": "#/components/schemas/BrowseBucketArtist"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "key": {
             "type": "string"
           },
@@ -13086,7 +13090,8 @@
           "key",
           "label",
           "threshold",
-          "track_count"
+          "track_count",
+          "artists"
         ],
         "type": "object"
       },
@@ -13114,38 +13119,6 @@
         },
         "required": [
           "items"
-        ],
-        "type": "object"
-      },
-      "MoodTracksBody": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": [
-              "https://example.com/schemas/MoodTracksBody.json"
-            ],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ListTracksByMoodRow"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          },
-          "total": {
-            "format": "int64",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "items",
-          "total"
         ],
         "type": "object"
       },
@@ -13758,6 +13731,132 @@
         ],
         "type": "object"
       },
+      "MusicListPageListTracksByGenreRow": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MusicListPageListTracksByGenreRow.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ListTracksByGenreRow"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "limit": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "offset": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "type": "object"
+      },
+      "MusicListPageListTracksByMoodRow": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MusicListPageListTracksByMoodRow.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ListTracksByMoodRow"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "limit": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "offset": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "type": "object"
+      },
+      "MusicListPageListTracksByTempoBandRow": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MusicListPageListTracksByTempoBandRow.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ListTracksByTempoBandRow"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "limit": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "offset": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "type": "object"
+      },
       "MusicListPageListUserLovedAlbumsRow": {
         "additionalProperties": false,
         "properties": {
@@ -14037,6 +14136,9 @@
             "type": "string"
           },
           "seed_artist_slug": {
+            "type": "string"
+          },
+          "seed_genre": {
             "type": "string"
           },
           "slug": {
@@ -16184,6 +16286,11 @@
               "array",
               "null"
             ]
+          },
+          "genre_affinity": {
+            "description": "0..1 knob for how strongly candidates must share the seed's genre(s) to rank well. 0 (default) is a no-op; near 1 pushes zero-genre-overlap candidates to the bottom and, at \u003e=0.9, drops them once enough overlapping candidates remain to fill the limit.",
+            "format": "double",
+            "type": "number"
           },
           "limit": {
             "description": "Number of tracks to return",
@@ -20133,6 +20240,15 @@
       "TempoBucket": {
         "additionalProperties": false,
         "properties": {
+          "artists": {
+            "items": {
+              "$ref": "#/components/schemas/BrowseBucketArtist"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "key": {
             "type": "string"
           },
@@ -20157,7 +20273,8 @@
           "label",
           "min_bpm",
           "max_bpm",
-          "track_count"
+          "track_count",
+          "artists"
         ],
         "type": "object"
       },
@@ -20185,38 +20302,6 @@
         },
         "required": [
           "items"
-        ],
-        "type": "object"
-      },
-      "TempoTracksBody": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": [
-              "https://example.com/schemas/TempoTracksBody.json"
-            ],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ListTracksByTempoBandRow"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          },
-          "total": {
-            "format": "int64",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "items",
-          "total"
         ],
         "type": "object"
       },
@@ -38602,7 +38687,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GenreTracksBody"
+                  "$ref": "#/components/schemas/MusicListPageListTracksByGenreRow"
                 }
               }
             },
@@ -38736,7 +38821,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MoodTracksBody"
+                  "$ref": "#/components/schemas/MusicListPageListTracksByMoodRow"
                 }
               }
             },
@@ -38870,7 +38955,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TempoTracksBody"
+                  "$ref": "#/components/schemas/MusicListPageListTracksByTempoBandRow"
                 }
               }
             },
@@ -39138,6 +39223,75 @@
           }
         ],
         "summary": "Personal mixes from taste, sonic similarity, and provider metadata",
+        "tags": [
+          "MusicHome"
+        ]
+      }
+    },
+    "/api/music/home/mixes-for-you/regenerate": {
+      "post": {
+        "operationId": "music-home-mixes-regenerate",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "max",
+            "schema": {
+              "default": 10,
+              "format": "int64",
+              "maximum": 10,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "tracks_per_mix",
+            "schema": {
+              "default": 30,
+              "format": "int64",
+              "maximum": 100,
+              "minimum": 5,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MixesBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Force a fresh personal mixes slate, ignoring today's stable rotation",
         "tags": [
           "MusicHome"
         ]
@@ -42339,7 +42493,9 @@
                 "podcast",
                 "radio",
                 "episode",
-                "person"
+                "person",
+                "albums",
+                "tracks"
               ],
               "examples": [
                 "movie"

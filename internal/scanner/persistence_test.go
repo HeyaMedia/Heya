@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/testutil"
@@ -305,8 +305,7 @@ func TestPersistScannerSearchEntitiesStoresNarrowArtifacts(t *testing.T) {
 		require.Empty(t, loaded.MovieSearch)
 	}
 
-	refs, err := PersistScannerSearchEntities(ctx, pool, lib, Options{ScopePaths: []string{"/media/movies"}}, result, 0)
-	require.NoError(t, err)
+	refs := persistTestScannerSearchEntities(t, ctx, pool, lib, Options{ScopePaths: []string{"/media/movies"}}, analysisRefs, result, 0)
 	require.Len(t, refs, 2)
 
 	var duneArtifactID int64
@@ -362,8 +361,7 @@ func TestMusicReviewRematchReusesRetainedAnalysisArtifact(t *testing.T) {
 	require.Len(t, analysisRefs, 1)
 
 	result.MusicSearch = []MusicSearchMatch{{Key: key, Query: MusicSearchQuery{Artist: "Uncertain"}, Reason: "ambiguous_or_low_confidence"}}
-	searchRefs, err := PersistScannerSearchEntities(ctx, pool, lib, Options{ScopePaths: scope}, result, 0)
-	require.NoError(t, err)
+	searchRefs := persistTestScannerSearchEntities(t, ctx, pool, lib, Options{ScopePaths: scope}, analysisRefs, result, 0)
 	require.Len(t, searchRefs, 1)
 	require.Equal(t, "needs_review", searchRefs[0].Entity.Status)
 
@@ -379,7 +377,7 @@ func TestMusicReviewRematchReusesRetainedAnalysisArtifact(t *testing.T) {
 	require.Equal(t, scope, rows[0].ScopePaths)
 }
 
-func TestCompactAppliedScannerArtifactsKeepsEntityState(t *testing.T) {
+func TestScannerEntityArtifactsCarryGenerationAndSourceLineage(t *testing.T) {
 	pool := testutil.SetupDB(t)
 	ctx := context.Background()
 	q := sqlc.New(pool)
@@ -427,8 +425,12 @@ func TestCompactAppliedScannerArtifactsKeepsEntityState(t *testing.T) {
 			Confidence: 1.0,
 		}},
 	}
-	refs, err := PersistScannerSearchEntities(ctx, pool, lib, Options{ScopePaths: scopePaths}, result, searchRun.ID)
+	analysisResult := result
+	analysisResult.MovieSearch = nil
+	analysisRefs, err := PersistScannerAnalysisEntities(ctx, pool, lib, Options{ScopePaths: scopePaths}, analysisResult)
 	require.NoError(t, err)
+	require.Len(t, analysisRefs, 1)
+	refs := persistTestScannerSearchEntities(t, ctx, pool, lib, Options{ScopePaths: scopePaths}, analysisRefs, result, searchRun.ID)
 	require.Len(t, refs, 1)
 	entityID := refs[0].Entity.ID
 	searchArtifactID := refs[0].Artifact.ID
@@ -441,8 +443,12 @@ func TestCompactAppliedScannerArtifactsKeepsEntityState(t *testing.T) {
 		Year:       "2021",
 		Detail:     &metadata.MediaDetail{Title: "Dune", Year: "2021"},
 	}}
-	fetchArtifact, err := PersistScannerFetchEntity(ctx, pool, entityID, result, fetchRun.ID)
+	current, err := BeginScannerEntityFetch(ctx, pool, entityID, searchArtifactID)
 	require.NoError(t, err)
+	require.True(t, current)
+	fetchArtifact, current, err := PersistScannerFetchEntity(ctx, pool, entityID, searchArtifactID, result, fetchRun.ID)
+	require.NoError(t, err)
+	require.True(t, current)
 
 	applyRun := createFinishedTestScanRun(t, ctx, q, lib, "apply")
 	result.MovieApply = []MovieApplyResult{{
@@ -453,8 +459,12 @@ func TestCompactAppliedScannerArtifactsKeepsEntityState(t *testing.T) {
 		ProviderID:  "heya:movie:tmdb:438631",
 		MediaItemID: 123,
 	}}
-	applyArtifact, err := PersistScannerApplyEntity(ctx, pool, entityID, result, applyRun.ID)
+	current, err = BeginScannerEntityApply(ctx, pool, entityID, fetchArtifact.ID)
 	require.NoError(t, err)
+	require.True(t, current)
+	applyArtifact, current, err := PersistScannerApplyEntity(ctx, pool, entityID, fetchArtifact.ID, result, applyRun.ID)
+	require.NoError(t, err)
+	require.True(t, current)
 
 	entity, err := q.GetScannerEntity(ctx, entityID)
 	require.NoError(t, err)
@@ -463,82 +473,14 @@ func TestCompactAppliedScannerArtifactsKeepsEntityState(t *testing.T) {
 	require.True(t, entity.MetadataArtifactID.Valid)
 	require.True(t, entity.ApplyArtifactID.Valid)
 
-	deletedArtifacts, err := q.CompactAppliedScannerArtifactsForEntity(ctx, entityID)
-	require.NoError(t, err)
-	require.EqualValues(t, 3, deletedArtifacts, "search + fetch + apply entity artifacts are compacted")
-
-	entity, err = q.GetScannerEntity(ctx, entityID)
-	require.NoError(t, err)
-	require.Equal(t, "applied", entity.Status)
-	require.Equal(t, "heya:movie:tmdb:438631", entity.ProviderID)
-	require.False(t, entity.SearchArtifactID.Valid)
-	require.False(t, entity.MetadataArtifactID.Valid)
-	require.False(t, entity.ApplyArtifactID.Valid)
-
-	_, err = q.GetScannerEntityArtifact(ctx, searchArtifactID)
-	require.Error(t, err)
-	_, err = q.GetScannerEntityArtifact(ctx, fetchArtifact.ID)
-	require.Error(t, err)
-	_, err = q.GetScannerEntityArtifact(ctx, applyArtifact.ID)
-	require.Error(t, err)
-}
-
-func TestCleanupStaleInFlightScannerEntitiesDeletesOrphanedMatchedScope(t *testing.T) {
-	pool := testutil.SetupDB(t)
-	ctx := context.Background()
-	q := sqlc.New(pool)
-
-	userID := testutil.TestUserID(t, pool)
-	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
-		Name:         "scanner-artifact-stale-in-flight-cleanup-test",
-		MediaType:    sqlc.MediaTypeMusic,
-		Paths:        []string{"/media/music"},
-		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
-		CreatedBy:    userID,
-		Settings:     []byte("{}"),
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
-
-	scopePaths := []string{"/media/music/No Longer Queued"}
-	scopeKey := scannerScopeKey(scopePaths)
-	searchRun := createFinishedTestScanRun(t, ctx, q, lib, "search")
-
-	entity, err := q.UpsertScannerEntity(ctx, sqlc.UpsertScannerEntityParams{
-		LibraryID:        lib.ID,
-		MediaType:        lib.MediaType,
-		ScopeKey:         scopeKey,
-		ScopePaths:       scopePaths,
-		IdentityKey:      "artist:no-longer-queued",
-		Title:            "No Longer Queued",
-		ProviderID:       "heya:artist:mbid:test",
-		Status:           "matched",
-		SearchScanRunID:  pgInt8(searchRun.ID),
-		SearchArtifactID: pgtype.Int8{},
-		ErrorMessage:     "",
-		Data:             []byte("{}"),
-	})
-	require.NoError(t, err)
-	entityArtifact, err := q.CreateScannerEntityArtifact(ctx, sqlc.CreateScannerEntityArtifactParams{
-		EntityID:      entity.ID,
-		Stage:         "search",
-		SchemaVersion: scanArtifactSchemaV1,
-		ScanRunID:     pgInt8(searchRun.ID),
-		Data:          []byte(`{"stage":"search"}`),
-	})
-	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `UPDATE scanner_entities SET search_artifact_id = $1, updated_at = now() - interval '72 hours' WHERE id = $2`, entityArtifact.ID, entity.ID)
-	require.NoError(t, err)
-
-	deleted, err := q.CleanupStaleInFlightScannerEntitiesOlderThan(ctx, pgtype.Timestamptz{Time: time.Now().Add(-48 * time.Hour), Valid: true})
-	require.NoError(t, err)
-	require.EqualValues(t, 1, deleted.EntitiesDeleted)
-	require.EqualValues(t, 1, deleted.EntityArtifactsDeleted)
-
-	_, err = q.GetScannerEntity(ctx, entity.ID)
-	require.Error(t, err)
-	_, err = q.GetScannerEntityArtifact(ctx, entityArtifact.ID)
-	require.Error(t, err)
+	require.Equal(t, entity.PipelineGeneration, analysisRefs[0].Artifact.PipelineGeneration)
+	require.Equal(t, entity.PipelineGeneration, refs[0].Artifact.PipelineGeneration)
+	require.Equal(t, entity.PipelineGeneration, fetchArtifact.PipelineGeneration)
+	require.Equal(t, entity.PipelineGeneration, applyArtifact.PipelineGeneration)
+	require.False(t, analysisRefs[0].Artifact.SourceArtifactID.Valid)
+	require.Equal(t, analysisRefs[0].Artifact.ID, refs[0].Artifact.SourceArtifactID.Int64)
+	require.Equal(t, refs[0].Artifact.ID, fetchArtifact.SourceArtifactID.Int64)
+	require.Equal(t, fetchArtifact.ID, applyArtifact.SourceArtifactID.Int64)
 }
 
 func TestPersistScannerSearchEntitiesHonorsDottedSceneDirectoryScope(t *testing.T) {
@@ -606,8 +548,11 @@ func TestPersistScannerSearchEntitiesHonorsDottedSceneDirectoryScope(t *testing.
 		}},
 	}
 
-	refs, err := PersistScannerSearchEntities(ctx, pool, lib, Options{ScopePaths: []string{sceneScope}}, result, 0)
+	analysisResult := result
+	analysisResult.MovieSearch = nil
+	analysisRefs, err := PersistScannerAnalysisEntities(ctx, pool, lib, Options{ScopePaths: []string{sceneScope}}, analysisResult)
 	require.NoError(t, err)
+	refs := persistTestScannerSearchEntities(t, ctx, pool, lib, Options{ScopePaths: []string{sceneScope}}, analysisRefs, result, 0)
 	require.Len(t, refs, 1)
 	require.Equal(t, "title_year:anora|2024", refs[0].IdentityKey)
 
@@ -618,6 +563,18 @@ func TestPersistScannerSearchEntitiesHonorsDottedSceneDirectoryScope(t *testing.
 	require.Len(t, loaded.Inventory.Roots, 1)
 	require.Len(t, loaded.Inventory.Roots[0].Files, 1)
 	require.Equal(t, "Anora.2024.1080p.BluRay.x264-PiGNUS/Anora.2024.1080p.BluRay.x264-PiGNUS.mkv", loaded.Inventory.Roots[0].Files[0].RelPath)
+}
+
+func persistTestScannerSearchEntities(t *testing.T, ctx context.Context, pool *pgxpool.Pool, lib sqlc.Library, opts Options, analysisRefs []ScannerEntityRef, result Result, scanRunID int64) []ScannerEntityRef {
+	t.Helper()
+	refs := make([]ScannerEntityRef, 0, len(analysisRefs))
+	for _, analysisRef := range analysisRefs {
+		ref, current, err := PersistScannerSearchEntity(ctx, pool, lib, opts, analysisRef.Entity.ID, analysisRef.Artifact.ID, result, scanRunID)
+		require.NoError(t, err)
+		require.True(t, current)
+		refs = append(refs, ref)
+	}
+	return refs
 }
 
 func createFinishedTestScanRun(t *testing.T, ctx context.Context, q *sqlc.Queries, lib sqlc.Library, mode string) sqlc.ScanRun {

@@ -919,6 +919,11 @@ export type BatchRatingsBody = {
     };
 };
 
+export type BrowseBucketArtist = {
+    id: number;
+    public_id: string;
+};
+
 export type CancelBody = {
     /**
      * A URL to the JSON Schema for this object.
@@ -1760,6 +1765,7 @@ export type FunnelBody = {
 };
 
 export type GenreBucket = {
+    artists: Array<BrowseBucketArtist> | null;
     label: string;
     name: string;
     parent: string;
@@ -1790,15 +1796,6 @@ export type GenreResult = {
 export type GenreScore = {
     name: string;
     score: number;
-};
-
-export type GenreTracksBody = {
-    /**
-     * A URL to the JSON Schema for this object.
-     */
-    readonly $schema?: string;
-    items: Array<ListTracksByGenreRow> | null;
-    total: number;
 };
 
 export type GetUserStateRequest = {
@@ -3562,6 +3559,7 @@ export type ModelArtifact = {
 };
 
 export type MoodBucket = {
+    artists: Array<BrowseBucketArtist> | null;
     key: string;
     label: string;
     threshold: number;
@@ -3574,15 +3572,6 @@ export type MoodBucketsBody = {
      */
     readonly $schema?: string;
     items: Array<MoodBucket> | null;
-};
-
-export type MoodTracksBody = {
-    /**
-     * A URL to the JSON Schema for this object.
-     */
-    readonly $schema?: string;
-    items: Array<ListTracksByMoodRow> | null;
-    total: number;
 };
 
 export type MoreByArtist = {
@@ -3743,6 +3732,39 @@ export type MusicListPageListTracksByArtistSlugRow = {
     total: number;
 };
 
+export type MusicListPageListTracksByGenreRow = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    items: Array<ListTracksByGenreRow> | null;
+    limit: number;
+    offset: number;
+    total: number;
+};
+
+export type MusicListPageListTracksByMoodRow = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    items: Array<ListTracksByMoodRow> | null;
+    limit: number;
+    offset: number;
+    total: number;
+};
+
+export type MusicListPageListTracksByTempoBandRow = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    items: Array<ListTracksByTempoBandRow> | null;
+    limit: number;
+    offset: number;
+    total: number;
+};
+
 export type MusicListPageListUserLovedAlbumsRow = {
     /**
      * A URL to the JSON Schema for this object.
@@ -3818,6 +3840,7 @@ export type MusicMix = {
     seed_artist_media_item_public_id?: string;
     seed_artist_name: string;
     seed_artist_slug: string;
+    seed_genre?: string;
     slug: string;
     tracks: Array<ListArtistTopTracksForMixRow> | null;
 };
@@ -4472,6 +4495,10 @@ export type RadioRequest = {
      * Tracks to skip (typically the current queue)
      */
     exclude_track_ids?: Array<number> | null;
+    /**
+     * 0..1 knob for how strongly candidates must share the seed's genre(s) to rank well. 0 (default) is a no-op; near 1 pushes zero-genre-overlap candidates to the bottom and, at >=0.9, drops them once enough overlapping candidates remain to fill the limit.
+     */
+    genre_affinity?: number;
     /**
      * Number of tracks to return
      */
@@ -5659,6 +5686,7 @@ export type TaskStats = {
 };
 
 export type TempoBucket = {
+    artists: Array<BrowseBucketArtist> | null;
     key: string;
     label: string;
     max_bpm: number;
@@ -5672,15 +5700,6 @@ export type TempoBucketsBody = {
      */
     readonly $schema?: string;
     items: Array<TempoBucket> | null;
-};
-
-export type TempoTracksBody = {
-    /**
-     * A URL to the JSON Schema for this object.
-     */
-    readonly $schema?: string;
-    items: Array<ListTracksByTempoBandRow> | null;
-    total: number;
 };
 
 export type Text = {
@@ -7039,11 +7058,6 @@ export type GenreResultWritable = {
     };
 };
 
-export type GenreTracksBodyWritable = {
-    items: Array<ListTracksByGenreRow> | null;
-    total: number;
-};
-
 export type GetUserStateRequestWritable = {
     scope: 'movies' | 'series' | 'seasons' | 'episodes';
     series_id?: number;
@@ -7332,11 +7346,6 @@ export type MoodBucketsBodyWritable = {
     items: Array<MoodBucket> | null;
 };
 
-export type MoodTracksBodyWritable = {
-    items: Array<ListTracksByMoodRow> | null;
-    total: number;
-};
-
 export type MoreByArtistsBodyWritable = {
     items: Array<MoreByArtist> | null;
 };
@@ -7413,6 +7422,27 @@ export type MusicListPageListMusicTracksRowWritable = {
 
 export type MusicListPageListTracksByArtistSlugRowWritable = {
     items: Array<ListTracksByArtistSlugRow> | null;
+    limit: number;
+    offset: number;
+    total: number;
+};
+
+export type MusicListPageListTracksByGenreRowWritable = {
+    items: Array<ListTracksByGenreRow> | null;
+    limit: number;
+    offset: number;
+    total: number;
+};
+
+export type MusicListPageListTracksByMoodRowWritable = {
+    items: Array<ListTracksByMoodRow> | null;
+    limit: number;
+    offset: number;
+    total: number;
+};
+
+export type MusicListPageListTracksByTempoBandRowWritable = {
+    items: Array<ListTracksByTempoBandRow> | null;
     limit: number;
     offset: number;
     total: number;
@@ -7766,6 +7796,10 @@ export type RadioRequestWritable = {
      * Tracks to skip (typically the current queue)
      */
     exclude_track_ids?: Array<number> | null;
+    /**
+     * 0..1 knob for how strongly candidates must share the seed's genre(s) to rank well. 0 (default) is a no-op; near 1 pushes zero-genre-overlap candidates to the bottom and, at >=0.9, drops them once enough overlapping candidates remain to fill the limit.
+     */
+    genre_affinity?: number;
     /**
      * Number of tracks to return
      */
@@ -8235,11 +8269,6 @@ export type TaskResponseWritable = {
 
 export type TempoBucketsBodyWritable = {
     items: Array<TempoBucket> | null;
-};
-
-export type TempoTracksBodyWritable = {
-    items: Array<ListTracksByTempoBandRow> | null;
-    total: number;
 };
 
 export type ToggleFavoriteRequestWritable = {
@@ -16527,7 +16556,7 @@ export type ListTracksByGenreResponses = {
     /**
      * OK
      */
-    200: GenreTracksBody;
+    200: MusicListPageListTracksByGenreRow;
 };
 
 export type ListTracksByGenreResponse = ListTracksByGenreResponses[keyof ListTracksByGenreResponses];
@@ -16588,7 +16617,7 @@ export type ListTracksByMoodResponses = {
     /**
      * OK
      */
-    200: MoodTracksBody;
+    200: MusicListPageListTracksByMoodRow;
 };
 
 export type ListTracksByMoodResponse = ListTracksByMoodResponses[keyof ListTracksByMoodResponses];
@@ -16649,7 +16678,7 @@ export type ListTracksByTempoResponses = {
     /**
      * OK
      */
-    200: TempoTracksBody;
+    200: MusicListPageListTracksByTempoBandRow;
 };
 
 export type ListTracksByTempoResponse = ListTracksByTempoResponses[keyof ListTracksByTempoResponses];
@@ -16761,6 +16790,34 @@ export type MusicHomeMixesResponses = {
 };
 
 export type MusicHomeMixesResponse = MusicHomeMixesResponses[keyof MusicHomeMixesResponses];
+
+export type MusicHomeMixesRegenerateData = {
+    body?: never;
+    path?: never;
+    query?: {
+        max?: number;
+        tracks_per_mix?: number;
+    };
+    url: '/api/music/home/mixes-for-you/regenerate';
+};
+
+export type MusicHomeMixesRegenerateErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type MusicHomeMixesRegenerateError = MusicHomeMixesRegenerateErrors[keyof MusicHomeMixesRegenerateErrors];
+
+export type MusicHomeMixesRegenerateResponses = {
+    /**
+     * OK
+     */
+    200: MixesBody;
+};
+
+export type MusicHomeMixesRegenerateResponse = MusicHomeMixesRegenerateResponses[keyof MusicHomeMixesRegenerateResponses];
 
 export type MusicHomeMoreByArtistsData = {
     body?: never;
@@ -18255,7 +18312,7 @@ export type SearchAllData = {
         /**
          * Optional bucket
          */
-        type?: 'movie' | 'tv' | 'music' | 'book' | 'comic' | 'podcast' | 'radio' | 'episode' | 'person';
+        type?: 'movie' | 'tv' | 'music' | 'book' | 'comic' | 'podcast' | 'radio' | 'episode' | 'person' | 'albums' | 'tracks';
         /**
          * Max results
          */

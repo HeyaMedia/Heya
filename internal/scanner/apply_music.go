@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -66,6 +67,9 @@ func ApplyMusicMaterialization(ctx context.Context, lib sqlc.Library, result Res
 		return nil, fmt.Errorf("begin music apply: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := runScannerApplyPreflightGuard(ctx); err != nil {
+		return nil, fmt.Errorf("validate music sources before apply: %w", err)
+	}
 
 	q := sqlc.New(tx)
 	lookupStore := NewSQLMusicMaterializeStore(tx)
@@ -178,6 +182,9 @@ func ApplyMusicMaterialization(ctx context.Context, lib sqlc.Library, result Res
 		emitMusicApplyResult(applied, emit)
 	}
 
+	if err := runScannerApplyCommitGuard(ctx, tx); err != nil {
+		return results, fmt.Errorf("validate music sources before commit: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return results, fmt.Errorf("commit music apply: %w", err)
 	}
@@ -480,6 +487,7 @@ func applyMusicAlbumsTracksAndFiles(ctx context.Context, q *sqlc.Queries, librar
 	for _, action := range preview.FileActions {
 		fileActionByRel[action.RelPath] = action
 	}
+	recordingEvidenceByRel := musicRecordingEvidenceByRelPath(preview.RecordingEvidence)
 	for _, mapping := range preview.AlbumMappings {
 		remoteAlbum := musicAlbumEntryForApply(meta.Detail, mapping)
 		album, action, err := applyMusicAlbum(ctx, q, artistID, mapping, remoteAlbum)
@@ -519,6 +527,11 @@ func applyMusicAlbumsTracksAndFiles(ctx context.Context, q *sqlc.Queries, librar
 			if err := bindCanonicalChild(ctx, q, "track", track.ID, remoteTrack.CanonicalID, "recording"); err != nil {
 				return counts, err
 			}
+			if evidence, ok := recordingEvidenceByRel[trackMapping.RelPath]; ok {
+				if err := applyMusicFingerprintRecordingEvidence(ctx, q, track.ID, remoteTrack, evidence); err != nil {
+					return counts, err
+				}
+			}
 			fileCounts, err := applyMusicTrackFile(ctx, q, libraryID, mediaItemID, track.ID, localTrack, fileActionByRel[trackMapping.RelPath], filesByRel)
 			if err != nil {
 				return counts, err
@@ -532,6 +545,89 @@ func applyMusicAlbumsTracksAndFiles(ctx context.Context, q *sqlc.Queries, librar
 		}
 	}
 	return counts, nil
+}
+
+// musicRecordingEvidenceByRelPath keeps acoustic identity tied to the exact
+// path that produced it. Similar-looking or differently-cased paths never
+// share evidence, and conflicting duplicate claims are ignored altogether.
+func musicRecordingEvidenceByRelPath(values []MusicAcceptedRecordingEvidence) map[string]MusicAcceptedRecordingEvidence {
+	out := map[string]MusicAcceptedRecordingEvidence{}
+	conflicted := map[string]bool{}
+	for _, value := range values {
+		if value.RelPath == "" || conflicted[value.RelPath] || value.Confidence <= 0 || value.SourceDuration <= 0 || value.RecordingDuration <= 0 {
+			continue
+		}
+		value.RecordingMBID = strings.TrimSpace(value.RecordingMBID)
+		value.CanonicalRecordingID = strings.TrimSpace(value.CanonicalRecordingID)
+		if _, err := uuid.Parse(value.RecordingMBID); err != nil {
+			continue
+		}
+		if _, err := uuid.Parse(value.CanonicalRecordingID); err != nil {
+			continue
+		}
+		if existing, ok := out[value.RelPath]; ok {
+			if !strings.EqualFold(existing.RecordingMBID, value.RecordingMBID) || !strings.EqualFold(existing.CanonicalRecordingID, value.CanonicalRecordingID) {
+				delete(out, value.RelPath)
+				conflicted[value.RelPath] = true
+				continue
+			}
+			if existing.Confidence >= value.Confidence {
+				continue
+			}
+		}
+		out[value.RelPath] = value
+	}
+	return out
+}
+
+// applyMusicFingerprintRecordingEvidence fills recording identity that the
+// fetched discography did not contain. Canonical fetch data and identities
+// already stored on the local track are hard constraints: acoustic evidence
+// may agree with them or fill a blank, but may never replace a conflict.
+func applyMusicFingerprintRecordingEvidence(ctx context.Context, q *sqlc.Queries, trackID int64, remote metadata.TrackDetail, evidence MusicAcceptedRecordingEvidence) error {
+	if remote.RecordingMBID != "" && !strings.EqualFold(strings.TrimSpace(remote.RecordingMBID), evidence.RecordingMBID) {
+		return nil
+	}
+	if remote.CanonicalID != "" && !strings.EqualFold(strings.TrimSpace(remote.CanonicalID), evidence.CanonicalRecordingID) {
+		return nil
+	}
+	track, err := q.GetTrackByID(ctx, trackID)
+	if err != nil {
+		return err
+	}
+	if track.RecordingMbid != "" && !strings.EqualFold(strings.TrimSpace(track.RecordingMbid), evidence.RecordingMBID) {
+		return nil
+	}
+	binding, bindingErr := q.GetMetadataEntityBinding(ctx, sqlc.GetMetadataEntityBindingParams{LocalKind: "track", LocalID: trackID})
+	if bindingErr == nil {
+		if binding.EntityKind != "recording" || !strings.EqualFold(binding.EntityID.String(), evidence.CanonicalRecordingID) {
+			return nil
+		}
+	} else if !errors.Is(bindingErr, pgx.ErrNoRows) {
+		return bindingErr
+	}
+
+	if track.RecordingMbid == "" {
+		externalIDs := track.ExternalIds
+		if len(externalIDs) == 0 {
+			externalIDs = []byte("{}")
+		}
+		artistCredits := track.ArtistCredits
+		if len(artistCredits) == 0 {
+			artistCredits = []byte("[]")
+		}
+		if err := q.UpdateTrackExtendedMetadata(ctx, sqlc.UpdateTrackExtendedMetadataParams{
+			ID: track.ID, ExternalIds: externalIDs, Column3: track.Isrc,
+			Column4: evidence.RecordingMBID, Column5: track.PreviewUrl, Explicit: track.Explicit,
+			ArtistCredits: artistCredits, LyricsAvailable: track.LyricsAvailable,
+		}); err != nil {
+			return err
+		}
+	}
+	if bindingErr == nil {
+		return nil
+	}
+	return bindCanonicalChild(ctx, q, "track", trackID, evidence.CanonicalRecordingID, "recording")
 }
 
 func applyMusicAlbum(ctx context.Context, q *sqlc.Queries, artistID int64, mapping MusicAlbumFetchMatch, remote metadata.AlbumEntry) (sqlc.Album, string, error) {
@@ -760,16 +856,22 @@ func applyMusicTrack(ctx context.Context, q *sqlc.Queries, albumID int64, local 
 			track = updated
 		}
 	}
-	_ = q.UpdateTrackExtendedMetadata(ctx, sqlc.UpdateTrackExtendedMetadataParams{
-		ID:              track.ID,
-		ExternalIds:     mustJSONBytes(remote.ExternalIDs),
-		Column3:         remote.ISRC,
-		Column4:         remote.RecordingMBID,
-		Column5:         remote.PreviewURL,
-		Explicit:        remote.Explicit,
-		ArtistCredits:   mustJSONBytes(remote.ArtistCredits),
-		LyricsAvailable: remote.LyricsAvailable,
-	})
+	// An album-level fetch can legitimately lack this recording. Do not let an
+	// empty TrackDetail erase rich data already stored on a local fallback row.
+	if remote.Title != "" || remote.RecordingMBID != "" || remote.CanonicalID != "" || len(remote.ExternalIDs) > 0 {
+		if err := q.UpdateTrackExtendedMetadata(ctx, sqlc.UpdateTrackExtendedMetadataParams{
+			ID:              track.ID,
+			ExternalIds:     mustJSONBytes(remote.ExternalIDs),
+			Column3:         remote.ISRC,
+			Column4:         remote.RecordingMBID,
+			Column5:         remote.PreviewURL,
+			Explicit:        remote.Explicit,
+			ArtistCredits:   mustJSONBytes(remote.ArtistCredits),
+			LyricsAvailable: remote.LyricsAvailable,
+		}); err != nil {
+			return sqlc.Track{}, false, err
+		}
+	}
 	return track, !found, nil
 }
 

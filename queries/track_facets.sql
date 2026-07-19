@@ -294,6 +294,49 @@ JOIN albums al ON al.id = t.album_id
 WHERE (tf.mood_tags->>sqlc.arg(mood_key)::text)::real > sqlc.arg(threshold)::real
   AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL);
 
+-- name: CountTracksByMoods :many
+-- Collapsed sibling of CountTracksByMood: computes every Browse > Moods tile
+-- count (one row per key in mood_keys) in a single track_facets pass instead
+-- of the caller looping one full-scan query per mood tag. Same
+-- distinct-recording counting and threshold predicate as CountTracksByMood.
+SELECT bucket_key::text AS bucket_key,
+       count(DISTINCT (al.artist_id, lower(t.title), t.duration / 15))::bigint AS track_count
+FROM track_facets tf
+JOIN tracks t  ON t.id = tf.track_id
+JOIN albums al ON al.id = t.album_id
+CROSS JOIN LATERAL unnest(sqlc.arg(mood_keys)::text[]) AS bucket_key
+WHERE (tf.mood_tags->>bucket_key)::real > sqlc.arg(threshold)::real
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+GROUP BY bucket_key;
+
+-- name: TopArtistsByMood :many
+-- Top-N artists per mood bucket, ranked by in-bucket track count. Powers the
+-- per-tile artist imagery on Browse > Moods. Reuses ListTracksByMood's join
+-- path (track_facets -> tracks -> albums -> artists -> media_item_cards) for
+-- the artist's routable identity (media item id + public id — the shape the
+-- FE image composables expect). Ranks on a raw track count rather than the
+-- distinct-recording dedup the tile counts use — good enough for "who's
+-- prominent in this mood" and keeps this a single pass.
+SELECT bucket_key::text AS bucket_key, media_item_id, media_item_public_id, track_count
+FROM (
+    SELECT bucket_key,
+           mi.id        AS media_item_id,
+           mi.public_id AS media_item_public_id,
+           count(*)::bigint AS track_count,
+           row_number() OVER (PARTITION BY bucket_key ORDER BY count(*) DESC, mi.id ASC) AS rn
+    FROM track_facets tf
+    JOIN tracks      t  ON t.id = tf.track_id
+    JOIN albums      al ON al.id = t.album_id
+    JOIN artists     a  ON a.id  = al.artist_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
+    CROSS JOIN LATERAL unnest(sqlc.arg(mood_keys)::text[]) AS bucket_key
+    WHERE (tf.mood_tags->>bucket_key)::real > sqlc.arg(threshold)::real
+      AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+    GROUP BY bucket_key, mi.id, mi.public_id
+) ranked
+WHERE rn <= sqlc.arg(top_n)::int
+ORDER BY bucket_key, track_count DESC, media_item_id ASC;
+
 -- name: ListTracksByMood :many
 -- High-scoring tracks for one mood tag, paginated, with album+artist context.
 -- Deduped to one row per recording (see recording-identity note above). The
@@ -347,6 +390,36 @@ GROUP BY (elem->>'name')
 HAVING count(DISTINCT (al.artist_id, lower(t.title), t.duration / 15)) >= sqlc.arg(min_tracks)::bigint
 ORDER BY track_count DESC, (elem->>'name') ASC
 LIMIT sqlc.arg(bucket_limit);
+
+-- name: TopArtistsByGenres :many
+-- Top-N artists per genre bucket, ranked by in-bucket track count. Companion
+-- to ListGenreBuckets for the per-tile artist imagery on Browse > Genres.
+-- Deliberately NOT filtered down to the caller's already-capped top-N genre
+-- name list (ListGenreBuckets' LIMIT genreBucketLimit) — that selection
+-- isn't known until ListGenreBuckets returns, and the two are meant to run
+-- concurrently. The Discogs-400 vocabulary is small (a few hundred labels
+-- once the score floor applies), so ranking every genre's top artists here
+-- and letting the service layer join against the capped bucket list
+-- afterward is cheap enough to skip a second, dependent round trip.
+SELECT genre_name, media_item_id, media_item_public_id, track_count
+FROM (
+    SELECT (elem->>'name')::text AS genre_name,
+           mi.id        AS media_item_id,
+           mi.public_id AS media_item_public_id,
+           count(*)::bigint AS track_count,
+           row_number() OVER (PARTITION BY (elem->>'name') ORDER BY count(*) DESC, mi.id ASC) AS rn
+    FROM track_facets tf
+    JOIN tracks      t  ON t.id = tf.track_id
+    JOIN albums      al ON al.id = t.album_id
+    JOIN artists     a  ON a.id  = al.artist_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
+    CROSS JOIN LATERAL jsonb_array_elements(tf.top_genres) AS elem
+    WHERE (elem->>'score')::real >= sqlc.arg(min_score)::real
+      AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+    GROUP BY (elem->>'name'), mi.id, mi.public_id
+) ranked
+WHERE rn <= sqlc.arg(top_n)::int
+ORDER BY genre_name, track_count DESC, media_item_id ASC;
 
 -- name: ListTracksByGenre :many
 -- Deduped to one row per recording (see recording-identity note above). The
@@ -469,6 +542,71 @@ WHERE tf.bpm IS NOT NULL
   AND tf.bpm >= sqlc.arg(min_bpm)::real
   AND tf.bpm <  sqlc.arg(max_bpm)::real
   AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL);
+
+-- name: CountTracksByTempoBands :many
+-- Collapsed sibling of CountTracksByTempoBand: buckets every analyzed track
+-- into one of the 5 fixed BPM bands (edges mirror tempoBands in
+-- music_browse.go) and counts each in one pass instead of 5 range-scoped
+-- full scans. band_index is 0..4 in the same ascending order as tempoBands,
+-- so the caller can zip it straight back onto that slice.
+SELECT
+    (CASE
+        WHEN tf.bpm < sqlc.arg(edge1)::real THEN 0
+        WHEN tf.bpm < sqlc.arg(edge2)::real THEN 1
+        WHEN tf.bpm < sqlc.arg(edge3)::real THEN 2
+        WHEN tf.bpm < sqlc.arg(edge4)::real THEN 3
+        ELSE 4
+    END)::int AS band_index,
+    count(DISTINCT (al.artist_id, lower(t.title), t.duration / 15))::bigint AS track_count
+FROM track_facets tf
+JOIN tracks t  ON t.id = tf.track_id
+JOIN albums al ON al.id = t.album_id
+WHERE tf.bpm IS NOT NULL
+  AND tf.bpm >= sqlc.arg(min_bpm)::real
+  AND tf.bpm <  sqlc.arg(max_bpm)::real
+  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+GROUP BY band_index;
+
+-- name: TopArtistsByTempoBands :many
+-- Top-N artists per BPM band, ranked by in-bucket track count. Powers the
+-- per-tile artist imagery on Browse > Tempo. Same band_index convention and
+-- edge params as CountTracksByTempoBands.
+SELECT band_index, media_item_id, media_item_public_id, track_count
+FROM (
+    SELECT
+        (CASE
+            WHEN tf.bpm < sqlc.arg(edge1)::real THEN 0
+            WHEN tf.bpm < sqlc.arg(edge2)::real THEN 1
+            WHEN tf.bpm < sqlc.arg(edge3)::real THEN 2
+            WHEN tf.bpm < sqlc.arg(edge4)::real THEN 3
+            ELSE 4
+        END)::int AS band_index,
+        mi.id        AS media_item_id,
+        mi.public_id AS media_item_public_id,
+        count(*)::bigint AS track_count,
+        row_number() OVER (
+            PARTITION BY (CASE
+                WHEN tf.bpm < sqlc.arg(edge1)::real THEN 0
+                WHEN tf.bpm < sqlc.arg(edge2)::real THEN 1
+                WHEN tf.bpm < sqlc.arg(edge3)::real THEN 2
+                WHEN tf.bpm < sqlc.arg(edge4)::real THEN 3
+                ELSE 4
+            END)
+            ORDER BY count(*) DESC, mi.id ASC
+        ) AS rn
+    FROM track_facets tf
+    JOIN tracks      t  ON t.id = tf.track_id
+    JOIN albums      al ON al.id = t.album_id
+    JOIN artists     a  ON a.id  = al.artist_id
+    JOIN media_item_cards mi ON mi.id = a.media_item_id
+    WHERE tf.bpm IS NOT NULL
+      AND tf.bpm >= sqlc.arg(min_bpm)::real
+      AND tf.bpm <  sqlc.arg(max_bpm)::real
+      AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+    GROUP BY band_index, mi.id, mi.public_id
+) ranked
+WHERE rn <= sqlc.arg(top_n)::int
+ORDER BY band_index, track_count DESC, media_item_id ASC;
 
 -- name: ListTracksByTempoBand :many
 -- Deduped to one row per recording (see recording-identity note above). The

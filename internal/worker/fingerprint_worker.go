@@ -148,8 +148,15 @@ func ensureLibraryFileFingerprint(ctx context.Context, q *sqlc.Queries, lf sqlc.
 	// network-mount read without holding a search worker indefinitely.
 	fpCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	fingerprint, err := computeChromaprint(fpCtx, lf.Path)
+	fpCtxErr := fpCtx.Err()
 	cancel()
 	if err != nil {
+		if fpCtxErr != nil {
+			return sqlc.LibraryFileFingerprint{}, fpCtxErr
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return sqlc.LibraryFileFingerprint{}, err
+		}
 		return sqlc.LibraryFileFingerprint{}, fmt.Errorf("compute chromaprint: %w", err)
 	}
 	if sourceDuration <= 0 {
@@ -160,9 +167,16 @@ func ensureLibraryFileFingerprint(ctx context.Context, q *sqlc.Queries, lf sqlc.
 	}
 	if sourceDuration <= 0 {
 		probeCtx, probeCancel := context.WithTimeout(ctx, 2*time.Minute)
-		info, probeErr := mediaprobe.Probe(probeCtx, lf.Path)
+		info, probeErr := probeFingerprintMedia(probeCtx, lf.Path)
+		probeCtxErr := probeCtx.Err()
 		probeCancel()
 		if probeErr != nil {
+			if probeCtxErr != nil {
+				return sqlc.LibraryFileFingerprint{}, probeCtxErr
+			}
+			if errors.Is(probeErr, context.Canceled) || errors.Is(probeErr, context.DeadlineExceeded) {
+				return sqlc.LibraryFileFingerprint{}, probeErr
+			}
 			return sqlc.LibraryFileFingerprint{}, fmt.Errorf("probe fingerprint source duration: %w", probeErr)
 		}
 		sourceDuration = int32(math.Round(info.Duration))
@@ -227,6 +241,7 @@ func chromaprintFile(ctx context.Context, path string) (string, error) {
 }
 
 var computeChromaprint = chromaprintFile
+var probeFingerprintMedia = mediaprobe.Probe
 
 func chromaprintViaFFmpeg(ctx context.Context, path string) (string, error) {
 	if err := vfs.ValidateLocalPath(path); err != nil {

@@ -233,7 +233,7 @@ func releaseFromLeaf(parsed parser.ParsedStorageEntry) bool {
 func parseMovieNFOs(root InventoryRoot, emit Emitter) map[string]movieNFOEntry {
 	out := make(map[string]movieNFOEntry)
 	for _, f := range root.Files {
-		if f.Class != ClassNFO || f.Kind != "movie" {
+		if f.Generated || f.Class != ClassNFO || f.Kind != "movie" {
 			continue
 		}
 		parsed := nfo.ParseFile(root.FS, f.RelPath, "movie")
@@ -262,7 +262,7 @@ func parseMovieNFOs(root InventoryRoot, emit Emitter) map[string]movieNFOEntry {
 func groupMovieAssets(files []InventoryFile) map[string][]MovieAssetPlan {
 	out := make(map[string][]MovieAssetPlan)
 	for _, f := range files {
-		if f.Class != ClassArtwork {
+		if f.Generated || f.Class != ClassArtwork {
 			continue
 		}
 		dir := filepath.Dir(f.RelPath)

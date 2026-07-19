@@ -11,92 +11,17 @@ SET status = $2,
     finished_at = now()
 WHERE id = $1;
 
--- name: CompactAppliedScannerArtifactsForEntity :one
--- Drops the heavy per-stage JSON blobs for an applied entity, keeping the
--- lightweight scanner_entities row. The caller guards on no in-flight
--- fetch/apply/rich job for the entity (see activeScannerJobsForEntity).
-WITH target AS (
-    SELECT entity.id
-    FROM scanner_entities entity
-    WHERE entity.id = $1
-      AND entity.status = 'applied'
-),
-entity_artifacts_deleted AS (
-    DELETE FROM scanner_entity_artifacts artifact
-    USING target
-    WHERE artifact.entity_id = target.id
-    RETURNING artifact.id
-),
-updated AS (
-    UPDATE scanner_entities entity
-    SET search_artifact_id = NULL,
-        metadata_artifact_id = NULL,
-        apply_artifact_id = NULL,
-        updated_at = now()
-    FROM target
-    WHERE entity.id = target.id
-    RETURNING entity.id
-)
-SELECT (SELECT count(*) FROM entity_artifacts_deleted)::bigint AS entity_artifacts_deleted;
-
--- name: CleanupAppliedScannerEntityArtifactsOlderThan :one
-WITH target AS (
-    UPDATE scanner_entities
-    SET search_artifact_id = NULL,
-        metadata_artifact_id = NULL,
-        apply_artifact_id = NULL,
-        updated_at = now()
-    WHERE status = 'applied'
-      AND applied_at IS NOT NULL
-      AND applied_at < sqlc.arg(cutoff_at)
-    RETURNING id
-),
-deleted AS (
-    DELETE FROM scanner_entity_artifacts artifact
-    USING target
-    WHERE artifact.entity_id = target.id
-    RETURNING artifact.id
-)
-SELECT count(*)::bigint AS deleted_count FROM deleted;
-
--- name: CleanupStaleInFlightScannerEntitiesOlderThan :one
-WITH target AS (
-    SELECT entity.id
-	FROM scanner_entities entity
-	WHERE entity.status IN ('matched', 'fetching')
-	  AND entity.updated_at < sqlc.arg(cutoff_at)
-	  AND NOT EXISTS (
-	      SELECT 1
-	      FROM scanner_metadata_continuations continuation
-	      WHERE continuation.scanner_entity_id = entity.id
-	  )
-),
-entity_artifacts_deleted AS (
-    DELETE FROM scanner_entity_artifacts artifact
-    USING target
-    WHERE artifact.entity_id = target.id
-    RETURNING artifact.id
-),
-entities_deleted AS (
-    DELETE FROM scanner_entities entity
-    USING target
-    WHERE entity.id = target.id
-    RETURNING entity.id
-)
-SELECT
-    (SELECT count(*) FROM entities_deleted)::bigint AS entities_deleted,
-    (SELECT count(*) FROM entity_artifacts_deleted)::bigint AS entity_artifacts_deleted;
-
 -- name: UpsertScannerEntity :one
 INSERT INTO scanner_entities (
     library_id, media_type, scope_key, scope_paths, identity_key,
     title, year, provider_id, status, search_scan_run_id,
-    search_artifact_id, error_message, data
+    analysis_artifact_id, search_artifact_id, error_message, data,
+    pipeline_generation
 )
 VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
-    $11, $12, $13
+    NULL, $11, $12, $13, 1
 )
 ON CONFLICT (library_id, media_type, scope_key, identity_key) DO UPDATE
 SET scope_paths = EXCLUDED.scope_paths,
@@ -104,31 +29,97 @@ SET scope_paths = EXCLUDED.scope_paths,
     year = EXCLUDED.year,
     provider_id = EXCLUDED.provider_id,
     status = EXCLUDED.status,
+    pipeline_generation = scanner_entities.pipeline_generation + 1,
     search_scan_run_id = EXCLUDED.search_scan_run_id,
+    analysis_artifact_id = NULL,
     search_artifact_id = EXCLUDED.search_artifact_id,
     fetch_scan_run_id = NULL,
     metadata_artifact_id = NULL,
     apply_artifact_id = NULL,
     error_message = EXCLUDED.error_message,
     data = EXCLUDED.data,
-    searched_at = CASE WHEN EXCLUDED.search_artifact_id IS NOT NULL THEN now() ELSE scanner_entities.searched_at END,
+    searched_at = NULL,
     fetched_at = NULL,
     applied_at = NULL,
     updated_at = now()
 RETURNING *;
+
+-- name: ListScannerEntitiesForScopeForUpdate :many
+SELECT *
+FROM scanner_entities
+WHERE library_id = sqlc.arg(library_id)
+  AND media_type = sqlc.arg(media_type)
+  AND scope_key = sqlc.arg(scope_key)
+ORDER BY id
+FOR UPDATE;
+
+-- name: DeleteScannerEntitiesForScopeExcept :many
+DELETE FROM scanner_entities
+WHERE library_id = sqlc.arg(library_id)
+  AND media_type = sqlc.arg(media_type)
+  AND scope_key = sqlc.arg(scope_key)
+  AND NOT (identity_key = ANY(sqlc.arg(identity_keys)::text[]))
+  AND status <> 'applying'
+RETURNING id;
+
+-- name: PruneUnclaimedScannerReviewIdentities :execrows
+-- Scope reconciliation can remove or rename the last scanner entity that
+-- claimed a review row. Keep accepted/bound history, but remove unbound
+-- terminal review decisions once no current scanner scope owns the key.
+DELETE FROM local_media_identities identity
+WHERE identity.library_id = sqlc.arg(library_id)
+  AND identity.media_type = sqlc.arg(media_type)
+  AND identity.media_item_id IS NULL
+  AND identity.review_status IN ('needs_review', 'review', 'suspicious', 'rejected', 'ignored')
+  AND NOT EXISTS (
+      SELECT 1
+      FROM scanner_entities entity
+      WHERE entity.library_id = identity.library_id
+        AND entity.media_type = identity.media_type
+        AND entity.identity_key = identity.identity_key
+  );
 
 -- name: GetScannerEntity :one
 SELECT * FROM scanner_entities
 WHERE id = $1;
 
 -- name: CreateScannerEntityArtifact :one
-INSERT INTO scanner_entity_artifacts (entity_id, stage, schema_version, scan_run_id, data)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO scanner_entity_artifacts (
+    entity_id, stage, schema_version, scan_run_id, data,
+    pipeline_generation, source_artifact_id
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING *;
+
+-- name: AttachScannerEntityAnalysisArtifact :one
+UPDATE scanner_entities
+SET analysis_artifact_id = sqlc.arg(analysis_artifact_id),
+    updated_at = now()
+WHERE scanner_entities.id = sqlc.arg(entity_id)
+  AND scanner_entities.pipeline_generation = sqlc.arg(pipeline_generation)
+  AND status = 'discovered'
 RETURNING *;
 
 -- name: GetScannerEntityArtifact :one
 SELECT * FROM scanner_entity_artifacts
 WHERE id = $1;
+
+-- name: GetCurrentScannerEntityArtifact :one
+SELECT artifact.*
+FROM scanner_entity_artifacts artifact
+JOIN scanner_entities entity ON entity.id = artifact.entity_id
+WHERE entity.id = sqlc.arg(entity_id)
+  AND artifact.id = sqlc.arg(artifact_id)
+  AND artifact.stage = sqlc.arg(stage)
+  AND artifact.pipeline_generation = entity.pipeline_generation
+  AND CASE artifact.stage
+      WHEN 'analysis_result' THEN entity.analysis_artifact_id = artifact.id
+      WHEN 'search_result' THEN entity.search_artifact_id = artifact.id
+      WHEN 'fetch_result' THEN entity.metadata_artifact_id = artifact.id
+      WHEN 'apply_result' THEN entity.apply_artifact_id = artifact.id
+      ELSE false
+  END
+FOR UPDATE OF entity;
 
 -- name: GetLatestScannerEntityArtifact :one
 SELECT * FROM scanner_entity_artifacts
@@ -147,37 +138,63 @@ SELECT
     entity.scope_paths,
     artifact.id AS analysis_artifact_id
 FROM scanner_entities entity
-JOIN LATERAL (
-    SELECT id
-    FROM scanner_entity_artifacts
-    WHERE entity_id = entity.id
-      AND stage = 'analysis_result'
-    ORDER BY id DESC
-    LIMIT 1
-) artifact ON true
+JOIN scanner_entity_artifacts artifact
+  ON artifact.id = entity.analysis_artifact_id
+ AND artifact.entity_id = entity.id
+ AND artifact.pipeline_generation = entity.pipeline_generation
+ AND artifact.stage = 'analysis_result'
 WHERE entity.library_id = sqlc.arg(library_id)
   AND entity.media_type = sqlc.arg(media_type)
   AND entity.status = 'needs_review'
 ORDER BY entity.id
 LIMIT sqlc.arg(row_limit);
 
+-- name: MarkScannerEntitySearched :one
+UPDATE scanner_entities
+SET title = sqlc.arg(title),
+    year = sqlc.arg(year),
+    provider_id = sqlc.arg(provider_id),
+    status = sqlc.arg(status),
+    search_scan_run_id = sqlc.narg(search_scan_run_id),
+    search_artifact_id = sqlc.arg(search_artifact_id),
+    fetch_scan_run_id = NULL,
+    metadata_artifact_id = NULL,
+    apply_artifact_id = NULL,
+    error_message = sqlc.arg(error_message),
+    data = sqlc.arg(data),
+    searched_at = now(),
+    fetched_at = NULL,
+    applied_at = NULL,
+    updated_at = now()
+WHERE id = sqlc.arg(entity_id)
+  AND pipeline_generation = sqlc.arg(pipeline_generation)
+  AND analysis_artifact_id = sqlc.arg(expected_analysis_artifact_id)
+  AND status IN ('discovered', 'needs_review', 'unmatched', 'error')
+RETURNING *;
+
 -- name: MarkScannerEntityFetching :one
 UPDATE scanner_entities
 SET status = 'fetching',
     error_message = '',
     updated_at = now()
-WHERE id = $1
+WHERE id = sqlc.arg(entity_id)
+  AND pipeline_generation = sqlc.arg(pipeline_generation)
+  AND search_artifact_id = sqlc.arg(expected_search_artifact_id)
+  AND status <> 'applying'
 RETURNING *;
 
 -- name: MarkScannerEntityFetched :one
 UPDATE scanner_entities
-SET status = $2,
-    fetch_scan_run_id = $3,
-    metadata_artifact_id = $4,
-    error_message = $5,
+SET status = sqlc.arg(status),
+    fetch_scan_run_id = sqlc.narg(fetch_scan_run_id),
+    metadata_artifact_id = sqlc.arg(metadata_artifact_id),
+    error_message = sqlc.arg(error_message),
     fetched_at = now(),
     updated_at = now()
-WHERE id = $1
+WHERE id = sqlc.arg(entity_id)
+  AND pipeline_generation = sqlc.arg(pipeline_generation)
+  AND search_artifact_id = sqlc.arg(expected_search_artifact_id)
+  AND status = 'fetching'
 RETURNING *;
 
 -- name: MarkScannerEntityApplying :one
@@ -185,44 +202,79 @@ UPDATE scanner_entities
 SET status = 'applying',
     error_message = '',
     updated_at = now()
-WHERE id = $1
+WHERE id = sqlc.arg(entity_id)
+  AND pipeline_generation = sqlc.arg(pipeline_generation)
+  AND metadata_artifact_id = sqlc.arg(expected_metadata_artifact_id)
+  AND status IN ('fetched', 'applying', 'apply_error')
 RETURNING *;
 
 -- name: MarkScannerEntityApplied :one
 UPDATE scanner_entities
-SET status = $2,
-    apply_artifact_id = $3,
-    error_message = $4,
-    applied_at = CASE WHEN $2 = 'applied' THEN now() ELSE applied_at END,
+SET status = sqlc.arg(status),
+    apply_artifact_id = sqlc.arg(apply_artifact_id),
+    error_message = sqlc.arg(error_message),
+    applied_at = CASE WHEN sqlc.arg(status) = 'applied' THEN now() ELSE applied_at END,
     updated_at = now()
-WHERE id = $1
+WHERE id = sqlc.arg(entity_id)
+  AND pipeline_generation = sqlc.arg(pipeline_generation)
+  AND metadata_artifact_id = sqlc.arg(expected_metadata_artifact_id)
+  AND status = 'applying'
 RETURNING *;
 
 -- name: MarkScannerEntityFailed :one
 UPDATE scanner_entities
-SET status = $2,
-    error_message = $3,
+SET status = sqlc.arg(status),
+    error_message = sqlc.arg(error_message),
     updated_at = now()
-WHERE id = $1
+WHERE scanner_entities.id = sqlc.arg(entity_id)
+  AND scanner_entities.pipeline_generation = sqlc.arg(pipeline_generation)
+  AND EXISTS (
+      SELECT 1
+      FROM scanner_entity_artifacts artifact
+      WHERE artifact.id = sqlc.arg(expected_artifact_id)
+        AND artifact.entity_id = scanner_entities.id
+        AND artifact.pipeline_generation = scanner_entities.pipeline_generation
+        AND CASE artifact.stage
+            WHEN 'analysis_result' THEN scanner_entities.analysis_artifact_id = artifact.id
+            WHEN 'search_result' THEN scanner_entities.search_artifact_id = artifact.id
+            WHEN 'fetch_result' THEN scanner_entities.metadata_artifact_id = artifact.id
+            ELSE false
+        END
+  )
 RETURNING *;
 
 -- name: UpsertLocalMediaIdentity :one
 INSERT INTO local_media_identities (
     library_id, media_type, identity_key, title, year, confidence, source,
     review_status, metadata_provider_id, media_item_id,
-    first_seen_scan_run_id, last_seen_scan_run_id, raw_identity
+    first_seen_scan_run_id, last_seen_scan_run_id, raw_identity,
+    decision_provenance, decision_matcher_revision
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'automatic', $14)
 ON CONFLICT (library_id, media_type, identity_key) DO UPDATE
 SET title = EXCLUDED.title,
     year = EXCLUDED.year,
     confidence = EXCLUDED.confidence,
     source = EXCLUDED.source,
-    review_status = EXCLUDED.review_status,
-    metadata_provider_id = COALESCE(NULLIF(EXCLUDED.metadata_provider_id, ''), local_media_identities.metadata_provider_id),
+    review_status = CASE
+        WHEN local_media_identities.decision_provenance = 'manual' THEN local_media_identities.review_status
+        ELSE EXCLUDED.review_status
+    END,
+    metadata_provider_id = CASE
+        WHEN local_media_identities.decision_provenance = 'manual' THEN local_media_identities.metadata_provider_id
+        ELSE EXCLUDED.metadata_provider_id
+    END,
     media_item_id = COALESCE(EXCLUDED.media_item_id, local_media_identities.media_item_id),
     last_seen_scan_run_id = EXCLUDED.last_seen_scan_run_id,
     raw_identity = EXCLUDED.raw_identity,
+    decision_provenance = CASE
+        WHEN local_media_identities.decision_provenance = 'manual' THEN 'manual'
+        ELSE EXCLUDED.decision_provenance
+    END,
+    decision_matcher_revision = CASE
+        WHEN local_media_identities.decision_provenance = 'manual' THEN local_media_identities.decision_matcher_revision
+        ELSE EXCLUDED.decision_matcher_revision
+    END,
     updated_at = now()
 RETURNING *;
 
@@ -512,6 +564,22 @@ LEFT JOIN LATERAL (
 WHERE lmi.library_id = sqlc.arg(library_id)
   AND lmi.media_type = sqlc.arg(media_type)
   AND lmi.review_status = ANY(sqlc.arg(review_statuses)::text[])
+  AND (
+      lmi.decision_provenance = 'manual'
+      OR (
+          lmi.decision_provenance = 'automatic'
+          AND lmi.decision_matcher_revision = sqlc.arg(matcher_revision)
+      )
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM scanner_entities entity
+      WHERE entity.library_id = lmi.library_id
+        AND entity.media_type = lmi.media_type
+        AND entity.identity_key = lmi.identity_key
+      GROUP BY entity.identity_key
+      HAVING count(DISTINCT entity.scope_key) > 1
+  )
 ORDER BY lmi.identity_key;
 
 -- name: ApproveScannerCandidate :one
@@ -527,11 +595,28 @@ updated_identity AS (
     UPDATE local_media_identities lmi
     SET review_status = 'accepted',
         metadata_provider_id = candidate.provider_id,
+        decision_provenance = 'manual',
+        decision_matcher_revision = 0,
         updated_at = now()
     FROM candidate
     WHERE lmi.id = sqlc.arg(identity_id)
       AND lmi.library_id = sqlc.arg(library_id)
     RETURNING lmi.*
+),
+invalidated_entities AS (
+    UPDATE scanner_entities entity
+    SET status = 'discovered', provider_id = '',
+        pipeline_generation = entity.pipeline_generation + 1,
+        search_scan_run_id = NULL, fetch_scan_run_id = NULL,
+        analysis_artifact_id = NULL, search_artifact_id = NULL,
+        metadata_artifact_id = NULL, apply_artifact_id = NULL,
+        error_message = '', searched_at = NULL, fetched_at = NULL,
+        applied_at = NULL, updated_at = now()
+    FROM updated_identity identity
+    WHERE entity.library_id = identity.library_id
+      AND entity.media_type = identity.media_type
+      AND entity.identity_key = identity.identity_key
+    RETURNING entity.id
 ),
 demoted AS (
     UPDATE metadata_match_candidates
@@ -565,6 +650,7 @@ SELECT updated_identity.*
 FROM updated_identity
 CROSS JOIN (SELECT count(*) FROM demoted) demoted_count
 CROSS JOIN (SELECT count(*) FROM selected) selected_count
+CROSS JOIN (SELECT count(*) FROM invalidated_entities) invalidated_count
 CROSS JOIN (SELECT count(*) FROM resolved) resolved_count;
 
 -- name: BulkApproveSingleScannerCandidates :many
@@ -588,10 +674,27 @@ updated_identities AS (
     UPDATE local_media_identities lmi
     SET review_status = 'accepted',
         metadata_provider_id = eligible.provider_id,
+        decision_provenance = 'manual',
+        decision_matcher_revision = 0,
         updated_at = now()
     FROM eligible
     WHERE lmi.id = eligible.identity_id
-    RETURNING lmi.id
+    RETURNING lmi.id, lmi.library_id, lmi.media_type, lmi.identity_key
+),
+invalidated_entities AS (
+    UPDATE scanner_entities entity
+    SET status = 'discovered', provider_id = '',
+        pipeline_generation = entity.pipeline_generation + 1,
+        search_scan_run_id = NULL, fetch_scan_run_id = NULL,
+        analysis_artifact_id = NULL, search_artifact_id = NULL,
+        metadata_artifact_id = NULL, apply_artifact_id = NULL,
+        error_message = '', searched_at = NULL, fetched_at = NULL,
+        applied_at = NULL, updated_at = now()
+    FROM updated_identities identity
+    WHERE entity.library_id = identity.library_id
+      AND entity.media_type = identity.media_type
+      AND entity.identity_key = identity.identity_key
+    RETURNING entity.id
 ),
 selected AS (
     UPDATE metadata_match_candidates mmc
@@ -611,6 +714,7 @@ resolved AS (
 )
 SELECT id FROM updated_identities
 CROSS JOIN (SELECT count(*) FROM selected) selected_count
+CROSS JOIN (SELECT count(*) FROM invalidated_entities) invalidated_count
 CROSS JOIN (SELECT count(*) FROM resolved) resolved_count
 ORDER BY id;
 
@@ -618,10 +722,28 @@ ORDER BY id;
 WITH updated_identity AS (
     UPDATE local_media_identities lmi
     SET review_status = 'rejected',
+        decision_provenance = 'manual',
+        decision_matcher_revision = 0,
         updated_at = now()
     WHERE lmi.library_id = sqlc.arg(library_id)
       AND lmi.id = sqlc.arg(identity_id)
+      AND lmi.media_item_id IS NULL
     RETURNING lmi.*
+),
+invalidated_entities AS (
+    UPDATE scanner_entities entity
+    SET status = 'discovered', provider_id = '',
+        pipeline_generation = entity.pipeline_generation + 1,
+        search_scan_run_id = NULL, fetch_scan_run_id = NULL,
+        analysis_artifact_id = NULL, search_artifact_id = NULL,
+        metadata_artifact_id = NULL, apply_artifact_id = NULL,
+        error_message = '', searched_at = NULL, fetched_at = NULL,
+        applied_at = NULL, updated_at = now()
+    FROM updated_identity identity
+    WHERE entity.library_id = identity.library_id
+      AND entity.media_type = identity.media_type
+      AND entity.identity_key = identity.identity_key
+    RETURNING entity.id
 ),
 candidates AS (
     UPDATE metadata_match_candidates
@@ -643,16 +765,35 @@ resolved AS (
 SELECT updated_identity.*
 FROM updated_identity
 CROSS JOIN (SELECT count(*) FROM candidates) candidate_count
+CROSS JOIN (SELECT count(*) FROM invalidated_entities) invalidated_count
 CROSS JOIN (SELECT count(*) FROM resolved) resolved_count;
 
 -- name: IgnoreScannerIdentity :one
 WITH updated_identity AS (
     UPDATE local_media_identities lmi
     SET review_status = 'ignored',
+        decision_provenance = 'manual',
+        decision_matcher_revision = 0,
         updated_at = now()
     WHERE lmi.library_id = sqlc.arg(library_id)
       AND lmi.id = sqlc.arg(identity_id)
+      AND lmi.media_item_id IS NULL
     RETURNING lmi.*
+),
+invalidated_entities AS (
+    UPDATE scanner_entities entity
+    SET status = 'discovered', provider_id = '',
+        pipeline_generation = entity.pipeline_generation + 1,
+        search_scan_run_id = NULL, fetch_scan_run_id = NULL,
+        analysis_artifact_id = NULL, search_artifact_id = NULL,
+        metadata_artifact_id = NULL, apply_artifact_id = NULL,
+        error_message = '', searched_at = NULL, fetched_at = NULL,
+        applied_at = NULL, updated_at = now()
+    FROM updated_identity identity
+    WHERE entity.library_id = identity.library_id
+      AND entity.media_type = identity.media_type
+      AND entity.identity_key = identity.identity_key
+    RETURNING entity.id
 ),
 candidates AS (
     UPDATE metadata_match_candidates
@@ -674,6 +815,7 @@ resolved AS (
 SELECT updated_identity.*
 FROM updated_identity
 CROSS JOIN (SELECT count(*) FROM candidates) candidate_count
+CROSS JOIN (SELECT count(*) FROM invalidated_entities) invalidated_count
 CROSS JOIN (SELECT count(*) FROM resolved) resolved_count;
 
 -- name: ResetScannerIdentityReview :one
@@ -682,10 +824,27 @@ WITH updated_identity AS (
     SET review_status = 'needs_review',
         metadata_provider_id = '',
         media_item_id = NULL,
+        decision_provenance = 'legacy',
+        decision_matcher_revision = 0,
         updated_at = now()
     WHERE lmi.library_id = sqlc.arg(library_id)
       AND lmi.id = sqlc.arg(identity_id)
     RETURNING lmi.*
+),
+invalidated_entities AS (
+    UPDATE scanner_entities entity
+    SET status = 'discovered', provider_id = '',
+        pipeline_generation = entity.pipeline_generation + 1,
+        search_scan_run_id = NULL, fetch_scan_run_id = NULL,
+        analysis_artifact_id = NULL, search_artifact_id = NULL,
+        metadata_artifact_id = NULL, apply_artifact_id = NULL,
+        error_message = '', searched_at = NULL, fetched_at = NULL,
+        applied_at = NULL, updated_at = now()
+    FROM updated_identity identity
+    WHERE entity.library_id = identity.library_id
+      AND entity.media_type = identity.media_type
+      AND entity.identity_key = identity.identity_key
+    RETURNING entity.id
 ),
 candidates AS (
     UPDATE metadata_match_candidates
@@ -707,6 +866,7 @@ resolved AS (
 SELECT updated_identity.*
 FROM updated_identity
 CROSS JOIN (SELECT count(*) FROM candidates) candidate_count
+CROSS JOIN (SELECT count(*) FROM invalidated_entities) invalidated_count
 CROSS JOIN (SELECT count(*) FROM resolved) resolved_count;
 
 -- name: ListMediaExtraLinks :many

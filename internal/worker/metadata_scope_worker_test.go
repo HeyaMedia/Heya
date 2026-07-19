@@ -21,12 +21,12 @@ import (
 )
 
 type stubTopTracksSource struct {
-	tracks []metadata.TopTrackEntry
-	err    error
+	projection heyametadata.ArtistTopTracksProjection
+	err        error
 }
 
-func (s *stubTopTracksSource) ArtistTopTrackEntries(context.Context, string, ...heyametadata.ProviderCredentials) ([]metadata.TopTrackEntry, error) {
-	return s.tracks, s.err
+func (s *stubTopTracksSource) ArtistTopTracksProjection(context.Context, string, ...heyametadata.ProviderCredentials) (heyametadata.ArtistTopTracksProjection, error) {
+	return s.projection, s.err
 }
 
 func TestReconcileMetadataScopeWorkerPreservesAndCheckpointsSnapshots(t *testing.T) {
@@ -67,9 +67,12 @@ func TestReconcileMetadataScopeWorkerPreservesAndCheckpointsSnapshots(t *testing
 		LocalKind: "artist", LocalID: artist.ID, EntityID: entityID.String(),
 		EntityKind: "artist", Scope: metadatasync.ArtistTopTracksScope, ProjectionVersion: 7,
 	}
-	source := &stubTopTracksSource{tracks: []metadata.TopTrackEntry{{
-		Rank: 1, Provider: "lastfm", Title: "Broken", RecordingEntityID: "not-a-uuid",
-	}}}
+	source := &stubTopTracksSource{projection: heyametadata.ArtistTopTracksProjection{
+		ProjectionVersion: 7,
+		Entries: []metadata.TopTrackEntry{{
+			Rank: 1, Provider: "lastfm", Title: "Broken", RecordingEntityID: "not-a-uuid",
+		}},
+	}}
 	worker := &ReconcileMetadataScopeWorker{DB: pool, Source: source}
 
 	// The insert fails after the transactional delete. The previous row must
@@ -85,7 +88,7 @@ func TestReconcileMetadataScopeWorkerPreservesAndCheckpointsSnapshots(t *testing
 	require.Zero(t, states)
 
 	// A valid snapshot replaces the rows and checkpoints the canonical version.
-	source.tracks = []metadata.TopTrackEntry{
+	source.projection.Entries = []metadata.TopTrackEntry{
 		{Rank: 2, Provider: "lastfm", Title: "Second"},
 		{Rank: 1, Provider: "lastfm", Title: "First"},
 	}
@@ -99,7 +102,8 @@ func TestReconcileMetadataScopeWorkerPreservesAndCheckpointsSnapshots(t *testing
 
 	// An authoritative empty snapshot is different from an error: clear the
 	// rows and advance the durable checkpoint so backfill does not loop.
-	source.tracks = []metadata.TopTrackEntry{}
+	source.projection.Entries = []metadata.TopTrackEntry{}
+	source.projection.ProjectionVersion = 8
 	args.ProjectionVersion = 8
 	_, err = q.UpsertMetadataEntityBinding(ctx, sqlc.UpsertMetadataEntityBindingParams{
 		LocalKind: "artist", LocalID: artist.ID, EntityID: entityID,
@@ -148,4 +152,69 @@ func TestReconcileMetadataScopeWorkerPreservesAndCheckpointsSnapshots(t *testing
 		  AND args->>'source' = 'metadata_scope_rebind'
 		ORDER BY id DESC LIMIT 1`, item.ID).Scan(&repairJobID))
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE id = $1`, repairJobID) })
+}
+
+func TestReconcileMetadataScopeWorkerDoesNotPromoteFetchedSnapshotToNewBindingVersion(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	userID := testutil.TestUserID(t, pool)
+	suffix := uuid.NewString()
+	library, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name: "scope-race-" + suffix, MediaType: sqlc.MediaTypeMusic,
+		Paths:        []string{"/scope-race-" + suffix},
+		ScanInterval: pgtype.Interval{Microseconds: 3_600_000_000, Valid: true},
+		CreatedBy:    userID, Settings: []byte("{}"),
+	})
+	require.NoError(t, err)
+	item, err := q.CreateMediaItem(ctx, sqlc.CreateMediaItemParams{
+		LibraryID: library.ID, MediaType: sqlc.MediaTypeMusic,
+		Title: "Projection Race " + suffix, SortTitle: "projection race " + suffix,
+		ExternalIds: []byte("{}"),
+	})
+	require.NoError(t, err)
+	artist, err := q.CreateArtist(ctx, sqlc.CreateArtistParams{MediaItemID: item.ID, Name: item.Title, SortName: item.SortTitle})
+	require.NoError(t, err)
+	entityID := uuid.New()
+	_, err = q.UpsertMetadataEntityBinding(ctx, sqlc.UpsertMetadataEntityBindingParams{
+		LocalKind: "artist", LocalID: artist.ID, EntityID: entityID,
+		EntityKind: "artist", SchemaVersion: 1, ProjectionVersion: 8,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM metadata_entity_bindings WHERE local_kind = 'artist' AND local_id = $1`, artist.ID)
+		testutil.CleanupLibrary(t, pool, library.ID)
+	})
+
+	source := &stubTopTracksSource{projection: heyametadata.ArtistTopTracksProjection{
+		ProjectionVersion: 8,
+		Entries:           []metadata.TopTrackEntry{{Rank: 1, Provider: "lastfm", Title: "Version Eight"}},
+	}}
+	worker := &ReconcileMetadataScopeWorker{
+		DB: pool, Source: source,
+		BeforeStoreTransaction: func() {
+			_, updateErr := q.UpsertMetadataEntityBinding(ctx, sqlc.UpsertMetadataEntityBindingParams{
+				LocalKind: "artist", LocalID: artist.ID, EntityID: entityID,
+				EntityKind: "artist", SchemaVersion: 1, ProjectionVersion: 10,
+			})
+			require.NoError(t, updateErr)
+		},
+	}
+	args := ReconcileMetadataScopeArgs{
+		LocalKind: "artist", LocalID: artist.ID, EntityID: entityID.String(), EntityKind: "artist",
+		Scope: metadatasync.ArtistTopTracksScope, ProjectionVersion: 8,
+	}
+	require.NoError(t, worker.Work(ctx, &river.Job[ReconcileMetadataScopeArgs]{Args: args}))
+
+	state, err := q.GetMetadataProjectionState(ctx, sqlc.GetMetadataProjectionStateParams{
+		LocalKind: "artist", LocalID: artist.ID, Scope: metadatasync.ArtistTopTracksScope,
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(8), state.ProjectionVersion, "v8 payload must never be checkpointed as the concurrently advanced v10 artist binding")
+	binding, err := q.GetMetadataEntityBinding(ctx, sqlc.GetMetadataEntityBindingParams{LocalKind: "artist", LocalID: artist.ID})
+	require.NoError(t, err)
+	require.Equal(t, int64(10), binding.ProjectionVersion)
+	var title string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT title FROM artist_top_tracks WHERE artist_id=$1`, artist.ID).Scan(&title))
+	require.Equal(t, "Version Eight", title)
 }

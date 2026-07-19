@@ -35,6 +35,7 @@ the rationale.
 | `heya library info <id>`      | Show library details + settings               |
 | `heya library settings <id>`  | Update per-library settings                   |
 | `heya library scan <id>`      | Trigger a scan                                |
+| `heya library rematch-reviews --id <id>` | Re-run current matcher for review rows safely |
 | `heya library files <id>`     | List files known to a library                 |
 | `heya library stats <id>`     | Match/unmatched/error counts                  |
 | `heya library watch`          | Show fsnotify watcher status                  |
@@ -46,7 +47,7 @@ the rationale.
 | `heya media list`                | List media items (`--type movie\|tv\|…`)    |
 | `heya media info <id\|slug>`     | Full detail dump for one item               |
 | `heya media search <query>`      | Full-text search                            |
-| `heya media match`               | Re-run matching for unmatched files         |
+| `heya media match --library-id <id>` | Queue a forced canonical scanner pass    |
 | `heya media refresh <id\|slug>`  | Re-fetch metadata from `metadata-server`    |
 
 ## Queue & jobs
@@ -175,6 +176,11 @@ make db-up && make build
 ./bin/heya parse "/mnt/films/Dune Part Two (2024).mkv"
 ./bin/heya media search "Dune"
 ./bin/heya media refresh dune-part-two-2024
+
+# Canary the current matcher against 25 review rows. Retained analysis is
+# replayed only when its revision and source files are still current;
+# otherwise the owning scopes receive fresh local analysis.
+./bin/heya library rematch-reviews --id 3 --limit 25
 
 # Check why a file is transcoding
 ./bin/heya transcode probe /mnt/films/Dune.Part.Two.2024.mkv

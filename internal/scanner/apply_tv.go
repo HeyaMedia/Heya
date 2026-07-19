@@ -76,6 +76,9 @@ func ApplyTVMaterialization(ctx context.Context, lib sqlc.Library, result Result
 		return nil, fmt.Errorf("begin TV apply: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // No-op after Commit; rollback is best-effort cleanup on early returns.
+	if err := runScannerApplyPreflightGuard(ctx); err != nil {
+		return nil, fmt.Errorf("validate TV sources before apply: %w", err)
+	}
 
 	q := sqlc.New(tx)
 	txMatcher := matcher.New(db, matcher.MatchOptions{}, nil, nil).WithTx(tx)
@@ -250,6 +253,9 @@ func ApplyTVMaterialization(ctx context.Context, lib sqlc.Library, result Result
 		emitTVApplyResult(applied, domain, emit)
 	}
 
+	if err := runScannerApplyCommitGuard(ctx, tx); err != nil {
+		return results, fmt.Errorf("validate TV sources before commit: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return results, fmt.Errorf("commit TV apply: %w", err)
 	}

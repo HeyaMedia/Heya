@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/karbowiak/heya/internal/atomicfile"
 	"github.com/karbowiak/heya/internal/mediafile"
 	"github.com/karbowiak/heya/internal/nfo"
 	"github.com/karbowiak/heya/internal/parser"
@@ -41,6 +42,11 @@ type InventoryFile struct {
 	AssetType string
 	Size      int64
 	MTime     time.Time
+	// Generated marks an exact NFO/artwork publication made by Heya. It stays
+	// in Inventory (and therefore the durable artifact source snapshot) but is
+	// excluded from local metadata analysis until its on-disk signature differs.
+	Generated    bool   `json:",omitempty"`
+	SourceSHA256 string `json:",omitempty"`
 }
 
 type InventoryRoot struct {
@@ -131,6 +137,12 @@ func walkInventory(ctx context.Context, roots []string, scopes []string, emit Em
 					default:
 						return nil
 					}
+				}
+				if atomicfile.IsInternalPath(filepath.Join(root, relPath)) {
+					// Publication staging/exchange entries are an implementation
+					// detail, never scanner inputs. The final destination remains a
+					// normal classified source in the same walk.
+					return nil
 				}
 
 				file := classifyFile(source.FS, root, relPath, d)

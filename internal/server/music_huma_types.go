@@ -92,21 +92,6 @@ type tempoBucketsBody struct {
 	Items []service.TempoBucket `json:"items"`
 }
 
-// Track drilldown bodies carry Total so the FE can size a full-length
-// virtual scroll track and random-access any page.
-type moodTracksBody struct {
-	Items []sqlc.ListTracksByMoodRow `json:"items"`
-	Total int64                      `json:"total"`
-}
-type genreTracksBody struct {
-	Items []sqlc.ListTracksByGenreRow `json:"items"`
-	Total int64                       `json:"total"`
-}
-type tempoTracksBody struct {
-	Items []sqlc.ListTracksByTempoBandRow `json:"items"`
-	Total int64                           `json:"total"`
-}
-
 type recentlyPlayedBody struct {
 	Items []sqlc.ListRecentlyPlayedTracksRow `json:"items"`
 }

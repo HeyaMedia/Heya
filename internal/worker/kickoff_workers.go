@@ -29,6 +29,7 @@ import (
 	"github.com/karbowiak/heya/internal/sonicanalysis"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/rs/zerolog/log"
 )
 
@@ -51,6 +52,14 @@ const (
 	metadataDeferredRetry = 30 * time.Second
 )
 
+type scannerStageHandoffError struct {
+	stage string
+	err   error
+}
+
+func (e *scannerStageHandoffError) Error() string { return e.stage + " handoff: " + e.err.Error() }
+func (e *scannerStageHandoffError) Unwrap() error { return e.err }
+
 func scannerWorkerError(err error) error {
 	if retryAfter, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
 		return river.JobSnooze(retryAfter)
@@ -60,6 +69,85 @@ func scannerWorkerError(err error) error {
 		return river.JobCancel(err)
 	}
 	return err
+}
+
+// enqueueStaleScannerArtifactReanalysis turns an unsafe durable replay into a
+// fresh owner-scope analysis. The stale stage job completes successfully once
+// the replacement is durable in River; retrying the old artifact can never
+// make progress and would otherwise keep resurrecting removed tags/NFO data.
+func enqueueStaleScannerArtifactReanalysis(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, lib sqlc.Library, entityID, artifactID int64, scopes []string, taskID, source string, replayErr error) (bool, error) {
+	return enqueueStaleScannerArtifactReanalysisWithInsert(ctx, rc, db, lib, entityID, artifactID, scopes, taskID, source, replayErr, nil)
+}
+
+func enqueueStaleScannerArtifactReanalysisWithInsert(
+	ctx context.Context,
+	rc *river.Client[pgx.Tx],
+	db *pgxpool.Pool,
+	lib sqlc.Library,
+	entityID, artifactID int64,
+	scopes []string,
+	taskID, source string,
+	replayErr error,
+	insert func(context.Context, pgx.Tx, ProcessLibraryScanArgs) error,
+) (bool, error) {
+	var stale *scanner.ArtifactReplayError
+	if !errors.As(replayErr, &stale) {
+		return false, nil
+	}
+	if db == nil || (rc == nil && insert == nil) {
+		return true, fmt.Errorf("stale scanner artifact recovery requires database and River client")
+	}
+	// Release the applying barrier and publish replacement analysis in the same
+	// transaction. If River insertion fails, the old entity remains retryable;
+	// if a newer generation already superseded it, neither transition occurs.
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		return true, fmt.Errorf("begin stale scanner artifact recovery: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
+	qtx := sqlc.New(tx)
+	artifact, err := qtx.GetScannerEntityArtifact(ctx, artifactID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return true, fmt.Errorf("load stale scanner artifact: %w", err)
+	}
+	if _, err := qtx.MarkScannerEntityFailed(ctx, sqlc.MarkScannerEntityFailedParams{
+		Status: "stale", ErrorMessage: replayErr.Error(), EntityID: entityID,
+		PipelineGeneration: artifact.PipelineGeneration, ExpectedArtifactID: artifactID,
+	}); errors.Is(err, pgx.ErrNoRows) {
+		return true, nil
+	} else if err != nil {
+		return true, fmt.Errorf("release stale scanner artifact: %w", err)
+	}
+	args := ProcessLibraryScanArgs{
+		LibraryID:       lib.ID,
+		MediaType:       lib.MediaType,
+		ScopePaths:      scopes,
+		Force:           true,
+		ScheduledTaskID: taskID,
+	}
+	if insert != nil {
+		err = insert(ctx, tx, args)
+	} else {
+		opts := args.InsertOpts()
+		opts.Priority = PriorityMatch
+		err = insertScanUnitWithBurstTx(ctx, rc, tx, lib.ID, args, applyScheduledJobSource(opts, source))
+	}
+	if err != nil {
+		return true, fmt.Errorf("enqueue fresh analysis for stale scanner artifact: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return true, fmt.Errorf("commit stale scanner artifact recovery: %w", err)
+	}
+	log.Info().
+		Int64("library_id", lib.ID).
+		Str("media_type", string(lib.MediaType)).
+		Strs("scopes", scopes).
+		Str("reason", stale.Reason).
+		Msg("scanner artifact is stale; enqueued fresh scoped analysis")
+	return true, nil
 }
 
 func logScannerPipelineFailure(worker string, jobID int64, lib sqlc.Library, scannerEntityID int64, scopes []string, err error) {
@@ -298,6 +386,9 @@ type ProcessLibraryScanWorker struct {
 	Hub      EventPublisher
 	Watcher  WatcherPauser
 	Progress *TaskProgressBroadcaster
+	// BeforeHandoffCommit is a fault-injection seam proving analysis state and
+	// downstream search work share one transaction.
+	BeforeHandoffCommit func() error
 }
 
 func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[ProcessLibraryScanArgs]) error {
@@ -365,35 +456,46 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 		logScannerPipelineFailure("process_scan", job.ID, lib, 0, job.Args.ScopePaths, err)
 		return scannerWorkerError(err)
 	}
+	observed, err := scanner.ObservePendingAnalysisFiles(ctx, w.DB, lib, result)
+	if err != nil {
+		logScannerPipelineFailure("process_scan", job.ID, lib, 0, job.Args.ScopePaths, err)
+		return scannerWorkerError(err)
+	}
 
 	entityOpts := scannerAnalysisOptions(w.DB)
 	entityOpts.ScopePaths = job.Args.ScopePaths
-	refs, err := scanner.PersistScannerAnalysisEntities(ctx, w.DB, lib, entityOpts, result)
+	enqueued := 0
+	refs, err := scanner.PersistScannerAnalysisEntitiesWithHandoff(ctx, w.DB, lib, entityOpts, result, func(handoffCtx context.Context, tx pgx.Tx, refs []scanner.ScannerEntityRef) error {
+		if len(refs) > 0 && w.BeforeHandoffCommit != nil {
+			if err := w.BeforeHandoffCommit(); err != nil {
+				return &scannerStageHandoffError{stage: "analysis_to_search", err: err}
+			}
+		}
+		for _, ref := range refs {
+			if err := enqueueSearchLibraryMetadataTx(handoffCtx, rc, tx, SearchLibraryMetadataArgs{
+				LibraryID: lib.ID, MediaType: lib.MediaType, ScopePaths: job.Args.ScopePaths,
+				ScannerEntityID: ref.Entity.ID, AnalysisArtifactID: ref.Artifact.ID,
+				Force: job.Args.Force, ScheduledTaskID: job.Args.ScheduledTaskID,
+			}, PriorityScan, source); err != nil {
+				return &scannerStageHandoffError{stage: "analysis_to_search", err: err}
+			}
+			enqueued++
+		}
+		return nil
+	})
 	if err != nil {
+		if errors.Is(err, scanner.ErrScannerScopeApplying) {
+			log.Debug().Int64("library_id", lib.ID).Strs("scopes", job.Args.ScopePaths).Msg("process_scan: scope is applying; snoozing analysis persistence")
+			return river.JobSnooze(5 * time.Second)
+		}
 		log.Error().Err(err).Int64("library_id", lib.ID).Msg("process_scan: persist scanner analysis entities failed")
 		return scannerWorkerError(err)
 	}
-	enqueued := 0
-	for _, ref := range refs {
-		if err := enqueueSearchLibraryMetadata(ctx, rc, w.DB, SearchLibraryMetadataArgs{
-			LibraryID:          lib.ID,
-			MediaType:          lib.MediaType,
-			ScopePaths:         job.Args.ScopePaths,
-			ScannerEntityID:    ref.Entity.ID,
-			AnalysisArtifactID: ref.Artifact.ID,
-			Force:              job.Args.Force,
-			ScheduledTaskID:    job.Args.ScheduledTaskID,
-		}, PriorityScan, source); err != nil {
-			log.Warn().Err(err).Int64("library_id", lib.ID).Int64("scanner_entity_id", ref.Entity.ID).Msg("process_scan: enqueue metadata search failed")
-			return err
-		}
-		enqueued++
-	}
-
 	log.Info().
 		Int64("library_id", lib.ID).
 		Int("scopes", len(job.Args.ScopePaths)).
 		Int("discovered", outcome.Discovered).
+		Int("observed_files", observed).
 		Int("entities", len(refs)).
 		Int("enqueued_search", enqueued).
 		Msg("process_scan: library done")
@@ -422,6 +524,9 @@ type SearchLibraryMetadataWorker struct {
 	Hub      EventPublisher
 	Progress *TaskProgressBroadcaster
 	Backoff  *metadataContinuationBackoff
+	// BeforeHandoffCommit is a fault-injection seam proving search projection
+	// and fetch work share one transaction.
+	BeforeHandoffCommit func() error
 }
 
 func (w *SearchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[SearchLibraryMetadataArgs]) error {
@@ -443,8 +548,45 @@ func (w *SearchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[S
 	scanCtx, cancel := context.WithTimeout(ctx, scannerProcessTimeout)
 	scanCtx = metadata.WithDeferredRemoteWork(scanCtx, metadataDeferredRetry)
 	defer cancel()
-	outcome, result, searchScanRunID, err := w.scanLibrarySearchArtifact(scanCtx, lib, job.Args.ScopePaths, job.Args.AnalysisArtifactID)
+	enqueued := 0
+	handoff := func(handoffCtx context.Context, tx pgx.Tx, ref scanner.ScannerEntityRef) error {
+		if !ref.Accepted || ref.ProviderID == "" {
+			return nil
+		}
+		if w.BeforeHandoffCommit != nil {
+			if err := w.BeforeHandoffCommit(); err != nil {
+				return &scannerStageHandoffError{stage: "search_to_fetch", err: err}
+			}
+		}
+		if err := enqueueFetchLibraryMetadataTx(handoffCtx, rc, tx, FetchLibraryMetadataArgs{
+			LibraryID: lib.ID, MediaType: lib.MediaType, ScopePaths: job.Args.ScopePaths,
+			ScannerEntityID: ref.Entity.ID, SearchArtifactID: ref.Artifact.ID,
+			Force: job.Args.Force, ScheduledTaskID: job.Args.ScheduledTaskID,
+		}, PriorityScan, source); err != nil {
+			return &scannerStageHandoffError{stage: "search_to_fetch", err: err}
+		}
+		enqueued++
+		return nil
+	}
+	outcome, result, _, current, err := w.scanLibrarySearchArtifact(scanCtx, lib, job.Args.ScopePaths, job.Args.ScannerEntityID, job.Args.AnalysisArtifactID, handoff)
+	if !current && err == nil {
+		deleteMetadataContinuation(ctx, w.DB, job.Args.Kind(), job.Args.ScannerEntityID, job.Args.AnalysisArtifactID)
+		log.Debug().Int64("scanner_entity_id", job.Args.ScannerEntityID).Int64("analysis_artifact_id", job.Args.AnalysisArtifactID).Msg("search_metadata: stale artifact; job completed without side effects")
+		return nil
+	}
 	if err != nil {
+		var handoffErr *scannerStageHandoffError
+		if errors.As(err, &handoffErr) {
+			deleteMetadataContinuation(ctx, w.DB, job.Args.Kind(), job.Args.ScannerEntityID, job.Args.AnalysisArtifactID)
+			return err
+		}
+		if stale, replayErr := enqueueStaleScannerArtifactReanalysis(ctx, rc, w.DB, lib, job.Args.ScannerEntityID, job.Args.AnalysisArtifactID, job.Args.ScopePaths, job.Args.ScheduledTaskID, source, err); stale {
+			deleteMetadataContinuation(ctx, w.DB, job.Args.Kind(), job.Args.ScannerEntityID, job.Args.AnalysisArtifactID)
+			if replayErr != nil {
+				return replayErr
+			}
+			return nil
+		}
 		if retryAfter, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
 			workflow := metadataContinuationWorkflow{}
 			waiting := int64(0)
@@ -460,7 +602,7 @@ func (w *SearchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[S
 			return parkMetadataContinuation(ctx, w.DB, pollArgs.Kind(), pollArgs.LibraryID, pollArgs.ScannerEntityID, pollArgs.AnalysisArtifactID, pollArgs, PriorityScan, source, retryAfter, workflow)
 		}
 		deleteMetadataContinuation(ctx, w.DB, job.Args.Kind(), job.Args.ScannerEntityID, job.Args.AnalysisArtifactID)
-		if markErr := scanner.MarkScannerEntityFailed(ctx, w.DB, job.Args.ScannerEntityID, "error", err); markErr != nil {
+		if _, markErr := scanner.MarkScannerEntityFailed(ctx, w.DB, job.Args.ScannerEntityID, job.Args.AnalysisArtifactID, "error", err); markErr != nil {
 			log.Error().Err(markErr).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("search_metadata: failure state persistence failed")
 		}
 		logScannerPipelineFailure("search_metadata", job.ID, lib, job.Args.ScannerEntityID, job.Args.ScopePaths, err)
@@ -468,33 +610,9 @@ func (w *SearchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[S
 	}
 	deleteMetadataContinuation(ctx, w.DB, job.Args.Kind(), job.Args.ScannerEntityID, job.Args.AnalysisArtifactID)
 
-	entityOpts := scannerSearchOptions(w.DB, w.Heya)
-	entityOpts.ScopePaths = job.Args.ScopePaths
-	refs, err := scanner.PersistScannerSearchEntities(ctx, w.DB, lib, entityOpts, result, searchScanRunID)
-	if err != nil {
-		return scannerWorkerError(err)
-	}
 	parked, parkErr := scanner.ParkUnmatchedFiles(ctx, w.DB, lib, result)
 	if parkErr != nil {
 		log.Warn().Err(parkErr).Int64("library_id", lib.ID).Int("parked", parked).Msg("search_metadata: park unmatched files failed")
-	}
-	enqueued := 0
-	for _, ref := range refs {
-		if !ref.Accepted || ref.ProviderID == "" {
-			continue
-		}
-		if err := enqueueFetchLibraryMetadata(ctx, rc, w.DB, FetchLibraryMetadataArgs{
-			LibraryID:        lib.ID,
-			MediaType:        lib.MediaType,
-			ScopePaths:       job.Args.ScopePaths,
-			ScannerEntityID:  ref.Entity.ID,
-			SearchArtifactID: ref.Artifact.ID,
-			Force:            job.Args.Force,
-			ScheduledTaskID:  job.Args.ScheduledTaskID,
-		}, PriorityScan, source); err != nil {
-			return err
-		}
-		enqueued++
 	}
 	log.Debug().Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Bool("poll", job.Args.Poll).Int("selected", outcome.New).Int("parked", parked).Int("enqueued_fetch", enqueued).Dur("duration", time.Since(started)).Msg("search_metadata: library done")
 	if enqueued == 0 {
@@ -514,6 +632,9 @@ type FetchLibraryMetadataWorker struct {
 	Hub      EventPublisher
 	Watcher  WatcherPauser
 	Progress *TaskProgressBroadcaster
+	// BeforeHandoffCommit is a fault-injection seam proving fetched metadata and
+	// apply work share one transaction.
+	BeforeHandoffCommit func() error
 }
 
 func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[FetchLibraryMetadataArgs]) error {
@@ -545,8 +666,43 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 	scanCtx, cancel := context.WithTimeout(ctx, scannerFetchTimeout)
 	scanCtx = metadata.WithDeferredRemoteWork(scanCtx, metadataDeferredRetry)
 	defer cancel()
-	result, fetchScanRunID, metadataArtifactID, err := w.scanLibraryFetch(scanCtx, lib, job.Args.ScopePaths, job.Args.ScannerEntityID, job.Args.SearchArtifactID)
+	handoff := func(handoffCtx context.Context, tx pgx.Tx, artifact sqlc.ScannerEntityArtifact, fetched scanner.Result) error {
+		if countScannerFetchedMetadata(fetched) == 0 {
+			return nil
+		}
+		if w.BeforeHandoffCommit != nil {
+			if err := w.BeforeHandoffCommit(); err != nil {
+				return &scannerStageHandoffError{stage: "fetch_to_apply", err: err}
+			}
+		}
+		if err := enqueueApplyLibraryScanTx(handoffCtx, rc, tx, ApplyLibraryScanArgs{
+			LibraryID: lib.ID, MediaType: lib.MediaType, ScopePaths: job.Args.ScopePaths,
+			ScannerEntityID: job.Args.ScannerEntityID, MetadataArtifactID: artifact.ID,
+			Force: job.Args.Force, ScheduledTaskID: job.Args.ScheduledTaskID,
+		}, PriorityScan, source); err != nil {
+			return &scannerStageHandoffError{stage: "fetch_to_apply", err: err}
+		}
+		return nil
+	}
+	result, fetchScanRunID, metadataArtifactID, current, err := w.scanLibraryFetch(scanCtx, lib, job.Args.ScopePaths, job.Args.ScannerEntityID, job.Args.SearchArtifactID, handoff)
+	if !current && err == nil {
+		deleteMetadataContinuation(ctx, w.DB, job.Args.Kind(), job.Args.ScannerEntityID, job.Args.SearchArtifactID)
+		log.Debug().Int64("scanner_entity_id", job.Args.ScannerEntityID).Int64("search_artifact_id", job.Args.SearchArtifactID).Msg("fetch_metadata: stale artifact; job completed without side effects")
+		return nil
+	}
 	if err != nil {
+		var handoffErr *scannerStageHandoffError
+		if errors.As(err, &handoffErr) {
+			deleteMetadataContinuation(ctx, w.DB, job.Args.Kind(), job.Args.ScannerEntityID, job.Args.SearchArtifactID)
+			return err
+		}
+		if stale, replayErr := enqueueStaleScannerArtifactReanalysis(ctx, rc, w.DB, lib, job.Args.ScannerEntityID, job.Args.SearchArtifactID, job.Args.ScopePaths, job.Args.ScheduledTaskID, source, err); stale {
+			deleteMetadataContinuation(ctx, w.DB, job.Args.Kind(), job.Args.ScannerEntityID, job.Args.SearchArtifactID)
+			if replayErr != nil {
+				return replayErr
+			}
+			return nil
+		}
 		if retryAfter, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
 			log.Info().Bool("poll", job.Args.Poll).Dur("retry_after", retryAfter).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("fetch_metadata: metadata work deferred")
 			pollArgs := job.Args
@@ -554,7 +710,7 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 			return parkMetadataContinuation(ctx, w.DB, pollArgs.Kind(), pollArgs.LibraryID, pollArgs.ScannerEntityID, pollArgs.SearchArtifactID, pollArgs, PriorityScan, source, retryAfter, metadataContinuationWorkflow{})
 		} else {
 			deleteMetadataContinuation(ctx, w.DB, job.Args.Kind(), job.Args.ScannerEntityID, job.Args.SearchArtifactID)
-			if markErr := scanner.MarkScannerEntityFailed(ctx, w.DB, job.Args.ScannerEntityID, "metadata_error", err); markErr != nil {
+			if _, markErr := scanner.MarkScannerEntityFailed(ctx, w.DB, job.Args.ScannerEntityID, job.Args.SearchArtifactID, "metadata_error", err); markErr != nil {
 				log.Error().Err(markErr).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("fetch_metadata: failure state persistence failed")
 			}
 			logScannerPipelineFailure("fetch_metadata", job.ID, lib, job.Args.ScannerEntityID, job.Args.ScopePaths, err)
@@ -577,19 +733,6 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 			New:         result.New,
 		})
 		return nil
-	}
-
-	if err := enqueueApplyLibraryScan(ctx, rc, w.DB, ApplyLibraryScanArgs{
-		LibraryID:          lib.ID,
-		MediaType:          lib.MediaType,
-		ScopePaths:         job.Args.ScopePaths,
-		ScannerEntityID:    job.Args.ScannerEntityID,
-		MetadataArtifactID: metadataArtifactID,
-		Force:              job.Args.Force,
-		ScheduledTaskID:    job.Args.ScheduledTaskID,
-	}, PriorityScan, source); err != nil {
-		log.Warn().Err(err).Int64("library_id", lib.ID).Msg("fetch_metadata: enqueue apply failed")
-		return err
 	}
 
 	log.Info().
@@ -617,6 +760,9 @@ type ApplyLibraryScanWorker struct {
 	Watcher      WatcherPauser
 	SonicEnabled SonicEnabledFn
 	Progress     *TaskProgressBroadcaster
+	// BeforeFanoutCommit is a narrow fault-injection seam for proving that
+	// River inserts and scanner finalization roll back together.
+	BeforeFanoutCommit func() error
 }
 
 type ApplyRichMetadataWorker struct {
@@ -625,6 +771,9 @@ type ApplyRichMetadataWorker struct {
 	Matcher  MatchService
 	Hub      EventPublisher
 	Progress *TaskProgressBroadcaster
+	// BeforeStoreTransaction is a narrow fault-injection seam for proving that
+	// a rematch between artifact loading and rich persistence wins the race.
+	BeforeStoreTransaction func() error
 }
 
 func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyLibraryScanArgs]) error {
@@ -644,6 +793,14 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 			Msg("apply_metadata: scanner does not support this library type")
 		return nil
 	}
+	lockTx, acquired, err := tryScannerEntityExecutionLock(ctx, w.DB, "apply", job.Args.ScannerEntityID)
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		return river.JobSnooze(2 * time.Second)
+	}
+	defer releaseScannerEntityExecutionLock(lockTx)
 
 	w.Progress.Set("scan_libraries", "apply_metadata", libraryScanProgressLabel(lib, job.Args.ScopePaths))
 
@@ -652,11 +809,58 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 		defer w.Watcher.Resume(lib.ID)
 	}
 
-	scanCtx, cancel := context.WithTimeout(ctx, scannerApplyTimeout)
-	defer cancel()
-	outcome, result, err := w.scanLibraryApply(scanCtx, lib, job.Args.ScopePaths, job.Args.ScannerEntityID, job.Args.MetadataArtifactID)
+	checkpoint, err := loadScannerApplyCheckpoint(ctx, w.DB, job.Args.ScannerEntityID, job.Args.MetadataArtifactID)
 	if err != nil {
-		if markErr := scanner.MarkScannerEntityFailed(ctx, w.DB, job.Args.ScannerEntityID, "apply_error", err); markErr != nil {
+		return err
+	}
+	if checkpoint.complete {
+		log.Debug().Int64("scanner_entity_id", job.Args.ScannerEntityID).Int64("metadata_artifact_id", job.Args.MetadataArtifactID).Msg("apply_metadata: durable fanout already completed")
+		return nil
+	}
+	if !checkpoint.current {
+		log.Debug().Int64("scanner_entity_id", job.Args.ScannerEntityID).Int64("metadata_artifact_id", job.Args.MetadataArtifactID).Msg("apply_metadata: stale artifact; job completed without main database writes")
+		return nil
+	}
+
+	outcome := libraryScanOutcome{}
+	result := checkpoint.result
+	applyArtifactID := checkpoint.applyArtifactID
+	if checkpoint.pending {
+		outcome = libraryScanOutcome{
+			Discovered: countScannerInventoryFiles(result.Inventory),
+			New:        countScannerAppliedFiles(result),
+		}
+		log.Info().Int64("scanner_entity_id", job.Args.ScannerEntityID).Int64("apply_artifact_id", applyArtifactID).Msg("apply_metadata: resuming durable post-apply fanout")
+	} else {
+		scanCtx, cancel := context.WithTimeout(ctx, scannerApplyTimeout)
+		defer cancel()
+		var current bool
+		outcome, result, applyArtifactID, current, err = w.scanLibraryApply(scanCtx, lib, job.Args.ScopePaths, job.Args.ScannerEntityID, job.Args.MetadataArtifactID)
+		if !current && err == nil {
+			log.Debug().Int64("scanner_entity_id", job.Args.ScannerEntityID).Int64("metadata_artifact_id", job.Args.MetadataArtifactID).Msg("apply_metadata: stale artifact; job completed without main database writes")
+			return nil
+		}
+	}
+	if err != nil {
+		var decisionChanged *scannerFetchDecisionChangedError
+		if errors.As(err, &decisionChanged) {
+			if err := enqueueFetchLibraryMetadata(ctx, rc, w.DB, FetchLibraryMetadataArgs{
+				LibraryID: lib.ID, MediaType: lib.MediaType, ScopePaths: job.Args.ScopePaths,
+				ScannerEntityID: job.Args.ScannerEntityID, SearchArtifactID: decisionChanged.searchArtifactID,
+				Force: job.Args.Force, ScheduledTaskID: job.Args.ScheduledTaskID,
+			}, PriorityScan, source); err != nil {
+				return err
+			}
+			log.Info().Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Int64("search_artifact_id", decisionChanged.searchArtifactID).Msg("apply_metadata: current manual decision requires fresh metadata")
+			return nil
+		}
+		if stale, replayErr := enqueueStaleScannerArtifactReanalysis(ctx, rc, w.DB, lib, job.Args.ScannerEntityID, job.Args.MetadataArtifactID, job.Args.ScopePaths, job.Args.ScheduledTaskID, source, err); stale {
+			if replayErr != nil {
+				return replayErr
+			}
+			return nil
+		}
+		if _, markErr := scanner.MarkScannerEntityFailed(ctx, w.DB, job.Args.ScannerEntityID, job.Args.MetadataArtifactID, "apply_error", err); markErr != nil {
 			log.Error().Err(markErr).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("apply_metadata: failure state persistence failed")
 		}
 		logScannerPipelineFailure("apply_metadata", job.ID, lib, job.Args.ScannerEntityID, job.Args.ScopePaths, err)
@@ -670,9 +874,37 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 	if parkErr != nil {
 		log.Warn().Err(parkErr).Int64("library_id", lib.ID).Int("parked", parked).Msg("apply_metadata: park unapplied files failed")
 	}
-	richQueued, richFailed := w.enqueueRichMetadataWork(ctx, rc, lib, result, job.Args.MetadataArtifactID, job.Args.ScannerEntityID, job.Args.ScheduledTaskID, source)
-	fanout := w.enqueuePostApplyWork(ctx, q, rc, lib, result, job.Args.ScheduledTaskID, source)
-	if richQueued == 0 && richFailed == 0 {
+
+	// River jobs and the entity's terminal status are one database commit. A
+	// rollback leaves the durable apply artifact in `applying`, so a retry can
+	// safely rebuild the complete fanout without repeating core apply writes.
+	fanoutTx, err := w.DB.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("apply_metadata: begin fanout transaction: %w", err)
+	}
+	defer fanoutTx.Rollback(ctx) //nolint:errcheck // no-op after commit
+	fanoutQ := sqlc.New(fanoutTx)
+	richQueued, richFailed := w.enqueueRichMetadataWork(ctx, fanoutTx, rc, lib, result, job.Args.MetadataArtifactID, job.Args.ScannerEntityID, job.Args.ScheduledTaskID, source)
+	fanout := w.enqueuePostApplyWorkTx(ctx, fanoutQ, rc, fanoutTx, lib, result, job.Args.ScheduledTaskID, source)
+	if richFailed > 0 || fanout.Failed > 0 {
+		return fmt.Errorf("apply_metadata: durable fanout failed (rich=%d post_apply=%d)", richFailed, fanout.Failed)
+	}
+	finalized, err := scanner.FinalizeScannerApplyEntityTx(ctx, fanoutTx, job.Args.ScannerEntityID, job.Args.MetadataArtifactID, applyArtifactID, result)
+	if err != nil {
+		return err
+	}
+	if !finalized {
+		return fmt.Errorf("apply_metadata: apply checkpoint %d is no longer current", applyArtifactID)
+	}
+	if w.BeforeFanoutCommit != nil {
+		if err := w.BeforeFanoutCommit(); err != nil {
+			return err
+		}
+	}
+	if err := fanoutTx.Commit(ctx); err != nil {
+		return fmt.Errorf("apply_metadata: commit durable fanout: %w", err)
+	}
+	if richQueued == 0 {
 		// Exclude this apply job from the guard — it's still running, and with
 		// no rich work queued nothing else will reference the entity's
 		// artifacts from this cycle.
@@ -709,7 +941,85 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 	return nil
 }
 
-func (w *ApplyLibraryScanWorker) enqueueRichMetadataWork(ctx context.Context, rc *river.Client[pgx.Tx], lib sqlc.Library, result scanner.Result, metadataArtifactID, scannerEntityID int64, taskID string, source string) (queued, failed int) {
+type scannerApplyCheckpoint struct {
+	result          scanner.Result
+	applyArtifactID int64
+	current         bool
+	pending         bool
+	complete        bool
+}
+
+type scannerFetchDecisionChangedError struct {
+	searchArtifactID int64
+}
+
+func (e *scannerFetchDecisionChangedError) Error() string {
+	return fmt.Sprintf("metadata no longer covers the current search decision; refetch search artifact %d", e.searchArtifactID)
+}
+
+func loadScannerApplyCheckpoint(ctx context.Context, db *pgxpool.Pool, entityID, metadataArtifactID int64) (scannerApplyCheckpoint, error) {
+	entity, err := sqlc.New(db).GetScannerEntity(ctx, entityID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return scannerApplyCheckpoint{}, nil
+	}
+	if err != nil {
+		return scannerApplyCheckpoint{}, fmt.Errorf("load scanner entity apply checkpoint: %w", err)
+	}
+	if !entity.MetadataArtifactID.Valid || entity.MetadataArtifactID.Int64 != metadataArtifactID {
+		return scannerApplyCheckpoint{}, nil
+	}
+	checkpoint := scannerApplyCheckpoint{current: true}
+	if !entity.ApplyArtifactID.Valid {
+		return checkpoint, nil
+	}
+	_, result, current, err := scanner.LoadCurrentScannerEntityArtifactResult(ctx, db, entityID, entity.ApplyArtifactID.Int64, "apply_result")
+	if err != nil {
+		return scannerApplyCheckpoint{}, err
+	}
+	if !current {
+		return scannerApplyCheckpoint{}, nil
+	}
+	checkpoint.result = result
+	checkpoint.applyArtifactID = entity.ApplyArtifactID.Int64
+	if entity.Status == "applying" || entity.Status == "apply_error" {
+		checkpoint.pending = true
+	} else {
+		checkpoint.complete = true
+	}
+	return checkpoint, nil
+}
+
+func tryScannerEntityExecutionLock(ctx context.Context, db *pgxpool.Pool, phase string, entityID int64) (pgx.Tx, bool, error) {
+	if db == nil || entityID == 0 {
+		return nil, false, fmt.Errorf("scanner %s execution lock requires a database and entity id", phase)
+	}
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin scanner %s execution lock: %w", phase, err)
+	}
+	var acquired bool
+	key := fmt.Sprintf("heya:scanner:%s:%d", phase, entityID)
+	if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))`, key).Scan(&acquired); err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, false, fmt.Errorf("acquire scanner %s execution lock: %w", phase, err)
+	}
+	if !acquired {
+		_ = tx.Rollback(ctx)
+		return nil, false, nil
+	}
+	return tx, true, nil
+}
+
+func releaseScannerEntityExecutionLock(tx pgx.Tx) {
+	if tx == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = tx.Rollback(ctx)
+}
+
+func (w *ApplyLibraryScanWorker) enqueueRichMetadataWork(ctx context.Context, tx pgx.Tx, rc *river.Client[pgx.Tx], lib sqlc.Library, result scanner.Result, metadataArtifactID, scannerEntityID int64, taskID string, source string) (queued, failed int) {
 	if rc == nil || metadataArtifactID == 0 {
 		return 0, 0
 	}
@@ -735,7 +1045,13 @@ func (w *ApplyLibraryScanWorker) enqueueRichMetadataWork(ctx context.Context, rc
 	if len(jobs) == 0 {
 		return 0, 0
 	}
-	results, err := rc.InsertMany(ctx, jobs)
+	var results []*rivertype.JobInsertResult
+	var err error
+	if tx != nil {
+		results, err = rc.InsertManyTx(ctx, tx, jobs)
+	} else {
+		results, err = rc.InsertMany(ctx, jobs)
+	}
 	if err != nil {
 		log.Warn().Err(err).Int64("library_id", lib.ID).Int("job_count", len(jobs)).Msg("apply_metadata: batch enqueue rich metadata failed")
 		return 0, len(jobs)
@@ -807,6 +1123,80 @@ func stringSliceContains(items []string, needle string) bool {
 	return false
 }
 
+func markRichMetadataPartialIfCurrent(ctx context.Context, db *pgxpool.Pool, entityID, artifactID, mediaItemID int64) error {
+	if db == nil || entityID == 0 || artifactID == 0 || mediaItemID == 0 {
+		return nil
+	}
+	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	qtx := sqlc.New(tx)
+	if _, err := qtx.GetCurrentScannerEntityArtifact(ctx, sqlc.GetCurrentScannerEntityArtifactParams{
+		EntityID: entityID, ArtifactID: artifactID, Stage: "fetch_result",
+	}); errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if err := qtx.MarkEnrichPartial(ctx, mediaItemID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (w *ApplyRichMetadataWorker) storeRichMetadataIfCurrent(
+	ctx context.Context,
+	entityID, artifactID, mediaItemID int64,
+	detail *metadata.MediaDetail,
+) (bool, error) {
+	store, ok := w.Matcher.(transactionalRichMetadataStore)
+	if !ok {
+		return false, fmt.Errorf("apply_rich_metadata matcher does not support transactional rich metadata persistence")
+	}
+	tx, err := w.DB.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	qtx := sqlc.New(tx)
+	artifact, err := qtx.GetCurrentScannerEntityArtifact(ctx, sqlc.GetCurrentScannerEntityArtifactParams{
+		EntityID: entityID, ArtifactID: artifactID, Stage: "fetch_result",
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("lock current rich metadata artifact: %w", err)
+	}
+	if err := scanner.ValidateScannerArtifactSourcesWithDB(ctx, w.DB, artifact); err != nil {
+		return false, err
+	}
+	if err := store.StoreRichMetadataTx(ctx, tx, mediaItemID, detail); err != nil {
+		return false, err
+	}
+	if err := qtx.MarkEnrichPeopleDone(ctx, mediaItemID); err != nil {
+		return false, err
+	}
+	if err := qtx.MarkEnrichExtrasDone(ctx, mediaItemID); err != nil {
+		return false, err
+	}
+	if err := qtx.MarkEnrichComplete(ctx, mediaItemID); err != nil {
+		return false, err
+	}
+	// Filesystem evidence is not row-lockable. Revalidate it immediately before
+	// commit so any change during the local rich-data rebuild rolls everything
+	// back instead of publishing stale side data.
+	if err := scanner.ValidateScannerArtifactSourcesWithDB(ctx, w.DB, artifact); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (w *ApplyRichMetadataWorker) Work(ctx context.Context, job *river.Job[ApplyRichMetadataArgs]) error {
 	started := time.Now()
 	q := sqlc.New(w.DB)
@@ -822,15 +1212,19 @@ func (w *ApplyRichMetadataWorker) Work(ctx context.Context, job *river.Job[Apply
 		return fmt.Errorf("apply_rich_metadata requires media_item_id and metadata_artifact_id")
 	}
 
-	_, result, err := scanner.LoadScannerEntityArtifactResult(ctx, w.DB, job.Args.MetadataArtifactID)
+	artifact, result, current, err := scanner.LoadCurrentScannerEntityArtifactResult(ctx, w.DB, job.Args.ScannerEntityID, job.Args.MetadataArtifactID, "fetch_result")
 	if err != nil {
-		_ = q.MarkEnrichPartial(ctx, job.Args.MediaItemID)
-		// A concurrent apply cycle for the same entity may have compacted this
-		// artifact out from under us. It's gone for good, so retrying the load
-		// can never succeed — but the applied item can still get its rich
-		// side-data straight from the provider. Queue a force-enrich to
-		// recover it and cancel this job instead of retry-storming.
-		if errors.Is(err, pgx.ErrNoRows) {
+		markCtx, markCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = markRichMetadataPartialIfCurrent(markCtx, w.DB, job.Args.ScannerEntityID, job.Args.MetadataArtifactID, job.Args.MediaItemID)
+		markCancel()
+		return err
+	}
+	if !current {
+		// Distinguish an ordinary superseded rich job from an artifact that was
+		// compacted prematurely. Superseded jobs are successful no-ops; a truly
+		// missing artifact retains the existing force-enrich recovery path.
+		_, _, loadErr := scanner.LoadScannerEntityArtifactResult(ctx, w.DB, job.Args.MetadataArtifactID)
+		if errors.Is(loadErr, pgx.ErrNoRows) {
 			if eqErr := EnqueueEnrichForceTx(ctx, job.Args.MediaItemID, lib.MediaType, EnrichSourceForced); eqErr != nil {
 				log.Warn().Err(eqErr).Int64("media_item_id", job.Args.MediaItemID).Msg("apply_rich_metadata: recovery enrich enqueue failed")
 			}
@@ -840,21 +1234,66 @@ func (w *ApplyRichMetadataWorker) Work(ctx context.Context, job *river.Job[Apply
 				Int64("scanner_entity_id", job.Args.ScannerEntityID).
 				Int64("metadata_artifact_id", job.Args.MetadataArtifactID).
 				Msg("apply_rich_metadata: artifact was compacted; queued force-enrich recovery")
-			return river.JobCancel(err)
+			return river.JobCancel(loadErr)
 		}
-		return err
+		if loadErr != nil {
+			return loadErr
+		}
+		log.Debug().Int64("scanner_entity_id", job.Args.ScannerEntityID).Int64("metadata_artifact_id", job.Args.MetadataArtifactID).Msg("apply_rich_metadata: stale artifact; job completed")
+		return nil
+	}
+	recoverStaleArtifact := func(staleErr error) error {
+		entity, entityErr := q.GetScannerEntity(ctx, job.Args.ScannerEntityID)
+		if entityErr != nil {
+			return fmt.Errorf("load scanner entity for stale rich metadata recovery: %w", entityErr)
+		}
+		rc, clientErr := river.ClientFromContextSafely[pgx.Tx](ctx)
+		if clientErr != nil {
+			// Never run StoreRichMetadata from stale local evidence. A direct test
+			// or malformed invocation without River cannot enqueue the corrective
+			// scan, so cancel this unsafe job without marking enrichment complete.
+			return river.JobCancel(fmt.Errorf("apply_rich_metadata stale source cannot enqueue corrective analysis: %w", errors.Join(staleErr, clientErr)))
+		}
+		if handled, recoveryErr := enqueueStaleScannerArtifactReanalysis(
+			ctx, rc, w.DB, lib, job.Args.ScannerEntityID, job.Args.MetadataArtifactID,
+			entity.ScopePaths, job.Args.ScheduledTaskID, scheduledJobSource(job.Metadata), staleErr,
+		); handled {
+			return recoveryErr
+		}
+		return staleErr
+	}
+	if err := scanner.ValidateScannerArtifactSourcesWithDB(ctx, w.DB, artifact); err != nil {
+		var stale *scanner.ArtifactReplayError
+		if !errors.As(err, &stale) {
+			return err
+		}
+		return recoverStaleArtifact(err)
 	}
 	detail, kind, err := richMetadataDetailForJob(result, job.Args)
 	if err != nil {
-		_ = q.MarkEnrichPartial(ctx, job.Args.MediaItemID)
+		markCtx, markCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = markRichMetadataPartialIfCurrent(markCtx, w.DB, job.Args.ScannerEntityID, job.Args.MetadataArtifactID, job.Args.MediaItemID)
+		markCancel()
 		return err
+	}
+	if w.BeforeStoreTransaction != nil {
+		if err := w.BeforeStoreTransaction(); err != nil {
+			return err
+		}
 	}
 
 	richCtx, cancel := context.WithTimeout(ctx, scannerRichTimeout)
 	defer cancel()
-	if err := w.Matcher.StoreRichMetadata(richCtx, job.Args.MediaItemID, detail); err != nil {
+	stored, err := w.storeRichMetadataIfCurrent(
+		richCtx, job.Args.ScannerEntityID, job.Args.MetadataArtifactID, job.Args.MediaItemID, detail,
+	)
+	if err != nil {
+		var stale *scanner.ArtifactReplayError
+		if errors.As(err, &stale) {
+			return recoverStaleArtifact(err)
+		}
 		markCtx, markCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = q.MarkEnrichPartial(markCtx, job.Args.MediaItemID)
+		_ = markRichMetadataPartialIfCurrent(markCtx, w.DB, job.Args.ScannerEntityID, job.Args.MetadataArtifactID, job.Args.MediaItemID)
 		markCancel()
 		log.Warn().
 			Err(err).
@@ -865,14 +1304,12 @@ func (w *ApplyRichMetadataWorker) Work(ctx context.Context, job *river.Job[Apply
 			Msg("apply_rich_metadata: rich metadata failed")
 		return err
 	}
-	if err := q.MarkEnrichPeopleDone(ctx, job.Args.MediaItemID); err != nil {
-		return err
-	}
-	if err := q.MarkEnrichExtrasDone(ctx, job.Args.MediaItemID); err != nil {
-		return err
-	}
-	if err := q.MarkEnrichComplete(ctx, job.Args.MediaItemID); err != nil {
-		return err
+	if !stored {
+		log.Debug().
+			Int64("scanner_entity_id", job.Args.ScannerEntityID).
+			Int64("metadata_artifact_id", job.Args.MetadataArtifactID).
+			Msg("apply_rich_metadata: artifact was superseded before transactional persistence")
+		return nil
 	}
 	if w.Hub != nil {
 		w.Hub.Emit(eventhub.EventMediaUpdated, eventhub.MediaPayload{
@@ -925,8 +1362,46 @@ func compactAppliedScannerArtifacts(ctx context.Context, db *pgxpool.Pool, scann
 	if busy {
 		return
 	}
-	q := sqlc.New(db)
-	deleted, err := q.CompactAppliedScannerArtifactsForEntity(ctx, scannerEntityID)
+	const query = `
+WITH target AS MATERIALIZED (
+    SELECT entity.id
+    FROM scanner_entities entity
+    WHERE entity.id = $1
+      AND entity.status = 'applied'
+      AND NOT EXISTS (
+          SELECT 1 FROM scanner_metadata_continuations continuation
+          WHERE continuation.scanner_entity_id = entity.id
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM river_job job
+          WHERE job.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
+            AND job.args ? 'scanner_entity_id'
+            AND COALESCE(job.args->>'scanner_entity_id', '') ~ '^[0-9]+$'
+            AND (job.args->>'scanner_entity_id')::bigint = entity.id
+            AND ($2::bigint = 0 OR job.id <> $2)
+      )
+    FOR UPDATE
+),
+updated AS (
+    UPDATE scanner_entities entity
+    SET analysis_artifact_id = NULL,
+        search_artifact_id = NULL,
+        metadata_artifact_id = NULL,
+        apply_artifact_id = NULL,
+        updated_at = now()
+    FROM target
+    WHERE entity.id = target.id
+    RETURNING entity.id
+),
+deleted AS (
+    DELETE FROM scanner_entity_artifacts artifact
+    USING updated
+    WHERE artifact.entity_id = updated.id
+    RETURNING artifact.id
+)
+SELECT count(*)::bigint FROM deleted`
+	var deleted int64
+	err = db.QueryRow(ctx, query, scannerEntityID, currentJobID).Scan(&deleted)
 	if err != nil {
 		log.Warn().Err(err).Int64("scanner_entity_id", scannerEntityID).Msg("scanner artifact compaction failed")
 		return
@@ -944,8 +1419,9 @@ func activeScannerJobsForEntity(ctx context.Context, db *pgxpool.Pool, scannerEn
 	err := db.QueryRow(ctx, `
 		SELECT count(*)
 		FROM river_job
-		WHERE kind IN ('search_metadata', 'fetch_metadata', 'apply_metadata', 'apply_rich_metadata')
-		  AND state IN ('available', 'pending', 'retryable', 'running', 'scheduled')
+		WHERE state IN ('available', 'pending', 'retryable', 'running', 'scheduled')
+		  AND args ? 'scanner_entity_id'
+		  AND COALESCE(args->>'scanner_entity_id', '') ~ '^[0-9]+$'
 		  AND (args->>'scanner_entity_id')::bigint = $1
 		  AND ($2::bigint = 0 OR id <> $2)
 	`, scannerEntityID, currentJobID).Scan(&count)
@@ -980,6 +1456,10 @@ func (w *KickoffLibraryScanWorker) inspectLibraryChanges(ctx context.Context, li
 	if err != nil {
 		return libraryScanOutcome{}, nil, scanner.Inventory{}, err
 	}
+	liveScopes, err := loadLiveScannerPipelineScopes(ctx, w.DB, lib.ID)
+	if err != nil {
+		return libraryScanOutcome{}, nil, scanner.Inventory{}, fmt.Errorf("load live scanner scopes: %w", err)
+	}
 
 	existingByPath := make(map[string]sqlc.ListLibraryFilesForScanRow, len(existingRows))
 	for _, row := range existingRows {
@@ -1013,7 +1493,7 @@ func (w *KickoffLibraryScanWorker) inspectLibraryChanges(ctx context.Context, li
 				markChangedScope(scope)
 				return
 			}
-			if !found || existing.DeletedAt.Valid || libraryFileChanged(existing, file) {
+			if !found || existing.DeletedAt.Valid || libraryFileNeedsScan(existing, file, scope, liveScopes) {
 				outcome.New++
 				markChangedScope(scope)
 			}
@@ -1259,6 +1739,13 @@ func scannerInventoryFileTracked(file scanner.InventoryFile) bool {
 // value never equals the stat value, so every file reads as "changed" on
 // every scan and the incremental skip never engages.
 func libraryFileChanged(row sqlc.ListLibraryFilesForScanRow, file scanner.InventoryFile) bool {
+	if row.Status == sqlc.FileStatusPending {
+		return true
+	}
+	return libraryFileSourceChanged(row, file)
+}
+
+func libraryFileSourceChanged(row sqlc.ListLibraryFilesForScanRow, file scanner.InventoryFile) bool {
 	if row.Size != file.Size {
 		return true
 	}
@@ -1269,6 +1756,85 @@ func libraryFileChanged(row sqlc.ListLibraryFilesForScanRow, file scanner.Invent
 		return true
 	}
 	return false
+}
+
+type liveScannerPipelineScopes struct {
+	all    bool
+	scopes []string
+}
+
+func (s liveScannerPipelineScopes) overlaps(scope string) bool {
+	if s.all {
+		return true
+	}
+	for _, active := range s.scopes {
+		if scannerScopeContains(active, scope) || scannerScopeContains(scope, active) {
+			return true
+		}
+	}
+	return false
+}
+
+// libraryFileNeedsScan distinguishes a genuinely changed source from the
+// pending marker used while its remote pipeline is in flight. An unchanged
+// pending tuple must not supersede a live/parked generation on every scheduled
+// kickoff; once the job/continuation disappears, pending becomes eligible
+// again so crashes still self-heal.
+func libraryFileNeedsScan(row sqlc.ListLibraryFilesForScanRow, file scanner.InventoryFile, scope string, live liveScannerPipelineScopes) bool {
+	if libraryFileSourceChanged(row, file) {
+		return true
+	}
+	return row.Status == sqlc.FileStatusPending && !live.overlaps(scope)
+}
+
+func loadLiveScannerPipelineScopes(ctx context.Context, db *pgxpool.Pool, libraryID int64) (liveScannerPipelineScopes, error) {
+	rows, err := db.Query(ctx, `
+		SELECT entity.scope_paths
+		FROM scanner_entities entity
+		WHERE entity.library_id = $1
+		  AND (
+		    EXISTS (
+		      SELECT 1
+		      FROM scanner_metadata_continuations continuation
+		      WHERE continuation.scanner_entity_id = entity.id
+		    )
+		    OR EXISTS (
+		      SELECT 1
+		      FROM river_job job
+		      WHERE job.state IN ('available', 'pending', 'retryable', 'running', 'scheduled')
+		        AND job.args ? 'scanner_entity_id'
+		        AND COALESCE(job.args->>'scanner_entity_id', '') ~ '^[0-9]+$'
+		        AND (job.args->>'scanner_entity_id')::bigint = entity.id
+		    )
+		  )`, libraryID)
+	if err != nil {
+		return liveScannerPipelineScopes{}, err
+	}
+	defer rows.Close()
+
+	set := map[string]bool{}
+	result := liveScannerPipelineScopes{}
+	for rows.Next() {
+		var scopes []string
+		if err := rows.Scan(&scopes); err != nil {
+			return liveScannerPipelineScopes{}, err
+		}
+		if len(scopes) == 0 {
+			result.all = true
+			continue
+		}
+		for _, scope := range scopes {
+			scope = strings.TrimSpace(scope)
+			if scope != "" {
+				set[scope] = true
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return liveScannerPipelineScopes{}, err
+	}
+	result.scopes = sortedMapKeys(set)
+	return result, nil
 }
 
 // timestamptzChanged compares µs-truncated for the same reason as
@@ -1514,6 +2080,22 @@ func insertScanUnitWithBurst(ctx context.Context, rc *river.Client[pgx.Tx], db *
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 
+	if err := insertScanUnitWithBurstTx(ctx, rc, tx, libraryID, args, opts); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// insertScanUnitWithBurstTx is the transaction-aware form used by durable
+// scanner stage hand-offs. The scanner artifact/status and its downstream
+// River job share one commit, eliminating the persist-then-enqueue crash gap.
+func insertScanUnitWithBurstTx(ctx context.Context, rc *river.Client[pgx.Tx], tx pgx.Tx, libraryID int64, args river.JobArgs, opts *river.InsertOpts) error {
+	if rc == nil {
+		return fmt.Errorf("river client unavailable")
+	}
+	if tx == nil {
+		return fmt.Errorf("scanner handoff transaction unavailable")
+	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO library_scan_bursts (library_id, units_total)
 		VALUES ($1, 0)
@@ -1550,7 +2132,7 @@ func insertScanUnitWithBurst(ctx context.Context, rc *river.Client[pgx.Tx], db *
 			return err
 		}
 	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 // EnqueueProcessLibraryScan inserts one process_scan unit and maintains the
@@ -1745,6 +2327,24 @@ func enqueueFetchLibraryMetadata(ctx context.Context, rc *river.Client[pgx.Tx], 
 	return insertScanUnitWithBurst(ctx, rc, db, args.LibraryID, args, applyScheduledJobSource(opts, source))
 }
 
+func enqueueSearchLibraryMetadataTx(ctx context.Context, rc *river.Client[pgx.Tx], tx pgx.Tx, args SearchLibraryMetadataArgs, priority int, source string) error {
+	opts := args.InsertOpts()
+	opts.Priority = priority
+	return insertScanUnitWithBurstTx(ctx, rc, tx, args.LibraryID, args, applyScheduledJobSource(opts, source))
+}
+
+func enqueueFetchLibraryMetadataTx(ctx context.Context, rc *river.Client[pgx.Tx], tx pgx.Tx, args FetchLibraryMetadataArgs, priority int, source string) error {
+	opts := args.InsertOpts()
+	opts.Priority = priority
+	return insertScanUnitWithBurstTx(ctx, rc, tx, args.LibraryID, args, applyScheduledJobSource(opts, source))
+}
+
+func enqueueApplyLibraryScanTx(ctx context.Context, rc *river.Client[pgx.Tx], tx pgx.Tx, args ApplyLibraryScanArgs, priority int, source string) error {
+	opts := args.InsertOpts()
+	opts.Priority = priority
+	return insertScanUnitWithBurstTx(ctx, rc, tx, args.LibraryID, args, applyScheduledJobSource(opts, source))
+}
+
 func (w *ProcessLibraryScanWorker) scanLibraryAnalyze(ctx context.Context, lib sqlc.Library, scopePaths []string) (libraryScanOutcome, scanner.Result, error) {
 	opts := scannerAnalysisOptions(w.DB)
 	opts.ScopePaths = scopePaths
@@ -1760,104 +2360,152 @@ func (w *ProcessLibraryScanWorker) scanLibraryAnalyze(ctx context.Context, lib s
 	}, result, nil
 }
 
-func (w *SearchLibraryMetadataWorker) scanLibrarySearchArtifact(ctx context.Context, lib sqlc.Library, scopePaths []string, analysisArtifactID int64) (libraryScanOutcome, scanner.Result, int64, error) {
-	if analysisArtifactID == 0 {
-		return libraryScanOutcome{}, scanner.Result{}, 0, fmt.Errorf("search_metadata requires analysis_artifact_id")
+func (w *SearchLibraryMetadataWorker) scanLibrarySearchArtifact(ctx context.Context, lib sqlc.Library, scopePaths []string, entityID, analysisArtifactID int64, handoff scanner.ScannerSearchHandoff) (libraryScanOutcome, scanner.Result, scanner.ScannerEntityRef, bool, error) {
+	if entityID == 0 || analysisArtifactID == 0 {
+		return libraryScanOutcome{}, scanner.Result{}, scanner.ScannerEntityRef{}, false, fmt.Errorf("search_metadata requires scanner_entity_id and analysis_artifact_id")
 	}
 	opts := scannerSearchOptions(w.DB, w.Heya)
 	opts.MusicFingerprinter = newMusicFingerprintMatcher(w.DB, lib, w.AcoustID, w.Heya)
 	opts.ScopePaths = scopePaths
 	opts.EventWriters = []scanner.EventWriter{newScannerEventBridge(w.Hub, "search_metadata")}
 	run := scanner.NewLibraryRun(lib, opts, io.Discard)
-	_, result, err := scanner.LoadScannerEntityArtifactResult(ctx, w.DB, analysisArtifactID)
+	artifact, result, current, err := scanner.LoadCurrentScannerEntityArtifactResult(ctx, w.DB, entityID, analysisArtifactID, "analysis_result")
 	if err != nil {
-		return libraryScanOutcome{}, scanner.Result{}, 0, err
+		return libraryScanOutcome{}, scanner.Result{}, scanner.ScannerEntityRef{}, false, err
+	}
+	if !current {
+		return libraryScanOutcome{}, scanner.Result{}, scanner.ScannerEntityRef{}, false, nil
+	}
+	if err := scanner.ValidateScannerArtifactSourcesWithDB(ctx, w.DB, artifact); err != nil {
+		return libraryScanOutcome{}, scanner.Result{}, scanner.ScannerEntityRef{}, true, err
 	}
 	run.ResumeAnalysisResult(result, analysisArtifactID)
 	if err := run.Run(ctx, scanner.PhaseSearch); err != nil {
 		result = run.Result()
-		return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, result, 0, err
+		return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, result, scanner.ScannerEntityRef{}, true, err
 	}
-	result, err = run.Finish(ctx)
+	result, ref, current, err := run.FinishSearchEntityWithHandoff(ctx, entityID, analysisArtifactID, handoff)
 	return libraryScanOutcome{
 		Discovered: countScannerInventoryFiles(result.Inventory),
 		New:        countScannerAcceptedSearch(result),
-	}, result, run.ScanRunID(), err
+	}, result, ref, current, err
 }
 
-func (w *FetchLibraryMetadataWorker) scanLibraryFetch(ctx context.Context, lib sqlc.Library, scopePaths []string, entityID, searchArtifactID int64) (libraryScanOutcome, int64, int64, error) {
+func (w *FetchLibraryMetadataWorker) scanLibraryFetch(ctx context.Context, lib sqlc.Library, scopePaths []string, entityID, searchArtifactID int64, handoff scanner.ScannerFetchHandoff) (libraryScanOutcome, int64, int64, bool, error) {
 	if entityID == 0 || searchArtifactID == 0 {
-		return libraryScanOutcome{}, 0, 0, fmt.Errorf("fetch_metadata requires scanner_entity_id and search_artifact_id")
+		return libraryScanOutcome{}, 0, 0, false, fmt.Errorf("fetch_metadata requires scanner_entity_id and search_artifact_id")
 	}
 	opts := scannerFetchOptions(w.DB, w.Heya)
 	opts.ScopePaths = scopePaths
 	opts.EventWriters = []scanner.EventWriter{newScannerEventBridge(w.Hub, "fetch_metadata")}
 	run := scanner.NewLibraryRun(lib, opts, io.Discard)
-	if _, err := sqlc.New(w.DB).MarkScannerEntityFetching(ctx, entityID); err != nil {
-		return libraryScanOutcome{}, 0, 0, fmt.Errorf("mark scanner entity fetching: %w", err)
-	}
-	_, result, err := scanner.LoadScannerEntityArtifactResult(ctx, w.DB, searchArtifactID)
+	artifact, result, current, err := scanner.LoadCurrentScannerEntityArtifactResult(ctx, w.DB, entityID, searchArtifactID, "search_result")
 	if err != nil {
-		return libraryScanOutcome{}, 0, 0, err
+		return libraryScanOutcome{}, 0, 0, false, err
+	}
+	if !current {
+		return libraryScanOutcome{}, 0, 0, false, nil
+	}
+	if err := scanner.ValidateScannerArtifactSourcesWithDB(ctx, w.DB, artifact); err != nil {
+		return libraryScanOutcome{}, 0, 0, true, err
+	}
+	current, err = scanner.BeginScannerEntityFetch(ctx, w.DB, entityID, searchArtifactID)
+	if err != nil {
+		return libraryScanOutcome{}, 0, 0, false, err
+	}
+	if !current {
+		return libraryScanOutcome{}, 0, 0, false, nil
 	}
 	if err := run.ResumeSearchResult(ctx, result, searchArtifactID); err != nil {
-		return libraryScanOutcome{}, 0, 0, err
+		return libraryScanOutcome{}, 0, 0, true, err
 	}
 	if err := run.Run(ctx, scanner.PhaseFetch); err != nil {
 		result := run.Result()
-		return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, 0, 0, err
+		return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, 0, 0, true, err
 	}
-	result, err = run.Finish(ctx)
+	result, artifact, current, err = run.FinishFetchEntityWithHandoff(ctx, entityID, searchArtifactID, handoff)
 	if err != nil {
-		return libraryScanOutcome{}, run.ScanRunID(), 0, err
+		return libraryScanOutcome{}, run.ScanRunID(), 0, current, err
 	}
-	artifact, err := scanner.PersistScannerFetchEntity(ctx, w.DB, entityID, result, run.ScanRunID())
-	if err != nil {
-		return libraryScanOutcome{}, run.ScanRunID(), 0, err
+	if !current {
+		return libraryScanOutcome{}, run.ScanRunID(), 0, false, nil
 	}
 	return libraryScanOutcome{
 		Discovered: countScannerInventoryFiles(result.Inventory),
 		New:        countScannerFetchedMetadata(result),
-	}, run.ScanRunID(), artifact.ID, nil
+	}, run.ScanRunID(), artifact.ID, true, nil
 }
 
-func (w *ApplyLibraryScanWorker) scanLibraryApply(ctx context.Context, lib sqlc.Library, scopePaths []string, entityID, metadataArtifactID int64) (libraryScanOutcome, scanner.Result, error) {
+func (w *ApplyLibraryScanWorker) scanLibraryApply(ctx context.Context, lib sqlc.Library, scopePaths []string, entityID, metadataArtifactID int64) (libraryScanOutcome, scanner.Result, int64, bool, error) {
 	if entityID == 0 || metadataArtifactID == 0 {
-		return libraryScanOutcome{}, scanner.Result{}, fmt.Errorf("apply_metadata requires scanner_entity_id and metadata_artifact_id")
+		return libraryScanOutcome{}, scanner.Result{}, 0, false, fmt.Errorf("apply_metadata requires scanner_entity_id and metadata_artifact_id")
 	}
 	opts := scannerApplyOptions(w.DB, w.Heya)
 	opts.ScopePaths = scopePaths
 	opts.EventWriters = []scanner.EventWriter{newScannerEventBridge(w.Hub, "apply_metadata")}
 	run := scanner.NewLibraryRun(lib, opts, io.Discard)
-	if _, err := sqlc.New(w.DB).MarkScannerEntityApplying(ctx, entityID); err != nil {
-		return libraryScanOutcome{}, scanner.Result{}, fmt.Errorf("mark scanner entity applying: %w", err)
-	}
-	_, result, err := scanner.LoadScannerEntityArtifactResult(ctx, w.DB, metadataArtifactID)
+	artifact, result, current, err := scanner.LoadCurrentScannerEntityArtifactResult(ctx, w.DB, entityID, metadataArtifactID, "fetch_result")
 	if err != nil {
-		return libraryScanOutcome{}, scanner.Result{}, err
+		return libraryScanOutcome{}, scanner.Result{}, 0, false, err
+	}
+	if !current {
+		return libraryScanOutcome{}, scanner.Result{}, 0, false, nil
+	}
+	if err := scanner.ValidateScannerArtifactSourcesWithDB(ctx, w.DB, artifact); err != nil {
+		return libraryScanOutcome{}, scanner.Result{}, 0, true, err
 	}
 	resumed, err := run.ResumeFetchResult(ctx, result, metadataArtifactID)
 	if err != nil {
-		return libraryScanOutcome{}, scanner.Result{}, err
+		return libraryScanOutcome{}, scanner.Result{}, 0, true, err
 	}
 	if !resumed {
-		return libraryScanOutcome{}, scanner.Result{}, fmt.Errorf("metadata artifact %d is stale for current search decision", metadataArtifactID)
+		entity, loadErr := sqlc.New(w.DB).GetScannerEntity(ctx, entityID)
+		if loadErr != nil {
+			return libraryScanOutcome{}, scanner.Result{}, 0, true, fmt.Errorf("load scanner entity for decision refetch: %w", loadErr)
+		}
+		if !entity.SearchArtifactID.Valid {
+			return libraryScanOutcome{}, scanner.Result{}, 0, true, fmt.Errorf("metadata artifact %d is stale and has no current search artifact", metadataArtifactID)
+		}
+		return libraryScanOutcome{}, scanner.Result{}, 0, true, &scannerFetchDecisionChangedError{searchArtifactID: entity.SearchArtifactID.Int64}
 	}
-	if err := run.Run(ctx, scanner.PhaseMaterialize, scanner.PhaseApply); err != nil {
-		result := run.Result()
-		return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, result, err
-	}
-	result, err = run.Finish(ctx)
+	current, err = scanner.BeginScannerEntityApply(ctx, w.DB, entityID, metadataArtifactID)
 	if err != nil {
-		return libraryScanOutcome{}, result, err
+		return libraryScanOutcome{}, scanner.Result{}, 0, false, err
 	}
-	if _, err := scanner.PersistScannerApplyEntity(ctx, w.DB, entityID, result, run.ScanRunID()); err != nil {
-		return libraryScanOutcome{}, result, err
+	if !current {
+		return libraryScanOutcome{}, scanner.Result{}, 0, false, nil
+	}
+	if err := run.Run(ctx, scanner.PhaseMaterialize); err != nil {
+		result := run.Result()
+		return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, result, 0, true, err
+	}
+	applyCtx := scanner.WithScannerApplyTransactionGuard(ctx, func(guardCtx context.Context) error {
+		return errors.Join(
+			scanner.ValidateScannerArtifactSourcesWithDB(guardCtx, w.DB, artifact),
+			scanner.ValidateCurrentScannerEntityArtifact(guardCtx, w.DB, entityID, metadataArtifactID, "fetch_result"),
+		)
+	}, func(guardCtx context.Context, tx pgx.Tx) error {
+		if err := scanner.ValidateCurrentScannerEntityArtifactTx(guardCtx, tx, entityID, metadataArtifactID, "fetch_result"); err != nil {
+			return err
+		}
+		return scanner.ValidateScannerArtifactSourcesWithDB(guardCtx, w.DB, artifact)
+	})
+	if err := run.Run(applyCtx, scanner.PhaseApply); err != nil {
+		result := run.Result()
+		return libraryScanOutcome{Discovered: countScannerInventoryFiles(result.Inventory)}, result, 0, true, err
+	}
+	var applyArtifact sqlc.ScannerEntityArtifact
+	result, applyArtifact, current, err = run.FinishApplyEntityPendingFanout(ctx, entityID, metadataArtifactID)
+	if err != nil {
+		return libraryScanOutcome{}, result, applyArtifact.ID, current, err
+	}
+	if !current {
+		return libraryScanOutcome{}, result, applyArtifact.ID, false, nil
 	}
 	return libraryScanOutcome{
 		Discovered: countScannerInventoryFiles(result.Inventory),
 		New:        countScannerAppliedFiles(result),
-	}, result, nil
+	}, result, applyArtifact.ID, true, nil
 }
 
 type postApplyFanout struct {
@@ -1885,8 +2533,13 @@ type postApplyPendingJob struct {
 }
 
 func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sqlc.Queries, rc *river.Client[pgx.Tx], lib sqlc.Library, result scanner.Result, taskID string, source string) postApplyFanout {
+	return w.enqueuePostApplyWorkTx(ctx, q, rc, nil, lib, result, taskID, source)
+}
+
+func (w *ApplyLibraryScanWorker) enqueuePostApplyWorkTx(ctx context.Context, q *sqlc.Queries, rc *river.Client[pgx.Tx], tx pgx.Tx, lib sqlc.Library, result scanner.Result, taskID string, source string) postApplyFanout {
 	var fanout postApplyFanout
 	if rc == nil {
+		fanout.Failed++
 		return fanout
 	}
 	settings := metadata.ParseSettings(lib.Settings)
@@ -1913,7 +2566,13 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 		if len(jobs) == 0 {
 			return
 		}
-		results, err := rc.InsertMany(ctx, jobs)
+		var results []*rivertype.JobInsertResult
+		var err error
+		if tx != nil {
+			results, err = rc.InsertManyTx(ctx, tx, jobs)
+		} else {
+			results, err = rc.InsertMany(ctx, jobs)
+		}
 		if err != nil {
 			byKind := make(map[string]int, len(pending))
 			for _, p := range pending {
@@ -2018,14 +2677,17 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWork(ctx context.Context, q *sq
 			fanout.Failed++
 		}
 		if trackFileNeedsLoudness(trackFile) {
-			enqueued, duplicate, err := enqueueTrackLoudnessIfNeeded(ctx, q, rc, ScanTrackLoudnessArgs{TrackFileID: trackFile.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source))
-			if err != nil {
-				log.Warn().Err(err).Int64("track_file_id", trackFile.ID).Msg("apply_metadata: enqueue loudness failed")
-				fanout.Failed++
-			} else if duplicate || !enqueued {
+			// Re-read immediately before accumulating the job, preserving the
+			// on-demand-analysis race guard while keeping the eventual insert in
+			// the same transaction as every other fanout job.
+			latest, latestErr := q.GetTrackFileByID(ctx, trackFile.ID)
+			if errors.Is(latestErr, pgx.ErrNoRows) || (latestErr == nil && !trackFileNeedsLoudness(latest)) {
 				fanout.Skipped++
+			} else if latestErr != nil {
+				log.Warn().Err(latestErr).Int64("track_file_id", trackFile.ID).Msg("apply_metadata: loudness eligibility lookup failed")
+				fanout.Failed++
 			} else {
-				fanout.Loudness++
+				enqueue(ScanTrackLoudnessArgs{TrackFileID: trackFile.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source), "loudness", &fanout.Loudness)
 			}
 		}
 		if sonicEnabled {
@@ -2255,22 +2917,22 @@ func countScannerFetchedMetadata(result scanner.Result) int {
 func countFetchedResultItems(movie []scanner.MovieFetchPreview, book []scanner.BookFetchPreview, tv []scanner.TVFetchPreview, music []scanner.MusicFetchPreview) int {
 	total := 0
 	for _, item := range movie {
-		if item.ProviderID != "" {
+		if item.ProviderID != "" && item.Detail != nil && item.Error == "" {
 			total++
 		}
 	}
 	for _, item := range book {
-		if item.ProviderID != "" {
+		if item.ProviderID != "" && item.Detail != nil && item.Error == "" {
 			total++
 		}
 	}
 	for _, item := range tv {
-		if item.ProviderID != "" {
+		if item.ProviderID != "" && item.Detail != nil && item.Error == "" {
 			total++
 		}
 	}
 	for _, item := range music {
-		if item.ProviderID != "" {
+		if item.ProviderID != "" && item.Detail != nil && item.Error == "" {
 			total++
 		}
 	}

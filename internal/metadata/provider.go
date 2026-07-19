@@ -231,8 +231,9 @@ type MediaDetail struct {
 	// ArtistTopTracksLoaded distinguishes an authoritative empty list from a
 	// failed dedicated endpoint read. The latter must retain the last known
 	// local ranking instead of silently clearing it.
-	ArtistTopTracksLoaded bool                 `json:"-"`
-	ArtistSimilarArtists  []SimilarArtistEntry `json:"artist_similar_artists,omitempty"`
+	ArtistTopTracksLoaded            bool                 `json:"-"`
+	ArtistTopTracksProjectionVersion int64                `json:"-"`
+	ArtistSimilarArtists             []SimilarArtistEntry `json:"artist_similar_artists,omitempty"`
 	// ArtistMetadataSources lists the upstream providers that fed the
 	// canonical document (heya.media freshness.providers keys) — surfaced
 	// on the artist page as a provenance strip.

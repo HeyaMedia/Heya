@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
@@ -94,9 +95,11 @@ func (a *App) missingCountCached(ctx context.Context) int {
 	// Missing = user-facing units which had a local file and now have none.
 	// Metadata-only catalog rows are not missing. For music the media_item is
 	// the artist, which stays present while it has *any* live file — so missing
-	// albums (every track's file gone) and orphan tracks (gone, but their album
-	// still has live tracks) must be counted too. See CleanupMissingMedia for
-	// the matching deletes.
+	// albums (every track's file gone, while their artist still has other live
+	// content) and orphan tracks (gone, but their album still has live tracks)
+	// must be counted too. A fully-gone artist is one media_item unit, never the
+	// artist plus every missing child album. See CleanupMissingMedia for the
+	// physical-row deletion semantics.
 	//
 	// track_files is the sole music ownership edge. Drive candidates from the
 	// small soft-deleted set, then reject any track which still has a live file.
@@ -121,55 +124,7 @@ func (a *App) missingCountCached(ctx context.Context) int {
 		return a.missingCount
 	}
 
-	var count int
-	err = tx.QueryRow(ctx, `
-		WITH deleted_files AS MATERIALIZED (
-		  SELECT id, media_item_id
-		  FROM library_files
-		  WHERE deleted_at IS NOT NULL
-		),
-		candidate_tracks AS MATERIALIZED (
-		  SELECT tf.track_id, t.album_id
-		  FROM track_files tf
-		  JOIN deleted_files d ON d.id = tf.library_file_id
-		  JOIN tracks t ON t.id = tf.track_id
-		),
-		missing_tracks AS MATERIALIZED (
-		  SELECT candidate.track_id, candidate.album_id
-		  FROM candidate_tracks candidate
-		  WHERE NOT EXISTS (
-		          SELECT 1
-		          FROM track_files tf
-		          JOIN library_files lf ON lf.id = tf.library_file_id
-		          WHERE tf.track_id = candidate.track_id AND lf.deleted_at IS NULL
-		        )
-		),
-		live_albums AS MATERIALIZED (
-		  SELECT DISTINCT t.album_id
-		  FROM track_files tf
-		  JOIN tracks t ON t.id = tf.track_id
-		  JOIN library_files lf ON lf.id = tf.library_file_id
-		  WHERE lf.deleted_at IS NULL
-		)
-		SELECT
-		  (SELECT count(DISTINCT d.media_item_id)
-		   FROM deleted_files d
-		   WHERE d.media_item_id IS NOT NULL
-		     AND NOT EXISTS (
-		       SELECT 1 FROM library_files live
-		       WHERE live.media_item_id = d.media_item_id AND live.deleted_at IS NULL
-		     ))
-		+ (SELECT count(DISTINCT missing.album_id)
-		   FROM missing_tracks missing
-		   WHERE NOT EXISTS (
-		     SELECT 1 FROM live_albums live WHERE live.album_id = missing.album_id
-		   ))
-		+ (SELECT count(*)
-		   FROM missing_tracks missing
-		   WHERE EXISTS (
-		     SELECT 1 FROM live_albums live WHERE live.album_id = missing.album_id
-		   ))
-	`).Scan(&count)
+	count, err := queryMissingCount(ctx, tx, 0)
 	if err != nil {
 		log.Warn().Err(err).Msg("dashboard missing_count query failed")
 		return a.missingCount // stale beats silently-zero
@@ -181,16 +136,86 @@ func (a *App) missingCountCached(ctx context.Context) int {
 	return count
 }
 
+// queryMissingCount implements the hierarchy once for both production's
+// all-library dashboard and deterministic library-scoped integration tests.
+// libraryID=0 means all libraries.
+func queryMissingCount(ctx context.Context, tx pgx.Tx, libraryID int64) (int, error) {
+	var count int
+	err := tx.QueryRow(ctx, `
+		WITH deleted_files AS MATERIALIZED (
+		  SELECT id, media_item_id
+		  FROM library_files
+		  WHERE deleted_at IS NOT NULL
+		    AND ($1::bigint = 0 OR library_id = $1)
+		),
+		candidate_tracks AS MATERIALIZED (
+		  SELECT DISTINCT tf.track_id, t.album_id
+		  FROM track_files tf
+		  JOIN deleted_files d ON d.id = tf.library_file_id
+		  JOIN tracks t ON t.id = tf.track_id
+		),
+		missing_tracks AS MATERIALIZED (
+		  SELECT DISTINCT candidate.track_id, candidate.album_id
+		  FROM candidate_tracks candidate
+		  WHERE NOT EXISTS (
+		          SELECT 1
+		          FROM track_files tf
+		          JOIN library_files lf ON lf.id = tf.library_file_id
+		          WHERE tf.track_id = candidate.track_id AND lf.deleted_at IS NULL
+		            AND ($1::bigint = 0 OR lf.library_id = $1)
+		        )
+		),
+		live_albums AS MATERIALIZED (
+		  SELECT DISTINCT t.album_id
+		  FROM track_files tf
+		  JOIN tracks t ON t.id = tf.track_id
+		  JOIN library_files lf ON lf.id = tf.library_file_id
+		  WHERE lf.deleted_at IS NULL
+		    AND ($1::bigint = 0 OR lf.library_id = $1)
+		)
+		SELECT
+		  (SELECT count(DISTINCT d.media_item_id)
+		   FROM deleted_files d
+		   WHERE d.media_item_id IS NOT NULL
+		     AND NOT EXISTS (
+		       SELECT 1 FROM library_files live
+		       WHERE live.media_item_id = d.media_item_id AND live.deleted_at IS NULL
+		         AND ($1::bigint = 0 OR live.library_id = $1)
+		     ))
+		+ (SELECT count(DISTINCT missing.album_id)
+		   FROM missing_tracks missing
+		   JOIN albums album ON album.id = missing.album_id
+		   JOIN artists artist ON artist.id = album.artist_id
+		   WHERE NOT EXISTS (
+		     SELECT 1 FROM live_albums live WHERE live.album_id = missing.album_id
+		   )
+		   AND EXISTS (
+		     SELECT 1 FROM library_files live
+		     WHERE live.media_item_id = artist.media_item_id AND live.deleted_at IS NULL
+		       AND ($1::bigint = 0 OR live.library_id = $1)
+		   ))
+		+ (SELECT count(*)
+		   FROM missing_tracks missing
+		   WHERE EXISTS (
+		     SELECT 1 FROM live_albums live WHERE live.album_id = missing.album_id
+		   ))
+	`, libraryID).Scan(&count)
+	return count, err
+}
+
 // ListMissingMedia returns the user-facing units which previously had a file
 // and now have none: media_items (movies/tv/books, plus fully-gone music
 // artists) and missing albums (every local track file removed but the artist
-// still has other live content). Metadata-only catalog rows are excluded.
+// still has other live content). A fully-gone artist appears only as its
+// media_item, not once again for each child album. Metadata-only catalog rows
+// are excluded.
 // Album rows carry media_type "album" so the FE can key/route them apart from
 // media_items, whose id space overlaps. Orphan tracks inside otherwise-present
 // albums are cleaned but not listed individually.
 func (a *App) ListMissingMedia(ctx context.Context) ([]MissingMediaItem, error) {
 	// Keep the candidate/live-link CTEs aligned with missingCountCached and
-	// CleanupMissingMedia so the dashboard, list, and delete always agree.
+	// CleanupMissingMedia so they select the same physical candidates; this
+	// list intentionally collapses those rows into user-facing hierarchy units.
 	// Serial execution for the same reason as missingCountCached: parallel DSM
 	// segments intermittently fail against the pod's tiny /dev/shm.
 	tx, err := a.db.Begin(ctx)
@@ -209,13 +234,13 @@ func (a *App) ListMissingMedia(ctx context.Context) ([]MissingMediaItem, error) 
 		  WHERE deleted_at IS NOT NULL
 		),
 		candidate_tracks AS MATERIALIZED (
-		  SELECT tf.track_id, t.album_id
+		  SELECT DISTINCT tf.track_id, t.album_id
 		  FROM track_files tf
 		  JOIN deleted_files d ON d.id = tf.library_file_id
 		  JOIN tracks t ON t.id = tf.track_id
 		),
 		missing_tracks AS MATERIALIZED (
-		  SELECT candidate.track_id, candidate.album_id
+		  SELECT DISTINCT candidate.track_id, candidate.album_id
 		  FROM candidate_tracks candidate
 		  WHERE NOT EXISTS (
 		          SELECT 1
@@ -234,8 +259,14 @@ func (a *App) ListMissingMedia(ctx context.Context) ([]MissingMediaItem, error) 
 		missing_albums AS MATERIALIZED (
 		  SELECT DISTINCT missing.album_id
 		  FROM missing_tracks missing
+		  JOIN albums album ON album.id = missing.album_id
+		  JOIN artists artist ON artist.id = album.artist_id
 		  WHERE NOT EXISTS (
 		    SELECT 1 FROM live_albums live WHERE live.album_id = missing.album_id
+		  )
+		  AND EXISTS (
+		    SELECT 1 FROM library_files live
+		    WHERE live.media_item_id = artist.media_item_id AND live.deleted_at IS NULL
 		  )
 		)
 		SELECT mi.id, mi.title, mi.year, mi.media_type::text, mi.poster_path, mi.slug
@@ -279,7 +310,9 @@ func (a *App) ListMissingMedia(ctx context.Context) ([]MissingMediaItem, error) 
 }
 
 // CleanupMissingMedia removes everything with no file left on disk, in one
-// transaction, and returns the total rows removed:
+// transaction, and returns the total physical catalog rows removed (tracks +
+// albums + media_items), which deliberately differs from the dashboard/list's
+// collapsed user-facing unit count:
 //
 //  1. file-backed music tracks whose every canonical file is gone,
 //  2. affected albums left with no tracks as a result, and
@@ -289,8 +322,10 @@ func (a *App) ListMissingMedia(ctx context.Context) ([]MissingMediaItem, error) 
 // The track/album passes are what the old media_item-only version missed:
 // library_files.media_item_id points at the *artist* media_item, so a
 // partially-present artist keeps its media_item while individual albums and
-// tracks rot — pass 3 alone would never reach them. ComputeStats' missing_count
-// counts the same three buckets.
+// tracks rot — pass 3 alone would never reach them. The dashboard collapses a
+// fully-gone artist to one media_item and a fully-gone album under a still-live
+// artist to one album; this cleanup return value instead reports every physical
+// track/album/media_item row it actually removed.
 func (a *App) CleanupMissingMedia(ctx context.Context) (int, error) {
 	tx, err := a.db.Begin(ctx)
 	if err != nil {
@@ -316,13 +351,13 @@ func (a *App) CleanupMissingMedia(ctx context.Context) (int, error) {
 		  SELECT id FROM library_files WHERE deleted_at IS NOT NULL
 		),
 		candidate_tracks AS MATERIALIZED (
-		  SELECT tf.track_id, t.album_id
+		  SELECT DISTINCT tf.track_id, t.album_id
 		  FROM track_files tf
 		  JOIN deleted_files d ON d.id = tf.library_file_id
 		  JOIN tracks t ON t.id = tf.track_id
 		),
 		missing_tracks AS MATERIALIZED (
-		  SELECT candidate.track_id, candidate.album_id
+		  SELECT DISTINCT candidate.track_id, candidate.album_id
 		  FROM candidate_tracks candidate
 		  WHERE NOT EXISTS (
 		          SELECT 1

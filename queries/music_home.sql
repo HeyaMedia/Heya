@@ -302,34 +302,6 @@ WHERE l.media_type = 'music'
 ORDER BY al.year DESC NULLS LAST, lower(al.title) ASC
 LIMIT $1;
 
--- name: ListUserSeedArtistsForMixes :many
--- "Mixes for You" seeds — top-N artists by play volume in the last `since_days`.
--- Each row becomes one mix; the service then runs SimilarArtists against the
--- artist_centroids index to flesh out the mix from sonic-similar artists.
-WITH ranked AS (
-    SELECT a.id                AS artist_id,
-           a.name              AS artist_name,
-           mi.id               AS media_item_id,
-           mi.public_id        AS media_item_public_id,
-           mi.slug             AS artist_slug,
-           count(*)            AS play_count,
-           max(pe.played_at)   AS last_played_at
-    FROM play_events pe
-    JOIN tracks      t  ON t.id  = pe.track_id
-    JOIN albums      al ON al.id = t.album_id
-    JOIN artists     a  ON a.id  = al.artist_id
-    JOIN media_item_cards mi ON mi.id = a.media_item_id
-    WHERE pe.user_id = sqlc.arg(user_id)
-      AND pe.played_at >= sqlc.arg(since_at)
-      AND pe.completed
-      AND EXISTS (SELECT 1 FROM library_files alf WHERE alf.media_item_id = a.media_item_id AND alf.deleted_at IS NULL)
-    GROUP BY a.id, a.name, mi.id, mi.public_id, mi.slug
-)
-SELECT artist_id, artist_name, media_item_id, media_item_public_id, artist_slug, play_count, last_played_at
-FROM ranked
-ORDER BY play_count DESC, last_played_at DESC
-LIMIT sqlc.arg(picks);
-
 -- name: ListArtistTracksTopPlayedFirst :many
 -- Drives the "play this artist" button on home tiles. Returns every track the
 -- artist has, ordered by the user's play count desc (top hits first), then
@@ -365,6 +337,15 @@ LIMIT sqlc.arg(track_limit);
 -- to `tracks_per_artist` tracks per artist ordered by play_count desc.
 -- diversifyByArtist in the service shuffles them inter-artist so the mix
 -- doesn't run six tracks of the same artist back-to-back.
+--
+-- The generated Go function itself has no direct caller anymore (the legacy
+-- server-wide-play-count mix generator that called it was deleted) — this
+-- query is kept solely because ListArtistTopTracksForMixRow is the shared
+-- "playable mix track" row shape that every hand-written recommendation
+-- query in internal/service (scanMixRows, tasteSeedTracks, positiveMusicCandidates,
+-- externalMusicCandidates, popularMusicCandidates, ...) scans into. Deleting
+-- this query definition would delete that struct and break the whole
+-- recommendation engine.
 WITH ranked AS (
     SELECT t.id              AS track_id,
            t.title           AS track_title,

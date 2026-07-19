@@ -131,6 +131,7 @@ func AnalyzeMusicWithOptions(ctx context.Context, inv Inventory, emit Emitter, o
 		type probedFile struct {
 			file InventoryFile
 			tags audiotags.Tags
+			err  error
 		}
 		var audioFiles []InventoryFile
 		for _, file := range root.Files {
@@ -160,18 +161,24 @@ func AnalyzeMusicWithOptions(ctx context.Context, inv Inventory, emit Emitter, o
 			go func(i int, file InventoryFile) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				probed[i] = probedFile{file: file, tags: probeMusicTags(ctx, file, opts, emit)}
+				tags, probeErr := probeMusicTags(ctx, file, opts, emit)
+				probed[i] = probedFile{file: file, tags: tags, err: probeErr}
 			}(i, file)
 		}
 		wg.Wait()
 		if err := ctx.Err(); err != nil {
 			return tracks, nil, nil, err
 		}
+		for _, item := range probed {
+			if item.err != nil {
+				return tracks, nil, nil, item.err
+			}
+		}
 
 		byReleaseDir := map[string][]probedFile{}
 		var releaseDirs []string
 		for _, item := range probed {
-			dir := musicReleaseDir(item.file.RelPath)
+			dir := musicReleasePlanningDir(item.file, item.tags)
 			if _, seen := byReleaseDir[dir]; !seen {
 				releaseDirs = append(releaseDirs, dir)
 			}
@@ -280,6 +287,24 @@ func musicReleaseDir(path string) string {
 		return ""
 	}
 	return filepath.ToSlash(dir)
+}
+
+func musicReleasePlanningDir(file InventoryFile, tags audiotags.Tags) string {
+	dir := musicReleaseDir(file.RelPath)
+	if dir != "" {
+		return dir
+	}
+	// Root-level files do not share a physical release directory. Bucket fully
+	// tagged files by their embedded release identity so consensus can help
+	// sibling tracks without letting the largest root album overwrite every
+	// other loose file's tags.
+	artist := strings.TrimSpace(firstNonEmpty(tags.AlbumArtist, tags.Artist))
+	album := strings.TrimSpace(tags.Album)
+	if !looksLikeUnusableMusicIdentity(artist) && !looksLikeUnusableMusicIdentity(album) &&
+		!audiotags.IsPlaceholderName(artist) && !audiotags.IsPlaceholderValue(album) {
+		return "@root-release:" + normalizeMusicKeyPart(artist) + "|" + normalizeMusicKeyPart(album)
+	}
+	return "@root-file:" + filepath.ToSlash(file.RelPath)
 }
 
 func musicConsensusEvidence(tags audiotags.Tags) musicconsensus.Evidence {
@@ -489,21 +514,24 @@ func musicCreditContainsArtist(credit, artist string) bool {
 	return false
 }
 
-func probeMusicTags(ctx context.Context, file InventoryFile, opts MusicAnalysisOptions, emit Emitter) audiotags.Tags {
+func probeMusicTags(ctx context.Context, file InventoryFile, opts MusicAnalysisOptions, emit Emitter) (audiotags.Tags, error) {
 	if opts.Probe == nil {
-		return audiotags.Tags{}
+		return audiotags.Tags{}, nil
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, musicProbeTimeout)
 	defer cancel()
 	info, err := opts.Probe(probeCtx, file.Path)
 	if err != nil {
+		if terminal := providerContextTermination(probeCtx.Err(), err); terminal != nil {
+			return audiotags.Tags{}, terminal
+		}
 		emit.Emit(Event{
 			Event:    "music.tags.probe_failed",
 			Severity: SeverityWarn,
 			RelPath:  file.RelPath,
 			Message:  err.Error(),
 		})
-		return audiotags.Tags{}
+		return audiotags.Tags{}, nil
 	}
 	tags := audiotags.FromMediaInfo(info)
 	if tags.HasAny() {
@@ -520,11 +548,24 @@ func probeMusicTags(ctx context.Context, file InventoryFile, opts MusicAnalysisO
 			},
 		})
 	}
-	return tags
+	return tags, nil
 }
 
 func planMusicTrack(file InventoryFile, nfos map[string]musicNFOEntry, tags audiotags.Tags) (MusicTrackPlan, bool) {
 	segments := splitRelPath(file.RelPath)
+	if len(segments) == 1 {
+		// A fully tagged file at the library root has no path-derived artist or
+		// album folders. Give the normal planner a virtual layout sourced only
+		// from trustworthy embedded identity; incomplete root files remain
+		// unplanned instead of inventing a "Loose Tracks" album.
+		tagArtist := strings.TrimSpace(firstNonEmpty(tags.AlbumArtist, tags.Artist))
+		tagAlbum := strings.TrimSpace(tags.Album)
+		if looksLikeUnusableMusicIdentity(tagArtist) || looksLikeUnusableMusicIdentity(tagAlbum) ||
+			audiotags.IsPlaceholderName(tagArtist) || audiotags.IsPlaceholderValue(tagAlbum) {
+			return MusicTrackPlan{}, false
+		}
+		segments = []string{tagArtist, tagAlbum, segments[0]}
+	}
 	if len(segments) < 2 {
 		return MusicTrackPlan{}, false
 	}
@@ -721,12 +762,12 @@ func planMusicTrack(file InventoryFile, nfos map[string]musicNFOEntry, tags audi
 }
 
 func groupMusicAlbums(tracks []MusicTrackPlan) []MusicAlbumPlan {
-	byKey := map[string]*MusicAlbumPlan{}
 	var grouped []*MusicAlbumPlan
+	conflictedIDs := map[*MusicAlbumPlan]map[string]bool{}
 	for _, track := range tracks {
-		key := musicAlbumGroupKey(track, byKey)
-		album := byKey[key]
+		album := musicAlbumGroup(track, grouped)
 		if album == nil {
+			key := uniqueMusicAlbumGroupKey(track, grouped)
 			album = &MusicAlbumPlan{
 				Key:                  key,
 				Artist:               track.Artist,
@@ -737,13 +778,7 @@ func groupMusicAlbums(tracks []MusicTrackPlan) []MusicAlbumPlan {
 				ExternalIDs:          copyMusicExternalIDs(track.ExternalIDs),
 				Confidence:           track.Confidence,
 			}
-			byKey[key] = album
 			grouped = append(grouped, album)
-		}
-		for _, identityKey := range track.IdentityKeys {
-			if identityKey != "" {
-				byKey[identityKey] = album
-			}
 		}
 		album.Tracks = append(album.Tracks, track)
 		album.Files = append(album.Files, track.RelPath)
@@ -751,6 +786,20 @@ func groupMusicAlbums(tracks []MusicTrackPlan) []MusicAlbumPlan {
 		for k, v := range track.ExternalIDs {
 			if album.ExternalIDs == nil {
 				album.ExternalIDs = map[string]string{}
+			}
+			if conflictedIDs[album][k] {
+				continue
+			}
+			if current := album.ExternalIDs[k]; current != "" && !strings.EqualFold(strings.TrimSpace(current), strings.TrimSpace(v)) {
+				delete(album.ExternalIDs, k)
+				if conflictedIDs[album] == nil {
+					conflictedIDs[album] = map[string]bool{}
+				}
+				conflictedIDs[album][k] = true
+				if musicArtistExternalIDKey(k) {
+					album.Issues = appendMusicIssue(album.Issues, "conflicting_"+k+"_ids")
+				}
+				continue
 			}
 			if album.ExternalIDs[k] == "" {
 				album.ExternalIDs[k] = v
@@ -783,6 +832,9 @@ func groupMusicAlbums(tracks []MusicTrackPlan) []MusicAlbumPlan {
 	sort.Slice(albums, func(i, j int) bool {
 		if albums[i].Artist == albums[j].Artist {
 			if albums[i].Year == albums[j].Year {
+				if albums[i].Album == albums[j].Album {
+					return albums[i].Key < albums[j].Key
+				}
 				return albums[i].Album < albums[j].Album
 			}
 			return albums[i].Year < albums[j].Year
@@ -792,32 +844,157 @@ func groupMusicAlbums(tracks []MusicTrackPlan) []MusicAlbumPlan {
 	return albums
 }
 
-func musicAlbumGroupKey(track MusicTrackPlan, existing map[string]*MusicAlbumPlan) string {
-	for _, key := range track.IdentityKeys {
-		if key == "" {
+func musicArtistExternalIDKey(key string) bool {
+	switch key {
+	case "musicbrainz_album_artist", "musicbrainz_artist", "itunes_artist", "apple_artist", "deezer_artist", "discogs_artist", "spotify_artist", "audiodb_artist":
+		return true
+	default:
+		return false
+	}
+}
+
+func musicAlbumGroup(track MusicTrackPlan, existing []*MusicAlbumPlan) *MusicAlbumPlan {
+	var identityMatches []*MusicAlbumPlan
+	for _, album := range existing {
+		if !musicAlbumHardIDsCompatible(track.ExternalIDs, album.ExternalIDs) {
 			continue
 		}
-		if _, ok := existing[key]; ok {
-			return key
+		if musicAlbumIdentityKeysOverlap(track, *album) {
+			identityMatches = append(identityMatches, album)
 		}
 	}
-	for key, album := range existing {
-		if !sameMusicArtist(track.Artist, album.Artist) || track.Year != album.Year {
+	if len(identityMatches) > 0 {
+		return unambiguousMusicAlbumGroup(identityMatches)
+	}
+	var fuzzyMatches []*MusicAlbumPlan
+	for _, album := range existing {
+		if !musicAlbumHardIDsCompatible(track.ExternalIDs, album.ExternalIDs) ||
+			!sameMusicArtist(track.Artist, album.Artist) || track.Year != album.Year {
 			continue
 		}
 		if titlematch.FuzzyEqual(track.Album, album.Album) {
-			return key
+			fuzzyMatches = append(fuzzyMatches, album)
+			continue
 		}
 		for _, alias := range album.Aliases {
 			if titlematch.FuzzyEqual(track.Album, alias) {
-				return key
+				fuzzyMatches = append(fuzzyMatches, album)
+				break
 			}
 		}
 	}
-	if len(track.IdentityKeys) > 0 {
-		return track.IdentityKeys[0]
+	return unambiguousMusicAlbumGroup(fuzzyMatches)
+}
+
+func unambiguousMusicAlbumGroup(matches []*MusicAlbumPlan) *MusicAlbumPlan {
+	if len(matches) == 1 {
+		return matches[0]
 	}
-	return musicAlbumKey(track.Artist, track.Album, track.Year)
+	// Once contradictory hard-ID groups exist for the same fallback identity,
+	// an untagged track cannot safely choose either. Keep one shared no-ID
+	// bucket for that ambiguous material instead of attaching it arbitrarily
+	// (or creating a new album for every track).
+	var withoutHardID *MusicAlbumPlan
+	for _, album := range matches {
+		if musicAlbumHasHardID(album.ExternalIDs) {
+			continue
+		}
+		if withoutHardID != nil {
+			return nil
+		}
+		withoutHardID = album
+	}
+	return withoutHardID
+}
+
+func musicAlbumHasHardID(ids map[string]string) bool {
+	for _, key := range []string{
+		"musicbrainz_release_group", "musicbrainz_album", "itunes_album",
+		"audiodb_album", "deezer_album", "discogs_album", "spotify_album",
+	} {
+		if strings.TrimSpace(ids[key]) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func uniqueMusicAlbumGroupKey(track MusicTrackPlan, existing []*MusicAlbumPlan) string {
+	used := map[string]bool{}
+	for _, album := range existing {
+		used[album.Key] = true
+	}
+	for _, key := range musicTrackAlbumIdentityKeys(track) {
+		if key != "" && !used[key] {
+			return key
+		}
+	}
+	base := musicAlbumKey(track.Artist, track.Album, track.Year)
+	if !used[base] {
+		return base
+	}
+	for suffix := 2; ; suffix++ {
+		key := fmt.Sprintf("%s|identity:%d", base, suffix)
+		if !used[key] {
+			return key
+		}
+	}
+}
+
+func musicAlbumIdentityKeysOverlap(track MusicTrackPlan, album MusicAlbumPlan) bool {
+	albumKeys := musicAlbumPlanIdentityKeys(album)
+	for _, trackKey := range musicTrackAlbumIdentityKeys(track) {
+		for _, albumKey := range albumKeys {
+			if trackKey != "" && strings.EqualFold(trackKey, albumKey) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func musicTrackAlbumIdentityKeys(track MusicTrackPlan) []string {
+	if len(track.IdentityKeys) > 0 {
+		return track.IdentityKeys
+	}
+	return musicAlbumIdentityKeys(track)
+}
+
+func musicAlbumPlanIdentityKeys(album MusicAlbumPlan) []string {
+	plan := MusicTrackPlan{
+		Artist: album.Artist, Album: album.Album, Year: album.Year,
+		ExternalIDs: album.ExternalIDs,
+	}
+	keys := musicAlbumIdentityKeys(plan)
+	for _, alias := range album.Aliases {
+		key := musicAlbumKey(album.Artist, alias, album.Year)
+		if !contains(keys, key) {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
+func musicAlbumHardIDsCompatible(left, right map[string]string) bool {
+	leftGroup := strings.TrimSpace(left["musicbrainz_release_group"])
+	rightGroup := strings.TrimSpace(right["musicbrainz_release_group"])
+	if leftGroup != "" && rightGroup != "" {
+		// Issued release IDs (and provider edition IDs) may legitimately differ
+		// inside one MusicBrainz release group. The shared group is the stronger
+		// identity; contradictory group IDs are an unconditional cannot-link.
+		return strings.EqualFold(leftGroup, rightGroup)
+	}
+	for _, key := range []string{
+		"musicbrainz_album", "itunes_album",
+		"audiodb_album", "deezer_album", "discogs_album", "spotify_album",
+	} {
+		leftID := strings.TrimSpace(left[key])
+		rightID := strings.TrimSpace(right[key])
+		if leftID != "" && rightID != "" && !strings.EqualFold(leftID, rightID) {
+			return false
+		}
+	}
+	return true
 }
 
 func sameMusicArtist(a, b string) bool {
@@ -825,19 +1002,11 @@ func sameMusicArtist(a, b string) bool {
 }
 
 func groupMusicArtists(albums []MusicAlbumPlan) []MusicArtistPlan {
-	byKey := map[string]*MusicArtistPlan{}
-	for _, album := range albums {
-		key := musicArtistKey(album.Artist, album.ArtistDisambiguation)
-		artist := byKey[key]
-		if artist == nil {
-			artist = &MusicArtistPlan{
-				Key:                  key,
-				Artist:               album.Artist,
-				ArtistDisambiguation: album.ArtistDisambiguation,
-				Confidence:           album.Confidence,
-			}
-			byKey[key] = artist
-		}
+	var grouped []*MusicArtistPlan
+	groupMBID := map[*MusicArtistPlan]string{}
+	byMBID := map[string]*MusicArtistPlan{}
+	byName := map[string][]*MusicArtistPlan{}
+	appendAlbum := func(artist *MusicArtistPlan, album MusicAlbumPlan) {
 		artist.Albums = append(artist.Albums, album)
 		artist.Files = append(artist.Files, album.Files...)
 		artist.Confidence = minFloat(artist.Confidence, album.Confidence)
@@ -846,9 +1015,80 @@ func groupMusicArtists(albums []MusicAlbumPlan) []MusicArtistPlan {
 				artist.Issues = append(artist.Issues, issue)
 			}
 		}
+		nameKey := musicArtistKey(album.Artist, album.ArtistDisambiguation)
+		if !containsMusicArtistGroup(byName[nameKey], artist) {
+			byName[nameKey] = append(byName[nameKey], artist)
+		}
 	}
-	artists := make([]MusicArtistPlan, 0, len(byKey))
-	for _, artist := range byKey {
+	newGroup := func(album MusicAlbumPlan, mbid string) *MusicArtistPlan {
+		artist := &MusicArtistPlan{
+			Artist:               album.Artist,
+			ArtistDisambiguation: album.ArtistDisambiguation,
+			Confidence:           album.Confidence,
+		}
+		grouped = append(grouped, artist)
+		if mbid != "" {
+			groupMBID[artist] = mbid
+			byMBID[mbid] = artist
+		}
+		appendAlbum(artist, album)
+		return artist
+	}
+
+	// A single MusicBrainz artist ID is the strongest local grouping spine.
+	// Process it first so spelling/localization drift cannot split one artist,
+	// while identical names carrying different MBIDs can never be collapsed.
+	for _, album := range albums {
+		mbid := trustworthyMusicArtistMBID(album)
+		if mbid == "" {
+			continue
+		}
+		artist := byMBID[mbid]
+		if artist == nil {
+			newGroup(album, mbid)
+			continue
+		}
+		appendAlbum(artist, album)
+	}
+
+	nameOnly := map[string]*MusicArtistPlan{}
+	for _, album := range albums {
+		if trustworthyMusicArtistMBID(album) != "" {
+			continue
+		}
+		nameKey := musicArtistKey(album.Artist, album.ArtistDisambiguation)
+		candidates := byName[nameKey]
+		if len(candidates) == 1 {
+			appendAlbum(candidates[0], album)
+			continue
+		}
+		artist := nameOnly[nameKey]
+		if artist == nil {
+			artist = newGroup(album, "")
+			nameOnly[nameKey] = artist
+			if len(candidates) > 1 {
+				artist.Issues = appendMusicIssue(artist.Issues, "ambiguous_artist_identity_missing_mbid")
+			}
+			continue
+		}
+		appendAlbum(artist, album)
+	}
+
+	baseKeyCount := map[string]int{}
+	for _, artist := range grouped {
+		baseKeyCount[musicArtistKey(artist.Artist, artist.ArtistDisambiguation)]++
+	}
+	artists := make([]MusicArtistPlan, 0, len(grouped))
+	for _, artist := range grouped {
+		baseKey := musicArtistKey(artist.Artist, artist.ArtistDisambiguation)
+		artist.Key = baseKey
+		if baseKeyCount[baseKey] > 1 {
+			if mbid := groupMBID[artist]; mbid != "" {
+				artist.Key += "|mbid:" + mbid
+			} else {
+				artist.Key += "|unidentified"
+			}
+		}
 		artist.ExternalIDs = consistentMusicArtistExternalIDs(artist.Albums, &artist.Issues)
 		sortMusicAlbums(artist.Albums)
 		sort.Strings(artist.Files)
@@ -856,9 +1096,33 @@ func groupMusicArtists(albums []MusicAlbumPlan) []MusicArtistPlan {
 		artists = append(artists, *artist)
 	}
 	sort.Slice(artists, func(i, j int) bool {
+		if artists[i].Artist == artists[j].Artist {
+			return artists[i].Key < artists[j].Key
+		}
 		return artists[i].Artist < artists[j].Artist
 	})
 	return artists
+}
+
+func containsMusicArtistGroup(groups []*MusicArtistPlan, target *MusicArtistPlan) bool {
+	for _, group := range groups {
+		if group == target {
+			return true
+		}
+	}
+	return false
+}
+
+func trustworthyMusicArtistMBID(album MusicAlbumPlan) string {
+	value := musicArtistExternalIDsFromAlbum(album)["mbid"]
+	ids := splitMusicProviderIDs(value)
+	if len(ids) != 1 {
+		return ""
+	}
+	for id := range ids {
+		return strings.ToLower(strings.TrimSpace(id))
+	}
+	return ""
 }
 
 // replaceMusicArtist keeps a folder disambiguation attached to the artist it
@@ -927,7 +1191,7 @@ func consistentMusicArtistExternalIDs(albums []MusicAlbumPlan, issues *[]string)
 func splitMusicProviderIDs(value string) map[string]struct{} {
 	ids := map[string]struct{}{}
 	for _, part := range strings.FieldsFunc(value, func(r rune) bool { return r == ';' || r == ',' }) {
-		if id := strings.TrimSpace(part); id != "" {
+		if id := strings.ToLower(strings.TrimSpace(part)); id != "" {
 			ids[id] = struct{}{}
 		}
 	}
@@ -1013,7 +1277,7 @@ func parseMusicAlbumFolder(folder, fallbackArtist string) musicAlbumFolderInfo {
 func parseMusicNFOs(root InventoryRoot, emit Emitter) map[string]musicNFOEntry {
 	out := make(map[string]musicNFOEntry)
 	for _, file := range root.Files {
-		if file.Class != ClassNFO || file.Kind != "album" {
+		if file.Generated || file.Class != ClassNFO || file.Kind != "album" {
 			continue
 		}
 		parsed := nfo.ParseFile(root.FS, file.RelPath, file.Kind)
@@ -1127,6 +1391,15 @@ func musicAlbumIdentityKeys(plan MusicTrackPlan) []string {
 	}
 	if plan.ExternalIDs["audiodb_album"] != "" {
 		add("audiodb_album:" + plan.ExternalIDs["audiodb_album"])
+	}
+	if plan.ExternalIDs["deezer_album"] != "" {
+		add("deezer_album:" + plan.ExternalIDs["deezer_album"])
+	}
+	if plan.ExternalIDs["discogs_album"] != "" {
+		add("discogs_album:" + plan.ExternalIDs["discogs_album"])
+	}
+	if plan.ExternalIDs["spotify_album"] != "" {
+		add("spotify_album:" + plan.ExternalIDs["spotify_album"])
 	}
 	add(musicAlbumKey(plan.Artist, plan.Album, plan.Year))
 	return keys
@@ -1383,6 +1656,9 @@ func sortMusicTracks(tracks []MusicTrackPlan) {
 func sortMusicAlbums(albums []MusicAlbumPlan) {
 	sort.Slice(albums, func(i, j int) bool {
 		if albums[i].Year == albums[j].Year {
+			if albums[i].Album == albums[j].Album {
+				return albums[i].Key < albums[j].Key
+			}
 			return albums[i].Album < albums[j].Album
 		}
 		return albums[i].Year < albums[j].Year

@@ -100,6 +100,108 @@ func TestAudiobookFixtureGroupsChapterFiles(t *testing.T) {
 	assertBookPlanFiles(t, byTitle, "The Hobbit", "J.R.R. Tolkien", "1937", 3)
 }
 
+func TestAudiobookSingleFileAuthorTitleLayout(t *testing.T) {
+	plans, err := AnalyzeBooks(context.Background(), Inventory{Roots: []InventoryRoot{{
+		Root: "/audiobooks",
+		Files: []InventoryFile{{
+			Root: "/audiobooks", Path: "/audiobooks/Andy Weir/Project Hail Mary.m4b",
+			RelPath: "Andy Weir/Project Hail Mary.m4b", Ext: ".m4b", Class: ClassPrimaryMedia,
+		}},
+	}}}, &captureEmitter{})
+	require.NoError(t, err)
+	require.Len(t, plans, 1)
+	require.Equal(t, "Project Hail Mary", plans[0].Title)
+	require.Equal(t, "Andy Weir", plans[0].Author)
+	require.Equal(t, "audiobook_author_file", plans[0].Source)
+}
+
+func TestAudiobookMultiFileFolderGroupsNumberedAndNamedChapters(t *testing.T) {
+	root := t.TempDir()
+	bookDir := filepath.Join(root, "A. G. Riddle", "The Long Winter")
+	require.NoError(t, os.MkdirAll(bookDir, 0o755))
+	for _, name := range []string{"01 - Prologue.mp3", "002.mp3", "Chapter 03 - Winter.mp3"} {
+		require.NoError(t, os.WriteFile(filepath.Join(bookDir, name), []byte(name), 0o600))
+	}
+	inv, err := WalkInventory(context.Background(), []string{root}, &captureEmitter{})
+	require.NoError(t, err)
+	plans, err := AnalyzeBooks(context.Background(), inv, &captureEmitter{})
+	require.NoError(t, err)
+	require.Len(t, plans, 1, "chapter leaves must not become separate audiobook works")
+	require.Equal(t, "The Long Winter", plans[0].Title)
+	require.Equal(t, "A. G. Riddle", plans[0].Author)
+	require.Equal(t, "audiobook_author_folder", plans[0].Source)
+	require.Len(t, plans[0].Files, 3)
+}
+
+func TestAudiobookMultiDiscFoldersGroupAtWorkDirectory(t *testing.T) {
+	root := t.TempDir()
+	files := []string{
+		filepath.Join("Author Name", "Book Title", "Disc 1", "01.mp3"),
+		filepath.Join("Author Name", "Book Title", "Disc 2", "02.mp3"),
+		filepath.Join("Other Author", "Series Name", "Other Book", "CD 1", "Chapter 01.mp3"),
+		filepath.Join("Other Author", "Series Name", "Other Book", "CD 2", "Chapter 02.mp3"),
+	}
+	for _, rel := range files {
+		path := filepath.Join(root, rel)
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(rel), 0o600))
+	}
+	inv, err := WalkInventory(context.Background(), []string{root}, &captureEmitter{})
+	require.NoError(t, err)
+	plans, err := AnalyzeBooks(context.Background(), inv, &captureEmitter{})
+	require.NoError(t, err)
+	require.Len(t, plans, 2, "disc/CD containers must not become separate work titles")
+	byTitle := make(map[string]BookPlan)
+	for _, plan := range plans {
+		byTitle[plan.Title] = plan
+	}
+	require.Equal(t, "Author Name", byTitle["Book Title"].Author)
+	require.Len(t, byTitle["Book Title"].Files, 2)
+	require.Equal(t, "Other Author", byTitle["Other Book"].Author)
+	require.Len(t, byTitle["Other Book"].Files, 2)
+}
+
+func TestAudiobookSingleNamedChapterUsesContainingWork(t *testing.T) {
+	plans, err := AnalyzeBooks(context.Background(), Inventory{Roots: []InventoryRoot{{
+		Root: "/audiobooks",
+		Files: []InventoryFile{{
+			Root: "/audiobooks", Path: "/audiobooks/Author Name/Book Title/Chapter 01 - Prologue.mp3",
+			RelPath: "Author Name/Book Title/Chapter 01 - Prologue.mp3", Ext: ".mp3", Class: ClassPrimaryMedia,
+		}},
+	}}}, &captureEmitter{})
+	require.NoError(t, err)
+	require.Len(t, plans, 1)
+	require.Equal(t, "Book Title", plans[0].Title)
+	require.Equal(t, "Author Name", plans[0].Author)
+}
+
+func TestAudiobookSeriesHierarchyDoesNotCallSeriesTheAuthor(t *testing.T) {
+	plans, err := AnalyzeBooks(context.Background(), Inventory{Roots: []InventoryRoot{{
+		Root: "/audiobooks",
+		Files: []InventoryFile{{
+			Root: "/audiobooks", Path: "/audiobooks/A. G. Riddle/The Long Winter/The Solar War/Chapter 01.mp3",
+			RelPath: "A. G. Riddle/The Long Winter/The Solar War/Chapter 01.mp3", Ext: ".mp3", Class: ClassPrimaryMedia,
+		}},
+	}}}, &captureEmitter{})
+	require.NoError(t, err)
+	require.Len(t, plans, 1)
+	require.Equal(t, "The Solar War", plans[0].Title)
+	require.Equal(t, "A. G. Riddle", plans[0].Author)
+	require.NotEqual(t, "The Long Winter", plans[0].Author)
+	require.Equal(t, "audiobook_author_series_folder", plans[0].Source)
+	require.LessOrEqual(t, plans[0].Confidence, 0.72, "inferred series nesting must remain review-level")
+}
+
+func TestBookIdentityKeyPreservesArticlesAndAuthorInitials(t *testing.T) {
+	want := "book:book|a g riddle|the martian|2021"
+	require.Equal(t, want, bookIdentityKey("A. G. Riddle", "The Martian", "2021", "book"))
+	require.NotEqual(t,
+		bookIdentityKey("A. G. Riddle", "The Martian", "2021", "book"),
+		bookIdentityKey("G. Riddle", "Martian", "2021", "book"),
+		"durable identities must not apply article-insensitive search normalization",
+	)
+}
+
 func TestRunLibrarySupportsBookReport(t *testing.T) {
 	bookDir := filepath.Join(testdataRoot(t), "library", "books")
 	if _, err := os.Stat(bookDir); os.IsNotExist(err) {
@@ -214,6 +316,51 @@ func TestSearchBookPlansUsesAuthorEvidenceToDisambiguateExactTitles(t *testing.T
 	require.Equal(t, "Andy Weir", search[0].Author)
 	require.Equal(t, "Andy Weir", search[0].Candidates[0].Author)
 	require.Greater(t, search[0].Candidates[0].Confidence, search[0].Candidates[1].Confidence)
+}
+
+func TestSearchBookPlansRequiresAuthorCorroborationForExactTitle(t *testing.T) {
+	provider := &fakeBookSearchProvider{results: map[string][]metadata.SearchResult{
+		"Artemis|Andy Weir||audiobook": {{
+			ProviderID: "heya:book:same-title-no-author", ProviderName: "heya",
+			Title: "Artemis", Confidence: 1,
+		}},
+	}}
+	plan := BookPlan{
+		Key:   bookIdentityKey("Andy Weir", "Artemis", "", "audiobook"),
+		Title: "Artemis", Author: "Andy Weir", Format: "audiobook", Confidence: 0.84,
+	}
+
+	search, err := SearchBookPlans(context.Background(), []BookPlan{plan}, provider, &captureEmitter{}, 0)
+	require.NoError(t, err)
+	require.Len(t, search, 1)
+	require.False(t, search[0].Accepted, "an exact title without remote author evidence is not an identity")
+	require.Equal(t, "ambiguous_or_low_confidence", search[0].Reason)
+}
+
+func TestBookAuthorCorroborationUsesNameBoundariesAndCompactsInitials(t *testing.T) {
+	require.True(t, bookAuthorCorroborated("A. G. Riddle", "AG Riddle"))
+	require.True(t, bookAuthorCorroborated("A. G. Riddle", "A G Riddle"))
+	require.True(t, bookAuthorCorroborated("Local Author", "Local Author, Coauthor"))
+	require.False(t, bookAuthorCorroborated("Ann Smith", "Joanne Smith"))
+	require.False(t, bookAuthorCorroborated("Andy Weir", "Andy Griffith"))
+}
+
+func TestSearchBookPlansAcceptsOneAuthorFromCandidateAuthorList(t *testing.T) {
+	plan := BookPlan{
+		Key:   bookIdentityKey("Local Author", "Shared Work", "", "audiobook"),
+		Title: "Shared Work", Author: "Local Author", Format: "audiobook", Confidence: 0.84,
+	}
+	provider := &fakeBookSearchProvider{results: map[string][]metadata.SearchResult{
+		"Shared Work|Local Author||audiobook": {{
+			ProviderID: "heya:book:shared-work", ProviderName: "heya", Title: "Shared Work", Confidence: 0.8,
+			Evidence: []metadata.SearchEvidence{{Field: "authors", Outcome: "1_of_2", Detail: "Local Author, Coauthor"}},
+		}},
+	}}
+	search, err := SearchBookPlans(context.Background(), []BookPlan{plan}, provider, &captureEmitter{}, 0)
+	require.NoError(t, err)
+	require.Len(t, search, 1)
+	require.True(t, search[0].Accepted)
+	require.Equal(t, "heya:book:shared-work", search[0].ProviderID)
 }
 
 func TestBookDatabaseFormatKeepsAudiobooksLogical(t *testing.T) {

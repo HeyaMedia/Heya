@@ -2,25 +2,222 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/generatedwrite"
+	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
 )
 
 const defaultScannerArtifactRetentionDays = 2
 const orphanedScannerEntityRetention = 15 * time.Minute
+const generatedSidecarReconcileLimit = 250
+const generatedSidecarReconcileTimeout = 30 * time.Second
 
 type CleanupScannerArtifactsWorker struct {
 	river.WorkerDefaults[CleanupScannerArtifactsArgs]
 	DB       *pgxpool.Pool
 	Progress *TaskProgressBroadcaster
+}
+
+func cleanupAppliedScannerEntityArtifactsOlderThan(ctx context.Context, db *pgxpool.Pool, cutoff time.Time) (int64, error) {
+	const query = `
+WITH target AS MATERIALIZED (
+    SELECT entity.id
+    FROM scanner_entities entity
+    WHERE entity.status = 'applied'
+      AND entity.applied_at IS NOT NULL
+      AND entity.applied_at < $1
+      AND NOT EXISTS (
+          SELECT 1 FROM scanner_metadata_continuations continuation
+          WHERE continuation.scanner_entity_id = entity.id
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM river_job job
+          WHERE job.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
+            AND job.args ? 'scanner_entity_id'
+            AND COALESCE(job.args->>'scanner_entity_id', '') ~ '^[0-9]+$'
+            AND (job.args->>'scanner_entity_id')::bigint = entity.id
+      )
+    FOR UPDATE
+),
+safe_target AS MATERIALIZED (
+    SELECT target.id
+    FROM target
+    WHERE NOT EXISTS (
+        SELECT 1 FROM scanner_metadata_continuations continuation
+        WHERE continuation.scanner_entity_id = target.id
+    )
+      AND NOT EXISTS (
+          SELECT 1 FROM river_job job
+          WHERE job.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
+            AND job.args ? 'scanner_entity_id'
+            AND COALESCE(job.args->>'scanner_entity_id', '') ~ '^[0-9]+$'
+            AND (job.args->>'scanner_entity_id')::bigint = target.id
+      )
+),
+updated AS (
+    UPDATE scanner_entities entity
+    SET analysis_artifact_id = NULL,
+        search_artifact_id = NULL,
+        metadata_artifact_id = NULL,
+        apply_artifact_id = NULL,
+        updated_at = now()
+    FROM safe_target
+    WHERE entity.id = safe_target.id
+    RETURNING entity.id
+),
+deleted AS (
+    DELETE FROM scanner_entity_artifacts artifact
+    USING updated
+    WHERE artifact.entity_id = updated.id
+    RETURNING artifact.id
+)
+SELECT count(*)::bigint FROM deleted`
+	var count int64
+	err := db.QueryRow(ctx, query, cutoff).Scan(&count)
+	return count, err
+}
+
+func cleanupStaleInFlightScannerEntitiesOlderThan(ctx context.Context, db *pgxpool.Pool, cutoff time.Time) (scannerInFlightCleanupCounts, error) {
+	const query = `
+WITH target AS MATERIALIZED (
+    SELECT entity.id
+    FROM scanner_entities entity
+    WHERE entity.status IN ('matched', 'fetching')
+      AND entity.updated_at < $1
+      AND NOT EXISTS (
+          SELECT 1 FROM scanner_metadata_continuations continuation
+          WHERE continuation.scanner_entity_id = entity.id
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM river_job job
+          WHERE job.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
+            AND job.args ? 'scanner_entity_id'
+            AND COALESCE(job.args->>'scanner_entity_id', '') ~ '^[0-9]+$'
+            AND (job.args->>'scanner_entity_id')::bigint = entity.id
+      )
+    FOR UPDATE
+),
+safe_target AS MATERIALIZED (
+    SELECT target.id
+    FROM target
+    WHERE NOT EXISTS (
+        SELECT 1 FROM scanner_metadata_continuations continuation
+        WHERE continuation.scanner_entity_id = target.id
+    )
+      AND NOT EXISTS (
+          SELECT 1 FROM river_job job
+          WHERE job.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
+            AND job.args ? 'scanner_entity_id'
+            AND COALESCE(job.args->>'scanner_entity_id', '') ~ '^[0-9]+$'
+            AND (job.args->>'scanner_entity_id')::bigint = target.id
+      )
+),
+artifact_count AS MATERIALIZED (
+    SELECT count(*)::bigint AS count
+    FROM scanner_entity_artifacts artifact
+    JOIN safe_target ON safe_target.id = artifact.entity_id
+),
+entities_deleted AS (
+    DELETE FROM scanner_entities entity
+    USING safe_target
+    WHERE entity.id = safe_target.id
+    RETURNING entity.id
+)
+SELECT
+    (SELECT count(*) FROM entities_deleted)::bigint,
+    (SELECT count FROM artifact_count)::bigint`
+	var counts scannerInFlightCleanupCounts
+	err := db.QueryRow(ctx, query, cutoff).Scan(&counts.EntitiesDeleted, &counts.EntityArtifactsDeleted)
+	return counts, err
+}
+
+// Superseded artifacts include every old non-current hand-off, even when it
+// belongs to the current generation. Retried search/fetch stages can produce
+// more than one artifact within a generation, so generation comparison alone
+// leaks the abandoned attempt forever.
+func cleanupSupersededScannerEntityArtifactsOlderThan(ctx context.Context, db *pgxpool.Pool, cutoff time.Time) (int64, error) {
+	const query = `
+WITH target AS MATERIALIZED (
+    SELECT artifact.id
+    FROM scanner_entity_artifacts artifact
+    JOIN scanner_entities entity ON entity.id = artifact.entity_id
+    WHERE artifact.created_at < $1
+      AND artifact.id IS DISTINCT FROM entity.analysis_artifact_id
+      AND artifact.id IS DISTINCT FROM entity.search_artifact_id
+      AND artifact.id IS DISTINCT FROM entity.metadata_artifact_id
+      AND artifact.id IS DISTINCT FROM entity.apply_artifact_id
+      AND NOT EXISTS (
+          SELECT 1 FROM scanner_metadata_continuations continuation
+          WHERE continuation.scanner_entity_id = entity.id
+             OR continuation.artifact_id = artifact.id
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM river_job job
+          WHERE job.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
+            AND (
+                (job.args ? 'scanner_entity_id'
+                 AND COALESCE(job.args->>'scanner_entity_id', '') ~ '^[0-9]+$'
+                 AND (job.args->>'scanner_entity_id')::bigint = entity.id)
+                OR EXISTS (
+                    SELECT 1
+                    FROM jsonb_each_text(job.args) argument
+                    WHERE argument.key LIKE '%artifact_id'
+                      AND argument.value ~ '^[0-9]+$'
+                      AND argument.value::bigint = artifact.id
+                )
+            )
+      )
+),
+safe_target AS MATERIALIZED (
+    SELECT target.id
+    FROM target
+    JOIN scanner_entity_artifacts artifact ON artifact.id = target.id
+    JOIN scanner_entities entity ON entity.id = artifact.entity_id
+    WHERE artifact.id IS DISTINCT FROM entity.analysis_artifact_id
+      AND artifact.id IS DISTINCT FROM entity.search_artifact_id
+      AND artifact.id IS DISTINCT FROM entity.metadata_artifact_id
+      AND artifact.id IS DISTINCT FROM entity.apply_artifact_id
+      AND NOT EXISTS (
+          SELECT 1 FROM scanner_metadata_continuations continuation
+          WHERE continuation.scanner_entity_id = entity.id
+             OR continuation.artifact_id = artifact.id
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM river_job job
+          WHERE job.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
+            AND (
+                (job.args ? 'scanner_entity_id'
+                 AND COALESCE(job.args->>'scanner_entity_id', '') ~ '^[0-9]+$'
+                 AND (job.args->>'scanner_entity_id')::bigint = entity.id)
+                OR EXISTS (
+                    SELECT 1
+                    FROM jsonb_each_text(job.args) argument
+                    WHERE argument.key LIKE '%artifact_id'
+                      AND argument.value ~ '^[0-9]+$'
+                      AND argument.value::bigint = artifact.id
+                )
+            )
+      )
+),
+deleted AS (
+    DELETE FROM scanner_entity_artifacts artifact
+    USING safe_target
+    WHERE artifact.id = safe_target.id
+    RETURNING artifact.id
+)
+SELECT count(*)::bigint FROM deleted`
+	var count int64
+	err := db.QueryRow(ctx, query, cutoff).Scan(&count)
+	return count, err
 }
 
 func (w *CleanupScannerArtifactsWorker) Work(ctx context.Context, job *river.Job[CleanupScannerArtifactsArgs]) error {
@@ -30,19 +227,24 @@ func (w *CleanupScannerArtifactsWorker) Work(ctx context.Context, job *river.Job
 	if retentionDays <= 0 {
 		retentionDays = defaultScannerArtifactRetentionDays
 	}
-	cutoff := pgtype.Timestamptz{Time: time.Now().AddDate(0, 0, -retentionDays), Valid: true}
+	cutoff := time.Now().AddDate(0, 0, -retentionDays)
 	q := sqlc.New(w.DB)
 
 	w.Progress.Set("cleanup_scanner_artifacts", CleanupScannerArtifactsArgs{}.Kind(), "scanner artifacts")
 
-	entityArtifacts, err := q.CleanupAppliedScannerEntityArtifactsOlderThan(ctx, cutoff)
+	entityArtifacts, err := cleanupAppliedScannerEntityArtifactsOlderThan(ctx, w.DB, cutoff)
 	if err != nil {
 		finishKickoff(ctx, q, taskID, startedAt, 0, 0, err)
 		return err
 	}
-	staleInFlight, err := q.CleanupStaleInFlightScannerEntitiesOlderThan(ctx, cutoff)
+	// Orphan reconciliation below covers every stale matched/fetching entity,
+	// requeues its scope, and also handles discovered/fetched/applying. The old
+	// retention-only delete ran first and silently discarded the very rows the
+	// orphan pass needed in order to requeue, so it is intentionally retired.
+	staleInFlight := scannerInFlightCleanupCounts{}
+	supersededArtifacts, err := cleanupSupersededScannerEntityArtifactsOlderThan(ctx, w.DB, cutoff)
 	if err != nil {
-		finishKickoff(ctx, q, taskID, startedAt, int(entityArtifacts), 0, err)
+		finishKickoff(ctx, q, taskID, startedAt, int(entityArtifacts+staleInFlight.EntitiesDeleted+staleInFlight.EntityArtifactsDeleted), 0, err)
 		return err
 	}
 	orphaned, err := listOrphanedInFlightScannerEntities(ctx, w.DB, time.Now().Add(-orphanedScannerEntityRetention), 0)
@@ -50,23 +252,49 @@ func (w *CleanupScannerArtifactsWorker) Work(ctx context.Context, job *river.Job
 		finishKickoff(ctx, q, taskID, startedAt, int(entityArtifacts+staleInFlight.EntitiesDeleted+staleInFlight.EntityArtifactsDeleted), 0, err)
 		return err
 	}
-	orphanedInFlight, err := cleanupOrphanedInFlightScannerEntities(ctx, w.DB, orphaned)
+	rc := river.ClientFromContext[pgx.Tx](ctx)
+	requeued, orphanedInFlight, err := requeueThenCleanupOrphanedScannerEntities(ctx, w.DB, orphaned, func(ctx context.Context, args ProcessLibraryScanArgs) error {
+		if rc == nil {
+			return errors.New("cleanup_scanner_artifacts: River client unavailable for durable orphan requeue")
+		}
+		return EnqueueProcessLibraryScan(ctx, rc, w.DB, args, PriorityScan, "cleanup_scanner_artifacts")
+	})
 	if err != nil {
 		finishKickoff(ctx, q, taskID, startedAt, int(entityArtifacts+staleInFlight.EntitiesDeleted+staleInFlight.EntityArtifactsDeleted), 0, err)
 		return err
 	}
-	requeued := reenqueueOrphanedScannerScopes(ctx, river.ClientFromContext[pgx.Tx](ctx), w.DB, orphaned)
+	reconcileCtx, reconcileCancel := context.WithTimeout(ctx, generatedSidecarReconcileTimeout)
+	generatedSidecars, err := generatedwrite.Reconcile(reconcileCtx, w.DB, generatedSidecarReconcileLimit)
+	reconcileCancel()
+	if err != nil {
+		log.Warn().
+			Err(vfs.RedactError(err)).
+			Int("generated_sidecars_examined", generatedSidecars.Examined).
+			Int("generated_sidecars_recovered", generatedSidecars.Recovered).
+			Int("generated_sidecars_retired", generatedSidecars.Retired).
+			Int("generated_sidecars_busy", generatedSidecars.Skipped).
+			Int("generated_sidecars_failed", generatedSidecars.Failed).
+			Msg("cleanup_scanner_artifacts: generated-sidecar page completed with failures")
+		finishKickoff(ctx, q, taskID, startedAt, int(entityArtifacts+supersededArtifacts+orphanedInFlight.EntitiesDeleted+orphanedInFlight.EntityArtifactsDeleted), 0, err)
+		return err
+	}
 
-	total := int(entityArtifacts + staleInFlight.EntitiesDeleted + staleInFlight.EntityArtifactsDeleted + orphanedInFlight.EntitiesDeleted + orphanedInFlight.EntityArtifactsDeleted)
+	total := int(entityArtifacts + supersededArtifacts + staleInFlight.EntitiesDeleted + staleInFlight.EntityArtifactsDeleted + orphanedInFlight.EntitiesDeleted + orphanedInFlight.EntityArtifactsDeleted + int64(generatedSidecars.Recovered+generatedSidecars.Retired))
 	finishKickoff(ctx, q, taskID, startedAt, total, 0, nil)
 	log.Info().
 		Int("retention_days", retentionDays).
 		Int64("scanner_entity_artifacts", entityArtifacts).
+		Int64("superseded_scanner_entity_artifacts", supersededArtifacts).
 		Int64("stale_in_flight_entities", staleInFlight.EntitiesDeleted).
 		Int64("stale_in_flight_entity_artifacts", staleInFlight.EntityArtifactsDeleted).
 		Int64("orphaned_in_flight_entities", orphanedInFlight.EntitiesDeleted).
 		Int64("orphaned_in_flight_entity_artifacts", orphanedInFlight.EntityArtifactsDeleted).
 		Int("orphaned_scopes_requeued", requeued).
+		Int("generated_sidecars_examined", generatedSidecars.Examined).
+		Int("generated_sidecars_recovered", generatedSidecars.Recovered).
+		Int("generated_sidecars_retired", generatedSidecars.Retired).
+		Int("generated_sidecars_busy", generatedSidecars.Skipped).
+		Int("generated_sidecars_failed", generatedSidecars.Failed).
 		Msg("cleanup_scanner_artifacts: complete")
 	return nil
 }
@@ -75,9 +303,12 @@ func (w *CleanupScannerArtifactsWorker) Work(ctx context.Context, job *river.Job
 // crash, cancelled deploy, exhausted retries — leaving no live
 // search_metadata/fetch_metadata/apply_metadata job to ever advance it.
 type orphanedScannerEntity struct {
-	ID         int64
-	LibraryID  int64
-	ScopePaths []string
+	ID                 int64
+	LibraryID          int64
+	ScopePaths         []string
+	PipelineGeneration int64
+	Status             string
+	UpdatedAt          time.Time
 	// Cancelled marks entities whose most recent pipeline job was cancelled
 	// by the user: they are cleaned up but NOT requeued — cancel means stop,
 	// and the next scan re-discovers the work through change detection.
@@ -86,31 +317,57 @@ type orphanedScannerEntity struct {
 
 // listOrphanedInFlightScannerEntities finds entities stuck in any in-flight
 // state past the cutoff with no live pipeline job referencing them. It covers
-// 'fetched' and 'applying' as well as 'matched'/'fetching': an apply job that
-// died after fetch persisted leaves those states orphaned exactly the same
-// way.
+// stale handoffs and exhausted error jobs as well as the ordinary stages: once
+// River has no live retry, none of those rows has another path forward.
 func listOrphanedInFlightScannerEntities(ctx context.Context, db *pgxpool.Pool, cutoff time.Time, libraryID int64) ([]orphanedScannerEntity, error) {
 	rows, err := db.Query(ctx, `
 		SELECT entity.id, entity.library_id, entity.scope_paths,
+		       entity.pipeline_generation, entity.status, entity.updated_at,
 		  EXISTS (
 		    SELECT 1
 		    FROM river_job job
-		    WHERE job.kind IN ('search_metadata', 'fetch_metadata', 'apply_metadata')
-		      AND job.state = 'cancelled'
+		    WHERE job.state = 'cancelled'
 		      AND job.args ? 'scanner_entity_id'
+		      AND COALESCE(job.args->>'scanner_entity_id', '') ~ '^[0-9]+$'
 		      AND (job.args->>'scanner_entity_id')::bigint = entity.id
+		      AND EXISTS (
+		        SELECT 1
+		        FROM LATERAL jsonb_each_text(job.args) argument
+		        JOIN scanner_entity_artifacts artifact
+		          ON argument.value ~ '^[0-9]+$'
+		         AND artifact.id = argument.value::bigint
+		         AND artifact.entity_id = entity.id
+		         AND artifact.pipeline_generation = entity.pipeline_generation
+		        WHERE (argument.key = 'analysis_artifact_id' AND artifact.id = entity.analysis_artifact_id)
+		           OR (argument.key = 'search_artifact_id' AND artifact.id = entity.search_artifact_id)
+		           OR (argument.key = 'metadata_artifact_id' AND artifact.id = entity.metadata_artifact_id)
+		      )
 		  ) AS cancelled
 		FROM scanner_entities entity
-		WHERE entity.status IN ('discovered', 'matched', 'fetching', 'fetched', 'applying')
+		WHERE entity.status IN (
+		  'discovered', 'matched', 'fetching', 'fetched', 'applying',
+		  'stale', 'error', 'metadata_error', 'apply_error', 'failed'
+		)
 		  AND entity.updated_at < $1
 		  AND ($2::bigint = 0 OR entity.library_id = $2)
 		  AND NOT EXISTS (
 		    SELECT 1
 		    FROM river_job job
-		    WHERE job.kind IN ('search_metadata', 'fetch_metadata', 'apply_metadata')
-		      AND job.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
-		      AND job.args ? 'scanner_entity_id'
-		      AND (job.args->>'scanner_entity_id')::bigint = entity.id
+		    WHERE job.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
+		      AND (
+		        (job.args ? 'scanner_entity_id'
+		         AND COALESCE(job.args->>'scanner_entity_id', '') ~ '^[0-9]+$'
+		         AND (job.args->>'scanner_entity_id')::bigint = entity.id)
+		        OR EXISTS (
+		          SELECT 1
+		          FROM scanner_entity_artifacts artifact,
+		               LATERAL jsonb_each_text(job.args) argument
+		          WHERE artifact.entity_id = entity.id
+		            AND argument.key LIKE '%artifact_id'
+		            AND argument.value ~ '^[0-9]+$'
+		            AND argument.value::bigint = artifact.id
+		        )
+		      )
 		  )
 		  AND NOT EXISTS (
 		    SELECT 1
@@ -124,7 +381,10 @@ func listOrphanedInFlightScannerEntities(ctx context.Context, db *pgxpool.Pool, 
 	var out []orphanedScannerEntity
 	for rows.Next() {
 		var e orphanedScannerEntity
-		if err := rows.Scan(&e.ID, &e.LibraryID, &e.ScopePaths, &e.Cancelled); err != nil {
+		if err := rows.Scan(
+			&e.ID, &e.LibraryID, &e.ScopePaths,
+			&e.PipelineGeneration, &e.Status, &e.UpdatedAt, &e.Cancelled,
+		); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -143,35 +403,51 @@ func SweepCancelledScannerEntities(ctx context.Context, db *pgxpool.Pool, librar
 	if err != nil {
 		return 0, err
 	}
-	counts, err := cleanupOrphanedInFlightScannerEntities(ctx, db, orphaned)
+	cancelled := orphaned[:0]
+	for _, entity := range orphaned {
+		if entity.Cancelled {
+			cancelled = append(cancelled, entity)
+		}
+	}
+	counts, err := cleanupOrphanedInFlightScannerEntities(ctx, db, cancelled)
 	if err != nil {
 		return 0, err
 	}
 	return counts.EntitiesDeleted, nil
 }
 
-// reenqueueOrphanedScannerScopes puts the deleted entities' scopes back into
-// the pipeline with a forced scoped process_scan. Deleting alone used to rely
+// requeueThenCleanupOrphanedScannerEntities puts every non-cancelled orphan
+// scope durably back into the pipeline before deleting any entity. Deleting
+// alone used to rely
 // on the next scan's change detection to rediscover the work — which held
 // only while the mtime bug made everything look changed. Now that unchanged
 // files (and parked unmatched ones) stay quiet, an NFO-triggered or
 // previously-applied scope would otherwise never be retried: its NFO
 // seen-marker was consumed at kickoff and its files read as unchanged.
 // Force bypasses change detection; the jobs dedupe by (library, scopes)
-// while active, so shared scopes re-enqueue once.
-func reenqueueOrphanedScannerScopes(ctx context.Context, rc *river.Client[pgx.Tx], db *pgxpool.Pool, orphaned []orphanedScannerEntity) int {
-	if rc == nil {
-		return 0
+// while active, so shared scopes re-enqueue once. If even one enqueue fails,
+// no candidate is deleted: retaining duplicate/stale state is recoverable,
+// losing the only pointer to work is not.
+func requeueThenCleanupOrphanedScannerEntities(
+	ctx context.Context,
+	db *pgxpool.Pool,
+	orphaned []orphanedScannerEntity,
+	enqueue func(context.Context, ProcessLibraryScanArgs) error,
+) (int, scannerInFlightCleanupCounts, error) {
+	argsList := orphanedScannerRequeueArgs(orphaned)
+	if len(argsList) > 0 && enqueue == nil {
+		return 0, scannerInFlightCleanupCounts{}, errors.New("cleanup_scanner_artifacts: orphan scope enqueuer unavailable")
 	}
-	requeued := 0
-	for _, args := range orphanedScannerRequeueArgs(orphaned) {
-		if err := EnqueueProcessLibraryScan(ctx, rc, db, args, PriorityScan, "cleanup_scanner_artifacts"); err != nil {
-			log.Warn().Err(err).Int64("library_id", args.LibraryID).Strs("scopes", args.ScopePaths).Msg("cleanup_scanner_artifacts: requeue orphaned scope failed")
-			continue
+	for index, args := range argsList {
+		if err := enqueue(ctx, args); err != nil {
+			return index, scannerInFlightCleanupCounts{}, fmt.Errorf("cleanup_scanner_artifacts: durably requeue orphan scope: %w", err)
 		}
-		requeued++
 	}
-	return requeued
+	counts, err := cleanupOrphanedInFlightScannerEntities(ctx, db, orphaned)
+	if err != nil {
+		return len(argsList), counts, err
+	}
+	return len(argsList), counts, nil
 }
 
 // orphanedScannerRequeueArgs splits each orphaned entity's scopes into one
@@ -212,6 +488,24 @@ func orphanedScannerRequeueArgs(orphaned []orphanedScannerEntity) []ProcessLibra
 type scannerInFlightCleanupCounts struct {
 	EntitiesDeleted        int64
 	EntityArtifactsDeleted int64
+	EntityIDs              []int64
+}
+
+func deletedOrphanedScannerEntities(orphaned []orphanedScannerEntity, deletedIDs []int64) []orphanedScannerEntity {
+	if len(orphaned) == 0 || len(deletedIDs) == 0 {
+		return nil
+	}
+	deleted := make(map[int64]struct{}, len(deletedIDs))
+	for _, id := range deletedIDs {
+		deleted[id] = struct{}{}
+	}
+	out := make([]orphanedScannerEntity, 0, len(deletedIDs))
+	for _, entity := range orphaned {
+		if _, ok := deleted[entity.ID]; ok {
+			out = append(out, entity)
+		}
+	}
+	return out
 }
 
 func cleanupOrphanedInFlightScannerEntities(ctx context.Context, db *pgxpool.Pool, orphaned []orphanedScannerEntity) (scannerInFlightCleanupCounts, error) {
@@ -219,32 +513,88 @@ func cleanupOrphanedInFlightScannerEntities(ctx context.Context, db *pgxpool.Poo
 		return scannerInFlightCleanupCounts{}, nil
 	}
 	ids := make([]int64, 0, len(orphaned))
+	generations := make([]int64, 0, len(orphaned))
+	statuses := make([]string, 0, len(orphaned))
+	updatedAts := make([]time.Time, 0, len(orphaned))
 	for _, entity := range orphaned {
 		ids = append(ids, entity.ID)
+		generations = append(generations, entity.PipelineGeneration)
+		statuses = append(statuses, entity.Status)
+		updatedAts = append(updatedAts, entity.UpdatedAt)
 	}
+	// Candidates were read before replacement work was enqueued. Match the
+	// exact generation and lifecycle snapshot so a fast replacement analysis
+	// cannot reuse the row and then be deleted by this older cleanup pass.
 	const query = `
-WITH target AS (
-    SELECT entity.id
-    FROM scanner_entities entity
-    WHERE entity.id = ANY($1)
+WITH candidate AS MATERIALIZED (
+    SELECT *
+    FROM unnest(
+        $1::bigint[],
+        $2::bigint[],
+        $3::text[],
+        $4::timestamptz[]
+    ) AS row(id, pipeline_generation, status, updated_at)
 ),
-entity_artifacts_deleted AS (
-    DELETE FROM scanner_entity_artifacts artifact
-    USING target
-    WHERE artifact.entity_id = target.id
-    RETURNING artifact.id
+target AS MATERIALIZED (
+    SELECT entity.id,
+           (SELECT count(*)::bigint
+            FROM scanner_entity_artifacts artifact
+            WHERE artifact.entity_id = entity.id) AS artifact_count
+    FROM scanner_entities entity
+    JOIN candidate
+      ON candidate.id = entity.id
+     AND candidate.pipeline_generation = entity.pipeline_generation
+     AND candidate.status = entity.status
+     AND candidate.updated_at = entity.updated_at
+    WHERE true
+      AND NOT EXISTS (
+          SELECT 1 FROM scanner_metadata_continuations continuation
+          WHERE continuation.scanner_entity_id = entity.id
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM river_job job
+          WHERE job.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
+            AND (
+                (job.args ? 'scanner_entity_id'
+                 AND COALESCE(job.args->>'scanner_entity_id', '') ~ '^[0-9]+$'
+                 AND (job.args->>'scanner_entity_id')::bigint = entity.id)
+                OR EXISTS (
+                    SELECT 1
+                    FROM scanner_entity_artifacts artifact,
+                         LATERAL jsonb_each_text(job.args) argument
+                    WHERE artifact.entity_id = entity.id
+                      AND argument.key LIKE '%artifact_id'
+                      AND argument.value ~ '^[0-9]+$'
+                      AND argument.value::bigint = artifact.id
+                )
+            )
+      )
+    FOR UPDATE
 ),
 entities_deleted AS (
     DELETE FROM scanner_entities entity
     USING target
     WHERE entity.id = target.id
-    RETURNING entity.id
+      AND NOT EXISTS (
+          SELECT 1 FROM scanner_metadata_continuations continuation
+          WHERE continuation.scanner_entity_id = entity.id
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM river_job job
+          WHERE job.state IN ('available', 'pending', 'running', 'retryable', 'scheduled')
+            AND job.args ? 'scanner_entity_id'
+            AND COALESCE(job.args->>'scanner_entity_id', '') ~ '^[0-9]+$'
+            AND (job.args->>'scanner_entity_id')::bigint = entity.id
+      )
+    RETURNING entity.id, target.artifact_count
 )
 SELECT
-    (SELECT count(*) FROM entities_deleted)::bigint AS entities_deleted,
-    (SELECT count(*) FROM entity_artifacts_deleted)::bigint AS entity_artifacts_deleted;
+	count(*)::bigint AS entities_deleted,
+	COALESCE(sum(artifact_count), 0)::bigint AS entity_artifacts_deleted,
+	COALESCE(array_agg(id ORDER BY id), '{}'::bigint[]) AS entity_ids
+FROM entities_deleted;
 `
 	var counts scannerInFlightCleanupCounts
-	err := db.QueryRow(ctx, query, ids).Scan(&counts.EntitiesDeleted, &counts.EntityArtifactsDeleted)
+	err := db.QueryRow(ctx, query, ids, generations, statuses, updatedAts).Scan(&counts.EntitiesDeleted, &counts.EntityArtifactsDeleted, &counts.EntityIDs)
 	return counts, err
 }

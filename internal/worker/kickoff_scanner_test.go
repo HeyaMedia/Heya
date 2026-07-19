@@ -2,10 +2,14 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
@@ -13,14 +17,472 @@ import (
 	"github.com/karbowiak/heya/internal/testutil"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
+	"github.com/riverqueue/river/rivertest"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
+
+type richMetadataCallCounter struct {
+	MatchService
+	calls int
+}
+
+func (m *richMetadataCallCounter) StoreRichMetadata(context.Context, int64, *metadata.MediaDetail) error {
+	m.calls++
+	return nil
+}
+
+func (m *richMetadataCallCounter) StoreRichMetadataTx(context.Context, pgx.Tx, int64, *metadata.MediaDetail) error {
+	m.calls++
+	return nil
+}
 
 func TestScannerWorkerErrorSnoozesDeferredMetadataWork(t *testing.T) {
 	err := scannerWorkerError(&metadata.DeferredWorkError{Operation: "test discovery", RetryAfter: 30 * time.Second})
 	var snooze *river.JobSnoozeError
 	require.ErrorAs(t, err, &snooze)
 	require.Equal(t, 30*time.Second, snooze.Duration)
+}
+
+func TestScannerEntityExecutionLockSerializesDuplicateApplyWorkers(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+
+	first, acquired, err := tryScannerEntityExecutionLock(ctx, pool, "apply", 880001)
+	require.NoError(t, err)
+	require.True(t, acquired)
+
+	second, acquired, err := tryScannerEntityExecutionLock(ctx, pool, "apply", 880001)
+	require.NoError(t, err)
+	require.False(t, acquired, "a duplicate worker must not enter apply concurrently")
+	require.Nil(t, second)
+
+	releaseScannerEntityExecutionLock(first)
+	third, acquired, err := tryScannerEntityExecutionLock(ctx, pool, "apply", 880001)
+	require.NoError(t, err)
+	require.True(t, acquired, "a crashed/completed worker releases the database lock for retry")
+	releaseScannerEntityExecutionLock(third)
+}
+
+func TestSearchToFetchHandoffRollsBackSearchCheckpointWhenEnqueueFails(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	root := t.TempDir()
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name: "search-fetch-atomic-handoff", MediaType: sqlc.MediaTypeMovie, Paths: []string{root},
+		ScanInterval: pgtype.Interval{Microseconds: int64(time.Hour / time.Microsecond), Valid: true},
+		CreatedBy:    testutil.TestUserID(t, pool), Settings: []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+	key := "title_year:atomic handoff|2026"
+	result := scanner.Result{
+		Inventory: scanner.Inventory{Roots: []scanner.InventoryRoot{{Root: root, Files: []scanner.InventoryFile{{
+			Root: root, Path: filepath.Join(root, "Atomic Handoff.mkv"), RelPath: "Atomic Handoff.mkv", Class: scanner.ClassPrimaryMedia,
+		}}}}},
+		MovieMatches: []scanner.MovieMatch{{Key: key, Title: "Atomic Handoff", Year: "2026", Files: []string{"Atomic Handoff.mkv"}}},
+		MovieSearch: []scanner.MovieSearchMatch{{
+			Key: key, Accepted: true, ProviderID: "heya:movie:atomic", Title: "Atomic Handoff", Year: "2026", Confidence: 1,
+		}},
+	}
+	opts := scanner.Options{ScopePaths: []string{root}}
+	analysis, err := scanner.PersistScannerAnalysisEntities(ctx, pool, lib, opts, result)
+	require.NoError(t, err)
+	require.Len(t, analysis, 1)
+
+	sentinel := errors.New("injected River insert failure")
+	_, current, err := scanner.PersistScannerSearchEntityWithHandoff(
+		ctx, pool, lib, opts, analysis[0].Entity.ID, analysis[0].Artifact.ID, result, 0,
+		func(context.Context, pgx.Tx, scanner.ScannerEntityRef) error { return sentinel },
+	)
+	require.ErrorIs(t, err, sentinel)
+	require.False(t, current)
+	entity, err := q.GetScannerEntity(ctx, analysis[0].Entity.ID)
+	require.NoError(t, err)
+	require.Equal(t, "discovered", entity.Status)
+	require.False(t, entity.SearchArtifactID.Valid, "search checkpoint must roll back with the failed fetch insert")
+
+	rc, err := NewInsertClient(pool)
+	require.NoError(t, err)
+	ref, current, err := scanner.PersistScannerSearchEntityWithHandoff(
+		ctx, pool, lib, opts, analysis[0].Entity.ID, analysis[0].Artifact.ID, result, 0,
+		func(handoffCtx context.Context, tx pgx.Tx, ref scanner.ScannerEntityRef) error {
+			return enqueueFetchLibraryMetadataTx(handoffCtx, rc, tx, FetchLibraryMetadataArgs{
+				LibraryID: lib.ID, MediaType: lib.MediaType, ScopePaths: []string{root},
+				ScannerEntityID: ref.Entity.ID, SearchArtifactID: ref.Artifact.ID,
+			}, PriorityScan, "")
+		},
+	)
+	require.NoError(t, err)
+	require.True(t, current)
+	require.NotZero(t, ref.Artifact.ID)
+	entity, err = q.GetScannerEntity(ctx, analysis[0].Entity.ID)
+	require.NoError(t, err)
+	require.Equal(t, ref.Artifact.ID, entity.SearchArtifactID.Int64)
+	var jobs int
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT count(*) FROM river_job
+		WHERE kind = 'fetch_metadata'
+		  AND (args->>'scanner_entity_id')::bigint = $1
+		  AND (args->>'search_artifact_id')::bigint = $2
+	`, entity.ID, ref.Artifact.ID).Scan(&jobs))
+	require.Equal(t, 1, jobs)
+
+	current, err = scanner.BeginScannerEntityFetch(ctx, pool, entity.ID, ref.Artifact.ID)
+	require.NoError(t, err)
+	require.True(t, current)
+	fetched := result
+	fetched.MovieMetadata = []scanner.MovieFetchPreview{{
+		Key: key, ProviderID: "heya:movie:atomic", Detail: &metadata.MediaDetail{Title: "Atomic Handoff", Year: "2026"},
+	}}
+	_, current, err = scanner.PersistScannerFetchEntityWithHandoff(
+		ctx, pool, entity.ID, ref.Artifact.ID, fetched, 0,
+		func(context.Context, pgx.Tx, sqlc.ScannerEntityArtifact, scanner.Result) error { return sentinel },
+	)
+	require.ErrorIs(t, err, sentinel)
+	require.False(t, current)
+	entity, err = q.GetScannerEntity(ctx, entity.ID)
+	require.NoError(t, err)
+	require.Equal(t, "fetching", entity.Status)
+	require.False(t, entity.MetadataArtifactID.Valid, "fetch checkpoint must roll back with the failed apply insert")
+
+	metadataArtifact, current, err := scanner.PersistScannerFetchEntityWithHandoff(
+		ctx, pool, entity.ID, ref.Artifact.ID, fetched, 0,
+		func(handoffCtx context.Context, tx pgx.Tx, artifact sqlc.ScannerEntityArtifact, _ scanner.Result) error {
+			return enqueueApplyLibraryScanTx(handoffCtx, rc, tx, ApplyLibraryScanArgs{
+				LibraryID: lib.ID, MediaType: lib.MediaType, ScopePaths: []string{root},
+				ScannerEntityID: entity.ID, MetadataArtifactID: artifact.ID,
+			}, PriorityScan, "")
+		},
+	)
+	require.NoError(t, err)
+	require.True(t, current)
+	entity, err = q.GetScannerEntity(ctx, entity.ID)
+	require.NoError(t, err)
+	require.Equal(t, metadataArtifact.ID, entity.MetadataArtifactID.Int64)
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT count(*) FROM river_job
+		WHERE kind = 'apply_metadata'
+		  AND (args->>'scanner_entity_id')::bigint = $1
+		  AND (args->>'metadata_artifact_id')::bigint = $2
+	`, entity.ID, metadataArtifact.ID).Scan(&jobs))
+	require.Equal(t, 1, jobs)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE kind IN ('fetch_metadata', 'apply_metadata') AND (args->>'scanner_entity_id')::bigint = $1`, entity.ID)
+	})
+}
+
+func TestStaleArtifactRecoveryRollsBackStateWhenReanalysisInsertFails(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name: "stale-artifact-atomic-recovery", MediaType: sqlc.MediaTypeMovie, Paths: []string{"/media/stale"},
+		ScanInterval: pgtype.Interval{Microseconds: int64(time.Hour / time.Microsecond), Valid: true},
+		CreatedBy:    testutil.TestUserID(t, pool), Settings: []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+	entity, err := q.UpsertScannerEntity(ctx, sqlc.UpsertScannerEntityParams{
+		LibraryID: lib.ID, MediaType: lib.MediaType, ScopeKey: "scope", ScopePaths: []string{"/media/stale/Movie"},
+		IdentityKey: "title_year:stale|2026", Title: "Stale", Year: "2026", Status: "discovered", Data: []byte("{}"),
+	})
+	require.NoError(t, err)
+	artifact, err := q.CreateScannerEntityArtifact(ctx, sqlc.CreateScannerEntityArtifactParams{
+		EntityID: entity.ID, Stage: "fetch_result", SchemaVersion: 1, Data: []byte("{}"), PipelineGeneration: entity.PipelineGeneration,
+	})
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `UPDATE scanner_entities SET status = 'applying', metadata_artifact_id = $2 WHERE id = $1`, entity.ID, artifact.ID)
+	require.NoError(t, err)
+
+	sentinel := errors.New("injected process_scan insert failure")
+	handled, err := enqueueStaleScannerArtifactReanalysisWithInsert(
+		ctx, nil, pool, lib, entity.ID, artifact.ID, entity.ScopePaths, "", "", &scanner.ArtifactReplayError{Reason: "source changed"},
+		func(context.Context, pgx.Tx, ProcessLibraryScanArgs) error { return sentinel },
+	)
+	require.True(t, handled)
+	require.ErrorIs(t, err, sentinel)
+	current, err := q.GetScannerEntity(ctx, entity.ID)
+	require.NoError(t, err)
+	require.Equal(t, "applying", current.Status, "stale transition must roll back when replacement work is not durable")
+	require.Empty(t, current.ErrorMessage)
+	var jobs int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM river_job WHERE kind = 'process_scan' AND (args->>'library_id')::bigint = $1`, lib.ID).Scan(&jobs))
+	require.Zero(t, jobs)
+
+	rc, err := NewInsertClient(pool)
+	require.NoError(t, err)
+	handled, err = enqueueStaleScannerArtifactReanalysis(
+		ctx, rc, pool, lib, entity.ID, artifact.ID, entity.ScopePaths, "", "", &scanner.ArtifactReplayError{Reason: "source changed"},
+	)
+	require.True(t, handled)
+	require.NoError(t, err)
+	current, err = q.GetScannerEntity(ctx, entity.ID)
+	require.NoError(t, err)
+	require.Equal(t, "stale", current.Status)
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM river_job WHERE kind = 'process_scan' AND (args->>'library_id')::bigint = $1`, lib.ID).Scan(&jobs))
+	require.Equal(t, 1, jobs)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE kind = 'process_scan' AND (args->>'library_id')::bigint = $1`, lib.ID)
+	})
+}
+
+func TestApplyErrorCheckpointCanRetryCoreApply(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name: "retry-apply-error", MediaType: sqlc.MediaTypeMovie, Paths: []string{"/media/retry-apply"},
+		ScanInterval: pgtype.Interval{Microseconds: int64(time.Hour / time.Microsecond), Valid: true},
+		CreatedBy:    testutil.TestUserID(t, pool), Settings: []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+	entity, err := q.UpsertScannerEntity(ctx, sqlc.UpsertScannerEntityParams{
+		LibraryID: lib.ID, MediaType: lib.MediaType, ScopeKey: "scope", ScopePaths: []string{"/media/retry-apply/Movie"},
+		IdentityKey: "movie:retry", Title: "Retry", Status: "discovered", Data: []byte("{}"),
+	})
+	require.NoError(t, err)
+	artifact, err := q.CreateScannerEntityArtifact(ctx, sqlc.CreateScannerEntityArtifactParams{
+		EntityID: entity.ID, Stage: "fetch_result", SchemaVersion: 1, Data: []byte("{}"), PipelineGeneration: entity.PipelineGeneration,
+	})
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `UPDATE scanner_entities SET status = 'apply_error', metadata_artifact_id = $2 WHERE id = $1`, entity.ID, artifact.ID)
+	require.NoError(t, err)
+
+	current, err := scanner.BeginScannerEntityApply(ctx, pool, entity.ID, artifact.ID)
+	require.NoError(t, err)
+	require.True(t, current, "River's retry after an apply failure must re-enter core apply")
+	entity, err = q.GetScannerEntity(ctx, entity.ID)
+	require.NoError(t, err)
+	require.Equal(t, "applying", entity.Status)
+}
+
+func TestApplyFanoutJobsAndTerminalStatusCommitAtomically(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name: "atomic-apply-fanout", MediaType: sqlc.MediaTypeMovie, Paths: []string{"/media/atomic-apply"},
+		ScanInterval: pgtype.Interval{Microseconds: int64(time.Hour / time.Microsecond), Valid: true},
+		CreatedBy:    testutil.TestUserID(t, pool), Settings: []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	entity, err := q.UpsertScannerEntity(ctx, sqlc.UpsertScannerEntityParams{
+		LibraryID: lib.ID, MediaType: lib.MediaType, ScopeKey: "scope", ScopePaths: []string{"/media/atomic-apply/Movie"},
+		IdentityKey: "movie:atomic", Title: "Atomic", Status: "discovered", Data: []byte("{}"),
+	})
+	require.NoError(t, err)
+	metadataArtifact, err := q.CreateScannerEntityArtifact(ctx, sqlc.CreateScannerEntityArtifactParams{
+		EntityID: entity.ID, Stage: "fetch_result", SchemaVersion: 1, Data: []byte("{}"), PipelineGeneration: entity.PipelineGeneration,
+	})
+	require.NoError(t, err)
+	applyArtifact, err := q.CreateScannerEntityArtifact(ctx, sqlc.CreateScannerEntityArtifactParams{
+		EntityID: entity.ID, Stage: "apply_result", SchemaVersion: 1, Data: []byte("{}"),
+		PipelineGeneration: entity.PipelineGeneration, SourceArtifactID: pgtype.Int8{Int64: metadataArtifact.ID, Valid: true},
+	})
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `
+		UPDATE scanner_entities
+		SET status = 'applying', metadata_artifact_id = $2, apply_artifact_id = $3
+		WHERE id = $1`, entity.ID, metadataArtifact.ID, applyArtifact.ID)
+	require.NoError(t, err)
+
+	rc, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
+	require.NoError(t, err)
+	const mediaItemID int64 = 880002
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE kind = 'ratings_fetch' AND (args->>'media_item_id')::bigint = $1`, mediaItemID)
+	})
+	result := scanner.Result{MovieApply: []scanner.MovieApplyResult{{Action: "create", MediaItemID: mediaItemID}}}
+
+	// Simulate a failure immediately before commit. Both the queued work and
+	// terminal status disappear, leaving the checkpoint retryable.
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	_, err = rc.InsertTx(ctx, tx, RatingsFetchArgs{MediaItemID: mediaItemID, LibraryID: lib.ID}, nil)
+	require.NoError(t, err)
+	finalized, err := scanner.FinalizeScannerApplyEntityTx(ctx, tx, entity.ID, metadataArtifact.ID, applyArtifact.ID, result)
+	require.NoError(t, err)
+	require.True(t, finalized)
+	require.NoError(t, tx.Rollback(ctx))
+
+	entity, err = q.GetScannerEntity(ctx, entity.ID)
+	require.NoError(t, err)
+	require.Equal(t, "applying", entity.Status)
+	var jobs int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM river_job WHERE kind = 'ratings_fetch' AND (args->>'media_item_id')::bigint = $1`, mediaItemID).Scan(&jobs))
+	require.Zero(t, jobs)
+
+	// The retry commits the same two operations together.
+	tx, err = pool.Begin(ctx)
+	require.NoError(t, err)
+	_, err = rc.InsertTx(ctx, tx, RatingsFetchArgs{MediaItemID: mediaItemID, LibraryID: lib.ID}, nil)
+	require.NoError(t, err)
+	finalized, err = scanner.FinalizeScannerApplyEntityTx(ctx, tx, entity.ID, metadataArtifact.ID, applyArtifact.ID, result)
+	require.NoError(t, err)
+	require.True(t, finalized)
+	require.NoError(t, tx.Commit(ctx))
+
+	entity, err = q.GetScannerEntity(ctx, entity.ID)
+	require.NoError(t, err)
+	require.Equal(t, "applied", entity.Status)
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM river_job WHERE kind = 'ratings_fetch' AND (args->>'media_item_id')::bigint = $1`, mediaItemID).Scan(&jobs))
+	require.Equal(t, 1, jobs)
+}
+
+func TestApplyRichMetadataRejectsChangedArtifactSourcesBeforeStore(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	root := t.TempDir()
+	scope := filepath.Join(root, "Movie (2026)")
+	require.NoError(t, os.MkdirAll(scope, 0o755))
+	path := filepath.Join(scope, "Movie (2026).mkv")
+	require.NoError(t, os.WriteFile(path, []byte("original"), 0o600))
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name: "stale-rich-metadata", MediaType: sqlc.MediaTypeMovie, Paths: []string{root},
+		ScanInterval: pgtype.Interval{Microseconds: int64(time.Hour / time.Microsecond), Valid: true},
+		CreatedBy:    testutil.TestUserID(t, pool), Settings: []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	var entityID int64
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO scanner_entities (
+			library_id, media_type, scope_key, scope_paths, identity_key, title, status, pipeline_generation
+		) VALUES ($1, $2, 'movie-scope', $3, 'movie-key', 'Movie', 'applied', 1)
+		RETURNING id
+	`, lib.ID, lib.MediaType, []string{scope}).Scan(&entityID))
+
+	data, err := json.Marshal(map[string]any{
+		"schema_version":    1,
+		"pipeline_revision": 2,
+		"inventory": map[string]any{"roots": []any{map[string]any{
+			"root": root,
+			"files": []scanner.InventoryFile{{
+				Root: root, Path: path, RelPath: "Movie (2026)/Movie (2026).mkv",
+				Class: scanner.ClassPrimaryMedia, Size: info.Size(), MTime: info.ModTime(),
+			}},
+		}}},
+		"result": scanner.Result{MovieMetadata: []scanner.MovieFetchPreview{{
+			Key: "movie-key", ProviderID: "movie-provider", Detail: &metadata.MediaDetail{Title: "Movie"},
+		}}},
+	})
+	require.NoError(t, err)
+	var artifactID int64
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO scanner_entity_artifacts (entity_id, stage, schema_version, data, pipeline_generation)
+		VALUES ($1, 'fetch_result', 1, $2, 1)
+		RETURNING id
+	`, entityID, data).Scan(&artifactID))
+	_, err = pool.Exec(ctx, `UPDATE scanner_entities SET metadata_artifact_id = $2 WHERE id = $1`, entityID, artifactID)
+	require.NoError(t, err)
+
+	// Change the exact source captured by the fetch artifact before the rich
+	// side-data worker resumes it.
+	require.NoError(t, os.WriteFile(path, []byte("replacement bytes"), 0o600))
+
+	insertClient, err := NewInsertClient(pool)
+	require.NoError(t, err)
+	workCtx := rivertest.WorkContext(ctx, insertClient)
+	matcher := &richMetadataCallCounter{}
+	worker := ApplyRichMetadataWorker{DB: pool, Matcher: matcher, Progress: &TaskProgressBroadcaster{}}
+	err = worker.Work(workCtx, &river.Job[ApplyRichMetadataArgs]{JobRow: &rivertype.JobRow{ID: 99101}, Args: ApplyRichMetadataArgs{
+		LibraryID: lib.ID, MediaItemID: 99102, ScannerEntityID: entityID,
+		MetadataArtifactID: artifactID, MediaKind: string(metadata.KindMovie), Key: "movie-key",
+	}})
+	require.NoError(t, err)
+	require.Zero(t, matcher.calls, "stale artifact reached StoreRichMetadata")
+
+	var queuedScopes []string
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT ARRAY(SELECT jsonb_array_elements_text(args->'scope_paths'))
+		FROM river_job
+		WHERE kind = 'process_scan' AND (args->>'library_id')::bigint = $1
+		ORDER BY id DESC LIMIT 1
+	`, lib.ID).Scan(&queuedScopes))
+	require.Equal(t, []string{scope}, queuedScopes)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE kind = 'process_scan' AND (args->>'library_id')::bigint = $1`, lib.ID)
+	})
+}
+
+func TestApplyRichMetadataRematchBetweenLoadAndStoreCannotCommit(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	root := t.TempDir()
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name: "rich-metadata-rematch-race", MediaType: sqlc.MediaTypeMovie, Paths: []string{root},
+		ScanInterval: pgtype.Interval{Microseconds: int64(time.Hour / time.Microsecond), Valid: true},
+		CreatedBy:    testutil.TestUserID(t, pool), Settings: []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	var entityID int64
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO scanner_entities (
+			library_id, media_type, scope_key, scope_paths, identity_key, title, status, pipeline_generation
+		) VALUES ($1, $2, 'movie-race-scope', $3, 'movie-race-key', 'Movie', 'applied', 1)
+		RETURNING id
+	`, lib.ID, lib.MediaType, []string{root}).Scan(&entityID))
+
+	// An empty source root still has a real source-set digest (SHA-256 of no
+	// entries), keeping this test focused on generation lineage rather than
+	// filesystem invalidation.
+	data, err := json.Marshal(map[string]any{
+		"schema_version":    1,
+		"pipeline_revision": 3,
+		"source_set": map[string]any{"roots": []any{map[string]any{
+			"root": root, "rel_starts": []string{"."}, "count": 0,
+			"sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		}}},
+		"inventory": map[string]any{"roots": []any{map[string]any{"root": root}}},
+		"result": scanner.Result{MovieMetadata: []scanner.MovieFetchPreview{{
+			Key: "movie-race-key", ProviderID: "movie-provider", Detail: &metadata.MediaDetail{Title: "Old Movie"},
+		}}},
+	})
+	require.NoError(t, err)
+	var artifactID int64
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO scanner_entity_artifacts (entity_id, stage, schema_version, data, pipeline_generation)
+		VALUES ($1, 'fetch_result', 1, $2, 1)
+		RETURNING id
+	`, entityID, data).Scan(&artifactID))
+	_, err = pool.Exec(ctx, `UPDATE scanner_entities SET metadata_artifact_id = $2 WHERE id = $1`, entityID, artifactID)
+	require.NoError(t, err)
+
+	matcher := &richMetadataCallCounter{}
+	worker := ApplyRichMetadataWorker{
+		DB: pool, Matcher: matcher, Progress: &TaskProgressBroadcaster{},
+		BeforeStoreTransaction: func() error {
+			// This is the exact dangerous interleaving: the worker already loaded
+			// old detail, then a manual decision/rematch supersedes its generation.
+			_, updateErr := pool.Exec(ctx, `
+				UPDATE scanner_entities
+				SET pipeline_generation = pipeline_generation + 1,
+				    metadata_artifact_id = NULL,
+				    status = 'discovered'
+				WHERE id = $1
+			`, entityID)
+			return updateErr
+		},
+	}
+	err = worker.Work(ctx, &river.Job[ApplyRichMetadataArgs]{JobRow: &rivertype.JobRow{ID: 99103}, Args: ApplyRichMetadataArgs{
+		LibraryID: lib.ID, MediaItemID: 99104, ScannerEntityID: entityID,
+		MetadataArtifactID: artifactID, MediaKind: string(metadata.KindMovie), Key: "movie-race-key",
+	}})
+	require.NoError(t, err)
+	require.Zero(t, matcher.calls, "superseded rich metadata reached transactional persistence")
 }
 
 // The DB round-trips mtimes at Postgres's µs precision while a fresh
@@ -44,6 +506,69 @@ func TestLibraryFileChangedTruncatesMtimeToMicroseconds(t *testing.T) {
 	file.MTime = statMtime
 	file.Size = 43
 	require.True(t, libraryFileChanged(row, file), "a size change must still be detected")
+}
+
+func TestCountFetchedResultItemsRequiresUsableDetail(t *testing.T) {
+	require.Zero(t, countFetchedResultItems(nil, []scanner.BookFetchPreview{{
+		ProviderID: "heya:book:accepted-but-failed", Error: "upstream status 500",
+	}}, nil, nil), "a provider ID without usable detail must not enqueue apply")
+	require.Zero(t, countFetchedResultItems(nil, []scanner.BookFetchPreview{{
+		ProviderID: "heya:book:empty-detail",
+	}}, nil, nil))
+	require.Equal(t, 1, countFetchedResultItems(nil, []scanner.BookFetchPreview{{
+		ProviderID: "heya:book:usable", Detail: &metadata.MediaDetail{Title: "Book"},
+	}}, nil, nil))
+}
+
+func TestPendingLibraryFileDoesNotSupersedeLivePipeline(t *testing.T) {
+	mtime := time.Date(2026, 7, 10, 4, 0, 0, 123456000, time.UTC)
+	row := sqlc.ListLibraryFilesForScanRow{
+		Status: sqlc.FileStatusPending,
+		Size:   42,
+		Mtime:  pgtype.Timestamptz{Time: mtime, Valid: true},
+	}
+	file := scanner.InventoryFile{Size: 42, MTime: mtime}
+	scope := "/music/Ado"
+	live := liveScannerPipelineScopes{scopes: []string{scope}}
+
+	require.False(t, libraryFileNeedsScan(row, file, scope, live), "unchanged pending source must wait for its live generation")
+	require.True(t, libraryFileNeedsScan(row, file, scope, liveScannerPipelineScopes{}), "orphaned pending source must self-heal")
+
+	file.Size++
+	require.True(t, libraryFileNeedsScan(row, file, scope, live), "real byte changes must supersede even a live generation")
+}
+
+func TestLoadLiveScannerPipelineScopesIncludesParkedContinuation(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	userID := testutil.TestUserID(t, pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name: "live-scanner-scope-test", MediaType: sqlc.MediaTypeMusic,
+		Paths: []string{"/music"}, ScanInterval: pgtype.Interval{Microseconds: int64(time.Hour / time.Microsecond), Valid: true},
+		CreatedBy: userID, Settings: []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	const scope = "/music/Ado"
+	entity, err := q.UpsertScannerEntity(ctx, sqlc.UpsertScannerEntityParams{
+		LibraryID: lib.ID, MediaType: lib.MediaType, ScopeKey: "scope-test", ScopePaths: []string{scope},
+		IdentityKey: "artist:ado", Title: "Ado", Status: "discovered", Data: []byte("{}"),
+	})
+	require.NoError(t, err)
+	artifact, err := q.CreateScannerEntityArtifact(ctx, sqlc.CreateScannerEntityArtifactParams{
+		EntityID: entity.ID, Stage: "analysis_result", SchemaVersion: 1, Data: []byte("{}"),
+		PipelineGeneration: entity.PipelineGeneration,
+	})
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO scanner_metadata_continuations(kind,library_id,scanner_entity_id,artifact_id,args,next_attempt_at) VALUES('search_metadata',$1,$2,$3,'{}'::jsonb,now()+interval '1 hour')`, lib.ID, entity.ID, artifact.ID)
+	require.NoError(t, err)
+
+	live, err := loadLiveScannerPipelineScopes(ctx, pool, lib.ID)
+	require.NoError(t, err)
+	require.True(t, live.overlaps(scope))
+	require.False(t, live.overlaps("/music/Someone Else"))
 }
 
 func TestTimestamptzChangedTruncatesToMicroseconds(t *testing.T) {

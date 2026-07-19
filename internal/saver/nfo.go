@@ -8,10 +8,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
+	"regexp"
 
 	"github.com/karbowiak/heya/internal/atomicfile"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/generatedwrite"
 	"github.com/karbowiak/heya/internal/vfs"
 	"github.com/rs/zerolog/log"
 )
@@ -50,11 +51,12 @@ type UniqueID struct {
 }
 
 func WriteMovieNFO(mediaDir string, item sqlc.MediaItemCard, movie sqlc.Movie) error {
-	nfoPath := filepath.Join(mediaDir, "movie.nfo")
-	if _, err := os.Stat(nfoPath); err == nil {
-		log.Debug().Str("path", vfs.RedactPath(nfoPath)).Msg("NFO already exists, skipping")
-		return nil
-	}
+	_, err := WriteMovieNFOWithResult(mediaDir, item, movie)
+	return err
+}
+
+func WriteMovieNFOWithResult(mediaDir string, item sqlc.MediaItemCard, movie sqlc.Movie) (generatedwrite.Output, error) {
+	nfoPath := MovieNFOPath(mediaDir)
 
 	rating := ""
 	if f, err := movie.Rating.Float64Value(); err == nil && f.Valid {
@@ -74,15 +76,29 @@ func WriteMovieNFO(mediaDir string, item sqlc.MediaItemCard, movie sqlc.Movie) e
 		UniqueIDs:     buildUniqueIDs(item),
 	}
 
-	return writeXML(nfoPath, nfo)
+	return writeXMLWithResult(nfoPath, nfo)
+}
+
+func PrepareMovieNFO(mediaDir string, item sqlc.MediaItemCard, movie sqlc.Movie) (*generatedwrite.Prepared, error) {
+	rating := ""
+	if f, err := movie.Rating.Float64Value(); err == nil && f.Valid {
+		rating = fmt.Sprintf("%.1f", f.Float64)
+	}
+	return prepareXML(MovieNFOPath(mediaDir), MovieNFO{
+		Title: item.Title, OriginalTitle: movie.OriginalTitle, SortTitle: item.SortTitle,
+		Year: item.Year, Plot: item.Description, Tagline: movie.Tagline,
+		Runtime: movie.RuntimeMinutes, Rating: rating, Genres: movie.Genres,
+		UniqueIDs: buildUniqueIDs(item),
+	})
 }
 
 func WriteTVShowNFO(mediaDir string, item sqlc.MediaItemCard, series sqlc.TvSeries) error {
-	nfoPath := filepath.Join(mediaDir, "tvshow.nfo")
-	if _, err := os.Stat(nfoPath); err == nil {
-		log.Debug().Str("path", vfs.RedactPath(nfoPath)).Msg("NFO already exists, skipping")
-		return nil
-	}
+	_, err := WriteTVShowNFOWithResult(mediaDir, item, series)
+	return err
+}
+
+func WriteTVShowNFOWithResult(mediaDir string, item sqlc.MediaItemCard, series sqlc.TvSeries) (generatedwrite.Output, error) {
+	nfoPath := TVShowNFOPath(mediaDir)
 
 	nfo := TVShowNFO{
 		Title:         item.Title,
@@ -95,7 +111,15 @@ func WriteTVShowNFO(mediaDir string, item sqlc.MediaItemCard, series sqlc.TvSeri
 		UniqueIDs:     buildUniqueIDs(item),
 	}
 
-	return writeXML(nfoPath, nfo)
+	return writeXMLWithResult(nfoPath, nfo)
+}
+
+func PrepareTVShowNFO(mediaDir string, item sqlc.MediaItemCard, series sqlc.TvSeries) (*generatedwrite.Prepared, error) {
+	return prepareXML(TVShowNFOPath(mediaDir), TVShowNFO{
+		Title: item.Title, OriginalTitle: series.OriginalName, SortTitle: item.SortTitle,
+		Year: item.Year, Plot: item.Description, Status: series.Status,
+		Genres: series.Genres, UniqueIDs: buildUniqueIDs(item),
+	})
 }
 
 func buildUniqueIDs(item sqlc.MediaItemCard) []UniqueID {
@@ -165,11 +189,16 @@ type AlbumTrackNFO struct {
 	Duration string `xml:"duration,omitempty"` // MM:SS
 }
 
-// WriteArtistNFO writes an artist.nfo at the artist directory. Overwrites
-// any existing file (the matcher's enrichment data is canonical and replaces
-// stale on-disk NFOs). artistDir is typically Library/Artist/.
+// WriteArtistNFO writes an artist.nfo at the artist directory. An existing
+// mismatch is always treated as user-owned source data and is never replaced.
+// artistDir is typically Library/Artist/.
 func WriteArtistNFO(artistDir string, artist sqlc.Artist, mediaItem sqlc.MediaItemCard, albumTitles []string) error {
-	nfoPath := filepath.Join(artistDir, "artist.nfo")
+	_, err := WriteArtistNFOWithResult(artistDir, artist, mediaItem, albumTitles)
+	return err
+}
+
+func WriteArtistNFOWithResult(artistDir string, artist sqlc.Artist, mediaItem sqlc.MediaItemCard, albumTitles []string) (generatedwrite.Output, error) {
+	nfoPath := ArtistNFOPath(artistDir)
 
 	refs := make([]AlbumRefNFO, 0, len(albumTitles))
 	for _, t := range albumTitles {
@@ -187,13 +216,32 @@ func WriteArtistNFO(artistDir string, artist sqlc.Artist, mediaItem sqlc.MediaIt
 		Albums:         refs,
 	}
 	_ = mediaItem // reserved for future genre/external_ids merging
-	return writeXML(nfoPath, nfo)
+	return writeXMLWithResult(nfoPath, nfo)
+}
+
+func PrepareArtistNFO(artistDir string, artist sqlc.Artist, mediaItem sqlc.MediaItemCard, albumTitles []string) (*generatedwrite.Prepared, error) {
+	refs := make([]AlbumRefNFO, 0, len(albumTitles))
+	for _, title := range albumTitles {
+		if title != "" {
+			refs = append(refs, AlbumRefNFO{Title: title})
+		}
+	}
+	_ = mediaItem
+	return prepareXML(ArtistNFOPath(artistDir), ArtistNFO{
+		Title: artist.Name, SortName: artist.SortName, Disambiguation: artist.Disambiguation,
+		Biography: artist.Biography, MBID: artist.MusicbrainzID, Albums: refs,
+	})
 }
 
 // WriteAlbumNFO writes album.nfo at the release directory. tracks must be
 // pre-ordered by (disc, position) for stable round-tripping.
 func WriteAlbumNFO(releaseDir string, artist sqlc.Artist, album sqlc.Album, tracks []sqlc.Track) error {
-	nfoPath := filepath.Join(releaseDir, "album.nfo")
+	_, err := WriteAlbumNFOWithResult(releaseDir, artist, album, tracks)
+	return err
+}
+
+func WriteAlbumNFOWithResult(releaseDir string, artist sqlc.Artist, album sqlc.Album, tracks []sqlc.Track) (generatedwrite.Output, error) {
+	nfoPath := AlbumNFOPath(releaseDir)
 
 	trackNFOs := make([]AlbumTrackNFO, 0, len(tracks))
 	for _, t := range tracks {
@@ -229,8 +277,40 @@ func WriteAlbumNFO(releaseDir string, artist sqlc.Artist, album sqlc.Album, trac
 		Genres:          append([]string(nil), album.Genres...),
 		Tracks:          trackNFOs,
 	}
-	return writeXML(nfoPath, nfo)
+	return writeXMLWithResult(nfoPath, nfo)
 }
+
+func PrepareAlbumNFO(releaseDir string, artist sqlc.Artist, album sqlc.Album, tracks []sqlc.Track) (*generatedwrite.Prepared, error) {
+	trackNFOs := make([]AlbumTrackNFO, 0, len(tracks))
+	for _, track := range tracks {
+		disc := int(track.DiscNumber)
+		if disc == 0 {
+			disc = 1
+		}
+		trackNFOs = append(trackNFOs, AlbumTrackNFO{
+			Disc: disc, Position: int(track.TrackNumber), Title: track.Title,
+			Duration: formatDurationMinSec(int(track.Duration)),
+		})
+	}
+	releaseDate := ""
+	if album.ReleaseDate.Valid {
+		releaseDate = album.ReleaseDate.Time.Format("2006-01-02")
+	}
+	return prepareXML(AlbumNFOPath(releaseDir), AlbumNFO{
+		Title: album.Title, Artist: artist.Name, AlbumArtist: artist.Name,
+		Year: album.Year, ReleaseDate: releaseDate, AlbumType: album.AlbumType,
+		Label: album.Label, Country: album.Country, Barcode: album.Barcode,
+		MBAlbumID: album.MusicbrainzID, MBAlbumArtistID: artist.MusicbrainzID,
+		Genres: append([]string(nil), album.Genres...), Tracks: trackNFOs,
+	})
+}
+
+func MovieNFOPath(mediaDir string) string   { return filepath.Join(mediaDir, "movie.nfo") }
+func TVShowNFOPath(mediaDir string) string  { return filepath.Join(mediaDir, "tvshow.nfo") }
+func ArtistNFOPath(artistDir string) string { return filepath.Join(artistDir, "artist.nfo") }
+func AlbumNFOPath(releaseDir string) string { return filepath.Join(releaseDir, "album.nfo") }
+
+var mediaContainerDir = regexp.MustCompile(`(?i)^(?:season|disc|cd)\s*\d+$`)
 
 func formatDurationMinSec(seconds int) string {
 	if seconds <= 0 {
@@ -241,35 +321,83 @@ func formatDurationMinSec(seconds int) string {
 
 func MediaDir(filePath string) string {
 	dir := filepath.Dir(filePath)
-	base := strings.ToLower(filepath.Base(dir))
-	if strings.HasPrefix(base, "season") || strings.HasPrefix(base, "disc") {
+	if mediaContainerDir.MatchString(filepath.Base(dir)) {
 		dir = filepath.Dir(dir)
 	}
 	return dir
 }
 
 func writeXML(path string, v any) error {
+	_, err := writeXMLWithResult(path, v)
+	return err
+}
+
+func writeXMLWithResult(path string, v any) (generatedwrite.Output, error) {
 	data, err := xml.MarshalIndent(v, "", "  ")
 	if err != nil {
-		return err
+		return generatedwrite.Output{}, err
 	}
 	content := xml.Header + string(data) + "\n"
 	contentBytes := []byte(content)
-	if info, statErr := os.Stat(path); statErr == nil && info.Mode().IsRegular() && info.Size() == int64(len(contentBytes)) {
-		//nolint:gosec // size equality above bounds this read to generated content length.
-		if existing, readErr := os.ReadFile(path); readErr == nil && bytes.Equal(existing, contentBytes) {
-			log.Debug().Str("path", vfs.RedactPath(path)).Msg("NFO unchanged, skipping write")
-			return nil
+	if output, exists, err := attestExistingBytes(path, contentBytes); err != nil {
+		return generatedwrite.Output{}, err
+	} else if exists {
+		if output.Attested {
+			log.Debug().Str("path", vfs.RedactPath(path)).Msg("exact NFO already present; attesting without rewrite")
+		} else {
+			log.Debug().Str("path", vfs.RedactPath(path)).Msg("different NFO already exists; preserving user-owned file")
 		}
+		return output, nil
 	}
-	if err := atomicfile.Write(path, 0o644, func(writer io.Writer) error {
+	created, err := atomicfile.WriteIfAbsent(path, 0o644, func(writer io.Writer) error {
 		_, err := writer.Write(contentBytes)
 		return err
-	}); err != nil {
-		return err
+	})
+	if err != nil {
+		return generatedwrite.Output{}, err
+	}
+	if !created {
+		// A file won the name after the initial check. Never replace it; attest
+		// only when it contains the exact desired bytes (e.g. a concurrent retry).
+		output, _, err := attestExistingBytes(path, contentBytes)
+		return output, err
 	}
 	log.Info().Str("path", vfs.RedactPath(path)).Msg("NFO written")
-	return nil
+	return generatedwrite.FromBytes(path, contentBytes), nil
+}
+
+func prepareXML(path string, v any) (*generatedwrite.Prepared, error) {
+	data, err := xml.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	content := append([]byte(xml.Header), data...)
+	content = append(content, '\n')
+	return generatedwrite.PrepareBytes(path, 0o644, content)
+}
+
+// attestExistingBytes distinguishes an exact retry from user-owned content.
+// exists is true for every path occupant, including non-regular files.
+func attestExistingBytes(path string, desired []byte) (output generatedwrite.Output, exists bool, err error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return generatedwrite.Output{}, false, nil
+		}
+		return generatedwrite.Output{}, false, err
+	}
+	if !info.Mode().IsRegular() || info.Size() != int64(len(desired)) {
+		return generatedwrite.Output{Path: path}, true, nil
+	}
+	//nolint:gosec // size equality above bounds this read to desired content length.
+	existing, err := os.ReadFile(path)
+	if err != nil {
+		return generatedwrite.Output{}, true, err
+	}
+	if !bytes.Equal(existing, desired) {
+		return generatedwrite.Output{Path: path}, true, nil
+	}
+	return generatedwrite.AttestBytes(path, desired), true, nil
 }
 
 func parseExternalIDs(data []byte) map[string]string {

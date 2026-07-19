@@ -208,7 +208,7 @@ func (p *HeyaProvider) Search(ctx context.Context, kind metadata.MediaKind, quer
 			return nil, err
 		}
 		localResults = p.mapSummaries(local)
-		if localSearchSufficient(localResults, query) {
+		if localSearchSufficient(localResults, query, canonical) {
 			return localResults, nil
 		}
 		// A fuzzy canonical-index hit is useful as a manual candidate, but it is
@@ -230,7 +230,16 @@ func (p *HeyaProvider) Search(ctx context.Context, kind metadata.MediaKind, quer
 	return mergeSearchResults(localResults, discovered), nil
 }
 
-func localSearchSufficient(results []metadata.SearchResult, query metadata.SearchQuery) bool {
+func localSearchSufficient(results []metadata.SearchResult, query metadata.SearchQuery, canonicalKind string) bool {
+	// Artist names are not identities. The canonical index can legitimately
+	// contain several unrelated artists with the same display name, and its
+	// text-search ordering is not identity evidence. Keep local hits as useful
+	// review candidates, but require discovery, a durable decision, structured
+	// catalog/identifier evidence, or fingerprints before an artist can be
+	// selected automatically.
+	if canonicalKind == "artist" {
+		return false
+	}
 	// Artist names alone are not durable identity evidence. When the scanner
 	// supplied a bounded local discography, let discovery evaluate it instead
 	// of accepting the first same-name canonical index hit.
@@ -241,6 +250,13 @@ func localSearchSufficient(results []metadata.SearchResult, query metadata.Searc
 	// the credited artist, discovery must corroborate it instead of accepting a
 	// same-named release group from the query-only canonical index.
 	if query.CanonicalKind == "release_group" && strings.TrimSpace(query.Artist) != "" {
+		return false
+	}
+	// Canonical book summaries do not currently carry structured authors. An
+	// exact title in the local index therefore cannot corroborate an audiobook
+	// (or ebook) whose scanner supplied an author; discovery must compare the
+	// author evidence before this hit becomes auto-selectable.
+	if canonicalKind == "book_work" && strings.TrimSpace(query.Author) != "" {
 		return false
 	}
 	wanted := normalizedLabel(query.Title)
@@ -788,7 +804,18 @@ func (p *HeyaProvider) GetDetail(ctx context.Context, providerID string, opts *m
 			return nil, err
 		}
 	}
-	return p.getDetailByEntity(ctx, entityID, opts)
+	detail, err := p.getDetailByEntity(ctx, entityID, opts)
+	return detail, deferRetryableDetailError(ctx, err)
+}
+
+func deferRetryableDetailError(ctx context.Context, err error) error {
+	if err == nil || !IsRetryable(err) {
+		return err
+	}
+	if deferred := transientDeferredWorkError(ctx, "retry canonical metadata detail after "+err.Error(), nil); deferred != nil {
+		return deferred
+	}
+	return err
 }
 
 func (p *HeyaProvider) getDetailByEntity(ctx context.Context, entityID string, opts *metadata.FetchOptions) (*metadata.MediaDetail, error) {

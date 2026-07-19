@@ -10,6 +10,7 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/ui"
+	"github.com/karbowiak/heya/internal/worker"
 	"github.com/spf13/cobra"
 )
 
@@ -311,7 +312,9 @@ var mediaSearchCmd = &cobra.Command{
 
 var mediaMatchCmd = &cobra.Command{
 	Use:   "match",
-	Short: "Trigger metadata matching for unmatched files",
+	Short: "Queue canonical scanner matching for a library",
+	Long: "Queues a forced inventory and fresh canonical scanner analysis. This command no longer invokes the legacy matcher. " +
+		"Use `heya library rematch-reviews --id <library-id>` when only existing review rows need replay.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		libraryID, _ := cmd.Flags().GetInt64("library-id")
 		if libraryID == 0 {
@@ -319,16 +322,15 @@ var mediaMatchCmd = &cobra.Command{
 		}
 
 		return withApp(func(ctx context.Context, app *service.App) error {
-			ui.Header("Matching library " + strconv.FormatInt(libraryID, 10))
-			result, err := app.MatchLibrary(ctx, libraryID)
-			if err != nil {
+			ui.Header("Queueing scanner match for library " + strconv.FormatInt(libraryID, 10))
+			if err := worker.EnqueueKickoffLibraryScan(ctx, app.RiverClient(), app.DBPool(), worker.KickoffLibraryScanArgs{
+				LibraryID: libraryID,
+				Force:     true,
+			}); err != nil {
 				return err
 			}
-
-			ui.Success("Match complete")
-			ui.Info("Matched", strconv.Itoa(result.Matched))
-			ui.Info("Unmatched", strconv.Itoa(result.Unmatched))
-			ui.Info("Errors", strconv.Itoa(result.Errors))
+			ui.Success("Canonical scanner rematch queued")
+			ui.Info("Mode", "forced inventory + fresh analysis")
 			return nil
 		})
 	},

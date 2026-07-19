@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -29,8 +30,9 @@ func releaseDirOf(filePath string) string {
 
 type SaveMusicNFOWorker struct {
 	river.WorkerDefaults[SaveMusicNFOArgs]
-	DB       *pgxpool.Pool
-	Progress *TaskProgressBroadcaster
+	DB              *pgxpool.Pool
+	Progress        *TaskProgressBroadcaster
+	GeneratedWrites GeneratedWriteSuppressor
 }
 
 func (w *SaveMusicNFOWorker) Work(ctx context.Context, job *river.Job[SaveMusicNFOArgs]) error {
@@ -43,6 +45,14 @@ func (w *SaveMusicNFOWorker) Work(ctx context.Context, job *river.Job[SaveMusicN
 	mediaItem, err := q.GetMediaItemByID(ctx, artist.MediaItemID)
 	if err != nil {
 		return err
+	}
+	allowed, err := generatedWriteAllowed(ctx, q, mediaItem.LibraryID, generatedWriteNFO)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		log.Debug().Int64("library_id", mediaItem.LibraryID).Int64("artist_id", artist.ID).Msg("save_music_nfo: disabled before execution, skipping")
+		return nil
 	}
 
 	w.Progress.SetCurrentByKind(SaveMusicNFOArgs{}.Kind(), artist.Name)
@@ -59,13 +69,16 @@ func (w *SaveMusicNFOWorker) Work(ctx context.Context, job *river.Job[SaveMusicN
 	wroteAlbums := 0
 	for _, al := range albums {
 		tracks, err := q.ListTracksByAlbum(ctx, al.ID)
-		if err != nil || len(tracks) == 0 {
+		if err != nil {
+			return fmt.Errorf("save_music_nfo: list tracks for album %d: %w", al.ID, err)
+		}
+		if len(tracks) == 0 {
 			continue
 		}
 		// Resolve the release directory from the canonical physical-file join.
 		samplePath, err := q.GetAlbumReleaseDir(ctx, al.ID)
 		if err != nil {
-			continue
+			return fmt.Errorf("save_music_nfo: resolve release directory for album %d: %w", al.ID, err)
 		}
 		if samplePath == "" {
 			continue
@@ -84,18 +97,51 @@ func (w *SaveMusicNFOWorker) Work(ctx context.Context, job *river.Job[SaveMusicN
 		if artistDir == "" {
 			artistDir = candidateArtistDir
 		}
+		allowed, err = generatedWriteAllowed(ctx, q, mediaItem.LibraryID, generatedWriteNFO)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			log.Debug().Int64("library_id", mediaItem.LibraryID).Int64("artist_id", artist.ID).Msg("save_music_nfo: disabled while executing, stopping")
+			return nil
+		}
 
-		if err := saver.WriteAlbumNFO(releaseDir, artist, al, tracks); err != nil {
+		prepared, err := saver.PrepareAlbumNFO(releaseDir, artist, al, tracks)
+		if err == nil {
+			err = publishGeneratedWriteWhenAllowed(ctx, w.DB, w.GeneratedWrites, q, mediaItem.LibraryID, generatedWriteNFO, prepared, func(validateCtx context.Context) (bool, error) {
+				currentPath, currentErr := q.GetAlbumReleaseDir(validateCtx, al.ID)
+				if currentErr != nil {
+					return false, currentErr
+				}
+				return currentPath != "" && filepath.Clean(releaseDirOf(currentPath)) == filepath.Clean(releaseDir), nil
+			})
+		}
+		if err != nil {
 			log.Warn().Err(vfs.RedactError(err)).Str("dir", vfs.RedactPath(releaseDir)).Msg("WriteAlbumNFO failed")
-			continue
+			return err
 		}
 		wroteAlbums++
 		albumTitles = append(albumTitles, al.Title)
 	}
 
 	if artistDir != "" {
-		if err := saver.WriteArtistNFO(artistDir, artist, mediaItem, albumTitles); err != nil {
+		allowed, err = generatedWriteAllowed(ctx, q, mediaItem.LibraryID, generatedWriteNFO)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			log.Debug().Int64("library_id", mediaItem.LibraryID).Int64("artist_id", artist.ID).Msg("save_music_nfo: disabled while executing, stopping")
+			return nil
+		}
+		prepared, err := saver.PrepareArtistNFO(artistDir, artist, mediaItem, albumTitles)
+		if err == nil {
+			err = publishGeneratedWriteWhenAllowed(ctx, w.DB, w.GeneratedWrites, q, mediaItem.LibraryID, generatedWriteNFO, prepared, func(validateCtx context.Context) (bool, error) {
+				return musicArtistStillOwnsDir(validateCtx, q, artist.ID, artistDir)
+			})
+		}
+		if err != nil {
 			log.Warn().Err(vfs.RedactError(err)).Str("dir", vfs.RedactPath(artistDir)).Msg("WriteArtistNFO failed")
+			return err
 		}
 	}
 
@@ -107,6 +153,24 @@ func (w *SaveMusicNFOWorker) Work(ctx context.Context, job *river.Job[SaveMusicN
 		Msg("SaveMusicNFO complete")
 
 	return nil
+}
+
+func musicArtistStillOwnsDir(ctx context.Context, q *sqlc.Queries, artistID int64, artistDir string) (bool, error) {
+	albums, err := q.ListAlbumsByArtist(ctx, artistID)
+	if err != nil {
+		return false, err
+	}
+	want := filepath.Clean(artistDir)
+	for _, album := range albums {
+		path, pathErr := q.GetAlbumReleaseDir(ctx, album.ID)
+		if pathErr != nil {
+			return false, pathErr
+		}
+		if path != "" && filepath.Clean(filepath.Dir(releaseDirOf(path))) == want {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // musicArtistDirMatches is the final write-time circuit breaker against a bad

@@ -2,10 +2,14 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	heyametadata "github.com/karbowiak/heya/internal/metadata/heyametadata"
 	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/karbowiak/heya/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -196,6 +200,90 @@ func TestScannerReviewViewBucketsAndActions(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "accepted", bulkApproved.ReviewStatus)
 	require.Equal(t, "heya:movie:tmdb:2005", bulkApproved.SelectedProviderID)
+}
+
+func TestTerminalReviewActionsRefuseAlreadyAppliedIdentity(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	app := &App{db: pool}
+	q := sqlc.New(pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name: "scanner-bound-review-test", MediaType: sqlc.MediaTypeMovie,
+		Paths:        []string{"/tmp/scanner-bound-review-test"},
+		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy:    testutil.TestUserID(t, pool), Settings: []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+	item, err := q.CreateMediaItem(ctx, sqlc.CreateMediaItemParams{
+		LibraryID: lib.ID, MediaType: lib.MediaType, Title: "Already Applied", SortTitle: "already applied",
+	})
+	require.NoError(t, err)
+	identity := createScannerIdentity(t, ctx, q, lib, 0, "title_year:already applied|2026", "Already Applied", "2026", "accepted", item.ID)
+
+	_, err = app.RejectScannerIdentity(ctx, lib.ID, identity.ID, "wrong match")
+	require.ErrorIs(t, err, ErrScannerReviewIdentityApplied)
+	_, err = app.IgnoreScannerIdentity(ctx, lib.ID, identity.ID, "hide")
+	require.ErrorIs(t, err, ErrScannerReviewIdentityApplied)
+
+	current, err := q.GetScannerIdentityForView(ctx, sqlc.GetScannerIdentityForViewParams{LibraryID: lib.ID, IdentityID: identity.ID})
+	require.NoError(t, err)
+	require.Equal(t, "accepted", current.ReviewStatus, "terminal review must not disagree with the still-served media item")
+	require.True(t, current.MediaItemID.Valid)
+	require.Equal(t, item.ID, current.MediaItemID.Int64)
+}
+
+func TestBookManualIdentitySearchRetainsAuthorFormatAndISBN(t *testing.T) {
+	var discovery map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/api/v2/discoveries", r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&discovery))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"99999999-9999-4999-8999-999999999999",
+			"state":"completed",
+			"expires_at":"2099-01-01T00:00:00Z",
+			"result":{
+				"kind":"book_work","query":"The Long Winter","recommendation":"no_match",
+				"status":"completed","schema_version":1,"observed_at":"2026-07-19T00:00:00Z","candidates":[]
+			}
+		}`))
+	}))
+	defer server.Close()
+	client, err := heyametadata.NewClient(server.URL, "")
+	require.NoError(t, err)
+
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	app := &App{db: pool, heya: heyametadata.NewHeyaProvider(client)}
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name: "book-manual-search-evidence", MediaType: sqlc.MediaTypeBook, Paths: []string{"/books"},
+		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy:    testutil.TestUserID(t, pool), Settings: []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+	identity := createScannerIdentity(t, ctx, q, lib, 0, "book:audiobook|a g riddle|the long winter|", "The Long Winter", "", "needs_review", 0)
+	_, err = pool.Exec(ctx, `
+		UPDATE local_media_identities
+		SET raw_identity = $2
+		WHERE id = $1
+	`, identity.ID, []byte(`{"title":"The Long Winter","author":"A. G. Riddle","format":"audiobook","external_ids":{"isbn_13":"9780000000002"}}`))
+	require.NoError(t, err)
+
+	_, err = app.SearchScannerIdentity(ctx, lib.ID, identity.ID, "", "")
+	require.NoError(t, err)
+	require.Equal(t, "book_work", discovery["kind"])
+	hints, ok := discovery["hints"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, []any{"A. G. Riddle"}, hints["authors"])
+	require.Equal(t, []any{"9780000000002"}, hints["isbns"])
+	require.Equal(t, "audiobook", hints["type"])
+	identifiers, ok := discovery["identifiers"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, identifiers)
 }
 
 func TestScannerReviewScopePaths(t *testing.T) {

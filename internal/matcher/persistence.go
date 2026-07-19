@@ -1530,3 +1530,14 @@ func (m *Matcher) bindCanonical(ctx context.Context, localKind string, localID i
 func (m *Matcher) StoreRichMetadata(ctx context.Context, mediaItemID int64, detail *metadata.MediaDetail) error {
 	return m.storeRichMetadata(ctx, mediaItemID, detail)
 }
+
+// StoreRichMetadataTx persists the rich side data through the caller's
+// transaction. Scanner workers use this together with a locked pipeline
+// generation check so an old rich-metadata job cannot commit after a rematch
+// has superseded its fetch artifact.
+func (m *Matcher) StoreRichMetadataTx(ctx context.Context, tx pgx.Tx, mediaItemID int64, detail *metadata.MediaDetail) error {
+	if tx == nil {
+		return fmt.Errorf("store rich metadata transaction is nil")
+	}
+	return m.WithTx(tx).storeRichMetadata(ctx, mediaItemID, detail)
+}

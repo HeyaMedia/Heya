@@ -34,6 +34,14 @@ type RadioRequest struct {
 	Seeds           []RadioSeed `json:"seeds,omitempty"  doc:"Optional. When populated, every seed is resolved to a track and their sonic embeddings are averaged into a centroid for KNN. Use to mix multiple artists/albums/tracks/vibes into one cohesive queue."`
 	Limit           int32       `json:"limit"            doc:"Number of tracks to return"`
 	ExcludeTrackIDs []int64     `json:"exclude_track_ids,omitempty" doc:"Tracks to skip (typically the current queue)"`
+	// GenreAffinity is additive: 0 (the default, and any value <= 0) is an
+	// exact no-op — ranking is byte-identical to genre-blind radio. Values
+	// toward 1 make candidates that share the seed's genre profile rank
+	// higher, and at >=0.9 candidates with zero genre overlap are dropped
+	// from the queue entirely once enough overlapping candidates remain to
+	// still fill the requested limit. See genreAffinityScoreScale's doc
+	// comment in music_recommendations.go for the exact formula.
+	GenreAffinity float64 `json:"genre_affinity,omitempty" doc:"0..1 knob for how strongly candidates must share the seed's genre(s) to rank well. 0 (default) is a no-op; near 1 pushes zero-genre-overlap candidates to the bottom and, at >=0.9, drops them once enough overlapping candidates remain to fill the limit."`
 }
 
 // RadioResponse is the result of one radio build. SeedTrackID echoes the
@@ -67,6 +75,11 @@ var ErrNoRadioSeed = errors.New("no playable track available for the given seed"
 func (a *App) BuildRadio(ctx context.Context, userID int64, req RadioRequest) (*RadioResponse, error) {
 	if req.Limit <= 0 || req.Limit > 200 {
 		req.Limit = 50
+	}
+	if req.GenreAffinity < 0 {
+		req.GenreAffinity = 0
+	} else if req.GenreAffinity > 1 {
+		req.GenreAffinity = 1
 	}
 
 	q := sqlc.New(a.db)
@@ -131,7 +144,22 @@ func (a *App) BuildRadio(ctx context.Context, userID int64, req RadioRequest) (*
 	if err != nil {
 		return nil, fmt.Errorf("seed artists: %w", err)
 	}
-	rows, err := a.recommendMusicAround(ctx, userID, sonicCentroid, metadataCentroid, artistIDs, recommendRadio, int(req.Limit), exclude)
+
+	// Only pay for the extra genre-profile fetches when the caller actually
+	// opted in — genre_affinity == 0 must stay a true no-op, cost included.
+	var seedGenreProfile map[string]float64
+	if req.GenreAffinity > 0 {
+		seeds := req.Seeds
+		if len(seeds) == 0 {
+			seeds = []RadioSeed{req.Seed}
+		}
+		seedGenreProfile, err = a.radioSeedGenreProfile(ctx, seeds, seedIDs)
+		if err != nil {
+			return nil, fmt.Errorf("seed genre profile: %w", err)
+		}
+	}
+
+	rows, err := a.recommendMusicAround(ctx, userID, sonicCentroid, metadataCentroid, artistIDs, recommendRadio, int(req.Limit), exclude, req.GenreAffinity, seedGenreProfile)
 	if err != nil {
 		return nil, fmt.Errorf("recommend radio: %w", err)
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/diagnostics"
 	"github.com/karbowiak/heya/internal/eventhub"
+	"github.com/karbowiak/heya/internal/generatedwrite"
 	"github.com/karbowiak/heya/internal/imagegen"
 	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/imageserve"
@@ -922,6 +923,17 @@ func (l lazyWatcher) Resume(libraryID int64) {
 		return
 	}
 	(*l.ptr).Resume(libraryID)
+}
+
+func (l lazyWatcher) SuppressGeneratedWrite(output generatedwrite.Output) error {
+	if l.ptr == nil || *l.ptr == nil {
+		return errors.New("generated sidecar acknowledger is not initialized")
+	}
+	suppressor, ok := (*l.ptr).(worker.GeneratedWriteSuppressor)
+	if !ok {
+		return errors.New("configured watcher cannot acknowledge generated sidecars")
+	}
+	return suppressor.SuppressGeneratedWrite(output)
 }
 
 func (a *App) StartWorkers(ctx context.Context) error {

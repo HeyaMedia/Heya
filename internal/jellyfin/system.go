@@ -3,6 +3,7 @@ package jellyfin
 import (
 	"net/http"
 	"runtime"
+	"strings"
 )
 
 // jellyfinVersion is the server version advertised to clients. 10.11.x is
@@ -26,12 +27,8 @@ func osName() string {
 }
 
 func (s *Server) publicInfo(r *http.Request) publicSystemInfo {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
 	return publicSystemInfo{
-		LocalAddress:           scheme + "://" + r.Host,
+		LocalAddress:           requestBaseURL(r),
 		ServerName:             s.serverName(),
 		Version:                jellyfinVersion,
 		ProductName:            productName,
@@ -39,6 +36,29 @@ func (s *Server) publicInfo(r *http.Request) publicSystemInfo {
 		ID:                     s.serverID(r),
 		StartupWizardCompleted: true,
 	}
+}
+
+// requestBaseURL returns the client-facing Jellyfin base, including Heya's
+// required mount prefix. Forwarding headers keep discovery correct when Heya
+// is placed behind a conventional TLS-terminating reverse proxy.
+func requestBaseURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if v := firstForwardedValue(r.Header.Get("X-Forwarded-Proto")); v != "" {
+		scheme = v
+	}
+	host := r.Host
+	if v := firstForwardedValue(r.Header.Get("X-Forwarded-Host")); v != "" {
+		host = v
+	}
+	return scheme + "://" + host + "/jellyfin"
+}
+
+func firstForwardedValue(value string) string {
+	value, _, _ = strings.Cut(value, ",")
+	return strings.TrimSpace(value)
 }
 
 // GET /System/Info/Public — the discovery endpoint. Every client validates a

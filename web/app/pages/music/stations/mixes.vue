@@ -1,6 +1,10 @@
 <template>
   <div class="ms-mixes page-pad">
     <MusicPageHead title="Mixes for You" subtitle="Daily blends of your reactions and completed listens, sonic similarity, provider charts, and related artists.">
+      <button type="button" class="ms-mixes-builder-cta steer-glass" :disabled="regenerating" @click="regenerateMixes">
+        <Icon name="refresh" :size="14" :class="{ 'ms-mixes-regen-spin': regenerating }" />
+        <span>{{ regenerating ? 'Regenerating…' : 'Regenerate' }}</span>
+      </button>
       <NuxtLink to="/music/stations/builder" class="ms-mixes-builder-cta steer-glass">
         <Icon name="sparkle" :size="14" />
         <span>Build your own</span>
@@ -91,13 +95,16 @@
 
 <script setup lang="ts">
 import type { Track } from '~/composables/usePlayer'
-import { useQuery } from '@pinia/colada'
+import { useQuery, useQueryCache } from '@pinia/colada'
 import { musicMixesQuery, type MusicMix as Mix, type MusicMixTrack as MixTrack } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
 
 const { play, queue, playTracks } = usePlayerBindings()
 const actions = useMusicActions()
+const { toast } = useToast()
+const queryCache = useQueryCache()
+const { $heya } = useNuxtApp()
 
 function mixTrackToEntity(t: MixTrack) {
   return {
@@ -120,6 +127,31 @@ const isLoading = computed(() => mixesQuery.isLoading.value)
 
 const featured = computed(() => mixes.value[0] ?? null)
 const rest = computed(() => mixes.value.slice(1))
+
+// Mixes are day-stable (same slate all day, byte-identical on refetch) — a
+// plain invalidate/refetch would hand back the exact set already on screen.
+// The regenerate endpoint forces a fresh variant server-side; write its
+// response straight into the GET query's cache entry (same key, shared by
+// this page, the mix detail page, and the MusicHome rail) rather than
+// invalidating, since a refetch of the GET would just re-serve today's
+// cached slate.
+const regenerating = ref(false)
+async function regenerateMixes() {
+  if (regenerating.value) return
+  regenerating.value = true
+  try {
+    const res = await $heya('/api/music/home/mixes-for-you/regenerate', {
+      method: 'POST',
+      query: { max: 10 },
+    }) as { items: Mix[] }
+    queryCache.setQueryData(musicMixesQuery().key, res.items ?? [])
+    toast.ok('Mixes regenerated')
+  } catch (e: any) {
+    toast.err(e?.data?.detail || 'Could not regenerate mixes')
+  } finally {
+    regenerating.value = false
+  }
+}
 
 function seedArt(mix: Mix) {
   if (!mix.seed_artist_media_item_id) return undefined
@@ -182,6 +214,11 @@ async function playMix(mix: Mix, opts: { shuffle?: boolean; startIdx?: number } 
   transition: all 0.15s;
 }
 .ms-mixes-builder-cta:hover { border-color: var(--gold-soft); }
+.ms-mixes-builder-cta:disabled { opacity: 0.55; cursor: default; }
+.ms-mixes-builder-cta:disabled:hover { border-color: var(--border); }
+
+.ms-mixes-regen-spin { animation: ms-mixes-regen-spin 0.8s linear infinite; }
+@keyframes ms-mixes-regen-spin { to { transform: rotate(360deg); } }
 
 /* ── Featured marquee ─────────────────────────────────────────────── */
 .ms-feat {

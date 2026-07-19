@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -42,7 +43,7 @@ func registerMusicHomeRoutes(api huma.API, app *service.App) {
 			MaxMixes     int `query:"max"            minimum:"1" maximum:"10"  default:"10"`
 			TracksPerMix int `query:"tracks_per_mix" minimum:"5" maximum:"100" default:"30"`
 		}) (*JSONOutput[mixesBody], error) {
-			mixes, err := app.GenerateMixesForUser(ctx, userFrom(ctx).ID, in.MaxMixes, in.TracksPerMix)
+			mixes, err := app.GenerateMixesForUser(ctx, userFrom(ctx).ID, in.MaxMixes, in.TracksPerMix, 0)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
@@ -50,6 +51,31 @@ func registerMusicHomeRoutes(api huma.API, app *service.App) {
 				mixes = []service.MusicMix{}
 			}
 			return cachedJSON(mixesBody{Items: mixes}, 3600), nil
+		})
+
+	// 1b. Mixes for You — force regenerate. Same shape as the GET above but
+	// bypasses the day-stable rotation: variant is a fresh non-zero value
+	// every call, so both generators fold it into their entropy and hand
+	// back a visibly different slate on demand. The response uses the same
+	// mixesBody envelope so the FE can write it straight into the GET's
+	// cache entry instead of juggling a second shape.
+	huma.Register(api, secured(op(http.MethodPost, "/api/music/home/mixes-for-you/regenerate", "music-home-mixes-regenerate", "Force a fresh personal mixes slate, ignoring today's stable rotation", "MusicHome")),
+		func(ctx context.Context, in *struct {
+			MaxMixes     int `query:"max"            minimum:"1" maximum:"10"  default:"10"`
+			TracksPerMix int `query:"tracks_per_mix" minimum:"5" maximum:"100" default:"30"`
+		}) (*JSONOutput[mixesBody], error) {
+			variant := time.Now().UnixNano()
+			if variant == 0 {
+				variant = 1 // guaranteed non-zero: 0 means "normal stable rotation"
+			}
+			mixes, err := app.GenerateMixesForUser(ctx, userFrom(ctx).ID, in.MaxMixes, in.TracksPerMix, variant)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			if mixes == nil {
+				mixes = []service.MusicMix{}
+			}
+			return noStoreJSON(mixesBody{Items: mixes}), nil
 		})
 
 	// 2. Recently Added (albums + singles + EPs). Reuses the existing

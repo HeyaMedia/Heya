@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/testutil"
@@ -87,4 +89,76 @@ func TestEnsureLibraryFileFingerprintComputesOnDemandAndCaches(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, first.Fingerprint, second.Fingerprint)
 	require.Equal(t, 1, calls, "the second uncertainty pass must reuse the durable file fingerprint")
+}
+
+func TestEnsureLibraryFileFingerprintPropagatesCanceledComputeAndProbe(t *testing.T) {
+	t.Run("chromaprint compute", func(t *testing.T) {
+		pool, file := fingerprintCancellationTestFile(t)
+		originalCompute := computeChromaprint
+		started := make(chan struct{})
+		computeChromaprint = func(ctx context.Context, _ string) (string, error) {
+			close(started)
+			<-ctx.Done()
+			return "", errors.New("signal: killed")
+		}
+		t.Cleanup(func() { computeChromaprint = originalCompute })
+
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			_, err := ensureLibraryFileFingerprint(ctx, sqlc.New(pool), file, 0)
+			done <- err
+		}()
+		<-started
+		cancel()
+		require.ErrorIs(t, <-done, context.Canceled)
+	})
+
+	t.Run("duration probe", func(t *testing.T) {
+		pool, file := fingerprintCancellationTestFile(t)
+		originalCompute := computeChromaprint
+		originalProbe := probeFingerprintMedia
+		started := make(chan struct{})
+		computeChromaprint = func(context.Context, string) (string, error) { return "AQIDBA", nil }
+		probeFingerprintMedia = func(ctx context.Context, _ string) (*mediaprobe.MediaInfo, error) {
+			close(started)
+			<-ctx.Done()
+			return nil, errors.New("signal: killed")
+		}
+		t.Cleanup(func() {
+			computeChromaprint = originalCompute
+			probeFingerprintMedia = originalProbe
+		})
+
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			_, err := ensureLibraryFileFingerprint(ctx, sqlc.New(pool), file, 0)
+			done <- err
+		}()
+		<-started
+		cancel()
+		require.ErrorIs(t, <-done, context.Canceled)
+	})
+}
+
+func fingerprintCancellationTestFile(t *testing.T) (*pgxpool.Pool, sqlc.LibraryFile) {
+	t.Helper()
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name: "fingerprint-cancellation-" + t.Name(), MediaType: sqlc.MediaTypeMusic,
+		Paths: []string{"/music"}, ScanInterval: pgtype.Interval{Microseconds: int64(time.Hour / time.Microsecond), Valid: true},
+		CreatedBy: testutil.TestUserID(t, pool), Settings: []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+	file, err := q.UpsertLibraryFile(ctx, sqlc.UpsertLibraryFileParams{
+		LibraryID: lib.ID, Path: "/music/Uncertain/01 - Example.flac", Size: 1234,
+		Mtime:       pgtype.Timestamptz{Time: time.Now().UTC().Truncate(time.Microsecond), Valid: true},
+		ParseResult: []byte("{}"), Status: sqlc.FileStatusUnmatched,
+	})
+	require.NoError(t, err)
+	return pool, file
 }

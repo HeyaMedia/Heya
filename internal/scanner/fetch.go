@@ -211,6 +211,9 @@ func FetchMovieMetadataPreviews(ctx context.Context, search []MovieSearchMatch, 
 
 		detail, err := provider.GetDetail(ctx, match.ProviderID, nil)
 		if err != nil {
+			if terminal := providerContextTermination(ctx.Err(), err); terminal != nil {
+				return previews, terminal
+			}
 			if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
 				return previews, err
 			}
@@ -285,6 +288,9 @@ func FetchBookMetadataPreviews(ctx context.Context, search []BookSearchMatch, pr
 
 		detail, err := provider.GetDetail(ctx, match.ProviderID, nil)
 		if err != nil {
+			if terminal := providerContextTermination(ctx.Err(), err); terminal != nil {
+				return previews, terminal
+			}
 			if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
 				return previews, err
 			}
@@ -451,7 +457,7 @@ func fetchOneMusicMetadataPreview(ctx context.Context, match MusicSearchMatch, a
 			continue
 		}
 		primaryCandidate := candidate.ProviderID == match.ProviderID
-		if !primaryCandidate && !musicFetchCandidateEligibleForRerank(candidate) {
+		if !primaryCandidate && !musicFetchCandidateEligibleForRerank(candidate, match) {
 			continue
 		}
 		candidatePreview, err := fetchMusicCandidatePreview(ctx, match, artist, candidate, provider, emit)
@@ -534,7 +540,11 @@ func fetchMusicCandidatePreview(ctx context.Context, match MusicSearchMatch, art
 	fetchCtx, cancel := context.WithTimeout(ctx, musicMetadataFetchTimeout)
 	detail, err := provider.GetDetail(fetchCtx, candidate.ProviderID, nil)
 	if err != nil {
+		fetchCtxErr := fetchCtx.Err()
 		cancel()
+		if terminal := providerContextTermination(fetchCtxErr, err); terminal != nil {
+			return MusicFetchPreview{}, terminal
+		}
 		if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
 			return MusicFetchPreview{}, err
 		}
@@ -561,7 +571,11 @@ func fetchMusicCandidatePreview(ctx context.Context, match MusicSearchMatch, art
 	}
 	if resolver, ok := provider.(MusicReleaseGroupProvider); ok {
 		if err := resolveLocalMusicReleaseGroups(fetchCtx, artist, detail, resolver, emit); err != nil {
+			fetchCtxErr := fetchCtx.Err()
 			cancel()
+			if terminal := providerContextTermination(fetchCtxErr, err); terminal != nil {
+				return MusicFetchPreview{}, terminal
+			}
 			if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
 				return MusicFetchPreview{}, err
 			}
@@ -770,8 +784,12 @@ func musicFetchPreviewBetter(candidate, current MusicFetchPreview, searchCandida
 	if candidate.Error != "" {
 		return false
 	}
-	if candidate.ProviderID != searchMatch.ProviderID && !musicFetchCandidateEligibleForRerank(searchCandidate) {
-		return false
+	if candidate.ProviderID != searchMatch.ProviderID {
+		if !musicFetchCandidateEligibleForRerank(searchCandidate, searchMatch) ||
+			!musicArtistHardIDsCanonicalEquivalent(searchMatch.ExternalIDs, candidate.ExternalIDs) ||
+			musicFetchPreviewHasArtistIdentityConflict(candidate) {
+			return false
+		}
 	}
 	if current.Error != "" {
 		return musicFetchPreviewHasLocalCoverage(candidate)
@@ -785,8 +803,47 @@ func musicFetchPreviewBetter(candidate, current MusicFetchPreview, searchCandida
 	return false
 }
 
-func musicFetchCandidateEligibleForRerank(candidate MusicSearchCandidate) bool {
-	return candidate.Confidence >= musicArtistAutoMatchThreshold
+func musicFetchCandidateEligibleForRerank(candidate MusicSearchCandidate, selected MusicSearchMatch) bool {
+	return !candidate.RequiresReview &&
+		candidate.Confidence >= musicArtistAutoMatchThreshold &&
+		musicArtistHardIDsCanonicalEquivalent(selected.ExternalIDs, candidate.ExternalIDs)
+}
+
+func musicFetchPreviewHasArtistIdentityConflict(preview MusicFetchPreview) bool {
+	for _, issue := range preview.Issues {
+		if strings.HasPrefix(issue, "artist_external_id_conflict ") {
+			return true
+		}
+	}
+	return false
+}
+
+// musicArtistHardIDsCanonicalEquivalent is deliberately stricter than the
+// general sharedExternalID helper. A fetch-stage replacement must share at
+// least one normalized hard artist identifier with the search selection and
+// must not contradict it in any namespace both sides carry. Discography
+// coverage alone is not identity evidence.
+func musicArtistHardIDsCanonicalEquivalent(a, b map[string]string) bool {
+	shared := false
+	for _, compare := range []musicIDCompare{
+		{Local: []string{"mbid", "musicbrainz", "musicbrainz_artist", "musicbrainz_album_artist"}, Remote: []string{"mbid", "musicbrainz", "musicbrainz_artist", "musicbrainz_album_artist"}},
+		{Local: []string{"apple", "itunes_artist", "apple_artist"}, Remote: []string{"apple", "itunes_artist", "apple_artist"}},
+		{Local: []string{"deezer", "deezer_artist"}, Remote: []string{"deezer", "deezer_artist"}},
+		{Local: []string{"discogs", "discogs_artist"}, Remote: []string{"discogs", "discogs_artist"}},
+		{Local: []string{"spotify", "spotify_artist"}, Remote: []string{"spotify", "spotify_artist"}},
+		{Local: []string{"audiodb", "audiodb_artist"}, Remote: []string{"audiodb", "audiodb_artist"}},
+	} {
+		_, left := firstMusicID(a, compare.Local)
+		_, right := firstMusicID(b, compare.Remote)
+		if left == "" || right == "" {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(left), strings.TrimSpace(right)) {
+			return false
+		}
+		shared = true
+	}
+	return shared
 }
 
 func musicFetchPreviewHasLocalCoverage(preview MusicFetchPreview) bool {
@@ -835,6 +892,9 @@ func fetchTVLikeMetadataPreviews(ctx context.Context, search []TVSearchMatch, ma
 
 		detail, err := provider.GetDetail(ctx, searchMatch.ProviderID, nil)
 		if err != nil {
+			if terminal := providerContextTermination(ctx.Err(), err); terminal != nil {
+				return previews, terminal
+			}
 			if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
 				return previews, err
 			}

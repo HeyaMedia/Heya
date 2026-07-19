@@ -44,14 +44,14 @@ func NewHandler(cfg *config.Config, app *service.App, opts ...Option) http.Handl
 	// {server}/jellyfin; the legacy /emby alias still works underneath that
 	// prefix as /jellyfin/emby/...
 	jf := jellyfin.NewMiddleware(app, o.hub, http.NotFoundHandler())
-	jellyfinHandler := http.StripPrefix("/jellyfin", jf)
+	jellyfinHandler := protocolMount("/jellyfin", "/jellyfin/System/Info/Public", jf)
 	mux.Handle("/jellyfin", jellyfinHandler)
 	mux.Handle("/jellyfin/", jellyfinHandler)
 	// Same treatment for the Subsonic-compatible surface: its own /subsonic
 	// namespace (clients are configured with {server}/subsonic), off by
 	// default, per-request toggle.
 	sub := subsonic.NewMiddleware(app, http.NotFoundHandler())
-	subsonicHandler := http.StripPrefix("/subsonic", sub)
+	subsonicHandler := protocolMount("/subsonic", "/subsonic/rest/ping.view", sub)
 	mux.Handle("/subsonic", subsonicHandler)
 	mux.Handle("/subsonic/", subsonicHandler)
 	mux.Handle("/", spaHandler())
@@ -59,6 +59,20 @@ func NewHandler(cfg *config.Config, app *service.App, opts ...Option) http.Handl
 	sub.SetNative(mux)
 
 	return withMiddleware(mux)
+}
+
+// protocolMount strips a compatibility API's public namespace while giving
+// its configured base URL a useful browser/probe response. Protocol clients
+// still append their normal discovery endpoint to the configured base.
+func protocolMount(prefix, landing string, handler http.Handler) http.Handler {
+	stripped := http.StripPrefix(prefix, handler)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == prefix || r.URL.Path == prefix+"/" {
+			http.Redirect(w, r, landing, http.StatusTemporaryRedirect)
+			return
+		}
+		stripped.ServeHTTP(w, r)
+	})
 }
 
 // BuildAPI registers every Heya operation against mux and returns the API. Use

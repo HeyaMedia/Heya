@@ -110,7 +110,9 @@ ORDER BY local_kind, local_id;
 -- name: ListMetadataChangeTargetsByEntities :many
 -- Resolve a complete change-feed page to refresh targets in one round trip.
 -- One canonical author may own multiple local books, hence UNION ALL rather
--- than a scalar CASE. The worker deduplicates final target IDs across pages.
+-- than a scalar CASE. The worker deduplicates final target IDs inside each
+-- feed-page transaction; a later page intentionally schedules a trailing
+-- refresh for the same target.
 WITH bindings AS (
   SELECT entity_id, local_kind, local_id, projection_version
   FROM metadata_entity_bindings
@@ -169,6 +171,30 @@ ON CONFLICT (request_key) DO UPDATE SET
   query = CASE WHEN EXCLUDED.query <> '' THEN EXCLUDED.query ELSE metadata_resolution_workflows.query END,
   hints = CASE WHEN EXCLUDED.hints <> '{}'::jsonb THEN EXCLUDED.hints ELSE metadata_resolution_workflows.hints END,
   selected_resolution = CASE WHEN EXCLUDED.selected_resolution <> '{}'::jsonb THEN EXCLUDED.selected_resolution ELSE metadata_resolution_workflows.selected_resolution END,
+	-- A terminal upstream job ID is not a reusable resolution. Reset failed
+	-- workflows on the next durable request so a repaired provider, refreshed
+	-- candidate, or transient upstream outage gets a genuinely new attempt
+	-- instead of polling the same failed job forever.
+	state = CASE
+	  WHEN metadata_resolution_workflows.state = 'failed' THEN EXCLUDED.state
+	  ELSE metadata_resolution_workflows.state
+	END,
+	job_id = CASE
+	  WHEN metadata_resolution_workflows.state = 'failed' THEN NULL
+	  ELSE metadata_resolution_workflows.job_id
+	END,
+	discovery_id = CASE
+	  WHEN metadata_resolution_workflows.state = 'failed' THEN NULL
+	  ELSE metadata_resolution_workflows.discovery_id
+	END,
+	last_error = CASE
+	  WHEN metadata_resolution_workflows.state = 'failed' THEN ''
+	  ELSE metadata_resolution_workflows.last_error
+	END,
+	completed_at = CASE
+	  WHEN metadata_resolution_workflows.state = 'failed' THEN NULL
+	  ELSE metadata_resolution_workflows.completed_at
+	END,
   updated_at = now()
 RETURNING *;
 
