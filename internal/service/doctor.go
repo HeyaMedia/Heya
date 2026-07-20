@@ -189,6 +189,7 @@ func (a *App) doctorConfigSection() DoctorConfigSection {
 		"infra.log_level":              cfg.LogLevel.Value,
 		"security.enable_registration": strconv.FormatBool(cfg.EnableRegistration.Value),
 		"security.waf_mode":            cfg.WAFMode.Value,
+		"security.trusted_networks":    cfg.TrustedNetworks.Value,
 		"infra.log_format":             cfg.LogFormat.Value,
 		"infra.data_dir":               cfg.DataDir.Value,
 		"infra.heya_metadata_url":      cfg.HeyaMetadataURL.Value,

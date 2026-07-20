@@ -105,7 +105,10 @@ The embedded Caddy edge runs Coraza with the OWASP Core Rule Set in detection
 mode by default. Use `HEYA_WAF_MODE=block` only after reviewing logs for false
 positives, or `off` to disable it. The CRS is compiled into the Heya binary and
 updated by reviewed weekly dependency PRs, never downloaded or replaced while
-the server is running. See [deployment.md](docs/deployment.md#public-exposure-hardening)
+the server is running. Tailscale (`100.64.0.0/10`) and `192.168.0.0/16` direct
+peers bypass CRS and authentication attempt buckets by default; admins can
+change that CIDR list live under Settings → Security, or lock it with
+`HEYA_TRUSTED_NETWORKS`. See [deployment.md](docs/deployment.md#public-exposure-hardening)
 for the complete hardening model.
 
 ## Contributing

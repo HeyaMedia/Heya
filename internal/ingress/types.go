@@ -16,12 +16,13 @@ import (
 // HostConfig describes the always-on host listener. HTTPS is disabled only
 // for --dev-backend, where the stable development proxy expects plaintext.
 type HostConfig struct {
-	Address  string
-	HTTPS    bool
-	DataDir  string
-	LANIP    string
-	LogLevel string
-	WAFMode  string
+	Address         string
+	HTTPS           bool
+	DataDir         string
+	LANIP           string
+	LogLevel        string
+	WAFMode         string
+	TrustedNetworks []string
 }
 
 // CertificateGetter supplies a certificate to Caddy at handshake time. It is

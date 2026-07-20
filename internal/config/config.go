@@ -5,6 +5,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/karbowiak/heya/internal/trustednetworks"
 )
 
 // Config holds every infrastructure-level knob loaded at boot. Each Field
@@ -29,6 +31,12 @@ type Config struct {
 	// The rules are compiled into the pinned Heya binary, never downloaded at
 	// runtime.
 	WAFMode Field[string]
+	// TrustedNetworks is the comma-separated direct-peer CIDR allowlist that
+	// bypasses the WAF and authentication attempt buckets. Authentication,
+	// authorization, CSRF, body limits, and verifier capacity still apply.
+	// It follows env > DB > default provenance and is live-editable unless the
+	// environment owns it.
+	TrustedNetworks Field[string]
 	// PassiveMode turns the API into a read-mostly guest on its database and
 	// prevents the dedicated worker runtime from starting: no auto-migrate, env
 	// bootstrap, River execution, filesystem watchers, schedules, model fetches,
@@ -186,6 +194,7 @@ func Load() *Config {
 		DatabaseMinConns:          envInt("HEYA_DB_MIN_CONNS", 2),
 		EnableRegistration:        envBool("HEYA_ENABLE_REGISTRATION", false),
 		WAFMode:                   envString("HEYA_WAF_MODE", "detect"),
+		TrustedNetworks:           envString(trustednetworks.EnvVar, trustednetworks.DefaultValue),
 		PassiveMode:               envBool("HEYA_PASSIVE_MODE", false),
 		AllowRemoteActive:         envBool("HEYA_ALLOW_REMOTE_ACTIVE", false),
 		ImageProxyURL:             envString("HEYA_IMAGE_PROXY_URL", ""),
@@ -394,6 +403,7 @@ var sourceFields = []sourceField{
 	{"infra.database_min_conns", func(c *Config) SourceEntry { return c.DatabaseMinConns.Entry() }},
 	{"security.enable_registration", func(c *Config) SourceEntry { return c.EnableRegistration.Entry() }},
 	{"security.waf_mode", func(c *Config) SourceEntry { return c.WAFMode.Entry() }},
+	{"security.trusted_networks", func(c *Config) SourceEntry { return c.TrustedNetworks.Entry() }},
 	{"infra.passive_mode", func(c *Config) SourceEntry { return c.PassiveMode.Entry() }},
 	{"infra.allow_remote_active", func(c *Config) SourceEntry { return c.AllowRemoteActive.Entry() }},
 	{"infra.image_proxy_url", func(c *Config) SourceEntry { return c.ImageProxyURL.Entry() }},

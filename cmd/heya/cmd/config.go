@@ -61,6 +61,7 @@ func configValues(c *config.Config) map[string]string {
 	return map[string]string{
 		"security.enable_registration": strconv.FormatBool(c.EnableRegistration.Value),
 		"security.waf_mode":            c.WAFMode.Value,
+		"security.trusted_networks":    c.TrustedNetworks.Value,
 		"infra.database_url":           c.DatabaseURL.Value,
 		"infra.host":                   c.Host.Value,
 		"infra.port":                   c.Port.Value,

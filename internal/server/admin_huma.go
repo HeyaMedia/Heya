@@ -23,6 +23,18 @@ func registerAdminRoutes(api huma.API, app *service.App, buf *logbuf.RingBuffer)
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[service.SecurityStatus], error) {
 			return noStoreJSON(app.SecurityStatus(ctx)), nil
 		})
+	huma.Register(api, adminSecured(op(http.MethodPut, "/api/admin/security/trusted-networks", "set-admin-trusted-networks", "Apply the trusted direct-peer CIDR allowlist", "Admin")),
+		func(ctx context.Context, in *struct {
+			Body struct {
+				Networks []string `json:"networks" maxItems:"64" doc:"Direct-peer IP addresses or CIDRs that bypass WAF inspection and authentication attempt buckets"`
+			}
+		}) (*JSONOutput[service.TrustedNetworksStatus], error) {
+			status, err := app.SaveAndApplyTrustedNetworks(ctx, in.Body.Networks)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return noStoreJSON(status), nil
+		})
 
 	// --- Config provenance (drives the disabled-when-env UI behaviour) ---
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/config/sources", "get-config-sources", "Per-field config provenance", "Admin")),

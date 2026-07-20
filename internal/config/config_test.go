@@ -11,7 +11,7 @@ import (
 var allHeyaEnvKeys = []string{
 	"HEYA_DATABASE_URL", "HEYA_DB_MAX_CONNS", "HEYA_DB_MIN_CONNS",
 	"HEYA_ENABLE_REGISTRATION",
-	"HEYA_WAF_MODE",
+	"HEYA_WAF_MODE", "HEYA_TRUSTED_NETWORKS",
 	"HEYA_PASSIVE_MODE", "HEYA_ALLOW_REMOTE_ACTIVE",
 	"HEYA_HOST", "HEYA_PORT", "HEYA_LOG_LEVEL",
 	"HEYA_LOG_FORMAT", "HEYA_DATA_DIR", "HEYA_METADATA_URL", "HEYA_METADATA_API_KEY", "HEYA_THEINTRODB_API_KEY", "HEYA_HWACCEL",
@@ -52,6 +52,7 @@ func TestLoadDefaults(t *testing.T) {
 	assert.Equal(t, "0.0.0.0", cfg.Host.Value)
 	assert.False(t, cfg.EnableRegistration.Value)
 	assert.Equal(t, "detect", cfg.WAFMode.Value)
+	assert.Equal(t, "100.64.0.0/10,192.168.0.0/16", cfg.TrustedNetworks.Value)
 	assert.Equal(t, SourceDefault, cfg.Host.Source)
 	assert.Equal(t, "info", cfg.LogLevel.Value)
 	assert.Equal(t, "console", cfg.LogFormat.Value)
@@ -77,6 +78,7 @@ func TestLoadEnvOverrides(t *testing.T) {
 	t.Setenv("HEYA_HOST", "127.0.0.1")
 	t.Setenv("HEYA_ENABLE_REGISTRATION", "true")
 	t.Setenv("HEYA_WAF_MODE", "block")
+	t.Setenv("HEYA_TRUSTED_NETWORKS", "10.0.0.0/8")
 	t.Setenv("HEYA_PORT", "9090")
 	t.Setenv("HEYA_TAILSCALE_ENABLED", "true")
 	t.Setenv("HEYA_TAILSCALE_HTTPS", "true")
@@ -90,6 +92,8 @@ func TestLoadEnvOverrides(t *testing.T) {
 	assert.True(t, cfg.EnableRegistration.Value)
 	assert.Equal(t, "block", cfg.WAFMode.Value)
 	assert.Equal(t, SourceEnv, cfg.WAFMode.Source)
+	assert.Equal(t, "10.0.0.0/8", cfg.TrustedNetworks.Value)
+	assert.Equal(t, SourceEnv, cfg.TrustedNetworks.Source)
 	assert.Equal(t, SourceEnv, cfg.EnableRegistration.Source)
 	assert.Equal(t, SourceEnv, cfg.Host.Source)
 	assert.Equal(t, "HEYA_HOST", cfg.Host.EnvVar)
@@ -127,6 +131,7 @@ func TestSources(t *testing.T) {
 	assert.Equal(t, SourceDefault, sources["infra.port"].Source)
 	assert.Equal(t, SourceDefault, sources["security.enable_registration"].Source)
 	assert.Equal(t, SourceDefault, sources["security.waf_mode"].Source)
+	assert.Equal(t, SourceDefault, sources["security.trusted_networks"].Source)
 	assert.Empty(t, sources["infra.port"].EnvVar)
 	assert.Equal(t, SourceDefault, sources["jobs.workers.process_scan"].Source)
 }

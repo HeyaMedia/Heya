@@ -55,43 +55,44 @@ type leaseCloser interface {
 var errAppClosing = errors.New("application is closing")
 
 type App struct {
-	config              *config.Config
-	configMu            sync.RWMutex
-	db                  *pgxpool.Pool
-	diagnostics         *diagnostics.Collector
-	sessionLookup       *auth.AsyncSessionLookup
-	loginGuardMu        sync.Mutex
-	loginGuard          *auth.LoginGuard
-	securityEventsMu    sync.Mutex
-	securityEvents      *securityevents.Recorder
-	coordinatorLease    leaseCloser
-	matcher             *matcher.Matcher
-	downloader          *images.Downloader
-	river               *river.Client[pgx.Tx]
-	riverMu             sync.Mutex
-	riverStarted        bool
-	closing             bool
-	watcher             *watcher.Manager
-	heya                *heyametadata.HeyaProvider
-	transcoder          *transcoder.SessionManager
-	transcodeCache      *transcoder.CacheManager
-	audioSessions       *transcoder.AudioSessionManager
-	hub                 *eventhub.Hub
-	relayPublisher      *eventhub.RelayPublisher
-	scheduler           *scheduler.Trigger
-	networkMu           sync.RWMutex
-	tailscale           tailscale.Manager
-	remote              *remote.Manager
-	ingress             *ingress.Manager
-	tailscaleSettingsMu sync.Mutex
-	remoteSettingsMu    sync.Mutex
-	tailscaleTransition backgroundTransition
-	remoteTransition    backgroundTransition
-	textSearcher        *sonicanalysis.TextSearcher
-	modelFetcher        *sonicanalysis.ModelFetcher
-	analyzer            *sonicanalysis.Analyzer
-	sonicHolder         *sonicanalysis.Holder
-	taskProgress        *worker.TaskProgressBroadcaster
+	config                    *config.Config
+	configMu                  sync.RWMutex
+	db                        *pgxpool.Pool
+	diagnostics               *diagnostics.Collector
+	sessionLookup             *auth.AsyncSessionLookup
+	loginGuardMu              sync.Mutex
+	loginGuard                *auth.LoginGuard
+	securityEventsMu          sync.Mutex
+	securityEvents            *securityevents.Recorder
+	trustedNetworksSettingsMu sync.Mutex
+	coordinatorLease          leaseCloser
+	matcher                   *matcher.Matcher
+	downloader                *images.Downloader
+	river                     *river.Client[pgx.Tx]
+	riverMu                   sync.Mutex
+	riverStarted              bool
+	closing                   bool
+	watcher                   *watcher.Manager
+	heya                      *heyametadata.HeyaProvider
+	transcoder                *transcoder.SessionManager
+	transcodeCache            *transcoder.CacheManager
+	audioSessions             *transcoder.AudioSessionManager
+	hub                       *eventhub.Hub
+	relayPublisher            *eventhub.RelayPublisher
+	scheduler                 *scheduler.Trigger
+	networkMu                 sync.RWMutex
+	tailscale                 tailscale.Manager
+	remote                    *remote.Manager
+	ingress                   *ingress.Manager
+	tailscaleSettingsMu       sync.Mutex
+	remoteSettingsMu          sync.Mutex
+	tailscaleTransition       backgroundTransition
+	remoteTransition          backgroundTransition
+	textSearcher              *sonicanalysis.TextSearcher
+	modelFetcher              *sonicanalysis.ModelFetcher
+	analyzer                  *sonicanalysis.Analyzer
+	sonicHolder               *sonicanalysis.Holder
+	taskProgress              *worker.TaskProgressBroadcaster
 
 	// Optional embedding recommendation engine (HEYA_RECOMMENDATIONS_ML_ENABLED).
 	// recEmbedder is lazy-loaded on first use when enabled; recModelsDir holds the
@@ -759,6 +760,11 @@ func newApp(ctx context.Context, cfg *config.Config, runtimeMode appRuntimeMode)
 		lifetimeCancel:   lifetimeCancel,
 		startedAt:        time.Now(),
 	}
+	// Trusted-network policy is needed by both the authentication handlers and
+	// the ingress config assembled immediately after New returns. Load its DB
+	// overlay before either begins serving requests; env provenance remains
+	// authoritative and locks runtime edits.
+	app.LoadTrustedNetworksFromDB(ctx)
 
 	// Wire the SonicEnabled closure now that the App can answer the
 	// system_settings query. Worker.Setup captured a closure pointing

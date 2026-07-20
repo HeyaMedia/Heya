@@ -49,7 +49,7 @@ func registerAuthRoutes(api huma.API, app *service.App, cfg *config.Config) {
 			clientIP := requestmeta.ClientIP(ctx)
 			registrationAccount := "registration:" + in.Body.Username
 			accountKey := auth.AccountKey(registrationAccount)
-			if !guard.Allow(clientIP, registrationAccount) {
+			if !app.TrustedClientIP(clientIP) && !guard.Allow(clientIP, registrationAccount) {
 				app.SecurityEvents().Record(securityevents.SecurityEvent{
 					Kind: securityevents.KindRegistrationThrottled, Surface: "registration",
 					ClientIP: clientIP, AccountKey: accountKey, Action: "throttled",
@@ -85,7 +85,7 @@ func registerAuthRoutes(api huma.API, app *service.App, cfg *config.Config) {
 			guard := app.LoginGuard()
 			clientIP := requestmeta.ClientIP(ctx)
 			accountKey := auth.AccountKey(in.Body.Username)
-			if !guard.Allow(clientIP, in.Body.Username) {
+			if !app.TrustedClientIP(clientIP) && !guard.Allow(clientIP, in.Body.Username) {
 				app.SecurityEvents().Record(securityevents.SecurityEvent{
 					Kind: securityevents.KindLoginThrottled, Surface: "heya",
 					ClientIP: clientIP, AccountKey: accountKey, Action: "throttled",

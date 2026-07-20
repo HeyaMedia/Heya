@@ -36,7 +36,7 @@ func (s *Server) handleAuthenticateByName(w http.ResponseWriter, r *http.Request
 	ip := clientIP(r)
 	guard := s.app.LoginGuard()
 	accountKey := auth.AccountKey(req.Username)
-	if !guard.Allow(ip, req.Username) {
+	if !s.app.TrustedClientIP(ip) && !guard.Allow(ip, req.Username) {
 		log.Warn().Str("surface", "jellyfin").Str("client_ip", ip).Str("account_key", accountKey).
 			Msg("login throttled")
 		w.WriteHeader(http.StatusUnauthorized)

@@ -20,6 +20,7 @@ import (
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/karbowiak/heya/internal/securityevents"
+	"github.com/karbowiak/heya/internal/trustednetworks"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 )
@@ -94,6 +95,11 @@ func (m *Manager) Start(ctx context.Context, cfg HostConfig) error {
 	if cfg.WAFMode != "off" && cfg.WAFMode != "detect" && cfg.WAFMode != "block" {
 		return fmt.Errorf("ingress: invalid WAF mode %q (want off, detect, or block)", cfg.WAFMode)
 	}
+	_, normalizedTrustedNetworks, err := trustednetworks.CanonicalList(cfg.TrustedNetworks)
+	if err != nil {
+		return fmt.Errorf("ingress: invalid trusted networks: %w", err)
+	}
+	cfg.TrustedNetworks = normalizedTrustedNetworks
 	if cfg.LANIP == "" {
 		cfg.LANIP = DetectLANIP()
 	}
@@ -122,6 +128,29 @@ func (m *Manager) Start(ctx context.Context, cfg HostConfig) error {
 			activeManager.CompareAndSwap(m, nil)
 			return fmt.Errorf("waiting for local HTTPS certificate: %w", err)
 		}
+	}
+	return nil
+}
+
+// SetTrustedNetworks atomically reloads every active Caddy ingress with the
+// new direct-peer WAF bypass. A rejected config restores the previous policy.
+func (m *Manager) SetTrustedNetworks(ctx context.Context, values []string) error {
+	_, normalized, err := trustednetworks.CanonicalList(values)
+	if err != nil {
+		return fmt.Errorf("ingress: invalid trusted networks: %w", err)
+	}
+
+	m.opMu.Lock()
+	defer m.opMu.Unlock()
+	m.mu.Lock()
+	previous := append([]string(nil), m.host.TrustedNetworks...)
+	m.host.TrustedNetworks = normalized
+	m.mu.Unlock()
+	if err := m.reloadLocked(ctx, "trusted networks updated"); err != nil {
+		m.mu.Lock()
+		m.host.TrustedNetworks = previous
+		m.mu.Unlock()
+		return err
 	}
 	return nil
 }
@@ -388,6 +417,7 @@ func (m *Manager) registerMetrics(generation uint64, registry *prometheus.Regist
 func (m *Manager) buildConfig(generation uint64) (map[string]any, []ListenerStatus, error) {
 	m.mu.RLock()
 	host := m.host
+	host.TrustedNetworks = append([]string(nil), m.host.TrustedNetworks...)
 	var remoteCfg *RemoteConfig
 	if m.remote != nil {
 		copyRemote := *m.remote
@@ -419,13 +449,14 @@ func (m *Manager) buildConfig(generation uint64) (map[string]any, []ListenerStat
 	}
 
 	servers["host"] = caddyHTTPServer(caddyServerOptions{
-		Listen:     []string{"tcp/" + host.Address},
-		Ingress:    "host",
-		Generation: generation,
-		HTTPS:      host.HTTPS,
-		DefaultSNI: defaultSNI,
-		HTTP3:      host.HTTPS,
-		WAFMode:    host.WAFMode,
+		Listen:          []string{"tcp/" + host.Address},
+		Ingress:         "host",
+		Generation:      generation,
+		HTTPS:           host.HTTPS,
+		DefaultSNI:      defaultSNI,
+		HTTP3:           host.HTTPS,
+		WAFMode:         host.WAFMode,
+		TrustedNetworks: host.TrustedNetworks,
 	})
 	hostProtocols := []string{"h1"}
 	if host.HTTPS {
@@ -456,6 +487,7 @@ func (m *Manager) buildConfig(generation uint64) (map[string]any, []ListenerStat
 		servers["remote"] = caddyHTTPServer(caddyServerOptions{
 			Listen: []string{"tcp/" + address}, Ingress: "remote", Generation: generation,
 			HTTPS: true, DefaultSNI: remoteDefault, HTTP3: true, WAFMode: host.WAFMode,
+			TrustedNetworks: host.TrustedNetworks,
 		})
 		listeners = append(listeners, ListenerStatus{
 			Name: "remote", Kind: "remote", Network: "tcp+udp", Address: address,
@@ -479,7 +511,7 @@ func (m *Manager) buildConfig(generation uint64) (map[string]any, []ListenerStat
 		case tailCfg.Funnel:
 			servers["funnel"] = caddyHTTPServer(caddyServerOptions{
 				Listen: []string{"heya-funnel/" + tailHostPort}, Ingress: "funnel", Generation: generation,
-				PreTerminatedTLS: true, WAFMode: host.WAFMode,
+				PreTerminatedTLS: true, WAFMode: host.WAFMode, TrustedNetworks: host.TrustedNetworks,
 			})
 			listeners = append(listeners, ListenerStatus{
 				Name: "funnel", Kind: "funnel", Network: "tcp", Address: tailHostPort,
@@ -490,6 +522,7 @@ func (m *Manager) buildConfig(generation uint64) (map[string]any, []ListenerStat
 				servers["tailnet_h3"] = caddyHTTPServer(caddyServerOptions{
 					Listen: []string{"heya-tsnet/" + tailHostPort}, Ingress: "tailnet", Generation: generation,
 					HTTPS: true, DefaultSNI: tailCfg.CertDomain, HTTP3Only: true, WAFMode: host.WAFMode,
+					TrustedNetworks: host.TrustedNetworks,
 				})
 				listeners = append(listeners, ListenerStatus{
 					Name: "tailnet-h3", Kind: "tailscale", Network: "udp", Address: tailHostPort,
@@ -501,6 +534,7 @@ func (m *Manager) buildConfig(generation uint64) (map[string]any, []ListenerStat
 			servers["tailnet"] = caddyHTTPServer(caddyServerOptions{
 				Listen: []string{"heya-tsnet/" + tailHostPort}, Ingress: "tailnet", Generation: generation,
 				HTTPS: true, DefaultSNI: tailCfg.CertDomain, HTTP3: true, WAFMode: host.WAFMode,
+				TrustedNetworks: host.TrustedNetworks,
 			})
 			listeners = append(listeners, ListenerStatus{
 				Name: "tailnet", Kind: "tailscale", Network: "tcp+udp", Address: tailHostPort,
@@ -511,6 +545,7 @@ func (m *Manager) buildConfig(generation uint64) (map[string]any, []ListenerStat
 			tailHTTP := net.JoinHostPort(tailCfg.Address, "80")
 			servers["tailnet"] = caddyHTTPServer(caddyServerOptions{
 				Listen: []string{"heya-tsnet/" + tailHTTP}, Ingress: "tailnet", Generation: generation, WAFMode: host.WAFMode,
+				TrustedNetworks: host.TrustedNetworks,
 			})
 			listeners = append(listeners, ListenerStatus{
 				Name: "tailnet", Kind: "tailscale", Network: "tcp", Address: tailHTTP,
@@ -598,18 +633,25 @@ type caddyServerOptions struct {
 	HTTP3Only        bool
 	PreTerminatedTLS bool
 	WAFMode          string
+	TrustedNetworks  []string
 }
 
-const wafDirectives = `
+const wafDirectivesTemplate = `
 Include @coraza.conf-recommended
 SecRequestBodyLimit 27262976
 SecRequestBodyInMemoryLimit 1048576
 SecResponseBodyAccess Off
 Include @crs-setup.conf.example
+# Trusted direct peers bypass CRS inspection. REMOTE_ADDR comes from Caddy's
+# accepted connection and never from client-supplied forwarding headers.
+%s
+# Heya is a REST API and legitimately uses these methods. CRS defaults to the
+# smaller static-site set unless tx.allowed_methods is initialized here.
+SecAction "id:1001,phase:1,pass,t:none,nolog,setvar:'tx.allowed_methods=GET HEAD POST OPTIONS PUT PATCH DELETE'"
 # Numeric Host headers are normal for direct LAN, loopback, and tailnet access.
 # Keep CRS 920350 active for public addresses while removing it transactionally
 # for private/local ranges before the CRS phase-one rules execute.
-SecRule REQUEST_HEADERS:Host "@rx ^(?:10(?:\.[0-9]{1,3}){3}|100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])(?:\.[0-9]{1,3}){2}|127(?:\.[0-9]{1,3}){3}|169\.254(?:\.[0-9]{1,3}){2}|172\.(?:1[6-9]|2[0-9]|3[01])(?:\.[0-9]{1,3}){2}|192\.168(?:\.[0-9]{1,3}){2}|\[(?:::1|f[cd][0-9a-f:]*|fe[89ab][0-9a-f:]*)\])(?::[0-9]{1,5})?$" "id:1000,phase:1,pass,t:none,t:lowercase,nolog,ctl:ruleRemoveById=920350"
+SecRule REQUEST_HEADERS:Host "@rx ^(?:10(?:\.[0-9]{1,3}){3}|100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])(?:\.[0-9]{1,3}){2}|127(?:\.[0-9]{1,3}){3}|169\.254(?:\.[0-9]{1,3}){2}|172\.(?:1[6-9]|2[0-9]|3[01])(?:\.[0-9]{1,3}){2}|192\.168(?:\.[0-9]{1,3}){2}|\[(?:::1|f[cd][0-9a-f:]*|fe[89ab][0-9a-f:]*)\])(?::[0-9]{1,5})?$" "id:1002,phase:1,pass,t:none,t:lowercase,nolog,ctl:ruleRemoveById=920350"
 Include @owasp_crs/*.conf
 SecRuleUpdateTargetByTag "OWASP_CRS" "!REQUEST_HEADERS:Authorization"
 SecRuleUpdateTargetByTag "OWASP_CRS" "!REQUEST_HEADERS:Cookie"
@@ -618,6 +660,17 @@ SecRuleUpdateTargetByTag "OWASP_CRS" "!ARGS:current_password"
 SecRuleUpdateTargetByTag "OWASP_CRS" "!ARGS:new_password"
 SecRuleEngine %s
 `
+
+func wafDirectives(engine string, networks []string) string {
+	trustedRule := "# No trusted direct-peer networks configured."
+	if len(networks) > 0 {
+		trustedRule = fmt.Sprintf(
+			`SecRule REMOTE_ADDR "@ipMatch %s" "id:1000,phase:1,pass,t:none,nolog,ctl:ruleEngine=Off"`,
+			strings.Join(networks, ","),
+		)
+	}
+	return fmt.Sprintf(wafDirectivesTemplate, trustedRule, engine)
+}
 
 func caddyHTTPServer(o caddyServerOptions) map[string]any {
 	protocols := []string{"h1"}
@@ -638,7 +691,7 @@ func caddyHTTPServer(o caddyServerOptions) map[string]any {
 		handlers = append(handlers, map[string]any{
 			"handler":        "waf",
 			"load_owasp_crs": true,
-			"directives":     fmt.Sprintf(wafDirectives, engine),
+			"directives":     wafDirectives(engine, o.TrustedNetworks),
 		})
 	}
 	handlers = append(handlers, map[string]any{

@@ -22,6 +22,7 @@ x-heya-common: &heya-common
     # HEYA_ADMIN_PASSWORD: replace-with-a-long-passphrase
     # HEYA_ENABLE_REGISTRATION: "false"
     # HEYA_WAF_MODE: detect  # off | detect | block
+    # HEYA_TRUSTED_NETWORKS: 100.64.0.0/10,192.168.0.0/16
     # Declare libraries from env. Keep these values and media mounts on BOTH
     # API and worker by placing them in this shared block:
     # HEYA_LIBRARY_0_NAME: Movies

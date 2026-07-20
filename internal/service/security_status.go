@@ -66,14 +66,15 @@ type HTTPSecurityStatus struct {
 }
 
 type SecurityStatus struct {
-	GeneratedAt  time.Time                            `json:"generated_at"`
-	StartedAt    time.Time                            `json:"started_at,omitempty"`
-	Registration RegistrationSecurityStatus           `json:"registration"`
-	WAF          WAFSecurityStatus                    `json:"waf"`
-	Login        LoginProtectionStatus                `json:"login"`
-	Password     PasswordSecurityStatus               `json:"password"`
-	HTTP         HTTPSecurityStatus                   `json:"http"`
-	Events       securityevents.SecurityEventSnapshot `json:"events"`
+	GeneratedAt     time.Time                            `json:"generated_at"`
+	StartedAt       time.Time                            `json:"started_at,omitempty"`
+	Registration    RegistrationSecurityStatus           `json:"registration"`
+	WAF             WAFSecurityStatus                    `json:"waf"`
+	TrustedNetworks TrustedNetworksStatus                `json:"trusted_networks"`
+	Login           LoginProtectionStatus                `json:"login"`
+	Password        PasswordSecurityStatus               `json:"password"`
+	HTTP            HTTPSecurityStatus                   `json:"http"`
+	Events          securityevents.SecurityEventSnapshot `json:"events"`
 }
 
 // SecurityStatus returns a read-only view of the controls that protect the
@@ -91,6 +92,10 @@ func (a *App) SecurityStatus(ctx context.Context) SecurityStatus {
 			CRSVersion:           dependencyVersion(embeddedCRSModule),
 			RulesBundled:         true,
 			UpdatedWithHeya:      true,
+		},
+		TrustedNetworks: TrustedNetworksStatus{
+			Networks: []string{"100.64.0.0/10", "192.168.0.0/16"}, Source: config.SourceDefault,
+			RuntimeEditable: true, WAFBypass: true, RateLimitBypass: true,
 		},
 		Login: LoginProtectionStatus{
 			ByIP:               LoginRatePolicy{Burst: auth.LoginIPBurst, RefillSeconds: auth.LoginIPRefillSeconds},
@@ -113,6 +118,7 @@ func (a *App) SecurityStatus(ctx context.Context) SecurityStatus {
 		return status
 	}
 	status.StartedAt = a.StartedAt()
+	status.TrustedNetworks = a.TrustedNetworksStatus()
 	status.Login.Stats = a.LoginGuard().Stats()
 	status.Events = a.SecurityEvents().Snapshot(50)
 

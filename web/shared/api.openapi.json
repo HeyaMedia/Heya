@@ -18653,6 +18653,9 @@
             "format": "date-time",
             "type": "string"
           },
+          "trusted_networks": {
+            "$ref": "#/components/schemas/TrustedNetworksStatus"
+          },
           "waf": {
             "$ref": "#/components/schemas/WAFSecurityStatus"
           }
@@ -18661,6 +18664,7 @@
           "generated_at",
           "registration",
           "waf",
+          "trusted_networks",
           "login",
           "password",
           "http",
@@ -19068,6 +19072,35 @@
         },
         "required": [
           "items"
+        ],
+        "type": "object"
+      },
+      "Set-admin-trusted-networksRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Set-admin-trusted-networksRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "networks": {
+            "description": "Direct-peer IP addresses or CIDRs that bypass WAF inspection and authentication attempt buckets",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "networks"
         ],
         "type": "object"
       },
@@ -21414,6 +21447,52 @@
         ],
         "type": "object"
       },
+      "TrustedNetworksStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/TrustedNetworksStatus.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "env_var": {
+            "type": "string"
+          },
+          "networks": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "rate_limit_bypass": {
+            "type": "boolean"
+          },
+          "runtime_editable": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string"
+          },
+          "waf_bypass": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "networks",
+          "source",
+          "runtime_editable",
+          "waf_bypass",
+          "rate_limit_bypass"
+        ],
+        "type": "object"
+      },
       "TvEpisode": {
         "additionalProperties": false,
         "properties": {
@@ -23686,6 +23765,59 @@
           }
         ],
         "summary": "Security posture and recent protection events",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/admin/security/trusted-networks": {
+      "put": {
+        "operationId": "set-admin-trusted-networks",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Set-admin-trusted-networksRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustedNetworksStatus"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Apply the trusted direct-peer CIDR allowlist",
         "tags": [
           "Admin"
         ]

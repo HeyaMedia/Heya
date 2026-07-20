@@ -38,7 +38,9 @@ func TestTailnetRedirectUsesCertificateDomain(t *testing.T) {
 }
 
 func TestCaddyHTTPServerPlacesPinnedWAFBeforeHeya(t *testing.T) {
-	raw, err := json.Marshal(caddyHTTPServer(caddyServerOptions{Ingress: "remote", WAFMode: "detect"}))
+	raw, err := json.Marshal(caddyHTTPServer(caddyServerOptions{
+		Ingress: "remote", WAFMode: "detect", TrustedNetworks: []string{"100.64.0.0/10", "192.168.0.0/16"},
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,6 +55,12 @@ func TestCaddyHTTPServerPlacesPinnedWAFBeforeHeya(t *testing.T) {
 	}
 	if !strings.Contains(config, "ctl:ruleRemoveById=920350") || !strings.Contains(config, "192\\\\.168") {
 		t.Fatalf("private numeric Host exclusion missing: %s", config)
+	}
+	if !strings.Contains(config, `@ipMatch 100.64.0.0/10,192.168.0.0/16`) || !strings.Contains(config, "ctl:ruleEngine=Off") {
+		t.Fatalf("trusted-network WAF bypass missing: %s", config)
+	}
+	if !strings.Contains(config, "GET HEAD POST OPTIONS PUT PATCH DELETE") {
+		t.Fatalf("REST API method policy missing: %s", config)
 	}
 }
 
@@ -153,6 +161,41 @@ func TestManagerServesHTTPSAndRedirectsPlainHTTPOnSamePort(t *testing.T) {
 	securitySnapshot := securityRecorder.Snapshot(32)
 	if securitySnapshot.Counters.WAFMatches == 0 || securitySnapshot.Counters.WAFBlocked == 0 {
 		t.Fatalf("WAF security telemetry missing: %+v", securitySnapshot.Counters)
+	}
+
+	patchRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPatch, "https://"+address+"/api/me/settings", strings.NewReader(`{"theme":"dark"}`))
+	if err != nil {
+		t.Fatalf("create PATCH request: %v", err)
+	}
+	patchRequest.Header.Set("Content-Type", "application/json")
+	patchResponse, err := client.Do(patchRequest)
+	if err != nil {
+		t.Fatalf("PATCH request: %v", err)
+	}
+	_ = patchResponse.Body.Close()
+	if patchResponse.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH response = %d, want REST method admitted by CRS", patchResponse.StatusCode)
+	}
+	for _, event := range securityRecorder.Snapshot(32).Recent {
+		if event.RuleID == "911100" {
+			t.Fatalf("valid Heya PATCH produced CRS 911100 event: %+v", event)
+		}
+	}
+
+	if err := manager.SetTrustedNetworks(t.Context(), []string{"127.0.0.0/8"}); err != nil {
+		t.Fatalf("SetTrustedNetworks: %v", err)
+	}
+	trustedWAFResponse, err := client.Get("https://" + address + "/?id=1%27%20OR%20%271%27=%271")
+	if err != nil {
+		t.Fatalf("trusted WAF request: %v", err)
+	}
+	trustedWAFBody, readErr := io.ReadAll(trustedWAFResponse.Body)
+	_ = trustedWAFResponse.Body.Close()
+	if readErr != nil {
+		t.Fatalf("read trusted WAF response: %v", readErr)
+	}
+	if trustedWAFResponse.StatusCode != http.StatusOK || string(trustedWAFBody) != "heya" {
+		t.Fatalf("trusted WAF response = %d %q, want application bypass", trustedWAFResponse.StatusCode, trustedWAFBody)
 	}
 
 	h3Transport := &http3.Transport{

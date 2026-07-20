@@ -4,6 +4,7 @@ definePageMeta({ layout: 'settings', middleware: 'admin' })
 import { adminSecurityQuery } from '~/queries/settings'
 import type { SecurityEvent } from '~~/shared/api/types.gen'
 
+const { $heya } = useNuxtApp()
 const securityData = useQuery(adminSecurityQuery())
 const status = computed(() => securityData.data.value ?? null)
 const loading = computed(() => securityData.isLoading.value && !status.value)
@@ -16,6 +17,16 @@ const counters = computed(() => status.value?.events.counters ?? {
   waf_blocked: 0,
   waf_matches: 0,
 })
+const trustedDraft = ref('')
+const trustedDirty = ref(false)
+const trustedSaving = ref(false)
+const { flash: trustedFlash } = useFlash()
+const trustedLocked = computed(() => status.value?.trusted_networks.runtime_editable === false)
+
+watch(() => status.value?.trusted_networks.networks, networks => {
+  if (!networks || trustedDirty.value || trustedSaving.value) return
+  trustedDraft.value = networks.join('\n')
+}, { immediate: true })
 
 let timer: ReturnType<typeof setInterval> | null = null
 onMounted(() => { timer = setInterval(() => { void securityData.refetch() }, 5000) })
@@ -77,6 +88,30 @@ function runtimeAge(value?: string) {
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m runtime`
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h runtime`
   return `${Math.floor(seconds / 86400)}d runtime`
+}
+
+async function saveTrustedNetworks() {
+  if (trustedSaving.value || trustedLocked.value) return
+  const networks = trustedDraft.value
+    .split(/[\s,;]+/)
+    .map(value => value.trim())
+    .filter(Boolean)
+  trustedSaving.value = true
+  trustedFlash.value = null
+  try {
+    const result = await $heya('/api/admin/security/trusted-networks', {
+      method: 'PUT',
+      body: { networks },
+    })
+    trustedDraft.value = result.networks?.join('\n') ?? ''
+    trustedDirty.value = false
+    trustedFlash.value = { kind: 'ok', text: 'Trusted networks applied live to the WAF and authentication limiters.' }
+    await securityData.refetch()
+  } catch (e: any) {
+    trustedFlash.value = { kind: 'err', text: e?.data?.detail ?? e?.message ?? 'Failed to apply trusted networks.' }
+  } finally {
+    trustedSaving.value = false
+  }
 }
 
 function eventTitle(event: SecurityEvent) {
@@ -141,7 +176,7 @@ function eventDetail(event: SecurityEvent) {
       </div>
 
       <div class="posture-grid">
-        <SettingsSection title="Public boundary" icon="shield" description="Boot-time controls are read-only here and require a server restart to change.">
+        <SettingsSection title="Public boundary" icon="shield" description="WAF mode and registration are boot-time controls; trusted networks are applied live below.">
           <div class="posture-list">
             <div class="posture-row">
               <div><strong>OWASP Core Rule Set</strong><span>Coraza inspects every Heya ingress before the application handler.</span></div>
@@ -157,6 +192,10 @@ function eventDetail(event: SecurityEvent) {
             <div class="posture-row">
               <div><strong>User registration</strong><span>Even when enabled, only the atomic first-user setup path can register.</span></div>
               <div class="posture-value"><StatusBadge :state="registrationBadge">{{ registrationLabel }}</StatusBadge></div>
+            </div>
+            <div class="posture-row">
+              <div><strong>Trusted direct peers</strong><span>Explicit CIDRs bypass CRS inspection and authentication attempt buckets.</span></div>
+              <div class="posture-value"><StatusBadge state="ok">{{ status.trusted_networks.networks?.length ?? 0 }} networks</StatusBadge></div>
             </div>
           </div>
           <div class="config-note">
@@ -180,6 +219,48 @@ function eventDetail(event: SecurityEvent) {
           ]" />
         </SettingsSection>
       </div>
+
+      <SettingsSection
+        title="Trusted networks"
+        icon="network"
+        description="Direct-peer addresses in these CIDRs bypass OWASP CRS inspection and login/registration attempt buckets. Changes are applied immediately."
+      >
+        <template #actions>
+          <StatusBadge :state="trustedLocked ? 'idle' : 'ok'">{{ trustedLocked ? 'Env locked' : 'Live editable' }}</StatusBadge>
+        </template>
+        <div class="trusted-editor">
+          <SettingsField
+            label="Allowed IP addresses and CIDRs"
+            description="One per line. Individual IP addresses are accepted and normalized to /32 or /128. An empty list trusts nobody."
+            :lockedBy="trustedLocked ? `Locked by ${status.trusted_networks.env_var}` : undefined"
+            v-slot="{ fieldId }"
+          >
+            <textarea
+              :id="fieldId"
+              v-model="trustedDraft"
+              class="sv2-textarea trusted-textarea"
+              rows="4"
+              spellcheck="false"
+              autocomplete="off"
+              placeholder="100.64.0.0/10&#10;192.168.0.0/16"
+              :disabled="trustedLocked || trustedSaving"
+              @input="trustedDirty = true"
+            />
+          </SettingsField>
+          <div class="trusted-warning">
+            <Icon name="shield" :size="13" />
+            <span>Trust is based only on the accepted connection's direct peer—not <code>X-Forwarded-For</code>. Credentials, permissions, CSRF protection, request-size limits, and password-verifier capacity still apply.</span>
+          </div>
+          <div class="trusted-save">
+            <code>{{ configSource(status.trusted_networks.source, status.trusted_networks.env_var) }}</code>
+            <button class="sv2-btn primary" :disabled="!trustedDirty || trustedSaving || trustedLocked" @click="saveTrustedNetworks">
+              <Icon v-if="trustedSaving" name="spinner" :size="13" />
+              {{ trustedSaving ? 'Applying…' : 'Apply trusted networks' }}
+            </button>
+          </div>
+          <SettingsFlash :flash="trustedFlash" />
+        </div>
+      </SettingsSection>
 
       <div class="posture-grid">
         <SettingsSection title="Passwords & credentials" icon="key">
@@ -270,6 +351,13 @@ function eventDetail(event: SecurityEvent) {
 .event-head :deep(.sv2-badge) { margin-left: auto; }
 .event-body p { margin: 5px 0 0; color: var(--fg-2); font-family: var(--font-mono); font-size: 10.5px; overflow-wrap: anywhere; }
 .event-meta { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-top: 5px; color: var(--fg-4); font-family: var(--font-mono); font-size: 9.5px; }
+.trusted-editor { display: flex; flex-direction: column; gap: 10px; }
+.trusted-textarea { width: 100%; min-height: 104px; resize: vertical; font-family: var(--font-mono); font-size: 11px; line-height: 1.6; }
+.trusted-warning { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border: 1px dashed var(--border); border-radius: var(--r-sm); color: var(--fg-3); font-size: 10.5px; line-height: 1.5; }
+.trusted-warning > svg { flex: 0 0 auto; margin-top: 1px; color: var(--gold); }
+.trusted-warning code, .trusted-save code { font-family: var(--font-mono); color: var(--fg-2); }
+.trusted-save { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.trusted-save > code { font-size: 10.5px; }
 @media (max-width: 1000px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .posture-grid { grid-template-columns: 1fr; } }
 @media (max-width: 600px) {
   .tiles { grid-template-columns: 1fr; }
@@ -277,5 +365,6 @@ function eventDetail(event: SecurityEvent) {
   .posture-value { align-items: flex-start; }
   .config-note a { margin-left: 0; width: 100%; }
   .event-head { align-items: flex-start; }
+  .trusted-save { align-items: stretch; flex-direction: column; }
 }
 </style>

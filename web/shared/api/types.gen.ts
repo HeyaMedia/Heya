@@ -5215,6 +5215,7 @@ export type SecurityStatus = {
     password: PasswordSecurityStatus;
     registration: RegistrationSecurityStatus;
     started_at?: string;
+    trusted_networks: TrustedNetworksStatus;
     waf: WafSecurityStatus;
 };
 
@@ -5326,6 +5327,17 @@ export type SessionsBody = {
      */
     readonly $schema?: string;
     items: Array<SessionSnapshot> | null;
+};
+
+export type SetAdminTrustedNetworksRequest = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    /**
+     * Direct-peer IP addresses or CIDRs that bypass WAF inspection and authentication attempt buckets
+     */
+    networks: Array<string> | null;
 };
 
 export type SetCastConfigRequest = {
@@ -6005,6 +6017,19 @@ export type TranscodeStatusBody = {
     encoder_hevc: string;
     hw_accel: string;
     hw_accel_label: string;
+};
+
+export type TrustedNetworksStatus = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    env_var?: string;
+    networks: Array<string> | null;
+    rate_limit_bypass: boolean;
+    runtime_editable: boolean;
+    source: string;
+    waf_bypass: boolean;
 };
 
 export type TvEpisode = {
@@ -8212,6 +8237,7 @@ export type SecurityStatusWritable = {
     password: PasswordSecurityStatus;
     registration: RegistrationSecurityStatus;
     started_at?: string;
+    trusted_networks: TrustedNetworksStatusWritable;
     waf: WafSecurityStatus;
 };
 
@@ -8271,6 +8297,13 @@ export type SessionSnapshotWritable = {
 
 export type SessionsBodyWritable = {
     items: Array<SessionSnapshotWritable> | null;
+};
+
+export type SetAdminTrustedNetworksRequestWritable = {
+    /**
+     * Direct-peer IP addresses or CIDRs that bypass WAF inspection and authentication attempt buckets
+     */
+    networks: Array<string> | null;
 };
 
 export type SetCastConfigRequestWritable = {
@@ -8533,6 +8566,15 @@ export type TranscodeStatusBodyWritable = {
     encoder_hevc: string;
     hw_accel: string;
     hw_accel_label: string;
+};
+
+export type TrustedNetworksStatusWritable = {
+    env_var?: string;
+    networks: Array<string> | null;
+    rate_limit_bypass: boolean;
+    runtime_editable: boolean;
+    source: string;
+    waf_bypass: boolean;
 };
 
 export type TvEpisodeWritable = {
@@ -9156,6 +9198,31 @@ export type GetAdminSecurityResponses = {
 };
 
 export type GetAdminSecurityResponse = GetAdminSecurityResponses[keyof GetAdminSecurityResponses];
+
+export type SetAdminTrustedNetworksData = {
+    body: SetAdminTrustedNetworksRequestWritable;
+    path?: never;
+    query?: never;
+    url: '/api/admin/security/trusted-networks';
+};
+
+export type SetAdminTrustedNetworksErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type SetAdminTrustedNetworksError = SetAdminTrustedNetworksErrors[keyof SetAdminTrustedNetworksErrors];
+
+export type SetAdminTrustedNetworksResponses = {
+    /**
+     * OK
+     */
+    200: TrustedNetworksStatus;
+};
+
+export type SetAdminTrustedNetworksResponse = SetAdminTrustedNetworksResponses[keyof SetAdminTrustedNetworksResponses];
 
 export type AdminListSessionsData = {
     body?: never;

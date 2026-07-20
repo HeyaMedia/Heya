@@ -1,5 +1,7 @@
 package service
 
+import "github.com/karbowiak/heya/internal/trustednetworks"
+
 // SystemSettingEnvLock reports whether the generic /api/system-settings/{key}
 // endpoint should refuse a write to the given key because its underlying
 // value (or any field within a JSON blob value) is locked by env.
@@ -16,6 +18,8 @@ package service
 func (a *App) SystemSettingEnvLock(key string) (envVar string, locked bool) {
 	cfg := a.ConfigSnapshot()
 	switch key {
+	case trustednetworks.SettingKey:
+		return cfg.TrustedNetworks.EnvLock()
 	case jfKeyEnabled:
 		return cfg.Jellyfin.Enabled.EnvLock()
 	case tsKeyEnabled:

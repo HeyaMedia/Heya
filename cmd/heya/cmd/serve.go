@@ -114,6 +114,7 @@ var serveCmd = &cobra.Command{
 		if err := ingressManager.Start(appCtx, ingress.HostConfig{
 			Address: cfg.Addr(), HTTPS: !devBackend, DataDir: cfg.DataDir.Value,
 			LogLevel: cfg.LogLevel.Value, WAFMode: cfg.WAFMode.Value,
+			TrustedNetworks: app.TrustedNetworksStatus().Networks,
 		}); err != nil {
 			return fmt.Errorf("starting embedded Caddy ingress: %w", err)
 		}

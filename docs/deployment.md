@@ -158,6 +158,27 @@ and private IPv6 ranges are also excluded from rule `920350`, because direct
 local access by IP is a supported Heya deployment. The rule remains active for
 public numeric Host headers.
 
+The trusted direct-peer allowlist defaults to Tailscale's IPv4 range and the
+`192.168/16` private LAN range:
+
+```env
+HEYA_TRUSTED_NETWORKS=100.64.0.0/10,192.168.0.0/16
+```
+
+Trusted peers bypass CRS and the per-IP/per-account login and registration
+attempt buckets. They do not bypass credentials, permissions, cookie-session
+CSRF protection, request-size limits, or the password-verifier concurrency
+ceiling. The Security settings page edits this list live and persists it in
+the database; setting the env variable takes precedence and locks the editor.
+Only the accepted connection's direct peer is matched—`X-Forwarded-For` and
+other client-supplied forwarding headers are ignored. If you place Heya behind
+another reverse proxy, do not trust that proxy's subnet unless every request
+arriving through it should receive the bypass.
+
+CRS's method policy is tuned to Heya's actual REST surface (`GET`, `HEAD`,
+`POST`, `OPTIONS`, `PUT`, `PATCH`, and `DELETE`). Other methods continue to
+trigger rule `911100`.
+
 The ruleset is pinned as a Go dependency. Dependabot proposes grouped weekly
 minor/patch upgrades for Coraza and CRS, which keeps updates reviewable and
 reproducible. Heya deliberately does not fetch executable rules at runtime:
