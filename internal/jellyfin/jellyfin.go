@@ -229,6 +229,13 @@ func (s *Server) buildRouter() *router {
 	rt.handle(http.MethodGet, "/Trailers/{itemId}/Similar", s.requireAuth(s.requireItem(s.handleSimilar)))
 	rt.handle(http.MethodGet, "/Audio/{itemId}/Lyrics", s.requireAuth(s.handleLyrics))
 
+	// InstantMix — all upstream aliases route to the one handler
+	rt.handle(http.MethodGet, "/Items/{itemId}/InstantMix", s.requireAuth(s.handleInstantMix))
+	rt.handle(http.MethodGet, "/Songs/{itemId}/InstantMix", s.requireAuth(s.handleInstantMix))
+	rt.handle(http.MethodGet, "/Albums/{itemId}/InstantMix", s.requireAuth(s.handleInstantMix))
+	rt.handle(http.MethodGet, "/Artists/{itemId}/InstantMix", s.requireAuth(s.handleInstantMix))
+	rt.handle(http.MethodGet, "/Playlists/{itemId}/InstantMix", s.requireAuth(s.handleInstantMix))
+
 	// Playlists (Heya-native, owner-private)
 	rt.handle(http.MethodPost, "/Playlists", s.requireAuth(s.handleCreatePlaylist))
 	rt.handle(http.MethodGet, "/Playlists/{playlistId}/Items", s.requireAuth(s.handleGetPlaylistItems))

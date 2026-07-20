@@ -91,10 +91,10 @@ var manifest = map[string]manifestEntry{
 	"DELETE /Videos/{itemId}/AlternateSources":                      {Status: opPlanned, Tag: "Videos"},
 	"DELETE /Videos/{itemId}/Subtitles/{index}":                     {Status: opPlanned, Tag: "Subtitle"},
 	"DELETE /Videos/ActiveEncodings":                                {Status: opPlanned, Tag: "HlsSegment"},
-	"GET /Albums/{itemId}/InstantMix":                               {Status: opPlanned, Tag: "InstantMix"},
+	"GET /Albums/{itemId}/InstantMix":                               {Status: opImplemented, Tag: "InstantMix"},
 	"GET /Albums/{itemId}/Similar":                                  {Status: opImplemented, Tag: "Library"},
 	"GET /Artists":                                                  {Status: opImplemented, Tag: "Artists"},
-	"GET /Artists/{itemId}/InstantMix":                              {Status: opPlanned, Tag: "InstantMix"},
+	"GET /Artists/{itemId}/InstantMix":                              {Status: opImplemented, Tag: "InstantMix"},
 	"GET /Artists/{itemId}/Similar":                                 {Status: opImplemented, Tag: "Library"},
 	"GET /Artists/{name}":                                           {Status: opPlanned, Tag: "Artists"},
 	"GET /Artists/{name}/Images/{imageType}/{imageIndex}":           {Status: opPlanned, Tag: "Image"},
@@ -151,7 +151,7 @@ var manifest = map[string]manifestEntry{
 	"GET /Items/{itemId}/Images/{imageType}":                        {Status: opImplemented, Tag: "Image"},
 	"GET /Items/{itemId}/Images/{imageType}/{imageIndex}":           {Status: opImplemented, Tag: "Image"},
 	"GET /Items/{itemId}/Images/{imageType}/{imageIndex}/{tag}/{format}/{maxWidth}/{maxHeight}/{percentPlayed}/{unplayedCount}": {Status: opPlanned, Tag: "Image"},
-	"GET /Items/{itemId}/InstantMix":                            {Status: opPlanned, Tag: "InstantMix"},
+	"GET /Items/{itemId}/InstantMix":                            {Status: opImplemented, Tag: "InstantMix"},
 	"GET /Items/{itemId}/Intros":                                {Status: opImplemented, Tag: "UserLibrary"}, // empty: no cinema intros feature
 	"GET /Items/{itemId}/LocalTrailers":                         {Status: opImplemented, Tag: "UserLibrary"}, // empty array after real validation
 	"GET /Items/{itemId}/MetadataEditor":                        {Status: opOutOfScope, Tag: "ItemUpdate"},
@@ -221,7 +221,7 @@ var manifest = map[string]manifestEntry{
 	"GET /Persons/{name}/Images/{imageType}":                    {Status: opPlanned, Tag: "Image"},
 	"GET /Persons/{name}/Images/{imageType}/{imageIndex}":       {Status: opPlanned, Tag: "Image"},
 	"GET /Playback/BitrateTest":                                 {Status: opImplemented, Tag: "MediaInfo"},
-	"GET /Playlists/{itemId}/InstantMix":                        {Status: opPlanned, Tag: "InstantMix"},
+	"GET /Playlists/{itemId}/InstantMix":                        {Status: opImplemented, Tag: "InstantMix"},
 	"GET /Playlists/{playlistId}":                               {Status: opPlanned, Tag: "Playlists"},
 	"GET /Playlists/{playlistId}/Items":                         {Status: opImplemented, Tag: "Playlists"},
 	"GET /Playlists/{playlistId}/Users":                         {Status: opPlanned, Tag: "Playlists"},
@@ -243,7 +243,7 @@ var manifest = map[string]manifestEntry{
 	"GET /Shows/{seriesId}/Seasons":                             {Status: opImplemented, Tag: "TvShows"},
 	"GET /Shows/NextUp":                                         {Status: opImplemented, Tag: "TvShows"},
 	"GET /Shows/Upcoming":                                       {Status: opStubbed, Tag: "TvShows"},
-	"GET /Songs/{itemId}/InstantMix":                            {Status: opPlanned, Tag: "InstantMix"},
+	"GET /Songs/{itemId}/InstantMix":                            {Status: opImplemented, Tag: "InstantMix"},
 	"GET /Startup/Configuration":                                {Status: opStubbed, Tag: "Startup"}, // 401: wizard is always complete on Heya
 	"GET /Startup/FirstUser":                                    {Status: opStubbed, Tag: "Startup"}, // 401: wizard is always complete on Heya
 	"GET /Startup/User":                                         {Status: opStubbed, Tag: "Startup"}, // 401: wizard is always complete on Heya
