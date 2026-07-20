@@ -1093,6 +1093,46 @@ func groupMusicArtists(albums []MusicAlbumPlan) []MusicArtistPlan {
 		identifiedByName[nameKey] = append([]*MusicArtistPlan(nil), candidates...)
 	}
 
+	// Track credits are weaker than Picard's album-artist identity and one bad
+	// tag must never select a namesake. They become useful corroboration when
+	// at least two independent releases agree with an authoritative artist
+	// spine already present in this same owner scope. This converges the common
+	// partial-tagging shape without allowing a lone poisoned release to attach.
+	type trackArtistConsensus struct {
+		artist   *MusicArtistPlan
+		albums   []int
+		releases map[string]struct{}
+	}
+	trackConsensus := map[string]*trackArtistConsensus{}
+	for i, album := range albums {
+		if assigned[i] || !musicTrackArtistConsensusAllowed(album.Artist) {
+			continue
+		}
+		mbid := singleMusicProviderID(album.ExternalIDs["musicbrainz_artist"])
+		candidate := byMBID[mbid]
+		if candidate == nil || album.Artist != candidate.Artist ||
+			album.ArtistDisambiguation != candidate.ArtistDisambiguation {
+			continue
+		}
+		key := musicArtistKey(album.Artist, album.ArtistDisambiguation) + "\x00" + mbid
+		consensus := trackConsensus[key]
+		if consensus == nil {
+			consensus = &trackArtistConsensus{artist: candidate, releases: map[string]struct{}{}}
+			trackConsensus[key] = consensus
+		}
+		consensus.albums = append(consensus.albums, i)
+		consensus.releases[firstNonEmpty(album.Key, musicAlbumKey(album.Artist, album.Album, album.Year))] = struct{}{}
+	}
+	for _, consensus := range trackConsensus {
+		if len(consensus.releases) < 2 {
+			continue
+		}
+		for _, i := range consensus.albums {
+			appendAlbum(consensus.artist, albums[i])
+			assigned[i] = true
+		}
+	}
+
 	nameOnly := map[string]*MusicArtistPlan{}
 	for i, album := range albums {
 		if assigned[i] {
@@ -1177,7 +1217,10 @@ func containsMusicArtistGroup(groups []*MusicArtistPlan, target *MusicArtistPlan
 }
 
 func trustworthyMusicArtistMBID(album MusicAlbumPlan) string {
-	value := musicArtistExternalIDsFromAlbum(album)["mbid"]
+	return singleMusicProviderID(musicArtistExternalIDsFromAlbum(album)["mbid"])
+}
+
+func singleMusicProviderID(value string) string {
 	ids := splitMusicProviderIDs(value)
 	if len(ids) != 1 {
 		return ""
@@ -1186,6 +1229,18 @@ func trustworthyMusicArtistMBID(album MusicAlbumPlan) string {
 		return strings.ToLower(strings.TrimSpace(id))
 	}
 	return ""
+}
+
+func musicTrackArtistConsensusAllowed(artist string) bool {
+	if musicPrimaryCollaborationArtist(artist) != "" {
+		return false
+	}
+	switch normalizeMusicKeyPart(artist) {
+	case "various artists", "various", "va", "unknown artist", "unknown", "soundtrack", "original soundtrack":
+		return false
+	default:
+		return true
+	}
 }
 
 // replaceMusicArtist keeps a folder disambiguation attached to the artist it

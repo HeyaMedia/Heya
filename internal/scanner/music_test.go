@@ -1237,10 +1237,14 @@ func TestGroupMusicArtistsDoesNotPromoteLooseTrackArtistMBID(t *testing.T) {
 			Key: "album:lisa|born-again|2025", Artist: "LISA", Album: "Born Again", Confidence: 1,
 			ExternalIDs: map[string]string{"musicbrainz_artist": japaneseLiSA},
 		},
+		{
+			Key: "album:lisa|alter-ego|2025", Artist: "LISA", Album: "Alter Ego", Confidence: 1,
+			ExternalIDs: map[string]string{"musicbrainz_artist": japaneseLiSA},
+		},
 	}
 
 	artists := groupMusicArtists(albums)
-	if len(artists) != 2 {
+	if len(artists) != 3 {
 		t.Fatalf("loose track MBID collapsed namesakes: %#v", artists)
 	}
 	var loose MusicArtistPlan
@@ -1254,6 +1258,78 @@ func TestGroupMusicArtistsDoesNotPromoteLooseTrackArtistMBID(t *testing.T) {
 	}
 	if !contains(loose.Issues, "ambiguous_artist_identity_missing_album_artist_mbid") {
 		t.Fatalf("loose namesake release missing ambiguity evidence: %#v", loose)
+	}
+}
+
+func TestGroupMusicArtistsConvergesRepeatedLooseAlbumsOnAuthoritativeMBID(t *testing.T) {
+	const artistMBID = "ef943908-5368-4e2c-8a3f-a0987308241e"
+	albums := []MusicAlbumPlan{
+		{
+			Key: "album:3-steps-ahead|most-wanted-criminal", Artist: "3 Steps Ahead", Album: "Most Wanted Criminal", Confidence: 1,
+			ExternalIDs: map[string]string{"musicbrainz_album_artist": artistMBID},
+		},
+		{
+			Key: "album:3-steps-ahead|all-time-high", Artist: "3 Steps Ahead", Album: "All Time High", Confidence: 1,
+			ExternalIDs: map[string]string{"musicbrainz_artist": artistMBID},
+		},
+		{
+			Key: "album:3-steps-ahead|ahead", Artist: "3 Steps Ahead", Album: "Ahead", Confidence: 1,
+			ExternalIDs: map[string]string{"musicbrainz_artist": strings.ToUpper(artistMBID)},
+		},
+	}
+
+	artists := groupMusicArtists(albums)
+	if len(artists) != 1 || len(artists[0].Albums) != 3 {
+		t.Fatalf("repeated corroborated releases stayed split: %#v", artists)
+	}
+	if artists[0].Key != "artist:3 steps ahead|mbid:"+artistMBID || artists[0].ExternalIDs["mbid"] != artistMBID {
+		t.Fatalf("corroborated releases lost authoritative spine: %#v", artists[0])
+	}
+	if contains(artists[0].Issues, "ambiguous_artist_identity_missing_album_artist_mbid") {
+		t.Fatalf("corroborated releases retained ambiguity: %#v", artists[0])
+	}
+}
+
+func TestGroupMusicArtistsRequiresTwoLooseReleasesForTrackMBIDConsensus(t *testing.T) {
+	const artistMBID = "artist-mbid"
+	albums := []MusicAlbumPlan{
+		{
+			Key: "album:example|identified", Artist: "Example", Album: "Identified", Confidence: 1,
+			ExternalIDs: map[string]string{"musicbrainz_album_artist": artistMBID},
+		},
+		{
+			Key: "album:example|matching", Artist: "Example", Album: "Matching", Confidence: 1,
+			ExternalIDs: map[string]string{"musicbrainz_artist": artistMBID},
+		},
+		{
+			Key: "album:example|conflicting", Artist: "Example", Album: "Conflicting", Confidence: 1,
+			ExternalIDs: map[string]string{"musicbrainz_artist": "other-mbid"},
+		},
+	}
+
+	artists := groupMusicArtists(albums)
+	if len(artists) != 3 {
+		t.Fatalf("single matching release bypassed consensus: %#v", artists)
+	}
+	for _, artist := range artists {
+		if len(artist.Albums) == 1 && artist.Albums[0].Album != "Identified" &&
+			!contains(artist.Issues, "ambiguous_artist_identity_missing_album_artist_mbid") {
+			t.Fatalf("loose release lost review evidence: %#v", artist)
+		}
+	}
+}
+
+func TestGroupMusicArtistsDoesNotConvergeGenericOwnerByTrackMBID(t *testing.T) {
+	const artistMBID = "various-artists-mbid"
+	albums := []MusicAlbumPlan{
+		{Key: "album:va|identified", Artist: "Various Artists", Album: "Identified", Confidence: 1, ExternalIDs: map[string]string{"musicbrainz_album_artist": artistMBID}},
+		{Key: "album:va|one", Artist: "Various Artists", Album: "One", Confidence: 1, ExternalIDs: map[string]string{"musicbrainz_artist": artistMBID}},
+		{Key: "album:va|two", Artist: "Various Artists", Album: "Two", Confidence: 1, ExternalIDs: map[string]string{"musicbrainz_artist": artistMBID}},
+	}
+
+	artists := groupMusicArtists(albums)
+	if len(artists) != 3 {
+		t.Fatalf("generic owner used track-credit consensus: %#v", artists)
 	}
 }
 
