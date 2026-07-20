@@ -129,7 +129,6 @@ const open = defineModel<boolean>('open')
   bottom: 0;
   width: 100vw;
   max-width: 100vw;
-  z-index: 400;
   display: flex;
   flex-direction: column;
   border-radius: var(--r-lg) var(--r-lg) 0 0;
@@ -138,6 +137,13 @@ const open = defineModel<boolean>('open')
 }
 .app-sheet-auto { max-height: 92dvh; }
 .app-sheet-full { height: 92dvh; }
+
+/* Two-class selector so .surface's z-index:200 can never outrank the sheet
+   above its own overlay (399) on stylesheet emission order — same trap and
+   same fix as .surface.app-dialog-content / .surface.app-select-content. */
+.surface.app-sheet-content {
+  z-index: 400;
+}
 
 .app-sheet-content[data-state="open"] {
   animation: app-sheet-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;

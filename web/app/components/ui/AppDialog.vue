@@ -119,7 +119,6 @@ function close() { open.value = false }
 
 .app-dialog-content {
   position: fixed;
-  z-index: 5001;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
@@ -130,6 +129,15 @@ function close() { open.value = false }
   overflow: hidden;
   /* `.surface` already provides background/blur/border/shadow/animation —
      we only add the sizing here. */
+}
+
+/* .surface carries z-index:200 at equal specificity, so whichever stylesheet
+   the bundler emits last would win — a dependency bump flipped that order and
+   dropped dialog content BELOW its own overlay (scrim ate every click while
+   tab focus still worked). The two-class selector wins on specificity
+   regardless of emission order — same pattern as .surface.app-select-content. */
+.surface.app-dialog-content {
+  z-index: 5001;
 }
 
 .app-dialog-sm   { max-width: 380px; }
