@@ -57,6 +57,72 @@ func TestDownloaderTrustedSourcePollsAcceptedImage(t *testing.T) {
 	}
 }
 
+func TestDownloaderUsesBoundedTrustedImageVariant(t *testing.T) {
+	t.Parallel()
+	imageBody := testJPEG(t, color.RGBA{R: 40, G: 90, B: 180, A: 255})
+	requestedPath := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath <- r.URL.Path
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(imageBody)
+	}))
+	defer server.Close()
+
+	downloader := NewDownloader(t.TempDir(), TrustedSource{BaseURL: server.URL, ImageVariantWidth: 1920})
+	_, err := downloader.Download(t.Context(), server.URL+"/api/v2/images/00000000-0000-0000-0000-000000000001", "music", "album-1", "cover.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := <-requestedPath; got != "/api/v2/images/00000000-0000-0000-0000-000000000001/variants/webp/1920" {
+		t.Fatalf("requested path = %q", got)
+	}
+}
+
+func TestDownloaderBoundsOnlyCanonicalTrustedImageURLs(t *testing.T) {
+	t.Parallel()
+	downloader := NewDownloader(t.TempDir(), TrustedSource{
+		BaseURL: "https://metadata.test/root", ImageVariantWidth: 1920,
+	})
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{
+			name: "canonical image",
+			url:  "https://metadata.test/root/api/v2/images/image-id",
+			want: "https://metadata.test/root/api/v2/images/image-id/variants/webp/1920",
+		},
+		{
+			name: "existing variant",
+			url:  "https://metadata.test/root/api/v2/images/image-id/variants/webp/640",
+			want: "https://metadata.test/root/api/v2/images/image-id/variants/webp/640",
+		},
+		{
+			name: "unrelated trusted route",
+			url:  "https://metadata.test/root/api/v2/entities/entity-id/images",
+			want: "https://metadata.test/root/api/v2/entities/entity-id/images",
+		},
+		{
+			name: "different base path",
+			url:  "https://metadata.test/api/v2/images/image-id",
+			want: "https://metadata.test/api/v2/images/image-id",
+		},
+		{
+			name: "untrusted origin",
+			url:  "https://other.test/root/api/v2/images/image-id",
+			want: "https://other.test/root/api/v2/images/image-id",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := downloader.boundedImageURL(tt.url); got != tt.want {
+				t.Fatalf("bounded URL = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDownloaderDoesNotForwardTrustedAccessAcrossOrigins(t *testing.T) {
 	t.Parallel()
 	var redirected atomic.Int32

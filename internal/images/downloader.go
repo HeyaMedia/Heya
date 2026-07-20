@@ -47,13 +47,20 @@ type Downloader struct {
 	dataDir       string
 	client        *http.Client
 	trustedClient *http.Client
-	trusted       map[string]http.Header
+	trusted       map[string]trustedSource
 	fetchSlots    chan struct{}
 }
 
 type TrustedSource struct {
-	BaseURL     string
-	BearerToken string
+	BaseURL           string
+	BearerToken       string
+	ImageVariantWidth int
+}
+
+type trustedSource struct {
+	basePath          string
+	headers           http.Header
+	imageVariantWidth int
 }
 
 func NewDownloader(dataDir string, trustedSources ...TrustedSource) *Downloader {
@@ -75,7 +82,7 @@ func NewDownloader(dataDir string, trustedSources ...TrustedSource) *Downloader 
 	trustedTransport.Proxy = nil
 	trustedTransport.MaxIdleConns = 100
 	trustedTransport.MaxIdleConnsPerHost = 16
-	trusted := make(map[string]http.Header)
+	trusted := make(map[string]trustedSource)
 	for _, source := range trustedSources {
 		parsed, err := url.Parse(source.BaseURL)
 		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
@@ -85,7 +92,11 @@ func NewDownloader(dataDir string, trustedSources ...TrustedSource) *Downloader 
 		if token := strings.TrimSpace(source.BearerToken); token != "" {
 			header.Set("Authorization", "Bearer "+token)
 		}
-		trusted[parsed.Scheme+"://"+parsed.Host] = header
+		trusted[parsed.Scheme+"://"+parsed.Host] = trustedSource{
+			basePath:          strings.TrimRight(parsed.Path, "/"),
+			headers:           header,
+			imageVariantWidth: max(0, source.ImageVariantWidth),
+		}
 	}
 	trustedClient := &http.Client{
 		Timeout: 30 * time.Second, Transport: trustedTransport,
@@ -164,6 +175,7 @@ func (d *Downloader) download(ctx context.Context, url, mediaType string, dirNam
 		}
 	}
 
+	url = d.boundedImageURL(url)
 	client, headers := d.clientForURL(url)
 	pollCtx, cancelPoll := context.WithTimeout(ctx, maxAcceptedImageWait)
 	defer cancelPoll()
@@ -272,11 +284,35 @@ func cacheImageCandidates(dir, filename string) []string {
 func (d *Downloader) clientForURL(rawURL string) (*http.Client, http.Header) {
 	parsed, err := url.Parse(rawURL)
 	if err == nil {
-		if header, ok := d.trusted[parsed.Scheme+"://"+parsed.Host]; ok {
-			return d.trustedClient, header
+		if source, ok := d.trusted[parsed.Scheme+"://"+parsed.Host]; ok {
+			return d.trustedClient, source.headers
 		}
 	}
 	return d.client, nil
+}
+
+// boundedImageURL upgrades a canonical HeyaMetadata original to its configured
+// WebP rendition. The rewrite is deliberately restricted to an exact image
+// route on a trusted origin; already-bounded variants and unrelated trusted
+// endpoints retain their original URLs.
+func (d *Downloader) boundedImageURL(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	source, ok := d.trusted[parsed.Scheme+"://"+parsed.Host]
+	if !ok || source.imageVariantWidth < 1 || parsed.RawQuery != "" {
+		return rawURL
+	}
+	prefix := source.basePath + "/api/v2/images/"
+	imageID := strings.TrimPrefix(parsed.Path, prefix)
+	if imageID == parsed.Path || imageID == "" || strings.Contains(imageID, "/") {
+		return rawURL
+	}
+	parsed.Path = prefix + imageID + "/variants/webp/" + strconv.Itoa(source.imageVariantWidth)
+	parsed.RawPath = ""
+	parsed.Fragment = ""
+	return parsed.String()
 }
 
 func imageRetryAfter(value string) time.Duration {

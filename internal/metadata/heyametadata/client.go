@@ -15,11 +15,18 @@ import (
 	"github.com/karbowiak/heya/internal/metadata"
 )
 
-// Canonical documents and workflow pages are JSON, but can contain broad
-// provider projections. Keep enough room for unusually rich metadata while
-// preventing a configured service from making the generated client allocate
-// an unbounded response body.
-const maxHeyaMetadataResponseBytes int64 = 32 << 20
+const (
+	// Canonical documents and workflow pages are JSON, but can contain broad
+	// provider projections. Keep enough room for unusually rich metadata while
+	// preventing a configured service from making the generated client allocate
+	// an unbounded response body.
+	maxHeyaMetadataResponseBytes int64 = 32 << 20
+
+	// ImageVariantWidth matches the largest source width the web UI routinely
+	// renders. HeyaMetadata canonicalizes it to a durable WebP rendition, keeping
+	// large provider originals below Heya's download/decode safety budget.
+	ImageVariantWidth = 1920
+)
 
 // ProviderCredentials are forwarded only on the request that needs them. They
 // are intentionally never stored in workflow rows, cache keys, or logs.
@@ -84,7 +91,7 @@ func (c *Client) ImageURL(imageID string) string {
 	if strings.TrimSpace(imageID) == "" {
 		return ""
 	}
-	return c.baseURL + "/api/v2/images/" + imageID
+	return fmt.Sprintf("%s/api/v2/images/%s/variants/webp/%d", c.baseURL, imageID, ImageVariantWidth)
 }
 
 type Change struct {

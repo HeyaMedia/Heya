@@ -543,6 +543,7 @@ func newApp(ctx context.Context, cfg *config.Config, runtimeMode appRuntimeMode)
 
 	dl := images.NewDownloader(cfg.DataDir.Value, images.TrustedSource{
 		BaseURL: cfg.HeyaMetadataURL.Value, BearerToken: cfg.HeyaMetadataAPIKey.Value,
+		ImageVariantWidth: heyametadata.ImageVariantWidth,
 	})
 
 	hm, err := heyametadata.NewClient(cfg.HeyaMetadataURL.Value, cfg.HeyaMetadataAPIKey.Value)

@@ -291,7 +291,7 @@ func TestKindSpecificCanonicalMapping(t *testing.T) {
 	if len(movie.Cast) != 1 || movie.Cast[0].CanonicalID != testPersonID || len(movie.Recommendations) != 1 || movie.Recommendations[0].CanonicalID != testEpisodeID {
 		t.Fatalf("movie relationship mapping: cast=%#v recommendations=%#v", movie.Cast, movie.Recommendations)
 	}
-	if movie.PosterURL != "http://metadata.test/api/v2/images/"+testImageID {
+	if movie.PosterURL != "http://metadata.test/api/v2/images/"+testImageID+"/variants/webp/1920" {
 		t.Fatalf("movie image URL = %q", movie.PosterURL)
 	}
 
@@ -377,7 +377,7 @@ func TestCanonicalImageSelectionsDrivePrimaryArtwork(t *testing.T) {
 	provider.applyCanonicalImages(detail, &gen.EntityImagesOutputBody{
 		Selections: map[string]string{"profile": testImageID},
 	})
-	if detail.PosterURL != "http://metadata.test/api/v2/images/"+testImageID {
+	if detail.PosterURL != "http://metadata.test/api/v2/images/"+testImageID+"/variants/webp/1920" {
 		t.Fatalf("selected profile URL = %q", detail.PosterURL)
 	}
 	if detail.Artwork == nil || detail.ArtistImages == nil {
