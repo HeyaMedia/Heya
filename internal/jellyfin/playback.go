@@ -304,7 +304,11 @@ func (s *Server) attachVideoSource(ctx context.Context, dto *baseItemDto, itemID
 	dto.VideoType = "VideoFile"
 	dto.Path = src.Path // already sanitized in videoMediaSource
 	dto.Chapters = []any{}
-	dto.Trickplay = map[string]any{}
+	if tp := trickplayMap(src.ID, target.file); tp != nil {
+		dto.Trickplay = tp
+	} else {
+		dto.Trickplay = map[string]any{}
+	}
 	for _, ms := range src.MediaStreams {
 		if ms.Type == "Video" {
 			hd := ms.Height >= 720

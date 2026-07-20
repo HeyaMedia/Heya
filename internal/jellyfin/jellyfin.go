@@ -290,6 +290,7 @@ func (s *Server) buildRouter() *router {
 	rt.handle(http.MethodGet, "/robots.txt", s.handleRobotsRedirect)
 	rt.handle(http.MethodGet, "/web/robots.txt", s.handleRobotsTxt)
 	rt.handle(http.MethodGet, "/Videos/{itemId}/AdditionalParts", s.requireAuth(s.handleAdditionalParts))
+	rt.handle(http.MethodGet, "/Videos/{itemId}/Trickplay/{width}/{index}.jpg", s.requireAuth(s.handleTrickplayTile))
 	rt.handle(http.MethodGet, "/Devices", s.requireAdmin(s.handleDevices))
 	rt.handle(http.MethodGet, "/ScheduledTasks", s.requireAdmin(s.stubEmptyArray))
 	rt.handle(http.MethodGet, "/Plugins", s.requireAdmin(s.stubEmptyArray))

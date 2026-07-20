@@ -286,7 +286,7 @@ var manifest = map[string]manifestEntry{
 	"GET /Videos/{itemId}/master.m3u8":                                      {Status: opPlanned, Tag: "DynamicHls"},
 	"GET /Videos/{itemId}/stream.{container}":                               {Status: opImplemented, Tag: "Videos"},
 	"GET /Videos/{itemId}/stream":                                           {Status: opImplemented, Tag: "Videos"},
-	"GET /Videos/{itemId}/Trickplay/{width}/{index}.jpg":                    {Status: opPlanned, Tag: "Trickplay"},
+	"GET /Videos/{itemId}/Trickplay/{width}/{index}.jpg":                    {Status: opImplemented, Tag: "Trickplay"}, // serves the native 320px sheets whatever width is asked
 	"GET /Videos/{itemId}/Trickplay/{width}/tiles.m3u8":                     {Status: opPlanned, Tag: "Trickplay"},
 	"GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/Stream.{routeFormat}": {Status: opImplemented, Tag: "Subtitle"},
 	"GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/Stream.{routeFormat}":                           {Status: opImplemented, Tag: "Subtitle"},
