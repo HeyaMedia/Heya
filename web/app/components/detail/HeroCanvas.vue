@@ -50,10 +50,38 @@ const bgImg = useBackgroundImageTools()
 const displayA = computed(() => (props.src ? bgImg.variant(props.src) : ''))
 const displayB = computed(() => (props.srcB ? bgImg.variant(props.srcB) : ''))
 
+// The claim carries the hero's rendered geometry so the blurred underlay can
+// paint the SAME crop in the SAME place — behind the hero it's pixel-aligned,
+// and past the hero's bottom edge the blur continues the image instead of
+// re-showing a differently-cropped copy (the "same cloud twice" seam).
+const rootRef = ref<HTMLElement | null>(null)
+const heroH = ref(0)
+let heroObserver: ResizeObserver | null = null
+onMounted(() => {
+  if (!rootRef.value || typeof ResizeObserver === 'undefined') return
+  heroObserver = new ResizeObserver(() => {
+    heroH.value = rootRef.value?.clientHeight ?? 0
+  })
+  heroObserver.observe(rootRef.value)
+  heroH.value = rootRef.value.clientHeight
+})
+onUnmounted(() => heroObserver?.disconnect())
+
+// object-position is always "center N%" in practice — extract the Y fraction
+// the underlay needs; anything unparsable falls back to the 30% default.
+const posY = computed(() => {
+  const m = /(\d+(?:\.\d+)?)%\s*$/.exec(props.objectPosition)
+  return m ? Number(m[1]) / 100 : 0.3
+})
+
 const background = useBackground()
 watchEffect(() => {
   if (!props.claim) return
-  if (currentSrc.value) background.set(currentSrc.value, { grade: props.claimGrade })
+  if (!currentSrc.value) return
+  background.set(currentSrc.value, {
+    grade: props.claimGrade,
+    align: heroH.value > 0 ? { heroH: heroH.value, posY: posY.value } : undefined,
+  })
 })
 
 function hideBroken(e: Event | string) {
@@ -62,7 +90,7 @@ function hideBroken(e: Event | string) {
 </script>
 
 <template>
-  <div class="hero-canvas" :style="{ '--hc-pos': objectPosition }" aria-hidden="true">
+  <div ref="rootRef" class="hero-canvas" :style="{ '--hc-pos': objectPosition }" aria-hidden="true">
     <LoadingImage
       v-if="displayA"
       :src="displayA"

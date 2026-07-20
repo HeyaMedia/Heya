@@ -72,13 +72,36 @@ export function useBackdropCarousel(detail: Ref<MediaDetail | null>, opts: Backd
     return detail.value ? useBackdropUrl(detail.value.media_item) : null
   }
 
+  /** Guards decode-before-flip: rapid advance/retreat clicks supersede any
+   *  in-flight preload — only the newest request may flip the layers. */
+  let flipSeq = 0
+
   function showIdx(idx: number) {
     backdropIdx.value = idx
     const url = getBackdropUrl(idx)
-    if (showA.value) { backdropB.value = url } else { backdropA.value = url }
-    showA.value = !showA.value
-    cycleKey.value++
-    warmNext(idx)
+    if (!url) return
+    const seq = ++flipSeq
+    const flip = () => {
+      if (seq !== flipSeq) return
+      if (showA.value) { backdropB.value = url } else { backdropA.value = url }
+      showA.value = !showA.value
+      cycleKey.value++
+      warmNext(idx)
+    }
+    // Preload + decode the rendered variant BEFORE flipping, so the hero's
+    // crossfade starts on painted pixels — and so the ambient underlay (which
+    // fetches the byte-identical variant on the claim change) finds a hot,
+    // already-decoded image and fades in the same frame instead of trailing
+    // a beat behind the sharp art.
+    const img = new Image()
+    img.onload = async () => {
+      try { await img.decode() } catch { /* decodable enough to paint */ }
+      flip()
+    }
+    // A broken backdrop still advances the carousel — one bad asset must not
+    // stall the rotation loop (the hero's own @error hides the layer).
+    img.onerror = flip
+    img.src = bgImg.variant(url)
   }
 
   function advanceBackdrop() {

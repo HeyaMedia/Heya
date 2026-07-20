@@ -16,21 +16,37 @@
          when its image lands. Grading from the container restyled BOTH
          layers the instant the winning claim changed: leaving a v2 detail
          page stripped brightness(0.4) off the still-visible art — a bright
-         flash — before the incoming pool image darkened it back. -->
-    <LoadingImage
+         flash — before the incoming pool image darkened it back.
+
+         The layer wrapper (not the img) carries blur/opacity/drift: blur on
+         the wrapper composites the main img and its mirror strip into ONE
+         raster before blurring, so the two can't bleed into each other at
+         their join, and the oversized wrapper pushes the blur's edge fade
+         off-screen (replacing the old per-image scale-up trick).
+
+         When the winning claim publishes hero geometry (v2 detail pages),
+         the main img is placed at EXACTLY the sharp hero's scale/offset —
+         behind the hero it's pixel-aligned, and below the hero's bottom edge
+         the blur shows the image's real continuation instead of a
+         differently-cropped second copy. The mirror strip reflects the
+         image's bottom edge to fill whatever viewport remains, which is
+         seam-continuous by construction. -->
+    <div
       v-if="srcA"
-      :src="srcA"
-      class="ambient-img"
+      class="ambient-layer"
       :class="[`grade-${gradeA}`, { visible: showA, drift: !reducedMotion && gradeA === 'pool' }]"
-      alt=""
-    />
-    <LoadingImage
+    >
+      <LoadingImage :src="srcA" class="ambient-img" :style="mainStyleA" alt="" />
+      <NuxtImg v-if="mirrorStyleA" :src="srcA" class="ambient-mirror" :style="mirrorStyleA" alt="" />
+    </div>
+    <div
       v-if="srcB"
-      :src="srcB"
-      class="ambient-img"
+      class="ambient-layer"
       :class="[`grade-${gradeB}`, { visible: !showA, drift: !reducedMotion && gradeB === 'pool' }]"
-      alt=""
-    />
+    >
+      <LoadingImage :src="srcB" class="ambient-img" :style="mainStyleB" alt="" />
+      <NuxtImg v-if="mirrorStyleB" :src="srcB" class="ambient-mirror" :style="mirrorStyleB" alt="" />
+    </div>
     <!-- All three scrim looks stay mounted and opacity-crossfade on mode
          changes — background gradients can't transition, so a single
          swapped element snapped between looks a beat before the artwork
@@ -62,6 +78,7 @@
 // background (heya.css) so the layer sits between the body canvas and all
 // content. Turning ambient off restores the plain-canvas look everywhere.
 import { useQuery } from '@pinia/colada'
+import type { ClaimAlign } from '~/composables/useBackground'
 
 const { $heya } = useNuxtApp()
 const route = useRoute()
@@ -138,6 +155,87 @@ const srcB = ref<string | null>(null)
 const showA = ref(true)
 const shown = ref<string | null>(null)
 
+// Hero-alignment state, stamped per layer like the grade: the claim's hero
+// geometry plus the image's natural dimensions (captured at preload). An
+// outgoing layer keeps its own placement while fading; null → the default
+// full-viewport cover.
+const claimAlign = computed<ClaimAlign | null>(() =>
+  claim.value?.kind === 'art' && claim.value.grade === 'v2' ? claim.value.align ?? null : null)
+const alignA = ref<ClaimAlign | null>(null)
+const alignB = ref<ClaimAlign | null>(null)
+const natA = ref<{ w: number; h: number } | null>(null)
+const natB = ref<{ w: number; h: number } | null>(null)
+
+// The wrapper's off-screen margin (see .ambient-layer). Keep in sync with
+// the CSS --bleed value.
+const BLEED = 80
+const vw = ref(0)
+const vh = ref(0)
+function measureViewport() {
+  vw.value = window.innerWidth
+  vh.value = window.innerHeight
+}
+
+/** The sharp hero's exact render geometry for this image: cover-scale within
+ *  the hero box, centered horizontally, focal-point offset vertically. */
+function heroPlacement(align: ClaimAlign | null, nat: { w: number; h: number } | null) {
+  if (!align || !nat || !nat.w || !nat.h || !vw.value || !vh.value) return null
+  const s = Math.max(vw.value / nat.w, align.heroH / nat.h)
+  const dispW = nat.w * s
+  const dispH = nat.h * s
+  return {
+    dispW,
+    dispH,
+    left: (vw.value - dispW) / 2,
+    top: -align.posY * (dispH - align.heroH),
+  }
+}
+
+/** Main img placement (wrapper coordinates = viewport + BLEED). Width is
+ *  stretched into both side margins — horizontal-only stretch keeps every
+ *  image ROW where the hero renders it, so seam alignment survives while the
+ *  wrapper's blur never meets a transparent side edge on screen. */
+function mainStyle(align: ClaimAlign | null, nat: { w: number; h: number } | null) {
+  const p = heroPlacement(align, nat)
+  if (!p) return undefined
+  return {
+    top: `${BLEED + p.top}px`,
+    left: `${p.left}px`,
+    width: `${p.dispW + BLEED * 2}px`,
+    height: `${p.dispH}px`,
+    objectFit: 'fill' as const,
+  }
+}
+
+/** Reflection strip below the image: its top edge shows the image's very
+ *  bottom row (object-position bottom + scaleY(-1)), continuing the main
+ *  copy seamlessly down to the wrapper's bottom edge. */
+function mirrorStyle(align: ClaimAlign | null, nat: { w: number; h: number } | null) {
+  const p = heroPlacement(align, nat)
+  if (!p) return null
+  const top = BLEED + p.top + p.dispH
+  const height = vh.value + BLEED * 2 - top
+  if (height <= 0) return null
+  return {
+    top: `${top}px`,
+    left: `${p.left}px`,
+    width: `${p.dispW + BLEED * 2}px`,
+    height: `${height}px`,
+  }
+}
+
+const mainStyleA = computed(() => mainStyle(alignA.value, natA.value))
+const mainStyleB = computed(() => mainStyle(alignB.value, natB.value))
+const mirrorStyleA = computed(() => mirrorStyle(alignA.value, natA.value))
+const mirrorStyleB = computed(() => mirrorStyle(alignB.value, natB.value))
+
+// The hero republishes its claim on resize (heroH changes) without the URL
+// changing — restamp the visible layer in place so placement tracks.
+watch(claimAlign, (a) => {
+  if (claim.value?.kind !== 'art' || claim.value.url !== shown.value) return
+  ;(showA.value ? alignA : alignB).value = a
+})
+
 // Per-layer grade — the look each image was shown under. An outgoing image
 // keeps its grade while fading out; only the incoming layer (or the visible
 // one when the SAME image is re-claimed, e.g. list → detail sharing art)
@@ -191,8 +289,10 @@ function showImage(url: string, then?: (ok: boolean) => void) {
   if (shown.value === url) {
     // Same image, possibly a new claim grade (list → detail whose art is the
     // current pool pick): re-coat the visible layer in place — a deliberate,
-    // smooth transition on one layer, not a swap.
+    // smooth transition on one layer, not a swap. Placement restamps with it
+    // (naturals for this layer are already known from its own load).
     ;(showA.value ? gradeA : gradeB).value = claimGrade.value
+    ;(showA.value ? alignA : alignB).value = claimAlign.value
     then?.(true)
     return
   }
@@ -203,12 +303,17 @@ function showImage(url: string, then?: (ok: boolean) => void) {
     // stall on a main-thread decode (the visible "stutter" at fade start).
     try { await img.decode() } catch { /* decodable enough to paint */ }
     if (seq !== loadSeq) return
+    const nat = { w: img.naturalWidth, h: img.naturalHeight }
     if (showA.value) {
       srcB.value = variant
       gradeB.value = claimGrade.value
+      natB.value = nat
+      alignB.value = claimAlign.value
     } else {
       srcA.value = variant
       gradeA.value = claimGrade.value
+      natA.value = nat
+      alignA.value = claimAlign.value
     }
     showA.value = !showA.value
     shown.value = url
@@ -346,6 +451,8 @@ function onVisibility() {
 }
 onMounted(() => {
   document.addEventListener('visibilitychange', onVisibility)
+  measureViewport()
+  window.addEventListener('resize', measureViewport, { passive: true })
   // Restore the paused wish across reloads (navigation persistence comes
   // from useState itself).
   try {
@@ -354,6 +461,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibility)
+  window.removeEventListener('resize', measureViewport)
   stop()
   // Layout swap (e.g. into settings): the corner controls unmount with us,
   // so a lingering reveal would strand a faded page with no way back.
@@ -378,25 +486,27 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-.ambient-img {
+/* One crossfade layer = wrapper + main img (+ optional mirror strip). The
+   wrapper carries blur/opacity/drift so its children composite into ONE
+   raster before blurring (no bleed at the main/mirror join), and it hangs
+   --bleed past the viewport on every side so the blur's edge fade happens
+   off-screen — replacing the old per-image scale-up trick. */
+.ambient-backdrop { --bleed: 80px; }
+.ambient-layer {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  inset: calc(-1 * var(--bleed));
   opacity: 0;
   transition: opacity 2.5s ease, filter 0.8s ease;
-  /* Soft-focus so content always wins; scale hides the blurred edge bleed.
-     ONE blur and ONE presence formula for both modes — the list-page pools
-     and the hero-driven pages must read as the same material. */
+  /* Soft-focus so content always wins. ONE blur and ONE presence formula for
+     both modes — the list-page pools and the hero-driven pages must read as
+     the same material. */
   filter: blur(9px);
-  transform: scale(1.05);
 }
-.ambient-img.visible {
+.ambient-layer.visible {
   opacity: min(calc(var(--ambient-opacity, 0.3) * 1.9), 0.9);
 }
 /* Owner-driven artwork switches with its hero — snappier fade only. */
-.ambient-img.grade-art {
+.ambient-layer.grade-art {
   transition: opacity 1.2s ease;
 }
 
@@ -409,25 +519,43 @@ onBeforeUnmount(() => {
    Grades live on each layer, NOT the container: an outgoing image must fade
    out under the coat it was shown with, or leaving a v2 page brightens the
    still-visible art (brightness 0.4 → none) before the next image lands. */
-.ambient-img.grade-v2 {
+.ambient-layer.grade-v2 {
   filter: blur(72px) brightness(0.4) saturate(1.2);
-  transform: scale(1.08);
   /* Match HeroCanvas's fade so the blur underlay and the sharp hero art
      arrive together instead of the blur trailing a beat behind. */
   transition: opacity 0.6s ease;
 }
-.ambient-img.grade-v2.visible {
+.ambient-layer.grade-v2.visible {
   opacity: 1;
 }
 
 /* Slow push-in so pool artwork never reads as a static wallpaper. */
-.ambient-img.drift {
+.ambient-layer.drift {
   animation: ambient-drift 60s ease-in-out infinite alternate;
 }
 @keyframes ambient-drift {
-  /* Stays ≥ the base 1.05 so the blur's edge bleed never shows. */
-  from { transform: scale(1.05); }
-  to { transform: scale(1.12); }
+  from { transform: scale(1); }
+  to { transform: scale(1.07); }
+}
+
+/* Default (no hero alignment): fill the whole oversized wrapper with a cover
+   crop — the margin overpaint is what keeps the blur from vignetting at the
+   screen edges. Hero-aligned layers replace this with exact inline geometry
+   (see mainStyle/mirrorStyle). */
+.ambient-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.ambient-mirror {
+  position: absolute;
+  object-fit: cover;
+  /* Bottom strip of the image, flipped: the strip's top edge shows the
+     image's last row — seam-continuous with the main copy above it. */
+  object-position: center bottom;
+  transform: scaleY(-1);
 }
 
 /* Three scrim looks, all mounted, opacity-crossfaded on mode change —
@@ -489,12 +617,23 @@ onBeforeUnmount(() => {
 .override-mode .scrim-override { opacity: 1; }
 
 /* Reveal (corner eye button): the artwork clean — no blur, full presence,
-   no scrim. The app content fades away via .app.bg-reveal (heya.css). */
-.reveal .ambient-img { transition: opacity 0.8s ease, filter 0.8s ease; filter: none; }
-.reveal .ambient-img.visible { opacity: 1; }
+   no scrim. The app content fades away via .app.bg-reveal (heya.css).
+   Hero-aligned placement is inline style, so the reveal geometry override
+   needs !important to win — reveal shows a plain full-viewport cover crop
+   and hides the mirror strip. */
+.reveal .ambient-layer { transition: opacity 0.8s ease, filter 0.8s ease; filter: none; }
+.reveal .ambient-layer.visible { opacity: 1; }
+.reveal .ambient-img {
+  top: var(--bleed) !important;
+  left: var(--bleed) !important;
+  width: calc(100% - var(--bleed) * 2) !important;
+  height: calc(100% - var(--bleed) * 2) !important;
+  object-fit: cover !important;
+}
+.reveal .ambient-mirror { display: none; }
 .reveal .ambient-scrim { opacity: 0; }
 
 @media (prefers-reduced-motion: reduce) {
-  .ambient-img { transition: none; }
+  .ambient-layer { transition: none; }
 }
 </style>

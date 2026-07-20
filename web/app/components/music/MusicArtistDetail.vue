@@ -11,9 +11,11 @@
     <!-- ── HERO: full-bleed backdrop as sharp art, hard-clipped at the ledger
          seam. HeroCanvas also publishes the graded (v2) art claim to the global
          AmbientBackdrop, so the blurred underlay mirrors this artist's backdrop
-         and pops back to the music pool on unmount. ── -->
+         and pops back to the music pool on unmount. Artists WITHOUT a backdrop
+         asset hand the claim to the script below instead (the backdrop URL
+         would 404 and leave the whole page with no ambient wash at all). ── -->
     <section class="hero-section artist-hero">
-      <HeroCanvas :src="backdropA || ''" :src-b="backdropB" :show-a="showA" object-position="center 22%" />
+      <HeroCanvas :src="backdropA || ''" :src-b="backdropB" :show-a="showA" object-position="center 22%" :claim="backdropAssets.length > 0" />
 
       <!-- Backdrop tools — expand-to-lightbox + the shared prev/pause/next
            ring together, top-right (same cluster as the movie/TV heroes). -->
@@ -729,6 +731,20 @@ watch(detail, async (d) => {
 }, { immediate: true })
 
 const currentHeroBackdrop = computed(() => (showA.value ? backdropA.value : backdropB.value) || null)
+
+// No backdrop asset → the carousel's fallback URL 404s and HeroCanvas's claim
+// would leave the page with no ambient wash at all. Claim the square artist
+// photo for the blurred underlay instead — full-viewport cover is right here,
+// since there's no sharp hero art to align with (the hero stays name-on-dark).
+const background = useBackground()
+watchEffect(() => {
+  if (!detail.value) return
+  if (backdropAssets.value.length > 0 || !artistPosterUrl.value) {
+    background.clear()
+    return
+  }
+  background.set(artistPosterUrl.value, { grade: 'v2' })
+})
 
 const { prefs } = useAppearance()
 
