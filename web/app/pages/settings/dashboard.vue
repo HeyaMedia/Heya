@@ -92,9 +92,24 @@ const unsubs = [
   on('scan.completed', debouncedRefetchStats),
 ]
 
+// A hidden tab has nobody reading the dashboard — skip the ticks instead of
+// polling into the void, then catch up once on return so nothing looks stale.
+function onVisibilityReturn() {
+  if (document.visibilityState !== 'visible') return
+  now.value = Date.now()
+  void refreshLiveOverview()
+}
+
 onMounted(() => {
-  nowTimer = setInterval(() => { now.value = Date.now() }, 1000)
-  livePoll = setInterval(() => { void refreshLiveOverview() }, 5000)
+  nowTimer = setInterval(() => {
+    if (document.hidden) return
+    now.value = Date.now()
+  }, 1000)
+  livePoll = setInterval(() => {
+    if (document.hidden) return
+    void refreshLiveOverview()
+  }, 5000)
+  document.addEventListener('visibilitychange', onVisibilityReturn)
 })
 
 onUnmounted(() => {
@@ -102,6 +117,7 @@ onUnmounted(() => {
   if (nowTimer) clearInterval(nowTimer)
   if (livePoll) clearInterval(livePoll)
   if (statsDebounce) clearTimeout(statsDebounce)
+  document.removeEventListener('visibilitychange', onVisibilityReturn)
 })
 </script>
 

@@ -268,18 +268,27 @@ const trailerVisible = ref(false)
 let trailerDelay: ReturnType<typeof setTimeout> | null = null
 let reducedMotion = false
 
+// Attract-mode guard: the hero rotates forever, and every slide with a local
+// trailer takes over with an autoplaying <video>. Fine while someone is
+// browsing — pure waste (continuous video decode) when the app has sat
+// untouched on the home page for a long while. Backdrop crossfades keep
+// running (they're cheap); only new trailer takeovers stop until the next
+// interaction.
+const TRAILER_IDLE_LIMIT_MS = 5 * 60 * 1000
+let lastInteractionAt = Date.now()
+function noteInteraction() { lastInteractionAt = Date.now() }
+
 function armTrailer() {
   if (trailerDelay) { clearTimeout(trailerDelay); trailerDelay = null }
+  if (Date.now() - lastInteractionAt > TRAILER_IDLE_LIMIT_MS) return
   const extraID = props.trailers?.[current.value.id]
   if (!extraID || reducedMotion || props.items.length === 0) return
   trailerDelay = setTimeout(() => {
     // Takeover: setting trailerSrc freezes the cycle ring (ring-paused);
     // the trailer owns the slide until it ends (advance) or errors
-    // (rotation resumes in place).
-    // Native <video> requests can't carry the Authorization header — pass
-    // the session token in the query, same as the player's stream URLs.
-    const { token } = useAuth()
-    trailerSrc.value = `/api/extras/${extraID}/stream?token=${token.value}`
+    // (rotation resumes in place). Same-origin media requests carry Heya's
+    // HttpOnly session cookie.
+    trailerSrc.value = `/api/extras/${extraID}/stream`
   }, TRAILER_LINGER)
 }
 
@@ -399,10 +408,16 @@ watch(
 
 onMounted(() => {
   reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  window.addEventListener('pointerdown', noteInteraction, { passive: true })
+  window.addEventListener('keydown', noteInteraction, { passive: true })
+  window.addEventListener('wheel', noteInteraction, { passive: true })
 })
 
 onUnmounted(() => {
   killTrailer()
+  window.removeEventListener('pointerdown', noteInteraction)
+  window.removeEventListener('keydown', noteInteraction)
+  window.removeEventListener('wheel', noteInteraction)
 })
 </script>
 
