@@ -123,7 +123,35 @@ function getCssVar(name: string, fallback: string): string {
   return v || fallback
 }
 
-function draw() {
+// Redraw-skip cache — the timeupdate-driven progress watch fires far more
+// often than the on-screen bar actually moves (progress moves ~1px/sec on
+// typical widths). Skip the repaint when nothing that would visibly change
+// the canvas has changed since the last draw. `force` bypasses the cache for
+// the paths that DO need a repaint without any of these inputs moving
+// (resize, live theme/accent swap).
+let lastPeaks: number[] | null | undefined
+let lastAccent: string | null | undefined
+let lastDevW = -1
+let lastDevH = -1
+let lastPlayedX = -1
+
+// Background-safe: playback continues while the tab is hidden, but nothing
+// is looking at this canvas — skip painting and catch up with a single
+// redraw once the page is visible again instead of burning CPU on a screen
+// nobody sees.
+let missedWhileHidden = false
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible' && missedWhileHidden) {
+    missedWhileHidden = false
+    draw(true)
+  }
+}
+
+function draw(force = false) {
+  if (document.visibilityState === 'hidden') {
+    missedWhileHidden = true
+    return
+  }
   const c = canvas.value
   const w = wrap.value
   if (!c || !w) return
@@ -131,8 +159,22 @@ function draw() {
   const cssW = w.clientWidth
   const cssH = w.clientHeight
   if (cssW === 0 || cssH === 0) return
-  c.width = Math.round(cssW * dpr)
-  c.height = Math.round(cssH * dpr)
+  const devW = Math.round(cssW * dpr)
+  const devH = Math.round(cssH * dpr)
+  const playedX = Math.round(devW * Math.max(0, Math.min(1, props.progress)))
+
+  if (!force && props.peaks === lastPeaks && props.accent === lastAccent
+    && devW === lastDevW && devH === lastDevH && playedX === lastPlayedX) {
+    return
+  }
+  lastPeaks = props.peaks
+  lastAccent = props.accent
+  lastDevW = devW
+  lastDevH = devH
+  lastPlayedX = playedX
+
+  c.width = devW
+  c.height = devH
   c.style.width = cssW + 'px'
   c.style.height = cssH + 'px'
 
@@ -149,9 +191,8 @@ function draw() {
     ctx.fillStyle = baseColor
     ctx.fillRect(0, mid - dpr, c.width, dpr * 2)
     // Played portion
-    const playedW = Math.round(c.width * Math.max(0, Math.min(1, props.progress)))
     ctx.fillStyle = fillColor
-    ctx.fillRect(0, mid - dpr, playedW, dpr * 2)
+    ctx.fillRect(0, mid - dpr, playedX, dpr * 2)
     return
   }
 
@@ -162,7 +203,6 @@ function draw() {
   const barCount = Math.min(peaks.length, Math.max(1, Math.floor(c.width / (2 * dpr))))
   const gapPx = Math.max(1, Math.round(dpr))
   const mid = c.height / 2
-  const playedX = c.width * Math.max(0, Math.min(1, props.progress))
   const ref = normRef.value
   const maxH = (c.height - 2 * dpr) * WF_HEADROOM
 
@@ -184,8 +224,12 @@ function draw() {
   }
 }
 
-onMounted(draw)
-useResizeObserver(wrap, () => draw())
+onMounted(() => {
+  draw()
+  document.addEventListener('visibilitychange', onVisibilityChange)
+})
+onUnmounted(() => document.removeEventListener('visibilitychange', onVisibilityChange))
+useResizeObserver(wrap, () => draw(true))
 
 watch(() => [props.peaks, props.progress, props.accent], () => draw(), { flush: 'post' })
 
@@ -193,8 +237,8 @@ watch(() => [props.peaks, props.progress, props.accent], () => draw(), { flush: 
 // there's no color cache to invalidate here. The missing piece is a repaint
 // trigger: theme/accent can change live (useAppearance.ts) without peaks or
 // progress changing, so without this the bars keep painting the old colors
-// until the next seek/resize.
-useEventListener(window, 'heya:theme', () => draw())
+// until the next seek/resize. Forced: none of the skip-cache inputs move.
+useEventListener(window, 'heya:theme', () => draw(true))
 
 function pctFromEvent(e: PointerEvent): number {
   const el = wrap.value

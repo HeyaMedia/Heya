@@ -50,6 +50,9 @@ var on EVERY eye invocation, not just `start`.
 | `dom <sel>` | Print outerHTML (truncated to 8 KiB) |
 | `style <sel> [props…]` | computed-style key/value dump. **Use kebab-case** (`backdrop-filter`, `border-radius`) — `getPropertyValue` won't translate camelCase |
 | `shot <out.png> [sel] [pad]` | Screenshot. Pass a selector to clip; default 16 px padding |
+| `profile <ms> [out.cpuprofile]` | Sample the page's CPU for `ms` (CDP `Profiler`, 500 µs interval); prints busy %, self-time by script and by function. Optional raw `.cpuprofile` loads in DevTools → Performance |
+| `wsmon <ms>` | Count WebSocket frames for `ms`; groups received JSON frames by `type` — measures event-bus chattiness |
+| `netlog <url> <ms>` | Navigate and log every response status + whether `/api/` requests carried an `Authorization` header; also instruments `localStorage` get/remove/clear with stacks (finds boot-time auth races) |
 
 ## Mobile viewport emulation
 
@@ -99,6 +102,25 @@ true` (used for every `shot`) sizes the PNG in physical pixels as `CSS width ×
 dpr`, and extends past the viewport height to cover the full scrollable page
 — a 390×844 @3x override with 2000px of scrollable content yields an
 1170×6000 PNG, not a viewport-height-clipped one.
+
+## Performance gathering
+
+`profile` + `wsmon` + `eval` cover most "why is the CPU busy" questions:
+
+- **Attribute compositor load**: run `profile`, note `(program)` %. Then
+  `eval` a `<style>*{animation:none!important}</style>` injection and re-run —
+  the delta is what infinite CSS animations cost. `document.getAnimations()`
+  censuses what's running (2026-07: 32 stuck `heya-loading-image` spinners
+  after scrolling /music was worth ~12% of a core).
+- **rAF/timer wake-ups**: wrap `requestAnimationFrame`/`setTimeout` counters
+  in an `eval` for 5 s to see scheduling rates.
+- **WS pressure**: `wsmon 20000` during server activity; pair with a
+  `performance.getEntriesByType('resource')` diff to count triggered refetches.
+- **Against prod**: Eye can target `https://heya.drum-ray.ts.net` directly —
+  log in through the real form (`focus`/`type`/`click`). Injecting a token
+  into localStorage on the login page does NOT survive: the unauthenticated
+  app's background heartbeat 401s and the `$heya` interceptor's `logout()`
+  wipes the injected token before navigation.
 
 ## Patterns that come up
 

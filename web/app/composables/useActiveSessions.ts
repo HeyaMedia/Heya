@@ -68,12 +68,32 @@ export function useActiveSessions() {
   // The session.update event is a payload-less change signal — refetch through
   // the auth-scoped endpoint rather than trusting anything on the wire.
   // We connect once per consumer; useEventBus.connect is idempotent.
+  //
+  // Hidden tabs defer the refetch: session.update arrives every ~10s while
+  // anyone on the server is playing, and a backgrounded phone has no business
+  // waking its radio for an activity panel nobody can see. One catch-up
+  // invalidation fires when the tab becomes visible again.
   if (import.meta.client) {
     connect()
+    let hiddenPending = false
+    const invalidate = () => queryClient.invalidateQueries({ key: SESSIONS_QUERY_KEY })
     const off = on('session.update', () => {
-      queryClient.invalidateQueries({ key: SESSIONS_QUERY_KEY })
+      if (document.visibilityState === 'hidden') {
+        hiddenPending = true
+        return
+      }
+      invalidate()
     })
-    onScopeDispose(off)
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible' || !hiddenPending) return
+      hiddenPending = false
+      invalidate()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    onScopeDispose(() => {
+      off()
+      document.removeEventListener('visibilitychange', onVisibility)
+    })
   }
 
   const sessions = computed<ActiveSession[]>(() => query.data.value ?? [])

@@ -58,10 +58,21 @@ export function useLiveRefresh(groups: LiveRefreshGroup[]) {
   const { on } = useEventBus()
   const queryClient = useQueryCache()
   const cleanups: Array<() => void> = []
+  // One shared visibilitychange listener drives every group's catch-up
+  // fire (see below) instead of each group registering its own — a page
+  // can carry a handful of groups and they'd all be waking for the same
+  // event.
+  const onReturnToVisible: Array<() => void> = []
 
   for (const group of groups) {
     let timer: ReturnType<typeof setTimeout> | null = null
     let trailingPending = false
+    // Set instead of firing when a trigger lands while the tab is hidden —
+    // a backgrounded tab has nobody looking at the page, so invalidating
+    // (and the network refetch that follows) would just wake the radio/CPU
+    // for no visible benefit. Cleared by a single catch-up fire once the
+    // tab is visible again.
+    let hiddenPending = false
 
     const fire = () => {
       for (const key of group.keys ?? []) {
@@ -82,13 +93,21 @@ export function useLiveRefresh(groups: LiveRefreshGroup[]) {
         timer = null
         if (trailingPending) {
           trailingPending = false
-          invoke()
+          // The window can close while the tab is hidden (it was armed
+          // before the tab went to the background) — treat that exactly
+          // like a fresh hidden trigger instead of firing blind.
+          if (document.visibilityState === 'hidden') hiddenPending = true
+          else invoke()
         }
       }, WINDOW_MS)
     }
 
     const trigger = (event: WsEvent) => {
       if (group.filter && !group.filter(event)) return
+      if (document.visibilityState === 'hidden') {
+        hiddenPending = true
+        return
+      }
       if (timer) trailingPending = true
       else invoke()
     }
@@ -99,7 +118,26 @@ export function useLiveRefresh(groups: LiveRefreshGroup[]) {
     cleanups.push(() => {
       if (timer) clearTimeout(timer)
     })
+
+    onReturnToVisible.push(() => {
+      if (!hiddenPending) return
+      hiddenPending = false
+      // A trailing window can still be armed from before the tab went
+      // hidden (it was left running, just forbidden from invoking) —
+      // route through the same leading/trailing machinery so a live
+      // window collapses this into the trailing fire instead of a double
+      // invalidation.
+      if (timer) trailingPending = true
+      else invoke()
+    })
   }
+
+  const handleVisibilityChange = () => {
+    if (document.visibilityState !== 'visible') return
+    for (const fn of onReturnToVisible) fn()
+  }
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  cleanups.push(() => document.removeEventListener('visibilitychange', handleVisibilityChange))
 
   onScopeDispose(() => {
     cleanups.forEach(fn => fn())

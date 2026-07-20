@@ -10,7 +10,7 @@ export default defineNuxtPlugin(() => {
   const { on } = useEventBus()
   const queryCache = useQueryCache()
 
-  on('media.watched', () => {
+  const invalidate = () => {
     // CW_QUERY_KEY from useWatchResume.ts — kept as a literal here since that
     // module doesn't export the constant.
     queryCache.invalidateQueries({ key: ['me', 'watch', 'continue'] })
@@ -20,5 +20,22 @@ export default defineNuxtPlugin(() => {
     // episode from the player / detail page keeps the rail fresh cross-page.
     queryCache.invalidateQueries({ key: ['me', 'watch', 'recent-episodes'] })
     queryCache.invalidateQueries({ key: ['me', 'state'] })
+  }
+
+  // Hidden tabs defer to a single catch-up invalidation on return — a
+  // backgrounded tab refetching four query keys because some other client
+  // marked an episode watched is wasted radio/CPU nobody can see.
+  let hiddenPending = false
+  on('media.watched', () => {
+    if (document.visibilityState === 'hidden') {
+      hiddenPending = true
+      return
+    }
+    invalidate()
+  })
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible' || !hiddenPending) return
+    hiddenPending = false
+    invalidate()
   })
 })

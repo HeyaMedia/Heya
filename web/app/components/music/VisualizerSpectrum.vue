@@ -19,9 +19,15 @@ const props = withDefaults(defineProps<{
   // When false the render loop parks itself (used to pause the playbar meter
   // while audio is stopped, saving a needless rAF).
   active?: boolean
+  // Freezes the render loop entirely and paints one deterministic "icon"
+  // frame instead of live analyser data — the rAF never starts, so this
+  // mount costs nothing while music plays in the background. Used for the
+  // playbar's mini meter (it's a button glyph, not a live readout).
+  static?: boolean
 }>(), {
   variant: 'bars',
   active: true,
+  static: false,
 })
 
 const analyser = usePlaybackAnalyser()
@@ -81,13 +87,24 @@ function resolveColors(el: HTMLElement) {
   dim = tripletRgba(inkTriplet, 0.10)
 }
 
-function fitCanvas(canvas: HTMLCanvasElement) {
+// Cached device-pixel canvas size, refreshed only by the ResizeObserver set up
+// in onMounted below — NOT read from canvas.clientWidth/Height here, which
+// would force a layout flush on every rAF tick (fitCanvas used to do exactly
+// that; at 60fps that's a synchronous reflow per frame for a canvas that
+// resizes maybe a handful of times per session).
+let cachedW = 1
+let cachedH = 1
+
+function updateCachedSize(canvas: HTMLCanvasElement) {
   const dpr = Math.max(1, window.devicePixelRatio || 1)
-  const w = Math.max(1, Math.floor(canvas.clientWidth * dpr))
-  const h = Math.max(1, Math.floor(canvas.clientHeight * dpr))
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w
-    canvas.height = h
+  cachedW = Math.max(1, Math.floor(canvas.clientWidth * dpr))
+  cachedH = Math.max(1, Math.floor(canvas.clientHeight * dpr))
+}
+
+function fitCanvas(canvas: HTMLCanvasElement) {
+  if (canvas.width !== cachedW || canvas.height !== cachedH) {
+    canvas.width = cachedW
+    canvas.height = cachedH
   }
 }
 
@@ -182,6 +199,34 @@ function drawBars(ctx: CanvasRenderingContext2D, w: number, h: number) {
     s[i]! += (v > s[i]! ? 0.5 : 0.16) * (v - s[i]!)
 
     const barH = Math.max(minBarPx, s[i]! * h)
+    const x = i * (barW + gap)
+    const grad = ctx.createLinearGradient(0, h, 0, h - barH)
+    grad.addColorStop(0, gold)
+    grad.addColorStop(1, goldBright)
+    ctx.fillStyle = grad
+    roundRectBottom(ctx, x, h - barH, barW, barH, Math.min(barW / 2, 2))
+    ctx.fill()
+  }
+}
+
+// Fixed bar-height profile for the static (icon) frame — a pleasant
+// double-humped spectrum shape, 0..1, sized for the 13-bar mini meter.
+// Resampled below for other bar counts.
+const STATIC_BAR_LEVELS = [0.24, 0.46, 0.7, 0.92, 0.66, 0.4, 0.22, 0.42, 0.7, 0.95, 0.74, 0.48, 0.26]
+
+// Draws one deterministic frame through the exact same geometry/gradient code
+// as drawBars, just sourcing bar heights from STATIC_BAR_LEVELS instead of the
+// analyser — so the frozen playbar meter is visually indistinguishable from a
+// paused live one.
+function drawBarsStatic(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  const n = barCount.value
+  const gap = props.variant === 'mini' ? 2 : 3
+  const barW = (w - gap * (n - 1)) / n
+  const minBarPx = props.variant === 'mini' ? 1 : 2
+
+  for (let i = 0; i < n; i++) {
+    const v = STATIC_BAR_LEVELS[Math.floor((i / n) * STATIC_BAR_LEVELS.length)] ?? 0
+    const barH = Math.max(minBarPx, v * h)
     const x = i * (barW + gap)
     const grad = ctx.createLinearGradient(0, h, 0, h - barH)
     grad.addColorStop(0, gold)
@@ -311,11 +356,16 @@ function drawFrame() {
       const w = canvas.width
       const h = canvas.height
       ctx.clearRect(0, 0, w, h)
-      // The direct-element engine (iOS compatibility mode, see
-      // engine/directEngine.ts) has no AnalyserNode at all — draw the same
-      // flat "present but silent" baseline as the inactive state instead of
-      // leaving the canvas blank while audio is actually playing.
-      if (!props.active || !analyser.available.value) {
+      // Static mount (playbar mini meter): always the fixed colored profile,
+      // never the dim flat-line baseline below — the button should read as
+      // "alive" whether or not audio is currently playing.
+      if (props.static) {
+        drawBarsStatic(ctx, w, h)
+      } else if (!props.active || !analyser.available.value) {
+        // The direct-element engine (iOS compatibility mode, see
+        // engine/directEngine.ts) has no AnalyserNode at all — draw the same
+        // flat "present but silent" baseline as the inactive state instead of
+        // leaving the canvas blank while audio is actually playing.
         ctx.fillStyle = dim
         ctx.fillRect(0, h - Math.max(1, h * 0.02), w, Math.max(1, h * 0.02))
       } else if (props.variant === 'scope') {
@@ -330,7 +380,9 @@ function drawFrame() {
 }
 
 function startLoop() {
-  if (cancelled || rafId || !canvasRef.value || !shouldAnimate.value) return
+  // Static mounts never animate, regardless of active/visibility — they draw
+  // one frame (see drawFrame) and stay parked forever.
+  if (cancelled || rafId || !canvasRef.value || !shouldAnimate.value || props.static) return
   rafId = requestAnimationFrame(frame)
 }
 
@@ -356,13 +408,27 @@ function onThemeChange() {
   if (!rafId) drawFrame()
 }
 
+// Replaces the old per-frame clientWidth/Height read in fitCanvas: only
+// recompute the cached device-pixel size when the canvas actually resizes,
+// and push one redraw through so a resize while parked (static/paused)
+// doesn't leave a stale frame at the old dimensions.
+let resizeObserver: ResizeObserver | null = null
+
 onMounted(() => {
   const canvas = canvasRef.value
   if (!canvas) return
   resolveColors(canvas)
+  updateCachedSize(canvas)
   drawFrame()
   startLoop()
   window.addEventListener('heya:theme', onThemeChange)
+  resizeObserver = new ResizeObserver(() => {
+    const c = canvasRef.value
+    if (!c) return
+    updateCachedSize(c)
+    if (!rafId) drawFrame()
+  })
+  resizeObserver.observe(canvas)
 })
 watch(shouldAnimate, (run) => {
   if (run) startLoop()
@@ -375,6 +441,8 @@ onUnmounted(() => {
   cancelled = true
   stopLoop()
   window.removeEventListener('heya:theme', onThemeChange)
+  resizeObserver?.disconnect()
+  resizeObserver = null
 })
 </script>
 

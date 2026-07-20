@@ -22,7 +22,7 @@
         <slot :item="v.item" :index="v.index" :width="tileW" />
       </div>
       <div v-if="hasMore" class="rail-tail" :style="{ left: `${items.length * stride}px` }" aria-hidden="true">
-        <span class="rail-tail-spin" />
+        <span class="rail-tail-spin" :class="{ 'is-offscreen': tailOffscreen }" />
       </div>
     </div>
   </div>
@@ -94,6 +94,19 @@ const visibleTiles = computed(() => {
     out.push({ item: props.items[i]!, index: i, left: i * s })
   }
   return out
+})
+
+// The tail lives one slot past the last tile — same stride math as
+// visibleTiles' window, just checked against a single index instead of
+// collected into a range. Scrolled out of that window the spinner keeps
+// compositing every frame for nothing; pausing it there is free.
+const tailOffscreen = computed(() => {
+  if (!props.hasMore) return false
+  const s = stride.value
+  const tailIndex = props.items.length
+  const start = Math.max(0, Math.floor(scrollLeft.value / s) - OVERSCAN)
+  const end = Math.ceil((scrollLeft.value + viewportW.value) / s) + OVERSCAN
+  return tailIndex < start || tailIndex >= end
 })
 
 function keyFor(item: T, index: number): string | number {
@@ -211,6 +224,9 @@ defineExpose({ scrollByDir, scrollToIndex, scrollToStart, overflows })
   border-top-color: var(--gold);
   animation: rail-spin 0.8s linear infinite;
 }
+/* Scrolled outside the rail's virtualization window — freeze rather than
+   spin somewhere nobody's looking. */
+.rail-tail-spin.is-offscreen { animation-play-state: paused; }
 @keyframes rail-spin {
   to { transform: rotate(360deg); }
 }

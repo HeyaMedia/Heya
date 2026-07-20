@@ -160,7 +160,7 @@
       </AppTooltip>
       <AppTooltip label="Visualizer">
         <button class="pb-viz-btn" :class="{ active: vis.fullscreenOpen.value }" :aria-pressed="vis.fullscreenOpen.value" @click="vis.fullscreenOpen.value = true">
-          <VisualizerSpectrum variant="mini" :active="playing" class="pb-viz-meter" />
+          <VisualizerSpectrum variant="mini" :active="playing" static class="pb-viz-meter" />
         </button>
       </AppTooltip>
       <SleepTimer />

@@ -532,6 +532,157 @@ async function cmd_console(urlOrAction = '/', durationStr = '4000') {
   console.log(`(${lines.length} entries)`)
 }
 
+// Sample the page's JS CPU for `durationMs` and print a self-time summary.
+// Optionally writes the raw .cpuprofile (loadable in Chrome DevTools >
+// Performance > Load profile) when an output path is given.
+async function cmd_profile(durationStr = '10000', out?: string) {
+  const s = requireState()
+  const cdp = new CDP(s.wsUrl)
+  await cdp.ready
+  await cdp.send('Profiler.enable')
+  await cdp.send('Profiler.setSamplingInterval', { interval: 500 })
+  await cdp.send('Profiler.start')
+  const ms = parseInt(durationStr, 10)
+  await sleep(ms)
+  const { profile } = await cdp.send('Profiler.stop')
+  cdp.close()
+  if (out) { writeFileSync(out, JSON.stringify(profile)); console.log(`Raw profile → ${out}`) }
+
+  const samples: number[] = profile.samples ?? []
+  const deltas: number[] = profile.timeDeltas ?? []
+  const selfTime = new Map<number, number>() // node id → µs
+  for (let i = 0; i < samples.length; i++) {
+    selfTime.set(samples[i]!, (selfTime.get(samples[i]!) ?? 0) + (deltas[i] ?? 0))
+  }
+  const nodes = new Map<number, any>((profile.nodes as any[]).map(n => [n.id, n]))
+  const byFrame = new Map<string, number>()
+  const byScript = new Map<string, number>()
+  let total = 0
+  let idle = 0
+  for (const [id, t] of selfTime) {
+    total += t
+    const n = nodes.get(id)
+    if (!n) continue
+    const f = n.callFrame
+    const name = f.functionName || '(anonymous)'
+    if (name === '(idle)') { idle += t; continue }
+    const url = (f.url ?? '').replace(/^https?:\/\/[^/]+/, '')
+    const frameKey = url ? `${name} — ${url}:${f.lineNumber + 1}` : name
+    byFrame.set(frameKey, (byFrame.get(frameKey) ?? 0) + t)
+    const scriptKey = url || `(${name})`
+    byScript.set(scriptKey, (byScript.get(scriptKey) ?? 0) + t)
+  }
+  const busy = total - idle
+  const fmt = (t: number) => `${(t / 1000).toFixed(1)}ms`
+  const pct = (t: number) => `${((t / total) * 100).toFixed(1)}%`
+  console.log(`\nSampled ${fmt(total)} wall, busy ${fmt(busy)} (${pct(busy)} of wall), idle ${pct(idle)}\n`)
+  console.log('=== Self time by script ===')
+  for (const [k, t] of [...byScript.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15)) {
+    console.log(`${fmt(t).padStart(10)}  ${pct(t).padStart(6)}  ${k}`)
+  }
+  console.log('\n=== Self time by function (top 30) ===')
+  for (const [k, t] of [...byFrame.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30)) {
+    console.log(`${fmt(t).padStart(10)}  ${pct(t).padStart(6)}  ${k}`)
+  }
+}
+
+// Navigate to a URL and log every network response (status + url) for
+// `durationMs` — for finding which boot-time request fails.
+async function cmd_netlog(urlOrPath = '/', durationStr = '6000') {
+  const s = requireState()
+  const cdp = new CDP(s.wsUrl)
+  await cdp.ready
+  await cdp.send('Network.enable')
+  await cdp.send('Page.enable')
+  const rows: string[] = []
+  const reqHeaders = new Map<string, any>()
+  cdp.on('Network.requestWillBeSent', (p: any) => {
+    reqHeaders.set(p.requestId, p.request.headers)
+  })
+  cdp.on('Network.responseReceived', (p: any) => {
+    const r = p.response
+    const h = reqHeaders.get(p.requestId) ?? {}
+    const auth = h.Authorization ?? h.authorization
+    const authNote = auth ? ` auth=${String(auth).slice(0, 18)}…` : ' auth=NONE'
+    rows.push(`${r.status}  ${r.url.slice(0, 120)}${r.url.includes('/api/') ? authNote : ''}`)
+  })
+  await cdp.send('Runtime.enable')
+  cdp.on('Runtime.consoleAPICalled', (p: any) => {
+    const text = (p.args ?? []).map((a: any) => a.value ?? a.description ?? '').join(' ')
+    if (text.startsWith('[eye]')) rows.push(text)
+  })
+  const hookSource = `
+      console.log('[eye] doc-start token?', !!localStorage.getItem('heya_token'), 'frame', location.href.slice(0, 60));
+      const stack = () => new Error().stack.split('\\n').slice(2, 5).join(' | ');
+      const origGet = Storage.prototype.getItem;
+      Storage.prototype.getItem = function(k) {
+        const v = origGet.call(this, k);
+        if (k === 'heya_token') console.log('[eye] getItem(heya_token) ->', v ? 'present' : 'NULL', 'at', performance.now().toFixed(0) + 'ms', v ? '' : stack());
+        return v;
+      };
+      const origRemove = Storage.prototype.removeItem;
+      Storage.prototype.removeItem = function(k) {
+        console.log('[eye] removeItem(' + k + ') at', performance.now().toFixed(0) + 'ms', stack());
+        return origRemove.call(this, k);
+      };
+      const origClear = Storage.prototype.clear;
+      Storage.prototype.clear = function() {
+        console.log('[eye] CLEAR at', performance.now().toFixed(0) + 'ms', stack());
+        return origClear.call(this);
+      };
+    `
+  await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: hookSource })
+  // Hook the CURRENT document too, so unload-time storage mutations from the
+  // page we're navigating away from get logged as well.
+  await cdp.send('Runtime.evaluate', { expression: hookSource.replace('doc-start', 'old-doc-hook') })
+  const url = urlOrPath.startsWith('http') ? urlOrPath : `${s.origin}${urlOrPath.startsWith('/') ? urlOrPath : '/' + urlOrPath}`
+  await cdp.send('Page.navigate', { url })
+  await sleep(parseInt(durationStr, 10))
+  cdp.close()
+  for (const r of rows) console.log(r)
+  console.log(`(${rows.length} responses)`)
+}
+
+// Count WebSocket frames received/sent by the page for `durationMs`; groups
+// received JSON frames by their type/event field to expose chatty topics.
+async function cmd_wsmon(durationStr = '10000') {
+  const s = requireState()
+  const cdp = new CDP(s.wsUrl)
+  await cdp.ready
+  await cdp.send('Network.enable')
+  const ms = parseInt(durationStr, 10)
+  let rx = 0, tx = 0, rxBytes = 0
+  const byType = new Map<string, number>()
+  const sample: string[] = []
+  cdp.on('Network.webSocketFrameReceived', (p: any) => {
+    rx++
+    const payload: string = p.response?.payloadData ?? ''
+    rxBytes += payload.length
+    let key = '(non-json)'
+    try {
+      const m = JSON.parse(payload)
+      key = m.type ?? m.event ?? m.kind ?? '(json, no type field)'
+    } catch {}
+    byType.set(key, (byType.get(key) ?? 0) + 1)
+    if (sample.length < 5) sample.push(payload.slice(0, 300))
+  })
+  cdp.on('Network.webSocketFrameSent', () => { tx++ })
+  await sleep(ms)
+  cdp.close()
+  const secs = ms / 1000
+  console.log(`\n${secs}s window: ${rx} frames received (${(rx / secs).toFixed(2)}/s, ${rxBytes} bytes), ${tx} sent`)
+  if (byType.size) {
+    console.log('\n=== Received frames by type ===')
+    for (const [k, n] of [...byType.entries()].sort((a, b) => b[1] - a[1])) {
+      console.log(`${String(n).padStart(6)}  ${k}`)
+    }
+  }
+  if (sample.length) {
+    console.log('\n=== First payloads (truncated) ===')
+    for (const p of sample) console.log(`  ${p}`)
+  }
+}
+
 async function cmd_type(text: string) {
   const cdp = await connect()
   // Insert text directly into the focused element; works for input/textarea
@@ -571,6 +722,9 @@ async function main() {
     case 'wait':   await cmd_wait(rest[0], rest[1] ? parseInt(rest[1], 10) : undefined); break
     case 'sleep':   await cmd_sleep(rest[0]); break
     case 'console': await cmd_console(rest[0], rest[1]); break
+    case 'profile': await cmd_profile(rest[0], rest[1]); break
+    case 'wsmon':   await cmd_wsmon(rest[0]); break
+    case 'netlog':  await cmd_netlog(rest[0], rest[1]); break
     default:
       console.error('usage: eye <start|stop|login|goto|shot|eval|click|dom|style|reload|focus|type|wait|sleep|viewport> [args]')
       process.exit(1)

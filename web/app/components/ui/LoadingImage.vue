@@ -1,3 +1,29 @@
+<script lang="ts">
+// Offscreen images must not animate. `loading="lazy"` images that scroll out
+// before the browser fetches them never fire load/error, so `is-loading`
+// (and its spinner keyframes) would otherwise run forever — dozens of
+// perpetual conic-gradient repaints measured at ~12% of a core on /music.
+// One module-shared observer toggles `is-offscreen`, whose only effect is
+// `animation-play-state: paused` — a paused spinner costs nothing per frame
+// and resumes exactly where it left off when scrolled back into view.
+let sharedObserver: IntersectionObserver | null = null
+const observedTargets = new WeakMap<Element, (visible: boolean) => void>()
+
+function observeVisibility(el: Element, set: (visible: boolean) => void) {
+  if (typeof IntersectionObserver === 'undefined') return
+  sharedObserver ??= new IntersectionObserver((entries) => {
+    for (const entry of entries) observedTargets.get(entry.target)?.(entry.isIntersecting)
+  })
+  observedTargets.set(el, set)
+  sharedObserver.observe(el)
+}
+
+function unobserveVisibility(el: Element) {
+  observedTargets.delete(el)
+  sharedObserver?.unobserve(el)
+}
+</script>
+
 <script setup lang="ts">
 defineOptions({ inheritAttrs: false })
 
@@ -22,6 +48,38 @@ let generation = 0
 let objectURL = ''
 let controller: AbortController | null = null
 let startedAt = 0
+
+const offscreen = ref(false)
+let observedEl: Element | null = null
+let visibilityResolvers: Array<() => void> = []
+
+function resolveVisibilityWaiters() {
+  const resolvers = visibilityResolvers
+  visibilityResolvers = []
+  for (const resolve of resolvers) resolve()
+}
+
+// Resolves once the image is (back) in the viewport — event-driven, so parked
+// materialize loops cost zero timers while offscreen.
+function untilVisible(current: number) {
+  if (!offscreen.value || current !== generation) return Promise.resolve()
+  return new Promise<void>((resolve) => { visibilityResolvers.push(resolve) })
+}
+
+// The `:key` on NuxtImg recreates the <img> whenever the source changes, so a
+// function ref (re-)observes each incarnation rather than only the first.
+function trackImgEl(instance: unknown) {
+  const el = (instance as { $el?: Element } | null)?.$el ?? null
+  if (el === observedEl) return
+  if (observedEl) unobserveVisibility(observedEl)
+  observedEl = el instanceof Element ? el : null
+  if (observedEl) {
+    observeVisibility(observedEl, (visible) => {
+      offscreen.value = !visible
+      if (visible) resolveVisibilityWaiters()
+    })
+  }
+}
 
 // Loads that resolve within this window (HTTP cache hits, same-tick decodes)
 // appear together with the surrounding page paint — easing them in would make
@@ -66,6 +124,10 @@ function retryDelay(response: Response, attempt: number) {
 async function materialize(source: string, current: number) {
   let attempt = 0
   while (current === generation) {
+    // Don't burn network polling 202s for images nobody can see; the loop
+    // resumes the moment the element scrolls into the viewport.
+    await untilVisible(current)
+    if (current !== generation) return
     try {
       const response = await fetch(source, {
         cache: 'no-store',
@@ -133,17 +195,25 @@ function onError(event: Event | string) {
 }
 
 watch(() => [props.src, props.persistent], begin, { immediate: true })
-onBeforeUnmount(() => { generation++; controller?.abort(); releaseObjectURL() })
+onBeforeUnmount(() => {
+  generation++
+  controller?.abort()
+  releaseObjectURL()
+  if (observedEl) unobserveVisibility(observedEl)
+  observedEl = null
+  resolveVisibilityWaiters()
+})
 </script>
 
 <template>
   <NuxtImg
     v-if="renderedSource"
     :key="renderedSource"
+    :ref="trackImgEl"
     decoding="async"
     v-bind="forwardedAttrs"
     :src="renderedSource"
-    :class="[attrs.class, 'heya-loading-image', { 'is-loading': loading, 'is-failed': failed, 'is-eased': eased }]"
+    :class="[attrs.class, 'heya-loading-image', { 'is-loading': loading, 'is-failed': failed, 'is-eased': eased, 'is-offscreen': offscreen }]"
     @load="onLoad"
     @error="onError"
   />
@@ -190,6 +260,15 @@ onBeforeUnmount(() => { generation++; controller?.abort(); releaseObjectURL() })
 }
 @keyframes heya-image-fade-in {
   from { opacity: 0; }
+}
+
+/* Offscreen loading spinners freeze — a paused animation produces no frames,
+   so a rail full of lazy images that never load stops costing paint. Only the
+   is-loading state pauses: the one-shot is-eased fade must keep running even
+   offscreen, because pausing a `from { opacity: 0 }` animation would freeze an
+   already-loaded image at fully invisible until it crosses the viewport. */
+.heya-loading-image.is-loading.is-offscreen {
+  animation-play-state: paused;
 }
 
 @media (prefers-reduced-motion: reduce) {

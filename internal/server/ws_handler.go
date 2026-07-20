@@ -73,7 +73,7 @@ func handleWebSocket(hub *eventhub.Hub, sessionLookup auth.SessionLookup) http.H
 		var flush <-chan time.Time
 		if !rawEvents {
 			coalescer = newWSEventCoalescer()
-			flushTicker = time.NewTicker(250 * time.Millisecond)
+			flushTicker = time.NewTicker(1000 * time.Millisecond)
 			flush = flushTicker.C
 			defer flushTicker.Stop()
 		}

@@ -15,6 +15,7 @@ package sessions
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/karbowiak/heya/internal/eventhub"
@@ -25,6 +26,15 @@ import (
 // couple of network blips; longer would keep zombies around when a tab
 // gets closed without a clean DELETE.
 const SessionTimeout = 30 * time.Second
+
+// minHeartbeatBroadcastInterval bounds how often a position-only heartbeat
+// (same media item/entity, same paused state — just position ticking) may
+// trigger a session.update broadcast. N active sessions heartbeating every
+// ~10s would otherwise mean a global broadcast every ~10/N seconds, and each
+// broadcast makes every connected client refetch /api/sessions/active. A
+// suppressed position update is always covered by the next heartbeat, at
+// most ~10s later (the client's heartbeat cadence).
+const minHeartbeatBroadcastInterval = 5 * time.Second
 
 // Session is the live snapshot of one in-progress playback. All fields
 // come from a mix of heartbeat-time client data and server-resolved
@@ -92,6 +102,11 @@ type Store struct {
 	cancel    context.CancelFunc
 	done      chan struct{}
 	closeOnce sync.Once
+	// lastBroadcastAt is UnixNano of the last emitted session.update, used to
+	// rate-limit position-only heartbeat broadcasts. Plain atomic rather than
+	// mu-guarded: broadcast() is called both under s.mu (Upsert) and after it
+	// has been released (EndForUser, purge), so it needs its own discipline.
+	lastBroadcastAt atomic.Int64
 }
 
 // New constructs a Store and kicks off a background purge goroutine that
@@ -136,6 +151,17 @@ func (s *Store) Upsert(incoming Session) *Session {
 
 	now := time.Now()
 	if existing, ok := s.data[incoming.SessionID]; ok {
+		// One player instance (session_id) lives across track/episode changes
+		// (background music keeps heartbeating the same session as the track
+		// advances), so identity can legitimately change mid-session. Snapshot
+		// it before the fields below get overwritten: this is what a track
+		// change or a play/pause flip looks like, and it's worth an immediate
+		// broadcast — everything else on a heartbeat is just position ticking.
+		significant := existing.MediaItemID != incoming.MediaItemID ||
+			existing.EntityType != incoming.EntityType ||
+			existing.EntityID != incoming.EntityID ||
+			existing.Paused != incoming.Paused
+
 		// Preserve StartedAt as the original session start. Everything
 		// else can update — the FE may have lacked the stream-info
 		// response on the first beat (so transcode fields were empty),
@@ -145,6 +171,7 @@ func (s *Store) Upsert(incoming Session) *Session {
 		existing.TotalSeconds = incoming.TotalSeconds
 		existing.Paused = incoming.Paused
 		existing.LastHeartbeatAt = now
+		existing.MediaItemID = incoming.MediaItemID
 		// Title + per-type display fields — server resolves on every
 		// beat, so always update.
 		if incoming.MediaTitle != "" {
@@ -169,7 +196,11 @@ func (s *Store) Upsert(incoming Session) *Session {
 			existing.Height = incoming.Height
 			existing.BitrateKbps = incoming.BitrateKbps
 		}
-		s.broadcast()
+		// Significant changes broadcast immediately; a plain position tick
+		// only broadcasts if the rate limit window has elapsed.
+		if significant || s.broadcastDue() {
+			s.broadcast()
+		}
 		return existing
 	}
 
@@ -276,7 +307,15 @@ func (s *Store) broadcast() {
 	if s.hub == nil {
 		return
 	}
+	s.lastBroadcastAt.Store(time.Now().UnixNano())
 	s.hub.Emit(EventSessionUpdate, SessionUpdatePayload{})
+}
+
+// broadcastDue reports whether minHeartbeatBroadcastInterval has elapsed
+// since the last broadcast, gating position-only heartbeat updates.
+func (s *Store) broadcastDue() bool {
+	last := s.lastBroadcastAt.Load()
+	return last == 0 || time.Since(time.Unix(0, last)) >= minHeartbeatBroadcastInterval
 }
 
 // EventSessionUpdate is a change notification only — it carries no session data

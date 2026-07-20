@@ -13,13 +13,12 @@ import (
 
 func (h *Hub) StartPeriodicEmitters(ctx context.Context, db *pgxpool.Pool) {
 	h.startRuntime(ctx, func(runCtx context.Context) { h.queueTelemetryTicker(runCtx, db) })
-	h.startRuntime(ctx, func(runCtx context.Context) { h.statsTicker(runCtx, db) })
 }
 
 // queueTelemetryTicker makes one grouped pass over live River rows every ten
 // seconds and fans that snapshot out to queue status, scheduled-task progress,
-// active jobs, scan progress, and the stats ticker. A 650k-row parked backlog
-// must not turn each UI surface into its own two-second full-table scan.
+// active jobs, and scan progress. A 650k-row parked backlog must not turn
+// each UI surface into its own two-second full-table scan.
 func (h *Hub) queueTelemetryTicker(ctx context.Context, db *pgxpool.Pool) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
@@ -218,52 +217,4 @@ func (h *Hub) emitScanProgress(ctx context.Context, db *pgxpool.Pool, activeUnit
 		libs = append(libs, lp)
 	}
 	h.Emit(EventScanProgress, ScanProgressPayload{Libraries: libs})
-}
-
-func (h *Hub) statsTicker(ctx context.Context, db *pgxpool.Pool) {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if !h.HasSubscribers() {
-				continue
-			}
-			s := StatsPayload{MediaCounts: make(map[string]int)}
-
-			_ = db.QueryRow(ctx, "SELECT count(*) FROM libraries").Scan(&s.Libraries)
-			if rows, err := db.Query(ctx, `SELECT media_type::text, count(*) FROM media_items GROUP BY media_type`); err == nil {
-				for rows.Next() {
-					var mediaType string
-					var count int
-					if rows.Scan(&mediaType, &count) == nil {
-						s.MediaCounts[mediaType] = count
-						s.TotalMedia += count
-					}
-				}
-				rows.Close()
-			}
-			s.TotalPeople = estimatedRows(ctx, db, "public.people")
-			s.TotalFiles = estimatedRows(ctx, db, "public.library_files")
-
-			status := h.queueStatusSnapshot()
-			s.QueuePending = status.Pending
-			s.QueueRunning = status.Running
-
-			h.Emit(EventStatsUpdated, s)
-		}
-	}
-}
-
-func estimatedRows(ctx context.Context, db *pgxpool.Pool, table string) int {
-	var count int64
-	if err := db.QueryRow(ctx,
-		`SELECT GREATEST(COALESCE((SELECT reltuples::bigint FROM pg_class WHERE oid = to_regclass($1)), 0), 0)`,
-		table,
-	).Scan(&count); err != nil {
-		return 0
-	}
-	return int(count)
 }

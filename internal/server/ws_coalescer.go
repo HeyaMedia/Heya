@@ -15,12 +15,14 @@ type wsEventCoalescer struct {
 	scanProgress *eventhub.Event
 	scanner      map[int64]eventhub.Event
 	tasks        map[string]eventhub.Event
+	media        map[int64]eventhub.Event
 }
 
 func newWSEventCoalescer() *wsEventCoalescer {
 	return &wsEventCoalescer{
 		scanner: make(map[int64]eventhub.Event),
 		tasks:   make(map[string]eventhub.Event),
+		media:   make(map[int64]eventhub.Event),
 	}
 }
 
@@ -57,14 +59,29 @@ func (c *wsEventCoalescer) Queue(ev eventhub.Event) bool {
 		if id, ok := scanLibraryID(ev.Payload); ok {
 			delete(c.scanner, id)
 		}
+		// A queued scan.progress snapshot predates this completion and may
+		// still list the finishing library as active — flushing it after the
+		// completed event would briefly resurrect the scan in the UI. Drop
+		// it; the periodic ticker re-emits within 10s if scans remain.
+		c.scanProgress = nil
 		return false
+	case eventhub.EventMediaUpdated:
+		// Bulk metadata/asset passes (enrich, image, ratings workers) fire one
+		// event per touched item; latest payload per id wins and each id is
+		// announced once per flush instead of once per write.
+		id, ok := mediaItemID(ev.Payload)
+		if !ok || id == 0 {
+			return false
+		}
+		c.media[id] = ev
+		return true
 	default:
 		return false
 	}
 }
 
 func (c *wsEventCoalescer) Drain() []eventhub.Event {
-	result := make([]eventhub.Event, 0, 1+len(c.scanner)+len(c.tasks))
+	result := make([]eventhub.Event, 0, 1+len(c.scanner)+len(c.tasks)+len(c.media))
 	if c.scanProgress != nil {
 		result = append(result, *c.scanProgress)
 		c.scanProgress = nil
@@ -90,6 +107,16 @@ func (c *wsEventCoalescer) Drain() []eventhub.Event {
 	for _, id := range taskIDs {
 		result = append(result, c.tasks[id])
 		delete(c.tasks, id)
+	}
+
+	mediaIDs := make([]int64, 0, len(c.media))
+	for id := range c.media {
+		mediaIDs = append(mediaIDs, id)
+	}
+	sort.Slice(mediaIDs, func(i, j int) bool { return mediaIDs[i] < mediaIDs[j] })
+	for _, id := range mediaIDs {
+		result = append(result, c.media[id])
+		delete(c.media, id)
 	}
 	return result
 }
@@ -204,6 +231,24 @@ func taskProgressPayload(payload any) (eventhub.TaskProgressPayload, bool) {
 			return decoded, false
 		}
 		return decoded, true
+	}
+}
+
+func mediaItemID(payload any) (int64, bool) {
+	switch p := payload.(type) {
+	case eventhub.MediaPayload:
+		return p.MediaItemID, true
+	case *eventhub.MediaPayload:
+		if p == nil {
+			return 0, false
+		}
+		return p.MediaItemID, true
+	default:
+		var decoded eventhub.MediaPayload
+		if !decodePayload(payload, &decoded) {
+			return 0, false
+		}
+		return decoded.MediaItemID, true
 	}
 }
 

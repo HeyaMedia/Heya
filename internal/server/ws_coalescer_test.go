@@ -75,6 +75,44 @@ func TestWSEventCoalescerMergesTaskCountsAndCurrentItem(t *testing.T) {
 	}
 }
 
+func TestWSEventCoalescerLatestMediaUpdatedPerItem(t *testing.T) {
+	c := newWSEventCoalescer()
+	for _, title := range []string{"stale", "fresh"} {
+		queued := c.Queue(eventhub.Event{
+			Type:    eventhub.EventMediaUpdated,
+			Payload: eventhub.MediaPayload{MediaItemID: 42, Title: title},
+		})
+		if !queued {
+			t.Fatal("media.updated event was not queued")
+		}
+	}
+
+	drained := c.Drain()
+	if len(drained) != 1 {
+		t.Fatalf("drained %d events, want 1", len(drained))
+	}
+	p := drained[0].Payload.(eventhub.MediaPayload)
+	if p.Title != "fresh" {
+		t.Fatalf("unexpected latest payload: %+v", p)
+	}
+}
+
+func TestWSEventCoalescerKeepsMediaItemsSeparate(t *testing.T) {
+	c := newWSEventCoalescer()
+	for _, id := range []int64{5, 2} {
+		c.Queue(eventhub.Event{Type: eventhub.EventMediaUpdated, Payload: eventhub.MediaPayload{MediaItemID: id}})
+	}
+	drained := c.Drain()
+	if len(drained) != 2 {
+		t.Fatalf("drained %d events, want 2", len(drained))
+	}
+	first := drained[0].Payload.(eventhub.MediaPayload)
+	second := drained[1].Payload.(eventhub.MediaPayload)
+	if first.MediaItemID != 2 || second.MediaItemID != 5 {
+		t.Fatalf("unexpected media item order: %d, %d", first.MediaItemID, second.MediaItemID)
+	}
+}
+
 func TestWSEventCoalescerScanCompletionDropsPendingDetail(t *testing.T) {
 	c := newWSEventCoalescer()
 	c.Queue(eventhub.Event{Type: eventhub.EventScannerEvent, Payload: eventhub.ScannerEventPayload{LibraryID: 9}})
@@ -84,5 +122,16 @@ func TestWSEventCoalescerScanCompletionDropsPendingDetail(t *testing.T) {
 	}
 	if drained := c.Drain(); len(drained) != 0 {
 		t.Fatalf("drained %d stale events after completion", len(drained))
+	}
+}
+
+func TestWSEventCoalescerScanCompletionDropsPendingProgress(t *testing.T) {
+	c := newWSEventCoalescer()
+	c.Queue(eventhub.Event{Type: eventhub.EventScanProgress, Payload: eventhub.ScanPayload{LibraryID: 9}})
+	c.Queue(eventhub.Event{Type: eventhub.EventScanCompleted, Payload: eventhub.ScanPayload{LibraryID: 9}})
+	// The queued progress snapshot predates the completion — flushing it
+	// afterwards would resurrect the finished scan in the UI.
+	if drained := c.Drain(); len(drained) != 0 {
+		t.Fatalf("drained %d stale progress events after completion", len(drained))
 	}
 }

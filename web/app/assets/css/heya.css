@@ -1406,19 +1406,23 @@ a { color: inherit; text-decoration: none; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Bars animate transform: scaleY() (compositor-only, no reflow) instead of
+   height — each span's static height is its own keyframe max (14px/16px/
+   16px), scaleY(0..1) reproduces the original px curve exactly, and
+   transform-origin: bottom keeps the flex-end-anchored base glued down. */
 @keyframes vu1 {
-  0%, 100% { height: 6px; }
-  50% { height: 14px; }
+  0%, 100% { transform: scaleY(0.4286); } /* 6px / 14px max */
+  50% { transform: scaleY(1); } /* 14px */
 }
 @keyframes vu2 {
-  0%, 100% { height: 10px; }
-  40% { height: 4px; }
-  70% { height: 16px; }
+  0%, 100% { transform: scaleY(0.625); } /* 10px / 16px max */
+  40% { transform: scaleY(0.25); } /* 4px */
+  70% { transform: scaleY(1); } /* 16px */
 }
 @keyframes vu3 {
-  0%, 100% { height: 8px; }
-  35% { height: 16px; }
-  65% { height: 6px; }
+  0%, 100% { transform: scaleY(0.5); } /* 8px / 16px max */
+  35% { transform: scaleY(1); } /* 16px */
+  65% { transform: scaleY(0.375); } /* 6px */
 }
 .vu {
   display: inline-flex; align-items: flex-end; gap: 2px;
@@ -1426,13 +1430,17 @@ a { color: inherit; text-decoration: none; }
 }
 .vu span {
   width: 3px;
+  height: 14px;
   background: var(--gold);
   border-radius: 1px;
+  transform-origin: bottom;
+  will-change: transform;
   animation: vu1 0.9s ease-in-out infinite;
 }
-.vu span:nth-child(2) { animation-name: vu2; animation-duration: 1.1s; }
-.vu span:nth-child(3) { animation-name: vu3; animation-duration: 0.85s; }
-.vu.paused span { animation-play-state: paused; height: 4px; }
+.vu span:nth-child(2) { height: 16px; animation-name: vu2; animation-duration: 1.1s; }
+.vu span:nth-child(3) { height: 16px; animation-name: vu3; animation-duration: 0.85s; }
+.vu.paused span { animation-play-state: paused; transform: scaleY(0.2857); } /* 4px / 14px max */
+.vu.paused span:nth-child(2), .vu.paused span:nth-child(3) { transform: scaleY(0.25); } /* 4px / 16px max */
 
 /* Settings pages — shared "sv2" chrome. Every settings page used to carry a
    scoped copy of these; pages with deliberate deviations (compact toolbars,
