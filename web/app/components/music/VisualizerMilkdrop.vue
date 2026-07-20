@@ -25,7 +25,7 @@
 <script setup lang="ts">
 import type { Visualizer } from 'butterchurn'
 import type { AnalyserBridge } from '~/engine/analysis/analyserBridge'
-import { getAudioContext } from '~/engine/context'
+import { acquireContextWake, getAudioContext, releaseContextWake } from '~/engine/context'
 
 const vis = useVisualizer()
 const player = usePlayerBindings()
@@ -58,6 +58,7 @@ const shouldAnimate = computed(() => ready.value && pageVisibility.value === 'vi
 
 let visualizer: Visualizer | null = null
 let presets: Record<string, object> = {}
+let holdsContextWake = false
 let presetKeys: string[] = []
 let presetIndex = 0
 
@@ -218,10 +219,11 @@ onMounted(async () => {
   if (isNative) {
     // No AnalyserNode to connect to under native playback — the frame data
     // arrives as copied PCM via usePlaybackAnalyser() instead (fed in per
-    // frame below via render({ audioLevels })). If that stream itself isn't
-    // available (e.g. the native shell doesn't support the visualizer
-    // capability), there's nothing to drive butterchurn with at all.
-    if (!analyser.available.value) {
+    // frame below via render({ audioLevels })). Gate on the shell's declared
+    // capability, not stream liveness: frames only start flowing once this
+    // component's demand registration reaches the Rust engine, moments after
+    // mount.
+    if (!player.nativeAudioCapabilities.value?.visualizer) {
       error.value = 'No native audio visualizer stream available.'
       return
     }
@@ -237,6 +239,10 @@ onMounted(async () => {
     if (!ctx || !node) { error.value = 'No audio context available'; return }
     audioCtx = ctx
     webAnalyserNode = node
+    // Butterchurn animates off AnalyserNode time even while paused — hold the
+    // shared context awake so the idle auto-suspend doesn't freeze it.
+    acquireContextWake()
+    holdsContextWake = true
   }
 
   try {
@@ -326,6 +332,10 @@ onUnmounted(() => {
   stopRenderLoop()
   resizeObserver?.disconnect()
   if (autoTimer) clearInterval(autoTimer)
+  if (holdsContextWake) {
+    releaseContextWake()
+    holdsContextWake = false
+  }
   if (visualizer && connectedAnalyserNode) {
     try { visualizer.disconnectAudio(connectedAnalyserNode) } catch { /* already gone */ }
   }

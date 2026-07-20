@@ -1,7 +1,7 @@
 import type { Ref } from 'vue'
 import type { CrossfadeMode } from '~~/shared/types/audio'
 import { AnalyserBridge } from '~/engine/analysis/analyserBridge'
-import { getAudioContext, resumeContext } from '~/engine/context'
+import { getAudioContext, resumeContext, scheduleIdleSuspend } from '~/engine/context'
 import { alog, shortUrl } from '~/engine/debug'
 import type { TransitionPlan } from '~/engine/crossfade/strategy'
 import { DeckManager } from '~/engine/deckManager'
@@ -107,11 +107,13 @@ function createEngine() {
   function pause() {
     deckManager.pause()
     isPlaying.value = false
+    scheduleIdleSuspend()
   }
 
   function stop() {
     deckManager.stopAll()
     isPlaying.value = false
+    scheduleIdleSuspend()
   }
 
   async function resume() {

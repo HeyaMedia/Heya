@@ -34,7 +34,7 @@
     <div
       v-if="srcA"
       class="ambient-layer"
-      :class="[`grade-${gradeA}`, { visible: showA, drift: !reducedMotion && gradeA === 'pool' }]"
+      :class="[`grade-${gradeA}`, { visible: showA, drift: !reducedMotion && gradeA === 'pool' && showA }]"
     >
       <LoadingImage :src="srcA" class="ambient-img" :style="mainStyleA" alt="" />
       <NuxtImg v-if="mirrorStyleA" :src="srcA" class="ambient-mirror" :style="mirrorStyleA" alt="" />
@@ -42,7 +42,7 @@
     <div
       v-if="srcB"
       class="ambient-layer"
-      :class="[`grade-${gradeB}`, { visible: !showA, drift: !reducedMotion && gradeB === 'pool' }]"
+      :class="[`grade-${gradeB}`, { visible: !showA, drift: !reducedMotion && gradeB === 'pool' && !showA }]"
     >
       <LoadingImage :src="srcB" class="ambient-img" :style="mainStyleB" alt="" />
       <NuxtImg v-if="mirrorStyleB" :src="srcB" class="ambient-mirror" :style="mirrorStyleB" alt="" />

@@ -1,4 +1,5 @@
 import { useAudioEngine } from '~/composables/useAudioEngine'
+import { nativeAnalyserDemandActive } from '~/composables/usePlaybackAnalyser'
 import type { QueueItem, QueueSourceInput } from '~/composables/useQueue'
 import { resumeContext } from '~/engine/context'
 import { shouldSuppressCrossfade } from '~/engine/crossfade/albumAware'
@@ -522,9 +523,10 @@ export const usePlayerStore = defineStore('player', () => {
       crossfadeMode: crossfade.mode,
       crossfadeSeconds: crossfade.durationSeconds,
       albumAware: crossfade.albumAware,
-      // Rust publishes bounded time-domain and FFT snapshots. The visualizer
-      // adapter consumes these only while native playback is authoritative.
-      visualizerEnabled: true,
+      // Rust publishes bounded time-domain and FFT snapshots only while a
+      // mounted visualizer is drawing them — every frame otherwise costs an
+      // FFT + JSON serialize + webview eval for nobody.
+      visualizerEnabled: nativeAnalyserDemandActive(),
     }
   }
 

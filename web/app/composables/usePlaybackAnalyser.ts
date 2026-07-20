@@ -1,4 +1,15 @@
 import type { AnalyserBridge } from '~/engine/analysis/analyserBridge'
+import { useAudioSettingsStore } from '~/stores/audio-settings'
+
+// Live count of mounted visualizer consumers. The native engine only streams
+// FFT/PCM frames while someone is actually drawing them — this is what flips
+// `visualizerEnabled` in nativeProcessingSettings().
+const nativeAnalyserDemand = ref(0)
+
+/** True while any mounted visualizer is consuming analyser frames. */
+export function nativeAnalyserDemandActive(): boolean {
+  return nativeAnalyserDemand.value > 0
+}
 
 /**
  * Backend-neutral analyser data for Heya's lightweight canvas visualizers.
@@ -11,6 +22,19 @@ export function usePlaybackAnalyser() {
   const player = usePlayerBindings()
   const engine = useAudioEngine() as ReturnType<typeof useAudioEngine> & {
     analyserBridge?: AnalyserBridge
+  }
+
+  // Each component instance counts as demand for its scope's lifetime, and
+  // every 0↔1 flip re-pushes processing settings so the native engine starts
+  // or stops its visualizer tap.
+  if (getCurrentScope()) {
+    const settings = useAudioSettingsStore()
+    nativeAnalyserDemand.value++
+    if (nativeAnalyserDemand.value === 1) settings.applyToEngine()
+    onScopeDispose(() => {
+      nativeAnalyserDemand.value = Math.max(0, nativeAnalyserDemand.value - 1)
+      if (nativeAnalyserDemand.value === 0) settings.applyToEngine()
+    })
   }
 
   let nativeRevision = -1

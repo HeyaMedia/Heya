@@ -254,6 +254,7 @@ export const useAudioSettingsStore = defineStore('audio-settings', () => {
     setReplayGainMode, setReplayGainTarget, setCrossfeedEnabled, setCrossfeedPreset,
     setLimiterEnabled, moveDspBlock,
     applyAudioProfile, currentAudioProfile, resetAudioProfile, registerEngineBridge,
+    applyToEngine,
   }
 })
 
