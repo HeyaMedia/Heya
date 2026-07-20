@@ -19,12 +19,24 @@
 //     mouse events.
 //   • Nothing load-bearing leans on overscroll-behavior (Safari 16+ only).
 //
-// Positioning: the rail is an absolutely-positioned child of the scroll element
-// itself (so it inherits the element's own positioning context — works equally
-// for a full-page scroller, a portaled sheet body, or a nested panel). An
-// absolutely-positioned child of a scroll container scrolls WITH the content,
-// so each frame we counter-translate the rail by the live scrollTop to keep it
-// glued to the current viewport top. The thumb moves within that rail.
+// Positioning: the rail lives inside a ZERO-HEIGHT `position: sticky;
+// bottom: 0` anchor kept as the scroller's last in-flow child, so the ENGINE
+// glues it to the scrollport edge on the compositor thread. Two earlier bugs
+// forced this shape — the previous design (absolute rail counter-translated by
+// scrollTop each rAF) must not come back:
+//   1. A translated absolute child EXTENDS the scroller's scrollable overflow.
+//     Rail bottom = scrollTop + clientHeight, so any slack (fractional
+//     scrollTop at non-integer zoom, Safari's unclamped elastic scrollTop)
+//     grew scrollHeight, which raised max, which let the user scroll further…
+//     a ratchet that scrolled far past the real content on Mac trackpads.
+//     The sticky anchor is 0px tall at its flow position and sticky offsets
+//     don't contribute to scrollable overflow, so scrollHeight stays honest.
+//   2. Async/compositor scrolling (Firefox APZ, Safari) paints frames before
+//     the main thread sees the scroll event, so a JS-translated rail lagged
+//     and visibly jumped during momentum scrolls. Sticky is engine-positioned:
+//     zero lag, zero per-frame JS.
+// The thumb still moves via JS within that rail (small-amplitude, so any
+// main-thread lag is imperceptible).
 
 const MIN_THUMB = 32          // px — thumb never shrinks below this
 const RAIL_WIDTH = 14         // px — hit area at the right edge (fine pointers)
@@ -61,23 +73,29 @@ function clamp(v: number, lo: number, hi: number) {
 export function createOverlayScrollbar(el: HTMLElement): OverlayScrollbarController {
   const doc = el.ownerDocument
 
-  // Rail + thumb (decorative; kept out of the a11y tree and tab order).
+  // Anchor (sticky, 0-height, in-flow) → rail (absolute within) → thumb.
+  // Decorative; kept out of the a11y tree and tab order.
+  const anchor = doc.createElement('div')
+  anchor.className = 'hos-anchor'
+  anchor.setAttribute('aria-hidden', 'true')
   const rail = doc.createElement('div')
   rail.className = 'hos-rail'
-  rail.setAttribute('aria-hidden', 'true')
   const thumb = doc.createElement('div')
   thumb.className = 'hos-thumb'
   rail.appendChild(thumb)
+  anchor.appendChild(rail)
 
-  // The rail anchors to the scroll element, which must establish a containing
-  // block. Only touch `position` when it's static, and restore on destroy.
+  // Legacy courtesy: some page CSS grew up with the controller making static
+  // scrollers position:relative (the old absolute rail needed it). The sticky
+  // anchor doesn't, but keep the mutation so those containing-block
+  // assumptions hold. Restored on destroy.
   let restorePosition = false
   if (getComputedStyle(el).position === 'static') {
     el.style.position = 'relative'
     restorePosition = true
   }
   el.classList.add('hos-managed')
-  el.appendChild(rail)
+  el.appendChild(anchor)
 
   let enabled = true
   let overflowNow = false
@@ -114,11 +132,10 @@ export function createOverlayScrollbar(el: HTMLElement): OverlayScrollbarControl
     }
     rail.style.display = ''
 
+    // The sticky anchor keeps the rail glued to the scrollport (see header
+    // comment); JS only sizes it to the visible height and drives the thumb.
     railH = ch
     rail.style.height = `${ch}px`
-    // Glue the rail to the live viewport top (actual scrollTop, so it stays
-    // pinned even through Safari's elastic overscroll).
-    rail.style.transform = `translateY(${el.scrollTop}px)`
 
     // Clamp scrollTop into range for the thumb math (Safari rubber-band).
     const max = sh - ch
@@ -230,11 +247,19 @@ export function createOverlayScrollbar(el: HTMLElement): OverlayScrollbarControl
     ro.disconnect()
     ro.observe(el)
     for (const child of Array.from(el.children)) {
-      if (child !== rail) ro.observe(child)
+      if (child !== anchor) ro.observe(child)
     }
   }
   observeTargets()
-  const mo = new MutationObserver(() => { observeTargets(); scheduleMeasure() })
+  const mo = new MutationObserver(() => {
+    // bottom:0 sticky only glues while the anchor's flow position is at (or
+    // below) the scrollport bottom, so it must stay the LAST child. Re-append
+    // when framework renders insert content after it (the move re-fires this
+    // observer once; the guard makes that pass a no-op).
+    if (el.lastElementChild !== anchor) el.appendChild(anchor)
+    observeTargets()
+    scheduleMeasure()
+  })
   mo.observe(el, { childList: true })
 
   const onWinResize = () => scheduleMeasure()
@@ -263,7 +288,7 @@ export function createOverlayScrollbar(el: HTMLElement): OverlayScrollbarControl
       el.removeEventListener('scroll', onScroll)
       el.removeEventListener('pointermove', onPointerMove)
       window.removeEventListener('resize', onWinResize)
-      rail.remove()
+      anchor.remove()
       el.classList.remove('hos-managed')
       if (restorePosition) el.style.position = ''
     },

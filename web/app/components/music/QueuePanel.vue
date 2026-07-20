@@ -9,7 +9,7 @@
 
     <!-- Queue tab — Played / Now Playing / Up Next, three discrete buckets so
          the user can see what's already happened and what's coming. -->
-    <div v-if="tab === 'queue'" v-overlay-scrollbar class="qp-body">
+    <div v-if="tab === 'queue'" ref="queueBodyEl" v-overlay-scrollbar class="qp-body">
       <div class="qp-autoplay">
         <div class="qp-autoplay-copy">
           <div class="qp-autoplay-title">Play tracks like this…</div>
@@ -58,7 +58,7 @@
 
       <!-- Now Playing (highlighted) -->
       <template v-if="currentTrack">
-        <div class="qp-section-label">Now Playing</div>
+        <div ref="nowPlayingLabelEl" class="qp-section-label">Now Playing</div>
         <div class="qp-row current">
           <VuMeter :playing="playing" />
           <div class="qp-row-info">
@@ -257,6 +257,39 @@ const radioSuggestions = useState<import('~/composables/useRadio').MusicCatalogS
 // slot (same one the playbar's Expand button uses).
 const nowPlayingOpen = useState('now_playing_open', () => false)
 function openFullscreen() { nowPlayingOpen.value = true }
+
+// --- Keep the current track pinned at the top of the queue scroller ---------
+// Played history renders ABOVE Now Playing, so without this a freshly opened
+// panel shows stale history while the active track sits below the fold — and
+// each auto-advance buries it one row deeper. Best-effort: scroll so the Now
+// Playing label lands at the top of the viewport; when there isn't enough
+// history above (or queue below) the browser clamps the target for us.
+const queueBodyEl = ref<HTMLElement | null>(null)
+const nowPlayingLabelEl = ref<HTMLElement | null>(null)
+
+function pinCurrentTrack(smooth: boolean) {
+  const body = queueBodyEl.value
+  const label = nowPlayingLabelEl.value
+  if (!body || !label) return
+  const top = label.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop
+  const reduced =
+    document.documentElement.dataset.motion === 'reduced' ||
+    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+  body.scrollTo({ top: Math.max(0, top), behavior: smooth && !reduced ? 'smooth' : 'auto' })
+}
+
+// Instant pin whenever the queue view (re)appears — panel opened, tab switched
+// back from Lyrics, or the whole panel remounted on navigation (the v-if body
+// renders this tick, hence nextTick). `immediate` covers the mount case.
+watch(
+  () => queueOpen.value && tab.value === 'queue',
+  (visible) => { if (visible) nextTick(() => pinCurrentTrack(false)) },
+  { immediate: true },
+)
+// Smooth re-pin as playback advances (or the user jumps around the queue).
+watch(currentIndex, () => {
+  if (queueOpen.value && tab.value === 'queue') nextTick(() => pinCurrentTrack(true))
+})
 
 // --- Lyrics fetch + sync ----------------------------------------------------
 
