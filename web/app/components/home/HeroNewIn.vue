@@ -126,6 +126,7 @@
 // already fetched.
 import type { MediaItem } from '~~/shared/types'
 import type { ImageTone } from '~/composables/useImageTone'
+import { ref } from 'vue'
 
 export interface RecentTVEntry {
   media_item_id: number
@@ -203,12 +204,12 @@ const feed = computed<FeedRow[]>(() => {
     return rank(a) - rank(b) || new Date(b.added_at).getTime() - new Date(a.added_at).getTime()
   })
   for (const e of tv.slice(0, 9)) {
-    const ref = { id: e.media_item_id, public_id: e.media_item_public_id }
+    const mediaRef = { id: e.media_item_id, public_id: e.media_item_public_id }
     rows.push({
       key: `tv-${e.media_item_id}-${e.kind}-${e.season_number}-${e.episode_number}-${e.added_at}`,
       to: `/tv/${e.slug}`,
-      art: usePosterUrl(ref) ?? '',
-      backdrop: useBackdropUrl(ref) || null,
+      art: usePosterUrl(mediaRef) ?? '',
+      backdrop: useBackdropUrl(mediaRef) || null,
       title: e.title,
       sub: entrySub(e),
       kind: kindLabel(e),

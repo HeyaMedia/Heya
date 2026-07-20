@@ -20,6 +20,8 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
+
 // Canvas-rendered waveform with click/drag-to-seek.
 //
 // Renders the entire waveform as vertical bars. The already-played
@@ -138,17 +140,23 @@ let lastPlayedX = -1
 // Background-safe: playback continues while the tab is hidden, but nothing
 // is looking at this canvas — skip painting and catch up with a single
 // redraw once the page is visible again instead of burning CPU on a screen
-// nobody sees.
+// nobody sees. Some embedded webviews keep `visibilityState` at `hidden`
+// while their native window is active, so focus is the tie-breaker; otherwise
+// the playbar canvas can remain permanently blank in HeyaClient.
 let missedWhileHidden = false
-function onVisibilityChange() {
-  if (document.visibilityState === 'visible' && missedWhileHidden) {
+function isActuallyHidden() {
+  return document.visibilityState === 'hidden' && !document.hasFocus()
+}
+
+function catchUpVisibleDraw() {
+  if (!isActuallyHidden() && missedWhileHidden) {
     missedWhileHidden = false
     draw(true)
   }
 }
 
 function draw(force = false) {
-  if (document.visibilityState === 'hidden') {
+  if (isActuallyHidden()) {
     missedWhileHidden = true
     return
   }
@@ -203,7 +211,7 @@ function draw(force = false) {
   const barCount = Math.min(peaks.length, Math.max(1, Math.floor(c.width / (2 * dpr))))
   const gapPx = Math.max(1, Math.round(dpr))
   const mid = c.height / 2
-  const ref = normRef.value
+  const normalizationRef = normRef.value
   const maxH = (c.height - 2 * dpr) * WF_HEADROOM
 
   for (let i = 0; i < barCount; i++) {
@@ -216,7 +224,7 @@ function draw(force = false) {
     const x = Math.floor((i * c.width) / barCount)
     const nextX = Math.floor(((i + 1) * c.width) / barCount)
     const barWPx = Math.max(1, nextX - x - gapPx)
-    const norm = Math.min(1, Math.max(0, peak) / ref)
+    const norm = Math.min(1, Math.max(0, peak) / normalizationRef)
     const h = Math.max(dpr, Math.pow(norm, WF_GAMMA) * maxH)
     const y = mid - h / 2
     ctx.fillStyle = x < playedX ? fillColor : baseColor
@@ -226,9 +234,9 @@ function draw(force = false) {
 
 onMounted(() => {
   draw()
-  document.addEventListener('visibilitychange', onVisibilityChange)
 })
-onUnmounted(() => document.removeEventListener('visibilitychange', onVisibilityChange))
+useEventListener(document, 'visibilitychange', catchUpVisibleDraw)
+useEventListener(window, 'focus', catchUpVisibleDraw)
 useResizeObserver(wrap, () => draw(true))
 
 watch(() => [props.peaks, props.progress, props.accent], () => draw(), { flush: 'post' })

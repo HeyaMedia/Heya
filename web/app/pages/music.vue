@@ -137,8 +137,8 @@ const phoneSectionTitle = computed(() => {
   if (s?.startsWith('browse')) return 'Browse'
   if (s?.startsWith('playlist-')) {
     // URL segment is the slug now (numeric id still resolves for old links).
-    const ref = s.slice('playlist-'.length)
-    return sidebarPlaylists.value.find((p) => p.slug === ref || String(p.id) === ref)?.name ?? 'Playlist'
+    const playlistRef = s.slice('playlist-'.length)
+    return sidebarPlaylists.value.find((p) => p.slug === playlistRef || String(p.id) === playlistRef)?.name ?? 'Playlist'
   }
   return 'Music'
 })
