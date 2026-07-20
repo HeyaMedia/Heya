@@ -153,6 +153,10 @@ events with your actual clients before selecting `block`; media servers carry
 unusual range requests, manifests, metadata, and third-party client traffic
 that deserve a tuning period. Authorization, cookie, and password values are
 excluded from CRS inspection to avoid placing credentials in audit events.
+Numeric Host headers for loopback, RFC1918, link-local, shared-address/Tailscale,
+and private IPv6 ranges are also excluded from rule `920350`, because direct
+local access by IP is a supported Heya deployment. The rule remains active for
+public numeric Host headers.
 
 The ruleset is pinned as a Go dependency. Dependabot proposes grouped weekly
 minor/patch upgrades for Coraza and CRS, which keeps updates reviewable and

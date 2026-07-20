@@ -606,6 +606,10 @@ SecRequestBodyLimit 27262976
 SecRequestBodyInMemoryLimit 1048576
 SecResponseBodyAccess Off
 Include @crs-setup.conf.example
+# Numeric Host headers are normal for direct LAN, loopback, and tailnet access.
+# Keep CRS 920350 active for public addresses while removing it transactionally
+# for private/local ranges before the CRS phase-one rules execute.
+SecRule REQUEST_HEADERS:Host "@rx ^(?:10(?:\.[0-9]{1,3}){3}|100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])(?:\.[0-9]{1,3}){2}|127(?:\.[0-9]{1,3}){3}|169\.254(?:\.[0-9]{1,3}){2}|172\.(?:1[6-9]|2[0-9]|3[01])(?:\.[0-9]{1,3}){2}|192\.168(?:\.[0-9]{1,3}){2}|\[(?:::1|f[cd][0-9a-f:]*|fe[89ab][0-9a-f:]*)\])(?::[0-9]{1,5})?$" "id:1000,phase:1,pass,t:none,t:lowercase,nolog,ctl:ruleRemoveById=920350"
 Include @owasp_crs/*.conf
 SecRuleUpdateTargetByTag "OWASP_CRS" "!REQUEST_HEADERS:Authorization"
 SecRuleUpdateTargetByTag "OWASP_CRS" "!REQUEST_HEADERS:Cookie"

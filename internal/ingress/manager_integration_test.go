@@ -51,6 +51,9 @@ func TestCaddyHTTPServerPlacesPinnedWAFBeforeHeya(t *testing.T) {
 	if !strings.Contains(config, `"load_owasp_crs":true`) || !strings.Contains(config, "SecRuleEngine DetectionOnly") {
 		t.Fatalf("detection-only embedded CRS missing: %s", config)
 	}
+	if !strings.Contains(config, "ctl:ruleRemoveById=920350") || !strings.Contains(config, "192\\\\.168") {
+		t.Fatalf("private numeric Host exclusion missing: %s", config)
+	}
 }
 
 func TestManagerRejectsUnknownWAFMode(t *testing.T) {
@@ -102,6 +105,32 @@ func TestManagerServesHTTPSAndRedirectsPlainHTTPOnSamePort(t *testing.T) {
 	}
 	if response.StatusCode != http.StatusOK || string(body) != "heya" {
 		t.Fatalf("HTTPS response = %d %q", response.StatusCode, body)
+	}
+	for _, event := range securityRecorder.Snapshot(32).Recent {
+		if event.RuleID == "920350" {
+			t.Fatalf("private numeric Host produced CRS 920350 event: %+v", event)
+		}
+	}
+
+	publicHostRequest, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://"+address+"/health", nil)
+	if err != nil {
+		t.Fatalf("create public numeric Host request: %v", err)
+	}
+	publicHostRequest.Host = "203.0.113.10"
+	publicHostResponse, err := client.Do(publicHostRequest)
+	if err != nil {
+		t.Fatalf("public numeric Host request: %v", err)
+	}
+	_ = publicHostResponse.Body.Close()
+	foundPublicNumericHostMatch := false
+	for _, event := range securityRecorder.Snapshot(32).Recent {
+		if event.RuleID == "920350" {
+			foundPublicNumericHostMatch = true
+			break
+		}
+	}
+	if !foundPublicNumericHostMatch {
+		t.Fatal("public numeric Host did not produce CRS 920350 event")
 	}
 	trustedResponse, err := localtls.Client(dataDir, 10*time.Second).Get("https://" + address + "/health")
 	if err != nil {
