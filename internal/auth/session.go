@@ -13,6 +13,14 @@ import (
 
 var ErrInvalidSession = errors.New("invalid session")
 
+func AllowsNativeAPI(kind string) bool {
+	return kind == "session" || kind == "api_token"
+}
+
+func AllowsJellyfinAPI(kind string) bool {
+	return kind == "session" || kind == "api_token" || kind == "jellyfin_session"
+}
+
 type SessionLookup interface {
 	GetSessionWithUserByToken(ctx context.Context, tokenHash string) (sqlc.GetSessionWithUserByTokenRow, error)
 	GetUserByID(ctx context.Context, id int64) (sqlc.User, error)

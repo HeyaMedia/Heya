@@ -36,7 +36,7 @@ func handleTrickplayVTT(app *service.App) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "text/vtt")
-		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Header().Set("Cache-Control", "private, max-age=86400")
 		_, _ = io.WriteString(w, vtt)
 	}
 }
@@ -76,7 +76,7 @@ func handleTrickplaySprite(app *service.App) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Header().Set("Cache-Control", "private, max-age=86400")
 		http.ServeFile(w, r, spritePath)
 	}
 }
@@ -96,7 +96,7 @@ func handleExtraThumbnail(app *service.App) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Header().Set("Cache-Control", "private, max-age=86400")
 		http.ServeFile(w, r, extra.ThumbnailPath)
 	}
 }

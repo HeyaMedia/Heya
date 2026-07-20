@@ -40,7 +40,7 @@ func TestTMDBImageProxyUsesValidatedRasterBytes(t *testing.T) {
 	require.Equal(t, "/t/p/w342/poster.jpg", upstreamPath)
 	require.Equal(t, "image/png", response.Header().Get("Content-Type"))
 	require.Equal(t, "nosniff", response.Header().Get("X-Content-Type-Options"))
-	require.Equal(t, "public, max-age=604800, immutable", response.Header().Get("Cache-Control"))
+	require.Equal(t, "private, max-age=604800, immutable", response.Header().Get("Cache-Control"))
 	require.Equal(t, encoded.Bytes(), response.Body.Bytes())
 }
 

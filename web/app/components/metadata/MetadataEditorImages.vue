@@ -91,6 +91,7 @@
 
 <script setup lang="ts">
 import type { ArtworkSearchResult } from '~~/shared/types'
+import { withAuthHeaders } from '~/composables/useAuth'
 
 const props = defineProps<{
   mediaId: number
@@ -381,14 +382,11 @@ async function uploadFile(e: Event) {
   // Multipart upload — stays on raw $fetch. $heya / openapi-fetch insist on
   // JSON bodies, and the spec doesn't model the multipart shape anyway.
   try {
-    const { token } = useAuth()
-    await $fetch(`/api/media/${props.mediaId}/assets/upload`, {
+    const url = `/api/media/${props.mediaId}/assets/upload`
+    await $fetch(url, {
       method: 'POST',
       body: form,
-      headers: withClientSurfaceHeaders(
-        `/api/media/${props.mediaId}/assets/upload`,
-        token.value ? { Authorization: `Bearer ${token.value}` } : undefined,
-      ),
+      headers: withAuthHeaders(url),
     })
     emit('ready', { assetType: uploadType.value, url: '' })
     emit('refresh')

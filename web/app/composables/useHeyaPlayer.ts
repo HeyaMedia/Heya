@@ -1,5 +1,6 @@
 import Hls from 'hls.js'
 import type { VideoPlaybackDiagnostics, VideoPlaybackState } from '~/types/video-playback'
+import { isBearerAuthToken } from '~/composables/useAuth'
 
 export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
   let hls: Hls | null = null
@@ -117,7 +118,7 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
         levelLoadingRetryDelay: 1000,
         startPosition: 0,
         xhrSetup(xhr: XMLHttpRequest, url: string) {
-          if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+          if (isBearerAuthToken(token)) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
           withClientSurfaceHeaders(url).forEach((value, name) => xhr.setRequestHeader(name, value))
         },
       })

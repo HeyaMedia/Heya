@@ -29,7 +29,9 @@ func handleWebSocket(hub *eventhub.Hub, sessionLookup auth.SessionLookup) http.H
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := auth.TokenFromContext(r.Context())
 		if token == "" {
-			token = r.URL.Query().Get("token")
+			if cookie, err := r.Cookie("session_token"); err == nil {
+				token = cookie.Value
+			}
 		}
 		// Resolve the token to a user regardless of which transport carried it:
 		// the connection subscribes under that user id so PublishToUser events

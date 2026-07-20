@@ -26,7 +26,17 @@ updates:
     groups:
       # Bundle minor + patch bumps into one PR per group; majors stay separate
       # so breaking changes still get individual review.
+      waf-security:
+        patterns:
+          - "github.com/corazawaf/coraza-caddy*"
+          - "github.com/corazawaf/coraza-coreruleset*"
+        update-types:
+          - minor
+          - patch
       go-minor-patch:
+        exclude-patterns:
+          - "github.com/corazawaf/coraza-caddy*"
+          - "github.com/corazawaf/coraza-coreruleset*"
         update-types:
           - minor
           - patch

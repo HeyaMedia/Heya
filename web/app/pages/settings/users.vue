@@ -91,8 +91,8 @@ async function load() {
 
 async function createUser() {
   createErr.value = ''
-  if (newUser.value.password.length < 8) {
-    createErr.value = 'Password must be at least 8 characters.'
+  if (newUser.value.password.length < 15) {
+    createErr.value = 'Password must be at least 15 characters.'
     return
   }
   creating.value = true
@@ -163,8 +163,8 @@ function openPw(u: AdminUser) {
 
 async function savePw() {
   if (!pwModal.value) return
-  if (pwValue.value.length < 8) {
-    pwErr.value = 'Password must be at least 8 characters.'
+  if (pwValue.value.length < 15) {
+    pwErr.value = 'Password must be at least 15 characters.'
     return
   }
   pwSaving.value = true
@@ -174,7 +174,7 @@ async function savePw() {
       path: { id: pwModal.value.id },
       body: { new_password: pwValue.value } as any,
     })
-    flash.value = { kind: 'ok', text: `Password reset for ${pwModal.value.username}.` }
+    flash.value = { kind: 'ok', text: `Password reset for ${pwModal.value.username}; their sessions and API tokens were revoked.` }
     pwModal.value = null
   } catch (e: any) {
     pwErr.value = e?.message ?? 'Reset failed.'
@@ -298,15 +298,15 @@ function initials(u: { username: string }): string {
           <input id="user-create-email" v-model="newUser.email" class="sv2-input" type="email" maxlength="254" autocomplete="off" />
         </div>
         <div class="form-field">
-          <label class="form-label" for="user-create-password">Initial password (≥ 8 chars)</label>
+          <label class="form-label" for="user-create-password">Initial password (≥ 15 chars)</label>
           <div class="pw-group">
             <input
               id="user-create-password"
               v-model="newUser.password"
               class="sv2-input"
               :type="showCreatePw ? 'text' : 'password'"
-              minlength="8" maxlength="256" autocomplete="new-password"
-              placeholder="At least 8 characters"
+              minlength="15" maxlength="256" autocomplete="new-password"
+              placeholder="At least 15 characters"
             />
             <button type="button" class="pw-btn" :class="{ active: showCreatePw }"
               :title="showCreatePw ? 'Hide' : 'Show'" :aria-label="showCreatePw ? 'Hide password' : 'Show password'" @click="showCreatePw = !showCreatePw">
@@ -338,18 +338,18 @@ function initials(u: { username: string }): string {
       </template>
     </AppDialog>
 
-    <AppDialog v-model="showPw" :title="pwModal ? `Reset password for ${pwModal.username}` : 'Reset password'" description="The user can change it themselves after signing in." size="md">
+    <AppDialog v-model="showPw" :title="pwModal ? `Reset password for ${pwModal.username}` : 'Reset password'" description="This also revokes the user's sessions and API tokens." size="md">
       <div class="dialog-form">
         <div class="form-field">
-          <label class="form-label" for="user-reset-password">New password (≥ 8 chars)</label>
+          <label class="form-label" for="user-reset-password">New password (≥ 15 chars)</label>
           <div class="pw-group">
             <input
               id="user-reset-password"
               v-model="pwValue"
               class="sv2-input"
               :type="showResetPw ? 'text' : 'password'"
-              minlength="8" maxlength="256" autocomplete="new-password"
-              placeholder="At least 8 characters"
+              minlength="15" maxlength="256" autocomplete="new-password"
+              placeholder="At least 15 characters"
             />
             <button type="button" class="pw-btn" :class="{ active: showResetPw }"
               :title="showResetPw ? 'Hide' : 'Show'" :aria-label="showResetPw ? 'Hide password' : 'Show password'" @click="showResetPw = !showResetPw">

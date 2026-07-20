@@ -126,16 +126,16 @@ func extractAuth(r *http.Request) DeviceInfo {
 	return d
 }
 
-// resolve authenticates the request and returns the resolution. Sessions are
-// the same rows Heya's own /api/auth/login mints — a Jellyfin login is a
-// first-class Heya session and shows up in Settings → Sessions.
+// resolve authenticates the request and returns the resolution. Jellyfin
+// sessions use the same lifecycle and management table as browser sessions,
+// but carry a narrower audience so a PIN login cannot call native/admin APIs.
 func (s *Server) resolve(r *http.Request) (auth.SessionResolution, DeviceInfo, bool) {
 	d := extractAuth(r)
 	if d.Token == "" {
 		return auth.SessionResolution{}, d, false
 	}
 	res, err := auth.ResolveSession(r.Context(), s.app.SessionLookup(), d.Token)
-	if err != nil {
+	if err != nil || !auth.AllowsJellyfinAPI(res.Session.Kind) {
 		return auth.SessionResolution{}, d, false
 	}
 	auth.TouchSessionAsync(s.app.SessionLookup(), d.Token)

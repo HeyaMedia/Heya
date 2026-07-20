@@ -114,8 +114,8 @@ The single `./bin/heya` artifact serves both the API and SPA via
 ## Hitting the local API
 
 `./bin/heya api <method> <path> [body]` issues an authenticated request to the
-running server. First call logs in (default `admin/admin`, override with
-`--user`/`--pass` or `HEYA_API_USER`/`HEYA_API_PASS`), caches the bearer token
+running server. First call logs in using `--user`/`--pass` or
+`HEYA_API_USER`/`HEYA_API_PASS`, then caches the bearer token
 under the OS user config dir, and reuses it. A 401 automatically clears the
 cache, re-logs in, and retries once.
 
@@ -129,7 +129,7 @@ export HEYA_API_BASE_URL=http://localhost:8080  # make dev only
 ./bin/heya api get /api/health
 ./bin/heya api get /api/music/artists -q limit=5
 ./bin/heya api get /api/media/42                            # path interpolation isn't done — pass the resolved path
-./bin/heya api post /api/users '{"username":"bob","email":"b@x","password":"hunter22"}'
+./bin/heya api post /api/users '{"username":"bob","email":"b@x","password":"correct horse battery staple"}'
 cat patch.json | ./bin/heya api patch /api/media/42 -
 ./bin/heya api get /api/tracks/123/stream --raw > out.flac  # binary endpoints need --raw
 ```

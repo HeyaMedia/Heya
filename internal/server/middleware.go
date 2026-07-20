@@ -5,19 +5,93 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"runtime/debug"
+	"strings"
 	"time"
 
+	"github.com/karbowiak/heya/internal/requestmeta"
 	"github.com/rs/zerolog/log"
 )
 
 func withMiddleware(h http.Handler) http.Handler {
-	// Outermost first: recovery → logging → CORS → gzip → etag → handler.
+	// Outermost first: recovery → request metadata → logging → security
+	// headers → CSRF gate → request limits → CORS → gzip → etag → handler.
 	// Recovery wraps everything so panics from gzip/etag/logging still return
 	// 500. Gzip sits inside CORS so OPTIONS replies (no body) skip it. ETag
 	// sits inside gzip so the hash is computed over uncompressed bytes (a
 	// gzip compressor upgrade must not silently invalidate browser caches).
-	return withRecovery(withLogging(withCORS(withGzip(withETag(h)))))
+	return withRecovery(withRequestMetadata(withLogging(withSecurityHeaders(withCSRFGate(withRequestBodyLimit(withCORS(withGzip(withETag(h)))))))))
+}
+
+const maxApplicationBodyBytes int64 = 1 << 20
+
+func withRequestMetadata(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, requestmeta.WithClientIP(r))
+	})
+}
+
+func withSecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Permissions-Policy", "camera=(), geolocation=(), microphone=()")
+		// Start CSP as reporting-only: the SPA and compatibility clients need a
+		// measured policy before enforcement, while every other header here is
+		// safe to enforce immediately.
+		w.Header().Set("Content-Security-Policy-Report-Only", "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'")
+		if ingress := requestmeta.Ingress(r.Context()); ingress == "remote" || ingress == "funnel" {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func withRequestBodyLimit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requestMayHaveBody(r.Method) && !isImageUploadPath(r.URL.Path) {
+			if r.ContentLength > maxApplicationBodyBytes {
+				http.Error(w, "request body is too large", http.StatusRequestEntityTooLarge)
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, maxApplicationBodyBytes)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func withCSRFGate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requestMayHaveBody(r.Method) && cookieSessionRequest(r) && r.Header.Get("Authorization") == "" {
+			origin, err := url.Parse(r.Header.Get("Origin"))
+			if err != nil || (origin.Scheme != "http" && origin.Scheme != "https") || origin.Host != r.Host {
+				http.Error(w, "cross-origin cookie request rejected", http.StatusForbidden)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func cookieSessionRequest(r *http.Request) bool {
+	cookie, err := r.Cookie("session_token")
+	return err == nil && cookie.Value != ""
+}
+
+func requestMayHaveBody(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+func isImageUploadPath(path string) bool {
+	return (strings.HasPrefix(path, "/api/media/") && strings.HasSuffix(path, "/assets/upload")) ||
+		(strings.HasPrefix(path, "/api/me/playlists/") && strings.HasSuffix(path, "/cover"))
 }
 
 func withLogging(next http.Handler) http.Handler {

@@ -19,7 +19,9 @@ x-heya-common: &heya-common
     # First-boot admin bootstrap (ignored once an admin user exists):
     # HEYA_ADMIN_USERNAME: admin
     # HEYA_ADMIN_EMAIL: admin@example.com
-    # HEYA_ADMIN_PASSWORD: change-me
+    # HEYA_ADMIN_PASSWORD: replace-with-a-long-passphrase
+    # HEYA_ENABLE_REGISTRATION: "false"
+    # HEYA_WAF_MODE: detect  # off | detect | block
     # Declare libraries from env. Keep these values and media mounts on BOTH
     # API and worker by placing them in this shared block:
     # HEYA_LIBRARY_0_NAME: Movies
@@ -34,6 +36,16 @@ x-heya-common: &heya-common
     - ./data/heya:/data
     # The worker must see the same media paths recorded by the API.
     # - /path/to/media:/storage/Movies:ro
+  # The application listens on unprivileged ports. Retain only the filesystem
+  # capabilities needed for host-owned /data bind mounts.
+  cap_drop:
+    - ALL
+  cap_add:
+    - CHOWN
+    - DAC_OVERRIDE
+    - FOWNER
+  security_opt:
+    - no-new-privileges:true
   # Hardware acceleration should also be shared by API + worker.
   # devices:
   #   - /dev/dri:/dev/dri
@@ -57,7 +69,9 @@ services:
       # contain a tracked marker file without making initdb reject PGDATA.
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      - "5440:5432"
+      # Development access stays available on the host without exposing the
+      # database to the LAN/public interfaces.
+      - "127.0.0.1:5440:5432"
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
     healthcheck:

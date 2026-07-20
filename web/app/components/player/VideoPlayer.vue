@@ -4,6 +4,7 @@ import { DropdownMenuItem, DropdownMenuSeparator } from 'reka-ui'
 import type { StreamAudio, StreamSubtitle, QualityOption } from '~~/shared/types'
 import type { CastStateEvent } from '~/composables/useCast'
 import type { NativeVideoPlaybackBackend } from '~/composables/useNativeVideoPlaybackBackend'
+import { isBearerAuthToken } from '~/composables/useAuth'
 import { useQuery } from '@pinia/colada'
 import { playbackPreferenceQuery } from '~/queries/playback'
 import { continueWatchingQuery } from '~/queries/activity'
@@ -312,7 +313,7 @@ const hoverThumbnail = computed(() => {
 
 function buildHLSUrl() {
   const caps = useClientCaps()
-  const params = new URLSearchParams({ token: token.value!, sid: sessionId })
+  const params = new URLSearchParams({ sid: sessionId })
   for (const [k, v] of Object.entries(caps)) { if (v) params.set(k, '1') }
   if (activeAudioIdx.value > 0) params.set('audio', String(activeAudioIdx.value))
   if (activeQuality.value !== 'auto') params.set('quality', activeQuality.value)
@@ -321,6 +322,10 @@ function buildHLSUrl() {
     params.set('remux', '1')
   }
   return `/api/stream/${props.fileId}/hls/master.m3u8?${params}`
+}
+
+function currentBearerToken() {
+  return isBearerAuthToken(token.value) ? token.value : undefined
 }
 
 interface NativePlaybackGrantResponse {
@@ -390,10 +395,10 @@ function loadBrowserPlayback(startPositionSeconds: number, autoplay = true) {
   const needsNonDefaultAudio = activeAudioIdx.value > 0
   if (action === 'direct_play' && !needsNonDefaultAudio) {
     usingHLS.value = false
-    loadBrowserSource(`/api/stream/${props.fileId}?token=${token.value}`, token.value!)
+    loadBrowserSource(`/api/stream/${props.fileId}`, currentBearerToken())
   } else {
     usingHLS.value = true
-    loadBrowserSource(buildHLSUrl(), token.value!)
+    loadBrowserSource(buildHLSUrl(), currentBearerToken())
   }
 
   const v = videoEl.value
@@ -793,7 +798,7 @@ async function startPlayback(startPositionSeconds = pendingSeekTo.value) {
     if (activeSubIdx.value >= 0) awaitVideoReady().then(() => initSubtitles())
   }
 
-  loadTrickplay(token.value!).catch(() => {})
+  loadTrickplay().catch(() => {})
   dismissedSegments.value = new Set()
   loadSegments().catch(() => {})
 
@@ -988,10 +993,10 @@ function selectAudio(idx: number) {
   }
   const canDirectPlay = streamState.streamInfo?.playback?.action === 'direct_play' && idx === 0
   const url = canDirectPlay
-    ? `/api/stream/${props.fileId}?token=${token.value}`
+    ? `/api/stream/${props.fileId}`
     : buildHLSUrl()
   usingHLS.value = !canDirectPlay
-  loadBrowserSource(url, token.value!)
+  loadBrowserSource(url, currentBearerToken())
   const v = videoEl.value
   if (v) {
     const onReady = () => { v.currentTime = currentTime; v.removeEventListener('canplay', onReady) }
@@ -1015,7 +1020,7 @@ function selectQuality(quality: string) {
     return
   }
   usingHLS.value = true
-  loadBrowserSource(buildHLSUrl(), token.value!)
+  loadBrowserSource(buildHLSUrl(), currentBearerToken())
   const v = videoEl.value
   if (v) {
     const onReady = () => { v.currentTime = currentTime; v.removeEventListener('canplay', onReady) }

@@ -328,10 +328,10 @@ func registerMeRoutes(api huma.API, app *service.App) {
 		func(ctx context.Context, in *struct {
 			Body struct {
 				CurrentPassword string `json:"current_password" minLength:"1" maxLength:"256" doc:"Current password (verified before swap)"`
-				NewPassword     string `json:"new_password" minLength:"8" maxLength:"256" doc:"New password — minimum 8 chars"`
+				NewPassword     string `json:"new_password" minLength:"15" maxLength:"256" doc:"New password — minimum 15 characters"`
 			}
 		}) (*JSONOutput[okBody], error) {
-			err := app.ChangePassword(ctx, userFrom(ctx).ID, in.Body.CurrentPassword, in.Body.NewPassword)
+			err := app.ChangePassword(ctx, userFrom(ctx).ID, auth.TokenFromContext(ctx), in.Body.CurrentPassword, in.Body.NewPassword)
 			if err != nil {
 				return nil, humaServiceError(err)
 			}

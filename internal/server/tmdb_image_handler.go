@@ -62,6 +62,6 @@ func handleTMDBImageProxy(fetcher *publichttp.Fetcher) http.HandlerFunc {
 			return
 		}
 
-		publichttp.ServeImage(w, r, image, "public, max-age=604800, immutable")
+		publichttp.ServeImage(w, r, image, "private, max-age=604800, immutable")
 	}
 }

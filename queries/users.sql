@@ -24,6 +24,30 @@ RETURNING *;
 -- name: UpdateUserPassword :exec
 UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1;
 
+-- name: UpdateUserPasswordAndDeleteOtherSessions :exec
+-- A self-service password change keeps only the credential that authorised
+-- the change. Other browser/Jellyfin sessions and API tokens are invalidated
+-- atomically with the password update.
+WITH updated AS (
+    UPDATE users SET password_hash = $2, updated_at = now() WHERE users.id = $1
+    RETURNING users.id
+)
+DELETE FROM sessions
+USING updated
+WHERE sessions.user_id = updated.id
+  AND sessions.token_hash <> $3;
+
+-- name: UpdateUserPasswordAndDeleteSessions :exec
+-- Admin/CLI resets cannot prove possession of any user session, so revoke all
+-- sessions and API tokens atomically with the password update.
+WITH updated AS (
+    UPDATE users SET password_hash = $2, updated_at = now() WHERE users.id = $1
+    RETURNING users.id
+)
+DELETE FROM sessions
+USING updated
+WHERE sessions.user_id = updated.id;
+
 -- name: DeleteUser :exec
 DELETE FROM users WHERE id = $1;
 

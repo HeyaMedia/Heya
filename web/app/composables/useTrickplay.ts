@@ -1,3 +1,5 @@
+import { withAuthHeaders } from '~/composables/useAuth'
+
 export interface TrickplayEntry {
   start: number
   end: number
@@ -12,14 +14,14 @@ export function useTrickplay(fileId: Ref<string | number>) {
   const entries = ref<TrickplayEntry[]>([])
   const loaded = ref(false)
 
-  async function load(token: string) {
+  async function load(_token?: string) {
     try {
-      const url = `/api/stream/${fileId.value}/trickplay/index.vtt?token=${token}`
+      const url = `/api/stream/${fileId.value}/trickplay/index.vtt`
       const text = await $fetch<string>(url, {
         responseType: 'text',
-        headers: withClientSurfaceHeaders(url),
+        headers: withAuthHeaders(url),
       })
-      entries.value = parseWebVTT(text, fileId.value, token)
+      entries.value = parseWebVTT(text, fileId.value)
       loaded.value = entries.value.length > 0
     } catch {
       loaded.value = false
@@ -36,7 +38,7 @@ export function useTrickplay(fileId: Ref<string | number>) {
   return { entries, loaded, load, getThumbnail }
 }
 
-function parseWebVTT(text: string, fileId: string | number, token: string): TrickplayEntry[] {
+function parseWebVTT(text: string, fileId: string | number): TrickplayEntry[] {
   const results: TrickplayEntry[] = []
   const lines = text.split('\n')
   let i = 0
@@ -66,7 +68,7 @@ function parseWebVTT(text: string, fileId: string | number, token: string): Tric
     results.push({
       start,
       end,
-      spriteUrl: `/api/stream/${fileId}/trickplay/${spriteName}?token=${token}`,
+      spriteUrl: `/api/stream/${fileId}/trickplay/${spriteName}`,
       x: coords[0]!,
       y: coords[1]!,
       w: coords[2]!,

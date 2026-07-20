@@ -20,7 +20,10 @@ import (
 // + http.ResponseWriter via humago.Unwrap. This preserves Range support,
 // content-type sniffing, and any custom header logic.
 func registerBinaryRoutes(api huma.API, app *service.App) {
-	// --- Images (no auth — browsers can't attach Authorization to <img>) ---
+	// --- Images ---
+	// Browser image elements authenticate with Heya's same-origin HttpOnly
+	// cookie. Keeping the catalog artwork behind the same user boundary avoids
+	// leaking library contents from a publicly reachable instance.
 	// In passive mode with HEYA_IMAGE_PROXY_URL set, imgProxy is non-nil and
 	// these endpoints reverse-proxy the identical path to the source instance
 	// (whose disk actually holds the files); otherwise it's nil and the local
@@ -28,37 +31,34 @@ func registerBinaryRoutes(api huma.API, app *service.App) {
 	// fetches from image.tmdb.org directly and needs no local files.
 	imgProxy := newPassiveImageProxy(app.ConfigSnapshot())
 
-	huma.Register(api, binaryOp(http.MethodGet, "/api/media/{id}/image/{type}", "media-image", "Media poster/backdrop bytes", "Images"),
+	huma.Register(api, securedBinary(http.MethodGet, "/api/media/{id}/image/{type}", "media-image", "Media poster/backdrop bytes", "Images"),
 		wrapStreamAs[mediaImageInput](proxiedImage(imgProxy, handleMediaImage(app))))
 
-	huma.Register(api, binaryOp(http.MethodGet, "/api/person/{id}/image", "person-image", "Person photo bytes", "Images"),
+	huma.Register(api, securedBinary(http.MethodGet, "/api/person/{id}/image", "person-image", "Person photo bytes", "Images"),
 		wrapStreamAs[idBinaryInput](proxiedImage(imgProxy, handlePersonImage(app))))
 
-	huma.Register(api, binaryOp(http.MethodGet, "/api/metadata/images/{id}", "metadata-image", "Wait for canonical HeyaMetadata image bytes", "Images"),
+	huma.Register(api, securedBinary(http.MethodGet, "/api/metadata/images/{id}", "metadata-image", "Wait for canonical HeyaMetadata image bytes", "Images"),
 		wrapStreamAs[metadataImageInput](handleMetadataImage(app)))
 
-	huma.Register(api, binaryOp(http.MethodGet, "/api/studio/{id}/image", "studio-image", "Studio logo bytes", "Images"),
+	huma.Register(api, securedBinary(http.MethodGet, "/api/studio/{id}/image", "studio-image", "Studio logo bytes", "Images"),
 		wrapStreamAs[idBinaryInput](proxiedImage(imgProxy, handleStudioImage(app))))
 
-	huma.Register(api, binaryOp(http.MethodGet, "/api/extras/{id}/thumbnail", "extra-thumbnail", "Extras thumbnail bytes", "Images"),
+	huma.Register(api, securedBinary(http.MethodGet, "/api/extras/{id}/thumbnail", "extra-thumbnail", "Extras thumbnail bytes", "Images"),
 		wrapStreamAs[extraBinaryInput](proxiedImage(imgProxy, handleExtraThumbnail(app))))
 
-	huma.Register(api, binaryOp(http.MethodGet, "/api/tmdb/image/{path}", "tmdb-image-proxy", "Proxied TMDB image bytes", "Images"),
+	huma.Register(api, securedBinary(http.MethodGet, "/api/tmdb/image/{path}", "tmdb-image-proxy", "Proxied TMDB image bytes", "Images"),
 		wrapStreamAs[tmdbImageInput](handleTMDBImageProxy(nil)))
 
-	huma.Register(api, binaryOp(http.MethodGet, "/api/music/artists/{artist_slug}/albums/{album_slug}/cover", "album-cover", "Album cover bytes (local file or 302 to upstream URL)", "Images"),
+	huma.Register(api, securedBinary(http.MethodGet, "/api/music/artists/{artist_slug}/albums/{album_slug}/cover", "album-cover", "Album cover bytes (local file or 302 to upstream URL)", "Images"),
 		wrapStreamAs[albumCoverInput](proxiedImage(imgProxy, handleAlbumCover(app))))
 
 	// Playlist covers are custom uploads (not passively-mirrored provider
 	// artwork), so they're excluded from the passive-mode image proxy — the
 	// file only exists on whichever instance the user uploaded it to.
-	huma.Register(api, binaryOp(http.MethodGet, "/api/me/playlists/{id}/cover", "playlist-cover", "Custom playlist cover bytes", "Images"),
+	huma.Register(api, securedBinary(http.MethodGet, "/api/me/playlists/{id}/cover", "playlist-cover", "Custom playlist cover bytes", "Images"),
 		wrapStreamAs[idBinaryInput](handlePlaylistCover(app)))
 
-	// Browser <img> requests cannot attach Heya's bearer token. Generated
-	// filenames are high-entropy and carry no library path information, so
-	// serve them like the other public image byte endpoints.
-	huma.Register(api, binaryOp(http.MethodGet, "/api/ai/images/{filename}", "ai-generated-image", "Generated AI image bytes", "AI"),
+	huma.Register(api, securedBinary(http.MethodGet, "/api/ai/images/{filename}", "ai-generated-image", "Generated AI image bytes", "AI"),
 		wrapStreamAs[generatedImageInput](func(w http.ResponseWriter, r *http.Request) {
 			path, ok := app.ImageOutputPath(r.PathValue("filename"))
 			if !ok {

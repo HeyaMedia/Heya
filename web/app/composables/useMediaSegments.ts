@@ -1,4 +1,5 @@
 import type { Ref } from 'vue'
+import { withAuthHeaders } from '~/composables/useAuth'
 
 export interface MediaSegment {
   type: string // intro | recap | credits | preview | commercial
@@ -22,10 +23,9 @@ export function useMediaSegments(fileId: Ref<string | number>) {
     loaded.value = false
     segments.value = []
     try {
-      const token = useAuth().token.value
       const url = `/api/stream/${fileId.value}/segments`
       const res = await $fetch<{ segments?: MediaSegment[] }>(url, {
-        headers: withClientSurfaceHeaders(url, token ? { Authorization: `Bearer ${token}` } : undefined),
+        headers: withAuthHeaders(url),
       })
       segments.value = (res?.segments ?? []) as MediaSegment[]
       loaded.value = true

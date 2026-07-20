@@ -1,13 +1,9 @@
 // Boot-time auth hydration.
 //
 // Plugins run client-side before any component mounts. We:
-//   1. Read the stashed token out of localStorage into the useState ref
-//      so the rest of the app sees `isAuthenticated` correctly on first
-//      render (otherwise the topbar / route guards would flicker as
-//      "logged out" for a frame).
-//   2. If a token was found, fetch the current user payload — this gives
-//      us username/email/is_admin for UI without needing to wait for the
-//      first lazy API call.
+//   1. Offer any legacy localStorage bearer to /api/auth/me once so the server
+//      can migrate it into an HttpOnly cookie.
+//   2. Resolve the cookie-backed current user before route middleware renders.
 //
 // The `fetchUser()` call is intentionally tolerant: a transient error
 // (backend restarting, network hiccup) leaves the token in place rather
@@ -16,8 +12,8 @@
 export default defineNuxtPlugin({
   name: 'heya:auth',
   async setup() {
-    const { hydrate, token, fetchUser } = useAuth()
+    const { hydrate, fetchUser } = useAuth()
     hydrate()
-    if (token.value) await fetchUser()
+    await fetchUser()
   },
 })

@@ -1,4 +1,5 @@
 import { useQuery, useQueryCache } from '@pinia/colada'
+import { withAuthHeaders } from '~/composables/useAuth'
 import {
   userPlaylistsQuery,
   type UserPlaylistRow,
@@ -140,16 +141,13 @@ export function usePlaylists() {
   // Custom cover upload. Multipart stays on raw $fetch — $heya/openapi-fetch
   // insist on JSON bodies (same reasoning as MetadataEditorImages.vue).
   async function setCover(id: number, file: File) {
-    const { token } = useAuth()
     const form = new FormData()
     form.append('file', file)
-    await $fetch(`/api/me/playlists/${id}/cover`, {
+    const url = `/api/me/playlists/${id}/cover`
+    await $fetch(url, {
       method: 'POST',
       body: form,
-      headers: withClientSurfaceHeaders(
-        `/api/me/playlists/${id}/cover`,
-        token.value ? { Authorization: `Bearer ${token.value}` } : undefined,
-      ),
+      headers: withAuthHeaders(url),
     })
     updateList(rows => rows.map(p => (p.id === id ? { ...p, has_cover: true } : p)))
     invalidatePlaylistCaches(id)

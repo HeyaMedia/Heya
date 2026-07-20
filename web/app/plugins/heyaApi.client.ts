@@ -1,4 +1,5 @@
 import type { FetchOptions } from 'ofetch'
+import { withAuthHeaders } from '~/composables/useAuth'
 
 type HeyaPathValue = string | number | boolean
 
@@ -25,20 +26,14 @@ export function resolveHeyaPath(url: string, values: Record<string, HeyaPathValu
 // Nuxt-native API transport. Pinia Colada remains responsible for query keys,
 // caching and persistence; this plugin only owns HTTP concerns shared by every
 // query/mutation: path expansion, client version, untrusted surface metadata,
-// bearer auth, and 401 logout.
-// `.client.ts` is intentional because auth state lives in localStorage and the
-// application is an SPA (`ssr: false`).
+// cookie/bearer auth, and 401 logout.
 export default defineNuxtPlugin({
   name: 'heya:api',
   setup(nuxtApp) {
     const apiFetch = $fetch.create({
       onRequest({ request, options }) {
-        const { token } = useAuth()
-        const headers = withClientSurfaceHeaders(request, options.headers)
+        const headers = withAuthHeaders(request, options.headers)
         headers.set('X-Heya-Client-Version', nuxtApp.$config.public.heyaVersion)
-        if (token.value) {
-          headers.set('Authorization', `Bearer ${token.value}`)
-        }
         options.headers = headers
       },
       onResponseError({ response }) {

@@ -16,8 +16,9 @@ import (
 )
 
 // fakeSessions is a stand-in for the production SessionLookup. It recognises
-// two well-known tokens: "admin-token" → admin user, "user-token" → regular
-// user. Anything else returns pgx.ErrNoRows so the auth middleware can map
+// three well-known tokens: "admin-token" → admin user, "user-token" →
+// regular user, and "jellyfin-token" → a Jellyfin-scoped session. Anything
+// else returns pgx.ErrNoRows so the auth middleware can map
 // it to 401 the same way it would in production.
 type fakeSessions struct{}
 
@@ -28,6 +29,8 @@ func (f fakeSessions) GetSessionWithUserByToken(ctx context.Context, tokenHash s
 		session = sqlc.Session{ID: 1, UserID: 1, TokenHash: tokenHash, Kind: "session"}
 	case auth.TokenHash("user-token"):
 		session = sqlc.Session{ID: 2, UserID: 2, TokenHash: tokenHash, Kind: "session"}
+	case auth.TokenHash("jellyfin-token"):
+		session = sqlc.Session{ID: 3, UserID: 2, TokenHash: tokenHash, Kind: "jellyfin_session"}
 	default:
 		return sqlc.GetSessionWithUserByTokenRow{}, pgx.ErrNoRows
 	}
@@ -77,6 +80,7 @@ var adminRoutes = []struct {
 	body   map[string]any
 }{
 	{"system", http.MethodGet, "/api/admin/system", nil},
+	{"security", http.MethodGet, "/api/admin/security", nil},
 	{"diagnostics", http.MethodGet, "/api/admin/diagnostics", nil},
 	{"workers", http.MethodGet, "/api/admin/workers", nil},
 	{"storage", http.MethodGet, "/api/admin/storage", nil},

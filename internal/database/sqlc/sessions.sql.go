@@ -85,7 +85,7 @@ func (q *Queries) DeleteSessionByIDAdmin(ctx context.Context, id int64) error {
 const deleteUserOtherSessions = `-- name: DeleteUserOtherSessions :exec
 DELETE FROM sessions
 WHERE user_id = $1
-  AND kind = 'session'
+  AND kind IN ('session', 'jellyfin_session')
   AND token_hash <> $2
 `
 
@@ -255,7 +255,8 @@ func (q *Queries) ListAllSessionsForAdmin(ctx context.Context) ([]ListAllSession
 const listUserSessionsByKind = `-- name: ListUserSessionsByKind :many
 SELECT id, user_id, token_hash, expires_at, created_at, kind, name, last_seen_at, user_agent, ip
 FROM sessions
-WHERE user_id = $1 AND kind = $2
+WHERE user_id = $1
+  AND (kind = $2 OR ($2 = 'session' AND kind = 'jellyfin_session'))
   AND (expires_at IS NULL OR expires_at > now())
 ORDER BY last_seen_at DESC
 `

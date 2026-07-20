@@ -222,6 +222,53 @@ func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPassword
 	return err
 }
 
+const updateUserPasswordAndDeleteOtherSessions = `-- name: UpdateUserPasswordAndDeleteOtherSessions :exec
+WITH updated AS (
+    UPDATE users SET password_hash = $2, updated_at = now() WHERE users.id = $1
+    RETURNING users.id
+)
+DELETE FROM sessions
+USING updated
+WHERE sessions.user_id = updated.id
+  AND sessions.token_hash <> $3
+`
+
+type UpdateUserPasswordAndDeleteOtherSessionsParams struct {
+	ID           int64  `json:"id"`
+	PasswordHash string `json:"password_hash"`
+	TokenHash    string `json:"token_hash"`
+}
+
+// A self-service password change keeps only the credential that authorised
+// the change. Other browser/Jellyfin sessions and API tokens are invalidated
+// atomically with the password update.
+func (q *Queries) UpdateUserPasswordAndDeleteOtherSessions(ctx context.Context, arg UpdateUserPasswordAndDeleteOtherSessionsParams) error {
+	_, err := q.db.Exec(ctx, updateUserPasswordAndDeleteOtherSessions, arg.ID, arg.PasswordHash, arg.TokenHash)
+	return err
+}
+
+const updateUserPasswordAndDeleteSessions = `-- name: UpdateUserPasswordAndDeleteSessions :exec
+WITH updated AS (
+    UPDATE users SET password_hash = $2, updated_at = now() WHERE users.id = $1
+    RETURNING users.id
+)
+DELETE FROM sessions
+USING updated
+WHERE sessions.user_id = updated.id
+`
+
+type UpdateUserPasswordAndDeleteSessionsParams struct {
+	ID           int64  `json:"id"`
+	PasswordHash string `json:"password_hash"`
+}
+
+// Admin/CLI resets cannot prove possession of any user session, so revoke all
+// sessions and API tokens atomically with the password update.
+func (q *Queries) UpdateUserPasswordAndDeleteSessions(ctx context.Context, arg UpdateUserPasswordAndDeleteSessionsParams) error {
+	_, err := q.db.Exec(ctx, updateUserPasswordAndDeleteSessions, arg.ID, arg.PasswordHash)
+	return err
+}
+
 const updateUserSettings = `-- name: UpdateUserSettings :exec
 UPDATE users SET settings = $1, updated_at = now() WHERE id = $2
 `

@@ -13,9 +13,8 @@ import (
 	"github.com/karbowiak/heya/internal/publichttp"
 )
 
-// Image delivery. Anonymous, like Jellyfin's own image endpoints and Heya's
-// /api/media/{id}/image/{type} — <img> tags carry no auth headers. Every
-// request is dispatched IN-PROCESS to the matching native Heya image
+// Image delivery. Stock Jellyfin clients attach their API key to image URLs;
+// Heya validates it before dispatching IN-PROCESS to the matching native image
 // endpoint, which owns the full pipeline (media_assets walk, resizer,
 // passive-mode proxy), and the bytes come back directly, like real Jellyfin.
 // No response on this surface is ever a redirect: a 302 was tried first and
@@ -176,6 +175,11 @@ func (s *Server) serveNativeImage(w http.ResponseWriter, r *http.Request, target
 		r2.URL.RawPath = ""
 		r2.URL.RawQuery = u.RawQuery
 		r2.RequestURI = ""
+		// The request already passed Jellyfin authentication. Translate that
+		// credential into Heya's bearer spelling for the in-process image route;
+		// its middleware still resolves the session and only admits the narrow
+		// image-operation allowlist for jellyfin_session tokens.
+		r2.Header.Set("Authorization", "Bearer "+TokenFrom(r.Context()))
 		dw := &imageDispatchWriter{ResponseWriter: w}
 		s.native.ServeHTTP(dw, r2)
 		if !dw.intercepted {
@@ -232,7 +236,7 @@ func (s *Server) proxyRemoteImage(w http.ResponseWriter, r *http.Request, rawURL
 		}
 		return
 	}
-	publichttp.ServeImage(w, r, image, "public, max-age=86400")
+	publichttp.ServeImage(w, r, image, "private, max-age=86400")
 }
 
 // hasImage reports whether a media item has a resolvable image of the given

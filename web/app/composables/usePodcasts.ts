@@ -45,9 +45,7 @@ export interface PodcastDetail {
 // episodeToTrack — wrap an episode in the Track shape, routing the audio
 // through Heya's proxy so CORS / auth are taken care of.
 export function episodeToTrack(podcast: PodcastDetail, episode: PodcastEpisode): Track {
-  const { token } = useAuth()
   const params = new URLSearchParams({ url: episode.audio_url })
-  if (token.value) params.set('token', token.value)
   return {
     // Negative id space mirrors the radio-station hack so episodes don't
     // collide with music track ids. A consistent hash keeps Now Playing

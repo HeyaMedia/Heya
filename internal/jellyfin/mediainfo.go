@@ -86,9 +86,8 @@ func bitDepthOf(bitsStr, pixFmt string) int {
 }
 
 // buildMediaStreams renders ffprobe streams as Jellyfin MediaStreams.
-// Subtitle DeliveryUrl points at Heya's native extraction endpoint — the
-// client's api_key is a Heya session token, so native ?token= auth just
-// works (same trick the TranscodingUrl uses).
+// Subtitle DeliveryUrl points at Heya's native extraction endpoint. Only the
+// Jellyfin-scoped session kind is accepted from these generated URLs.
 func buildMediaStreams(fileID int64, token string, info *mediaprobe.MediaInfo) (streams []mediaStream, defaultAudio, defaultSub *int) {
 	for _, s := range info.Streams {
 		ms := mediaStream{

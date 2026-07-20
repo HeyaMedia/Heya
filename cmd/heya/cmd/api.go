@@ -42,8 +42,8 @@ var apiCmd = &cobra.Command{
 	Short: "Issue an authenticated request to the local Heya API",
 	Long: `Issues an HTTP request to the running Heya server.
 
-The first call logs in (default admin/admin; override with --user / --pass
-or HEYA_API_USER / HEYA_API_PASS), caches the bearer token under the OS
+The first call logs in (credentials come from --user / --pass or
+HEYA_API_USER / HEYA_API_PASS), caches the bearer token under the OS
 user config dir (heya/cli-token — on macOS that's
 ~/Library/Application Support/heya, on Linux $XDG_CONFIG_HOME or
 ~/.config/heya), and reuses it next time. A 401 triggers an automatic
@@ -59,7 +59,7 @@ Query params: -q key=value, repeatable. Auto-URL-encoded.
 Examples:
   heya api get /api/health
   heya api get /api/media -q type=music -q limit=5
-  heya api post /api/users '{"username":"bob","email":"b@x","password":"hunter22"}'
+  heya api post /api/users '{"username":"bob","email":"b@x","password":"correct horse battery staple"}'
   cat patch.json | heya api patch /api/media/42 -
 
 Non-2xx responses print status + body to stderr and exit non-zero.`,
@@ -72,7 +72,7 @@ Non-2xx responses print status + body to stderr and exit non-zero.`,
 func init() {
 	apiCmd.Flags().StringVar(&apiBaseURL, "base", envOr("HEYA_API_BASE_URL", "https://localhost:8080"), "Server base URL")
 	apiCmd.Flags().StringVar(&apiUser, "user", envOr("HEYA_API_USER", "admin"), "Login username")
-	apiCmd.Flags().StringVar(&apiPass, "pass", envOr("HEYA_API_PASS", "admin"), "Login password")
+	apiCmd.Flags().StringVar(&apiPass, "pass", os.Getenv("HEYA_API_PASS"), "Login password (required when no cached/API token exists)")
 	apiCmd.Flags().StringVar(&apiToken, "token", os.Getenv("HEYA_API_TOKEN"), "Bearer token (skips login + cache)")
 	apiCmd.Flags().StringSliceVarP(&apiQuery, "query", "q", nil, "Query param key=value (repeatable)")
 	apiCmd.Flags().BoolVar(&apiRaw, "raw", false, "Stream response bytes verbatim (no JSON pretty-print)")
@@ -233,6 +233,9 @@ func clearAPITokenCache() error {
 }
 
 func loginAndCacheAPI(ctx context.Context) (string, error) {
+	if apiPass == "" {
+		return "", errors.New("login password is required; use --pass, HEYA_API_PASS, or --token")
+	}
 	body, _ := json.Marshal(map[string]string{"username": apiUser, "password": apiPass})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		strings.TrimRight(apiBaseURL, "/")+"/api/auth/login",

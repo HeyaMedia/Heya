@@ -24,7 +24,7 @@ docker run -d --name heya -p 8080:8080/tcp -p 8080:8080/udp \
   -v "/path/to/your/media:/media:ro" \
   -e HEYA_METADATA_URL='https://your-heyametadata.example' \
   -e HEYA_ADMIN_USERNAME=admin \
-  -e HEYA_ADMIN_PASSWORD=admin \
+  -e HEYA_ADMIN_PASSWORD='replace-with-a-long-passphrase' \
   ghcr.io/heyamedia/heya:latest-aio
 ```
 
@@ -49,8 +49,9 @@ The AIO image supervises Postgres, `heya serve`, and `heya worker` inside the
 single container. Regular-image deployments must run both Heya commands from
 the same image; the repository's Docker Compose file is the simplest example.
 
-Open https://localhost:8080 and sign in with `admin` / `admin`, then change the
-password and add your libraries under Settings → Libraries. Heya creates a
+Open https://localhost:8080 and sign in with `admin` and the bootstrap
+passphrase you supplied, then add your libraries under Settings → Libraries.
+New passwords must be at least 15 characters. Heya creates a
 private Caddy CA on first boot; install `data/caddy/pki/authorities/local/root.crt`
 in clients you want to trust, or accept the initial browser warning. UDP is
 published beside TCP so HTTP/3 works. Hardware transcode
@@ -91,6 +92,21 @@ Day-to-day development (hot reload via `make dev`, tests, hooks, CI) lives in
 
 The HTTP API documents itself at `/api/docs` (Scalar over OpenAPI 3.1 via
 Huma v2); real-time events stream over the `/api/ws` WebSocket.
+
+## Public exposure
+
+First-user registration is disabled by default. Set
+`HEYA_ENABLE_REGISTRATION=true` only while deliberately creating the first
+account, or bootstrap an administrator with `HEYA_ADMIN_*`; registration closes
+after the first user exists either way. Browser sessions use same-origin,
+HttpOnly cookies, while API clients continue to use `Authorization: Bearer`.
+
+The embedded Caddy edge runs Coraza with the OWASP Core Rule Set in detection
+mode by default. Use `HEYA_WAF_MODE=block` only after reviewing logs for false
+positives, or `off` to disable it. The CRS is compiled into the Heya binary and
+updated by reviewed weekly dependency PRs, never downloaded or replaced while
+the server is running. See [deployment.md](docs/deployment.md#public-exposure-hardening)
+for the complete hardening model.
 
 ## Contributing
 

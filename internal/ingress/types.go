@@ -21,6 +21,7 @@ type HostConfig struct {
 	DataDir  string
 	LANIP    string
 	LogLevel string
+	WAFMode  string
 }
 
 // CertificateGetter supplies a certificate to Caddy at handshake time. It is

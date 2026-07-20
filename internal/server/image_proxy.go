@@ -14,8 +14,9 @@ import (
 // proxying isn't wanted. It is only active in passive mode — where this process
 // is a guest on a borrowed (production) DB whose image files live on the source
 // server's disk, not locally — and only when HEYA_IMAGE_PROXY_URL names that
-// source. The public image endpoints are unauthenticated (browsers can't attach
-// Authorization to <img>), so there are no credentials to forward.
+// source. ReverseProxy preserves the inbound cookie/Authorization header; a
+// passive instance sharing the source database therefore forwards the same
+// valid session boundary instead of opening a separate anonymous image path.
 func newPassiveImageProxy(cfg *config.Config) *httputil.ReverseProxy {
 	// cfg is nil for the zero-valued App used in operation-contract tests.
 	if cfg == nil || !cfg.PassiveMode.Value || cfg.ImageProxyURL.Value == "" {

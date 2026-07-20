@@ -9,13 +9,15 @@ import (
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestHashPasswordRoundTrip(t *testing.T) {
-	hash, err := HashPassword("secret123")
+	hash, err := HashPassword("a sufficiently long passphrase")
 	require.NoError(t, err)
-	assert.NotEmpty(t, hash)
-	assert.True(t, CheckPassword(hash, "secret123"))
+	assert.Contains(t, hash, "$argon2id$")
+	assert.True(t, CheckPassword(hash, "a sufficiently long passphrase"))
+	assert.False(t, NeedsPasswordRehash(hash))
 }
 
 func TestCheckPasswordWrong(t *testing.T) {
@@ -30,6 +32,18 @@ func TestHashPasswordSaltUniqueness(t *testing.T) {
 	h2, err := HashPassword("same")
 	require.NoError(t, err)
 	assert.NotEqual(t, h1, h2)
+}
+
+func TestLegacyBcryptPasswordStillVerifiesAndNeedsUpgrade(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("legacy-password"), bcrypt.DefaultCost)
+	require.NoError(t, err)
+	assert.True(t, CheckPassword(string(hash), "legacy-password"))
+	assert.True(t, NeedsPasswordRehash(string(hash)))
+}
+
+func TestValidateNewPassword(t *testing.T) {
+	assert.ErrorIs(t, ValidateNewPassword("too short"), ErrPasswordPolicy)
+	assert.NoError(t, ValidateNewPassword("this passphrase is long enough"))
 }
 
 func TestGenerateToken(t *testing.T) {

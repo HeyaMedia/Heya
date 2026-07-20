@@ -18,6 +18,12 @@ import (
 // The shared Huma admin middleware enforces user.IsAdmin on operations
 // declared with adminSecured(); regular bearer auth covers the rest.
 func registerAdminRoutes(api huma.API, app *service.App, buf *logbuf.RingBuffer) {
+	// --- Security posture + process-local protection telemetry ---
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/admin/security", "get-admin-security", "Security posture and recent protection events", "Admin")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[service.SecurityStatus], error) {
+			return noStoreJSON(app.SecurityStatus(ctx)), nil
+		})
+
 	// --- Config provenance (drives the disabled-when-env UI behaviour) ---
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/config/sources", "get-config-sources", "Per-field config provenance", "Admin")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[service.ConfigSources], error) {

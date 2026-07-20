@@ -36,6 +36,7 @@ import (
 	"github.com/karbowiak/heya/internal/remote"
 	"github.com/karbowiak/heya/internal/runtimelease"
 	"github.com/karbowiak/heya/internal/scheduler"
+	"github.com/karbowiak/heya/internal/securityevents"
 	"github.com/karbowiak/heya/internal/sessions"
 	"github.com/karbowiak/heya/internal/sonicanalysis"
 	"github.com/karbowiak/heya/internal/tailscale"
@@ -59,6 +60,10 @@ type App struct {
 	db                  *pgxpool.Pool
 	diagnostics         *diagnostics.Collector
 	sessionLookup       *auth.AsyncSessionLookup
+	loginGuardMu        sync.Mutex
+	loginGuard          *auth.LoginGuard
+	securityEventsMu    sync.Mutex
+	securityEvents      *securityevents.Recorder
 	coordinatorLease    leaseCloser
 	matcher             *matcher.Matcher
 	downloader          *images.Downloader
@@ -164,6 +169,29 @@ func (a *App) SessionLookup() auth.SessionLookup {
 		return a.sessionLookup
 	}
 	return sqlc.New(a.db)
+}
+
+func (a *App) LoginGuard() *auth.LoginGuard {
+	if a == nil {
+		return auth.NewLoginGuard()
+	}
+	a.loginGuardMu.Lock()
+	defer a.loginGuardMu.Unlock()
+	if a.loginGuard == nil {
+		a.loginGuard = auth.NewLoginGuard()
+	}
+	return a.loginGuard
+}
+func (a *App) SecurityEvents() *securityevents.Recorder {
+	if a == nil {
+		return securityevents.New(1)
+	}
+	a.securityEventsMu.Lock()
+	defer a.securityEventsMu.Unlock()
+	if a.securityEvents == nil {
+		a.securityEvents = securityevents.New(200)
+	}
+	return a.securityEvents
 }
 func (a *App) TranscoderSessions() *transcoder.SessionManager { return a.transcoder }
 func (a *App) TranscoderCache() *transcoder.CacheManager      { return a.transcodeCache }
@@ -698,6 +726,7 @@ func newApp(ctx context.Context, cfg *config.Config, runtimeMode appRuntimeMode)
 		db:               db,
 		diagnostics:      diagnosticCollector,
 		sessionLookup:    sessionLookup,
+		securityEvents:   securityevents.New(200),
 		coordinatorLease: coordinator,
 		matcher:          m,
 		downloader:       dl,

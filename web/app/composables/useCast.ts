@@ -1,5 +1,6 @@
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import type { MediaDetail, StreamInfoResponse } from '~~/shared/types'
+import { withAuthHeaders } from '~/composables/useAuth'
 
 // Server-side casting (docs/cast-plan.md Phase 2). The SERVER is the player:
 // it pushes or exposes scoped media to the receiver and owns the session; this store is the
@@ -159,7 +160,7 @@ export const useCastStore = defineStore('cast', () => {
     try {
       const url = `/api/stream/${encodeURIComponent(fileID)}/info`
       const info = await $fetch<StreamInfoResponse>(url, {
-        headers: withClientSurfaceHeaders(url, token.value ? { Authorization: `Bearer ${token.value}` } : undefined),
+        headers: withAuthHeaders(url),
       })
       if (request !== videoInfoRequest) return null
       videoStreamInfo.value = info

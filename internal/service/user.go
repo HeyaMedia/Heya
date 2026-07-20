@@ -15,6 +15,9 @@ import (
 var ErrRegistrationClosed = errors.New("registration is closed")
 
 func (a *App) CreateUser(ctx context.Context, username, email, password string, isAdmin bool) (sqlc.User, error) {
+	if err := auth.ValidateNewPassword(password); err != nil {
+		return sqlc.User{}, err
+	}
 	hash, err := auth.HashPassword(password)
 	if err != nil {
 		return sqlc.User{}, fmt.Errorf("hashing password: %w", err)
@@ -44,6 +47,21 @@ func (a *App) CreateUser(ctx context.Context, username, email, password string, 
 }
 
 func (a *App) RegisterFirstUser(ctx context.Context, username, email, password string) (sqlc.User, error) {
+	// Once setup is complete, reject registration before paying Argon2's CPU
+	// cost or taking the exclusive users-table lock. The locked transaction
+	// below remains the race-proof boundary for two concurrent first requests.
+	q := sqlc.New(a.db)
+	count, err := q.CountUsers(ctx)
+	if err != nil {
+		return sqlc.User{}, fmt.Errorf("counting users: %w", err)
+	}
+	if count > 0 {
+		return sqlc.User{}, ErrRegistrationClosed
+	}
+	if err := auth.ValidateNewPassword(password); err != nil {
+		return sqlc.User{}, err
+	}
+
 	hash, err := auth.HashPassword(password)
 	if err != nil {
 		return sqlc.User{}, fmt.Errorf("hashing password: %w", err)
@@ -59,8 +77,8 @@ func (a *App) RegisterFirstUser(ctx context.Context, username, email, password s
 		return sqlc.User{}, fmt.Errorf("lock users: %w", err)
 	}
 
-	q := sqlc.New(tx)
-	count, err := q.CountUsers(ctx)
+	q = sqlc.New(tx)
+	count, err = q.CountUsers(ctx)
 	if err != nil {
 		return sqlc.User{}, fmt.Errorf("counting users: %w", err)
 	}
@@ -83,17 +101,30 @@ func (a *App) RegisterFirstUser(ctx context.Context, username, email, password s
 	return user, nil
 }
 
+// RegistrationAvailable is the public setup-state probe used by the login UI.
+// The environment/config gate is checked by the HTTP layer first; this method
+// answers only whether the atomic first-user invariant is still satisfiable.
+func (a *App) RegistrationAvailable(ctx context.Context) (bool, error) {
+	count, err := sqlc.New(a.db).CountUsers(ctx)
+	if err != nil {
+		return false, fmt.Errorf("counting users: %w", err)
+	}
+	return count == 0, nil
+}
+
 func (a *App) Authenticate(ctx context.Context, username, password string) (sqlc.User, error) {
 	q := sqlc.New(a.db)
 
 	user, err := q.GetUserByUsername(ctx, username)
 	if err != nil {
+		auth.CheckDummyPassword(password)
 		return sqlc.User{}, fmt.Errorf("invalid credentials")
 	}
 
 	if !auth.CheckPassword(user.PasswordHash, password) {
 		return sqlc.User{}, fmt.Errorf("invalid credentials")
 	}
+	rehashUserPassword(ctx, q, &user, password)
 
 	return user, nil
 }
@@ -102,6 +133,17 @@ func (a *App) Authenticate(ctx context.Context, username, password string) (sqlc
 // logins land here. Sessions live 30 days; user_agent is captured for the
 // "My sessions" page; ip is best-effort (caller passes "" if not derivable).
 func (a *App) CreateAuthSession(ctx context.Context, userID int64, userAgent, ip string) (string, error) {
+	return a.createAuthSession(ctx, userID, userAgent, ip, "session")
+}
+
+// CreateJellyfinSession mints a compatibility-client token whose audience is
+// limited to Jellyfin routes. A short Jellyfin PIN must never buy a bearer
+// token accepted by Heya's native/admin API.
+func (a *App) CreateJellyfinSession(ctx context.Context, userID int64, userAgent, ip string) (string, error) {
+	return a.createAuthSession(ctx, userID, userAgent, ip, "jellyfin_session")
+}
+
+func (a *App) createAuthSession(ctx context.Context, userID int64, userAgent, ip, kind string) (string, error) {
 	token, err := auth.GenerateToken()
 	if err != nil {
 		return "", fmt.Errorf("generating token: %w", err)
@@ -112,7 +154,7 @@ func (a *App) CreateAuthSession(ctx context.Context, userID int64, userAgent, ip
 		UserID:    userID,
 		TokenHash: auth.TokenHash(token),
 		ExpiresAt: pgTimestamptz(time.Now().Add(30 * 24 * time.Hour)),
-		Kind:      "session",
+		Kind:      kind,
 		Name:      pgText(""),
 		UserAgent: pgText(userAgent),
 		Ip:        pgText(ip),
@@ -134,7 +176,7 @@ func (a *App) DeleteSession(ctx context.Context, token string) error {
 // for a wrong current password vs 500 for a hashing/DB problem.
 var ErrWrongPassword = fmt.Errorf("current password is incorrect")
 
-func (a *App) ChangePassword(ctx context.Context, userID int64, currentPassword, newPassword string) error {
+func (a *App) ChangePassword(ctx context.Context, userID int64, currentToken, currentPassword, newPassword string) error {
 	q := sqlc.New(a.db)
 	user, err := q.GetUserByID(ctx, userID)
 	if err != nil {
@@ -143,14 +185,31 @@ func (a *App) ChangePassword(ctx context.Context, userID int64, currentPassword,
 	if !auth.CheckPassword(user.PasswordHash, currentPassword) {
 		return ErrWrongPassword
 	}
+	if err := auth.ValidateNewPassword(newPassword); err != nil {
+		return err
+	}
 	hash, err := auth.HashPassword(newPassword)
 	if err != nil {
 		return fmt.Errorf("hashing: %w", err)
 	}
-	return q.UpdateUserPassword(ctx, sqlc.UpdateUserPasswordParams{
+	return q.UpdateUserPasswordAndDeleteOtherSessions(ctx, sqlc.UpdateUserPasswordAndDeleteOtherSessionsParams{
 		ID:           userID,
 		PasswordHash: hash,
+		TokenHash:    auth.TokenHash(currentToken),
 	})
+}
+
+func rehashUserPassword(ctx context.Context, q *sqlc.Queries, user *sqlc.User, password string) {
+	if !auth.NeedsPasswordRehash(user.PasswordHash) {
+		return
+	}
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return
+	}
+	if err := q.UpdateUserPassword(ctx, sqlc.UpdateUserPasswordParams{ID: user.ID, PasswordHash: hash}); err == nil {
+		user.PasswordHash = hash
+	}
 }
 
 // AuthSessionView is the redacted shape returned to the user — token is
@@ -383,13 +442,16 @@ func (a *App) ResetPassword(ctx context.Context, username, newPassword string) e
 	if err != nil {
 		return fmt.Errorf("user not found: %s", username)
 	}
+	if err := auth.ValidateNewPassword(newPassword); err != nil {
+		return err
+	}
 
 	hash, err := auth.HashPassword(newPassword)
 	if err != nil {
 		return fmt.Errorf("hashing password: %w", err)
 	}
 
-	return q.UpdateUserPassword(ctx, sqlc.UpdateUserPasswordParams{
+	return q.UpdateUserPasswordAndDeleteSessions(ctx, sqlc.UpdateUserPasswordAndDeleteSessionsParams{
 		ID:           user.ID,
 		PasswordHash: hash,
 	})
@@ -435,11 +497,14 @@ func (a *App) SetUserAdmin(ctx context.Context, userID int64, isAdmin bool) (sql
 // username lookup.
 func (a *App) ResetPasswordByID(ctx context.Context, userID int64, newPassword string) error {
 	q := sqlc.New(a.db)
+	if err := auth.ValidateNewPassword(newPassword); err != nil {
+		return err
+	}
 	hash, err := auth.HashPassword(newPassword)
 	if err != nil {
 		return fmt.Errorf("hashing: %w", err)
 	}
-	return q.UpdateUserPassword(ctx, sqlc.UpdateUserPasswordParams{
+	return q.UpdateUserPasswordAndDeleteSessions(ctx, sqlc.UpdateUserPasswordAndDeleteSessionsParams{
 		ID:           userID,
 		PasswordHash: hash,
 	})

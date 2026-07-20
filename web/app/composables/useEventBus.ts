@@ -286,10 +286,9 @@ export function useEventBus() {
 
     const url = new URL('/api/ws', location.origin)
     url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    url.searchParams.set('token', token.value)
     url.searchParams.set('subscriptions', '1')
     // Spoofable transport metadata only; WebSocket authentication continues
-    // to rely exclusively on the bearer token above.
+    // to rely on the same-origin session cookie.
     if (getClientSurface() === 'tauri') {
       url.searchParams.set(CLIENT_SURFACE_WS_PARAM, 'tauri')
     }

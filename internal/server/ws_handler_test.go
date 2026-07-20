@@ -18,7 +18,8 @@ func TestWebSocketRawModeRequiresAdmin(t *testing.T) {
 	wsBase := "ws" + strings.TrimPrefix(server.URL, "http")
 
 	t.Run("regular user denied raw mode", func(t *testing.T) {
-		conn, response, err := websocket.DefaultDialer.Dial(wsBase+"?token=user-token&events=raw", nil)
+		headers := http.Header{"Cookie": []string{"session_token=user-token"}}
+		conn, response, err := websocket.DefaultDialer.Dial(wsBase+"?events=raw", headers)
 		if conn != nil {
 			_ = conn.Close()
 		}
@@ -29,7 +30,8 @@ func TestWebSocketRawModeRequiresAdmin(t *testing.T) {
 	})
 
 	t.Run("regular user may use normal stream", func(t *testing.T) {
-		conn, response, err := websocket.DefaultDialer.Dial(wsBase+"?token=user-token&subscriptions=1", nil)
+		headers := http.Header{"Cookie": []string{"session_token=user-token"}}
+		conn, response, err := websocket.DefaultDialer.Dial(wsBase+"?subscriptions=1", headers)
 		if response != nil {
 			t.Cleanup(func() { _ = response.Body.Close() })
 		}
@@ -38,7 +40,8 @@ func TestWebSocketRawModeRequiresAdmin(t *testing.T) {
 	})
 
 	t.Run("admin may use raw mode", func(t *testing.T) {
-		conn, response, err := websocket.DefaultDialer.Dial(wsBase+"?token=admin-token&events=raw", nil)
+		headers := http.Header{"Cookie": []string{"session_token=admin-token"}}
+		conn, response, err := websocket.DefaultDialer.Dial(wsBase+"?events=raw", headers)
 		if response != nil {
 			t.Cleanup(func() { _ = response.Body.Close() })
 		}
@@ -51,10 +54,11 @@ func TestWebSocketRejectsCrossOriginBrowser(t *testing.T) {
 	hub := eventhub.New()
 	server := httptest.NewServer(handleWebSocket(hub, fakeSessions{}))
 	t.Cleanup(server.Close)
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "?token=user-token"
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
 
 	header := http.Header{}
 	header.Set("Origin", "https://attacker.example")
+	header.Set("Cookie", "session_token=user-token")
 	conn, response, err := websocket.DefaultDialer.Dial(wsURL, header)
 	if conn != nil {
 		_ = conn.Close()

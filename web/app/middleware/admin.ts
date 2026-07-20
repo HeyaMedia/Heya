@@ -3,7 +3,7 @@
 // Non-admins land on the personal profile page instead of seeing a blank
 // admin-gated panel. Server endpoints are still admin-gated on their own.
 //
-// plugins/auth.ts hydrates the token synchronously and then fetches the user
+// plugins/auth.ts initializes cookie auth synchronously and then fetches the user
 // payload asynchronously. Skip the gate while user.value hasn't resolved yet
 // (token present, user still null) so an admin doesn't get bounced to
 // /profile on first visit before /api/auth/me has come back.

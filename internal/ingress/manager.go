@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/caddyserver/caddy/v2"
+	"github.com/karbowiak/heya/internal/securityevents"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 )
@@ -29,8 +30,9 @@ var activeManager atomic.Pointer[Manager]
 // changes are serialized because Caddy provisions a replacement config before
 // retiring the previous one.
 type Manager struct {
-	handler http.Handler
-	log     zerolog.Logger
+	handler        http.Handler
+	log            zerolog.Logger
+	securityEvents *securityevents.Recorder
 
 	opMu sync.Mutex
 	mu   sync.RWMutex
@@ -59,14 +61,18 @@ type Manager struct {
 	metricSample metricSample
 }
 
-func New(handler http.Handler, logger zerolog.Logger) *Manager {
-	return &Manager{
+func New(handler http.Handler, logger zerolog.Logger, recorders ...*securityevents.Recorder) *Manager {
+	manager := &Manager{
 		handler:         handler,
 		log:             logger,
 		registries:      make(map[uint64]*prometheus.Registry),
 		sharedListeners: make(map[string]*sharedListener),
 		protocols:       make(map[string]ProtocolStats),
 	}
+	if len(recorders) > 0 {
+		manager.securityEvents = recorders[0]
+	}
+	return manager
 }
 
 // Start installs the initial host listener and claims Caddy's process-global
@@ -80,6 +86,13 @@ func (m *Manager) Start(ctx context.Context, cfg HostConfig) error {
 	}
 	if cfg.DataDir == "" {
 		return errors.New("ingress: data directory is required")
+	}
+	cfg.WAFMode = strings.ToLower(strings.TrimSpace(cfg.WAFMode))
+	if cfg.WAFMode == "" {
+		cfg.WAFMode = "off"
+	}
+	if cfg.WAFMode != "off" && cfg.WAFMode != "detect" && cfg.WAFMode != "block" {
+		return fmt.Errorf("ingress: invalid WAF mode %q (want off, detect, or block)", cfg.WAFMode)
 	}
 	if cfg.LANIP == "" {
 		cfg.LANIP = DetectLANIP()
@@ -412,6 +425,7 @@ func (m *Manager) buildConfig(generation uint64) (map[string]any, []ListenerStat
 		HTTPS:      host.HTTPS,
 		DefaultSNI: defaultSNI,
 		HTTP3:      host.HTTPS,
+		WAFMode:    host.WAFMode,
 	})
 	hostProtocols := []string{"h1"}
 	if host.HTTPS {
@@ -441,7 +455,7 @@ func (m *Manager) buildConfig(generation uint64) (map[string]any, []ListenerStat
 		address := net.JoinHostPort("", strconv.Itoa(remoteCfg.Port))
 		servers["remote"] = caddyHTTPServer(caddyServerOptions{
 			Listen: []string{"tcp/" + address}, Ingress: "remote", Generation: generation,
-			HTTPS: true, DefaultSNI: remoteDefault, HTTP3: true,
+			HTTPS: true, DefaultSNI: remoteDefault, HTTP3: true, WAFMode: host.WAFMode,
 		})
 		listeners = append(listeners, ListenerStatus{
 			Name: "remote", Kind: "remote", Network: "tcp+udp", Address: address,
@@ -465,7 +479,7 @@ func (m *Manager) buildConfig(generation uint64) (map[string]any, []ListenerStat
 		case tailCfg.Funnel:
 			servers["funnel"] = caddyHTTPServer(caddyServerOptions{
 				Listen: []string{"heya-funnel/" + tailHostPort}, Ingress: "funnel", Generation: generation,
-				PreTerminatedTLS: true,
+				PreTerminatedTLS: true, WAFMode: host.WAFMode,
 			})
 			listeners = append(listeners, ListenerStatus{
 				Name: "funnel", Kind: "funnel", Network: "tcp", Address: tailHostPort,
@@ -475,7 +489,7 @@ func (m *Manager) buildConfig(generation uint64) (map[string]any, []ListenerStat
 			if tailCfg.HTTPS {
 				servers["tailnet_h3"] = caddyHTTPServer(caddyServerOptions{
 					Listen: []string{"heya-tsnet/" + tailHostPort}, Ingress: "tailnet", Generation: generation,
-					HTTPS: true, DefaultSNI: tailCfg.CertDomain, HTTP3Only: true,
+					HTTPS: true, DefaultSNI: tailCfg.CertDomain, HTTP3Only: true, WAFMode: host.WAFMode,
 				})
 				listeners = append(listeners, ListenerStatus{
 					Name: "tailnet-h3", Kind: "tailscale", Network: "udp", Address: tailHostPort,
@@ -486,7 +500,7 @@ func (m *Manager) buildConfig(generation uint64) (map[string]any, []ListenerStat
 		case tailCfg.HTTPS:
 			servers["tailnet"] = caddyHTTPServer(caddyServerOptions{
 				Listen: []string{"heya-tsnet/" + tailHostPort}, Ingress: "tailnet", Generation: generation,
-				HTTPS: true, DefaultSNI: tailCfg.CertDomain, HTTP3: true,
+				HTTPS: true, DefaultSNI: tailCfg.CertDomain, HTTP3: true, WAFMode: host.WAFMode,
 			})
 			listeners = append(listeners, ListenerStatus{
 				Name: "tailnet", Kind: "tailscale", Network: "tcp+udp", Address: tailHostPort,
@@ -496,7 +510,7 @@ func (m *Manager) buildConfig(generation uint64) (map[string]any, []ListenerStat
 		default:
 			tailHTTP := net.JoinHostPort(tailCfg.Address, "80")
 			servers["tailnet"] = caddyHTTPServer(caddyServerOptions{
-				Listen: []string{"heya-tsnet/" + tailHTTP}, Ingress: "tailnet", Generation: generation,
+				Listen: []string{"heya-tsnet/" + tailHTTP}, Ingress: "tailnet", Generation: generation, WAFMode: host.WAFMode,
 			})
 			listeners = append(listeners, ListenerStatus{
 				Name: "tailnet", Kind: "tailscale", Network: "tcp", Address: tailHTTP,
@@ -556,12 +570,19 @@ func (m *Manager) buildConfig(generation uint64) (map[string]any, []ListenerStat
 		level = "ERROR"
 	}
 	root := filepath.Join(host.DataDir, "caddy")
+	defaultLog := map[string]any{"level": level}
+	if host.WAFMode != "off" {
+		// The core tees only sanitized Coraza security signals into Heya's
+		// bounded admin event recorder. Ordinary Caddy logs keep their normal
+		// stderr destination and verbosity.
+		defaultLog["core"] = map[string]any{"module": "heya_security"}
+	}
 	config := map[string]any{
 		"admin": map[string]any{
 			"disabled": true, "config": map[string]any{"persist": false},
 		},
 		"storage": map[string]any{"module": "file_system", "root": root},
-		"logging": map[string]any{"logs": map[string]any{"default": map[string]any{"level": level}}},
+		"logging": map[string]any{"logs": map[string]any{"default": defaultLog}},
 		"apps":    apps,
 	}
 	return config, listeners, nil
@@ -576,7 +597,23 @@ type caddyServerOptions struct {
 	HTTP3            bool
 	HTTP3Only        bool
 	PreTerminatedTLS bool
+	WAFMode          string
 }
+
+const wafDirectives = `
+Include @coraza.conf-recommended
+SecRequestBodyLimit 27262976
+SecRequestBodyInMemoryLimit 1048576
+SecResponseBodyAccess Off
+Include @crs-setup.conf.example
+Include @owasp_crs/*.conf
+SecRuleUpdateTargetByTag "OWASP_CRS" "!REQUEST_HEADERS:Authorization"
+SecRuleUpdateTargetByTag "OWASP_CRS" "!REQUEST_HEADERS:Cookie"
+SecRuleUpdateTargetByTag "OWASP_CRS" "!ARGS:password"
+SecRuleUpdateTargetByTag "OWASP_CRS" "!ARGS:current_password"
+SecRuleUpdateTargetByTag "OWASP_CRS" "!ARGS:new_password"
+SecRuleEngine %s
+`
 
 func caddyHTTPServer(o caddyServerOptions) map[string]any {
 	protocols := []string{"h1"}
@@ -588,16 +625,32 @@ func caddyHTTPServer(o caddyServerOptions) map[string]any {
 			protocols = append(protocols, "h3")
 		}
 	}
+	handlers := make([]any, 0, 2)
+	if o.WAFMode == "detect" || o.WAFMode == "block" {
+		engine := "DetectionOnly"
+		if o.WAFMode == "block" {
+			engine = "On"
+		}
+		handlers = append(handlers, map[string]any{
+			"handler":        "waf",
+			"load_owasp_crs": true,
+			"directives":     fmt.Sprintf(wafDirectives, engine),
+		})
+	}
+	handlers = append(handlers, map[string]any{
+		"handler": "heya", "ingress": o.Ingress, "generation": o.Generation,
+	})
+
 	server := map[string]any{
 		"listen":          o.Listen,
 		"protocols":       protocols,
 		"automatic_https": map[string]any{"disable": true},
 		"routes": []any{map[string]any{
-			"handle": []any{map[string]any{
-				"handler": "heya", "ingress": o.Ingress, "generation": o.Generation,
-			}},
+			"handle": handlers,
 		}},
 		"read_header_timeout": "15s",
+		"read_timeout":        "2m",
+		"max_header_bytes":    64 << 10,
 		"idle_timeout":        "5m",
 	}
 	if o.HTTPS {

@@ -21,6 +21,8 @@ func New(cfg *config.Config, app *service.App, opts ...Option) *http.Server {
 		Addr:              cfg.Addr(),
 		Handler:           NewHandler(cfg, app, opts...),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    64 << 10,
 	}
 	if baseCtx := collectOptions(opts...).baseCtx; baseCtx != nil {
 		srv.BaseContext = func(_ net.Listener) context.Context { return baseCtx }
@@ -93,7 +95,7 @@ func BuildAPI(mux *http.ServeMux, app *service.App, cfg *config.Config, opts ...
 	// handlers (see wrapStream in binary_huma.go).
 	api := newHumaAPI(mux, sessions)
 	registerSystemRoutes(api, app)
-	registerAuthRoutes(api, app)
+	registerAuthRoutes(api, app, cfg)
 	registerAdminRoutes(api, app, o.logBuf)
 	registerAdminSystemRoutes(api, app, o.hub)
 	registerAdminDiagnosticsRoutes(api, app, o.hub, o.logBuf)

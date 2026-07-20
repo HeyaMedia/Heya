@@ -10,6 +10,8 @@ import (
 	"github.com/danielgtaylor/huma/v2/humatest"
 	"github.com/karbowiak/heya/internal/auth"
 	"github.com/karbowiak/heya/internal/config"
+	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/requestmeta"
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/stretchr/testify/assert"
 )
@@ -125,38 +127,44 @@ func TestHumaAuthInjectsTokenContext(t *testing.T) {
 	assert.Contains(t, resp.Body.String(), "user-token")
 }
 
-func TestAllowsQueryTokenOnlyForBrowserTransports(t *testing.T) {
-	allowed := []string{
-		"/api/stream/{file_id}",
-		"/api/stream/{file_id}/hls/master.m3u8",
-		"/api/stream/{file_id}/hls/index.m3u8",
-		"/api/stream/{file_id}/hls/{segment}",
-		"/api/stream/{file_id}/subtitles/{index}",
-		"/api/stream/{file_id}/trickplay/index.vtt",
-		"/api/stream/{file_id}/trickplay/{filename}",
-		"/api/music/tracks/{id}/stream",
-		"/api/music/tracks/{id}/file/{track_file_id}",
-		"/api/radio/stream",
-		"/api/podcasts/episode/stream",
-		"/api/ws",
-	}
-	for _, path := range allowed {
-		t.Run(path, func(t *testing.T) {
-			assert.True(t, allowsQueryToken(&huma.Operation{Path: path}))
+func TestHumaAuthRejectsSessionTokensInURLs(t *testing.T) {
+	mux := http.NewServeMux()
+	api := newHumaAPI(mux, fakeSessions{})
+	huma.Register(api, secured(op(http.MethodGet, "/private", "private", "private", "Test")),
+		func(context.Context, *struct{}) (*JSONOutput[map[string]bool], error) {
+			return noStoreJSON(map[string]bool{"ok": true}), nil
 		})
-	}
+	response := humatest.Wrap(t, api).Get("/private?token=user-token")
+	assert.Equal(t, http.StatusUnauthorized, statusOf(response))
+}
 
-	denied := []string{
-		"/api/auth/me",
-		"/api/media",
-		"/api/music/tracks/{id}",
-		"/api/stream/{file_id}/info",
-		"/api/stream/{file_id}/transcode-status",
-		"/api/stream/{file_id}/subtitles",
-	}
-	for _, path := range denied {
-		t.Run(path, func(t *testing.T) {
-			assert.False(t, allowsQueryToken(&huma.Operation{Path: path}))
+func TestHumaAuthAllowsOnlyScopedJellyfinPlaybackTokensInURLs(t *testing.T) {
+	mux := http.NewServeMux()
+	api := newHumaAPI(mux, fakeSessions{})
+	operation := secured(binaryOp(http.MethodGet, "/stream", "stream-direct", "stream", "Test"))
+	huma.Register(api, operation,
+		func(context.Context, *struct{}) (*JSONOutput[map[string]bool], error) {
+			return noStoreJSON(map[string]bool{"ok": true}), nil
 		})
-	}
+	tapi := humatest.Wrap(t, api)
+
+	assert.Equal(t, http.StatusUnauthorized, statusOf(tapi.Get("/stream?token=user-token")))
+	assert.Equal(t, http.StatusOK, statusOf(tapi.Get("/stream?token=jellyfin-token")))
+}
+
+func TestAuthOutputKeepsBrowserCredentialOutOfJSON(t *testing.T) {
+	ctx := requestmeta.WithSecureTransport(context.Background(), true)
+	user := sqlc.User{ID: 7, Username: "alice", Email: "alice@example.com"}
+
+	browser := newAuthOutput(ctx, "browser-secret", user, "browser")
+	assert.Empty(t, browser.Body.Token)
+	assert.Contains(t, browser.SetCookie, "session_token=browser-secret")
+	assert.Contains(t, browser.SetCookie, "Path=/")
+	assert.Contains(t, browser.SetCookie, "HttpOnly")
+	assert.Contains(t, browser.SetCookie, "Secure")
+	assert.Contains(t, browser.SetCookie, "SameSite=Strict")
+
+	apiClient := newAuthOutput(ctx, "api-secret", user, "")
+	assert.Equal(t, "api-secret", apiClient.Body.Token)
+	assert.Empty(t, apiClient.SetCookie)
 }

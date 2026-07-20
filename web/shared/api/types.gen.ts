@@ -890,9 +890,9 @@ export type AuthBody = {
      */
     readonly $schema?: string;
     /**
-     * Session token
+     * Session token; omitted for browser/Tauri cookie sessions
      */
-    token: string;
+    token?: string;
     user: UserView;
 };
 
@@ -1080,7 +1080,7 @@ export type ChangePasswordRequest = {
      */
     current_password: string;
     /**
-     * New password — minimum 8 chars
+     * New password — minimum 15 characters
      */
     new_password: string;
 };
@@ -1873,6 +1873,15 @@ export type HttpMetrics = {
     requests_in_flight: number;
     requests_per_second: number;
     requests_total: number;
+};
+
+export type HttpSecurityStatus = {
+    application_body_limit_bytes: number;
+    csp_mode: 'report-only' | 'enforced';
+    hsts_on_public_ingress: boolean;
+    same_origin_csrf_gate: boolean;
+    security_headers: boolean;
+    trusted_forwarded_headers: boolean;
 };
 
 export type HealthBody = {
@@ -3243,6 +3252,17 @@ export type LocalModel = {
     url: string;
 };
 
+export type LoginGuardStats = {
+    active_account_buckets: number;
+    active_ip_buckets: number;
+    allowed_total: number;
+    password_check_capacity: number;
+    password_checks_active: number;
+    password_checks_started: number;
+    saturated_total: number;
+    throttled_total: number;
+};
+
 export type LoginInputBody = {
     /**
      * A URL to the JSON Schema for this object.
@@ -3256,6 +3276,26 @@ export type LoginInputBody = {
      * Username
      */
     username: string;
+};
+
+export type LoginProtectionStatus = {
+    by_account: LoginRatePolicy;
+    by_ip: LoginRatePolicy;
+    stats: LoginGuardStats;
+    tracked_key_capacity: number;
+};
+
+export type LoginRatePolicy = {
+    burst: number;
+    refill_seconds: number;
+};
+
+export type LogoutOutputBody = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    status: string;
 };
 
 export type LovedBody = {
@@ -3995,6 +4035,15 @@ export type OsTestBody = {
     error?: string;
     ok: boolean;
     user?: unknown;
+};
+
+export type PasswordSecurityStatus = {
+    hash_algorithm: string;
+    legacy_hashes_upgraded: boolean;
+    maximum_length: number;
+    minimum_length: number;
+    password_change_revokes_other_credentials: boolean;
+    unknown_user_timing_defense: boolean;
 };
 
 export type PeopleMediaIdsRequest = {
@@ -4746,6 +4795,24 @@ export type RegisterInputBody = {
     username: string;
 };
 
+export type RegistrationSecurityStatus = {
+    available: boolean;
+    enabled: boolean;
+    env_var?: string;
+    restart_required: boolean;
+    source: string;
+    state: 'disabled' | 'available' | 'closed' | 'unknown';
+    value: string;
+};
+
+export type RegistrationStatusBody = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    enabled: boolean;
+};
+
 export type RemoteConfigPayload = {
     /**
      * A URL to the JSON Schema for this object.
@@ -5111,6 +5178,51 @@ export type SeasonWatchInfo = {
     season_id: number;
     total: number;
     watched: number;
+};
+
+export type SecurityCounters = {
+    login_failures: number;
+    login_throttled: number;
+    registration_throttled: number;
+    verifier_saturated: number;
+    waf_blocked: number;
+    waf_matches: number;
+};
+
+export type SecurityEvent = {
+    account_key?: string;
+    action?: string;
+    client_ip?: string;
+    id: number;
+    kind: string;
+    message?: string;
+    path?: string;
+    rule_id?: string;
+    severity?: string;
+    surface?: string;
+    time: string;
+    transaction_id?: string;
+};
+
+export type SecurityEventSnapshot = {
+    capacity: number;
+    counters: SecurityCounters;
+    recent: Array<SecurityEvent> | null;
+};
+
+export type SecurityStatus = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    events: SecurityEventSnapshot;
+    generated_at: string;
+    http: HttpSecurityStatus;
+    login: LoginProtectionStatus;
+    password: PasswordSecurityStatus;
+    registration: RegistrationSecurityStatus;
+    started_at?: string;
+    waf: WafSecurityStatus;
 };
 
 export type SemanticSearchResult = {
@@ -6313,6 +6425,18 @@ export type VideoStream = {
     width: number;
 };
 
+export type WafSecurityStatus = {
+    blocking: boolean;
+    crs_version: string;
+    enabled: boolean;
+    env_var?: string;
+    restart_required: boolean;
+    rules_bundled: boolean;
+    source: string;
+    updated_with_heya: boolean;
+    value: string;
+};
+
 export type WatchedBody = {
     /**
      * A URL to the JSON Schema for this object.
@@ -6785,9 +6909,9 @@ export type ArtworkBodyWritable = {
 
 export type AuthBodyWritable = {
     /**
-     * Session token
+     * Session token; omitted for browser/Tauri cookie sessions
      */
-    token: string;
+    token?: string;
     user: UserViewWritable;
 };
 
@@ -6895,7 +7019,7 @@ export type ChangePasswordRequestWritable = {
      */
     current_password: string;
     /**
-     * New password — minimum 8 chars
+     * New password — minimum 15 characters
      */
     new_password: string;
 };
@@ -7347,6 +7471,10 @@ export type LoginInputBodyWritable = {
      * Username
      */
     username: string;
+};
+
+export type LogoutOutputBodyWritable = {
+    status: string;
 };
 
 export type LovedBodyWritable = {
@@ -7932,6 +8060,10 @@ export type RegisterInputBodyWritable = {
     username: string;
 };
 
+export type RegistrationStatusBodyWritable = {
+    enabled: boolean;
+};
+
 export type RemoteConfigPayloadWritable = {
     acme_email?: string;
     /**
@@ -8077,6 +8209,17 @@ export type SearchResponseWritable = {
     page: number;
     total_count: number;
     total_pages: number;
+};
+
+export type SecurityStatusWritable = {
+    events: SecurityEventSnapshot;
+    generated_at: string;
+    http: HttpSecurityStatus;
+    login: LoginProtectionStatus;
+    password: PasswordSecurityStatus;
+    registration: RegistrationSecurityStatus;
+    started_at?: string;
+    waf: WafSecurityStatus;
 };
 
 export type SemanticSearchResultWritable = {
@@ -8996,6 +9139,31 @@ export type RecommendationsMlStatusResponses = {
 
 export type RecommendationsMlStatusResponse = RecommendationsMlStatusResponses[keyof RecommendationsMlStatusResponses];
 
+export type GetAdminSecurityData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/admin/security';
+};
+
+export type GetAdminSecurityErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type GetAdminSecurityError = GetAdminSecurityErrors[keyof GetAdminSecurityErrors];
+
+export type GetAdminSecurityResponses = {
+    /**
+     * OK
+     */
+    200: SecurityStatus;
+};
+
+export type GetAdminSecurityResponse = GetAdminSecurityResponses[keyof GetAdminSecurityResponses];
+
 export type AdminListSessionsData = {
     body?: never;
     path?: never;
@@ -9796,6 +9964,10 @@ export type LoginData = {
          * Captured into the session so the user can recognise this device on the My Sessions page
          */
         'User-Agent'?: string;
+        /**
+         * Untrusted client UX metadata; browser and tauri surfaces receive an HttpOnly cookie
+         */
+        'X-Heya-Client-Surface'?: string;
     };
     path?: never;
     query?: never;
@@ -9847,13 +10019,16 @@ export type LogoutResponses = {
     /**
      * OK
      */
-    200: StatusOutputBody;
+    200: LogoutOutputBody;
 };
 
 export type LogoutResponse = LogoutResponses[keyof LogoutResponses];
 
 export type MeData = {
     body?: never;
+    headers?: {
+        'X-Heya-Client-Surface'?: string;
+    };
     path?: never;
     query?: never;
     url: '/api/auth/me';
@@ -9884,6 +10059,10 @@ export type RegisterData = {
          * Captured into the session so the user can recognise this device on the My Sessions page
          */
         'User-Agent'?: string;
+        /**
+         * Untrusted client UX metadata; browser and tauri surfaces receive an HttpOnly cookie
+         */
+        'X-Heya-Client-Surface'?: string;
     };
     path?: never;
     query?: never;
@@ -9907,6 +10086,31 @@ export type RegisterResponses = {
 };
 
 export type RegisterResponse = RegisterResponses[keyof RegisterResponses];
+
+export type RegistrationStatusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/auth/registration';
+};
+
+export type RegistrationStatusErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type RegistrationStatusError = RegistrationStatusErrors[keyof RegistrationStatusErrors];
+
+export type RegistrationStatusResponses = {
+    /**
+     * OK
+     */
+    200: RegistrationStatusBody;
+};
+
+export type RegistrationStatusResponse = RegistrationStatusResponses[keyof RegistrationStatusResponses];
 
 export type CastConfigData = {
     body?: never;

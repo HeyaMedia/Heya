@@ -96,6 +96,7 @@ const ALL_GROUPS: SettingsNavGroup[] = [
       },
       { to: '/settings/storage', label: 'Storage', icon: 'hard-drives' },
       { to: '/settings/network', label: 'Network', icon: 'network' },
+      { to: '/settings/security', label: 'Security', icon: 'shield' },
       {
         to: '/settings/users', label: 'Users & access', icon: 'users',
         tabs: [

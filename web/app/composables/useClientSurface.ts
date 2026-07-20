@@ -89,8 +89,8 @@ export function withClientSurfaceHeaders(target: RequestInfo | URL, headers?: He
   // browser or cross-origin requests. The value remains trivially spoofable by
   // arbitrary clients and is metadata only on the server.
   merged.delete(CLIENT_SURFACE_HEADER)
-  if (getClientSurface() === 'tauri' && isSameOriginHeyaApiRequest(target)) {
-    merged.set(CLIENT_SURFACE_HEADER, 'tauri')
+  if (isSameOriginHeyaApiRequest(target)) {
+    merged.set(CLIENT_SURFACE_HEADER, getClientSurface())
   }
   return merged
 }

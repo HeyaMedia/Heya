@@ -115,9 +115,9 @@ func userFrom(ctx context.Context) sqlc.User {
 
 // authMiddleware enforces the per-operation "bearer" security scheme. Routes
 // without a Security entry are treated as public. Token extraction matches
-// the legacy auth.Middleware: Authorization header, session_token cookie, or
-// ?token= query on browser-native transports that can't carry custom headers
-// (media elements and WebSockets).
+// the legacy auth.Middleware: an Authorization header or the same-origin,
+// HttpOnly session_token cookie. Broad session credentials are deliberately
+// never accepted from URLs, where logs and referrers can retain them.
 //
 // `sessions` may be nil — in that case every secured operation returns 401
 // without ever touching a database. The spec-dump CLI and humatest fixtures
@@ -129,7 +129,7 @@ func authMiddleware(api huma.API, sessions auth.SessionLookup) func(huma.Context
 			return
 		}
 
-		token := extractHumaToken(ctx)
+		token, fromURL := extractHumaToken(ctx)
 		resolved, err := auth.ResolveSession(ctx.Context(), sessions, token)
 		if err != nil {
 			if errors.Is(err, auth.ErrInvalidSession) {
@@ -139,11 +139,37 @@ func authMiddleware(api huma.API, sessions auth.SessionLookup) func(huma.Context
 			}
 			return
 		}
+		// Jellyfin's media protocol requires credentials in generated playback
+		// URLs. Accept that legacy shape only for a Jellyfin-scoped session and
+		// only on the exact binary operations it needs. Ordinary Heya sessions
+		// and API tokens are never accepted from a URL.
+		if fromURL && resolved.Session.Kind != "jellyfin_session" {
+			_ = huma.WriteErr(api, ctx, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		if !auth.AllowsNativeAPI(resolved.Session.Kind) && !allowsJellyfinNativeOperation(ctx.Operation(), resolved.Session.Kind) {
+			_ = huma.WriteErr(api, ctx, http.StatusUnauthorized, "unauthorized")
+			return
+		}
 
 		ctx = huma.WithValue(ctx, userCtxKey, resolved.User)
 		ctx = huma.WithContext(ctx, auth.ContextWithToken(ctx.Context(), resolved.Token))
 		auth.TouchSessionAsync(sessions, resolved.Token)
 		next(ctx)
+	}
+}
+
+func allowsJellyfinNativeOperation(op *huma.Operation, kind string) bool {
+	if kind != "jellyfin_session" || op == nil {
+		return false
+	}
+	switch op.OperationID {
+	case "media-image", "person-image", "metadata-image", "studio-image", "extra-thumbnail",
+		"tmdb-image-proxy", "album-cover", "playlist-cover", "stream-direct", "stream-hls-master",
+		"stream-hls-index", "stream-hls-segment", "stream-subtitle-body", "stream-track", "stream-track-file":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -181,10 +207,10 @@ func isAdminOnly(op *huma.Operation) bool {
 	return ok && v
 }
 
-func extractHumaToken(ctx huma.Context) string {
+func extractHumaToken(ctx huma.Context) (token string, fromURL bool) {
 	if h := ctx.Header("Authorization"); h != "" {
 		if strings.HasPrefix(h, "Bearer ") {
-			return strings.TrimPrefix(h, "Bearer ")
+			return strings.TrimPrefix(h, "Bearer "), false
 		}
 	}
 	// Huma's Context doesn't expose Cookie directly — parse the Cookie header.
@@ -192,41 +218,14 @@ func extractHumaToken(ctx huma.Context) string {
 		for _, part := range strings.Split(cookieHeader, ";") {
 			kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
 			if len(kv) == 2 && kv[0] == "session_token" && kv[1] != "" {
-				return kv[1]
+				return kv[1], false
 			}
 		}
 	}
-	if t := ctx.Query("token"); t != "" && allowsQueryToken(ctx.Operation()) {
-		return t
+	if token := ctx.Query("token"); token != "" {
+		return token, true
 	}
-	return ""
-}
-
-func allowsQueryToken(op *huma.Operation) bool {
-	if op == nil {
-		return false
-	}
-	switch {
-	case op.Path == "/api/stream/{file_id}":
-		return true
-	case op.Path == "/api/extras/{id}/stream":
-		return true
-	case strings.HasPrefix(op.Path, "/api/stream/{file_id}/hls/"):
-		return true
-	case op.Path == "/api/stream/{file_id}/subtitles/{index}":
-		return true
-	case strings.HasPrefix(op.Path, "/api/stream/{file_id}/trickplay/"):
-		return true
-	case op.Path == "/api/ws":
-		return true
-	case op.Path == "/api/radio/stream":
-		return true
-	case op.Path == "/api/podcasts/episode/stream":
-		return true
-	case strings.HasPrefix(op.Path, "/api/music/tracks/") && (strings.HasSuffix(op.Path, "/stream") || strings.Contains(op.Path, "/file/")):
-		return true
-	}
-	return false
+	return "", false
 }
 
 // secured returns a copy of op with bearer auth required.

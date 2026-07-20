@@ -109,11 +109,11 @@ var serveCmd = &cobra.Command{
 			server.WithEventHub(app.EventHub()),
 		)
 		ingressLogger := log.With().Str("subsystem", "caddy").Logger()
-		ingressManager := ingress.New(handler, ingressLogger)
+		ingressManager := ingress.New(handler, ingressLogger, app.SecurityEvents())
 		app.SetIngress(ingressManager)
 		if err := ingressManager.Start(appCtx, ingress.HostConfig{
 			Address: cfg.Addr(), HTTPS: !devBackend, DataDir: cfg.DataDir.Value,
-			LogLevel: cfg.LogLevel.Value,
+			LogLevel: cfg.LogLevel.Value, WAFMode: cfg.WAFMode.Value,
 		}); err != nil {
 			return fmt.Errorf("starting embedded Caddy ingress: %w", err)
 		}

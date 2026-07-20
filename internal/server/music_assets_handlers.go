@@ -52,7 +52,7 @@ func handleAlbumCover(app *service.App) http.HandlerFunc {
 			// scroll-into-view, but not so long that a follow-up refresh
 			// (which would replace the URL with a local file) gets stuck
 			// behind a stale 302.
-			w.Header().Set("Cache-Control", "public, max-age=300")
+			w.Header().Set("Cache-Control", "private, max-age=300")
 			http.Redirect(w, r, path, http.StatusFound)
 			return
 		}
@@ -70,13 +70,12 @@ func proxyRemoteImage(w http.ResponseWriter, r *http.Request, rawURL string) {
 		http.NotFound(w, r)
 		return
 	}
-	publichttp.ServeImage(w, r, image, "public, max-age=3600")
+	publichttp.ServeImage(w, r, image, "private, max-age=3600")
 }
 
-// handlePlaylistCover serves a user playlist's custom cover file. Registered
-// unauthenticated (see binary_huma.go's registerBinaryRoutes and
-// GetUserPlaylistCoverPath's doc comment) so a plain <img src> works the same
-// way it does for every other image endpoint in the app. Unlike the
+// handlePlaylistCover serves a user playlist's custom cover file. The
+// same-origin session cookie lets a plain <img src> cross the auth boundary.
+// Unlike the
 // resized/cached media images, this is a small, rarely-resized custom upload
 // — served as-is (no imageserve.Resizer) with a short private Cache-Control
 // so a re-upload is picked up quickly instead of riding the resizer's

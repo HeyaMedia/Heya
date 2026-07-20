@@ -116,9 +116,11 @@ func (a *App) AuthenticateJellyfin(ctx context.Context, username, password strin
 	q := sqlc.New(a.db)
 	user, err := q.GetUserByUsername(ctx, username)
 	if err != nil {
+		auth.CheckDummyPassword(password)
 		return sqlc.User{}, fmt.Errorf("invalid credentials")
 	}
 	if auth.CheckPassword(user.PasswordHash, password) {
+		rehashUserPassword(ctx, q, &user, password)
 		return user, nil
 	}
 	cred, err := a.GetJellyfinCredential(ctx, user.ID)

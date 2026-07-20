@@ -26,13 +26,12 @@ import (
 
 // Playback: negotiation, byte delivery, and playstate reporting.
 //
-// The delivery trick that keeps this thin: the client's api_key IS a Heya
-// session token, and Heya's native stream endpoints accept ?token= on an
-// allowlist (/api/stream/*, /api/music/tracks/*). So PlaybackInfo hands out
-// TranscodingUrl / subtitle DeliveryUrls that point straight at the native
-// HLS + subtitle stack — sessions, segment pacing, hwaccel, idle-kill all
-// reused with zero duplication. Only the URLs clients construct THEMSELVES
-// (/Videos/{id}/stream, /Audio/{id}/universal) get real handlers here.
+// The delivery trick that keeps this thin: Jellyfin login mints a scoped Heya
+// session, and only that session kind may authenticate the native playback
+// allowlist through generated URLs. PlaybackInfo can therefore reuse Heya's
+// HLS + subtitle stack without exposing an ordinary browser/API credential.
+// URLs clients construct themselves (/Videos/{id}/stream,
+// /Audio/{id}/universal) get real handlers here.
 
 // playTarget is a resolved playable entity.
 type playTarget struct {
@@ -418,6 +417,7 @@ func (s *Server) handleAudioUniversal(w http.ResponseWriter, r *http.Request, p 
 	}
 	w.Header().Set("Content-Type", "audio/mp4")
 	w.Header().Set("Accept-Ranges", "bytes")
+	w.Header().Set("Cache-Control", "private, no-store")
 	http.ServeContent(w, r, file.Name(), stat.ModTime(), file)
 }
 
@@ -428,6 +428,7 @@ func (s *Server) handleAudioUniversal(w http.ResponseWriter, r *http.Request, p 
 // SHARED database, so it authenticates upstream as-is. Same idea as the
 // passive image proxy; without it, dev playback of prod-path media 404s.
 func (s *Server) serveMediaFile(w http.ResponseWriter, r *http.Request, fileID int64, path string) {
+	w.Header().Set("Cache-Control", "private, no-store")
 	if path == "" {
 		http.NotFound(w, r)
 		return
@@ -466,7 +467,7 @@ func (s *Server) proxyUpstreamMedia(w http.ResponseWriter, r *http.Request, upst
 	if token == "" {
 		token = extractAuth(r).Token
 	}
-	u := fmt.Sprintf("%s/api/stream/%d?token=%s", upstream, fileID, url.QueryEscape(token))
+	u := fmt.Sprintf("%s/api/stream/%d", upstream, fileID)
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, u, nil)
 	if err != nil {
 		http.NotFound(w, r)
@@ -475,6 +476,7 @@ func (s *Server) proxyUpstreamMedia(w http.ResponseWriter, r *http.Request, upst
 	if rg := r.Header.Get("Range"); rg != "" {
 		req.Header.Set("Range", rg)
 	}
+	req.Header.Set("Authorization", "Bearer "+token)
 	res, err := passiveMediaClient.Do(req)
 	if err != nil {
 		log.Warn().Err(err).Int64("file", fileID).Str("component", "jellyfin").Msg("passive media proxy upstream failed")

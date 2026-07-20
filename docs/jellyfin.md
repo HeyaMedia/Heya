@@ -45,13 +45,15 @@ Everything lives in `internal/jellyfin/` (see the package comment in
   remotes (`jellyfin_credentials`, `service/jellyfin_credentials.go`).
   Managed per-user via Settings → Client apps, `/api/me/jellyfin-credential`,
   or `heya jellyfin credential <username> --rotate|--revoke`. Failed logins
-  are throttled per IP (10 per 15 min) so the short PIN can't be guessed
-  online.
-- **Delivery trick**: the client's api_key IS a Heya session token, and the
-  native stream endpoints accept `?token=` — so `TranscodingUrl` and
-  subtitle `DeliveryUrl`s point straight at `/api/stream/{file}/...`,
-  reusing the whole transcode-session stack with zero duplication. Only
-  URLs clients construct themselves (`/Videos/{id}/stream`,
+  are throttled independently by source IP and account, with a global bounded
+  password-verification pool, so the short PIN cannot be guessed online or
+  used to exhaust the server.
+- **Delivery trick**: Jellyfin login mints a scoped session that cannot call
+  ordinary Heya API operations. Only that session kind is accepted from the
+  generated `TranscodingUrl` and subtitle `DeliveryUrl` playback allowlist;
+  normal Heya sessions and API tokens are never accepted from URLs. This
+  reuses the native transcode-session stack without exposing the browser
+  session. URLs clients construct themselves (`/Videos/{id}/stream`,
   `/Audio/{id}/universal`) have real handlers in the package.
 - **Playstate**: `/Sessions/Playing*` maps ticks onto the same
   watch-progress and scrobble paths the web player uses, and mirrors into
@@ -86,7 +88,7 @@ absent/disabled" answers a stock Jellyfin gives — LiveTV off, no plugins…),
   server, so the same suite validates both sides:
 
   ```bash
-  bun tools/jellyfin-conformance.ts                       # Heya (:8080, admin/admin)
+  JF_PASS='your-test-passphrase' bun tools/jellyfin-conformance.ts # Heya (:8080)
   JF_URL=https://jf.example JF_USER=u JF_PASS=p \
     bun tools/jellyfin-conformance.ts                     # real Jellyfin oracle
   ```

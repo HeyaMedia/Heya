@@ -62,7 +62,7 @@ export function alog(scope: string, msg: string, data?: unknown) {
   else console.log(`%c♪ ${scope}`, style, msg)
 }
 
-// Strip the query string (token + caps) so logged URLs stay readable.
+// Strip capability/session-routing query parameters so logged URLs stay readable.
 export function shortUrl(u?: string | null): string {
   if (!u) return String(u)
   return u.split('?')[0] ?? u

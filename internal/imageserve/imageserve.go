@@ -256,7 +256,7 @@ func serveFile(w http.ResponseWriter, r *http.Request, path, contentType string)
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Cache-Control", "public, max-age=604800, immutable")
+	w.Header().Set("Cache-Control", "private, max-age=604800, immutable")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if contentType == "" {
 		contentType = ContentTypeForPath(path)

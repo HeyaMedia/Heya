@@ -95,6 +95,6 @@ func (s *Server) handleTrickplayTile(w http.ResponseWriter, r *http.Request, p P
 		return
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Cache-Control", "private, max-age=86400")
 	http.ServeFile(w, r, spritePath)
 }

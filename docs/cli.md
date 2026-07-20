@@ -132,7 +132,7 @@ config dir, and reuses it. Full details in
 ```bash
 heya api get /api/health
 heya api get /api/music/artists -q limit=5
-heya api post /api/users '{"username":"bob","email":"b@x","password":"hunter22"}'
+heya api post /api/users '{"username":"bob","email":"b@x","password":"correct horse battery staple"}'
 cat patch.json | heya api patch /api/media/42 -
 ```
 
@@ -140,7 +140,7 @@ cat patch.json | heya api patch /api/media/42 -
 | ---------- | ------------------------------------------------------ |
 | `--base`   | Server base URL (default `https://localhost:8080`)     |
 | `--user`   | Login username (default `admin`)                       |
-| `--pass`   | Login password (default `admin`)                       |
+| `--pass`   | Login password (or set `HEYA_API_PASS`)                |
 | `--token`  | Bearer token (skips login + cache)                     |
 | `-q k=v`   | Query param (repeatable, URL-encoded)                  |
 | `--raw`    | Stream response bytes verbatim (no JSON pretty-print)  |

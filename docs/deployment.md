@@ -32,7 +32,7 @@ docker run -d --name heya \
   -v "$HOME/heya-data:/data" \
   -v "/path/to/your/media:/media:ro" \
   -e HEYA_ADMIN_USERNAME=admin \
-  -e HEYA_ADMIN_PASSWORD=admin \
+  -e HEYA_ADMIN_PASSWORD='replace-with-a-long-passphrase' \
   --restart unless-stopped \
   ghcr.io/heyamedia/heya:latest-aio
 ```
@@ -56,10 +56,13 @@ models, caches, and service state. A named volume such as
 it is visible on the host and much easier to inspect, back up, and migrate.
 Whichever form you choose, never run the AIO image without persistent `/data`.
 
-The two `HEYA_ADMIN_*` variables create `admin` / `admin` only when the database
-does not already contain an administrator. Sign in and change that deliberately
-simple bootstrap password immediately; subsequent container restarts do not
-reset it.
+The two `HEYA_ADMIN_*` variables create the administrator only when the
+database does not already contain one. Passwords shorter than 15 characters
+are rejected. Subsequent container restarts do not reset it; remove the
+bootstrap password from the deployment configuration after first boot. For a
+`docker run` deployment, recreate the container with the same `/data` mount
+but without `HEYA_ADMIN_PASSWORD`; the account remains in PostgreSQL while the
+plaintext bootstrap secret disappears from the container configuration.
 
 Heya's production edge is embedded Caddy and requires HTTPS on `HEYA_PORT`.
 Plain HTTP on that same port receives a permanent HTTPS redirect. First boot
@@ -78,13 +81,13 @@ GPU forms use the same host flags as their regular counterparts:
 # NVIDIA
 docker run -d --name heya --gpus all -p 8080:8080/tcp -p 8080:8080/udp \
   -v "$HOME/heya-data:/data" -v "/path/to/your/media:/media:ro" \
-  -e HEYA_ADMIN_USERNAME=admin -e HEYA_ADMIN_PASSWORD=admin \
+  -e HEYA_ADMIN_USERNAME=admin -e HEYA_ADMIN_PASSWORD='replace-with-a-long-passphrase' \
   ghcr.io/heyamedia/heya:latest-cuda-aio
 
 # Intel OpenVINO
 docker run -d --name heya -p 8080:8080/tcp -p 8080:8080/udp \
   -v "$HOME/heya-data:/data" -v "/path/to/your/media:/media:ro" \
-  -e HEYA_ADMIN_USERNAME=admin -e HEYA_ADMIN_PASSWORD=admin \
+  -e HEYA_ADMIN_USERNAME=admin -e HEYA_ADMIN_PASSWORD='replace-with-a-long-passphrase' \
   --device /dev/dri:/dev/dri \
   --group-add "$(getent group render | cut -d: -f3)" \
   ghcr.io/heyamedia/heya:latest-openvino-aio
@@ -104,6 +107,10 @@ docker compose pull && docker compose up -d # update both Heya roles together
 The compose file carries commented-out blocks for the common extras — admin
 bootstrap, declarative `HEYA_LIBRARY_<N>_*` libraries, media mounts, and
 `/dev/dri` passthrough for hardware transcode. Uncomment what you need.
+Application containers set `no-new-privileges` and drop every Linux capability
+except the three filesystem capabilities needed to work with host-owned
+`/data` bind mounts; neither Heya role receives raw-network, device-node, or
+privileged-port capabilities.
 (`make db-up` starts only the `postgres` service — that's the dev flow, and it
 shares this file.)
 
@@ -111,6 +118,53 @@ Library paths are absolute paths inside the container. For NAS or other network
 storage, mount the share on the host and bind-mount it at the same path into the
 serve and worker containers. Configure that mounted path in Heya; transport
 URLs such as `smb://…` are intentionally rejected.
+
+## Public exposure hardening
+
+Heya's public listener is the embedded Caddy edge, not a bare application
+server. It applies bounded request bodies and headers, connection timeouts,
+security response headers, login/registration throttles by client IP and
+account, and a bounded password-verification concurrency limit. Failed logins
+return one generic error so they do not disclose whether an account exists.
+
+First-user registration is opt-in and disabled by default:
+
+```env
+HEYA_ENABLE_REGISTRATION=false
+```
+
+Prefer the `HEYA_ADMIN_*` first-boot bootstrap for unattended deployments. If
+you enable registration, do it only for the short enrollment window; the
+endpoint closes permanently once the first user exists. New passwords are
+Argon2id-hashed and require at least 15 characters. Existing bcrypt hashes are
+accepted and upgraded after the next successful full-password login. A password
+change keeps only the credential that authorized it and revokes other sessions
+and API tokens; administrative resets revoke every credential for the affected
+account.
+
+Coraza and the OWASP Core Rule Set are built into the regular and AIO binaries:
+
+```env
+HEYA_WAF_MODE=detect # off | detect | block
+```
+
+`detect` logs matches without blocking and is the safe default. Review those
+events with your actual clients before selecting `block`; media servers carry
+unusual range requests, manifests, metadata, and third-party client traffic
+that deserve a tuning period. Authorization, cookie, and password values are
+excluded from CRS inspection to avoid placing credentials in audit events.
+
+The ruleset is pinned as a Go dependency. Dependabot proposes grouped weekly
+minor/patch upgrades for Coraza and CRS, which keeps updates reviewable and
+reproducible. Heya deliberately does not fetch executable rules at runtime:
+an unattended rule update can introduce false positives or become a
+supply-chain path without passing CI or producing a new immutable image.
+
+For an Internet-facing deployment also restrict the host firewall to the ports
+you intentionally publish, keep PostgreSQL private (the supplied Compose maps
+its development port to loopback only), update Heya regularly, and keep
+`/data` backups. UDP 8080 is needed only if you want HTTP/3. Tailscale remains
+the lower-exposure option when access does not need to be public.
 
 ### Query diagnostics with pg_stat_statements
 

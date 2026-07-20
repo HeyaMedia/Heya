@@ -6,6 +6,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5"
+	"github.com/karbowiak/heya/internal/auth"
 	"github.com/karbowiak/heya/internal/images"
 	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/karbowiak/heya/internal/service"
@@ -92,6 +93,8 @@ func humaServiceErrorStatus(err error, fallbackStatus int) error {
 		return huma.Error400BadRequest(message)
 	case errors.Is(err, service.ErrWrongPassword):
 		return huma.Error401Unauthorized(message)
+	case errors.Is(err, auth.ErrPasswordPolicy):
+		return huma.Error400BadRequest(message)
 	case errors.Is(err, service.ErrJobNotRetryable), errors.Is(err, service.ErrJobNotCancellable):
 		return huma.Error404NotFound(message)
 	case errors.Is(err, service.ErrSchedulerUnavailable):

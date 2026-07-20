@@ -1,5 +1,6 @@
 import type { StreamInfoResponse } from '~~/shared/types'
 import type { PlaybackEntityType } from '~/composables/usePlaybackEvents'
+import { withAuthHeaders } from '~/composables/useAuth'
 
 export interface PlayerState {
   fileId: string | number
@@ -55,10 +56,7 @@ export function useVideoPlayer(
       // builds the full query string and the response shape isn't pinned in the
       // OpenAPI spec yet.
       const url = `/api/stream/${fileId.value}/info${capsQuery ? `?${capsQuery}` : ''}`
-      const token = useAuth().token.value
-      state.streamInfo = await $fetch<StreamInfoResponse>(url, {
-        headers: withClientSurfaceHeaders(url, token ? { Authorization: `Bearer ${token}` } : undefined),
-      })
+      state.streamInfo = await $fetch<StreamInfoResponse>(url, { headers: withAuthHeaders(url) })
     } catch {
       state.error = 'Failed to load stream info'
     }
@@ -100,8 +98,7 @@ export function useVideoPlayer(
   }
 
   function subtitleUrl(index: number) {
-    const { token } = useAuth()
-    return `/api/stream/${fileId.value}/subtitles/${index}?token=${token.value}`
+    return `/api/stream/${fileId.value}/subtitles/${index}`
   }
 
   async function loadResumePosition(): Promise<number> {

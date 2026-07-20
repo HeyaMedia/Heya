@@ -15,9 +15,7 @@ export interface StreamableTrack {
   stream_url?: string | null
 }
 
-// The <audio> element can't carry an Authorization header, so the session
-// token has to ride in the query string. The auth middleware already accepts
-// ?token= as an alternative to Bearer.
+// Browser media elements authenticate with the same-origin HttpOnly cookie.
 //
 // For /stream URLs (the smart endpoint that picks the best playable file and
 // transcodes if needed) we also append the audio caps so the server can match
@@ -34,9 +32,6 @@ export function buildStreamUrl(t: StreamableTrack): string {
   if (!base) return ''
 
   const params = new URLSearchParams()
-  const { token } = useAuth()
-  if (token.value) params.set('token', token.value)
-
   const isStreamEndpoint = base.endsWith('/stream')
   if (import.meta.client && isStreamEndpoint) {
     const caps = useClientCaps()
@@ -53,13 +48,9 @@ export function buildStreamUrl(t: StreamableTrack): string {
   return params.toString() ? `${base}${sep}${params.toString()}` : base
 }
 
-// Cache key for the Cache API: the same URL with the `token` query param
-// stripped, everything else left intact (relative — no origin). Tokens
-// rotate across logins; keying the cache on the token would mean a fresh
-// login never hits a track cached under a previous session. Caps + quality
-// MUST stay in the key because they select which encode the server actually
-// returns — a response fetched for one caps/quality combination must not be
-// served back to a request for a different one.
+// Cache key for the Cache API. Strip the obsolete pre-cookie token parameter
+// defensively so old cached URLs migrate cleanly, but retain caps + quality:
+// they select which encode the server returns and must not collide.
 export function streamCacheKey(url: string): string {
   const origin = typeof location !== 'undefined' ? location.origin : 'http://localhost'
   const parsed = new URL(url, origin)

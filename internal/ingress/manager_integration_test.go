@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/karbowiak/heya/internal/localtls"
+	"github.com/karbowiak/heya/internal/securityevents"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/rs/zerolog"
 )
@@ -36,9 +37,36 @@ func TestTailnetRedirectUsesCertificateDomain(t *testing.T) {
 	}
 }
 
+func TestCaddyHTTPServerPlacesPinnedWAFBeforeHeya(t *testing.T) {
+	raw, err := json.Marshal(caddyHTTPServer(caddyServerOptions{Ingress: "remote", WAFMode: "detect"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := string(raw)
+	waf := strings.Index(config, `"handler":"waf"`)
+	heya := strings.Index(config, `"handler":"heya"`)
+	if waf < 0 || heya < 0 || waf > heya {
+		t.Fatalf("WAF must run before Heya: %s", config)
+	}
+	if !strings.Contains(config, `"load_owasp_crs":true`) || !strings.Contains(config, "SecRuleEngine DetectionOnly") {
+		t.Fatalf("detection-only embedded CRS missing: %s", config)
+	}
+}
+
+func TestManagerRejectsUnknownWAFMode(t *testing.T) {
+	manager := New(http.NotFoundHandler(), zerolog.Nop())
+	err := manager.Start(t.Context(), HostConfig{
+		Address: availableTCPAddress(t), DataDir: t.TempDir(), WAFMode: "surprise",
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid WAF mode") {
+		t.Fatalf("Start error = %v, want invalid WAF mode", err)
+	}
+}
+
 func TestManagerServesHTTPSAndRedirectsPlainHTTPOnSamePort(t *testing.T) {
 	address := availableTCPAddress(t)
 	dataDir := t.TempDir()
+	securityRecorder := securityevents.New(32)
 	manager := New(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Heya-Protocol", fmt.Sprintf("%d", r.ProtoMajor))
 		if r.URL.Path == "/error" {
@@ -46,9 +74,9 @@ func TestManagerServesHTTPSAndRedirectsPlainHTTPOnSamePort(t *testing.T) {
 			return
 		}
 		_, _ = io.WriteString(w, "heya")
-	}), zerolog.Nop())
+	}), zerolog.Nop(), securityRecorder)
 	if err := manager.Start(t.Context(), HostConfig{
-		Address: address, HTTPS: true, DataDir: dataDir, LANIP: "127.0.0.1", LogLevel: "error",
+		Address: address, HTTPS: true, DataDir: dataDir, LANIP: "127.0.0.1", LogLevel: "error", WAFMode: "block",
 	}); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -80,6 +108,23 @@ func TestManagerServesHTTPSAndRedirectsPlainHTTPOnSamePort(t *testing.T) {
 		t.Fatalf("HTTPS GET with Heya local root: %v", err)
 	}
 	_ = trustedResponse.Body.Close()
+
+	blockedResponse, err := client.Get("https://" + address + "/?id=1%27%20OR%20%271%27=%271")
+	if err != nil {
+		t.Fatalf("WAF request: %v", err)
+	}
+	blockedBody, readErr := io.ReadAll(blockedResponse.Body)
+	_ = blockedResponse.Body.Close()
+	if readErr != nil {
+		t.Fatalf("read WAF response: %v", readErr)
+	}
+	if blockedResponse.StatusCode != http.StatusForbidden || strings.Contains(string(blockedBody), "heya") {
+		t.Fatalf("WAF response = %d %q, want blocked before application handler", blockedResponse.StatusCode, blockedBody)
+	}
+	securitySnapshot := securityRecorder.Snapshot(32)
+	if securitySnapshot.Counters.WAFMatches == 0 || securitySnapshot.Counters.WAFBlocked == 0 {
+		t.Fatalf("WAF security telemetry missing: %+v", securitySnapshot.Counters)
+	}
 
 	h3Transport := &http3.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // test-only local CA

@@ -19,11 +19,11 @@ const confirmPwd = ref('')
 const saving = ref(false)
 const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
 
-const newPwdTooShort = computed(() => newPwd.value.length > 0 && newPwd.value.length < 8)
+const newPwdTooShort = computed(() => newPwd.value.length > 0 && newPwd.value.length < 15)
 const mismatch = computed(() => confirmPwd.value.length > 0 && newPwd.value !== confirmPwd.value)
 const canSubmit = computed(() =>
   currentPwd.value.length > 0
-  && newPwd.value.length >= 8
+  && newPwd.value.length >= 15
   && newPwd.value === confirmPwd.value
   && !saving.value,
 )
@@ -37,7 +37,7 @@ async function changePassword() {
       method: 'PUT',
       body: { current_password: currentPwd.value, new_password: newPwd.value },
     })
-    flash.value = { kind: 'ok', text: 'Password updated. Existing devices remain signed in until you revoke them.' }
+    flash.value = { kind: 'ok', text: 'Password updated. Other sessions and API tokens were revoked.' }
     currentPwd.value = ''
     newPwd.value = ''
     confirmPwd.value = ''
@@ -99,16 +99,16 @@ async function changePassword() {
           />
         </div>
         <p class="security-note">
-          Changing your password does not revoke existing sessions or tokens. Review both lists if you suspect account access you do not recognise.
+          Changing your password keeps this device signed in and revokes every other session and API token.
         </p>
       </SettingsSection>
 
-      <SettingsSection title="Change password" icon="key" description="Use at least 8 characters. Other sessions remain active after the change.">
+      <SettingsSection title="Change password" icon="key" description="Use at least 15 characters. Other credentials are revoked after the change.">
         <form class="password-form" @submit.prevent="changePassword">
           <SettingsField label="Current password" v-slot="{ fieldId }">
             <input :id="fieldId" v-model="currentPwd" type="password" autocomplete="current-password" class="profile-input" placeholder="•••••••••••" />
           </SettingsField>
-          <SettingsField label="New password" :hint="newPwdTooShort ? 'Too short — use at least 8 characters.' : undefined" v-slot="{ fieldId, hintId }">
+          <SettingsField label="New password" :hint="newPwdTooShort ? 'Too short — use at least 15 characters.' : undefined" v-slot="{ fieldId, hintId }">
             <input
               :id="fieldId"
               v-model="newPwd"

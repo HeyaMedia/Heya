@@ -13,6 +13,7 @@ import (
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"github.com/caddyserver/certmagic"
+	"github.com/karbowiak/heya/internal/requestmeta"
 
 	// Link only the modules Heya's generated config actually references. The
 	// full standard bundle includes reverse proxies, templates, tracing and an
@@ -21,10 +22,12 @@ import (
 	_ "github.com/caddyserver/caddy/v2/modules/caddypki"
 	_ "github.com/caddyserver/caddy/v2/modules/caddytls"
 	_ "github.com/caddyserver/caddy/v2/modules/filestorage"
+	_ "github.com/corazawaf/coraza-caddy/v2"
 )
 
 func init() {
 	caddy.RegisterModule(heyaHandler{})
+	caddy.RegisterModule(heyaSecurityLogCore{})
 	caddy.RegisterModule(heyaRemoteCertificateManager{})
 	caddy.RegisterModule(heyaTailscaleCertificateManager{})
 
@@ -61,6 +64,11 @@ func (h *heyaHandler) Provision(ctx caddy.Context) error {
 }
 
 func (h *heyaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, _ caddyhttp.Handler) error {
+	ctx := requestmeta.WithIngress(r.Context(), h.Ingress)
+	// Funnel TLS terminates before this synthetic Caddy listener; every other
+	// secure listener retains r.TLS. Preserve that fact for cookie attributes.
+	ctx = requestmeta.WithSecureTransport(ctx, r.TLS != nil || h.Ingress == "funnel")
+	r = r.WithContext(ctx)
 	h.handler.ServeHTTP(w, r)
 	// Record after Heya returns so a status request does not include itself in
 	// the protocol totals before Caddy increments the corresponding request

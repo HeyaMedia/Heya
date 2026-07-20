@@ -364,11 +364,10 @@ Music Assistant's shape, adapted:
    Renderers surface in the existing WS event bus so all clients see the
    same cast state live.
 2. **Two transport shapes:**
-   - *URL-pull* (Cast, DLNA, WiiM/vendor): hand the receiver
-     `/api/music/tracks/{id}/stream?token=…` — range-serving, AAC
-     transcode fallback, and `?token=` query auth already exist today.
-     Needs a scoped/short-lived cast token rather than the user session
-     token.
+   - *URL-pull* (Cast, DLNA, WiiM/vendor): hand the receiver a
+     `/api/cast/media/...?...cast_token=…` URL. The signed token is scoped to
+     that exact media path and user rather than exposing a reusable account
+     session in the receiver URL.
    - *PCM-push* (RAOP): ffmpeg decode → stdin of cliraop subprocess.
      Mirrors the existing transcoder session management.
 3. **Server-side playback session** — queue position, elapsed time, volume

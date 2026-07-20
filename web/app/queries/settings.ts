@@ -16,6 +16,7 @@ export type {
   JobListResult,
   LibrarySettings,
   LibraryView as Library,
+  SecurityStatus,
   SubsonicConfigBody as SubsonicConfig,
   SubsonicCredentialBody as SubsonicCredential,
   UserListView,
@@ -40,6 +41,7 @@ import type {
   JobListResult,
   LibrarySettings,
   LibraryView as Library,
+  SecurityStatus,
   SubsonicConfigBody as SubsonicConfig,
   SubsonicCredentialBody as SubsonicCredential,
   UserListView,
@@ -192,6 +194,16 @@ export const adminNetworkStatusQuery = defineQueryOptions(() => ({
   query: async () => {
     const { $heya } = useNuxtApp()
     return await $heya('/api/admin/network/status') as AdminNetworkStatus
+  },
+  staleTime: 1000 * 5,
+  meta: privateSettings,
+}))
+
+export const adminSecurityQuery = defineQueryOptions(() => ({
+  key: ['admin', 'security'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/admin/security') as SecurityStatus
   },
   staleTime: 1000 * 5,
   meta: privateSettings,

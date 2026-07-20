@@ -22,6 +22,8 @@
 // The derived family is cached in the prefs blob so the boot script stamps the
 // saved values verbatim — it never re-derives (stays dumb + tiny).
 
+import { withAuthHeaders } from '~/composables/useAuth'
+
 export type ThemeMode = 'system' | 'dark' | 'light' | 'oled'
 export type AccentName =
   | 'gold' | 'ember' | 'crimson' | 'rose' | 'iris'
@@ -323,8 +325,7 @@ export function useAppearance() {
     saveTimer = setTimeout(async () => {
       saveTimer = null
       try {
-        const token = localStorage.getItem('heya_token')
-        const headers = withClientSurfaceHeaders('/api/me/settings', { Authorization: `Bearer ${token}` })
+        const headers = withAuthHeaders('/api/me/settings')
         const settings = await $fetch<Record<string, unknown>>('/api/me/settings', { headers })
         settings.appearance = {
           theme: prefs.value.theme,

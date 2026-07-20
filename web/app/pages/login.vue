@@ -29,7 +29,7 @@
         </div>
         <div class="field">
           <label for="login-password">Password</label>
-          <input id="login-password" v-model="password" type="password" placeholder="••••••••" autocomplete="current-password" required />
+          <input id="login-password" v-model="password" type="password" placeholder="••••••••" :autocomplete="isRegister ? 'new-password' : 'current-password'" :minlength="isRegister ? 15 : 1" maxlength="256" required />
         </div>
 
         <div v-if="error" class="error-msg" role="alert">{{ error }}</div>
@@ -38,7 +38,7 @@
           {{ loading ? 'Please wait…' : (isRegister ? 'Create Account' : 'Sign In') }}
         </button>
 
-        <button type="button" class="toggle-btn" @click="isRegister = !isRegister">
+        <button v-if="registrationEnabled" type="button" class="toggle-btn" @click="isRegister = !isRegister">
           {{ isRegister ? 'Already have an account? Sign in' : 'Need an account? Register' }}
         </button>
       </form>
@@ -58,7 +58,21 @@ const password = ref('')
 const error = ref('')
 const loading = ref(false)
 const isRegister = ref(false)
+const registrationEnabled = ref(false)
 const serverOrigin = import.meta.client ? window.location.origin : ''
+
+onMounted(async () => {
+  try {
+    const status = await $fetch<{ enabled: boolean }>('/api/auth/registration', {
+      headers: withClientSurfaceHeaders('/api/auth/registration'),
+    })
+    registrationEnabled.value = status.enabled
+  } catch {
+    // Closed is the safe fallback when setup state cannot be determined.
+    registrationEnabled.value = false
+    isRegister.value = false
+  }
+})
 
 async function submit() {
   error.value = ''

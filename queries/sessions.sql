@@ -40,7 +40,8 @@ DELETE FROM sessions WHERE expires_at IS NOT NULL AND expires_at <= now();
 -- For the "My sessions" and "API tokens" pages — most-recent activity first.
 SELECT id, user_id, token_hash, expires_at, created_at, kind, name, last_seen_at, user_agent, ip
 FROM sessions
-WHERE user_id = $1 AND kind = $2
+WHERE user_id = $1
+  AND (kind = $2 OR ($2 = 'session' AND kind = 'jellyfin_session'))
   AND (expires_at IS NULL OR expires_at > now())
 ORDER BY last_seen_at DESC;
 
@@ -55,7 +56,7 @@ DELETE FROM sessions WHERE id = $1 AND user_id = $2;
 -- long-lived API tokens aren't affected.
 DELETE FROM sessions
 WHERE user_id = $1
-  AND kind = 'session'
+  AND kind IN ('session', 'jellyfin_session')
   AND token_hash <> $2;
 
 -- name: ListAllSessionsForAdmin :many

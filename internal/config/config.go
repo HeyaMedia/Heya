@@ -17,6 +17,18 @@ type Config struct {
 	DatabaseURL      Field[string]
 	DatabaseMaxConns Field[int]
 	DatabaseMinConns Field[int]
+	// EnableRegistration admits the unauthenticated first-user registration
+	// endpoint. It defaults off: unattended/public deployments should bootstrap
+	// their first administrator with HEYA_ADMIN_* instead of leaving a password-
+	// hashing endpoint exposed. The service still atomically enforces that only
+	// the first user can register.
+	EnableRegistration Field[bool]
+	// WAFMode controls the embedded Coraza + OWASP Core Rule Set boundary.
+	// "detect" (the default) records matches without disrupting traffic;
+	// "block" enforces the tuned rules; "off" removes the handler entirely.
+	// The rules are compiled into the pinned Heya binary, never downloaded at
+	// runtime.
+	WAFMode Field[string]
 	// PassiveMode turns the API into a read-mostly guest on its database and
 	// prevents the dedicated worker runtime from starting: no auto-migrate, env
 	// bootstrap, River execution, filesystem watchers, schedules, model fetches,
@@ -172,6 +184,8 @@ func Load() *Config {
 		DatabaseURL:               envString("HEYA_DATABASE_URL", "postgres://heya:heya@localhost:5440/heya?sslmode=disable"),
 		DatabaseMaxConns:          envInt("HEYA_DB_MAX_CONNS", 30),
 		DatabaseMinConns:          envInt("HEYA_DB_MIN_CONNS", 2),
+		EnableRegistration:        envBool("HEYA_ENABLE_REGISTRATION", false),
+		WAFMode:                   envString("HEYA_WAF_MODE", "detect"),
 		PassiveMode:               envBool("HEYA_PASSIVE_MODE", false),
 		AllowRemoteActive:         envBool("HEYA_ALLOW_REMOTE_ACTIVE", false),
 		ImageProxyURL:             envString("HEYA_IMAGE_PROXY_URL", ""),
@@ -378,6 +392,8 @@ var sourceFields = []sourceField{
 	{"infra.database_url", func(c *Config) SourceEntry { return c.DatabaseURL.Entry() }},
 	{"infra.database_max_conns", func(c *Config) SourceEntry { return c.DatabaseMaxConns.Entry() }},
 	{"infra.database_min_conns", func(c *Config) SourceEntry { return c.DatabaseMinConns.Entry() }},
+	{"security.enable_registration", func(c *Config) SourceEntry { return c.EnableRegistration.Entry() }},
+	{"security.waf_mode", func(c *Config) SourceEntry { return c.WAFMode.Entry() }},
 	{"infra.passive_mode", func(c *Config) SourceEntry { return c.PassiveMode.Entry() }},
 	{"infra.allow_remote_active", func(c *Config) SourceEntry { return c.AllowRemoteActive.Entry() }},
 	{"infra.image_proxy_url", func(c *Config) SourceEntry { return c.ImageProxyURL.Entry() }},

@@ -21,9 +21,8 @@ import (
 //  2. Inbound: if the response carries `icy-metaint`, wrap the body in
 //     our IcyReader; otherwise pass-through unchanged.
 //
-// Browsers can't attach Authorization headers to <audio src>, so this
-// endpoint accepts ?token= as an alternative (same as the music streaming
-// endpoints).
+// Browser media requests authenticate with Heya's same-origin HttpOnly cookie;
+// normal session credentials are never placed in this URL.
 func handleRadioStream(hub *eventhub.Hub, userID int64, client *http.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")

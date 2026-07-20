@@ -163,6 +163,7 @@
 import type { MediaDetail, StreamInfoResponse } from '~~/shared/types'
 import type { ImageTone } from '~/composables/useImageTone'
 import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
+import { withAuthHeaders } from '~/composables/useAuth'
 import { useQuery } from '@pinia/colada'
 import { mediaDetailQuery } from '~/queries/media'
 
@@ -429,9 +430,8 @@ async function loadStreamInfo() {
     const caps = useClientCaps()
     const capsQuery = capsToQueryString(caps)
     const url = `/api/stream/${fileRef.value}/info${capsQuery ? `?${capsQuery}` : ''}`
-    const token = useAuth().token.value
     streamInfo.value = await $fetch<StreamInfoResponse>(url, {
-      headers: withClientSurfaceHeaders(url, token ? { Authorization: `Bearer ${token}` } : undefined),
+      headers: withAuthHeaders(url),
     })
   } catch { /* empty */ }
 }

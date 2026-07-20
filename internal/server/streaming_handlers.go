@@ -28,6 +28,7 @@ func handleDirectStream(app *service.App) http.HandlerFunc {
 		ct := contentTypeFromExt(filepath.Ext(file.Path))
 		w.Header().Set("Content-Type", ct)
 		w.Header().Set("Accept-Ranges", "bytes")
+		w.Header().Set("Cache-Control", "private, no-store")
 
 		serveLibraryFile(w, r, file.Path)
 	}
@@ -51,6 +52,7 @@ func handleExtraStream(app *service.App) http.HandlerFunc {
 		ct := contentTypeFromExt(filepath.Ext(extra.FilePath))
 		w.Header().Set("Content-Type", ct)
 		w.Header().Set("Accept-Ranges", "bytes")
+		w.Header().Set("Cache-Control", "private, no-store")
 
 		serveLibraryFile(w, r, extra.FilePath)
 	}
@@ -104,7 +106,7 @@ func handleHLSMaster(app *service.App) http.HandlerFunc {
 		codecStr := transcoder.FormatCodecString(videoCodec, audioCodec)
 
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Cache-Control", "private, no-cache")
 
 		if _, err := fmt.Fprint(w, "#EXTM3U\n#EXT-X-VERSION:6\n"); err != nil {
 			return
@@ -156,7 +158,7 @@ func handleHLSPlaylist(app *service.App) http.HandlerFunc {
 		playlist := transcoder.GenerateDynamicPlaylistWithQuery(session, hlsChildQuery(r))
 
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Cache-Control", "private, no-cache")
 		_, _ = w.Write([]byte(playlist))
 	}
 }
@@ -201,7 +203,7 @@ func handleHLSSegment(app *service.App) http.HandlerFunc {
 				}
 			}
 			w.Header().Set("Content-Type", "video/mp4")
-			w.Header().Set("Cache-Control", "public, max-age=3600")
+			w.Header().Set("Cache-Control", "private, max-age=3600")
 			// The session derives this path from Heya's cache root and a hashed
 			// session key; no request-controlled path component reaches ServeFile.
 			http.ServeFile(w, r, session.InitSegmentPath()) //nolint:gosec
@@ -221,7 +223,7 @@ func handleHLSSegment(app *service.App) http.HandlerFunc {
 		} else {
 			w.Header().Set("Content-Type", "video/mp2t")
 		}
-		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Cache-Control", "private, no-cache")
 		// SegmentPath accepts the parsed numeric index and joins it beneath the
 		// session's server-created cache directory.
 		http.ServeFile(w, r, segPath) //nolint:gosec

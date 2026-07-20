@@ -127,6 +127,7 @@ func handleGetSubtitleAs(app *service.App, forceWebVTT bool) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Cache-Control", "private, max-age=86400")
 		http.ServeFile(w, r, subPath)
 	}
 }

@@ -5,11 +5,12 @@
 // (re)applies through the composable so reactive state matches the DOM,
 // then reconciles with the server copy once auth is up.
 //
-// NOTE: this plugin runs BEFORE plugins/auth.ts (alphabetical order), so
-// the token isn't hydrated yet — hydrate() it ourselves (idempotent; it
-// just lifts localStorage into the shared useState) or the server fetch
-// below would silently never run and appearance would stop syncing
-// across devices.
+// NOTE: this plugin runs BEFORE plugins/auth.ts (alphabetical order), so it
+// initializes the auth state first. hydrate() offers a pre-cookie legacy
+// bearer once when present; otherwise it represents the same-origin cookie
+// without exposing the credential to JavaScript.
+import { withAuthHeaders } from '~/composables/useAuth'
+
 export default defineNuxtPlugin(() => {
   const { apply, hydrateFromServer } = useAppearance()
   const { token, hydrate } = useAuth()
@@ -20,7 +21,7 @@ export default defineNuxtPlugin(() => {
   if (!token.value) return
   // Fire-and-forget: a failure just means we ride the localStorage mirror.
   $fetch<{ appearance?: Record<string, unknown> }>('/api/me/settings', {
-    headers: withClientSurfaceHeaders('/api/me/settings', { Authorization: `Bearer ${token.value}` }),
+    headers: withAuthHeaders('/api/me/settings'),
   })
     .then((s) => hydrateFromServer(s.appearance))
     .catch(() => {})

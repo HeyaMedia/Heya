@@ -118,7 +118,7 @@ func registerAdminSystemRoutes(api huma.API, app *service.App, hub *eventhub.Hub
 			Body struct {
 				Username string `json:"username" minLength:"1" maxLength:"64" example:"alice"`
 				Email    string `json:"email" minLength:"1" maxLength:"254" format:"email" example:"alice@example.com"`
-				Password string `json:"password" minLength:"8" maxLength:"256" example:"hunter2hunter2"`
+				Password string `json:"password" minLength:"15" maxLength:"256" example:"correct horse battery staple"`
 				IsAdmin  bool   `json:"is_admin"`
 			}
 		}) (*JSONOutput[adminUserView], error) {
@@ -157,7 +157,7 @@ func registerAdminSystemRoutes(api huma.API, app *service.App, hub *eventhub.Hub
 		func(ctx context.Context, in *struct {
 			ID   int64 `path:"id" minimum:"1"`
 			Body struct {
-				NewPassword string `json:"new_password" minLength:"8" maxLength:"256"`
+				NewPassword string `json:"new_password" minLength:"15" maxLength:"256"`
 			}
 		}) (*StatusOutput, error) {
 			if err := app.ResetPasswordByID(ctx, in.ID, in.Body.NewPassword); err != nil {

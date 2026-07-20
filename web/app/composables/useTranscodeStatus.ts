@@ -2,6 +2,8 @@
 // a reactive ref the consumer can render. Polling stops when `enabled` flips
 // to false — saves backend round-trips when the diagnostics overlay is hidden.
 
+import { withAuthHeaders } from '~/composables/useAuth'
+
 export type TranscodeState =
   | 'idle'        // no session
   | 'running'     // ffmpeg encoding right now
@@ -55,9 +57,7 @@ export function useTranscodeStatus(
       const query = new URLSearchParams({ sid: sessionId() })
       if (audioTrack.value > 0) query.set('audio', String(audioTrack.value))
       const url = `/api/stream/${id}/transcode-status?${query}`
-      const res = await fetch(url, {
-        headers: withClientSurfaceHeaders(url, { Authorization: `Bearer ${token.value}` }),
-      })
+      const res = await fetch(url, { headers: withAuthHeaders(url) })
       if (!res.ok) {
         error.value = `HTTP ${res.status}`
         return
