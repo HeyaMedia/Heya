@@ -375,6 +375,57 @@ func TestPauseDepthSurvivesWatcherReconciliation(t *testing.T) {
 	}
 }
 
+func TestPausedWatcherChangeReconcilesAfterFinalResume(t *testing.T) {
+	restore := useShortDebounces()
+	t.Cleanup(restore)
+
+	rescans := make(chan int64, 2)
+	m := NewManager(nil, nil, func(libraryID int64, _ bool) { rescans <- libraryID })
+	t.Cleanup(m.StopAll)
+	lw, ctx := registerTestWatcher(t, m, 42, 1)
+
+	m.Pause(lw.libraryID)
+	m.Pause(lw.libraryID)
+	m.markWatcherDirty(ctx, lw)
+
+	m.Resume(lw.libraryID)
+	select {
+	case libraryID := <-rescans:
+		t.Fatalf("intermediate resume reconciled library %d", libraryID)
+	case <-time.After(2 * rescanDebounceDelay):
+	}
+
+	m.Resume(lw.libraryID)
+	select {
+	case libraryID := <-rescans:
+		if libraryID != lw.libraryID {
+			t.Fatalf("reconciled library %d, want %d", libraryID, lw.libraryID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("paused watcher change did not reconcile after the final resume")
+	}
+}
+
+func TestWatcherOverflowSchedulesLibraryReconciliation(t *testing.T) {
+	restore := useShortDebounces()
+	t.Cleanup(restore)
+
+	rescans := make(chan int64, 2)
+	m := NewManager(nil, nil, func(libraryID int64, _ bool) { rescans <- libraryID })
+	t.Cleanup(m.StopAll)
+	lw, ctx := registerTestWatcher(t, m, 43, 1)
+
+	m.handleWatcherError(ctx, lw, fmt.Errorf("wrapped watcher failure: %w", fsnotify.ErrEventOverflow))
+	select {
+	case libraryID := <-rescans:
+		if libraryID != lw.libraryID {
+			t.Fatalf("reconciled library %d, want %d", libraryID, lw.libraryID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("watcher overflow did not schedule a full library reconciliation")
+	}
+}
+
 func TestNewestSyncGenerationWins(t *testing.T) {
 	oldRoot := t.TempDir()
 	newRoot := t.TempDir()
@@ -795,6 +846,7 @@ func registerTestWatcher(t *testing.T, m *Manager, libraryID int64, generation u
 		libraryID:  libraryID,
 		rootPath:   root,
 		fsw:        fsw,
+		ctx:        wctx,
 		cancel:     cancel,
 		generation: generation,
 	}

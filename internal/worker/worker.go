@@ -274,9 +274,17 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			"apply_metadata_podcast": {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},
 			"apply_metadata_radio":   {MaxWorkers: queueWorkers(cfg, "apply_metadata", 4)},
 
-			"apply_rich_metadata": {MaxWorkers: queueWorkers(cfg, "apply_rich_metadata", 4)}, // local set-based projection writes; shared people are locked canonically and concurrency-tested
-			"ffprobe":             {MaxWorkers: queueWorkers(cfg, "ffprobe", 1)},
-			"detect_local_assets": {MaxWorkers: queueWorkers(cfg, "detect_local_assets", 1)},
+			"apply_rich_metadata":         {MaxWorkers: queueWorkers(cfg, "apply_rich_metadata", 4)}, // local set-based projection writes; shared people are locked canonically and concurrency-tested
+			"apply_rich_metadata_movie":   {MaxWorkers: queueWorkers(cfg, "apply_rich_metadata", 4)},
+			"apply_rich_metadata_tv":      {MaxWorkers: queueWorkers(cfg, "apply_rich_metadata", 4)},
+			"apply_rich_metadata_anime":   {MaxWorkers: queueWorkers(cfg, "apply_rich_metadata", 4)},
+			"apply_rich_metadata_music":   {MaxWorkers: queueWorkers(cfg, "apply_rich_metadata", 4)},
+			"apply_rich_metadata_book":    {MaxWorkers: queueWorkers(cfg, "apply_rich_metadata", 4)},
+			"apply_rich_metadata_comic":   {MaxWorkers: queueWorkers(cfg, "apply_rich_metadata", 4)},
+			"apply_rich_metadata_podcast": {MaxWorkers: queueWorkers(cfg, "apply_rich_metadata", 4)},
+			"apply_rich_metadata_radio":   {MaxWorkers: queueWorkers(cfg, "apply_rich_metadata", 4)},
+			"ffprobe":                     {MaxWorkers: queueWorkers(cfg, "ffprobe", 1)},
+			"detect_local_assets":         {MaxWorkers: queueWorkers(cfg, "detect_local_assets", 1)},
 
 			// Enrich pipeline (external rate-limit safety).
 			"enrich_media_item":      {MaxWorkers: queueWorkers(cfg, "enrich_media_item", 1)}, // priority bands P1=watcher/view, P2=movies+tv, P3=music+books

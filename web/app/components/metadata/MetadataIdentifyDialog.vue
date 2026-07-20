@@ -6,10 +6,10 @@
     @update:model-value="(v) => v ? null : $emit('close')"
   >
     <div class="mid-search-bar">
-      <input v-model="query" type="text" class="mid-input" :placeholder="isURL ? 'Paste a Heya ID or URL...' : 'Search Heya by title...'" @keydown.enter="search" />
-      <input v-if="!isURL" v-model="year" type="text" class="mid-input mid-year" placeholder="Year" maxlength="4" @keydown.enter="search" />
+      <input v-model="query" type="text" class="mid-input" placeholder="Search title or enter an IMDb / TMDB / TVDB / TVmaze ID or URL..." @keydown.enter="search" />
+      <input v-if="!isDirectLookup" v-model="year" type="text" class="mid-input mid-year" placeholder="Year" maxlength="4" @keydown.enter="search" />
       <button class="btn btn-primary" :disabled="searching || !query.trim()" @click="search">
-        {{ searching ? (isURL ? 'Looking up...' : 'Searching...') : (isURL ? 'Look up' : 'Search') }}
+        {{ searching ? (isDirectLookup ? 'Looking up...' : 'Searching...') : (isDirectLookup ? 'Look up' : 'Search') }}
       </button>
     </div>
     <div class="mid-results scroll">
@@ -55,9 +55,12 @@ const results = ref<ProviderSearchResult[]>([])
 const applyingId = ref('')
 const { toast } = useToast()
 
-const isURL = computed(() => {
+const isDirectLookup = computed(() => {
   const q = query.value.trim()
-  return /^https?:\/\//i.test(q) || /^heya(_[a-z]+)?:/i.test(q)
+  return /^https?:\/\//i.test(q)
+    || /^heya(_[a-z]+)?:/i.test(q)
+    || /^(?:imdb:)?tt\d+$/i.test(q)
+    || /^(?:tmdb|tvdb|tvmaze):\d+$/i.test(q)
 })
 
 watch(() => props.show, (v) => {
@@ -76,7 +79,7 @@ async function search() {
   try {
     const { $heya } = useNuxtApp()
     const q: Record<string, any> = { q: query.value }
-    if (year.value) q.year = year.value
+    if (year.value && !isDirectLookup.value) q.year = year.value
     const res = await $heya('/api/media/{id}/identify', {
       path: { id: props.mediaId },
       query: q,

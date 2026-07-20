@@ -35,6 +35,15 @@ func TestParseIdentifyURL(t *testing.T) {
 		// IMDb URLs — ambiguous, use hint
 		{"imdb url with movie hint", "https://www.imdb.com/title/tt15398776/", metadata.KindMovie, "heya", "heya:movie:imdb:tt15398776", true},
 		{"imdb url with tv hint", "https://www.imdb.com/title/tt15398776/", metadata.KindTV, "heya", "heya:tv:imdb:tt15398776", true},
+		{"bare imdb id", "tt16161100", metadata.KindTV, "heya", "heya:tv:imdb:tt16161100", true},
+		{"tagged imdb id", "imdb:tt16161100", metadata.KindTV, "heya", "heya:tv:imdb:tt16161100", true},
+		{"tagged tmdb id", "tmdb:66014", metadata.KindTV, "heya", "heya:tv:tmdb:66014", true},
+		{"tagged tvdb id", "TVDB:372076", metadata.KindTV, "heya", "heya:tv:tvdb:372076", true},
+		{"tagged tvmaze id", "tvmaze:1234", metadata.KindTV, "heya", "heya:tv:tvmaze:1234", true},
+		{"tvmaze show url", "https://www.tvmaze.com/shows/1234/example", metadata.KindTV, "heya", "heya:tv:tvmaze:1234", true},
+		{"tvmaze movie rejected", "tvmaze:1234", metadata.KindMovie, "", "", false},
+		{"invalid bare imdb id", "ttnotanid", metadata.KindTV, "", "", false},
+		{"invalid tagged numeric id", "tmdb:0", metadata.KindTV, "", "", false},
 
 		// Forms no longer supported (slug-only / missing kind)
 		{"slug-only shortcode rejected", "heya:oshi-no-ko-2023", metadata.KindTV, "", "", false},

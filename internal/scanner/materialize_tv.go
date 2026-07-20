@@ -331,8 +331,10 @@ func planTVMaterializeTarget(ctx context.Context, lib sqlc.Library, meta TVFetch
 
 	preview.FileActions = planTVFileActions(ctx, lib.ID, localMatch.Files, filesByRel, preview.MediaItemID, preview.Title, preview.Year, preview.ExternalIDs, store)
 	if len(preview.MissingEpisodes) > 0 {
-		preview.Action = "blocked"
-		preview.Reason = "episode_mapping_missing"
+		// A metadata source can lag behind an actively airing show by an
+		// episode. Apply the series and every known episode now; the file keeps
+		// its parsed season/episode link without a canonical episode ID and will
+		// converge on a later scan once upstream metadata catches up.
 		preview.Issues = append(preview.Issues, "missing local episodes in fetched metadata: "+formatTVEpisodeRefs(preview.MissingEpisodes, 8))
 	}
 	if fileIssues := materializeFileIssues(preview.FileActions); len(fileIssues) > 0 {

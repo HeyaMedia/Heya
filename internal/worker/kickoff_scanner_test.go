@@ -772,6 +772,7 @@ func TestScannerPipelineQueuesArePartitionedByMediaType(t *testing.T) {
 	require.Equal(t, "fetch_metadata_music", FetchLibraryMetadataArgs{MediaType: sqlc.MediaTypeMusic}.InsertOpts().Queue)
 	require.Equal(t, "fetch_metadata_poll_music", FetchLibraryMetadataArgs{MediaType: sqlc.MediaTypeMusic, Poll: true}.InsertOpts().Queue)
 	require.Equal(t, "apply_metadata_tv", ApplyLibraryScanArgs{MediaType: sqlc.MediaTypeTv}.InsertOpts().Queue)
+	require.Equal(t, "apply_rich_metadata_tv", ApplyRichMetadataArgs{MediaType: sqlc.MediaTypeTv}.InsertOpts().Queue)
 }
 
 func TestRemoteMetadataPollContinuationsAreParkedOutsideRiver(t *testing.T) {
@@ -880,6 +881,70 @@ func TestMetadataContinuationSweepAdoptsLegacyRiverPolls(t *testing.T) {
 	require.Equal(t, 1, continuations)
 }
 
+func TestMetadataContinuationSweepClaimsEachMediaTypeIndependently(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+	userID := testutil.TestUserID(t, pool)
+
+	createLibrary := func(name string, mediaType sqlc.MediaType) sqlc.Library {
+		lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+			Name:         name,
+			MediaType:    mediaType,
+			Paths:        []string{"/media/" + name},
+			ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+			CreatedBy:    userID,
+			Settings:     []byte("{}"),
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+		return lib
+	}
+	music := createLibrary("continuation-fairness-music", sqlc.MediaTypeMusic)
+	tv := createLibrary("continuation-fairness-tv", sqlc.MediaTypeTv)
+
+	insertDue := func(lib sqlc.Library, count int) {
+		_, err := pool.Exec(ctx, `
+			WITH entities AS (
+				INSERT INTO scanner_entities (library_id, media_type, identity_key, title)
+				SELECT $1, $2, 'continuation-' || value::text, 'Continuation ' || value::text
+				FROM generate_series(1, $3) value
+				RETURNING id
+			), artifacts AS (
+				INSERT INTO scanner_entity_artifacts (entity_id, stage)
+				SELECT id, 'analysis' FROM entities
+				RETURNING id, entity_id
+			)
+			INSERT INTO scanner_metadata_continuations (
+				kind, library_id, scanner_entity_id, artifact_id, args, next_attempt_at
+			)
+			SELECT 'search_metadata', $1, entity_id, id,
+			       jsonb_build_object(
+			           'library_id', $1,
+			           'media_type', $2,
+			           'scanner_entity_id', entity_id,
+			           'analysis_artifact_id', id
+			       ),
+			       now() - interval '1 minute'
+			FROM artifacts
+		`, lib.ID, lib.MediaType, count)
+		require.NoError(t, err)
+	}
+	insertDue(music, metadataContinuationBatch+1)
+	insertDue(tv, 1)
+
+	claimed, err := (&MetadataContinuationSweepWorker{DB: pool}).claimDue(ctx)
+	require.NoError(t, err)
+	counts := map[sqlc.MediaType]int{}
+	for _, row := range claimed {
+		var args SearchLibraryMetadataArgs
+		require.NoError(t, json.Unmarshal(row.ArgsJSON, &args))
+		counts[args.MediaType]++
+	}
+	require.Equal(t, metadataContinuationBatch, counts[sqlc.MediaTypeMusic])
+	require.Equal(t, 1, counts[sqlc.MediaTypeTv], "a saturated Music continuation batch must not delay due TV work")
+}
+
 func TestRenameLegacyScannerJobsRoutesActiveBacklogByMediaType(t *testing.T) {
 	pool := testutil.SetupDB(t)
 	ctx := context.Background()
@@ -922,8 +987,16 @@ func TestRenameLegacyScannerJobsRoutesActiveBacklogByMediaType(t *testing.T) {
 		Poll:             true,
 	}, nil)
 	require.NoError(t, err)
+	animeRichJob, err := rc.Insert(ctx, ApplyRichMetadataArgs{
+		LibraryID:          anime.ID,
+		MediaItemID:        993,
+		ScannerEntityID:    994,
+		MetadataArtifactID: 995,
+		MediaKind:          string(metadata.KindTV),
+	}, nil)
+	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE id = ANY($1::bigint[])`, []int64{musicJob.Job.ID, animeJob.Job.ID, musicPollJob.Job.ID})
+		_, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE id = ANY($1::bigint[])`, []int64{musicJob.Job.ID, animeJob.Job.ID, musicPollJob.Job.ID, animeRichJob.Job.ID})
 	})
 
 	queueFor := func(jobID int64) string {
@@ -934,11 +1007,13 @@ func TestRenameLegacyScannerJobsRoutesActiveBacklogByMediaType(t *testing.T) {
 	require.Equal(t, "process_scan", queueFor(musicJob.Job.ID))
 	require.Equal(t, "process_scan", queueFor(animeJob.Job.ID))
 	require.Equal(t, "fetch_metadata_poll", queueFor(musicPollJob.Job.ID))
+	require.Equal(t, "apply_rich_metadata", queueFor(animeRichJob.Job.ID))
 
 	require.NoError(t, renameLegacyScannerJobs(ctx, pool))
 	require.Equal(t, "process_scan_music", queueFor(musicJob.Job.ID))
 	require.Equal(t, "process_scan_anime", queueFor(animeJob.Job.ID))
 	require.Equal(t, "fetch_metadata_poll_music", queueFor(musicPollJob.Job.ID))
+	require.Equal(t, "apply_rich_metadata_anime", queueFor(animeRichJob.Job.ID))
 }
 
 func TestScannerInventoryPostApplyPaths(t *testing.T) {

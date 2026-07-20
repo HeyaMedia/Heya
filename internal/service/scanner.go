@@ -512,17 +512,14 @@ func (a *App) SearchScannerIdentity(ctx context.Context, libraryID, identityID i
 	}
 	kind := scannerSearchKind(row.MediaType)
 
-	var fetchOpts *metadata.FetchOptions
-	if settings.PreferredLanguage != "" {
-		fetchOpts = &metadata.FetchOptions{Language: settings.PreferredLanguage, Country: settings.PreferredCountry}
-	}
-
 	if providerName, providerID, ok := parseIdentifyURL(query, kind); ok {
-		if res, err := a.resolveIdentifyURL(ctx, providerName, providerID, fetchOpts); err == nil {
-			return IdentifySearchResult{Results: []metadata.SearchResult{res}}, nil
-		} else {
-			log.Debug().Err(err).Str("provider", providerName).Str("provider_id", providerID).Msg("scanner identity URL lookup failed")
+		results, err := a.searchIdentifyReference(ctx, kind, providerName, providerID, metadata.SearchQuery{
+			Language: settings.PreferredLanguage, Country: settings.PreferredCountry,
+		})
+		if err != nil {
+			return IdentifySearchResult{}, fmt.Errorf("look up external identity: %w", err)
 		}
+		return IdentifySearchResult{Results: results}, nil
 	}
 
 	searchQuery := metadata.SearchQuery{

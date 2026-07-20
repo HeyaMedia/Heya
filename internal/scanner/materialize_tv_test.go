@@ -180,6 +180,70 @@ func TestPlanTVMaterializationCreatesUniqueTargetsAndBlocksRejected(t *testing.T
 	}
 }
 
+func TestPlanTVMaterializationDoesNotBlockSeriesForLaggingEpisodeMetadata(t *testing.T) {
+	const relPath = "Current Show (2026)/Season 01/Current.Show.S01E02.mkv"
+	result := Result{
+		Inventory: Inventory{Roots: []InventoryRoot{{Files: []InventoryFile{{
+			RelPath: relPath,
+			Path:    "/tv/" + relPath,
+		}}}}},
+		TVMatches: []TVMatch{{
+			Key:      "tmdb:1234",
+			Title:    "Current Show",
+			Year:     "2026",
+			Files:    []string{relPath},
+			Episodes: []TVEpisodeRef{{Season: 1, Episode: 2}},
+		}},
+		TVSearch: []TVSearchMatch{{
+			Accepted:    true,
+			Key:         "tmdb:1234",
+			ProviderID:  "heya:tv:tmdb:1234",
+			Title:       "Current Show",
+			Year:        "2026",
+			ExternalIDs: map[string]string{"tmdb": "1234"},
+		}},
+		TVMetadata: []TVFetchPreview{{
+			Key:             "tmdb:1234",
+			Keys:            []string{"tmdb:1234"},
+			ProviderID:      "heya:tv:tmdb:1234",
+			Title:           "Current Show",
+			Year:            "2026",
+			ExternalIDs:     map[string]string{"tmdb": "1234"},
+			PlannedEpisodes: 1,
+			MissingEpisodes: []TVEpisodeRef{{Season: 1, Episode: 2}},
+			Detail: &metadata.MediaDetail{
+				Title:       "Current Show",
+				Year:        "2026",
+				ExternalIDs: map[string]string{"tmdb": "1234"},
+				Seasons: []metadata.SeasonDetail{{
+					Number:   1,
+					Episodes: []metadata.EpisodeDetail{{Number: 1, Title: "Pilot"}},
+				}},
+			},
+		}},
+	}
+
+	previews, err := PlanTVMaterialization(
+		context.Background(),
+		sqlc.Library{ID: 2, Name: "DevTV", MediaType: sqlc.MediaTypeTv},
+		result,
+		newFakeTVMaterializeStore(),
+		&captureEmitter{},
+	)
+	if err != nil {
+		t.Fatalf("plan TV materialization: %v", err)
+	}
+	if len(previews) != 1 {
+		t.Fatalf("previews: got %d, want 1", len(previews))
+	}
+	if previews[0].Action != "create" {
+		t.Fatalf("lagging episode metadata action = %q, want create: %#v", previews[0].Action, previews[0])
+	}
+	if len(previews[0].MissingEpisodes) != 1 || len(previews[0].Issues) != 1 {
+		t.Fatalf("missing episode diagnostics were not retained: %#v", previews[0])
+	}
+}
+
 func TestTVEpisodeLinkTargetsPreservesAbsoluteNumbers(t *testing.T) {
 	index := tvEpisodeLinkIndex{
 		byNumber: map[tvEpisodeNumberKey]tvEpisodeLinkTarget{

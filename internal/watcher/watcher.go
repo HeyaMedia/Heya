@@ -3,6 +3,7 @@ package watcher
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -53,9 +54,11 @@ type LibraryWatcher struct {
 	libraryID  int64
 	rootPath   string
 	fsw        *fsnotify.Watcher
+	ctx        context.Context
 	cancel     context.CancelFunc
 	generation uint64
 	pauseDepth atomic.Int32
+	dirty      atomic.Bool
 	pendingMu  sync.Mutex
 	pending    map[string]*pendingWatcherEvent
 }
@@ -351,6 +354,7 @@ func (m *Manager) watch(ctx context.Context, libraryID int64, rootPath string, g
 		libraryID:  libraryID,
 		rootPath:   rootPath,
 		fsw:        fsw,
+		ctx:        wctx,
 		cancel:     cancel,
 		generation: generation,
 	}
@@ -511,6 +515,12 @@ func (m *Manager) Pause(libraryID int64) {
 }
 
 func (m *Manager) Resume(libraryID int64) {
+	type reconcileRequest struct {
+		ctx        context.Context
+		generation uint64
+	}
+	var reconciles []reconcileRequest
+
 	m.mu.Lock()
 	m.initLifecycleMapsLocked()
 	if m.stopped {
@@ -529,9 +539,19 @@ func (m *Manager) Resume(libraryID int64) {
 	for _, lw := range m.watchers {
 		if lw.libraryID == libraryID {
 			lw.pauseDepth.Store(depth)
+			if depth == 0 && lw.dirty.Swap(false) {
+				ctx := lw.ctx
+				if ctx == nil {
+					ctx = context.Background()
+				}
+				reconciles = append(reconciles, reconcileRequest{ctx: ctx, generation: lw.generation})
+			}
 		}
 	}
 	m.mu.Unlock()
+	for _, reconcile := range reconciles {
+		m.enqueueRescan(reconcile.ctx, libraryID, reconcile.generation)
+	}
 	log.Debug().Int64("library_id", libraryID).Int32("depth", depth).Msg("watcher resumed")
 }
 
@@ -733,6 +753,7 @@ func (m *Manager) eventLoop(ctx context.Context, lw *LibraryWatcher) {
 				return
 			}
 			if lw.pauseDepth.Load() > 0 {
+				m.markWatcherDirty(ctx, lw)
 				continue
 			}
 			m.handleEvent(ctx, lw, event)
@@ -741,8 +762,40 @@ func (m *Manager) eventLoop(ctx context.Context, lw *LibraryWatcher) {
 			if !ok {
 				return
 			}
-			log.Error().Err(err).Int64("library_id", lw.libraryID).Msg("watcher error")
+			m.handleWatcherError(ctx, lw, err)
 		}
+	}
+}
+
+// handleWatcherError turns an fsnotify overflow into a durable reconciliation
+// request. An overflow means the kernel has already dropped an unknown number
+// of events, so continuing to consume the watcher without a full inventory can
+// leave a library silently stale forever.
+func (m *Manager) handleWatcherError(ctx context.Context, lw *LibraryWatcher, err error) {
+	log.Error().Err(err).Int64("library_id", lw.libraryID).Msg("watcher error")
+	if errors.Is(err, fsnotify.ErrEventOverflow) {
+		m.markWatcherDirty(ctx, lw)
+	}
+}
+
+// markWatcherDirty records that at least one event was discarded while the
+// watcher was paused (or by the kernel during overflow). The manager lock
+// closes the Resume race: either Resume observes dirty=true, or this method
+// observes the library at depth zero and schedules the reconciliation itself.
+func (m *Manager) markWatcherDirty(ctx context.Context, lw *LibraryWatcher) {
+	if lw == nil {
+		return
+	}
+	lw.dirty.Store(true)
+	m.mu.Lock()
+	m.initLifecycleMapsLocked()
+	ready := !m.stopped &&
+		m.generations[lw.libraryID] == lw.generation &&
+		m.pauseDepths[lw.libraryID] == 0 &&
+		lw.dirty.Swap(false)
+	m.mu.Unlock()
+	if ready {
+		m.enqueueRescan(ctx, lw.libraryID, lw.generation)
 	}
 }
 

@@ -645,19 +645,18 @@ func (a *App) IdentifySearch(ctx context.Context, mediaItemID int64, query, year
 		}
 	}
 
-	var fetchOpts *metadata.FetchOptions
-	if settings.PreferredLanguage != "" {
-		fetchOpts = &metadata.FetchOptions{Language: settings.PreferredLanguage, Country: settings.PreferredCountry}
-	}
-
-	// If the query looks like a URL/shortcode that points to a specific provider
-	// item, resolve it directly to a single result instead of doing a text search.
+	// If the query points to a specific external identity, submit identifier
+	// evidence instead of treating the URL/tag as title text. This can return a
+	// canonical entity or a resolvable candidate, so brand-new upstream IDs also
+	// work before they have been indexed locally by heya.media.
 	if providerName, providerID, ok := parseIdentifyURL(query, kind); ok {
-		if res, err := a.resolveIdentifyURL(ctx, providerName, providerID, fetchOpts); err == nil {
-			return IdentifySearchResult{Results: []metadata.SearchResult{res}}, nil
-		} else {
-			log.Debug().Err(err).Str("provider", providerName).Str("provider_id", providerID).Msg("identify URL lookup failed")
+		results, err := a.searchIdentifyReference(ctx, kind, providerName, providerID, metadata.SearchQuery{
+			Language: settings.PreferredLanguage, Country: settings.PreferredCountry,
+		})
+		if err != nil {
+			return IdentifySearchResult{}, fmt.Errorf("look up external identity: %w", err)
 		}
+		return IdentifySearchResult{Results: results}, nil
 	}
 
 	sq := metadata.SearchQuery{
@@ -676,17 +675,29 @@ func (a *App) IdentifySearch(ctx context.Context, mediaItemID int64, query, year
 	return IdentifySearchResult{Results: results}, nil
 }
 
-// resolveIdentifyURL fetches a single search-result-shaped item using the
-// heya provider. Used when the user pastes a direct URL into the identify dialog.
-func (a *App) resolveIdentifyURL(ctx context.Context, providerName, providerID string, opts *metadata.FetchOptions) (metadata.SearchResult, error) {
+func (a *App) searchIdentifyReference(ctx context.Context, kind metadata.MediaKind, providerName, providerID string, query metadata.SearchQuery) ([]metadata.SearchResult, error) {
 	if providerName != "heya" {
-		return metadata.SearchResult{}, fmt.Errorf("unknown provider: %s", providerName)
+		return nil, fmt.Errorf("unknown provider: %s", providerName)
 	}
-	detail, err := a.heya.GetDetail(ctx, providerID, opts)
+	rest := strings.TrimPrefix(providerID, "heya:")
+	parts := strings.SplitN(rest, ":", 3)
+	if rest == providerID || len(parts) != 3 || parts[1] == "" || parts[2] == "" {
+		return nil, fmt.Errorf("invalid external provider ID %q", providerID)
+	}
+	query.Identifiers = map[string]string{parts[1]: parts[2]}
+	results, err := a.heya.Search(ctx, kind, query)
+	if err != nil || len(results) != 1 || !results[0].Enriched {
+		return results, err
+	}
+	var opts *metadata.FetchOptions
+	if query.Language != "" || query.Country != "" {
+		opts = &metadata.FetchOptions{Language: query.Language, Country: query.Country}
+	}
+	detail, err := a.heya.GetDetail(ctx, results[0].ProviderID, opts)
 	if err != nil {
-		return metadata.SearchResult{}, err
+		return results, nil
 	}
-	return metadata.SearchResult{
+	return []metadata.SearchResult{{
 		ProviderID:   heyametadata.EncodeEntityProviderID(detail.CanonicalID),
 		ProviderName: "heya",
 		Title:        detail.Title,
@@ -696,8 +707,8 @@ func (a *App) resolveIdentifyURL(ctx context.Context, providerName, providerID s
 		HeyaSlug:     detail.CanonicalID,
 		ExternalIDs:  detail.ExternalIDs,
 		Enriched:     true,
-		Confidence:   1.0,
-	}, nil
+		Confidence:   1,
+	}}, nil
 }
 
 // parseIdentifyURL inspects a user-pasted string and returns the heya provider
@@ -710,6 +721,9 @@ func (a *App) resolveIdentifyURL(ctx context.Context, providerName, providerID s
 //   - TMDB URLs:                   https://www.themoviedb.org/{movie,tv}/<id>[-<name>]
 //   - IMDb URLs:                   https://www.imdb.com/title/tt<id>/  (uses hint kind)
 //   - TheTVDB URLs:                https://thetvdb.com/{series,movies}/<id>
+//   - TVmaze URLs:                 https://www.tvmaze.com/shows/<id>/<name>
+//   - tagged IDs:                  imdb:tt123, tmdb:123, tvdb:123, tvmaze:123
+//   - bare IMDb IDs:               tt123
 func parseIdentifyURL(input string, hint metadata.MediaKind) (provider, providerID string, ok bool) {
 	s := strings.TrimSpace(input)
 	if s == "" {
@@ -726,11 +740,32 @@ func parseIdentifyURL(input string, hint metadata.MediaKind) (provider, provider
 		if err != nil {
 			return "", "", false
 		}
-		host = strings.ToLower(u.Host)
+		host = strings.ToLower(u.Hostname())
 		pathSegments = splitPath(u.Path)
 	} else {
 		// Treat the whole token as a single path segment (for shortcode inputs).
 		pathSegments = []string{s}
+	}
+
+	if host == "" && hintAPI != "" {
+		lower := strings.ToLower(s)
+		if validIMDbTitleID(lower) {
+			return "heya", "heya:" + hintAPI + ":imdb:" + lower, true
+		}
+		parts := strings.SplitN(lower, ":", 2)
+		if len(parts) == 2 && parts[0] == "imdb" && validIMDbTitleID(parts[1]) {
+			return "heya", "heya:" + hintAPI + ":imdb:" + parts[1], true
+		}
+		if len(parts) == 2 && validPositiveNumericID(parts[1]) {
+			switch parts[0] {
+			case "tmdb", "tvdb":
+				return "heya", "heya:" + hintAPI + ":" + parts[0] + ":" + parts[1], true
+			case "tvmaze":
+				if hintAPI == "tv" {
+					return "heya", "heya:tv:tvmaze:" + parts[1], true
+				}
+			}
+		}
 	}
 
 	for _, seg := range pathSegments {
@@ -752,7 +787,7 @@ func parseIdentifyURL(input string, hint metadata.MediaKind) (provider, provider
 		}
 	}
 
-	if strings.Contains(host, "themoviedb.org") && len(pathSegments) >= 2 {
+	if (host == "themoviedb.org" || strings.HasSuffix(host, ".themoviedb.org")) && len(pathSegments) >= 2 {
 		tmdbKind := pathSegments[0]
 		if tmdbKind == "tv" || tmdbKind == "movie" {
 			idPart := pathSegments[1]
@@ -765,18 +800,18 @@ func parseIdentifyURL(input string, hint metadata.MediaKind) (provider, provider
 		}
 	}
 
-	if strings.Contains(host, "imdb.com") && hintAPI != "" {
+	if (host == "imdb.com" || strings.HasSuffix(host, ".imdb.com")) && hintAPI != "" {
 		for i, seg := range pathSegments {
 			if seg == "title" && i+1 < len(pathSegments) {
 				ttID := pathSegments[i+1]
-				if strings.HasPrefix(ttID, "tt") {
-					return "heya", "heya:" + hintAPI + ":imdb:" + ttID, true
+				if validIMDbTitleID(strings.ToLower(ttID)) {
+					return "heya", "heya:" + hintAPI + ":imdb:" + strings.ToLower(ttID), true
 				}
 			}
 		}
 	}
 
-	if strings.Contains(host, "thetvdb.com") {
+	if host == "thetvdb.com" || strings.HasSuffix(host, ".thetvdb.com") {
 		for i, seg := range pathSegments {
 			if i+1 >= len(pathSegments) {
 				continue
@@ -795,7 +830,24 @@ func parseIdentifyURL(input string, hint metadata.MediaKind) (provider, provider
 		}
 	}
 
+	if (host == "tvmaze.com" || strings.HasSuffix(host, ".tvmaze.com")) && hintAPI == "tv" {
+		for i, seg := range pathSegments {
+			if seg == "shows" && i+1 < len(pathSegments) && validPositiveNumericID(pathSegments[i+1]) {
+				return "heya", "heya:tv:tvmaze:" + pathSegments[i+1], true
+			}
+		}
+	}
+
 	return "", "", false
+}
+
+func validPositiveNumericID(value string) bool {
+	n, err := strconv.ParseInt(value, 10, 64)
+	return err == nil && n > 0
+}
+
+func validIMDbTitleID(value string) bool {
+	return len(value) > 2 && strings.HasPrefix(value, "tt") && validPositiveNumericID(value[2:])
 }
 
 // heyaAPIKind maps an internal MediaKind to the api kind segment heya.media

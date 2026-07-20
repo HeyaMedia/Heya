@@ -594,7 +594,7 @@ func (w *SearchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[S
 				workflow = metadataContinuationWorkflow{Kind: workflowKind, ID: workflowID}
 				retryAfter = metadataSearchReconcileAfter(workflowID, retryAfter)
 			} else {
-				retryAfter, waiting = w.Backoff.searchRetryAfter(retryAfter)
+				retryAfter, waiting = w.Backoff.searchRetryAfter(lib.MediaType, retryAfter)
 			}
 			log.Debug().Bool("poll", job.Args.Poll).Bool("event_driven", workflow.ID != "").Dur("retry_after", retryAfter).Int64("waiting", waiting).Int64("library_id", lib.ID).Int64("scanner_entity_id", job.Args.ScannerEntityID).Msg("search_metadata: metadata work deferred")
 			pollArgs := job.Args
@@ -1034,6 +1034,7 @@ func (w *ApplyLibraryScanWorker) enqueueRichMetadataWork(ctx context.Context, tx
 			MediaItemID:        target.mediaItemID,
 			ScannerEntityID:    scannerEntityID,
 			MetadataArtifactID: metadataArtifactID,
+			MediaType:          lib.MediaType,
 			MediaKind:          string(target.kind),
 			Key:                target.key,
 			ScheduledTaskID:    taskID,

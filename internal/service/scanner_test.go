@@ -58,6 +58,22 @@ func TestScannerReviewViewBucketsAndActions(t *testing.T) {
 	review := createScannerIdentity(t, ctx, q, lib, run.ID, "title_year:review|2002", "Review Movie", "2002", "needs_review", 0)
 	rejected := createScannerIdentity(t, ctx, q, lib, run.ID, "title_year:rejected|2003", "Rejected Movie", "2003", "rejected", 0)
 	unmatched := createScannerIdentity(t, ctx, q, lib, run.ID, "title_year:unmatched|2004", "Unmatched Movie", "2004", "accepted", 0)
+	dormant := createScannerIdentity(t, ctx, q, lib, run.ID, "title_year:dormant|1999", "Removed Movie", "1999", "accepted", 0)
+	_, err = pool.Exec(ctx, `UPDATE local_media_identities SET decision_provenance = 'legacy' WHERE id = $1`, dormant.ID)
+	require.NoError(t, err)
+	_, err = q.UpsertScannerEntity(ctx, sqlc.UpsertScannerEntityParams{
+		LibraryID:       lib.ID,
+		MediaType:       lib.MediaType,
+		ScopeKey:        "scope:unmatched",
+		ScopePaths:      []string{"/tmp/Unmatched Movie"},
+		IdentityKey:     unmatched.IdentityKey,
+		Title:           unmatched.Title,
+		Year:            unmatched.Year,
+		Status:          "skipped",
+		SearchScanRunID: pgInt8ForTest(run.ID),
+		Data:            []byte(`{}`),
+	})
+	require.NoError(t, err)
 	pipelineFailure, err := q.UpsertScannerEntity(ctx, sqlc.UpsertScannerEntityParams{
 		LibraryID:       lib.ID,
 		MediaType:       lib.MediaType,
@@ -164,6 +180,7 @@ func TestScannerReviewViewBucketsAndActions(t *testing.T) {
 		rejected.ID:  "rejected",
 		unmatched.ID: "unmatched",
 	}, scannerBucketsByID(identities))
+	require.NotContains(t, scannerBucketsByID(identities), dormant.ID, "accepted history with no current files must stay dormant instead of becoming a phantom unmatched row")
 
 	reviewPage, err := app.ListScannerIdentitiesPage(ctx, lib.ID, "needs_review", "", 50, 0)
 	require.NoError(t, err)

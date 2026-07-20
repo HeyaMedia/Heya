@@ -34,6 +34,7 @@ var scannerQueueKinds = []string{
 	"search_metadata",
 	"fetch_metadata",
 	"apply_metadata",
+	"apply_rich_metadata",
 }
 
 // scannerQueueName isolates the scanner pipeline by library media type. The
@@ -317,19 +318,20 @@ func (a ApplyLibraryScanArgs) InsertOpts() river.InsertOpts {
 // entity and persists slow side-data (cast, crew, keywords, videos,
 // certifications, recommendations, collections) outside the core apply path.
 type ApplyRichMetadataArgs struct {
-	LibraryID          int64  `json:"library_id" river:"unique"`
-	MediaItemID        int64  `json:"media_item_id" river:"unique"`
-	ScannerEntityID    int64  `json:"scanner_entity_id,omitempty" river:"unique"`
-	MetadataArtifactID int64  `json:"metadata_artifact_id" river:"unique"`
-	MediaKind          string `json:"media_kind" river:"unique"`
-	Key                string `json:"key,omitempty" river:"unique"`
-	ScheduledTaskID    string `json:"scheduled_task_id,omitempty"`
+	LibraryID          int64          `json:"library_id" river:"unique"`
+	MediaItemID        int64          `json:"media_item_id" river:"unique"`
+	ScannerEntityID    int64          `json:"scanner_entity_id,omitempty" river:"unique"`
+	MetadataArtifactID int64          `json:"metadata_artifact_id" river:"unique"`
+	MediaType          sqlc.MediaType `json:"media_type,omitempty"`
+	MediaKind          string         `json:"media_kind" river:"unique"`
+	Key                string         `json:"key,omitempty" river:"unique"`
+	ScheduledTaskID    string         `json:"scheduled_task_id,omitempty"`
 }
 
 func (ApplyRichMetadataArgs) Kind() string { return "apply_rich_metadata" }
-func (ApplyRichMetadataArgs) InsertOpts() river.InsertOpts {
+func (a ApplyRichMetadataArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{
-		Queue:       "apply_rich_metadata",
+		Queue:       scannerQueueName("apply_rich_metadata", a.MediaType),
 		MaxAttempts: 5,
 		Priority:    PriorityScan,
 		UniqueOpts:  uniqueWhileActive(),

@@ -6,10 +6,10 @@
     @update:model-value="(v) => v ? null : $emit('close')"
   >
     <div class="ssd-search-bar">
-      <input v-model="query" type="text" class="ssd-input" :placeholder="isURL ? 'Paste a Heya / TMDB / IMDb URL...' : 'Search title or paste a URL...'" @keydown.enter="search" />
-      <input v-if="!isURL" v-model="year" type="text" class="ssd-input ssd-year" placeholder="Year" maxlength="4" @keydown.enter="search" />
+      <input v-model="query" type="text" class="ssd-input" placeholder="Search title or enter an IMDb / TMDB / TVDB / TVmaze ID or URL..." @keydown.enter="search" />
+      <input v-if="!isDirectLookup" v-model="year" type="text" class="ssd-input ssd-year" placeholder="Year" maxlength="4" @keydown.enter="search" />
       <button class="btn btn-primary" :disabled="searching || !query.trim()" @click="search">
-        {{ searching ? (isURL ? 'Looking up...' : 'Searching...') : (isURL ? 'Look up' : 'Search') }}
+        {{ searching ? (isDirectLookup ? 'Looking up...' : 'Searching...') : (isDirectLookup ? 'Look up' : 'Search') }}
       </button>
     </div>
     <div class="ssd-results scroll">
@@ -65,10 +65,14 @@ const searching = ref(false)
 const searched = ref(false)
 const assigning = ref(false)
 const results = ref<ScannerSearchResult[]>([])
+const { toast } = useToast()
 
-const isURL = computed(() => {
+const isDirectLookup = computed(() => {
   const q = query.value.trim()
-  return /^https?:\/\//i.test(q) || /^heya(_[a-z]+)?:/i.test(q)
+  return /^https?:\/\//i.test(q)
+    || /^heya(_[a-z]+)?:/i.test(q)
+    || /^(?:imdb:)?tt\d+$/i.test(q)
+    || /^(?:tmdb|tvdb|tvmaze):\d+$/i.test(q)
 })
 
 watch(() => props.show, (v) => {
@@ -88,13 +92,16 @@ async function search() {
   try {
     const heya = $heya as any
     const q: Record<string, any> = { q: query.value }
-    if (year.value && !isURL.value) q.year = year.value
+    if (year.value && !isDirectLookup.value) q.year = year.value
     const res = await heya('/api/libraries/{id}/scanner/identities/{identity_id}/search', {
       path: { id: props.libraryId, identity_id: props.identity.id },
       query: q,
     }) as { results: ScannerSearchResult[] }
     results.value = res.results || []
-  } catch { results.value = [] }
+  } catch (error) {
+    results.value = []
+    toast.err(apiErrorMessage(error, 'Metadata lookup failed'), { duration: 7000 })
+  }
   searching.value = false
 }
 

@@ -331,6 +331,17 @@ FROM (
     END AS bucket
     FROM local_media_identities lmi
     WHERE lmi.library_id = $1
+      AND (
+        lmi.media_item_id IS NOT NULL
+        OR lmi.review_status <> 'accepted'
+        OR lmi.decision_provenance <> 'legacy'
+        OR EXISTS (
+          SELECT 1 FROM scanner_entities entity
+          WHERE entity.library_id = lmi.library_id
+            AND entity.media_type = lmi.media_type
+            AND entity.identity_key = lmi.identity_key
+        )
+      )
 ) buckets
 `
 
@@ -1798,6 +1809,17 @@ FROM (
             END AS bucket
         FROM local_media_identities lmi
         WHERE lmi.library_id = $1
+          AND (
+            lmi.media_item_id IS NOT NULL
+            OR lmi.review_status <> 'accepted'
+            OR lmi.decision_provenance <> 'legacy'
+            OR EXISTS (
+              SELECT 1 FROM scanner_entities entity
+              WHERE entity.library_id = lmi.library_id
+                AND entity.media_type = lmi.media_type
+                AND entity.identity_key = lmi.identity_key
+            )
+          )
     ) all_rows
     WHERE ($2::text = '' OR all_rows.bucket = $2::text)
       AND (

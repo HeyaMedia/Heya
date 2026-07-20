@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/queueops"
 	"github.com/riverqueue/river"
 	"github.com/rs/zerolog/log"
@@ -50,12 +52,13 @@ type MetadataContinuationSweepWorker struct {
 // waiting population once per tick; search workers use that cached count to
 // avoid a COUNT query for every deferred item.
 type metadataContinuationBackoff struct {
-	searchWaiting atomic.Int64
+	mu            sync.RWMutex
+	searchWaiting map[sqlc.MediaType]int64
 	lastRefresh   atomic.Int64
 }
 
 func newMetadataContinuationBackoff() *metadataContinuationBackoff {
-	return &metadataContinuationBackoff{}
+	return &metadataContinuationBackoff{searchWaiting: make(map[sqlc.MediaType]int64)}
 }
 
 func (b *metadataContinuationBackoff) refresh(ctx context.Context, db queueops.DB) error {
@@ -70,23 +73,44 @@ func (b *metadataContinuationBackoff) refresh(ctx context.Context, db queueops.D
 	if !b.lastRefresh.CompareAndSwap(last, now) {
 		return nil
 	}
-	var waiting int64
-	if err := db.QueryRow(ctx, `
-		SELECT count(*)
-		FROM scanner_metadata_continuations
-		WHERE kind = 'search_metadata' AND workflow_id IS NULL
-	`).Scan(&waiting); err != nil {
+	rows, err := db.Query(ctx, `
+		SELECT library.media_type, count(*)
+		FROM scanner_metadata_continuations continuation
+		JOIN libraries library ON library.id = continuation.library_id
+		WHERE continuation.kind = 'search_metadata' AND continuation.workflow_id IS NULL
+		GROUP BY library.media_type
+	`)
+	if err != nil {
 		b.lastRefresh.Store(last)
 		return err
 	}
-	b.searchWaiting.Store(waiting)
+	defer rows.Close()
+	waiting := make(map[sqlc.MediaType]int64)
+	for rows.Next() {
+		var mediaType sqlc.MediaType
+		var count int64
+		if err := rows.Scan(&mediaType, &count); err != nil {
+			b.lastRefresh.Store(last)
+			return err
+		}
+		waiting[mediaType] = count
+	}
+	if err := rows.Err(); err != nil {
+		b.lastRefresh.Store(last)
+		return err
+	}
+	b.mu.Lock()
+	b.searchWaiting = waiting
+	b.mu.Unlock()
 	return nil
 }
 
-func (b *metadataContinuationBackoff) searchRetryAfter(providerDelay time.Duration) (time.Duration, int64) {
+func (b *metadataContinuationBackoff) searchRetryAfter(mediaType sqlc.MediaType, providerDelay time.Duration) (time.Duration, int64) {
 	waiting := int64(0)
 	if b != nil {
-		waiting = max(b.searchWaiting.Load(), 0)
+		b.mu.RLock()
+		waiting = max(b.searchWaiting[mediaType], 0)
+		b.mu.RUnlock()
 	}
 	adaptive := metadataSearchRetryMinimum + time.Duration(waiting/100)*metadataSearchRetryStep
 	if adaptive > metadataSearchRetryMaximum {
@@ -331,13 +355,23 @@ func (w *MetadataContinuationSweepWorker) adoptLegacyPollJobs(ctx context.Contex
 
 func (w *MetadataContinuationSweepWorker) claimDue(ctx context.Context) ([]metadataContinuationRow, error) {
 	rows, err := w.DB.Query(ctx, `
-		WITH due AS (
-			SELECT id
-			FROM scanner_metadata_continuations
-			WHERE next_attempt_at <= now()
-			ORDER BY next_attempt_at, id
-			LIMIT $1
-			FOR UPDATE SKIP LOCKED
+		WITH ranked AS MATERIALIZED (
+			SELECT continuation.id,
+			       continuation.next_attempt_at,
+			       row_number() OVER (
+			           PARTITION BY library.media_type
+			           ORDER BY continuation.next_attempt_at, continuation.id
+			       ) AS media_rank
+			FROM scanner_metadata_continuations continuation
+			JOIN libraries library ON library.id = continuation.library_id
+			WHERE continuation.next_attempt_at <= now()
+		), due AS (
+			SELECT continuation.id
+			FROM scanner_metadata_continuations continuation
+			JOIN ranked ON ranked.id = continuation.id
+			WHERE ranked.media_rank <= $1
+			ORDER BY ranked.next_attempt_at, continuation.id
+			FOR UPDATE OF continuation SKIP LOCKED
 		)
 		UPDATE scanner_metadata_continuations continuation
 		SET next_attempt_at = $2,

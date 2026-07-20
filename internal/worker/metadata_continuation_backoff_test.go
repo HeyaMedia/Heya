@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,8 +24,10 @@ func TestMetadataSearchRetryBackoffScalesWithWaitingPopulation(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		backoff.searchWaiting.Store(tt.waiting)
-		got, waiting := backoff.searchRetryAfter(30 * time.Second)
+		backoff.mu.Lock()
+		backoff.searchWaiting[sqlc.MediaTypeMusic] = tt.waiting
+		backoff.mu.Unlock()
+		got, waiting := backoff.searchRetryAfter(sqlc.MediaTypeMusic, 30*time.Second)
 		require.Equal(t, tt.waiting, waiting)
 		require.Equal(t, tt.want, got)
 	}
@@ -32,10 +35,27 @@ func TestMetadataSearchRetryBackoffScalesWithWaitingPopulation(t *testing.T) {
 
 func TestMetadataSearchRetryBackoffHonorsLongerProviderDelay(t *testing.T) {
 	backoff := newMetadataContinuationBackoff()
-	backoff.searchWaiting.Store(100)
+	backoff.mu.Lock()
+	backoff.searchWaiting[sqlc.MediaTypeMusic] = 100
+	backoff.mu.Unlock()
 
-	got, _ := backoff.searchRetryAfter(12 * time.Minute)
+	got, _ := backoff.searchRetryAfter(sqlc.MediaTypeMusic, 12*time.Minute)
 	require.Equal(t, 12*time.Minute, got)
+}
+
+func TestMetadataSearchRetryBackoffIsIndependentByMediaType(t *testing.T) {
+	backoff := newMetadataContinuationBackoff()
+	backoff.mu.Lock()
+	backoff.searchWaiting[sqlc.MediaTypeMusic] = 50_000
+	backoff.searchWaiting[sqlc.MediaTypeTv] = 0
+	backoff.mu.Unlock()
+
+	musicDelay, musicWaiting := backoff.searchRetryAfter(sqlc.MediaTypeMusic, 30*time.Second)
+	tvDelay, tvWaiting := backoff.searchRetryAfter(sqlc.MediaTypeTv, 30*time.Second)
+	require.EqualValues(t, 50_000, musicWaiting)
+	require.Equal(t, 5*time.Minute, musicDelay)
+	require.Zero(t, tvWaiting)
+	require.Equal(t, time.Minute, tvDelay)
 }
 
 func TestMetadataSearchEventReconciliationIsSlowAndStable(t *testing.T) {
