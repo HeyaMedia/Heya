@@ -384,47 +384,46 @@ func (s *Server) handleNextUp(w http.ResponseWriter, r *http.Request, p Params) 
 	ctx := r.Context()
 	serverID := s.serverID(r)
 
-	limit, _ := strconv.Atoi(queryCI(r, "limit"))
+	limit64, _ := strconv.ParseInt(queryCI(r, "limit"), 10, 32)
+	limit := int32(limit64)
 	if limit <= 0 {
 		limit = 16
 	}
+	if limit > 100 {
+		limit = 100
+	}
 
-	var seriesIDs []int64
+	var epIDs []int64
 	if sid := queryCI(r, "seriesId"); sid != "" {
+		// Explicit series probe (clients ask after finishing an episode) —
+		// direct lookup, no recency window involved.
 		id, err := DecodeIDKind(sid, KindItem)
 		if err != nil {
 			writeJSON(w, http.StatusOK, queryResult[baseItemDto]{Items: []baseItemDto{}})
 			return
 		}
-		seriesIDs = []int64{id}
-	} else {
-		recents, err := s.app.ListRecentlyWatched(ctx, u.ID, 20, 0)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		seen := map[int64]bool{}
-		for _, row := range recents {
-			if (row.MediaType != string(sqlc.MediaTypeTv) && row.MediaType != string(sqlc.MediaTypeAnime)) || seen[row.MediaItemID] {
-				continue
-			}
-			seen[row.MediaItemID] = true
-			seriesIDs = append(seriesIDs, row.MediaItemID)
-			if len(seriesIDs) >= limit {
-				break
-			}
-		}
-	}
-
-	var epIDs []int64
-	for _, seriesID := range seriesIDs {
-		next, ok, err := s.app.JFNextUnwatchedEpisode(ctx, u.ID, seriesID)
+		next, ok, err := s.app.JFNextUnwatchedEpisode(ctx, u.ID, id)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 		if ok {
 			epIDs = append(epIDs, next.EpisodeID)
+		}
+	} else {
+		// Same server-owned rail as the native Home: one query, per
+		// recently-watched series the next unwatched episode that has a
+		// playable file — specials excluded, fully-watched series
+		// prefiltered. The old derivation here (first 20 recently-watched
+		// rows → per-series next-episode fan-out) went blind after a bulk
+		// mark-watched pass and nominated S0 specials for finished shows.
+		rail, err := s.app.ListUpNextRail(ctx, u.ID, limit)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		for _, item := range rail {
+			epIDs = append(epIDs, item.EpisodeID)
 		}
 	}
 
