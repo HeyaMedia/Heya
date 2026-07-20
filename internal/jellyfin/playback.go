@@ -243,19 +243,24 @@ func (s *Server) mediaSourceForFile(ctx context.Context, file sqlc.LibraryFile, 
 	}
 
 	return mediaSourceInfo{
-		Protocol:                   "File",
-		ID:                         EncodeID(KindFile, file.ID),
-		Path:                       sanitizePath(file.Path),
-		Type:                       "Default",
-		Container:                  containerOf(file.Path),
-		Size:                       file.Size,
-		Name:                       name,
-		ETag:                       tag32("etag-source", file.ID),
-		RunTimeTicks:               int64(info.Duration * float64(ticksPerSecond)),
-		SupportsDirectPlay:         directOK,
-		SupportsDirectStream:       directOK,
-		SupportsTranscoding:        s.app.TranscoderSessions() != nil,
-		SupportsProbing:            true,
+		Protocol:             "File",
+		ID:                   EncodeID(KindFile, file.ID),
+		Path:                 sanitizePath(file.Path),
+		Type:                 "Default",
+		Container:            containerOf(file.Path),
+		Size:                 file.Size,
+		Name:                 name,
+		ETag:                 tag32("etag-source", file.ID),
+		RunTimeTicks:         int64(info.Duration * float64(ticksPerSecond)),
+		SupportsDirectPlay:   directOK,
+		SupportsDirectStream: directOK,
+		SupportsTranscoding:  s.app.TranscoderSessions() != nil,
+		SupportsProbing:      true,
+		// MediaStreamProtocol is a required no-default enum in the kotlin SDK:
+		// "" or absent kills deserialization of any DTO embedding a
+		// MediaSource. Upstream's C# default is http; the HLS transcode path
+		// overrides to "hls" alongside TranscodingUrl.
+		TranscodingSubProtocol:     "http",
 		VideoType:                  "VideoFile",
 		MediaStreams:               streams,
 		MediaAttachments:           []any{},
@@ -332,10 +337,12 @@ func trackSourceInfo(trackFileID int64, path string, size int64, title string, d
 		SupportsDirectPlay:   true,
 		SupportsDirectStream: true,
 		SupportsTranscoding:  true,
-		MediaStreams:         []mediaStream{},
-		MediaAttachments:     []any{},
-		Formats:              []string{},
-		RequiredHTTPHeaders:  map[string]string{},
+		// See videoMediaSource — required no-default enum in the kotlin SDK.
+		TranscodingSubProtocol: "http",
+		MediaStreams:           []mediaStream{},
+		MediaAttachments:       []any{},
+		Formats:                []string{},
+		RequiredHTTPHeaders:    map[string]string{},
 	}
 }
 

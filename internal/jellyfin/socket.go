@@ -168,11 +168,19 @@ func (s *Server) bridgeEvents() {
 				})
 			case eventhub.EventMediaWatched:
 				if p, ok := ev.Payload.(eventhub.WatchPayload); ok {
+					// Every UserItemDataDto field the kotlin SDK marks
+					// required must be present or the whole socket frame
+					// fails to deserialize client-side. PlayCount/IsFavorite
+					// aren't in the payload; clients use this as an
+					// invalidation hint, so zero values are fine.
 					s.broadcastSocket(p.UserID, "UserDataChanged", map[string]any{
 						"UserId": EncodeID(KindUser, p.UserID),
 						"UserDataList": []map[string]any{{
 							"Key":                   strconv.FormatInt(p.MediaItemID, 10),
+							"ItemId":                EncodeID(KindItem, p.MediaItemID),
 							"PlaybackPositionTicks": int64(p.Progress) * ticksPerSecond,
+							"PlayCount":             0,
+							"IsFavorite":            false,
 							"Played":                p.Completed,
 						}},
 					})

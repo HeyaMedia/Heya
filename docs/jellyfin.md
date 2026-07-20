@@ -102,6 +102,14 @@ absent/disabled" answers a stock Jellyfin gives — LiveTV off, no plugins…),
   walk (discovery → login → browse → PlaybackInfo → stream bytes →
   playstate → resume → favorites → websocket → logout) against a running
   server. CI-able against a seeded dev DB.
+- `bun tools/jellyfin-sdk-strict.ts [base] [token]` — kotlin-SDK strictness
+  audit. Replays an Android client's login + home-load sequence and
+  validates every response body against the 10.11 OpenAPI spec with
+  jellyfin-sdk-kotlin's deserializer semantics: a non-nullable no-default
+  property that is missing/null, or an enum value outside the spec list,
+  crashes kotlinx clients (Wholphin, Findroid, Streamyfin) even though
+  lenient clients (jellyfin-web, Infuse) shrug it off. Token defaults to
+  the heya CLI token cache. Found the `TranscodingSubProtocol: ""` crash.
 - Real-client: jellyfin-web (served standalone, pointed at Heya) driven via
   Heya Eye. Verified end-to-end 2026-07: login, home rails (Continue
   Watching / Latest), series → season → episode browse, item detail,
