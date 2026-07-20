@@ -44,6 +44,10 @@ type Server struct {
 
 	socketsMu sync.RWMutex
 	sockets   map[*socketConn]struct{}
+
+	// throttle meters failed logins — the login endpoint accepts the short
+	// Jellyfin PIN, so guessing must be rate-limited (see users.go).
+	throttle *loginThrottle
 }
 
 // SetNative hands the middleware the fully-built server mux for in-process
@@ -58,7 +62,7 @@ func (s *Server) SetNative(h http.Handler) { s.native = h }
 // here, not in service.App.New, to keep the feature's boot footprint inside
 // this package.
 func NewMiddleware(app *service.App, hub *eventhub.Hub, next http.Handler) *Server {
-	s := &Server{app: app, hub: hub, next: next}
+	s := &Server{app: app, hub: hub, next: next, throttle: newLoginThrottle()}
 	s.rt = s.buildRouter()
 	if app != nil && app.DBPool() != nil {
 		app.LoadJellyfinFromDB(app.LifetimeContext())

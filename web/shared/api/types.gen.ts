@@ -2041,6 +2041,17 @@ export type JellyfinConfigBody = {
     enabled: boolean;
 };
 
+export type JellyfinCredentialBody = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    created_at: string;
+    last_used_at?: string;
+    pin: string;
+    rotated_at: string;
+};
+
 export type JobKindSummaryRow = {
     count: number;
     kind: string;
@@ -7203,6 +7214,13 @@ export type ImageStatusWritable = {
 
 export type JellyfinConfigBodyWritable = {
     enabled: boolean;
+};
+
+export type JellyfinCredentialBodyWritable = {
+    created_at: string;
+    last_used_at?: string;
+    pin: string;
+    rotated_at: string;
 };
 
 export type JobListResultWritable = {
@@ -12514,6 +12532,81 @@ export type CheckFavoriteResponses = {
 };
 
 export type CheckFavoriteResponse = CheckFavoriteResponses[keyof CheckFavoriteResponses];
+
+export type RevokeJellyfinCredentialData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/me/jellyfin-credential';
+};
+
+export type RevokeJellyfinCredentialErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type RevokeJellyfinCredentialError = RevokeJellyfinCredentialErrors[keyof RevokeJellyfinCredentialErrors];
+
+export type RevokeJellyfinCredentialResponses = {
+    /**
+     * No Content
+     */
+    204: void;
+};
+
+export type RevokeJellyfinCredentialResponse = RevokeJellyfinCredentialResponses[keyof RevokeJellyfinCredentialResponses];
+
+export type GetJellyfinCredentialData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/me/jellyfin-credential';
+};
+
+export type GetJellyfinCredentialErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type GetJellyfinCredentialError = GetJellyfinCredentialErrors[keyof GetJellyfinCredentialErrors];
+
+export type GetJellyfinCredentialResponses = {
+    /**
+     * OK
+     */
+    200: JellyfinCredentialBody;
+};
+
+export type GetJellyfinCredentialResponse = GetJellyfinCredentialResponses[keyof GetJellyfinCredentialResponses];
+
+export type RotateJellyfinCredentialData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/me/jellyfin-credential';
+};
+
+export type RotateJellyfinCredentialErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type RotateJellyfinCredentialError = RotateJellyfinCredentialErrors[keyof RotateJellyfinCredentialErrors];
+
+export type RotateJellyfinCredentialResponses = {
+    /**
+     * OK
+     */
+    200: JellyfinCredentialBody;
+};
+
+export type RotateJellyfinCredentialResponse = RotateJellyfinCredentialResponses[keyof RotateJellyfinCredentialResponses];
 
 export type GetListeningStatsData = {
     body?: never;

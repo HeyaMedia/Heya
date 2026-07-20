@@ -11,6 +11,7 @@ export type {
   CastNetworkStatus as CastStatus,
   Entry as LogEntry,
   JellyfinConfigBody as JellyfinConfig,
+  JellyfinCredentialBody as JellyfinCredential,
   JobKindSummaryRow as JobKindSummary,
   JobListResult,
   LibrarySettings,
@@ -34,6 +35,7 @@ import type {
   CastNetworkStatus as CastStatus,
   Entry as LogEntry,
   JellyfinConfigBody as JellyfinConfig,
+  JellyfinCredentialBody as JellyfinCredential,
   JobKindSummaryRow as JobKindSummary,
   JobListResult,
   LibrarySettings,
@@ -220,6 +222,16 @@ export const jellyfinConfigQuery = defineQueryOptions(() => ({
   query: async () => {
     const { $heya } = useNuxtApp()
     return await $heya('/api/jellyfin/config') as JellyfinConfig
+  },
+  staleTime: 1000 * 30,
+  meta: privateSettings,
+}))
+
+export const jellyfinCredentialQuery = defineQueryOptions(() => ({
+  key: ['me', 'jellyfin-credential'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/me/jellyfin-credential') as JellyfinCredential
   },
   staleTime: 1000 * 30,
   meta: privateSettings,

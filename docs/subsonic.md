@@ -46,8 +46,9 @@ three protocol auth forms verify against it:
 
 ### Symfonium walkthrough
 
-1. Heya: Settings → enable the Subsonic API, then create your app password
-   (or `heya subsonic credential <user> --rotate`).
+1. Heya: Settings → Client APIs → enable the Subsonic API (admin), then mint
+   your app password under Settings → Client apps (per-user; or
+   `heya subsonic credential <user> --rotate`).
 2. Symfonium: Add media provider → **Subsonic**.
 3. Server address: `http://your-host:8080` (the same origin as Heya).
 4. Username: your Heya username. Password: the **app password**.

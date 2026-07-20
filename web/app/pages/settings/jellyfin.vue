@@ -88,11 +88,13 @@ onMounted(() => { ensureSources() })
         <KVTable :rows="[
           { key: 'Server address', value: serverAddress, mono: true, copy: true },
           { key: 'Advertises as', value: 'Jellyfin Server 10.11.11' },
-          { key: 'Sign in with', value: 'Your normal Heya username & password' },
+          { key: 'Sign in with', value: 'Your Heya username & password — or a personal TV PIN' },
         ]" />
         <p class="jf-hint">
           In any Jellyfin app (Infuse, Streamyfin, Finamp, Findroid, jellyfin-web…),
           add a server with the address above and log in with your Heya account.
+          Each user can mint a 6-digit TV sign-in PIN under
+          <NuxtLink to="/settings/clients">Settings → Client apps</NuxtLink>.
           Sessions created by Jellyfin apps show up under
           <NuxtLink to="/settings/sessions">Settings → Sessions</NuxtLink> and can be
           revoked like any other device.

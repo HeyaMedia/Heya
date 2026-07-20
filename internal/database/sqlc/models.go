@@ -413,6 +413,14 @@ type GeneratedSidecarPublication struct {
 	VerifiedAt            pgtype.Timestamptz `json:"verified_at"`
 }
 
+type JellyfinCredential struct {
+	UserID     int64              `json:"user_id"`
+	Pin        string             `json:"pin"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	RotatedAt  pgtype.Timestamptz `json:"rotated_at"`
+	LastUsedAt pgtype.Timestamptz `json:"last_used_at"`
+}
+
 type Keyword struct {
 	ID          int64  `json:"id"`
 	ExternalIds []byte `json:"external_ids"`

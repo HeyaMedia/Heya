@@ -3,11 +3,72 @@ package jellyfin
 import (
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/karbowiak/heya/internal/auth"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 )
+
+// loginThrottle meters failed AuthenticateByName attempts per client IP.
+// The login accepts the short Jellyfin PIN (see service.AuthenticateJellyfin),
+// and a 6-digit space is only safe when online guessing is rate-limited:
+// after maxLoginFailures failures inside loginFailureWindow, further attempts
+// from that IP answer 401 without touching credentials until the window
+// drains. A successful login clears the IP's slate.
+type loginThrottle struct {
+	mu       sync.Mutex
+	failures map[string][]time.Time
+}
+
+const (
+	maxLoginFailures   = 10
+	loginFailureWindow = 15 * time.Minute
+)
+
+func newLoginThrottle() *loginThrottle {
+	return &loginThrottle{failures: map[string][]time.Time{}}
+}
+
+// blocked prunes the IP's expired failures and reports whether it is over
+// the limit. Also opportunistically sweeps the whole map when it grows large
+// so a scanning botnet can't balloon memory.
+func (t *loginThrottle) blocked(ip string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	cutoff := time.Now().Add(-loginFailureWindow)
+	if len(t.failures) > 4096 {
+		for k, v := range t.failures {
+			if len(v) == 0 || v[len(v)-1].Before(cutoff) {
+				delete(t.failures, k)
+			}
+		}
+	}
+	kept := t.failures[ip][:0]
+	for _, ts := range t.failures[ip] {
+		if ts.After(cutoff) {
+			kept = append(kept, ts)
+		}
+	}
+	if len(kept) == 0 {
+		delete(t.failures, ip)
+		return false
+	}
+	t.failures[ip] = kept
+	return len(kept) >= maxLoginFailures
+}
+
+func (t *loginThrottle) fail(ip string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.failures[ip] = append(t.failures[ip], time.Now())
+}
+
+func (t *loginThrottle) clear(ip string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.failures, ip)
+}
 
 type authenticateByNameRequest struct {
 	Username string `json:"Username"`
@@ -32,13 +93,23 @@ func (s *Server) handleAuthenticateByName(w http.ResponseWriter, r *http.Request
 		password = req.Password
 	}
 
-	user, err := s.app.Authenticate(r.Context(), req.Username, password)
-	if err != nil {
-		// Jellyfin answers failed logins with a bare 401; clients render
-		// their own "invalid credentials" copy.
+	ip := clientIP(r)
+	if s.throttle.blocked(ip) {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
+
+	// Account password or the user's Jellyfin PIN — the PIN is valid only
+	// on this surface.
+	user, err := s.app.AuthenticateJellyfin(r.Context(), req.Username, password)
+	if err != nil {
+		// Jellyfin answers failed logins with a bare 401; clients render
+		// their own "invalid credentials" copy.
+		s.throttle.fail(ip)
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	s.throttle.clear(ip)
 
 	device := extractAuth(r)
 	ua := deviceUserAgent(device, r)

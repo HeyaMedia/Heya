@@ -3,24 +3,13 @@ definePageMeta({ layout: 'settings', middleware: 'admin' })
 
 const { $heya } = useNuxtApp()
 const { isLocked, lockTooltip, ensure: ensureSources } = useConfigSources()
-import { subsonicConfigQuery, subsonicCredentialQuery } from '~/queries/settings'
+import { subsonicConfigQuery } from '~/queries/settings'
 
 const enabled = ref(false)
 const configData = useQuery(subsonicConfigQuery())
-const credentialData = useQuery(subsonicCredentialQuery())
 const loading = computed(() => configData.isLoading.value)
 const saving = ref(false)
 const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
-
-type Credential = {
-  secret: string
-  created_at: string
-  rotated_at: string
-  last_used_at?: string
-}
-const credential = ref<Credential | null>(null)
-const credentialBusy = ref(false)
-const secretVisible = ref(false)
 
 const serverAddress = computed(() =>
   import.meta.client ? window.location.origin : '')
@@ -30,19 +19,10 @@ async function load() {
     const res = await configData.refetch()
     if (res.data) enabled.value = res.data.enabled
   } catch {}
-  try {
-    const res = await credentialData.refetch()
-    credential.value = res.data as Credential
-  } catch {
-    credential.value = null // 404 — none minted yet
-  }
 }
 
 watch(() => configData.data.value, value => {
   if (value) enabled.value = value.enabled
-}, { immediate: true })
-watch(() => credentialData.data.value, value => {
-  if (value) credential.value = value as Credential
 }, { immediate: true })
 
 async function onToggle(on: boolean) {
@@ -66,65 +46,6 @@ async function onToggle(on: boolean) {
   } finally {
     saving.value = false
   }
-}
-
-async function rotateCredential() {
-  if (credential.value) {
-    const ok = await useConfirm().confirm({
-      title: 'Rotate app password?',
-      message: 'Every Subsonic client signed in with the current app password stops working until you update it.',
-      confirmLabel: 'Rotate',
-    })
-    if (!ok) return
-  }
-  credentialBusy.value = true
-  try {
-    credential.value = await $heya('/api/me/subsonic-credential', { method: 'POST' }) as Credential
-    secretVisible.value = true
-    flash.value = { kind: 'ok', text: credential.value ? 'App password ready — paste it into your client.' : '' }
-  } catch (e: any) {
-    flash.value = { kind: 'err', text: e?.data?.detail ?? e?.message ?? 'Could not create app password.' }
-  } finally {
-    credentialBusy.value = false
-  }
-}
-
-async function revokeCredential() {
-  const ok = await useConfirm().confirm({
-    title: 'Revoke app password?',
-    message: 'All Subsonic clients are signed out immediately. You can generate a new password any time.',
-    confirmLabel: 'Revoke',
-    destructive: true,
-  })
-  if (!ok) return
-  credentialBusy.value = true
-  try {
-    await $heya('/api/me/subsonic-credential', { method: 'DELETE' })
-    credential.value = null
-    secretVisible.value = false
-  } catch (e: any) {
-    flash.value = { kind: 'err', text: e?.data?.detail ?? e?.message ?? 'Revoke failed.' }
-  } finally {
-    credentialBusy.value = false
-  }
-}
-
-async function copySecret() {
-  if (!credential.value) return
-  try {
-    await navigator.clipboard.writeText(credential.value.secret)
-    flash.value = { kind: 'ok', text: 'App password copied to clipboard.' }
-  } catch {
-    flash.value = { kind: 'err', text: 'Clipboard blocked — reveal and copy manually.' }
-  }
-}
-
-function formatWhen(value?: string): string {
-  if (!value) return 'never'
-  const d = new Date(value)
-  return Number.isNaN(d.getTime())
-    ? value
-    : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 onMounted(() => { ensureSources() })
@@ -167,12 +88,13 @@ onMounted(() => { ensureSources() })
           { key: 'Server address', value: serverAddress, mono: true, copy: true },
           { key: 'Protocol', value: 'Subsonic 1.16.1 + OpenSubsonic' },
           { key: 'Username', value: 'Your Heya username' },
-          { key: 'Password', value: 'The app password below — never your Heya login password' },
+          { key: 'Password', value: 'A personal app password — never your Heya login password' },
         ]" />
         <p class="ss-hint">
           Works with Symfonium, DSub, play:Sub, Tempo, Supersonic, Amperfy, and any
           other Subsonic/OpenSubsonic client: add a server with the address above,
-          your Heya username, and the app password from the section below.
+          your Heya username, and your personal app password from
+          <NuxtLink to="/settings/clients">Settings → Client apps</NuxtLink>.
           Plays scrobble into your normal Heya listening history; hearts and
           ratings sync both ways.
         </p>
@@ -181,41 +103,6 @@ onMounted(() => { ensureSources() })
         When enabled, Heya answers the Subsonic client protocol alongside its own API
         — nothing about the normal web app changes. You can also force this on with
         <code>HEYA_SUBSONIC_API_ENABLED=true</code>, which locks this toggle.
-      </p>
-    </SettingsSection>
-
-    <SettingsSection
-      title="App password"
-      icon="key"
-      description="Subsonic's token login needs a secret the server can read back, so clients use a generated app password — your real Heya password is never involved and never at risk."
-    >
-      <template #actions>
-        <button class="ss-btn" :disabled="credentialBusy" @click="rotateCredential">
-          {{ credential ? 'Rotate' : 'Generate' }}
-        </button>
-        <button v-if="credential" class="ss-btn danger" :disabled="credentialBusy" @click="revokeCredential">
-          Revoke
-        </button>
-      </template>
-
-      <template v-if="credential">
-        <div class="ss-secret-row">
-          <code class="ss-secret">{{ secretVisible ? credential.secret : '••••••••••••••••••••' }}</code>
-          <button class="ss-btn" @click="secretVisible = !secretVisible">
-            {{ secretVisible ? 'Hide' : 'Reveal' }}
-          </button>
-          <button class="ss-btn" @click="copySecret">Copy</button>
-        </div>
-        <KVTable :rows="[
-          { key: 'Created', value: formatWhen(credential.created_at) },
-          { key: 'Last rotated', value: formatWhen(credential.rotated_at) },
-          { key: 'Last used', value: formatWhen(credential.last_used_at) },
-        ]" />
-      </template>
-      <p v-else class="ss-hint">
-        No app password yet — generate one, then paste it into your Subsonic client
-        together with your Heya username. Each user mints their own; rotating or
-        revoking it never touches the Heya account password.
       </p>
     </SettingsSection>
   </div>
@@ -283,54 +170,5 @@ onMounted(() => { ensureSources() })
 }
 .ss-hint code {
   font-size: 12px;
-}
-.ss-btn {
-  padding: 6px 14px;
-  border-radius: var(--r-sm);
-  border: 1px solid var(--border);
-  background: var(--bg-2);
-  color: var(--fg-1);
-  font-size: 12.5px;
-  transition: color 0.12s, border-color 0.12s, background 0.12s;
-}
-.ss-btn:hover:not(:disabled) {
-  color: var(--fg-0);
-  border-color: var(--border-strong);
-  background: rgb(var(--ink) / 0.05);
-}
-.ss-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.ss-btn.danger:hover:not(:disabled) {
-  color: var(--bad);
-  border-color: color-mix(in srgb, var(--bad) 35%, transparent);
-  background: color-mix(in srgb, var(--bad) 8%, transparent);
-}
-.ss-secret-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.ss-secret {
-  flex: 1;
-  min-width: 0;
-  padding: 8px 12px;
-  border-radius: var(--r-sm);
-  border: 1px solid var(--border);
-  background: var(--bg-3);
-  font-family: var(--font-mono);
-  font-size: 13px;
-  letter-spacing: 0.04em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-@media (max-width: 520px) {
-  .ss-secret-row { align-items: stretch; flex-wrap: wrap; }
-  .ss-secret { flex-basis: 100%; }
-  .ss-secret-row .ss-btn { flex: 1; }
 }
 </style>

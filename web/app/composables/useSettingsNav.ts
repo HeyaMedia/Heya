@@ -34,6 +34,7 @@ const ALL_GROUPS: SettingsNavGroup[] = [
       { to: '/settings/device', label: 'This device', icon: 'cpu' },
       { to: '/settings/application', label: 'Application', icon: 'settings', applicationOnly: true },
       { to: '/settings/sessions', label: 'My sessions', icon: 'eye' },
+      { to: '/settings/clients', label: 'Client apps', icon: 'link' },
       { to: '/settings/tokens', label: 'API tokens', icon: 'key' },
     ],
   },

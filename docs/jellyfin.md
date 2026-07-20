@@ -40,6 +40,13 @@ Everything lives in `internal/jellyfin/` (see the package comment in
 - **Auth**: `POST /Users/AuthenticateByName` mints a real Heya session.
   All four credential forms work: `Authorization: MediaBrowser Token=…`,
   `X-Emby-Authorization`, `X-Emby-Token`/`X-MediaBrowser-Token`, `?api_key=`.
+  The login accepts the account password **or** the user's Jellyfin PIN — a
+  server-minted 6-digit secret valid only on this surface, built for TV
+  remotes (`jellyfin_credentials`, `service/jellyfin_credentials.go`).
+  Managed per-user via Settings → Client apps, `/api/me/jellyfin-credential`,
+  or `heya jellyfin credential <username> --rotate|--revoke`. Failed logins
+  are throttled per IP (10 per 15 min) so the short PIN can't be guessed
+  online.
 - **Delivery trick**: the client's api_key IS a Heya session token, and the
   native stream endpoints accept `?token=` — so `TranscodingUrl` and
   subtitle `DeliveryUrl`s point straight at `/api/stream/{file}/...`,
