@@ -1733,13 +1733,6 @@ export type ForYouResult = {
     items: Array<ForYouItem> | null;
 };
 
-export type FormFile = {
-    ContentType: string;
-    Filename: string;
-    IsSet: boolean;
-    Size: number;
-};
-
 export type FsBrowseBody = {
     /**
      * A URL to the JSON Schema for this object.

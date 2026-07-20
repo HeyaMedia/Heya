@@ -1,5 +1,5 @@
 import type { RouterConfig } from '@nuxt/schema'
-import type { RouteRecordRaw } from 'vue-router'
+import type { RouteLocationGeneric, RouteRecordRaw } from 'vue-router'
 
 // Browse-view routes for the movies / tv library pages. The sidebar selection
 // (library / loved / list / franchise) lives in the PATH so each pick earns a
@@ -53,7 +53,7 @@ export default <RouterConfig>{
         // The per-franchise view is the rich standalone /collection/:id page
         // (linked from the Franchises grid + movie "part of collection"
         // badges). Keep the old browse-filter URL working as a redirect.
-        extra.push({ path: `/${base}/collection/:colId(\\d+)`, redirect: (to) => `/collection/${to.params.colId}` })
+        extra.push({ path: `/${base}/collection/:colId(\\d+)`, redirect: (to: RouteLocationGeneric) => `/collection/${to.params.colId}` })
       }
     }
     return [...routes, ...extra]

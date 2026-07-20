@@ -221,6 +221,10 @@ export default defineNuxtConfig({
 
   // Experimental performance features
   experimental: {
+    // Nuxt 4.5 can share Vite's watcher instead of opening a second watcher
+    // tree, reducing file-descriptor pressure in Heya's large local workspace.
+    // Production generation does not use this watcher.
+    watcher: "builder",
     renderJsonPayloads: true, // Faster SSR JSON payloads via native JSON.parse
     writeEarlyHints: false, // No-op on nitro's bun preset (node-only feature)
     // View Transitions run the browser's default ~250ms full-root crossfade on
