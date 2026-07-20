@@ -38,6 +38,9 @@ const { ready, isAuthenticated } = useAuth()
 // after an origin-validated handshake, HeyaClient's native OS-media adapter.
 // The player remains controllable after navigating away from /music.
 useSystemMediaIntegration()
+// The same origin-validated native handshake drives the integrated
+// application settings surface and a quiet desktop update check.
+useApplicationIntegration()
 
 // hydrate() + fetchUser() are now done once at SPA boot in plugins/auth.ts —
 // removing the duplicate that lived here. Doubling the boot-time

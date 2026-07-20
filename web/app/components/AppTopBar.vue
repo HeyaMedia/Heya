@@ -53,6 +53,18 @@
         <span class="search-trigger-label">Search titles, artists, people…</span>
         <kbd v-if="showKbdHint" class="search-kbd">{{ shortcutLabel }}</kbd>
       </button>
+
+      <button
+        v-if="applicationUpdateAvailable"
+        type="button"
+        class="application-update-btn"
+        :disabled="applicationUpdateInstalling"
+        :title="applicationUpdateInstalling ? 'Installing HeyaClient update' : `Install HeyaClient ${applicationUpdateVersion}`"
+        @click="installPendingApplicationUpdate"
+      >
+        <Icon :name="applicationUpdateInstalling ? 'refresh' : 'download'" :size="14" />
+        <span>{{ applicationUpdateInstalling ? 'Installing…' : 'Update' }}</span>
+      </button>
       <!-- Cast output picker — self-hides until discovery finds a device.
            Its phone-band hide rule lives in CastButton.vue (scoped rules
            here wouldn't reach the child's trigger). -->
@@ -225,6 +237,22 @@
 import type { ActiveJob } from '~/composables/useEventBus'
 
 const { user } = useAuth()
+const {
+  applicationSnapshot,
+  applicationUpdateAvailable,
+  applicationUpdateInstalling,
+  installApplicationUpdate,
+} = useApplicationBridge()
+const { toast } = useToast()
+const applicationUpdateVersion = computed(() => applicationSnapshot.value?.update?.version ?? 'update')
+
+async function installPendingApplicationUpdate() {
+  try {
+    await installApplicationUpdate()
+  } catch (error) {
+    toast.err(error instanceof Error ? error.message : 'The HeyaClient update could not be installed.')
+  }
+}
 const {
   connected: wsConnected,
   activeScans,
@@ -679,6 +707,28 @@ const { tabs, isActive } = useNavTabs()
 .topbar-tabs .tab:hover { color: var(--fg-0); background: rgb(var(--ink) / 0.04); }
 .topbar-tabs .tab.active { color: var(--gold); }
 .topbar-right { display: flex; align-items: center; gap: 10px; justify-self: end; }
+.application-update-btn {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 11px;
+  border: 1px solid color-mix(in srgb, var(--gold) 42%, var(--border));
+  border-radius: var(--r-md);
+  background: var(--gold-soft);
+  color: var(--gold-bright);
+  font: 650 10.5px var(--font-mono);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.application-update-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--gold) 18%, transparent);
+  border-color: color-mix(in srgb, var(--gold) 62%, var(--border));
+}
+.application-update-btn:disabled { cursor: wait; opacity: 0.7; }
 .search-wrap { display: flex; align-items: center; gap: 8px; }
 .search-wrap.open {
   background: var(--bg-3);
@@ -743,7 +793,7 @@ const { tabs, isActive } = useNavTabs()
 /* Activity-dropdown styles moved to the non-scoped block below — see note there. */
 
 /* Phone (<=720px): BottomNav.vue takes over the tab row, so the topbar
-   collapses to burger + search + avatar (Activity is dropped too — see the
+   collapses to burger + search + optional update + avatar (Activity is dropped too — see the
    `.activity-btn` rule in the unscoped block below). Desktop rule above is
    untouched — everything mobile-specific is gated behind this query. */
 @media (max-width: 720px) {
@@ -772,6 +822,8 @@ const { tabs, isActive } = useNavTabs()
     width: auto;
     min-width: 0;
   }
+  .application-update-btn { width: 34px; padding: 0; }
+  .application-update-btn span { display: none; }
 }
 
 /* Compact band (720.02-1200px, see useViewport().isCompact): the persistent
@@ -816,6 +868,8 @@ const { tabs, isActive } = useNavTabs()
      search-wrap below actually has room to expand into (mirrors the phone
      query — `justify-self: end` would shrink-wrap it and strand the space). */
   .topbar-right { justify-self: stretch; gap: 8px; min-width: 0; }
+  .application-update-btn { width: 34px; padding: 0; }
+  .application-update-btn span { display: none; }
   /* Dev-only Query Cache toggle — not part of the compact-band set, and
      crowds the ladder at the narrow end (~744px). Hidden the same way the
      phone query already drops it. */

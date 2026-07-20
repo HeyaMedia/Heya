@@ -4,12 +4,14 @@ import { DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem } from 
 const { user, logout } = useAuth()
 const { prefs, set } = useAppearance()
 const settingsTarget = computed(() => user.value?.is_admin ? '/settings/dashboard' : '/settings/profile')
+const { applicationAvailable } = useApplicationBridge()
 
 // The user-scoped settings links, straight from the settings nav's "You"
 // group — one source of truth, so this menu stays in sync with the
 // settings sidebar automatically.
 const { groups } = useSettingsNav()
-const youItems = computed(() => groups.value.find(g => g.id === 'you')?.items ?? [])
+const youItems = computed(() => (groups.value.find(g => g.id === 'you')?.items ?? [])
+  .filter(item => item.to !== '/settings/application'))
 
 const THEMES = [
   { value: 'dark' as const, label: 'Dark' },
@@ -77,6 +79,13 @@ const THEMES = [
       <NuxtLink :to="settingsTarget">
         <Icon name="settings" :size="15" class="surface-item-icon" />
         <span>Settings</span>
+      </NuxtLink>
+    </DropdownMenuItem>
+
+    <DropdownMenuItem v-if="applicationAvailable" class="surface-item" as-child>
+      <NuxtLink to="/settings/application">
+        <Icon name="settings" :size="15" class="surface-item-icon" />
+        <span>Application Settings</span>
       </NuxtLink>
     </DropdownMenuItem>
 

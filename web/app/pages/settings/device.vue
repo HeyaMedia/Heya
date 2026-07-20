@@ -15,6 +15,7 @@ import {
 const { settings, update } = useDeviceSettings()
 const { toast } = useToast()
 const { isTauriClient } = useClientSurface()
+const { applicationAvailable } = useApplicationBridge()
 const { user } = useAuth()
 const userId = computed(() => (user.value?.id ?? Number(localStorage.getItem('heya_user_id'))) || null)
 
@@ -183,12 +184,19 @@ onMounted(() => {
         />
       </SettingsField>
       <SettingsField
-        v-else
+        v-else-if="applicationAvailable"
         label="Native song-change notifications"
         description="HeyaClient owns OS notification permission and background eligibility."
-        hint="Open HeyaClient Settings with Cmd/Ctrl+, to turn this on or off."
+        hint="Application-specific controls now live inside Heya."
       >
-        <span class="local-owner">Managed by HeyaClient</span>
+        <NuxtLink class="sv2-btn ghost" to="/settings/application">Open Application Settings</NuxtLink>
+      </SettingsField>
+      <SettingsField
+        v-else
+        label="Native song-change notifications"
+        description="Waiting for the origin-validated HeyaClient application bridge."
+      >
+        <span class="local-owner">Native application settings unavailable</span>
       </SettingsField>
     </SettingsSection>
 

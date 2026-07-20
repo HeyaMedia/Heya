@@ -7,6 +7,7 @@ export type SettingsNavItem = {
   icon: string
   tabs?: SettingsNavTab[]
   aliases?: string[]
+  applicationOnly?: boolean
 }
 
 export type SettingsNavTab = {
@@ -31,6 +32,7 @@ const ALL_GROUPS: SettingsNavGroup[] = [
       { to: '/settings/services', label: 'Music services', icon: 'music' },
       { to: '/settings/appearance', label: 'Appearance', icon: 'brightness' },
       { to: '/settings/device', label: 'This device', icon: 'cpu' },
+      { to: '/settings/application', label: 'Application', icon: 'settings', applicationOnly: true },
       { to: '/settings/sessions', label: 'My sessions', icon: 'eye' },
       { to: '/settings/tokens', label: 'API tokens', icon: 'key' },
     ],
@@ -134,11 +136,16 @@ const ALL_GROUPS: SettingsNavGroup[] = [
 
 export function useSettingsNav() {
   const { user } = useAuth()
+  const { applicationAvailable } = useApplicationBridge()
   const isAdmin = computed(() => user.value?.is_admin === true)
 
-  const groups = computed(() =>
-    ALL_GROUPS.filter(group => !group.adminOnly || isAdmin.value),
-  )
+  const groups = computed(() => ALL_GROUPS
+    .filter(group => !group.adminOnly || isAdmin.value)
+    .map(group => ({
+      ...group,
+      items: group.items.filter(item => !item.applicationOnly || applicationAvailable.value),
+    }))
+    .filter(group => group.items.length > 0))
 
   // Every tab route resolves both to its own display label and to the stable
   // sidebar destination that owns it.
