@@ -67,6 +67,11 @@ func (s *Server) handleAuthenticateByName(w http.ResponseWriter, r *http.Request
 	ua := deviceUserAgent(device, r)
 	token, err := s.app.CreateJellyfinSession(r.Context(), user.ID, ua, clientIP(r))
 	if err != nil {
+		// Post-credential failures must be loud: a silent 500 here presented
+		// as "wrong password" in clients while the real cause was a schema
+		// constraint rejecting the session insert.
+		log.Error().Err(err).Str("surface", "jellyfin").
+			Msg("session mint failed after successful authentication")
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
