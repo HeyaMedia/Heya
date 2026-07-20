@@ -21192,6 +21192,76 @@
         ],
         "type": "object"
       },
+      "UpNextRailItem": {
+        "additionalProperties": false,
+        "properties": {
+          "episode_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "episode_number": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "episode_title": {
+            "type": "string"
+          },
+          "file_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "file_public_id": {
+            "type": "string"
+          },
+          "last_watched_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "media_item_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "media_item_public_id": {
+            "type": "string"
+          },
+          "media_type": {
+            "type": "string"
+          },
+          "runtime": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "season_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "season_number": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "media_item_id",
+          "media_item_public_id",
+          "title",
+          "slug",
+          "media_type",
+          "episode_id",
+          "episode_number",
+          "season_id",
+          "season_number",
+          "file_id",
+          "file_public_id",
+          "last_watched_at"
+        ],
+        "type": "object"
+      },
       "UpNextResult": {
         "additionalProperties": false,
         "properties": {
@@ -35967,6 +36037,69 @@
         "summary": "Create or rotate the Subsonic app password",
         "tags": [
           "Subsonic"
+        ]
+      }
+    },
+    "/api/me/up-next": {
+      "get": {
+        "operationId": "up-next-rail",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 24,
+              "format": "int32",
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UpNextRailItem"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Next unwatched episode per recently-watched series",
+        "tags": [
+          "Me"
         ]
       }
     },

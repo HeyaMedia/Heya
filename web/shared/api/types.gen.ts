@@ -5947,6 +5947,23 @@ export type UnmatchedFile = {
     file: LibraryFile;
 };
 
+export type UpNextRailItem = {
+    episode_id: number;
+    episode_number: number;
+    episode_title?: string;
+    file_id: number;
+    file_public_id: string;
+    last_watched_at: string;
+    media_item_id: number;
+    media_item_public_id: string;
+    media_type: string;
+    runtime?: number;
+    season_id: number;
+    season_number: number;
+    slug: string;
+    title: string;
+};
+
 export type UpNextResult = {
     /**
      * A URL to the JSON Schema for this object.
@@ -15313,6 +15330,33 @@ export type RotateSubsonicCredentialResponses = {
 };
 
 export type RotateSubsonicCredentialResponse = RotateSubsonicCredentialResponses[keyof RotateSubsonicCredentialResponses];
+
+export type UpNextRailData = {
+    body?: never;
+    path?: never;
+    query?: {
+        limit?: number;
+    };
+    url: '/api/me/up-next';
+};
+
+export type UpNextRailErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type UpNextRailError = UpNextRailErrors[keyof UpNextRailErrors];
+
+export type UpNextRailResponses = {
+    /**
+     * OK
+     */
+    200: Array<UpNextRailItem> | null;
+};
+
+export type UpNextRailResponse = UpNextRailResponses[keyof UpNextRailResponses];
 
 export type ContinueWatchingData = {
     body?: never;

@@ -528,6 +528,20 @@ func registerMeRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(result), nil
 		})
 
+	// The whole Up Next rail in one call — per recently-watched series, the
+	// next unwatched episode that has a playable file. The per-series
+	// /api/media/{id}/up-next below stays for player chaining and detail pages.
+	huma.Register(api, secured(op(http.MethodGet, "/api/me/up-next", "up-next-rail", "Next unwatched episode per recently-watched series", "Me")),
+		func(ctx context.Context, in *struct {
+			Limit int32 `query:"limit" minimum:"1" maximum:"50" default:"24"`
+		}) (*JSONOutput[[]service.UpNextRailItem], error) {
+			items, err := app.ListUpNextRail(ctx, userFrom(ctx).ID, in.Limit)
+			if err != nil {
+				return nil, huma.Error500InternalServerError(err.Error())
+			}
+			return noStoreJSON(items), nil
+		})
+
 	huma.Register(api, secured(op(http.MethodGet, "/api/media/{id}/up-next", "get-up-next", "Next episode for a series", "Me")),
 		func(ctx context.Context, in *struct {
 			IDPath

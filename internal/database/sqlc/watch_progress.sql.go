@@ -474,6 +474,142 @@ func (q *Queries) ListSeriesEpisodeRefs(ctx context.Context, mediaItemID int64) 
 	return items, nil
 }
 
+const listUpNextRail = `-- name: ListUpNextRail :many
+WITH watched AS (
+  SELECT ts.media_item_id AS mid, ts.id AS series_id,
+         count(*) FILTER (WHERE s.season_number > 0) AS watched_regular,
+         max(wp.updated_at) AS last_watch
+  FROM user_watch_progress wp
+  JOIN tv_episodes e ON e.id = wp.entity_id
+  JOIN tv_seasons s ON s.id = e.season_id
+  JOIN tv_series ts ON ts.id = s.series_id
+  WHERE wp.user_id = $2 AND wp.entity_type = 'episode' AND wp.completed = true
+  GROUP BY ts.media_item_id, ts.id
+),
+totals AS (
+  SELECT s.series_id, count(*) AS total_regular
+  FROM tv_seasons s JOIN tv_episodes e ON e.season_id = s.id
+  WHERE s.season_number > 0
+  GROUP BY s.series_id
+),
+candidates AS (
+  SELECT w.mid, w.series_id, w.last_watch
+  FROM watched w
+  JOIN totals t ON t.series_id = w.series_id
+  WHERE t.total_regular > w.watched_regular
+  ORDER BY w.last_watch DESC
+  LIMIT 100
+),
+file_keys AS (
+  SELECT lf.media_item_id AS mid, (sv.val)::int AS season, (ev.val)::int AS ep,
+         lf.id AS file_id, lf.public_id AS file_public_id
+  FROM library_files lf
+  JOIN candidates c ON c.mid = lf.media_item_id
+  CROSS JOIN jsonb_array_elements_text(lf.parse_result->'parsed'->'release'->'seasons') sv(val)
+  CROSS JOIN jsonb_array_elements_text(lf.parse_result->'parsed'->'release'->'episodes') ev(val)
+  WHERE lf.deleted_at IS NULL AND lf.status = 'matched'
+),
+next_ep AS (
+  SELECT DISTINCT ON (c.mid)
+      c.mid, e.id AS episode_id, e.episode_number, e.title AS episode_title,
+      e.runtime_minutes, s.id AS season_id, s.season_number, fk.file_id, fk.file_public_id
+  FROM candidates c
+  JOIN tv_seasons s ON s.series_id = c.series_id AND s.season_number > 0
+  JOIN tv_episodes e ON e.season_id = s.id
+  JOIN file_keys fk ON fk.mid = c.mid AND fk.season = s.season_number AND fk.ep = e.episode_number
+  WHERE NOT EXISTS (
+    SELECT 1 FROM user_watch_progress wp3
+    WHERE wp3.entity_id = e.id AND wp3.entity_type = 'episode' AND wp3.completed = true AND wp3.user_id = $2
+  )
+  ORDER BY c.mid, s.season_number ASC, e.episode_number ASC, fk.file_id ASC
+)
+SELECT n.mid AS media_item_id,
+       mic.public_id AS media_item_public_id,
+       mic.library_id,
+       mic.title,
+       mic.slug,
+       mic.media_type::text AS media_type,
+       n.episode_id, n.episode_number, n.episode_title, n.runtime_minutes,
+       n.season_id, n.season_number,
+       n.file_id, n.file_public_id,
+       c.last_watch::timestamptz AS last_watched_at
+FROM next_ep n
+JOIN candidates c ON c.mid = n.mid
+JOIN media_item_cards mic ON mic.id = n.mid
+ORDER BY c.last_watch DESC
+LIMIT $1
+`
+
+type ListUpNextRailParams struct {
+	Lim    int32 `json:"lim"`
+	UserID int64 `json:"user_id"`
+}
+
+type ListUpNextRailRow struct {
+	MediaItemID       int64              `json:"media_item_id"`
+	MediaItemPublicID uuid.UUID          `json:"media_item_public_id"`
+	LibraryID         int64              `json:"library_id"`
+	Title             string             `json:"title"`
+	Slug              string             `json:"slug"`
+	MediaType         string             `json:"media_type"`
+	EpisodeID         int64              `json:"episode_id"`
+	EpisodeNumber     int32              `json:"episode_number"`
+	EpisodeTitle      string             `json:"episode_title"`
+	RuntimeMinutes    int32              `json:"runtime_minutes"`
+	SeasonID          int64              `json:"season_id"`
+	SeasonNumber      int32              `json:"season_number"`
+	FileID            int64              `json:"file_id"`
+	FilePublicID      uuid.UUID          `json:"file_public_id"`
+	LastWatchedAt     pgtype.Timestamptz `json:"last_watched_at"`
+}
+
+// The server-owned Up Next rail: one row per recently-watched series that
+// still has an unwatched episode WITH a matched file — the next episode is
+// the lowest (season, episode) unwatched episode that has a file, skipping
+// catalog episodes the library doesn't hold. Replaces the old FE derivation
+// (first 20 recent titles × one /up-next call each), which went blind when a
+// bulk mark-watched pass filled the recency window with finished shows.
+//
+// candidates prefilters to series whose regular-season catalog count exceeds
+// the user's completed count: fully-watched shows never pay the parse_result
+// expansion (the expensive part — multi-KB jsonb detoast per file), and the
+// LIMIT 100 bounds the worst case. Specials (season 0) are never nominated.
+func (q *Queries) ListUpNextRail(ctx context.Context, arg ListUpNextRailParams) ([]ListUpNextRailRow, error) {
+	rows, err := q.db.Query(ctx, listUpNextRail, arg.Lim, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUpNextRailRow{}
+	for rows.Next() {
+		var i ListUpNextRailRow
+		if err := rows.Scan(
+			&i.MediaItemID,
+			&i.MediaItemPublicID,
+			&i.LibraryID,
+			&i.Title,
+			&i.Slug,
+			&i.MediaType,
+			&i.EpisodeID,
+			&i.EpisodeNumber,
+			&i.EpisodeTitle,
+			&i.RuntimeMinutes,
+			&i.SeasonID,
+			&i.SeasonNumber,
+			&i.FileID,
+			&i.FilePublicID,
+			&i.LastWatchedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWatchedEpisodeNumbersForMediaItems = `-- name: ListWatchedEpisodeNumbersForMediaItems :many
 SELECT ts.media_item_id, s.season_number, e.episode_number
 FROM user_watch_progress wp

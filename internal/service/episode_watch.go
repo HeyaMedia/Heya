@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -571,6 +572,79 @@ func (a *App) GetUpNext(ctx context.Context, userID, mediaItemID int64) (UpNextR
 		FileID:            fileID,
 		FilePublicID:      filePublicID,
 	}, nil
+}
+
+// UpNextRailItem is one tile of the server-owned Up Next rail: a
+// recently-watched series plus its next unwatched episode that actually has
+// a playable file.
+type UpNextRailItem struct {
+	MediaItemID       int64     `json:"media_item_id"`
+	MediaItemPublicID string    `json:"media_item_public_id"`
+	Title             string    `json:"title"`
+	Slug              string    `json:"slug"`
+	MediaType         string    `json:"media_type"`
+	EpisodeID         int64     `json:"episode_id"`
+	EpisodeNumber     int32     `json:"episode_number"`
+	EpisodeTitle      string    `json:"episode_title,omitempty"`
+	SeasonID          int64     `json:"season_id"`
+	SeasonNumber      int32     `json:"season_number"`
+	Runtime           int32     `json:"runtime,omitempty"`
+	FileID            int64     `json:"file_id"`
+	FilePublicID      string    `json:"file_public_id"`
+	LastWatchedAt     time.Time `json:"last_watched_at"`
+}
+
+// ListUpNextRail returns the Up Next rail for a user: for each
+// recently-watched series that still has an unwatched episode with a matched
+// file, that next episode (specials excluded), newest watch first. One query
+// replaces the old per-series GetUpNext fan-out and, unlike it, never
+// nominates an episode the library holds no file for.
+func (a *App) ListUpNextRail(ctx context.Context, userID int64, limit int32) ([]UpNextRailItem, error) {
+	q := sqlc.New(a.db)
+	rows, err := q.ListUpNextRail(ctx, sqlc.ListUpNextRailParams{UserID: userID, Lim: limit})
+	if err != nil {
+		return nil, err
+	}
+	// Same preferred-language overlay as overlayEpisodeTitle, batched: the
+	// library settings lookup is cached per library instead of per row.
+	langByLibrary := map[int64]string{}
+	items := make([]UpNextRailItem, 0, len(rows))
+	for _, r := range rows {
+		lang, ok := langByLibrary[r.LibraryID]
+		if !ok {
+			if lib, err := q.GetLibraryByID(ctx, r.LibraryID); err == nil {
+				lang = metadata.ParseSettings(lib.Settings).PreferredLanguage
+			}
+			langByLibrary[r.LibraryID] = lang
+		}
+		title := r.EpisodeTitle
+		if lang != "" {
+			if t, err := q.GetEpisodeTitleByLanguage(ctx, sqlc.GetEpisodeTitleByLanguageParams{EpisodeID: r.EpisodeID, Language: lang}); err == nil && t.Title != "" {
+				title = t.Title
+			} else if lang != "en" {
+				if t, err := q.GetEpisodeTitleByLanguage(ctx, sqlc.GetEpisodeTitleByLanguageParams{EpisodeID: r.EpisodeID, Language: "en"}); err == nil && t.Title != "" {
+					title = t.Title
+				}
+			}
+		}
+		items = append(items, UpNextRailItem{
+			MediaItemID:       r.MediaItemID,
+			MediaItemPublicID: r.MediaItemPublicID.String(),
+			Title:             r.Title,
+			Slug:              r.Slug,
+			MediaType:         r.MediaType,
+			EpisodeID:         r.EpisodeID,
+			EpisodeNumber:     r.EpisodeNumber,
+			EpisodeTitle:      title,
+			SeasonID:          r.SeasonID,
+			SeasonNumber:      r.SeasonNumber,
+			Runtime:           r.RuntimeMinutes,
+			FileID:            r.FileID,
+			FilePublicID:      r.FilePublicID.String(),
+			LastWatchedAt:     r.LastWatchedAt.Time,
+		})
+	}
+	return items, nil
 }
 
 // overlayEpisodeTitle localizes an episode title using the series library's

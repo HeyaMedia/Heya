@@ -1,7 +1,7 @@
 import { setInfiniteQueryData, useQueryCache, type EntryKey, type UseQueryOptions } from '@pinia/colada'
 import { collectionDetailQuery, personDetailQuery } from '~/queries/discovery'
 import { mediaDetailQuery } from '~/queries/media'
-import { continueWatchingQuery, recentWatchedQuery } from '~/queries/activity'
+import { continueWatchingQuery, upNextRailQuery } from '~/queries/activity'
 import { meSettingsQuery } from '~/queries/user'
 import {
   musicAlbumDetailQuery,
@@ -40,7 +40,7 @@ function queriesForPath(pathname: string): UseQueryOptions<unknown>[] {
     // listed separately in infiniteRailsForPath).
     return [
       continueWatchingQuery(),
-      recentWatchedQuery(),
+      upNextRailQuery(),
       homeRecentArtistsQuery(),
       meSettingsQuery(),
     ]

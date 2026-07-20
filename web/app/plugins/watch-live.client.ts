@@ -19,6 +19,9 @@ export default defineNuxtPlugin(() => {
     // must invalidate here too (not only in BrowseView) so watching an
     // episode from the player / detail page keeps the rail fresh cross-page.
     queryCache.invalidateQueries({ key: ['me', 'watch', 'recent-episodes'] })
+    // Server-owned Up Next rail: watch state directly changes which episode
+    // is next (or drops the series once it's fully watched).
+    queryCache.invalidateQueries({ key: ['me', 'up-next'] })
     queryCache.invalidateQueries({ key: ['me', 'state'] })
   }
 

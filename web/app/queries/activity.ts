@@ -22,22 +22,32 @@ export const continueWatchingQuery = defineQueryOptions(() => ({
   meta: { prefetch: 'none', persistence: 'offline-essential', sensitivity: 'private' },
 }))
 
-/** Row of /api/me/watch/recent (deduped: one row per title). */
-export interface RecentWatchedTitle {
+/** Row of /api/me/up-next — the server-resolved Up Next rail. */
+export interface UpNextRailRow {
   media_item_id: number
+  media_item_public_id: string
   title: string
-  poster_path: string
   slug: string
   media_type: string
+  episode_id: number
+  episode_number: number
+  episode_title?: string
+  season_id: number
+  season_number: number
+  runtime?: number
+  file_id: number
+  file_public_id: string
+  last_watched_at: string
 }
 
-// Feeds the home page's Up Next derivation (useUpNext) — distinct from
-// rails.ts recentWatchedInfinite, which pages the same endpoint for rails.
-export const recentWatchedQuery = defineQueryOptions(() => ({
-  key: ['me', 'watch', 'recent'],
+// The Up Next rail, resolved server-side in one round-trip: per
+// recently-watched series, the next unwatched episode that has a playable
+// file. Consumed through useUpNext (Home + TV Recommended landing).
+export const upNextRailQuery = defineQueryOptions(() => ({
+  key: ['me', 'up-next'],
   query: async () => {
     const { $heya } = useNuxtApp()
-    return (await $heya('/api/me/watch/recent')) as RecentWatchedTitle[]
+    return (await $heya('/api/me/up-next') as UpNextRailRow[] | null) ?? []
   },
   staleTime: 1000 * 30,
   meta: { prefetch: 'none', persistence: 'device', sensitivity: 'private' },

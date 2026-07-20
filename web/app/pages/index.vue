@@ -177,7 +177,7 @@ import { useInfiniteQuery, useQuery, useQueryCache } from '@pinia/colada'
 import { meSettingsQuery, type UserSettingsBlob } from '~/queries/user'
 import { mediaUserStateQuery, movieUserStateQuery, seriesUserStateQuery, userListsQuery as userListsOptions } from '~/queries/catalog'
 import { mediaDetailQuery, mediaDetailTarget } from '~/queries/media'
-import { continueWatchingQuery as continueWatchingOptions, recentWatchedQuery as recentWatchedOptions } from '~/queries/activity'
+import { continueWatchingQuery as continueWatchingOptions } from '~/queries/activity'
 import {
   forYouInfinite,
   homeRecentArtistsQuery,
@@ -230,7 +230,6 @@ const loadMoreAlbums = railLoadMore(albumsQuery)
 // what persists to disk); the MediaItem-ish mapping happens in the computed.
 const musicHomeQuery = useQuery(homeRecentArtistsQuery())
 const continueWatchingQuery = useQuery(continueWatchingOptions())
-const recentWatchedQuery = useQuery(recentWatchedOptions())
 // Personalized "For You" — the taste-vector + TMDB-graph engine. Excludes
 // seeds (hearts / watched) server-side, so no client-side filtering needed.
 const forYouQuery = useInfiniteQuery(() => forYouInfinite({ section: 'all' }))
@@ -277,15 +276,13 @@ const recentTVShows = computed<MediaItem[]>(() => {
 const continueWatching = computed<ContinueWatchingItem[]>(() => continueWatchingQuery.data.value ?? [])
 
 // Hero/Up Next/Favorites/Recommendations are derived from the queries above.
-// Up Next needs an extra per-show /up-next round-trip; keep that imperative
-// since it depends on the recent-watched query landing first.
 const movieDetails = ref<Record<number, Movie>>({})
 const heroPlayInfo = ref<Record<number, HeroPlayInfo>>({})
 const heroTrailers = ref<Record<number, number>>({})
 
 // Up Next + player navigation are shared with the Movies/TV Recommended
 // landings — see useUpNext / usePlaybackNav.
-const { upNextItems } = useUpNext(() => recentWatchedQuery.data.value)
+const { upNextItems, isPending: upNextPending } = useUpNext()
 const { playContinue, playUpNext } = usePlaybackNav()
 
 // Pinned hero mode — server-persisted in user settings so it follows the
@@ -331,7 +328,7 @@ const loading = computed(() =>
 // cold cache, the strip renders ghost cells at its final height instead of
 // popping in later and shoving every rail down. Hydrated boots never see it.
 const pulsePending = computed(() =>
-  loading.value || continueWatchingQuery.isPending.value || recentWatchedQuery.isPending.value,
+  loading.value || continueWatchingQuery.isPending.value || upNextPending.value,
 )
 
 // Chip per TV show: what the newest grouped event for that show was, so the

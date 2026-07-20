@@ -283,14 +283,9 @@ const isEmpty = computed(() =>
 )
 
 // ── Up Next (TV) + player navigation ──────────────────────────────────────
-// Shared with the Home page. Up Next is fed from the episode-level watch feed;
-// useUpNext dedupes to unique series internally, so several watched episodes of
-// one show still yield a single Up Next tile.
-const { upNextItems } = useUpNext(() => props.section === 'tv'
-  ? (recentEpisodesQuery.data.value?.pages ?? []).flat().map(e => ({
-    media_item_id: e.media_item_id, title: e.series_title, slug: e.series_slug, media_type: 'tv',
-  }))
-  : [])
+// Shared with the Home page — the server owns the derivation (see useUpNext);
+// only the TV landing renders the rail, so the fetch is gated to it.
+const { upNextItems } = useUpNext(() => props.section === 'tv')
 const { playContinue, playUpNext } = usePlaybackNav()
 
 // ContentRow types its tiles as MediaItem-ish; RailItem carries just the subset
@@ -349,7 +344,7 @@ useLiveRefresh([
       ['media', 'recent', props.section],
     ],
   },
-  { events: ['media.watched'], keys: [['me', 'watch', 'continue'], ['me', 'watch', 'recent'], ['me', 'watch', 'recent-episodes'], ['recommended', props.section], ['for-you', props.section]] },
+  { events: ['media.watched'], keys: [['me', 'watch', 'continue'], ['me', 'watch', 'recent'], ['me', 'watch', 'recent-episodes'], ['me', 'up-next'], ['recommended', props.section], ['for-you', props.section]] },
   { events: ['media.watched', 'media.favorited'], keys: [['me', 'state', props.section === 'movie' ? 'movies' : 'series']] },
 ])
 
