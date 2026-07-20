@@ -137,6 +137,11 @@ func (s *Server) handleItemImage(w http.ResponseWriter, r *http.Request, p Param
 		}
 		target = fmt.Sprintf("/api/music/artists/%s/albums/%s/cover", rows[0].ArtistSlug, rows[0].AlbumSlug)
 
+	case KindPlaylist:
+		// Native handler is anonymous and does its own unscoped cover-path
+		// lookup, mirroring every other image endpoint.
+		target = fmt.Sprintf("/api/me/playlists/%d/cover", id)
+
 	default: // KindLibrary, KindUser, ...
 		http.NotFound(w, r)
 		return

@@ -248,6 +248,7 @@ const (
 	levelAlbums
 	levelTracks
 	levelViews
+	levelPlaylists
 )
 
 // resolveLevel picks the entity level from types and parent. mediaType is
@@ -271,7 +272,9 @@ func (s *Server) resolveLevel(ctx context.Context, req *itemsRequest) (itemLevel
 			return levelItems, sqlc.MediaTypeMusic
 		case "book":
 			return levelItems, sqlc.MediaTypeBook
-		case "boxset", "playlist", "collectionfolder", "folder":
+		case "playlist":
+			return levelPlaylists, ""
+		case "boxset", "collectionfolder", "folder":
 			// No Heya equivalent at this level yet (BoxSets → phase 3
 			// collections). Empty result is correct, not an error.
 			return levelNone, ""
@@ -459,6 +462,12 @@ func (s *Server) queryItems(ctx context.Context, userID int64, serverID string, 
 	// Ids= hydration: group by kind, fetch, return in request order.
 	if len(req.ids) > 0 {
 		return s.queryByIDs(ctx, userID, serverID, req)
+	}
+
+	// A playlist parent lists its tracks in playlist order — no other level
+	// applies below a playlist.
+	if req.hasParent && req.parentKind == KindPlaylist {
+		return s.playlistTracksResult(ctx, userID, req.parentID, serverID, req)
 	}
 
 	// Resolve GenreIds → names once, before any fan-out (sub-requests inherit
@@ -662,6 +671,9 @@ func (s *Server) queryItems(ctx context.Context, userID int64, serverID string, 
 			s.attachTrackSources(ctx, rows, items, req)
 		}
 		return queryResult[baseItemDto]{Items: items, TotalRecordCount: int(total), StartIndex: req.startIndex}, nil
+
+	case levelPlaylists:
+		return s.playlistsResult(ctx, userID, serverID, req)
 	}
 
 	log.Debug().Str("component", "jellyfin").
@@ -761,6 +773,12 @@ func (s *Server) queryByIDs(ctx context.Context, userID int64, serverID string, 
 			}
 			for i, row := range rows {
 				found[EncodeID(KindTrack, row.ID)] = dtos[i]
+			}
+		case KindPlaylist:
+			for _, id := range ids {
+				if dto, ok := s.playlistDto(ctx, userID, id, serverID); ok {
+					found[EncodeID(KindPlaylist, id)] = dto
+				}
 			}
 		case KindLibrary:
 			libs, err := s.app.ListLibraries(ctx)

@@ -228,6 +228,13 @@ func (s *Server) buildRouter() *router {
 	rt.handle(http.MethodGet, "/Artists/{itemId}/Similar", s.requireAuth(s.requireItem(s.handleSimilar)))
 	rt.handle(http.MethodGet, "/Trailers/{itemId}/Similar", s.requireAuth(s.requireItem(s.handleSimilar)))
 	rt.handle(http.MethodGet, "/Audio/{itemId}/Lyrics", s.requireAuth(s.handleLyrics))
+
+	// Playlists (Heya-native, owner-private)
+	rt.handle(http.MethodPost, "/Playlists", s.requireAuth(s.handleCreatePlaylist))
+	rt.handle(http.MethodGet, "/Playlists/{playlistId}/Items", s.requireAuth(s.handleGetPlaylistItems))
+	rt.handle(http.MethodPost, "/Playlists/{playlistId}/Items", s.requireAuth(s.handleAddPlaylistItems))
+	rt.handle(http.MethodDelete, "/Playlists/{playlistId}/Items", s.requireAuth(s.handleRemovePlaylistItems))
+	rt.handle(http.MethodGet, "/Playlists/{playlistId}/Users/{userId}", s.requireAuth(s.handlePlaylistUser))
 	rt.handle(http.MethodGet, "/Sessions", s.requireAuth(s.handleSessionsList))
 	rt.handle(http.MethodPost, "/Sessions/Capabilities", s.requireAuth(s.handleSessionsCapabilities))
 	rt.handle(http.MethodPost, "/Sessions/Capabilities/Full", s.requireAuth(s.handleSessionsCapabilities))

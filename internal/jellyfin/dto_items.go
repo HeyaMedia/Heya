@@ -32,6 +32,7 @@ type baseItemDto struct {
 	IsFolder          bool         `json:"IsFolder"`
 	Type              string       `json:"Type"`
 	ParentID          string       `json:"ParentId,omitempty"`
+	PlaylistItemID    string       `json:"PlaylistItemId,omitempty"` // entry handle inside a playlist listing
 	UserData          *userDataDto `json:"UserData,omitempty"`
 	ChildCount        *int32       `json:"ChildCount,omitempty"`
 	Status            string       `json:"Status,omitempty"`
