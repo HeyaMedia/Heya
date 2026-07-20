@@ -93,7 +93,11 @@ func BuildAPI(mux *http.ServeMux, app *service.App, cfg *config.Config, opts ...
 	// shows up in /api/docs. The actual byte handling for streaming
 	// endpoints is delegated through humago.Unwrap to existing stdlib
 	// handlers (see wrapStream in binary_huma.go).
-	api := newHumaAPI(mux, sessions)
+	trustedIP := func(string) bool { return false }
+	if app != nil {
+		trustedIP = app.TrustedClientIP
+	}
+	api := newHumaAPI(mux, sessions, trustedIP)
 	registerSystemRoutes(api, app)
 	registerAuthRoutes(api, app, cfg)
 	registerAdminRoutes(api, app, o.logBuf)

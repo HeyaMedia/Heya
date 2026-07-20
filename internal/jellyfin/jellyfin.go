@@ -162,10 +162,12 @@ func (s *Server) buildRouter() *router {
 	rt.handle(http.MethodGet, "/Artists", s.requireAuth(s.handleArtists))
 	rt.handle(http.MethodGet, "/Artists/AlbumArtists", s.requireAuth(s.handleArtists))
 
-	// Images. Stock clients attach api_key to these URLs; keeping the endpoint
-	// authenticated avoids exposing library artwork on public instances.
-	rt.handle(http.MethodGet, "/Items/{itemId}/Images/{imageType}", s.requireAuth(s.handleItemImage))
-	rt.handle(http.MethodGet, "/Items/{itemId}/Images/{imageType}/{imageIndex}", s.requireAuth(s.handleItemImage))
+	// Images. Upstream marks these AllowAnonymous and clients depend on it
+	// (Fladder and jellyfin-web fetch art bare); requireAuthOrTrusted keeps
+	// that contract on trusted networks while the public path still needs a
+	// token — Heya ids are enumerable, unlike upstream's random GUIDs.
+	rt.handle(http.MethodGet, "/Items/{itemId}/Images/{imageType}", s.requireAuthOrTrusted(s.handleItemImage))
+	rt.handle(http.MethodGet, "/Items/{itemId}/Images/{imageType}/{imageIndex}", s.requireAuthOrTrusted(s.handleItemImage))
 
 	// Legacy pre-10.9 user-scoped aliases. Removed from the 10.11 spec but
 	// still emitted by clients that keep compatibility with older servers;

@@ -179,7 +179,12 @@ func (s *Server) serveNativeImage(w http.ResponseWriter, r *http.Request, target
 		// credential into Heya's bearer spelling for the in-process image route;
 		// its middleware still resolves the session and only admits the narrow
 		// image-operation allowlist for jellyfin_session tokens.
-		r2.Header.Set("Authorization", "Bearer "+TokenFrom(r.Context()))
+		// Anonymous-but-trusted requests carry no token; an empty Bearer
+		// would read as a malformed credential to the native middleware
+		// rather than as anonymous, so only translate when one exists.
+		if token := TokenFrom(r.Context()); token != "" {
+			r2.Header.Set("Authorization", "Bearer "+token)
+		}
 		dw := &imageDispatchWriter{ResponseWriter: w}
 		s.native.ServeHTTP(dw, r2)
 		if !dw.intercepted {

@@ -115,7 +115,7 @@ func TestAuthMeRequiresBearer(t *testing.T) {
 
 func TestHumaAuthInjectsTokenContext(t *testing.T) {
 	mux := http.NewServeMux()
-	api := newHumaAPI(mux, fakeSessions{})
+	api := newHumaAPI(mux, fakeSessions{}, nil)
 	huma.Register(api, secured(op(http.MethodGet, "/test-token", "test-token", "Token context test", "Test")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[map[string]string], error) {
 			return noStoreJSON(map[string]string{"token": auth.TokenFromContext(ctx)}), nil
@@ -129,7 +129,7 @@ func TestHumaAuthInjectsTokenContext(t *testing.T) {
 
 func TestHumaAuthRejectsSessionTokensInURLs(t *testing.T) {
 	mux := http.NewServeMux()
-	api := newHumaAPI(mux, fakeSessions{})
+	api := newHumaAPI(mux, fakeSessions{}, nil)
 	huma.Register(api, secured(op(http.MethodGet, "/private", "private", "private", "Test")),
 		func(context.Context, *struct{}) (*JSONOutput[map[string]bool], error) {
 			return noStoreJSON(map[string]bool{"ok": true}), nil
@@ -140,7 +140,7 @@ func TestHumaAuthRejectsSessionTokensInURLs(t *testing.T) {
 
 func TestHumaAuthAllowsOnlyScopedJellyfinPlaybackTokensInURLs(t *testing.T) {
 	mux := http.NewServeMux()
-	api := newHumaAPI(mux, fakeSessions{})
+	api := newHumaAPI(mux, fakeSessions{}, nil)
 	operation := secured(binaryOp(http.MethodGet, "/stream", "stream-direct", "stream", "Test"))
 	huma.Register(api, operation,
 		func(context.Context, *struct{}) (*JSONOutput[map[string]bool], error) {

@@ -159,6 +159,31 @@ func (s *Server) requireAuth(h handlerFunc) handlerFunc {
 	}
 }
 
+// requireAuthOrTrusted admits authenticated requests like requireAuth, plus
+// bare requests from trusted networks. Upstream marks the image endpoints
+// AllowAnonymous and clients lean on it — Flutter apps (Fladder) and
+// jellyfin-web <img> tags fetch art with no credential at all. But Heya item
+// ids are enumerable (sequential row ids inside the GUID encoding), so fully
+// anonymous would let a public instance's artwork be scraped; trusted
+// networks keep upstream parity where real clients live while the public
+// path still requires the token.
+func (s *Server) requireAuthOrTrusted(h handlerFunc) handlerFunc {
+	return func(w http.ResponseWriter, r *http.Request, p Params) {
+		if res, d, ok := s.resolve(r); ok {
+			ctx := context.WithValue(r.Context(), ctxUser, res.User)
+			ctx = context.WithValue(ctx, ctxDevice, d)
+			ctx = context.WithValue(ctx, ctxToken, res.Token)
+			h(w, r.WithContext(ctx), p)
+			return
+		}
+		if s.app.TrustedClientIP(clientIP(r)) {
+			h(w, r, p)
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}
+}
+
 // requireAdmin further gates on Heya's is_admin flag.
 func (s *Server) requireAdmin(h handlerFunc) handlerFunc {
 	return s.requireAuth(func(w http.ResponseWriter, r *http.Request, p Params) {

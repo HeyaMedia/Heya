@@ -14,6 +14,7 @@ import (
 	"github.com/karbowiak/heya/internal/auth"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/images"
+	"github.com/karbowiak/heya/internal/requestmeta"
 )
 
 // goccyJSONFormat replaces Huma's encoding/json default with goccy/go-json,
@@ -44,7 +45,9 @@ var goccyJSONFormat = huma.Format{
 //
 // The admin middleware looks for the "admin" extension flag on the operation
 // metadata and rejects non-admin users.
-func newHumaAPI(mux *http.ServeMux, sessions auth.SessionLookup) huma.API {
+// trustedIP reports whether a client IP belongs to the trusted-network
+// allowlist; nil means "nothing is trusted" (tests, spec dump).
+func newHumaAPI(mux *http.ServeMux, sessions auth.SessionLookup, trustedIP func(string) bool) huma.API {
 	cfg := huma.DefaultConfig("Heya Media Server API", "1.0.0")
 	cfg.Info.Description = "Self-hosted media server for movies, TV, music, and books."
 	cfg.Info.Contact = &huma.Contact{Name: "Heya", URL: "https://heya.media"}
@@ -73,7 +76,7 @@ func newHumaAPI(mux *http.ServeMux, sessions auth.SessionLookup) huma.API {
 
 	api := humago.New(mux, cfg)
 	api.UseMiddleware(uploadBodyLimitMiddleware(api))
-	api.UseMiddleware(authMiddleware(api, sessions))
+	api.UseMiddleware(authMiddleware(api, sessions, trustedIP))
 	api.UseMiddleware(adminMiddleware(api))
 	return api
 }
@@ -122,7 +125,7 @@ func userFrom(ctx context.Context) sqlc.User {
 // `sessions` may be nil — in that case every secured operation returns 401
 // without ever touching a database. The spec-dump CLI and humatest fixtures
 // rely on this to register the full route set without a live App.
-func authMiddleware(api huma.API, sessions auth.SessionLookup) func(huma.Context, func(huma.Context)) {
+func authMiddleware(api huma.API, sessions auth.SessionLookup, trustedIP func(string) bool) func(huma.Context, func(huma.Context)) {
 	return func(ctx huma.Context, next func(huma.Context)) {
 		if !requiresAuth(ctx.Operation()) {
 			next(ctx)
@@ -130,6 +133,17 @@ func authMiddleware(api huma.API, sessions auth.SessionLookup) func(huma.Context
 		}
 
 		token, fromURL := extractHumaToken(ctx)
+		// Image bytes from trusted networks may come bare: upstream Jellyfin
+		// marks image endpoints AllowAnonymous and clients depend on it
+		// (Flutter apps, plain <img> tags), and the Jellyfin compat layer
+		// dispatches those fetches here in-process. Only credential-less
+		// requests take this path — a PRESENT-but-invalid token still 401s —
+		// and only for image operations; streams stay token-only.
+		if token == "" && trustedIP != nil && anonymousTrustedImageOperation(ctx.Operation()) &&
+			trustedIP(requestmeta.ClientIP(ctx.Context())) {
+			next(ctx)
+			return
+		}
 		resolved, err := auth.ResolveSession(ctx.Context(), sessions, token)
 		if err != nil {
 			if errors.Is(err, auth.ErrInvalidSession) {
@@ -156,6 +170,21 @@ func authMiddleware(api huma.API, sessions auth.SessionLookup) func(huma.Context
 		ctx = huma.WithContext(ctx, auth.ContextWithToken(ctx.Context(), resolved.Token))
 		auth.TouchSessionAsync(sessions, resolved.Token)
 		next(ctx)
+	}
+}
+
+// anonymousTrustedImageOperation is the image subset of the Jellyfin-scoped
+// allowlist — the operations whose upstream equivalents are AllowAnonymous.
+func anonymousTrustedImageOperation(op *huma.Operation) bool {
+	if op == nil {
+		return false
+	}
+	switch op.OperationID {
+	case "media-image", "person-image", "metadata-image", "studio-image",
+		"extra-thumbnail", "tmdb-image-proxy", "album-cover", "playlist-cover":
+		return true
+	default:
+		return false
 	}
 }
 

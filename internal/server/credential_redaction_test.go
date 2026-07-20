@@ -86,7 +86,7 @@ func TestHumaErrorTransformerIsFinalCredentialBoundary(t *testing.T) {
 	t.Parallel()
 
 	mux := http.NewServeMux()
-	api := newHumaAPI(mux, nil)
+	api := newHumaAPI(mux, nil, nil)
 	huma.Register(api, op(http.MethodGet, "/credential-error", "credential-error", "Credential error", "Test"),
 		func(context.Context, *struct{}) (*JSONOutput[struct{}], error) {
 			return nil, huma.Error500InternalServerError(

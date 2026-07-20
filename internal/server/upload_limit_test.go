@@ -22,7 +22,7 @@ func TestImageUploadContentLengthRejectedBeforeHandler(t *testing.T) {
 		t.Run(operationID, func(t *testing.T) {
 			t.Parallel()
 			mux := http.NewServeMux()
-			api := newHumaAPI(mux, fakeSessions{})
+			api := newHumaAPI(mux, fakeSessions{}, nil)
 			called := false
 			huma.Register(api, secured(op(http.MethodPost, "/"+operationID, operationID, "upload", "Test")),
 				func(context.Context, *struct{}) (*struct{}, error) {
@@ -48,7 +48,7 @@ func TestImageUploadContentLengthRejectedBeforeHandler(t *testing.T) {
 
 func TestChunkedImageMultipartIsCappedBeforeHandler(t *testing.T) {
 	mux := http.NewServeMux()
-	api := newHumaAPI(mux, fakeSessions{})
+	api := newHumaAPI(mux, fakeSessions{}, nil)
 	called := false
 	huma.Register(api, secured(op(http.MethodPost, "/chunked-upload", "upload-media-asset", "upload", "Test")),
 		func(_ context.Context, _ *struct {
