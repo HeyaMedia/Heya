@@ -229,6 +229,11 @@ func (s *Server) buildRouter() *router {
 	rt.handle(http.MethodGet, "/Trailers/{itemId}/Similar", s.requireAuth(s.requireItem(s.handleSimilar)))
 	rt.handle(http.MethodGet, "/Audio/{itemId}/Lyrics", s.requireAuth(s.handleLyrics))
 
+	// Localization reference data + user avatar
+	rt.handle(http.MethodGet, "/Localization/Cultures", s.requireAuth(s.handleCultures))
+	rt.handle(http.MethodGet, "/Localization/ParentalRatings", s.requireAuth(s.handleParentalRatings))
+	rt.handle(http.MethodGet, "/UserImage", s.handleUserImage)
+
 	// InstantMix — all upstream aliases route to the one handler
 	rt.handle(http.MethodGet, "/Items/{itemId}/InstantMix", s.requireAuth(s.handleInstantMix))
 	rt.handle(http.MethodGet, "/Songs/{itemId}/InstantMix", s.requireAuth(s.handleInstantMix))

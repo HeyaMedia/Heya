@@ -96,6 +96,15 @@ func (s *Server) handleThemeSongsOrVideos(w http.ResponseWriter, _ *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"Items": []any{}, "TotalRecordCount": 0, "StartIndex": 0, "OwnerId": ""})
 }
 
+// GET /UserImage — user avatar. Heya users have no profile images; upstream
+// answers 404 for an avatar-less user, and clients (Wholphin's nav drawer,
+// jellyfin-web's header) fall back to an initials placeholder on exactly
+// that. Registered so the miss is a spec-correct 404 rather than an
+// unrouted one.
+func (s *Server) handleUserImage(w http.ResponseWriter, _ *http.Request, _ Params) {
+	w.WriteHeader(http.StatusNotFound)
+}
+
 // GET /Videos/{itemId}/AdditionalParts — Infuse probes for multi-part films.
 func (s *Server) handleAdditionalParts(w http.ResponseWriter, _ *http.Request, _ Params) {
 	writeJSON(w, http.StatusOK, queryResult[baseItemDto]{Items: []baseItemDto{}})

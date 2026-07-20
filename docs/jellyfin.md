@@ -139,8 +139,13 @@ directly at `http://127.0.0.1:3050`).
 - Video play counts are 0/1 (derived from the completed flag).
 - `/Items` param grid: genre/year/person/studio filters are accepted but
   ignored (logged at debug — point a client at the server and the log is
-  the worklist). Same for playlist CRUD and QuickConnect (`planned` in the
-  manifest).
+  the worklist). Same for QuickConnect (`planned` in the manifest —
+  though the per-user PIN covers the "typing passwords on a TV" pain).
+- Playlist sharing: playlists are owner-private, so
+  `/Playlists/{id}/Users/{userId}` answers only the owner and the
+  user-management endpoints stay planned. Playlist CRUD itself
+  (create/list/items/add/remove), InstantMix, trickplay tiles, and
+  Localization Cultures/ParentalRatings are implemented.
 - Episode images resolve via the series' `media_assets` labels
   (`s{n}e{m}` stills, `season-{n}` posters) — series without enriched
   assets fall back to series art.
