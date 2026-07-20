@@ -223,10 +223,10 @@ function close() { open.value = false }
    the centering `translate(-50%, -50%)` and makes the dialog warp from
    the top-left back to centre. Our own keyframes preserve the centering
    transform throughout. */
-.app-dialog-content[data-state="open"] {
+.surface.app-dialog-content[data-state="open"] {
   animation: app-dialog-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.app-dialog-content[data-state="closed"] {
+.surface.app-dialog-content[data-state="closed"] {
   animation: app-dialog-out 0.12s cubic-bezier(0.4, 0, 1, 1);
 }
 @keyframes app-dialog-in {

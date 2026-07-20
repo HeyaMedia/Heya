@@ -145,10 +145,10 @@ const open = defineModel<boolean>('open')
   z-index: 400;
 }
 
-.app-sheet-content[data-state="open"] {
+.surface.app-sheet-content[data-state="open"] {
   animation: app-sheet-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
-.app-sheet-content[data-state="closed"] {
+.surface.app-sheet-content[data-state="closed"] {
   animation: app-sheet-out 0.16s cubic-bezier(0.4, 0, 1, 1) both;
 }
 @keyframes app-sheet-in {
@@ -177,10 +177,10 @@ const open = defineModel<boolean>('open')
   padding-bottom: 0;
   transform: translateX(var(--drawer-swipe-movement-x, 0px));
 }
-.app-sheet-left[data-state="open"] {
+.surface.app-sheet-left[data-state="open"] {
   animation: app-sheet-left-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
-.app-sheet-left[data-state="closed"] {
+.surface.app-sheet-left[data-state="closed"] {
   animation: app-sheet-left-out 0.16s cubic-bezier(0.4, 0, 1, 1) both;
 }
 @keyframes app-sheet-left-in {
