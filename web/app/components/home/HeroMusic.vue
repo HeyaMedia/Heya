@@ -1,5 +1,6 @@
 <template>
   <section
+    ref="sectionRef"
     class="hero-music"
     :style="toneVars"
     @mouseenter="onHover(true)"
@@ -11,7 +12,7 @@
          literal-dark 2.0 grade + tone leak — parity with the Featured hero;
          else the cover blurred into ambience. The blurred site-wide underlay is
          the global AmbientBackdrop, fed a graded (v2) claim when ambient is on. -->
-    <div class="music-bg">
+    <div class="music-bg" :style="pinnedStyle">
       <Transition name="mbg">
         <LoadingImage
           v-if="bgUrl"
@@ -311,9 +312,14 @@ const background = useBackground()
 // pre-resolved, no width/quality props → no srcset) so sharp hero and blurred
 // underlay share one cache entry and paint together — see HeroCanvas.vue.
 const bgImg = useBackgroundImageTools()
-watch([bgUrl, bgFallback, ambientEnabled], ([bg, fb, on]) => {
+// Pin the art layer to the hero's scroll-0 band; the claim carries the
+// geometry so the blurred underlay aligns and the ledger line below becomes
+// the sharp/blur divider on scroll (same treatment as the Featured hero).
+const sectionRef = ref<HTMLElement | null>(null)
+const { pinnedStyle, align } = useHeroPin(() => sectionRef.value, () => 0.22)
+watch([bgUrl, bgFallback, ambientEnabled, align], ([bg, fb, on, a]) => {
   const url = bg ?? fb
-  if (on && url) background.set(url, { grade: 'v2' })
+  if (on && url) background.set(url, { grade: 'v2', align: a })
   else background.clear()
 }, { immediate: true })
 

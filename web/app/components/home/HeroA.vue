@@ -1,5 +1,6 @@
 <template>
   <section
+    ref="sectionRef"
     class="hero-featured"
     v-if="items.length"
     :style="toneVars"
@@ -11,7 +12,7 @@
          this hero feeds it a graded (v2) art claim when ambient is on, and
          always shows its own crisp copy in-hero (the old .ambient-extended
          hide-local behaviour is retired: the sharp hero is always visible). -->
-    <div class="hero-bg">
+    <div class="hero-bg" :style="pinnedStyle">
       <LoadingImage
         v-if="displayA"
         :src="displayA"
@@ -182,8 +183,13 @@ const currentBg = computed(() => (showA.value ? bgA.value : bgB.value) || null)
 // browser-cache entry and paint together — see HeroCanvas.vue.
 const displayA = computed(() => (bgA.value ? bgImg.variant(bgA.value) : ''))
 const displayB = computed(() => (bgB.value ? bgImg.variant(bgB.value) : ''))
-watch([currentBg, ambientEnabled], ([url, on]) => {
-  if (on && url) background.set(url, { grade: 'v2' })
+// Pin the art layer to the deck's scroll-0 band and publish its geometry
+// with the claim — the blurred underlay then aligns with the sharp copy and
+// the ledger line below the deck becomes the sharp/blur divider on scroll.
+const sectionRef = ref<HTMLElement | null>(null)
+const { pinnedStyle, align } = useHeroPin(() => sectionRef.value, () => 0.22)
+watch([currentBg, ambientEnabled, align], ([url, on, a]) => {
+  if (on && url) background.set(url, { grade: 'v2', align: a })
   else background.clear()
 }, { immediate: true })
 

@@ -169,39 +169,35 @@ const natB = ref<{ w: number; h: number } | null>(null)
 // The wrapper's off-screen margin (see .ambient-layer). Keep in sync with
 // the CSS --bleed value.
 const BLEED = 80
-const vw = ref(0)
 const vh = ref(0)
 function measureViewport() {
-  vw.value = window.innerWidth
   vh.value = window.innerHeight
 }
 
-/** The sharp hero's exact render geometry for this image: cover-scale within
- *  the hero box, centered horizontally, focal-point offset vertically. */
+/** The sharp hero's vertical render geometry for this image: cover-scale
+ *  within the hero box (its WIDTH, not the viewport's — pages with a side
+ *  menu render the hero in the content column), focal-point offset applied.
+ *  Vertical mapping is exact; horizontally the underlay stretches across the
+ *  full wrapper (fill), which keeps every image ROW where the hero draws it
+ *  while still washing the areas beside the hero column. */
 function heroPlacement(align: ClaimAlign | null, nat: { w: number; h: number } | null) {
-  if (!align || !nat || !nat.w || !nat.h || !vw.value || !vh.value) return null
-  const s = Math.max(vw.value / nat.w, align.heroH / nat.h)
-  const dispW = nat.w * s
+  if (!align || !nat || !nat.w || !nat.h || !align.heroW || !vh.value) return null
+  const s = Math.max(align.heroW / nat.w, align.heroH / nat.h)
   const dispH = nat.h * s
   return {
-    dispW,
     dispH,
-    left: (vw.value - dispW) / 2,
-    top: -align.posY * (dispH - align.heroH),
+    top: align.heroTop - align.posY * (dispH - align.heroH),
   }
 }
 
-/** Main img placement (wrapper coordinates = viewport + BLEED). Width is
- *  stretched into both side margins — horizontal-only stretch keeps every
- *  image ROW where the hero renders it, so seam alignment survives while the
- *  wrapper's blur never meets a transparent side edge on screen. */
+/** Main img placement (wrapper coordinates = viewport + BLEED). */
 function mainStyle(align: ClaimAlign | null, nat: { w: number; h: number } | null) {
   const p = heroPlacement(align, nat)
   if (!p) return undefined
   return {
     top: `${BLEED + p.top}px`,
-    left: `${p.left}px`,
-    width: `${p.dispW + BLEED * 2}px`,
+    left: '0',
+    width: '100%',
     height: `${p.dispH}px`,
     objectFit: 'fill' as const,
   }
@@ -218,8 +214,8 @@ function mirrorStyle(align: ClaimAlign | null, nat: { w: number; h: number } | n
   if (height <= 0) return null
   return {
     top: `${top}px`,
-    left: `${p.left}px`,
-    width: `${p.dispW + BLEED * 2}px`,
+    left: '0',
+    width: '100%',
     height: `${height}px`,
   }
 }

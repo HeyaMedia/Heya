@@ -34,6 +34,14 @@ import { useBackgroundStore } from '~/stores/background'
 export interface ClaimAlign {
   /** Rendered height of the sharp hero box, px. */
   heroH: number
+  /** The hero box's viewport Y at scroll 0, px — 0 on desktop (the topbar
+   *  overlays the hero) but non-zero on layouts with an in-flow topbar. */
+  heroTop: number
+  /** Rendered width of the sharp hero box, px — the viewport on detail
+   *  pages, the content column on pages with a side menu. The underlay
+   *  derives its cover scale from THIS so image rows land exactly where the
+   *  hero draws them. */
+  heroW: number
   /** object-position Y of the sharp art as a 0..1 fraction (0.3 = `30%`). */
   posY: number
 }
@@ -159,7 +167,8 @@ export function useBackground() {
     const align = opts?.align
     if (
       mine?.kind === 'art' && mine.url === url && mine.grade === grade
-      && mine.align?.heroH === align?.heroH && mine.align?.posY === align?.posY
+      && mine.align?.heroH === align?.heroH && mine.align?.heroTop === align?.heroTop
+      && mine.align?.heroW === align?.heroW && mine.align?.posY === align?.posY
     ) return
     place({ kind: 'art', url, grade, align })
   }

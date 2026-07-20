@@ -9,8 +9,10 @@
 // blurred ambient. Zero JS scroll math; works in every browser.
 //
 // Layout contract: the PAGE owns the relative hero <section> (and its
-// height); HeroCanvas is the absolute inset-0 art layer with overflow:hidden
-// (THE clip). Never put a transform on this container.
+// height); HeroCanvas measures that section and pins itself over its
+// scroll-0 band (position:fixed, overflow:hidden — THE clip). Never put a
+// transform on this container OR its ancestors (a transformed ancestor
+// re-anchors fixed positioning and the band would scroll with the page).
 //
 // Props are shaped for the whole redesign, not just the episode page:
 // series/movie/artist heroes drive srcB + showA from useBackdropCarousel for
@@ -54,18 +56,19 @@ const displayB = computed(() => (props.srcB ? bgImg.variant(props.srcB) : ''))
 // paint the SAME crop in the SAME place — behind the hero it's pixel-aligned,
 // and past the hero's bottom edge the blur continues the image instead of
 // re-showing a differently-cropped copy (the "same cloud twice" seam).
+//
+// The art layer itself is position:FIXED at the section's scroll-0 band: the
+// hero art never moves — scrolling slides the whole page up OVER it. Geometry
+// (band height + viewport top) is measured off the PARENT section, since this
+// component is the thing being pinned.
+//
+// The ledger strip right below the hero is the HARD divider between sharp
+// art and the blurred ambient wash. It scrolls with the content, so the
+// sharp copy is clipped at exactly the ledger's current viewport position
+// (clip bottom = scrollTop, since ledger top = hero bottom − scrollTop):
+// above the moving line the art stays fully sharp, below it only the
+// aligned blur shows, and the boundary rides the ledger as you scroll.
 const rootRef = ref<HTMLElement | null>(null)
-const heroH = ref(0)
-let heroObserver: ResizeObserver | null = null
-onMounted(() => {
-  if (!rootRef.value || typeof ResizeObserver === 'undefined') return
-  heroObserver = new ResizeObserver(() => {
-    heroH.value = rootRef.value?.clientHeight ?? 0
-  })
-  heroObserver.observe(rootRef.value)
-  heroH.value = rootRef.value.clientHeight
-})
-onUnmounted(() => heroObserver?.disconnect())
 
 // object-position is always "center N%" in practice — extract the Y fraction
 // the underlay needs; anything unparsable falls back to the 30% default.
@@ -74,14 +77,13 @@ const posY = computed(() => {
   return m ? Number(m[1]) / 100 : 0.3
 })
 
+const { pinnedStyle, align } = useHeroPin(() => rootRef.value?.parentElement ?? null, () => posY.value)
+
 const background = useBackground()
 watchEffect(() => {
   if (!props.claim) return
   if (!currentSrc.value) return
-  background.set(currentSrc.value, {
-    grade: props.claimGrade,
-    align: heroH.value > 0 ? { heroH: heroH.value, posY: posY.value } : undefined,
-  })
+  background.set(currentSrc.value, { grade: props.claimGrade, align: align.value })
 })
 
 function hideBroken(e: Event | string) {
@@ -90,7 +92,7 @@ function hideBroken(e: Event | string) {
 </script>
 
 <template>
-  <div ref="rootRef" class="hero-canvas" :style="{ '--hc-pos': objectPosition }" aria-hidden="true">
+  <div ref="rootRef" class="hero-canvas" :style="[{ '--hc-pos': objectPosition }, pinnedStyle]" aria-hidden="true">
     <LoadingImage
       v-if="displayA"
       :src="displayA"
