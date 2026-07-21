@@ -24,17 +24,19 @@ func TestCastHLSPathsPreserveScopedAuthAndSessionRouting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for key, want := range map[string]string{"cast_token": "signed", "sid": "cast-123", "audio": "1"} {
+	// Segment URLs carry the playlist's FULL query — including quality/caps —
+	// so a segment request alone can faithfully recreate its transcode session
+	// after idle cleanup or a server restart. With only auth+routing, the
+	// recreated plan could pick a different container than the playlist
+	// promised, dead-ending the player.
+	for key, want := range map[string]string{"cast_token": "signed", "sid": "cast-123", "audio": "1", "quality": "720p"} {
 		if got := childQuery.Get(key); got != want {
 			t.Fatalf("child %s = %q, want %q", key, got, want)
 		}
 	}
-	if childQuery.Has("quality") {
-		t.Fatal("quality should be consumed by the playlist request, not repeated on segments")
-	}
 }
 
-func TestNativeHLSPathsUseHeaderAuthAndPreserveOnlyTranscodeRouting(t *testing.T) {
+func TestNativeHLSPathsUseHeaderAuthAndForwardTranscodeSettings(t *testing.T) {
 	r := httptest.NewRequest("GET", "/api/playback/native/media/input-id/hls/master.m3u8?sid=native-123&audio=2&quality=1080p", nil)
 	if got := hlsBasePath(r, "public-id"); got != "/api/playback/native/media/public-id/hls" {
 		t.Fatalf("base path = %q", got)
@@ -52,12 +54,14 @@ func TestNativeHLSPathsUseHeaderAuthAndPreserveOnlyTranscodeRouting(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	for key, want := range map[string]string{"sid": "native-123", "audio": "2"} {
+	for key, want := range map[string]string{"sid": "native-123", "audio": "2", "quality": "1080p"} {
 		if got := childQuery.Get(key); got != want {
 			t.Fatalf("child %s = %q, want %q", key, got, want)
 		}
 	}
-	if childQuery.Has("quality") || childQuery.Has("token") || childQuery.Has("cast_token") {
-		t.Fatal("native child URLs must rely on the fixed grant header and consumed transcode settings")
+	// Passthrough must not INVENT auth params the playlist request never had —
+	// the native path authenticates with the fixed grant header.
+	if childQuery.Has("token") || childQuery.Has("cast_token") {
+		t.Fatal("native child URLs must rely on the fixed grant header, not minted query auth")
 	}
 }

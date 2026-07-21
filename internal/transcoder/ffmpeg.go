@@ -15,7 +15,8 @@ import (
 type CommandBuilder interface {
 	// BuildHLSCommand returns an exec.Cmd that will transcode the input
 	// into HLS segments written to opts.OutputDir. The caller is responsible
-	// for starting the process and reading the segment list from Stdout.
+	// for starting the process; segment completion is observed by watching
+	// OutputDir (temp_file renames), not via the process's stdout.
 	BuildHLSCommand(ctx context.Context, opts TranscodeOpts) (*exec.Cmd, error)
 
 	// IsAvailable reports whether the underlying encoder binary can be found.

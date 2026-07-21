@@ -126,6 +126,7 @@ func buildTranscodeArgs(opts TranscodeOpts) []string {
 
 	args = appendVideoArgs(args, opts)
 	args = appendAudioArgs(args, opts.Profile)
+	args = appendForcedKeyframeArgs(args, opts)
 	args = appendOutputArgs(args, opts)
 
 	return args
@@ -204,16 +205,32 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 		args = append(args, "-vf", filterChain)
 	}
 
-	if hw.Type == HwAccelNVENC {
-		args = append(args,
-			"-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%d)", 4),
-		)
-	}
-
 	if hw.Type == HwAccelQSV && strings.Contains(encoder, "hevc") {
 		args = append(args, "-load_plugin", "hevc_hw")
 	}
 
+	return args
+}
+
+// appendForcedKeyframeArgs pins encoder keyframes to the segment grid so the
+// HLS muxer can cut where the declared playlist says it will. QSV and NVENC
+// ignore the pict_type hint that -force_key_frames plants unless told to
+// promote it to a real IDR frame — without that, segments silently follow the
+// encoder's default GOP (~10s) while every playlist entry declares
+// SegmentDuration, desyncing the whole time↔segment mapping (and on seeks,
+// leaving the muxer with no keyframe to cut at for minutes). x264, VAAPI and
+// VideoToolbox honor the hint natively.
+func appendForcedKeyframeArgs(args []string, opts TranscodeOpts) []string {
+	if opts.Profile.VideoCodec == "" || opts.Profile.VideoCodec == "copy" {
+		return args
+	}
+	args = append(args, "-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%.1f)", SegmentDuration))
+	switch opts.HWAccel.Type {
+	case HwAccelQSV:
+		args = append(args, "-forced_idr", "1")
+	case HwAccelNVENC:
+		args = append(args, "-forced-idr", "1")
+	}
 	return args
 }
 
@@ -428,13 +445,18 @@ func BuildHLSArgs(opts TranscodeOpts, outputDir string) []string {
 
 	args = appendVideoArgs(args, opts)
 	args = appendAudioArgs(args, opts.Profile)
-
-	if opts.UseFMP4 && opts.Profile.VideoCodec != "copy" && opts.Profile.VideoCodec != "" {
-		args = append(args, "-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%.1f)", SegmentDuration))
-	}
+	args = appendForcedKeyframeArgs(args, opts)
 
 	startNum := opts.StartSegment
 
+	// Both delivery formats use the hls muxer. The TS path used to run the
+	// `segment` muxer, whose cut boundaries are anchored to an absolute
+	// wall-clock grid offset by -segment_start_number — combined with -copyts
+	// (which already bakes the seek offset into the timestamps) a seek head's
+	// first cut landed start_number*SegmentDuration seconds too late, encoding
+	// the entire span since the seek point into one giant first segment. The
+	// hls muxer cuts relative to the stream's first packet, which is also the
+	// rule RealSegmentBoundaries probes for copy-video playlists.
 	if opts.UseFMP4 {
 		args = append(args,
 			"-f", "hls",
@@ -450,13 +472,15 @@ func BuildHLSArgs(opts TranscodeOpts, outputDir string) []string {
 		)
 	} else {
 		args = append(args,
-			"-f", "segment",
-			"-segment_time", fmt.Sprintf("%.1f", SegmentDuration),
-			"-segment_format", "mpegts",
-			"-segment_start_number", strconv.Itoa(startNum),
-			"-segment_list", "pipe:1",
-			"-segment_list_type", "flat",
-			filepath.Join(outputDir, "seg_%04d.ts"),
+			"-f", "hls",
+			"-hls_time", fmt.Sprintf("%.1f", SegmentDuration),
+			"-hls_segment_type", "mpegts",
+			"-hls_segment_filename", filepath.Join(outputDir, "seg_%04d.ts"),
+			"-hls_playlist_type", "vod",
+			"-hls_list_size", "0",
+			"-hls_flags", "independent_segments+temp_file",
+			"-start_number", strconv.Itoa(startNum),
+			filepath.Join(outputDir, "_ffmpeg.m3u8"),
 		)
 	}
 	return args

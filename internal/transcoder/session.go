@@ -1,7 +1,6 @@
 package transcoder
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -618,11 +617,7 @@ func (s *TranscodeSession) runHead(ctx context.Context, head *Head, opts Transco
 		}
 	}
 
-	if s.IsFMP4() {
-		terminalErr = s.runHeadFMP4(ctx, head, cmd, cleanup, logExit)
-	} else {
-		terminalErr = s.runHeadTS(ctx, head, cmd, cleanup, logExit)
-	}
+	terminalErr = s.runHeadWatch(ctx, head, cmd, cleanup, logExit)
 }
 
 func transcodeHeadError(stage string, err error) error {
@@ -632,90 +627,6 @@ func transcodeHeadError(stage string, err error) error {
 	// Multiple %w verbs let callers match both the stable category and a
 	// builder/process-specific cause when that is useful to internal tests.
 	return fmt.Errorf("%w: %s: %w", ErrTranscodeFailed, stage, err)
-}
-
-func (s *TranscodeSession) runHeadTS(ctx context.Context, head *Head, cmd *exec.Cmd, cleanup func(), logExit func(error)) error {
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		log.Error().Err(err).Str("key", s.Key).Msg("stdout pipe")
-		cleanup()
-		if ctx.Err() != nil {
-			return nil
-		}
-		return transcodeHeadError("open segment output", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		log.Error().Err(err).Str("key", s.Key).Msg("ffmpeg start failed")
-		cleanup()
-		if ctx.Err() != nil {
-			return nil
-		}
-		return transcodeHeadError("start encoder", err)
-	}
-
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		segIdx := parseSegIdx(filepath.Base(line))
-		if segIdx < 0 {
-			continue
-		}
-
-		s.setHeadCurrent(head, segIdx)
-		s.markSegmentReady(segIdx)
-
-		if segIdx > head.StartSeg && s.segmentAlreadyDone(segIdx+1) {
-			log.Info().Str("key", s.Key).Int("seg", segIdx).Msg("head reached completed territory, stopping")
-			s.setStopReason(head, StopReasonCompleted)
-			head.Cancel()
-			break
-		}
-
-		// Lead-cap throttle: stop running ahead of the player.
-		s.mu.Lock()
-		exceeded := s.headExceedsLeadCap(head)
-		lastReq := s.lastRequestedSeg
-		s.mu.Unlock()
-		if exceeded {
-			log.Info().
-				Str("key", s.Key).
-				Int("seg", segIdx).
-				Int("last_requested", lastReq).
-				Float64("lead_cap_seconds", LeadCapSeconds).
-				Msg("head exceeded lead cap, stopping")
-			s.setStopReason(head, StopReasonLeadCap)
-			head.Cancel()
-			break
-		}
-	}
-
-	scanErr := scanner.Err()
-	// A genuine scanner failure means stdout is no longer being drained. Kill
-	// the child before Wait or a writer blocked on that pipe could deadlock us.
-	scanFailed := scanErr != nil && ctx.Err() == nil
-	if scanFailed {
-		head.Cancel()
-	}
-	cmdErr := cmd.Wait()
-	// If we exited the scanner loop without setting a reason, it's because
-	// ffmpeg ended its stdout (natural EOF / error / killed externally).
-	s.setStopReasonIfRunning(head, StopReasonExited)
-	cleanup()
-	logExit(cmdErr)
-	if scanFailed {
-		return transcodeHeadError("read segment output", scanErr)
-	}
-	if ctx.Err() != nil {
-		return nil
-	}
-	if cmdErr != nil {
-		return transcodeHeadError("encoder exited", cmdErr)
-	}
-	return nil
 }
 
 // setStopReason records a reason only while head is still the session's
@@ -740,7 +651,12 @@ func (s *TranscodeSession) setStopReasonIfRunning(head *Head, r HeadStopReason) 
 	s.mu.Unlock()
 }
 
-func (s *TranscodeSession) runHeadFMP4(ctx context.Context, head *Head, cmd *exec.Cmd, cleanup func(), logExit func(error)) error {
+// runHeadWatch starts ffmpeg and tracks segment production by watching the
+// output directory. Both delivery formats run the hls muxer with
+// `-hls_flags temp_file`: segments are written to seg_N.<ext>.tmp and renamed
+// when fully flushed, so a final-named file appearing is complete and
+// servable — requests can never observe a half-written segment.
+func (s *TranscodeSession) runHeadWatch(ctx context.Context, head *Head, cmd *exec.Cmd, cleanup func(), logExit func(error)) error {
 	if err := cmd.Start(); err != nil {
 		log.Error().Err(err).Str("key", s.Key).Msg("ffmpeg start failed")
 		cleanup()
@@ -812,16 +728,14 @@ func (s *TranscodeSession) runHeadFMP4(ctx context.Context, head *Head, cmd *exe
 				continue
 			}
 			name := filepath.Base(ev.Name)
-			if !strings.HasSuffix(name, ".m4s") {
+			if !strings.HasSuffix(name, s.SegExt) {
 				continue
 			}
 			idx := parseSegIdx(name)
 			if idx < 0 {
 				continue
 			}
-			// ffmpeg runs with hls_flags temp_file: segments are written to
-			// seg_N.m4s.tmp and renamed when fully flushed, so a seg_N.m4s
-			// appearing is already complete and servable.
+			// temp_file semantics: a final-named segment is fully flushed.
 			s.markSegmentReady(idx)
 			s.setHeadCurrent(head, idx)
 			if idx > head.StartSeg && s.segmentAlreadyDone(idx+1) {
@@ -856,8 +770,8 @@ func (s *TranscodeSession) runHeadFMP4(ctx context.Context, head *Head, cmd *exe
 
 // reconcileSegmentsFromFS scans the output directory and marks every segment
 // whose file exists as ready. ffmpeg runs with hls_flags temp_file, so any
-// seg_N.m4s on disk is fully flushed (in-progress files carry a .tmp suffix
-// and are skipped by the extension check).
+// final-named segment on disk is fully flushed (in-progress files carry a
+// .tmp suffix and are skipped by the extension check).
 //
 // Only files actually present may be marked: the directory accumulates
 // disjoint ranges from previous heads (earlier seek targets), so filling the
@@ -872,7 +786,7 @@ func (s *TranscodeSession) reconcileSegmentsFromFS(head *Head) {
 	present := make(map[int]bool, len(entries))
 	for _, e := range entries {
 		n := e.Name()
-		if !strings.HasSuffix(n, ".m4s") {
+		if !strings.HasSuffix(n, s.SegExt) {
 			continue
 		}
 		idx := parseSegIdx(n)

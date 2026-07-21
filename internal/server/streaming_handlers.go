@@ -6,10 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/rs/zerolog/log"
 
 	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/service"
@@ -185,8 +186,28 @@ func handleHLSSegment(app *service.App) http.HandlerFunc {
 		}
 		session := app.TranscoderSessions().GetExistingSession(fileID, audioTrack, r.URL.Query().Get("sid"))
 		if session == nil {
-			writeError(w, http.StatusNotFound, "no active transcode")
-			return
+			// The session died under a still-active player (idle cleanup during
+			// a long pause, or a server restart). VOD playlists are never
+			// re-fetched by most players, so a plain 404 here dead-ends playback
+			// in an infinite retry loop. Segment URLs carry the playlist's full
+			// original query, so the session can be recreated faithfully.
+			session = getOrCreateSession(app, r, fileID, 0)
+			if session == nil {
+				writeError(w, http.StatusNotFound, "no active transcode")
+				return
+			}
+			if segmentName != "init.mp4" && !strings.HasSuffix(segmentName, session.SegExt) {
+				// The recreated plan disagrees with the requested container —
+				// the client is holding a playlist this server would no longer
+				// produce. Serving mismatched bytes would corrupt the player.
+				writeError(w, http.StatusGone, "transcode session is stale")
+				return
+			}
+			log.Info().
+				Int64("file_id", fileID).
+				Str("segment", segmentName).
+				Str("key", session.Key).
+				Msg("recreated transcode session from segment request")
 		}
 
 		session.Touch()
@@ -233,8 +254,12 @@ func handleHLSSegment(app *service.App) http.HandlerFunc {
 func writeHLSSegmentError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		// The requester is already gone (or its deadline elapsed), so there is
-		// no useful response left to write.
+		// The requester is already gone (or its deadline elapsed), so no body
+		// can usefully be written — but returning without a status makes Go
+		// log an empty 200, which reads as a successful serve in access logs
+		// while the player is actually timing out and retrying. 499 is the
+		// de-facto "client closed request" status.
+		w.WriteHeader(499)
 		return
 	case errors.Is(err, transcoder.ErrInvalidSegment):
 		writeError(w, http.StatusNotFound, "segment not found")
@@ -357,18 +382,14 @@ func hlsBasePath(r *http.Request, fileRef string) string {
 	return "/api/stream/" + fileRef + "/hls"
 }
 
-// hlsChildQuery keeps only authentication and exact transcode-session routing
-// on segment URLs. Capability/quality flags have already been consumed while
-// creating the variant session and need not be repeated dozens of times.
+// hlsChildQuery forwards the playlist request's full query onto every segment
+// URL. Auth (token/cast_token) and session routing (sid/audio) are
+// load-bearing on each segment; capability/quality flags ride along so a
+// segment request alone can faithfully recreate its session after idle
+// cleanup or a server restart — with only auth+routing, the recreated plan
+// could pick a different container/profile than the playlist promised.
 func hlsChildQuery(r *http.Request) string {
-	in := r.URL.Query()
-	out := url.Values{}
-	for _, key := range []string{"token", "cast_token", "sid", "audio"} {
-		if value := in.Get(key); value != "" {
-			out.Set(key, value)
-		}
-	}
-	return out.Encode()
+	return r.URL.Query().Encode()
 }
 
 func mediaProbeToTranscoderInfo(info *mediaprobe.MediaInfo) transcoder.MediaInfo {
