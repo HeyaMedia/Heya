@@ -21382,6 +21382,137 @@
         ],
         "type": "object"
       },
+      "TranscodeSessionBody": {
+        "additionalProperties": false,
+        "properties": {
+          "audio_codec": {
+            "type": "string"
+          },
+          "bitrate_kbps": {
+            "format": "double",
+            "type": "number"
+          },
+          "container": {
+            "type": "string"
+          },
+          "duration_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "encoder_pos_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "file": {
+            "type": "string"
+          },
+          "fps": {
+            "format": "double",
+            "type": "number"
+          },
+          "head_current_segment": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "head_start_segment": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "idle_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "key": {
+            "type": "string"
+          },
+          "last_requested_segment": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "player_pos_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "quality": {
+            "type": "string"
+          },
+          "ready_segments": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "speed": {
+            "format": "double",
+            "type": "number"
+          },
+          "state": {
+            "type": "string"
+          },
+          "total_segments": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "video_codec": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "file",
+          "path",
+          "container",
+          "video_codec",
+          "audio_codec",
+          "quality",
+          "running",
+          "state",
+          "duration_seconds",
+          "total_segments",
+          "ready_segments",
+          "head_start_segment",
+          "head_current_segment",
+          "last_requested_segment",
+          "encoder_pos_seconds",
+          "player_pos_seconds",
+          "idle_seconds",
+          "fps",
+          "speed",
+          "bitrate_kbps"
+        ],
+        "type": "object"
+      },
+      "TranscodeSessionsBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/TranscodeSessionsBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/TranscodeSessionBody"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "type": "object"
+      },
       "TranscodeStatusBody": {
         "additionalProperties": false,
         "properties": {
@@ -46201,6 +46332,49 @@
           }
         ],
         "summary": "Clear cached transcoded segments",
+        "tags": [
+          "Transcoding"
+        ]
+      }
+    },
+    "/api/transcode/sessions": {
+      "get": {
+        "operationId": "transcode-sessions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranscodeSessionsBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Live transcode sessions",
         "tags": [
           "Transcoding"
         ]

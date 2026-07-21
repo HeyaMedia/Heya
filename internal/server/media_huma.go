@@ -432,7 +432,46 @@ func registerMediaRoutes(api huma.API, app *service.App) {
 				resp.CacheSizeMB = stats.TotalSize / (1024 * 1024)
 				resp.CacheItems = stats.ItemCount
 			}
+			if app.TranscoderSessions() != nil {
+				resp.ActiveJobs = len(app.TranscoderSessions().Overview())
+			}
 			return noStoreJSON(resp), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/transcode/sessions", "transcode-sessions", "Live transcode sessions", "Transcoding")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[transcodeSessionsBody], error) {
+			body := transcodeSessionsBody{Sessions: []transcodeSessionBody{}}
+			if app.TranscoderSessions() == nil {
+				return noStoreJSON(body), nil
+			}
+			for _, ov := range app.TranscoderSessions().Overview() {
+				running, state := transcodeSessionState(ov.Head, ov.Progress)
+				sess := transcodeSessionBody{
+					Key:                  ov.Key,
+					File:                 filepath.Base(ov.FilePath),
+					Path:                 ov.FilePath,
+					Container:            ov.Container,
+					VideoCodec:           ov.VideoCodec,
+					AudioCodec:           ov.AudioCodec,
+					Quality:              ov.Quality,
+					Running:              running,
+					State:                state,
+					DurationSeconds:      ov.Duration,
+					TotalSegments:        ov.TotalSegs,
+					ReadySegments:        ov.ReadySegs,
+					HeadStartSegment:     ov.Head.StartSeg,
+					HeadCurrentSegment:   ov.Head.CurrentSeg,
+					LastRequestedSegment: ov.LastRequestedSeg,
+					EncoderPosSeconds:    ov.EncoderPos,
+					PlayerPosSeconds:     ov.PlayerPos,
+					IdleSeconds:          ov.IdleSeconds,
+					FPS:                  ov.Progress.FPS,
+					Speed:                ov.Progress.Speed,
+					BitrateKbps:          ov.Progress.Bitrate,
+				}
+				body.Sessions = append(body.Sessions, sess)
+			}
+			return noStoreJSON(body), nil
 		})
 
 	huma.Register(api, adminSecured(op(http.MethodPut, "/api/transcode/settings", "update-transcode-settings", "Update transcoder settings", "Transcoding")),
@@ -498,6 +537,54 @@ type fsBrowseBody struct {
 	Path    string    `json:"path"`
 	Parent  string    `json:"parent,omitempty"`
 	Entries []fsEntry `json:"entries"`
+}
+
+type transcodeSessionsBody struct {
+	Sessions []transcodeSessionBody `json:"sessions"`
+}
+
+type transcodeSessionBody struct {
+	Key                  string  `json:"key"`
+	File                 string  `json:"file"`
+	Path                 string  `json:"path"`
+	Container            string  `json:"container"`
+	VideoCodec           string  `json:"video_codec"`
+	AudioCodec           string  `json:"audio_codec"`
+	Quality              string  `json:"quality"`
+	Running              bool    `json:"running"`
+	State                string  `json:"state"`
+	DurationSeconds      float64 `json:"duration_seconds"`
+	TotalSegments        int     `json:"total_segments"`
+	ReadySegments        int     `json:"ready_segments"`
+	HeadStartSegment     int     `json:"head_start_segment"`
+	HeadCurrentSegment   int     `json:"head_current_segment"`
+	LastRequestedSegment int     `json:"last_requested_segment"`
+	EncoderPosSeconds    float64 `json:"encoder_pos_seconds"`
+	PlayerPosSeconds     float64 `json:"player_pos_seconds"`
+	IdleSeconds          float64 `json:"idle_seconds"`
+	FPS                  float64 `json:"fps"`
+	Speed                float64 `json:"speed"`
+	BitrateKbps          float64 `json:"bitrate_kbps"`
+}
+
+// transcodeSessionState collapses head/progress snapshots into the state
+// vocabulary shared by the per-file telemetry endpoint and the admin
+// sessions list.
+func transcodeSessionState(head transcoder.HeadInfo, stats transcoder.ProgressStats) (bool, string) {
+	running := stats.Running || head.Running
+	switch {
+	case running:
+		return true, "running"
+	case head.StopReason == transcoder.StopReasonLeadCap:
+		return false, "throttled"
+	case head.StopReason == transcoder.StopReasonCompleted:
+		return false, "completed"
+	case head.StopReason == transcoder.StopReasonKilled:
+		return false, "killed"
+	case head.StopReason == transcoder.StopReasonExited:
+		return false, "exited"
+	}
+	return false, "idle"
 }
 
 type transcodeStatusBody struct {

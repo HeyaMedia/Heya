@@ -6001,6 +6001,38 @@ export type TranscodeProgressResponse = {
     updated_at_unix_ms?: number;
 };
 
+export type TranscodeSessionBody = {
+    audio_codec: string;
+    bitrate_kbps: number;
+    container: string;
+    duration_seconds: number;
+    encoder_pos_seconds: number;
+    file: string;
+    fps: number;
+    head_current_segment: number;
+    head_start_segment: number;
+    idle_seconds: number;
+    key: string;
+    last_requested_segment: number;
+    path: string;
+    player_pos_seconds: number;
+    quality: string;
+    ready_segments: number;
+    running: boolean;
+    speed: number;
+    state: string;
+    total_segments: number;
+    video_codec: string;
+};
+
+export type TranscodeSessionsBody = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    sessions: Array<TranscodeSessionBody> | null;
+};
+
 export type TranscodeStatusBody = {
     /**
      * A URL to the JSON Schema for this object.
@@ -8552,6 +8584,10 @@ export type TranscodeProgressResponseWritable = {
     total_segments: number;
     total_size_bytes: number;
     updated_at_unix_ms?: number;
+};
+
+export type TranscodeSessionsBodyWritable = {
+    sessions: Array<TranscodeSessionBody> | null;
 };
 
 export type TranscodeStatusBodyWritable = {
@@ -19965,6 +20001,31 @@ export type ClearTranscodeCacheResponses = {
 };
 
 export type ClearTranscodeCacheResponse = ClearTranscodeCacheResponses[keyof ClearTranscodeCacheResponses];
+
+export type TranscodeSessionsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/transcode/sessions';
+};
+
+export type TranscodeSessionsErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type TranscodeSessionsError = TranscodeSessionsErrors[keyof TranscodeSessionsErrors];
+
+export type TranscodeSessionsResponses = {
+    /**
+     * OK
+     */
+    200: TranscodeSessionsBody;
+};
+
+export type TranscodeSessionsResponse = TranscodeSessionsResponses[keyof TranscodeSessionsResponses];
 
 export type UpdateTranscodeSettingsData = {
     body: UpdateTranscodeSettingsRequestWritable;

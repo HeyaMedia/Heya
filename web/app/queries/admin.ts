@@ -12,6 +12,8 @@ export type {
   ReadyBody as Ready,
   TaskResponse,
   TranscodeStatusBody as TranscodeStatus,
+  TranscodeSessionsBody as TranscodeSessions,
+  TranscodeSessionBody as TranscodeSession,
 } from '~~/shared/api/types.gen'
 
 import type {
@@ -27,6 +29,7 @@ import type {
   ReadyBody as Ready,
   TaskResponse,
   TranscodeStatusBody as TranscodeStatus,
+  TranscodeSessionsBody as TranscodeSessions,
 } from '~~/shared/api/types.gen'
 
 const privateRuntime = {
@@ -142,6 +145,16 @@ export const transcodeStatusQuery = defineQueryOptions(() => ({
     return await $heya('/api/transcode/status') as TranscodeStatus
   },
   staleTime: 1000 * 5,
+  meta: privateRuntime,
+}))
+
+export const transcodeSessionsQuery = defineQueryOptions(() => ({
+  key: ['admin', 'transcode', 'sessions'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/transcode/sessions') as TranscodeSessions
+  },
+  staleTime: 1000,
   meta: privateRuntime,
 }))
 

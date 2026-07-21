@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -1124,6 +1125,85 @@ func (m *SessionManager) disposeDetachedSessions(detached []*TranscodeSession) {
 		// this exact old lease cannot expose the replacement to LRU eviction.
 		session.cacheLease.Release()
 	}
+}
+
+// SessionOverview is a point-in-time snapshot of one live HLS session, built
+// for admin/status surfaces (Settings → Transcoding). All fields are copies —
+// nothing here retains a reference into the live session.
+type SessionOverview struct {
+	Key              string
+	FilePath         string
+	Container        string // "fmp4" or "mpegts"
+	VideoCodec       string // target codec; "copy" means remux
+	AudioCodec       string
+	Quality          string // profile name
+	Duration         float64
+	TotalSegs        int
+	ReadySegs        int
+	LastRequestedSeg int
+	// EncoderPos/PlayerPos are media timestamps in seconds: where the encode
+	// head has flushed up to, and where the player most recently requested.
+	EncoderPos  float64
+	PlayerPos   float64
+	IdleSeconds float64
+	Head        HeadInfo
+	Progress    ProgressStats
+}
+
+// OverviewSnapshot assembles a SessionOverview. Each getter locks internally;
+// nothing is held across them, so a snapshot is cheap and can run while the
+// session is actively encoding.
+func (s *TranscodeSession) OverviewSnapshot() SessionOverview {
+	head := s.HeadSnapshot()
+	s.mu.Lock()
+	lastReq := s.lastRequestedSeg
+	idle := time.Since(s.LastAccess).Seconds()
+	s.mu.Unlock()
+
+	container := "mpegts"
+	if s.IsFMP4() {
+		container = "fmp4"
+	}
+	// SegmentStartTime(idx) is the start of segment idx; the head has flushed
+	// through CurrentSeg, so its position is the start of the next segment.
+	encoderPos := s.Duration
+	if next := head.CurrentSeg + 1; next < s.TotalSegs {
+		encoderPos = s.SegmentStartTime(next)
+	}
+	return SessionOverview{
+		Key:              s.Key,
+		FilePath:         s.FilePath,
+		Container:        container,
+		VideoCodec:       s.Opts.Profile.VideoCodec,
+		AudioCodec:       s.Opts.Profile.AudioCodec,
+		Quality:          s.Opts.Profile.Name,
+		Duration:         s.Duration,
+		TotalSegs:        s.TotalSegs,
+		ReadySegs:        s.ReadySegmentCount(),
+		LastRequestedSeg: lastReq,
+		EncoderPos:       encoderPos,
+		PlayerPos:        s.SegmentStartTime(lastReq),
+		IdleSeconds:      idle,
+		Head:             head,
+		Progress:         s.ProgressSnapshot(),
+	}
+}
+
+// Overview snapshots every live session, ordered by key for stable rendering.
+func (m *SessionManager) Overview() []SessionOverview {
+	m.mu.Lock()
+	sessions := make([]*TranscodeSession, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		sessions = append(sessions, s)
+	}
+	m.mu.Unlock()
+
+	out := make([]SessionOverview, 0, len(sessions))
+	for _, s := range sessions {
+		out = append(out, s.OverviewSnapshot())
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	return out
 }
 
 // existingSession returns the already-live session for key, if any, touching

@@ -96,20 +96,7 @@ func registerStreamRoutes(api huma.API, app *service.App) {
 			}
 			head := sess.HeadSnapshot()
 			stats := sess.ProgressSnapshot()
-			running := stats.Running || head.Running
-			state := "idle"
-			switch {
-			case running:
-				state = "running"
-			case head.StopReason == transcoder.StopReasonLeadCap:
-				state = "throttled"
-			case head.StopReason == transcoder.StopReasonCompleted:
-				state = "completed"
-			case head.StopReason == transcoder.StopReasonKilled:
-				state = "killed"
-			case head.StopReason == transcoder.StopReasonExited:
-				state = "exited"
-			}
+			running, state := transcodeSessionState(head, stats)
 			resp := transcodeProgressResponse{
 				Active:           true,
 				Running:          running,

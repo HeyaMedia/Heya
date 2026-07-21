@@ -1,7 +1,7 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'settings', middleware: 'admin' })
 
-import { transcodeStatusQuery } from '~/queries/admin'
+import { transcodeStatusQuery, transcodeSessionsQuery, type TranscodeSession } from '~/queries/admin'
 
 const { $heya } = useNuxtApp()
 const { confirm } = useConfirm()
@@ -9,6 +9,51 @@ const { isLocked, lockTooltip, ensure: ensureSources } = useConfigSources()
 
 const statusData = useQuery(transcodeStatusQuery())
 const status = computed(() => statusData.data.value ?? null)
+
+const sessionsData = useQuery(transcodeSessionsQuery())
+const sessions = computed(() => sessionsData.data.value?.sessions ?? [])
+let sessionsTimer: ReturnType<typeof setInterval> | null = null
+
+const STATE_LABELS: Record<string, string> = {
+  running: 'Encoding',
+  throttled: 'Buffered ahead',
+  completed: 'Completed',
+  killed: 'Stopped',
+  exited: 'Exited',
+  idle: 'Idle',
+}
+
+function stateLabel(s: TranscodeSession) {
+  return STATE_LABELS[s.state] ?? s.state
+}
+
+function fmtTime(sec?: number) {
+  if (!sec || sec < 0) return '0:00'
+  const t = Math.floor(sec)
+  const h = Math.floor(t / 3600)
+  const m = Math.floor((t % 3600) / 60)
+  const s = t % 60
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${m}:${String(s).padStart(2, '0')}`
+}
+
+function fmtBitrate(kbps?: number) {
+  if (!kbps) return ''
+  if (kbps >= 1000) return `${(kbps / 1000).toFixed(1)} Mbps`
+  return `${Math.round(kbps)} Kbps`
+}
+
+function pct(v: number, total: number) {
+  if (!total || total <= 0) return 0
+  return Math.min(100, Math.max(0, (v / total) * 100))
+}
+
+function codecLabel(s: TranscodeSession) {
+  const v = s.video_codec === 'copy' || !s.video_codec ? 'video copy' : s.video_codec.replace(/^lib/, '')
+  const a = s.audio_codec === 'copy' || !s.audio_codec ? 'audio copy' : s.audio_codec
+  return `${v} · ${a}`
+}
 const dirty = ref(false)
 const saving = ref(false)
 const clearing = ref(false)
@@ -110,7 +155,16 @@ const cachePct = computed(() => {
 })
 
 onMounted(async () => {
+  // Poll sessions only while the tab is visible — an admin page left open in
+  // a background tab must not keep the server (or the phone) busy.
+  sessionsTimer = setInterval(() => {
+    if (!document.hidden) void sessionsData.refetch()
+  }, 2000)
   await ensureSources()
+})
+
+onUnmounted(() => {
+  if (sessionsTimer) clearInterval(sessionsTimer)
 })
 </script>
 
@@ -152,6 +206,43 @@ onMounted(async () => {
           :sub="status.cache_max_gb === 0 ? `${status.cache_items} items · unlimited` : `${status.cache_items} items · ${cachePct}% of cap`"
         />
       </div>
+
+      <SettingsSection title="Active sessions" icon="pulse"
+        description="Live HLS transcode sessions: what ffmpeg is encoding right now, how far ahead of the player it is, and how fast it's running. Updates every 2 seconds.">
+        <div v-if="!sessions.length" class="sess-empty">No active transcode sessions.</div>
+        <div v-else class="sess-list">
+          <div v-for="s in sessions" :key="s.key" class="sess">
+            <div class="sess-top">
+              <span class="sess-file" :title="s.path">{{ s.file }}</span>
+              <span class="sess-pill" :class="`st-${s.state}`">
+                <Icon v-if="s.running" name="spinner" :size="11" />
+                {{ stateLabel(s) }}
+              </span>
+            </div>
+
+            <div class="sess-chips">
+              <span class="sess-chip">{{ codecLabel(s) }}</span>
+              <span class="sess-chip">{{ s.container }}</span>
+              <span v-if="s.quality" class="sess-chip">{{ s.quality }}</span>
+            </div>
+
+            <div class="sess-bar" :title="`player ${fmtTime(s.player_pos_seconds)} · encoder ${fmtTime(s.encoder_pos_seconds)}`">
+              <div class="sess-bar-encoded" :style="{ width: pct(s.encoder_pos_seconds, s.duration_seconds) + '%' }" />
+              <div class="sess-bar-player" :style="{ left: pct(s.player_pos_seconds, s.duration_seconds) + '%' }" />
+            </div>
+
+            <div class="sess-stats">
+              <span>player {{ fmtTime(s.player_pos_seconds) }}</span>
+              <span>encoder {{ fmtTime(s.encoder_pos_seconds) }} / {{ fmtTime(s.duration_seconds) }}</span>
+              <span v-if="s.running && s.speed">{{ s.speed.toFixed(2) }}×</span>
+              <span v-if="s.running && s.fps">{{ Math.round(s.fps) }} fps</span>
+              <span v-if="s.running && s.bitrate_kbps > 0">{{ fmtBitrate(s.bitrate_kbps) }}</span>
+              <span>{{ s.ready_segments }}/{{ s.total_segments }} segs</span>
+              <span class="dim">seen {{ Math.round(s.idle_seconds) }}s ago</span>
+            </div>
+          </div>
+        </div>
+      </SettingsSection>
 
       <SettingsSection title="Detected encoders" icon="cpu">
         <KVTable :rows="[
@@ -304,6 +395,83 @@ onMounted(async () => {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 11.5px; color: var(--fg-3);
 }
+
+.sess-empty {
+  color: var(--fg-3); font-size: 12.5px;
+  padding: 14px 16px;
+  background: var(--bg-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+}
+
+.sess-list { display: flex; flex-direction: column; gap: 10px; }
+
+.sess {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+}
+
+.sess-top {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 8px;
+}
+.sess-file {
+  flex: 1; min-width: 0;
+  color: var(--fg-0); font-size: 13px; font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sess-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--fg-2);
+}
+.sess-pill.st-running   { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, transparent); }
+.sess-pill.st-throttled { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 40%, transparent); }
+.sess-pill.st-exited    { color: var(--bad);  border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+
+.sess-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.sess-chip {
+  font-family: var(--font-mono); font-size: 10.5px;
+  color: var(--fg-2);
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 2px 7px;
+}
+
+.sess-bar {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-0);
+  overflow: hidden;
+}
+.sess-bar-encoded {
+  height: 100%;
+  background: color-mix(in srgb, var(--gold) 55%, transparent);
+  transition: width 0.6s ease;
+}
+.sess-bar-player {
+  position: absolute; top: 0; bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--fg-0);
+  transition: left 0.6s ease;
+}
+
+.sess-stats {
+  display: flex; flex-wrap: wrap; gap: 6px 14px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--fg-2);
+  margin-top: 8px;
+}
+.sess-stats .dim { color: var(--fg-4); }
 
 .cache-bar {
   height: 6px;
