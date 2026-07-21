@@ -7,11 +7,83 @@ withDefaults(defineProps<{ embedded?: boolean, showSummary?: boolean }>(), {
 })
 
 import type { ActiveSession } from '~/composables/useActiveSessions'
+import { transcodeSessionsQuery, type TranscodeSession } from '~/queries/admin'
 
 const { $heya } = useNuxtApp()
 const { confirm } = useConfirm()
 const { toast } = useToast()
 const { sessions, isPending, formatTime, progressPct, transcodeLabel } = useActiveSessions()
+
+// Live encoder telemetry, matched onto playback sessions by library file id
+// (transcode keys are "fileID:aN:sid" and Heya admits one live transcode
+// session per file). Matching by session presence — not playback_action — is
+// deliberate: the Jellyfin playstate mirror reports direct_play even when the
+// client picked the transcode URL, and a live ffmpeg head is the honest
+// signal either way.
+const transcodeData = useQuery(transcodeSessionsQuery())
+let encTimer: ReturnType<typeof setInterval> | null = null
+
+const transcodeByFile = computed(() => {
+  const map = new Map<number, TranscodeSession>()
+  for (const t of transcodeData.data.value?.sessions ?? []) {
+    const fileId = Number.parseInt(t.key, 10)
+    if (!Number.isNaN(fileId)) map.set(fileId, t)
+  }
+  return map
+})
+
+const sessionRows = computed(() =>
+  sessions.value.map(s => ({ s, enc: transcodeByFile.value.get(s.file_id) })))
+
+// Transcode sessions with no live playback session to attach to (a player
+// whose session tracking lagged or dropped). Still shown — an active ffmpeg
+// head must never be invisible on the dashboard.
+const orphanTranscodes = computed(() => {
+  const playingFiles = new Set(sessions.value.map(s => s.file_id))
+  return (transcodeData.data.value?.sessions ?? []).filter(t => {
+    const fileId = Number.parseInt(t.key, 10)
+    return Number.isNaN(fileId) || !playingFiles.has(fileId)
+  })
+})
+
+const ENC_STATE_LABELS: Record<string, string> = {
+  running: 'encoding',
+  throttled: 'buffered ahead',
+  completed: 'encoded',
+  killed: 'stopped',
+  exited: 'exited',
+  idle: 'idle',
+}
+
+function encStateLabel(t: TranscodeSession) {
+  return ENC_STATE_LABELS[t.state] ?? t.state
+}
+
+function encAhead(s: ActiveSession, t: TranscodeSession) {
+  return Math.max(0, t.encoder_pos_seconds - s.position_seconds)
+}
+
+function encPct(total: number | undefined, t: TranscodeSession) {
+  const dur = total || t.duration_seconds
+  if (!dur) return 0
+  return Math.min(100, (t.encoder_pos_seconds / dur) * 100)
+}
+
+function fmtMbps(kbps?: number) {
+  if (!kbps) return ''
+  return kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbps` : `${Math.round(kbps)} kbps`
+}
+
+onMounted(() => {
+  encTimer = setInterval(() => {
+    if (document.hidden) return
+    void transcodeData.refetch()
+  }, 3000)
+})
+
+onUnmounted(() => {
+  if (encTimer) clearInterval(encTimer)
+})
 
 const viewerCount = computed(() => new Set(sessions.value.map(s => s.user_id)).size)
 const transcodingCount = computed(() => sessions.value.filter(s => s.playback_action === 'transcode').length)
@@ -156,14 +228,14 @@ async function sendMsg() {
     <SettingsSection title="Live sessions" icon="pulse">
       <div v-if="isPending" class="loading-state"><Icon name="spinner" :size="14" /> Loading…</div>
 
-      <div v-else-if="sessions.length === 0" class="empty-state">
+      <div v-else-if="sessions.length === 0 && orphanTranscodes.length === 0" class="empty-state">
         <div class="empty-icon"><Icon name="cast" :size="28" /></div>
         <div class="empty-title">Nothing playing right now</div>
         <p class="empty-desc">When someone starts watching or listening, their stream shows up here live.</p>
       </div>
 
       <div v-else class="stream-list">
-        <div v-for="s in sessions" :key="s.session_id" class="stream-card">
+        <div v-for="{ s, enc } in sessionRows" :key="s.session_id" class="stream-card">
           <div class="stream-icon" :class="`kind-${s.media_type}`">
             <Icon :name="mediaIcon(s.media_type)" :size="18" />
           </div>
@@ -187,12 +259,24 @@ async function sendMsg() {
 
             <div class="stream-progress">
               <div class="prog-track">
+                <div v-if="enc" class="prog-encoded" :style="{ width: encPct(s.total_seconds, enc) + '%' }" />
                 <div class="prog-fill" :class="{ paused: s.paused }" :style="{ width: progressPct(s) + '%' }" />
               </div>
               <div class="prog-time mono">
                 {{ formatTime(s.position_seconds) }} <span class="prog-sep">/</span> {{ formatTime(s.total_seconds) }}
                 <span class="prog-pct">· {{ progressPct(s) }}%</span>
               </div>
+            </div>
+
+            <div v-if="enc" class="stream-encoder mono">
+              <span class="enc-state" :class="`st-${enc.state}`">
+                <Icon name="cpu" :size="10" /> {{ encStateLabel(enc) }}
+              </span>
+              <span v-if="enc.running && enc.speed">{{ enc.speed.toFixed(2) }}×</span>
+              <span v-if="enc.running && enc.fps">{{ Math.round(enc.fps) }} fps</span>
+              <span v-if="enc.running && enc.bitrate_kbps > 0">{{ fmtMbps(enc.bitrate_kbps) }}</span>
+              <span>+{{ formatTime(encAhead(s, enc)) }} buffered</span>
+              <span v-if="enc.quality" class="dim">{{ enc.quality }} · {{ enc.container }}</span>
             </div>
           </div>
 
@@ -203,6 +287,38 @@ async function sendMsg() {
             <button class="sv2-btn danger sm" :disabled="busy === s.session_id" @click="stopSession(s)">
               <Icon :name="busy === s.session_id ? 'spinner' : 'stop'" :size="12" /> Stop
             </button>
+          </div>
+        </div>
+
+        <div v-for="t in orphanTranscodes" :key="t.key" class="stream-card">
+          <div class="stream-icon">
+            <Icon name="cpu" :size="18" />
+          </div>
+          <div class="stream-body">
+            <div class="stream-top">
+              <span class="stream-title" :title="t.path">{{ t.file }}</span>
+              <StatusBadge :state="t.running ? 'warn' : 'idle'">transcoding</StatusBadge>
+            </div>
+            <div class="stream-meta">
+              <span class="mono">{{ t.video_codec === 'copy' ? 'remux' : t.video_codec.replace(/^lib/, '') }} · {{ t.container }}</span>
+              <span>no linked player session</span>
+            </div>
+            <div class="stream-progress">
+              <div class="prog-track">
+                <div class="prog-encoded" :style="{ width: encPct(t.duration_seconds, t) + '%' }" />
+              </div>
+              <div class="prog-time mono">
+                {{ formatTime(t.encoder_pos_seconds) }} <span class="prog-sep">/</span> {{ formatTime(t.duration_seconds) }}
+              </div>
+            </div>
+            <div class="stream-encoder mono">
+              <span class="enc-state" :class="`st-${t.state}`">
+                <Icon name="cpu" :size="10" /> {{ encStateLabel(t) }}
+              </span>
+              <span v-if="t.running && t.speed">{{ t.speed.toFixed(2) }}×</span>
+              <span v-if="t.running && t.fps">{{ Math.round(t.fps) }} fps</span>
+              <span v-if="t.running && t.bitrate_kbps > 0">{{ fmtMbps(t.bitrate_kbps) }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -304,11 +420,32 @@ async function sendMsg() {
 
 .stream-progress { display: flex; align-items: center; gap: 10px; margin-top: 3px; }
 .prog-track {
+  position: relative;
   flex: 1; height: 4px; border-radius: 2px;
   background: rgb(var(--ink) / 0.08); overflow: hidden;
 }
-.prog-fill { height: 100%; background: var(--gold); transition: width 0.5s ease; }
+.prog-encoded {
+  position: absolute; inset: 0 auto 0 0;
+  background: color-mix(in srgb, var(--gold) 30%, transparent);
+  transition: width 0.6s ease;
+}
+.prog-fill { position: relative; height: 100%; background: var(--gold); transition: width 0.5s ease; }
 .prog-fill.paused { background: var(--fg-3); }
+
+.stream-encoder {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px;
+  font-size: 10.5px; color: var(--fg-2);
+  margin-top: 1px;
+}
+.enc-state {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  font-size: 9.5px;
+  color: var(--fg-2);
+}
+.enc-state.st-running   { color: var(--good); }
+.enc-state.st-throttled { color: var(--gold); }
+.enc-state.st-exited    { color: var(--bad); }
 .prog-time { font-size: 11px; color: var(--fg-2); white-space: nowrap; }
 .prog-sep { color: var(--fg-3); }
 .prog-pct { color: var(--fg-3); }

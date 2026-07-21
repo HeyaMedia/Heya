@@ -582,6 +582,20 @@ func (s *Server) applyPlaystate(r *http.Request, u sqlc.User, report playbackRep
 			return
 		}
 		device := DeviceFrom(ctx)
+		// Playstate reports don't say which stream URL the client chose, so a
+		// live transcode session for this file is the honest playback-action
+		// signal (previously hardcoded direct_play, which undercounted the
+		// dashboard's transcoding tile for Jellyfin clients).
+		action := "direct_play"
+		if tm := s.app.TranscoderSessions(); tm != nil {
+			if ts := tm.GetExisting(target.file.ID); ts != nil {
+				if ts.Opts.Profile.VideoCodec == "copy" {
+					action = "remux"
+				} else {
+					action = "transcode"
+				}
+			}
+		}
 		store.Upsert(sessions.Session{
 			SessionID:       sessionID,
 			UserID:          u.ID,
@@ -601,7 +615,7 @@ func (s *Server) applyPlaystate(r *http.Request, u sqlc.User, report playbackRep
 			PositionSeconds: pos,
 			TotalSeconds:    total,
 			Paused:          report.IsPaused,
-			PlaybackAction:  "direct_play",
+			PlaybackAction:  action,
 			Container:       containerOf(target.file.Path),
 			ClientUserAgent: deviceUserAgent(device, r),
 			ClientIP:        clientIP(r),
