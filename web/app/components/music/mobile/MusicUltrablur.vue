@@ -61,7 +61,13 @@ withDefaults(defineProps<{
   width: 110%;
   height: 110%;
   object-fit: cover;
-  filter: blur(9px) saturate(175%) brightness(0.86);
+  /* useMusicUltrablur resolves internal artwork through the Go image
+     transform as a cached 960px WebP with blur=31. Keep this layer static:
+     a second live CSS blur made Chrome continuously composite a large
+     filtered surface even after the crossfade had settled. A little
+     transparency lets the deterministic color bed retain the richer palette
+     the former saturation filter supplied. */
+  opacity: 0.9;
   transform: scale(1.08);
 }
 
@@ -78,7 +84,7 @@ withDefaults(defineProps<{
   inset: -30% -5%;
   width: 110%;
   height: 160%;
-  filter: blur(8px) saturate(170%) brightness(0.72);
+  opacity: 0.78;
 }
 .music-ultrablur--bar .music-ultrablur-scrim {
   background: linear-gradient(90deg, rgba(0, 0, 0, 0.58), rgba(0, 0, 0, 0.42) 55%, rgba(0, 0, 0, 0.62));

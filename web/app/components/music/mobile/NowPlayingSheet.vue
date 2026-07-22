@@ -421,6 +421,17 @@ watch(activeLyricIdx, (i) => {
   max-height: 100dvh;
   padding-top: var(--safe-top, 0px);
   border-radius: 0;
+  /* This sheet paints its own full-size, server-blurred image. The generic
+     glass surface would otherwise backdrop-blur the already-covered page. */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+/* The full-screen player completely covers its drawer overlay, so the
+   overlay's generic live blur is redundant too. Keep only its dark scrim for
+   the opening/closing edge of the sheet. */
+body:has(.nps-ultrablur) .app-sheet-overlay {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 .surface.app-sheet-content:has(> .nps-ultrablur)::after {
   content: '';
