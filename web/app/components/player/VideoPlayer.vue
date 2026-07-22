@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import AkariSub from 'akarisub'
 import { DropdownMenuItem, DropdownMenuSeparator } from 'reka-ui'
 import type { StreamAudio, StreamSubtitle, QualityOption } from '~~/shared/types'
 import type { CastStateEvent } from '~/composables/useCast'
@@ -258,7 +257,10 @@ const ctrlShown = computed(() => controlsVisible.value || controlsPinned.value)
 const nativeWindowChrome = useNativeWindowChrome()
 let stopWindowChromeReveal: (() => void) | null = null
 const resumeCardRef = ref<HTMLElement>()
-let assRenderer: AkariSub | null = null
+type AkariSubConstructor = typeof import('akarisub')['default']
+type AkariSubInstance = InstanceType<AkariSubConstructor>
+let assRenderer: AkariSubInstance | null = null
+let subtitleRendererGeneration = 0
 // VTT path state — non-ASS tracks are served as WebVTT by the backend and
 // rendered through a hidden <track> + custom overlay (see initVTT).
 let vttTrackEl: HTMLTrackElement | null = null
@@ -839,6 +841,7 @@ function destroyASS() { if (assRenderer) { assRenderer.destroy(); assRenderer = 
 // <track>/overlay. Safe to call when neither exists. Every subtitle switch
 // (ASS ⇄ VTT ⇄ off) funnels through this so renderers never stack.
 function destroySubtitles() {
+  subtitleRendererGeneration++
   destroyASS()
   destroyVTT()
 }
@@ -853,13 +856,18 @@ function initSubtitles() {
   if (activeSubIdx.value < 0 || !videoEl.value) return
   const sub = subtitleTracks.value[activeSubIdx.value]
   if (!sub) return
-  if (sub.codec === 'ass' || sub.codec === 'ssa') initASS(sub)
+  if (sub.codec === 'ass' || sub.codec === 'ssa') void initASS(sub, subtitleRendererGeneration)
   else initVTT(sub)
 }
 
-function initASS(sub: StreamSubtitle) {
+async function initASS(sub: StreamSubtitle, generation: number) {
   if (!videoEl.value) return
   try {
+    // libass is a playback-only dependency. Keep its JS wrapper out of the
+    // browsing bundle and load it only for an ASS/SSA track; the worker/WASM
+    // assets remain on demand as before.
+    const { default: AkariSub } = await import('akarisub')
+    if (generation !== subtitleRendererGeneration || !videoEl.value) return
     assRenderer = new AkariSub({
       video: videoEl.value,
       subUrl: subtitleUrl(sub.index),

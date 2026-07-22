@@ -10,7 +10,7 @@
        credited in (crossfaded, sharp); when the person has no in-library
        credits with backdrops it falls back to the profile photos, softened
        page-side (`photos-mode`) so the sharp headshot in the record-card stays
-       the focal point. Either way HeroCanvas publishes a graded (v2) art claim
+       the focal point. Either way HeroCanvas publishes a shared hero art claim
        so the blurred site-wide underlay follows along. Tone vars are published
        on the scroll root, mirroring the movie/artist ports. -->
   <div v-else-if="person" class="scroll person2 hero-flush" :style="toneStyle" style="height: 100%">

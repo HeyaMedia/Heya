@@ -280,7 +280,7 @@ let settleSeq = 0
 const background = useBackground()
 const currentBg = computed(() => (pick.value && settled.value ? useBackdropUrl(pick.value) : null) || null)
 watch(currentBg, (url) => {
-  if (url) background.set(url, { grade: 'v2' })
+  if (url) background.set(url, { presentation: 'hero' })
   else background.pool('movie')
 }, { immediate: true })
 

@@ -78,6 +78,7 @@ const playableTracks = computed(() => tracks.value.filter(isPlayable))
 const albumPlayable = computed(() => playableTracks.value.length > 0)
 
 const coverUrl = computed(() => useAlbumCoverUrl(artistSlug.value, albumSlug.value))
+const bgImg = useBackgroundImageTools()
 
 const albumTypeLabel = computed(() => (album.value?.album_type || 'album').toUpperCase())
 
@@ -100,14 +101,14 @@ const albumExternalIds = computed<Record<string, string>>(() => {
   return ids
 })
 
-// ── Ambient claim (Heya 2.0 graded soft underlay) ────────────────────────────
+// ── Ambient claim (shared hero presentation) ─────────────────────────────────
 // The cover is the artwork this page owns; push it to the global AmbientBackdrop
-// with grade 'v2' so the blurred wash mirrors it and pops back to the music
+// as a hero so the blurred wash mirrors it and pops back to the music
 // pool on unmount. Honors the user's ambient toggle (off → flat canvas).
 const { ambientEnabled, toneFollowEnabled } = useAppearance()
 const background = useBackground()
 watch([coverUrl, ambientEnabled], ([url, on]) => {
-  if (on && url) background.set(url, { grade: 'v2' })
+  if (on && url) background.set(url, { presentation: 'hero' })
   else background.clear()
 }, { immediate: true })
 
@@ -115,7 +116,9 @@ watch([coverUrl, ambientEnabled], ([url, on]) => {
 // ambient toggle) so the hero identity text keeps its dark grade for contrast,
 // and it hard-clips at the ledger seam (the .hero section is overflow:hidden).
 // A blurred wash sidesteps the square-cover-into-a-wide-hero crop problem.
-const heroArtStyle = computed(() => (coverUrl.value ? { backgroundImage: `url(${coverUrl.value})` } : {}))
+const heroArtStyle = computed(() => (coverUrl.value
+  ? { backgroundImage: `url("${bgImg.ambientVariant(coverUrl.value)}")` }
+  : {}))
 
 // ── Tone follow: --tone / --tone-rgb / --tone-ink on the page root ───────────
 // Primary source is the ambient's own sampled tone; a direct cover sample is
@@ -754,8 +757,8 @@ if (import.meta.client) {
   z-index: 0;
   background-size: cover;
   background-position: center;
-  filter: blur(64px) brightness(0.42) saturate(1.3);
-  transform: scale(1.25);
+  filter: blur(7px) brightness(0.75) saturate(1.2);
+  transform: scale(1.06);
 }
 .hero-grade {
   position: absolute;

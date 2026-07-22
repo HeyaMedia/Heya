@@ -12,6 +12,68 @@ export default defineNuxtConfig({
     "@vite-pwa/nuxt",
   ],
 
+  hooks: {
+    "build:manifest"(manifest) {
+      // Nuxt normally emits rel=prefetch for every dynamic entry. That would
+      // download all three playback payloads immediately after Home becomes
+      // idle, defeating both the lazy imports and the Workbox exclusions.
+      for (const resource of Object.values(manifest)) {
+        if (/^feature-(?:hls|subtitles|visualizer)\./.test(resource.file || "")) {
+          resource.prefetch = false
+        }
+      }
+    },
+    // Nuxt's Vite builder creates the final client environment after merging
+    // `vite.build`, so output-level Rolldown settings placed there are
+    // overwritten. Apply the production chunk policy to the final client
+    // config instead. The app and all route/UI code become one cacheable
+    // payload; the genuinely heavyweight playback engines stay lazy so Home
+    // does not parse a video stack or visualizer it never uses.
+    "vite:extendConfig"(config, { isClient }) {
+      if (!isClient || process.env.NODE_ENV !== "production") return
+      type RolldownOutput = Record<string, unknown> & { codeSplitting?: unknown }
+      type ClientBuild = typeof config.build & {
+        rolldownOptions?: { output?: RolldownOutput | RolldownOutput[] }
+      }
+      const environmentBuild = config.environments?.client?.build as ClientBuild | undefined
+      const build = (environmentBuild ?? config.build) as ClientBuild
+      if (!build) return
+      build.rolldownOptions ??= {}
+      const currentOutput = build.rolldownOptions.output
+      const outputs = (Array.isArray(currentOutput) ? currentOutput : [currentOutput ?? {}])
+      for (const output of outputs) {
+        output.codeSplitting = {
+          groups: [
+            {
+              // A single total partition avoids the catch-all recursively
+              // reclaiming modules assigned by earlier groups. Rolldown treats
+              // each returned name as its own manual group.
+              name(id: string) {
+                if (/[\\/]node_modules[\\/]butterchurn(?:-presets)?[\\/]/.test(id)) return "feature-visualizer"
+                if (/[\\/]node_modules[\\/]hls\.js[\\/]/.test(id)) return "feature-hls"
+                if (/[\\/]node_modules[\\/]akarisub[\\/]/.test(id)) return "feature-subtitles"
+                return "app"
+              },
+              test: () => true,
+              includeDependenciesRecursively: false,
+            },
+          ],
+        }
+        // Nuxt's default callback intentionally emits content-hash-only
+        // filenames, which throws away the manual group name. Preserve it so
+        // Workbox can exclude the three lazy feature payloads deterministically
+        // without inspecting minified source code.
+        output.chunkFileNames = "_nuxt/[name].[hash].js"
+        // The catch-all deliberately does not pull dynamic dependencies into
+        // itself. Preserve module execution order across the resulting manual
+        // boundaries; Rolldown otherwise warns that circular chunks can run
+        // side effects too early.
+        output.strictExecutionOrder = true
+      }
+      build.rolldownOptions.output = Array.isArray(currentOutput) ? outputs : outputs[0]
+    },
+  },
+
   // PWA install support (Wave 4 of docs/responsive-plan.md). Self-hosted app
   // with frequent tagged releases. `generateSW` (the module default) precaches
   // the built app shell, so a freshly deployed version stays invisible until
@@ -71,12 +133,21 @@ export default defineNuxtConfig({
       importScripts: ["/notification-click.js"],
       // Defaults only glob js/css/html; add the icon + font formats that
       // make up the rest of the "app shell" so the standalone window has
-      // something to paint from cache immediately. `akarisub` (libass WASM
-      // + its font, ~3.5 MB) is the subtitle renderer for ASS tracks — only
-      // needed when a video with ASS subs actually plays, not part of the
-      // shell, so it's excluded from precache and fetched on demand instead.
+      // something to paint from cache immediately. Heavy playback-only
+      // features stay out of the install/update path: libass, hls.js,
+      // Butterchurn, and its presets are fetched on demand when somebody
+      // actually plays that media.
       globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
-      globIgnores: ["**/akarisub/**"],
+      globIgnores: [
+        "**/akarisub/**",
+        "**/feature-hls.*.js",
+        "**/feature-subtitles.*.js",
+        "**/feature-visualizer.*.js",
+      ],
+      // The deliberately coarse app chunk is larger than Workbox's generic
+      // 2 MiB safety default. Heya wants it installed as one atomic shell;
+      // playback-only chunks above remain excluded and load on demand.
+      maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
       // The html glob above never actually matches the SPA shell: Nitro
       // writes index.html AFTER the client build where workbox's glob runs,
       // so without this explicit entry the built sw.js contained NO html in
@@ -101,27 +172,33 @@ export default defineNuxtConfig({
         /^\/(?:emby|socket|embywebsocket|web|api-docs|robots\.txt)(?:\/|$)/i,
         /^\/rest(?:\/|$)/i,
       ],
-      // The ONLY `/api/*` requests the SW may intercept: media images. Their
-      // URLs are stable but the CONTENT is mutable — album covers especially
-      // (re-identify/edit swaps the bytes behind the same
-      // `/artists/{slug}/albums/{slug}/cover` URL). So StaleWhileRevalidate,
-      // NOT CacheFirst: paint instantly from the SW cache (kills the
-      // repeated-reload flicker on the media grids) while a background fetch
-      // refreshes the entry, so edited art lands on the next view rather than
-      // being pinned. `maxAgeSeconds` is capped at the server's own 7-day
-      // `immutable` window so the SW never holds art staler than the browser's
-      // HTTP cache already would. Auth, streaming, and every other `/api/*`
-      // route match no rule here, so the SW leaves them alone — always
-      // network-fresh. Covers `/image` variants (media/person/studio, incl.
-      // `?w=…&q=…` resize params, keyed per size) and album `/cover`. 500-entry
-      // LRU, quota-purge.
+      // The ONLY `/api/*` requests the SW may intercept: media images. Generic
+      // media/person/studio files carry the server's seven-day immutable
+      // contract, and media objects add their durable updated-at revision to
+      // the URL (useMedia.ts), so CacheFirst avoids running a background fetch
+      // path on every remount. Album-cover DTOs do not yet all expose a durable
+      // artwork revision; keep those on StaleWhileRevalidate so a refreshed
+      // cover cannot stay pinned behind its stable slug URL. Auth, streaming,
+      // and every other `/api/*` route match no rule here.
       runtimeCaching: [
         {
-          urlPattern:
-            /\/api\/(?:media|person|studio)\/[^/]+\/image|\/api\/music\/artists\/[^/]+\/albums\/[^/]+\/cover/,
-          handler: "StaleWhileRevalidate",
+          urlPattern: /\/api\/(?:media|person|studio)\/[^/]+\/image/,
+          handler: "CacheFirst",
           options: {
             cacheName: "heya-images",
+            expiration: {
+              maxEntries: 500,
+              maxAgeSeconds: 60 * 60 * 24 * 7,
+              purgeOnQuotaError: true,
+            },
+            cacheableResponse: { statuses: [0, 200] },
+          },
+        },
+        {
+          urlPattern: /\/api\/music\/artists\/[^/]+\/albums\/[^/]+\/cover/,
+          handler: "StaleWhileRevalidate",
+          options: {
+            cacheName: "heya-album-covers",
             expiration: {
               maxEntries: 500,
               maxAgeSeconds: 60 * 60 * 24 * 7,

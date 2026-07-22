@@ -39,8 +39,9 @@ function prune(entries: Record<string, SerializedQueryEntry>, now = Date.now(), 
 
   const selected: Record<string, SerializedQueryEntry> = {}
   let bytes = 2
+  let count = 0
   for (const [key, entry] of candidates) {
-    if (Object.keys(selected).length >= MAX_ENTRIES) break
+    if (count >= MAX_ENTRIES) break
     const entryBytes = new Blob([JSON.stringify([key, entry])]).size
     if (bytes + entryBytes > MAX_BYTES) continue
     // Errors are never persisted. A failed background revalidation keeps the
@@ -48,6 +49,7 @@ function prune(entries: Record<string, SerializedQueryEntry>, now = Date.now(), 
     // what allows the next offline boot to use it again.
     selected[key] = [entry[0], null, entry[2], entry[3]]
     bytes += entryBytes
+    count++
   }
   return { entries: selected, bytes }
 }
@@ -91,6 +93,7 @@ export default defineNuxtPlugin({
         if (stopped || !token.value || activeUserId !== userId) return
         if (writing) { writeAgain = true; return }
         writing = true
+        const startedAt = performance.now()
         try {
           const serialized = serializeQueryCache(queryCache) as Record<string, SerializedQueryEntry>
           for (const entry of queryCache.getEntries()) {
@@ -113,6 +116,7 @@ export default defineNuxtPlugin({
           await savePersistedQueryCache(record)
           metrics.setPersistenceStats(metrics.hydratedEntries, Object.keys(selected.entries).length, selected.bytes)
         } finally {
+          metrics.recordPersistence(performance.now() - startedAt)
           writing = false
           if (writeAgain) { writeAgain = false; void persist() }
         }

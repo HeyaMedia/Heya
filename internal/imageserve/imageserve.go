@@ -1,8 +1,9 @@
 // Package imageserve provides on-the-fly image resizing with a disk cache.
 //
 // Callers wrap a source path on disk with Serve(). Resize parameters come from
-// URL query (w, h, q, f). Resized output is written to a cache directory keyed
-// by source mtime so cache invalidates automatically when the source changes.
+// URL query (w, h, q, f, blur). Transformed output is written to a cache
+// directory keyed by source mtime so cache invalidates automatically when the
+// source changes.
 // Concurrent identical requests are coalesced via singleflight.
 package imageserve
 
@@ -21,13 +22,13 @@ import (
 	"strconv"
 	"strings"
 
+	deepwebp "github.com/deepteams/webp"
 	"github.com/disintegration/imaging"
 	"github.com/karbowiak/heya/internal/atomicfile"
 	"golang.org/x/sync/singleflight"
 
-	// Decode-only WebP support — registers a decoder with the stdlib image
-	// package so imaging.Open() can read .webp posters. We don't have a
-	// pure-Go WebP encoder, so cached output is JPEG either way.
+	// Registers the established x/image decoder used elsewhere in Heya.
+	// deepteams/webp below supplies the pure-Go encoder for transformed output.
 	_ "golang.org/x/image/webp"
 )
 
@@ -57,12 +58,13 @@ type Params struct {
 	Width   int
 	Height  int
 	Quality int
-	Format  string // "jpeg", "png", or "" to match source
+	Format  string // "jpeg", "png", "webp", or "" to match source
+	Blur    int    // Gaussian radius in pixels, 0 disables it
 }
 
 // active reports whether the params request any transformation.
 func (p Params) active() bool {
-	return p.Width > 0 || p.Height > 0 || p.Format != ""
+	return p.Width > 0 || p.Height > 0 || p.Format != "" || p.Blur > 0
 }
 
 // ParseQuery reads resize parameters from URL query. Returns the parsed params
@@ -85,11 +87,18 @@ func ParseQuery(q url.Values) Params {
 			p.Quality = n
 		}
 	}
+	if v := q.Get("blur"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 64 {
+			p.Blur = n
+		}
+	}
 	switch q.Get("f") {
 	case "jpeg", "jpg":
 		p.Format = "jpeg"
 	case "png":
 		p.Format = "png"
+	case "webp":
+		p.Format = "webp"
 	}
 	return p
 }
@@ -156,9 +165,9 @@ func (r *Resizer) cacheKey(srcPath string, st os.FileInfo, p Params) (string, er
 	// sha256 with these inputs is purely a cache-key hash, not a security
 	// primitive — collisions just cost an extra resize, not a security
 	// breach. Errors from Fprintf can't happen with a hasher Writer.
-	_, _ = fmt.Fprintf(h, "%s|%d|%d|%d|%d|%d|%s",
+	_, _ = fmt.Fprintf(h, "%s|%d|%d|%d|%d|%d|%d|%s",
 		abs, st.ModTime().UnixNano(), st.Size(),
-		p.Width, p.Height, p.Quality, p.Format,
+		p.Width, p.Height, p.Quality, p.Blur, p.Format,
 	)
 	sum := hex.EncodeToString(h.Sum(nil))
 	ext := p.Format
@@ -180,6 +189,12 @@ func (r *Resizer) generate(srcPath, cachePath string, p Params) error {
 	}
 
 	out := resize(src, p)
+	if p.Blur > 0 {
+		// Ambient backdrops are deliberately soft. Baking the Gaussian into the
+		// cached derivative avoids a large live CSS filter over the viewport on
+		// every transition frame.
+		out = imaging.Blur(out, float64(p.Blur))
+	}
 
 	if err := os.MkdirAll(filepath.Dir(cachePath), 0o750); err != nil {
 		return err
@@ -192,6 +207,13 @@ func (r *Resizer) generate(srcPath, cachePath string, p Params) error {
 		switch format {
 		case "png":
 			err = png.Encode(writer, out)
+		case "webp":
+			opts := deepwebp.OptionsForPreset(deepwebp.PresetPhoto, float32(p.Quality))
+			// Ambient derivatives are generated once and disk-cached. Method 4
+			// spends a little more time on that cold request to reduce every
+			// subsequent network transfer without introducing CGO/libwebp.
+			opts.Method = 4
+			err = deepwebp.Encode(writer, out, opts)
 		default: // jpeg
 			err = jpeg.Encode(writer, out, &jpeg.Options{Quality: p.Quality})
 		}
@@ -217,18 +239,24 @@ func resize(src image.Image, p Params) image.Image {
 // sourceExt returns the output format for a source when no explicit f= is
 // requested. Canonical HeyaMetadata URLs are opaque UUIDs, so their local
 // cache filenames commonly end in the fallback .jpg even when the bytes are
-// PNG. Inspect the bytes to preserve transparency for logos and clearart.
-// WebP/GIF remain decode-only and transcode to JPEG.
+// PNG or WebP. Inspect the bytes to preserve transparency for logos and
+// clearart and to avoid needlessly transcoding existing WebP sources.
 func sourceExt(path string) string {
 	file, err := os.Open(path) //nolint:gosec // path is a resolved internal cache file
 	if err == nil {
 		defer func() { _ = file.Close() }()
-		if _, format, decodeErr := image.DecodeConfig(file); decodeErr == nil && format == "png" {
-			return "png"
+		if _, format, decodeErr := image.DecodeConfig(file); decodeErr == nil {
+			switch format {
+			case "png", "webp":
+				return format
+			}
 		}
 	}
-	if filepath.Ext(path) == ".png" {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".png":
 		return "png"
+	case ".webp":
+		return "webp"
 	}
 	return "jpeg"
 }
@@ -239,6 +267,8 @@ func contentTypeFor(format string) string {
 		return "image/jpeg"
 	case "png":
 		return "image/png"
+	case "webp":
+		return "image/webp"
 	}
 	return "" // let http.ServeContent sniff
 }

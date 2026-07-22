@@ -7,11 +7,62 @@ import (
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestParseQueryAcceptsBoundedBlur(t *testing.T) {
+	params := ParseQuery(url.Values{"blur": {"24"}, "w": {"960"}, "q": {"58"}, "f": {"webp"}})
+	if params.Blur != 24 || params.Width != 960 || params.Quality != 58 || params.Format != "webp" {
+		t.Fatalf("ParseQuery() = %#v, want blur=24 width=960 quality=58 format=webp", params)
+	}
+	if !params.active() {
+		t.Fatal("blurred params should activate the transformer")
+	}
+	if got := ParseQuery(url.Values{"blur": {"65"}}).Blur; got != 0 {
+		t.Fatalf("out-of-range blur = %d, want 0", got)
+	}
+}
+
+func TestServeGeneratesWebPDerivative(t *testing.T) {
+	resizer, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(t.TempDir(), "source.png")
+	file, err := os.Create(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := image.NewNRGBA(image.Rect(0, 0, 16, 16))
+	for y := range 16 {
+		for x := range 16 {
+			img.SetNRGBA(x, y, color.NRGBA{R: uint8(x * 16), G: uint8(y * 16), B: 120, A: 255})
+		}
+	}
+	if err := png.Encode(file, img); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/image?w=8&blur=2&f=webp", nil)
+	resizer.Serve(response, request, source, Params{Width: 8, Quality: 58, Format: "webp", Blur: 2})
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	if got := response.Header().Get("Content-Type"); got != "image/webp" {
+		t.Fatalf("Content-Type = %q, want image/webp", got)
+	}
+	if body := response.Body.Bytes(); len(body) < 12 || string(body[:4]) != "RIFF" || string(body[8:12]) != "WEBP" {
+		t.Fatalf("body is not a WebP container: %x", body)
+	}
+}
 
 func TestSourceExtUsesImageBytesForOpaqueCanonicalFilename(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "opaque-canonical-id.jpg")

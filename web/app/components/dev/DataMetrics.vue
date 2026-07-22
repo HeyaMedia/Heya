@@ -14,6 +14,8 @@
       <span>Prefetch wasted</span><b>{{ metrics.prefetchWasted }}</b>
       <span>Disk cache</span><b>{{ metrics.persistedEntries }} · {{ formatBytes(metrics.persistedBytes) }}</b>
       <span>Hydrated</span><b>{{ metrics.hydratedEntries }}</b>
+      <span>Persist last / avg</span><b>{{ metrics.lastPersistenceMs }} / {{ metrics.averagePersistenceMs }} ms</b>
+      <span>Persist max / writes</span><b>{{ metrics.maxPersistenceMs }} ms / {{ metrics.persistenceWrites }}</b>
     </div>
     <div class="dm-path">{{ metrics.lastPath || 'No navigation yet' }}</div>
   </details>

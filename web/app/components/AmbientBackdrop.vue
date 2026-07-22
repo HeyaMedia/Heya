@@ -2,7 +2,7 @@
   <div
     v-if="active"
     class="ambient-backdrop"
-    :class="{ 'override-mode': !!overrideUrl, 'override-v2': !!overrideUrl && overrideGrade === 'v2', 'veil-content': !!claimedPool && !overrideUrl, reveal: ctl.reveal }"
+    :class="{ 'override-mode': !!overrideUrl, 'veil-content': !!claimedPool && !overrideUrl, reveal: ctl.reveal }"
     :style="{ '--ambient-opacity': intensity / 100 }"
     aria-hidden="true"
   >
@@ -12,19 +12,17 @@
          preloaded one. With modifier props here, NuxtImg's densities srcset
          could pick a w=3840 file the preloader never warmed.
 
-         Each layer carries its OWN grade class (grade-pool/art/v2), stamped
-         when its image lands. Grading from the container restyled BOTH
-         layers the instant the winning claim changed: leaving a v2 detail
-         page stripped brightness(0.4) off the still-visible art — a bright
-         flash — before the incoming pool image darkened it back.
+         Each layer carries its OWN mode class (mode-pool/art/hero), stamped
+         when its image lands. The modes share image processing, but retain
+         their own fade timing/presence while an outgoing layer finishes.
 
-         The layer wrapper (not the img) carries blur/opacity/drift: blur on
-         the wrapper composites the main img and its mirror strip into ONE
-         raster before blurring, so the two can't bleed into each other at
-         their join, and the oversized wrapper pushes the blur's edge fade
-         off-screen (replacing the old per-image scale-up trick).
+         The layer wrapper (not the img) carries opacity and a small fallback
+         blur. The bulk of the blur is baked into the WebP derivative, while
+         the fallback keeps passive dev servers compatible with an older
+         upstream. Applying it to the wrapper composites the main img and its
+         mirror strip into one raster, so they cannot bleed at their join.
 
-         When the winning claim publishes hero geometry (v2 detail pages),
+         When the winning claim publishes hero geometry (detail pages),
          the main img is placed at EXACTLY the sharp hero's scale/offset —
          behind the hero it's pixel-aligned, and below the hero's bottom edge
          the blur shows the image's real continuation instead of a
@@ -34,20 +32,20 @@
     <div
       v-if="srcA"
       class="ambient-layer"
-      :class="[`grade-${gradeA}`, { visible: showA }]"
+      :class="[`mode-${modeA}`, { visible: showA }]"
       @transitionend="onLayerTransitionEnd('a', $event)"
     >
-      <LoadingImage :src="srcA" class="ambient-img" :style="mainStyleA" alt="" />
-      <NuxtImg v-if="mirrorStyleA" :src="srcA" class="ambient-mirror" :style="mirrorStyleA" alt="" />
+      <NuxtImg :src="srcA" class="ambient-img" :style="mainStyleA" alt="" loading="eager" decoding="sync" />
+      <NuxtImg v-if="mirrorStyleA" :src="srcA" class="ambient-mirror" :style="mirrorStyleA" alt="" loading="eager" decoding="sync" />
     </div>
     <div
       v-if="srcB"
       class="ambient-layer"
-      :class="[`grade-${gradeB}`, { visible: !showA }]"
+      :class="[`mode-${modeB}`, { visible: !showA }]"
       @transitionend="onLayerTransitionEnd('b', $event)"
     >
-      <LoadingImage :src="srcB" class="ambient-img" :style="mainStyleB" alt="" />
-      <NuxtImg v-if="mirrorStyleB" :src="srcB" class="ambient-mirror" :style="mirrorStyleB" alt="" />
+      <NuxtImg :src="srcB" class="ambient-img" :style="mainStyleB" alt="" loading="eager" decoding="sync" />
+      <NuxtImg v-if="mirrorStyleB" :src="srcB" class="ambient-mirror" :style="mirrorStyleB" alt="" loading="eager" decoding="sync" />
     </div>
     <!-- All three scrim looks stay mounted and opacity-crossfade on mode
          changes — background gradients can't transition, so a single
@@ -91,9 +89,11 @@ const { isAuthenticated } = useAuth()
 const bgImg = useBackgroundImageTools()
 const claim = useBackgroundClaim()
 const overrideUrl = computed(() => (claim.value?.kind === 'art' ? claim.value.url : null))
-// Heya 2.0 art owners tag their claim with grade:'v2' — the layer then paints
-// the redesign's soft grade instead of the legacy pool coat (see override-v2).
-const overrideGrade = computed(() => (claim.value?.kind === 'art' ? claim.value.grade : undefined))
+// Hero owners tag their claim with presentation:'hero'. All modes share one
+// rendered derivative/filter; the tag only selects hero alignment, fade timing,
+// and full-presence semantics.
+const overridePresentation = computed(() =>
+  claim.value?.kind === 'art' ? claim.value.presentation : undefined)
 const claimedPool = computed(() => (claim.value?.kind === 'pool' ? claim.value.types : null))
 // Corner-cluster channel: the layer reports mode/rotating/cycle, the
 // AmbientControls buttons request pause/shuffle/reveal.
@@ -156,6 +156,7 @@ const srcA = ref<string | null>(null)
 const srcB = ref<string | null>(null)
 const showA = ref(true)
 const shown = ref<string | null>(null)
+const shownVariant = ref<string | null>(null)
 let layerCleanupTimer: ReturnType<typeof setTimeout> | null = null
 
 function clearOutgoingLayer() {
@@ -190,7 +191,7 @@ function onLayerTransitionEnd(layer: 'a' | 'b', event: TransitionEvent) {
 // outgoing layer keeps its own placement while fading; null → the default
 // full-viewport cover.
 const claimAlign = computed<ClaimAlign | null>(() =>
-  claim.value?.kind === 'art' && claim.value.grade === 'v2' ? claim.value.align ?? null : null)
+  claim.value?.kind === 'art' && claim.value.presentation === 'hero' ? claim.value.align ?? null : null)
 const alignA = ref<ClaimAlign | null>(null)
 const alignB = ref<ClaimAlign | null>(null)
 const natA = ref<{ w: number; h: number } | null>(null)
@@ -198,7 +199,7 @@ const natB = ref<{ w: number; h: number } | null>(null)
 
 // The wrapper's off-screen margin (see .ambient-layer). Keep in sync with
 // the CSS --bleed value.
-const BLEED = 80
+const BLEED = 24
 const vh = ref(0)
 function measureViewport() {
   vh.value = window.innerHeight
@@ -262,15 +263,15 @@ watch(claimAlign, (a) => {
   ;(showA.value ? alignA : alignB).value = a
 })
 
-// Per-layer grade — the look each image was shown under. An outgoing image
-// keeps its grade while fading out; only the incoming layer (or the visible
-// one when the SAME image is re-claimed, e.g. list → detail sharing art)
-// takes the current claim's grade.
-type ImgGrade = 'pool' | 'art' | 'v2'
-const gradeA = ref<ImgGrade>('pool')
-const gradeB = ref<ImgGrade>('pool')
-const claimGrade = computed<ImgGrade>(() =>
-  overrideUrl.value ? (overrideGrade.value === 'v2' ? 'v2' : 'art') : 'pool')
+// Per-layer mode — image processing is unified, but an outgoing image keeps
+// the fade timing/presence it was shown under. Only the incoming layer (or the
+// visible one when the SAME image is re-claimed, e.g. list → detail sharing
+// art) takes the current claim's mode.
+type LayerMode = 'pool' | 'art' | 'hero'
+const modeA = ref<LayerMode>('pool')
+const modeB = ref<LayerMode>('pool')
+const claimMode = computed<LayerMode>(() =>
+  overrideUrl.value ? (overridePresentation.value === 'hero' ? 'hero' : 'art') : 'pool')
 let cursor = 0
 let timer: ReturnType<typeof setTimeout> | null = null
 
@@ -312,42 +313,47 @@ function showImage(url: string, then?: (ok: boolean) => void) {
   // already shown" must still cancel a pending switch, or A → (B loading)
   // → A leaves B current and it lands late anyway.
   const seq = ++loadSeq
-  if (shown.value === url) {
-    // Same image, possibly a new claim grade (list → detail whose art is the
-    // current pool pick): re-coat the visible layer in place — a deliberate,
-    // smooth transition on one layer, not a swap. Placement restamps with it
-    // (naturals for this layer are already known from its own load).
-    ;(showA.value ? gradeA : gradeB).value = claimGrade.value
+  const variant = ctl.value.reveal
+    ? bgImg.variant(url)
+    : bgImg.ambientVariant(url)
+  if (shown.value === url && shownVariant.value === variant) {
+    // Same image, possibly a new claim mode (list → detail whose art is the
+    // current pool pick): update timing/presence on the visible layer in place,
+    // without a redundant image swap. Placement restamps with it (naturals for
+    // this layer are already known from its own load).
+    ;(showA.value ? modeA : modeB).value = claimMode.value
     ;(showA.value ? alignA : alignB).value = claimAlign.value
     then?.(true)
     return
   }
-  const variant = bgImg.variant(url)
-  const img = new Image()
-  img.onload = async () => {
-    // Decode off-screen so the crossfade's first painted frame doesn't
-    // stall on a main-thread decode (the visible "stutter" at fade start).
-    try { await img.decode() } catch { /* decodable enough to paint */ }
+  const land = (nat: { w: number; h: number } | null) => {
     if (seq !== loadSeq) return
-    const nat = { w: img.naturalWidth, h: img.naturalHeight }
+    if (!nat) { then?.(false); return }
     if (showA.value) {
       srcB.value = variant
-      gradeB.value = claimGrade.value
+      modeB.value = claimMode.value
       natB.value = nat
       alignB.value = claimAlign.value
     } else {
       srcA.value = variant
-      gradeA.value = claimGrade.value
+      modeA.value = claimMode.value
       natA.value = nat
       alignA.value = claimAlign.value
     }
     showA.value = !showA.value
     shown.value = url
+    shownVariant.value = variant
     scheduleLayerCleanup()
     then?.(true)
   }
-  img.onerror = () => { if (seq === loadSeq) then?.(false) }
-  img.src = variant
+
+  // HeroCanvas prepares both rendered variants before publishing its claim.
+  // Take the synchronous path when that exact ambient URL is already decoded,
+  // so the hero and underlay enter the same Vue paint rather than two adjacent
+  // browser tasks. Pool/reveal images use the same helper asynchronously.
+  const prepared = bgImg.prepared(variant)
+  if (prepared) land(prepared)
+  else void bgImg.prepareResolved(variant).then(land)
 }
 
 function scheduleRotation() {
@@ -361,17 +367,15 @@ function scheduleRotation() {
   warmAhead()
 }
 
-/** Warm the next couple of pool variants while this window idles, so the
+/** Warm the next pool variant while this window idles, so the
  *  upcoming rotation (or a quick manual next) crossfades from a hot cache.
  *  Low-priority + idle-scheduled: never competes with page content. */
 function warmAhead() {
   const pool = poolQuery.data.value
   if (!pool || pool.length < 2) return
   const kick = () => {
-    for (const off of [1, 2]) {
-      const c = pool[(cursor + off) % pool.length]
-      if (c) bgImg.warm(urlFor(c))
-    }
+    const c = pool[(cursor + 1) % pool.length]
+    if (c) bgImg.warmAmbient(urlFor(c))
   }
   if ('requestIdleCallback' in window) requestIdleCallback(kick, { timeout: 4000 })
   else setTimeout(kick, 800)
@@ -459,6 +463,14 @@ watch(() => ctl.value.paused, (p) => {
   else if (active.value && !overrideUrl.value) scheduleRotation()
 })
 
+// Normal display uses the cheap baked ambient derivative; reveal swaps the
+// same raw artwork to the sharp 1920px variant, then swaps back to the already
+// cached derivative when the page returns. showImage's sequence guard keeps a
+// quick double-toggle from landing the wrong variant late.
+watch(() => ctl.value.reveal, () => {
+  if (shown.value) showImage(shown.value)
+})
+
 watch(() => ctl.value.shuffleReq, () => {
   const pool = poolQuery.data.value
   if (!pool?.length || overrideUrl.value || !active.value) return
@@ -514,46 +526,46 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-/* One crossfade layer = wrapper + main img (+ optional mirror strip). The
-   wrapper carries blur/opacity so its children composite into ONE
-   raster before blurring (no bleed at the main/mirror join), and it hangs
-   --bleed past the viewport on every side so the blur's edge fade happens
-   off-screen — replacing the old per-image scale-up trick. */
-.ambient-backdrop { --bleed: 80px; }
+/* One crossfade layer = wrapper + main img (+ optional mirror strip). Most
+   softness is baked into the 960px WebP. A small fallback blur remains for
+   passive development: localhost forwards image bytes to the previous
+   production version, which may not understand the new blur transform yet.
+   Keeping the fallback on the wrapper also makes the main/mirror join one
+   raster, with the bleed moving its soft edge off-screen. */
+.ambient-backdrop { --bleed: 24px; }
 .ambient-layer {
   position: absolute;
   inset: calc(-1 * var(--bleed));
   opacity: 0;
-  transition: opacity 2.5s ease, filter 0.8s ease;
-  /* Soft-focus so content always wins. ONE blur and ONE presence formula for
-     both modes — the list-page pools and the hero-driven pages must read as
-     the same material. */
-  filter: blur(9px);
+  transition: opacity 1.2s ease;
+  /* One image treatment everywhere. Seven live pixels keep passive dev
+     upstreams presentable; production gets nearly all softness from the
+     shared cached derivative. Darkness/saturation are likewise identical;
+     page-specific readability comes from static scrims above this surface. */
+  filter: blur(7px) brightness(0.75) saturate(1.2);
 }
 .ambient-layer.visible {
   opacity: min(calc(var(--ambient-opacity, 0.3) * 1.9), 0.9);
 }
 /* Owner-driven artwork switches with its hero — snappier fade only. */
-.ambient-layer.grade-art {
-  transition: opacity 1.2s ease;
+.ambient-layer.mode-art {
+  transition: opacity 0.8s ease;
 }
 
-/* Heya 2.0 art owners (grade:'v2') — the redesign's soft underlay grade:
-   heavier blur, dimmer, richer, and pushed to full opacity so below-hero
-   content reads on a deliberate dark wash rather than the legacy ~0.5
-   presence coat. Non-v2 art claims and every pool page are untouched. Kept
-   ABOVE the .reveal rules so a reveal still clears the blur cleanly.
+/* Hero owners use the same image processing as every pool/art surface. They
+   remain full-presence because the owning hero and its
+   continuation are one aligned image; the stronger static override scrim
+   below reproduces the former entity-page darkness. Kept ABOVE the
+   .reveal rules so a reveal still clears the treatment cleanly.
 
    Grades live on each layer, NOT the container: an outgoing image must fade
-   out under the coat it was shown with, or leaving a v2 page brightens the
-   still-visible art (brightness 0.4 → none) before the next image lands. */
-.ambient-layer.grade-v2 {
-  filter: blur(72px) brightness(0.4) saturate(1.2);
+   out with the timing/presence it was shown with. */
+.ambient-layer.mode-hero {
   /* Match HeroCanvas's fade so the blur underlay and the sharp hero art
      arrive together instead of the blur trailing a beat behind. */
   transition: opacity 0.6s ease;
 }
-.ambient-layer.grade-v2.visible {
+.ambient-layer.mode-hero.visible {
   opacity: 1;
 }
 
@@ -609,29 +621,30 @@ onBeforeUnmount(() => {
 .override-mode .scrim-open,
 .veil-content .scrim-open { opacity: 0; }
 
-/* Content veil (explicit pool claims — the list pages): mirrors the
-   override scrim so /movies//tv//music read exactly like home, with a
-   touch more base at the very top where FilterBar/headers sit. */
+/* Content veil (explicit pool claims — the list pages): slightly denser than
+   the hero/detail coat so /movies /tv /music /books keep their controls and
+   rails readable without adding more live blur or compositor work. */
 .scrim-veil {
   background:
     linear-gradient(to bottom,
-      color-mix(in srgb, var(--bg-1) 34%, transparent) 0%,
-      color-mix(in srgb, var(--bg-1) 16%, transparent) 30%,
-      color-mix(in srgb, var(--bg-1) 55%, transparent) 68%,
-      color-mix(in srgb, var(--bg-1) 78%, transparent) 100%);
+      color-mix(in srgb, var(--bg-1) 42%, transparent) 0%,
+      color-mix(in srgb, var(--bg-1) 22%, transparent) 30%,
+      color-mix(in srgb, var(--bg-1) 62%, transparent) 68%,
+      color-mix(in srgb, var(--bg-1) 82%, transparent) 100%);
 }
 .veil-content .scrim-veil { opacity: 1; }
 
-/* Override mode: the hero zone (top) shows the art nearly clean — the
-   owning page's own fade handles its text — and the canvas builds back
-   up toward the bottom where long-form content lives. */
+/* Override mode: full-presence detail artwork uses a denser static veil than
+   the intensity-scaled section pools. This preserves the old detail darkness
+   after removing brightness(.4) from the live image filter, while keeping the
+   actual derivative/filter identical everywhere. */
 .scrim-override {
   background:
     linear-gradient(to bottom,
-      color-mix(in srgb, var(--bg-1) 22%, transparent) 0%,
-      color-mix(in srgb, var(--bg-1) 16%, transparent) 30%,
-      color-mix(in srgb, var(--bg-1) 55%, transparent) 68%,
-      color-mix(in srgb, var(--bg-1) 78%, transparent) 100%);
+      color-mix(in srgb, var(--bg-1) 58%, transparent) 0%,
+      color-mix(in srgb, var(--bg-1) 55%, transparent) 30%,
+      color-mix(in srgb, var(--bg-1) 76%, transparent) 68%,
+      color-mix(in srgb, var(--bg-1) 88%, transparent) 100%);
 }
 .override-mode .scrim-override { opacity: 1; }
 

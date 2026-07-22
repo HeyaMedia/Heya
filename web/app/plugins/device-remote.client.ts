@@ -37,6 +37,7 @@ export default defineNuxtPlugin((nuxtApp) => {
     })
   }
   function heartbeat() {
+    if (!bus.connected.value) return
     bus.send({ type: 'device.heartbeat', device_id: id, state: state() })
   }
 
@@ -49,10 +50,41 @@ export default defineNuxtPlugin((nuxtApp) => {
     }, 400)
   }
 
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  function playbackActive() {
+    return player.playing || video.snapshot.value?.state === 'playing'
+  }
+  function syncHeartbeatTimer() {
+    const shouldRun = bus.connected.value && (!document.hidden || playbackActive())
+    if (!shouldRun) {
+      if (heartbeatTimer) clearInterval(heartbeatTimer)
+      heartbeatTimer = null
+      return
+    }
+    if (heartbeatTimer) return
+    // The hub retains devices for 35 seconds. A 25-second presence pulse keeps
+    // an idle visible client safely registered while cutting periodic work by
+    // 60%; real state changes are announced immediately below.
+    heartbeatTimer = setInterval(heartbeat, 25_000)
+  }
+
   nuxtApp.hook('app:mounted', () => {
-    watch(bus.connected, (up) => { if (up) hello() }, { immediate: true })
-    setInterval(heartbeat, 10_000)
-    watch(video.snapshot, announceSoon, { deep: true })
+    watch(bus.connected, (up) => {
+      if (up) hello()
+      syncHeartbeatTimer()
+    }, { immediate: true })
+    watch(video.snapshot, () => { announceSoon(); syncHeartbeatTimer() }, { deep: true })
+    watch(
+      () => [player.playing, player.currentTrack?.id, player.volume, qs.targetDeviceID, qs.activeOutput],
+      () => { announceSoon(); syncHeartbeatTimer() },
+    )
+    document.addEventListener('visibilitychange', syncHeartbeatTimer)
+  })
+
+  nuxtApp.vueApp.onUnmount(() => {
+    if (heartbeatTimer) clearInterval(heartbeatTimer)
+    if (announceTimer) clearTimeout(announceTimer)
+    document.removeEventListener('visibilitychange', syncHeartbeatTimer)
   })
 
   bus.on('device.command', async (ev) => {

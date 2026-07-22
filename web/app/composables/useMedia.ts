@@ -14,6 +14,11 @@ export type MediaImageRef =
     media_item_public_id?: string | null
     local_media_item_id?: number | string | null
     local_public_id?: string | null
+    /** Durable server-side artwork revision. Most media DTOs already expose
+     *  updated_at; images_enriched_at is preferred where available. */
+    image_revision?: number | string | null
+    images_enriched_at?: string | null
+    updated_at?: string | null
   }
 
 export function useMediaImageKey(ref: MediaImageRef) {
@@ -41,12 +46,19 @@ export function bumpMediaImageRevision(...refs: MediaImageRef[]) {
   }
 }
 
+function durableMediaImageRevision(ref: MediaImageRef) {
+  if (ref == null || typeof ref === 'number' || typeof ref === 'string') return ''
+  const revision = ref.image_revision ?? ref.images_enriched_at ?? ref.updated_at
+  return revision == null ? '' : String(revision)
+}
+
 export function withMediaImageRevision(url: string, ref: MediaImageRef) {
   const key = useMediaImageKey(ref)
-  const revision = key ? (mediaImageRevisions.get(key) || 0) : 0
-  if (!revision) return url
+  const localRevision = key ? (mediaImageRevisions.get(key) || 0) : 0
+  const durableRevision = durableMediaImageRevision(ref)
+  if (!localRevision && !durableRevision) return url
   const separator = url.includes('?') ? '&' : '?'
-  return `${url}${separator}image_revision=${revision}`
+  return `${url}${separator}image_revision=${encodeURIComponent(`${durableRevision}:${localRevision}`)}`
 }
 
 export function metadataImageProxyUrl(source: string | null | undefined) {
@@ -126,6 +138,35 @@ export function mediaUrl(item: { id: number; public_id?: string; title: string; 
   const prefix = typeMap[item.media_type] || 'media'
   const s = item.slug || slugify(item.title) + (item.year ? '-' + item.year : '')
   return `/${prefix}/${s}`
+}
+
+/** Canonical route for a TV/anime season. Season zero is exposed as the
+ * human-readable `specials` segment used by the season and episode pages. */
+export function seasonDetailUrl(item: { slug: string; season_number: number }): string {
+  const season = item.season_number === 0 ? 'specials' : String(item.season_number)
+  return `/tv/${item.slug}/season/${season}`
+}
+
+/** Canonical route for a TV/anime episode. */
+export function episodeUrl(item: { slug: string; season_number: number; episode_number: number }): string {
+  return `${seasonDetailUrl(item)}/episode/${item.episode_number}`
+}
+
+/** Destination for a grouped Recently Added TV event. A singular season or
+ * episode has its own page; show and multi-episode summary cards stay at the
+ * series level. */
+export function recentTVEntryUrl(item: {
+  id: number
+  title: string
+  slug: string
+  media_type: string
+  kind: 'series' | 'season' | 'episodes' | 'episode'
+  season_number: number
+  episode_number: number
+}): string {
+  if (item.kind === 'episode') return episodeUrl(item)
+  if (item.kind === 'season') return seasonDetailUrl(item)
+  return mediaUrl(item)
 }
 
 // Public provider page for a title we don't have locally. HeyaMetadata's UUID

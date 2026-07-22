@@ -16,9 +16,14 @@ export const useDataMetricsStore = defineStore('data-metrics', () => {
   const hydratedEntries = ref(0)
   const persistedEntries = ref(0)
   const persistedBytes = ref(0)
+  const persistenceWrites = ref(0)
+  const totalPersistenceMs = ref(0)
+  const lastPersistenceMs = ref(0)
+  const maxPersistenceMs = ref(0)
 
   const averageNavigationMs = computed(() => navigations.value ? Math.round(totalNavigationMs.value / navigations.value) : 0)
   const prefetchUseRate = computed(() => prefetchAttempts.value ? Math.round((prefetchUsed.value / prefetchAttempts.value) * 100) : 0)
+  const averagePersistenceMs = computed(() => persistenceWrites.value ? Math.round(totalPersistenceMs.value / persistenceWrites.value) : 0)
 
   function recordNavigation(path: string, elapsed: number, warm: boolean | null) {
     navigations.value++
@@ -43,13 +48,21 @@ export const useDataMetricsStore = defineStore('data-metrics', () => {
     persistedEntries.value = entries
     persistedBytes.value = bytes
   }
+  function recordPersistence(elapsed: number) {
+    const rounded = Math.round(elapsed)
+    persistenceWrites.value++
+    totalPersistenceMs.value += elapsed
+    lastPersistenceMs.value = rounded
+    maxPersistenceMs.value = Math.max(maxPersistenceMs.value, rounded)
+  }
 
   return {
     navigations, warmNavigations, coldNavigations, totalNavigationMs,
     lastNavigationMs, lastPath, averageNavigationMs,
     prefetchAttempts, prefetchAlreadyCached, prefetchUsed, prefetchWasted, prefetchUseRate,
     cacheEntries, cacheBytes, hydratedEntries, persistedEntries, persistedBytes,
+    persistenceWrites, lastPersistenceMs, maxPersistenceMs, averagePersistenceMs,
     recordNavigation, recordPrefetch, recordPrefetchUsed, recordPrefetchWasted,
-    setCacheStats, setPersistenceStats,
+    setCacheStats, setPersistenceStats, recordPersistence,
   }
 })

@@ -28,7 +28,7 @@ export default defineProvider({
     if (width) params.push(`w=${width}`)
     if (height) params.push(`h=${height}`)
     if (quality) params.push(`q=${quality}`)
-    if (format === 'jpeg' || format === 'jpg' || format === 'png') {
+    if (format === 'jpeg' || format === 'jpg' || format === 'png' || format === 'webp') {
       params.push(`f=${format}`)
     }
 

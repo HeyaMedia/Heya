@@ -5,7 +5,7 @@
 // above the line, only the blurred ambient wash below it.
 //
 // Used by HeroCanvas (detail pages) and the home hero deck. The returned
-// `align` is the geometry a v2 art claim publishes so AmbientBackdrop can
+// `align` is the geometry a hero art claim publishes so AmbientBackdrop can
 // draw the blur at exactly the hero's scale and offset (see ClaimAlign).
 //
 // Contract: `section` is the in-flow hero <section> that owns the band's

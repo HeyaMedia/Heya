@@ -9,7 +9,7 @@
   >
     <!-- Sharp art layer, hard-clipped at the hero's bottom edge (the ledger
          seam). The blurred site-wide underlay is the global AmbientBackdrop —
-         this hero feeds it a graded (v2) art claim when ambient is on, and
+         this hero feeds it a shared hero art claim when ambient is on, and
          always shows its own crisp copy in-hero (the old .ambient-extended
          hide-local behaviour is retired: the sharp hero is always visible). -->
     <div class="hero-bg" :style="pinnedStyle">
@@ -163,7 +163,7 @@ const bgA = ref<string | null>(null)
 const bgB = ref<string | null>(null)
 
 // Ambient extension: with the ambient background on, this hero's current
-// backdrop is also published (graded v2) as the full-page blurred underlay via
+// backdrop is also published as the full-page shared blurred underlay via
 // the AmbientBackdrop layer, which follows the deck's rotation through this
 // watcher. The sharp local copy always stays visible in-hero.
 const { ambientEnabled } = useAppearance()
@@ -190,7 +190,7 @@ const displayB = computed(() => (bgB.value ? bgImg.variant(bgB.value) : ''))
 const sectionRef = ref<HTMLElement | null>(null)
 const { pinnedStyle, align } = useHeroPin(() => sectionRef.value, () => 0.22)
 watch([currentBg, ambientEnabled, align], ([url, on, a]) => {
-  if (on && url) background.set(url, { grade: 'v2', align: a })
+  if (on && url) background.set(url, { presentation: 'hero', align: a })
   else background.clear()
 }, { immediate: true })
 
@@ -429,7 +429,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* Heya 2.0 featured hero. Text rides the literal-dark art grade, so --oink
+/* Featured hero. Text rides the literal-dark art grade, so --oink
    keeps it light in every theme (dark/oled/light) — a themed --ink would flip
    near-black in light mode and vanish over the artwork. --tone / --tone-rgb /
    --tone-ink are published on the root per slide (see toneVars); when sampling

@@ -685,6 +685,16 @@ const { tabs, isActive } = useNavTabs()
   border-bottom: 0;
   box-shadow: 0 1px 18px rgb(var(--shade) / 0.22);
 }
+/* Large fixed backdrop filters are costly while artwork and content move
+   underneath them on touch devices. Their slightly denser themed fill keeps
+   the same glass hierarchy without continuously resampling the whole bar. */
+@media (pointer: coarse) {
+  .topbar {
+    background: color-mix(in srgb, var(--chrome) 96%, transparent);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
 /* `.topbar-left` is the grid item (column 1); it shrinks to content
    (empty at >1200px where the burger never renders) instead of stretching
    across the 1fr track. `display: flex` only gets added in the compact

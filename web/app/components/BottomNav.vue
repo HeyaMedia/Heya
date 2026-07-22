@@ -50,6 +50,14 @@ const { tabs, isActive } = useNavTabs()
   z-index: 45;
 }
 
+@media (pointer: coarse) {
+  .bottom-nav {
+    background: color-mix(in srgb, var(--bg-1) 96%, transparent);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
 /* Phone-only: exists solely as the mobile replacement for .topbar-tabs. */
 @media (min-width: 720.02px) {
   .bottom-nav { display: none; }

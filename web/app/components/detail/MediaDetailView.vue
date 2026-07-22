@@ -6,25 +6,12 @@
   <div v-else-if="detail" class="scroll" style="height: 100%">
     <!-- Hero: backdrop + poster + info merged -->
     <div class="hero-section">
-      <div class="hero-bg" :class="{ 'ambient-extended': ambientEnabled }">
-        <LoadingImage
-          v-if="backdropA"
-          :src="bgImg.variant(backdropA)"
-          alt=""
-          class="hero-bg-img"
-          :class="{ visible: showA }"
-          @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
-        />
-        <LoadingImage
-          v-if="backdropB"
-          :src="bgImg.variant(backdropB)"
-          alt=""
-          class="hero-bg-img"
-          :class="{ visible: !showA }"
-          @error="(e: Event | string) => { if (typeof e !== 'string') (e.target as HTMLImageElement).style.display = 'none' }"
-        />
-        <div class="hero-bg-fade" />
-      </div>
+      <HeroCanvas
+        :src="backdropA || ''"
+        :src-b="backdropB"
+        :show-a="showA"
+        object-position="center 30%"
+      />
 
       <div class="hero-content">
         <div class="hero-poster">
@@ -406,22 +393,9 @@ const {
   advanceBackdrop, retreatBackdrop, seedCarousel, openBackdropLightbox,
 } = useBackdropCarousel(detail, { preloadSecond: true })
 
-// Ambient extension: with the ambient background on, this page's current
-// hero backdrop becomes the full-page layer (the hero image "extends" down
-// the whole page) — the local hero <img> hides via .ambient-extended and
-// only the softened fade stays for text legibility. Off = classic scoped
-// hero, untouched.
-const { ambientEnabled } = useAppearance()
-const background = useBackground()
-// Local hero copies render the EXACT variant AmbientBackdrop loads (w=1920
-// q=70, pre-resolved, no width/quality props → no srcset) so both layers
-// share one cache entry and paint together — see HeroCanvas.vue.
-const bgImg = useBackgroundImageTools()
-const currentHeroBackdrop = computed(() => (showA.value ? backdropA.value : backdropB.value) || null)
-watch([currentHeroBackdrop, ambientEnabled], ([url, on]) => {
-  if (on && url) background.set(url)
-  else background.clear()
-}, { immediate: true })
+// HeroCanvas owns both the sharp A/B hero and the matching ambient claim, so
+// this legacy detail view now shares the same hard seam, baked derivative,
+// decode gate, and carousel synchronization as movie/TV/episode/artist pages.
 
 // Lightbox
 function openPosterLightbox() {
@@ -560,8 +534,6 @@ watch(() => mediaStateQuery.data.value, state => {
 /* Shared backdrop/carousel/zoom chrome (.hero-bg*, .bd-*, .hero-expand,
    .zoom-btn) lives in heya.css; only per-view deltas stay scoped here. */
 .hero-section { min-height: 520px; }
-/* Slightly slower crossfade than the movie/tv pages (1.5s global). */
-.hero-bg-img { transition: opacity 1.8s ease-in-out; }
 .hero-content {
   position: relative; z-index: 2;
   display: grid; grid-template-columns: 240px 1fr;

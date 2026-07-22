@@ -81,20 +81,21 @@ const trackWidth = computed(() =>
   + (props.hasMore ? stride.value : 0))
 
 const scrollEl = ref<HTMLElement>()
-const scrollLeft = ref(0)
 const viewportW = ref(0)
 const railMoving = ref(false)
 let settleTimer: ReturnType<typeof setTimeout> | null = null
+let scrollFrame = 0
+let latestScrollLeft = 0
 
 // LoadingImage descendants use this to postpone only *new* image work while
 // a native fling is active. Already-painted tiles remain untouched.
 provide('heya:rail-moving', readonly(railMoving))
 
 const OVERSCAN = 4
+const visibleRange = shallowRef({ start: 0, end: 0, overscanEnd: OVERSCAN })
 const visibleTiles = computed(() => {
   const s = stride.value
-  const start = Math.max(0, Math.floor(scrollLeft.value / s) - OVERSCAN)
-  const end = Math.min(props.items.length, Math.ceil((scrollLeft.value + viewportW.value) / s) + OVERSCAN)
+  const { start, end } = visibleRange.value
   const out: { item: T; index: number; left: number }[] = []
   for (let i = start; i < end; i++) {
     out.push({ item: props.items[i]!, index: i, left: i * s })
@@ -108,12 +109,25 @@ const visibleTiles = computed(() => {
 // compositing every frame for nothing; pausing it there is free.
 const tailOffscreen = computed(() => {
   if (!props.hasMore) return false
-  const s = stride.value
   const tailIndex = props.items.length
-  const start = Math.max(0, Math.floor(scrollLeft.value / s) - OVERSCAN)
-  const end = Math.ceil((scrollLeft.value + viewportW.value) / s) + OVERSCAN
-  return tailIndex < start || tailIndex >= end
+  const { start, overscanEnd } = visibleRange.value
+  return tailIndex < start || tailIndex >= overscanEnd
 })
+
+function syncVisibleRange() {
+  const s = stride.value
+  if (s <= 0) return
+  const start = Math.max(0, Math.floor(latestScrollLeft / s) - OVERSCAN)
+  const overscanEnd = Math.ceil((latestScrollLeft + viewportW.value) / s) + OVERSCAN
+  const end = Math.min(props.items.length, overscanEnd)
+  const current = visibleRange.value
+  // Raw scroll events can arrive far more often than a tile boundary is
+  // crossed. Keep scrollLeft outside Vue and wake the renderer only when the
+  // actual virtual window changes.
+  if (start !== current.start || end !== current.end || overscanEnd !== current.overscanEnd) {
+    visibleRange.value = { start, end, overscanEnd }
+  }
+}
 
 function keyFor(item: T, index: number): string | number {
   if (props.itemKey) return props.itemKey(item, index)
@@ -126,40 +140,62 @@ onMounted(() => {
   if (!scrollEl.value) return
   viewportW.value = scrollEl.value.clientWidth
   // Scroll memory may have restored a position before we mounted.
-  scrollLeft.value = scrollEl.value.scrollLeft
+  latestScrollLeft = scrollEl.value.scrollLeft
+  syncVisibleRange()
   ro = new ResizeObserver(() => {
-    if (scrollEl.value) viewportW.value = scrollEl.value.clientWidth
+    if (!scrollEl.value) return
+    viewportW.value = scrollEl.value.clientWidth
+    latestScrollLeft = scrollEl.value.scrollLeft
+    syncVisibleRange()
   })
   ro.observe(scrollEl.value)
 })
 onBeforeUnmount(() => {
   ro?.disconnect()
   if (settleTimer) clearTimeout(settleTimer)
+  if (scrollFrame) cancelAnimationFrame(scrollFrame)
 })
 
 // Ask for the next page while the user still has ~8 tiles of runway, so the
 // rail keeps flowing instead of hitting a wall. The watchEffect also covers
 // the "first page doesn't even fill the viewport" case with no scroll at all.
 const LOAD_AHEAD_TILES = 8
-function maybeLoadMore() {
+function maybeLoadMore(scrollLeft = latestScrollLeft) {
   if (!props.hasMore || props.loadingMore) return
-  const remaining = trackWidth.value - (scrollLeft.value + viewportW.value)
+  const remaining = trackWidth.value - (scrollLeft + viewportW.value)
   if (remaining < stride.value * LOAD_AHEAD_TILES) emit('load-more')
 }
-function onScroll() {
-  railMoving.value = true
+
+function commitScrollFrame() {
+  scrollFrame = 0
+  syncVisibleRange()
+  maybeLoadMore()
+}
+
+function markMoving() {
+  if (!railMoving.value) railMoving.value = true
+  // A single trailing timer is enough to detect the end of a fling. Resetting
+  // it is cheap and, unlike a perpetual rAF loop, produces no frames while the
+  // rail is merely coasting between browser scroll callbacks.
   if (settleTimer) clearTimeout(settleTimer)
   settleTimer = setTimeout(() => {
     railMoving.value = false
     settleTimer = null
   }, 120)
-  if (scrollEl.value) scrollLeft.value = scrollEl.value.scrollLeft
-  maybeLoadMore()
+}
+
+function onScroll() {
+  if (!scrollEl.value) return
+  latestScrollLeft = scrollEl.value.scrollLeft
+  markMoving()
+  if (!scrollFrame) scrollFrame = requestAnimationFrame(commitScrollFrame)
 }
 watchEffect(() => {
   // touch the reactive deps so a new page / resize / prop change re-checks
   void props.items.length
   void viewportW.value
+  void stride.value
+  syncVisibleRange()
   maybeLoadMore()
 })
 

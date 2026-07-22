@@ -27,7 +27,7 @@ import type { ImageTone } from './useImageTone'
 import { storeToRefs } from 'pinia'
 import { useBackgroundStore } from '~/stores/background'
 
-/** Sharp-hero geometry published with a v2 art claim so AmbientBackdrop can
+/** Sharp-hero geometry published with a hero art claim so AmbientBackdrop can
  *  render the blurred underlay at EXACTLY the hero's scale and offset — the
  *  image continues past the hero seam instead of re-showing a differently
  *  cropped copy of itself. */
@@ -47,10 +47,10 @@ export interface ClaimAlign {
 }
 
 export type BackgroundClaim =
-  // `grade` marks a Heya 2.0 art owner: AmbientBackdrop paints it with the
-  // redesign's soft grade (blur 72 / brightness .4 / saturate 1.2, opacity 1)
-  // instead of the legacy pool coat. Absent → unchanged legacy behaviour.
-  | { kind: 'art'; url: string; grade?: 'v2'; align?: ClaimAlign }
+  // Hero presentation shares the site-wide image treatment; the marker only
+  // selects aligned geometry, coordinated fade timing, and full-presence/scrim
+  // semantics for artwork that continues out of a sharp hero.
+  | { kind: 'art'; url: string; presentation?: 'hero'; align?: ClaimAlign }
   | { kind: 'pool'; types: string[] }
 
 export function useBackgroundStack() {
@@ -85,9 +85,56 @@ export function useBackgroundToneStyle() {
 /** Rotation cadence of the pool layer. */
 export const BG_ROTATE_MS = 30_000
 
-/** The one size the ambient layer renders at. Preloads MUST warm exactly
- *  this variant or the crossfade starts before the real bytes exist. */
+/** Sharp hero/reveal size. AmbientBackdrop uses the smaller baked derivative
+ *  below during normal display and swaps to this only for artwork reveal. */
 export const BG_IMG = { width: 1920, quality: 70 } as const
+export const BG_AMBIENT_IMG = { width: 960, quality: 58, format: 'webp' } as const
+export const BG_AMBIENT_BLUR = 31
+
+interface PreparedBackgroundImage { w: number; h: number }
+
+// Shared by every useBackgroundImageTools() instance. HeroCanvas prepares the
+// sharp + ambient pair, then AmbientBackdrop can recognize the decoded ambient
+// URL and commit its A/B layer synchronously instead of waiting for a second
+// Image.onload task. Metadata is tiny and bounded; the browser owns the actual
+// decoded/image cache.
+const preparedBackgroundImages = new Map<string, PreparedBackgroundImage>()
+const preparingBackgroundImages = new Map<string, Promise<PreparedBackgroundImage | null>>()
+const PREPARED_BACKGROUND_LIMIT = 32
+
+function rememberPrepared(src: string, image: PreparedBackgroundImage) {
+  preparedBackgroundImages.delete(src)
+  preparedBackgroundImages.set(src, image)
+  while (preparedBackgroundImages.size > PREPARED_BACKGROUND_LIMIT) {
+    const oldest = preparedBackgroundImages.keys().next().value
+    if (!oldest) break
+    preparedBackgroundImages.delete(oldest)
+  }
+}
+
+function prepareResolvedBackground(src: string, priority: 'auto' | 'low' = 'auto') {
+  const ready = preparedBackgroundImages.get(src)
+  if (ready) return Promise.resolve(ready)
+  const pending = preparingBackgroundImages.get(src)
+  if (pending) return pending
+
+  const request = new Promise<PreparedBackgroundImage | null>((resolve) => {
+    const img = new Image()
+    img.decoding = 'async'
+    img.fetchPriority = priority
+    img.onload = async () => {
+      try { await img.decode() } catch { /* loaded pixels remain paintable */ }
+      const dimensions = { w: img.naturalWidth, h: img.naturalHeight }
+      rememberPrepared(src, dimensions)
+      resolve(dimensions)
+    }
+    img.onerror = () => resolve(null)
+    img.src = src
+  }).finally(() => preparingBackgroundImages.delete(src))
+
+  preparingBackgroundImages.set(src, request)
+  return request
+}
 
 /** URL helpers bound to the nuxt-image provider. Call in setup and keep the
  *  returned object — the factory touches useImage()/useNuxtApp(), which
@@ -95,19 +142,40 @@ export const BG_IMG = { width: 1920, quality: 70 } as const
  *  (docs/ui.md gotcha #1). The methods themselves are safe anywhere. */
 export function useBackgroundImageTools() {
   const $img = useImage()
+  function appendTransform(url: string, name: string, value: string | number) {
+    if (!url.startsWith('/api/')) return url
+    const separator = url.includes('?') ? '&' : '?'
+    return `${url}${separator}${name}=${encodeURIComponent(String(value))}`
+  }
+  function ambientVariant(url: string) {
+    const resized = $img(url, { ...BG_AMBIENT_IMG })
+    // Every full-page ambient surface uses one cache identity and one image
+    // treatment. A 31px baked derivative + the cheap 7px fallback gives the
+    // former detail-page softness without its expensive 20px live blur.
+    // External artwork falls back to resize-only because its origin does not
+    // understand Heya's query.
+    return appendTransform(resized, 'blur', BG_AMBIENT_BLUR)
+  }
   return {
-    /** The exact URL the ambient layer renders — preload THIS, not the raw url. */
+    /** Full-resolution sharp hero/reveal variant. */
     variant: (url: string) => $img(url, { ...BG_IMG }),
+    /** Low-resolution, server-blurred derivative for the full-page underlay. */
+    ambientVariant,
     /** Tiny thumb for tone sampling (a 24×24 canvas needs nothing more). */
     thumb: (url: string) => $img(url, { width: 64 }),
+    /** Decoded dimensions when another owner has already prepared this exact
+     * rendered URL. Used to start coordinated hero/ambient fades in one tick. */
+    prepared: (resolvedUrl: string) => preparedBackgroundImages.get(resolvedUrl) ?? null,
+    prepareResolved: prepareResolvedBackground,
     /** Fire-and-forget cache warmer for the rendered variant, so the next
      *  rotation/advance crossfades from a hot cache instead of stuttering. */
     warm(url: string) {
       if (!import.meta.client) return
-      const img = new Image()
-      img.decoding = 'async'
-      img.fetchPriority = 'low' // never compete with page content
-      img.src = this.variant(url)
+      void prepareResolvedBackground(this.variant(url), 'low')
+    },
+    warmAmbient(url: string) {
+      if (!import.meta.client) return
+      void prepareResolvedBackground(ambientVariant(url), 'low')
     },
   }
 }
@@ -158,16 +226,16 @@ export function useBackground() {
       : [...cur, next]
   }
 
-  function set(url: string | null | undefined, opts?: { grade?: 'v2'; align?: ClaimAlign }) {
+  function set(url: string | null | undefined, opts?: { presentation?: 'hero'; align?: ClaimAlign }) {
     if (!url) return clear()
-    const grade = opts?.grade
+    const presentation = opts?.presentation
     const align = opts?.align
     if (
-      mine?.kind === 'art' && mine.url === url && mine.grade === grade
+      mine?.kind === 'art' && mine.url === url && mine.presentation === presentation
       && mine.align?.heroH === align?.heroH && mine.align?.heroTop === align?.heroTop
       && mine.align?.heroW === align?.heroW && mine.align?.posY === align?.posY
     ) return
-    place({ kind: 'art', url, grade, align })
+    place({ kind: 'art', url, presentation, align })
   }
 
   function pool(...types: string[]) {

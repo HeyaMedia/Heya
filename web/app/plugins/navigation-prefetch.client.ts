@@ -130,9 +130,12 @@ export default defineNuxtPlugin((nuxtApp) => {
 
   const connection = (navigator as Navigator & {
     connection?: { saveData?: boolean; effectiveType?: string }
+    deviceMemory?: number
   }).connection
   const canSpeculate = !connection?.saveData && !connection?.effectiveType?.includes('2g')
   const touchFirst = matchMedia('(hover: none)').matches
+  const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory
+  const constrainedDevice = touchFirst || (deviceMemory !== undefined && deviceMemory <= 4)
 
   function targetFrom(event: Event): HTMLElement | null {
     const target = event.target
@@ -251,7 +254,11 @@ export default defineNuxtPlugin((nuxtApp) => {
       : cb => void setTimeout(cb, 2500)
 
   function pumpIdleSections() {
-    if (!canSpeculate) return
+    // Touch-first and low-memory devices benefit much more from a quiet radio,
+    // smaller query cache, and fewer persistence writes than from warming
+    // several landing pages they may never open. Intent prefetch below remains
+    // active for taps/focus on those devices.
+    if (!canSpeculate || constrainedDevice || document.hidden) return
     const current = sectionOf(router.currentRoute.value.path)
     const next = IDLE_SECTIONS.find(s => s !== current && !idleWarmed.has(s))
     if (!next) return

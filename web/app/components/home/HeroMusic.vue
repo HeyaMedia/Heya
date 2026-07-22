@@ -11,7 +11,7 @@
     <!-- Sharp artist backdrop (when present) hard-clipped at the seam with the
          literal-dark 2.0 grade + tone leak — parity with the Featured hero;
          else the cover blurred into ambience. The blurred site-wide underlay is
-         the global AmbientBackdrop, fed a graded (v2) claim when ambient is on. -->
+         the global AmbientBackdrop, fed a shared hero claim when ambient is on. -->
     <div class="music-bg" :style="pinnedStyle">
       <Transition name="mbg">
         <LoadingImage
@@ -307,9 +307,8 @@ const bgFallback = computed(() => (bgUrl.value ? null : spotlight.value?.art || 
 // follows the carousel through this watcher.
 const { ambientEnabled } = useAppearance()
 const background = useBackground()
-// Local copies render the EXACT variant AmbientBackdrop loads (w=1920 q=70,
-// pre-resolved, no width/quality props → no srcset) so sharp hero and blurred
-// underlay share one cache entry and paint together — see HeroCanvas.vue.
+// Local copies render the pre-resolved sharp variant with no generated srcset;
+// AmbientBackdrop derives its smaller blurred underlay from the raw URL.
 const bgImg = useBackgroundImageTools()
 // Pin the art layer to the hero's scroll-0 band; the claim carries the
 // geometry so the blurred underlay aligns and the ledger line below becomes
@@ -318,7 +317,7 @@ const sectionRef = ref<HTMLElement | null>(null)
 const { pinnedStyle, align } = useHeroPin(() => sectionRef.value, () => 0.22)
 watch([bgUrl, bgFallback, ambientEnabled, align], ([bg, fb, on, a]) => {
   const url = bg ?? fb
-  if (on && url) background.set(url, { grade: 'v2', align: a })
+  if (on && url) background.set(url, { presentation: 'hero', align: a })
   else background.clear()
 }, { immediate: true })
 

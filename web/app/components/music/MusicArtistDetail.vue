@@ -9,7 +9,7 @@
   <div v-else class="artist2" :class="{ 'hero-flush': !isPhone }" :style="toneStyle">
 
     <!-- ── HERO: full-bleed backdrop as sharp art, hard-clipped at the ledger
-         seam. HeroCanvas also publishes the graded (v2) art claim to the global
+         seam. HeroCanvas also publishes the shared hero art claim to the global
          AmbientBackdrop, so the blurred underlay mirrors this artist's backdrop
          and pops back to the music pool on unmount. Artists WITHOUT a backdrop
          asset hand the claim to the script below instead (the backdrop URL
@@ -743,7 +743,7 @@ watchEffect(() => {
     background.clear()
     return
   }
-  background.set(artistPosterUrl.value, { grade: 'v2' })
+  background.set(artistPosterUrl.value, { presentation: 'hero' })
 })
 
 const { prefs } = useAppearance()

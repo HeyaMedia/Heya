@@ -102,8 +102,8 @@
         :pending="tvQuery.isPending.value"
         show-added
         more="Show all"
-        @tile="(item) => navigateTo(mediaUrl(item))"
-        @intent="prefetchMediaIntent"
+        @tile="(item) => navigateTo(recentTVDestination(item))"
+        @intent="(item) => prefetchMediaIntent(item, recentTVDestination(item))"
         @more="navigateTo('/tv/all?sort=added')"
         @load-more="loadMoreTV"
       />
@@ -202,8 +202,7 @@ const { $heya } = useNuxtApp()
 const queryClient = useQueryCache()
 const invalidateContinueWatching = useInvalidateContinueWatching()
 
-function prefetchMediaIntent(item: MediaItem) {
-  const to = mediaUrl(item)
+function prefetchMediaIntent(item: MediaItem, to = mediaUrl(item)) {
   void preloadRouteComponents(to)
   const entry = queryClient.ensure(mediaDetailQuery(mediaDetailTarget(item)))
   void queryClient.refresh(entry).catch(() => {})
@@ -214,6 +213,7 @@ function prefetchMediaIntent(item: MediaItem) {
 // album-cover endpoint and the click handler routing to album detail.
 type AlbumRowItem = MediaItem & { artist_slug: string; album_slug: string; artist_name?: string }
 type ArtistRowItem = MediaItem & { artist_id: number }
+type RecentTVRowItem = MediaItem & Pick<RecentTVEntry, 'kind' | 'season_number' | 'episode_number'>
 
 // The TV rail is Plex-style grouped file arrivals, not bare shows: a brand-new
 // show is one "New show" card, a season drop one "New season" card, and a
@@ -259,7 +259,7 @@ const recentArtists = computed<ArtistRowItem[]>(() =>
 const tvEntries = computed<RecentTVEntry[]>(() => (tvQuery.data.value?.pages ?? []).flat())
 
 // Rail items: one card per grouped TV event (a show may appear twice).
-const recentTVItems = computed<MediaItem[]>(() => tvEntries.value.map(tvEntryToRowItem))
+const recentTVItems = computed<RecentTVRowItem[]>(() => tvEntries.value.map(tvEntryToRowItem))
 // Deduped MediaItem-ish shows for hero / favorites / recommendations, which
 // think in shows, not events.
 const recentTVShows = computed<MediaItem[]>(() => {
@@ -488,7 +488,7 @@ function albumToRowItem(al: RecentAlbumRow): AlbumRowItem {
 // the event ("New show", "New season 3 · 8 episodes", "S05E12 · Title").
 // `year` stays empty so ContentRow falls through to `sub`, and `key` keeps
 // v-for happy when one show has two event cards.
-function tvEntryToRowItem(e: RecentTVEntry): MediaItem {
+function tvEntryToRowItem(e: RecentTVEntry): RecentTVRowItem {
   return {
     id: e.media_item_id,
     public_id: e.media_item_public_id,
@@ -498,10 +498,17 @@ function tvEntryToRowItem(e: RecentTVEntry): MediaItem {
     sub: tvEntrySub(e),
     media_type: 'tv',
     slug: e.slug,
+    kind: e.kind,
+    season_number: e.season_number,
+    episode_number: e.episode_number,
     created_at: e.added_at,
     added_at: e.added_at,
     available: true,
-  } as unknown as MediaItem
+  } as unknown as RecentTVRowItem
+}
+
+function recentTVDestination(item: MediaItem): string {
+  return recentTVEntryUrl(item as RecentTVRowItem)
 }
 
 function tvEntrySub(e: RecentTVEntry): string {

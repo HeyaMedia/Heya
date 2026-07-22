@@ -1,9 +1,9 @@
 <script setup lang="ts">
-// Heya 2.0 hero art layer — the SHARP copy only.
+// Shared hero art layer — the SHARP copy only.
 //
 // The blurred site-wide underlay is NOT rendered here: it's the global
-// AmbientBackdrop, which this component feeds via a graded art claim
-// (useBackground().set(url, { grade })). HeroCanvas paints just the crisp
+// AmbientBackdrop, which this component feeds via an aligned art claim
+// (useBackground().set(url, { presentation, align })). HeroCanvas paints just the crisp
 // artwork inside the hero, hard-clipped at the hero's bottom edge — so the
 // sharp art ends exactly at the ledger seam and everything below sits on the
 // blurred ambient. Zero JS scroll math; works in every browser.
@@ -28,29 +28,57 @@ const props = withDefaults(defineProps<{
   objectPosition?: string
   /** Publish the shown image to the global ambient layer as an art claim. */
   claim?: boolean
-  /** Ambient grade to request when claiming (Heya 2.0 soft underlay). */
-  claimGrade?: 'v2'
 }>(), {
   srcB: null,
   showA: true,
   objectPosition: 'center 30%',
   claim: true,
-  claimGrade: 'v2',
 })
 
-// The image actually on screen right now (RAW url) — that's what the blurred
-// ambient underlay mirrors via the claim.
-const currentSrc = computed(() => (props.showA === false ? (props.srcB || props.src) : props.src))
+// The image the parent wants on screen next (RAW url). The visible layer and
+// ambient claim are committed together only after both rendered variants are
+// decoded below, so the sharp hero cannot outrun its blurred continuation.
+const targetSrc = computed(() => (props.showA === false ? (props.srcB || props.src) : props.src))
 
-// Render the EXACT rendered variant the AmbientBackdrop will load (w=1920 q=70,
-// resolved through the same nuxt-image provider), passed through NuxtImg
-// untouched (no width/quality props → no densities srcset). Because the sharp
-// hero and the blurred underlay then fetch a byte-identical URL, they share one
-// browser-cache entry and paint together instead of the blur trailing behind.
+// Resolve the sharp hero URL once and pass it through NuxtImg untouched (no
+// width/quality props → no densities srcset). The ambient layer deliberately
+// uses a smaller server-blurred WebP now, so the two variants are prepared as a
+// pair before either layer is allowed to crossfade.
 // Hoisted at setup — the factory touches useImage()/useNuxtApp() (gotcha #1).
 const bgImg = useBackgroundImageTools()
 const displayA = computed(() => (props.src ? bgImg.variant(props.src) : ''))
 const displayB = computed(() => (props.srcB ? bgImg.variant(props.srcB) : ''))
+
+const renderedShowA = ref(props.showA !== false)
+const paintReady = ref(false)
+const claimedSrc = ref('')
+let prepareSeq = 0
+
+watch(
+  [targetSrc, () => props.showA],
+  async ([src, showA]) => {
+    const seq = ++prepareSeq
+    if (!src) {
+      paintReady.value = false
+      claimedSrc.value = ''
+      return
+    }
+
+    await Promise.all([
+      bgImg.prepareResolved(bgImg.variant(src)),
+      bgImg.prepareResolved(bgImg.ambientVariant(src)),
+    ])
+    if (seq !== prepareSeq) return
+
+    // One Vue flush publishes the ambient claim and flips the sharp A/B layer.
+    // AmbientBackdrop now finds its exact derivative hot and decoded instead
+    // of starting that request after the hero transition has already begun.
+    claimedSrc.value = src
+    renderedShowA.value = showA !== false
+    paintReady.value = true
+  },
+  { immediate: true },
+)
 
 // The claim carries the hero's rendered geometry so the blurred underlay can
 // paint the SAME crop in the SAME place — behind the hero it's pixel-aligned,
@@ -81,9 +109,8 @@ const { pinnedStyle, align } = useHeroPin(() => rootRef.value?.parentElement ?? 
 
 const background = useBackground()
 watchEffect(() => {
-  if (!props.claim) return
-  if (!currentSrc.value) return
-  background.set(currentSrc.value, { grade: props.claimGrade, align: align.value })
+  if (!props.claim || !claimedSrc.value) return
+  background.set(claimedSrc.value, { presentation: 'hero', align: align.value })
 })
 
 function hideBroken(e: Event | string) {
@@ -97,7 +124,7 @@ function hideBroken(e: Event | string) {
       v-if="displayA"
       :src="displayA"
       class="hc-img"
-      :class="{ visible: showA !== false }"
+      :class="{ visible: paintReady && renderedShowA }"
       alt=""
       @error="hideBroken"
     />
@@ -105,7 +132,7 @@ function hideBroken(e: Event | string) {
       v-if="displayB"
       :src="displayB"
       class="hc-img"
-      :class="{ visible: showA === false }"
+      :class="{ visible: paintReady && !renderedShowA }"
       alt=""
       @error="hideBroken"
     />

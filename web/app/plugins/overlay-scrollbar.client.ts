@@ -46,8 +46,9 @@ export default defineNuxtPlugin((nuxtApp) => {
 
   // Rescan is O(number of .scroll elements), not O(mutations): a debounced
   // sweep that adopts new `.scroll` roots and reaps auto-attached ones that
-  // have left the DOM. Cheap enough to run once per animation frame even while
-  // a virtualized grid churns its item nodes.
+  // have left the DOM. The observer below only requests one when a changed
+  // subtree can actually add/remove a `.scroll` root, so virtualized tile churn
+  // never turns into repeated whole-document queries.
   let rescanScheduled = false
   function rescan() {
     rescanScheduled = false
@@ -64,9 +65,21 @@ export default defineNuxtPlugin((nuxtApp) => {
     requestAnimationFrame(rescan)
   }
 
-  // One subtree observer for the whole app. The callback only ever schedules a
-  // (deduped) rescan, so heavy DOM churn stays cheap.
-  const mo = new MutationObserver(scheduleRescan)
+  function containsScrollRoot(node: Node) {
+    return node instanceof Element
+      && (node.matches('.scroll') || node.querySelector('.scroll') !== null)
+  }
+
+  // One subtree observer for the whole app. Ignore mutations that cannot
+  // affect the set of vertical scroll roots (rail cards, badges, images, etc.).
+  const mo = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      if ([...mutation.addedNodes, ...mutation.removedNodes].some(containsScrollRoot)) {
+        scheduleRescan()
+        return
+      }
+    }
+  })
   mo.observe(document.body, { childList: true, subtree: true })
 
   // Initial + per-navigation sweeps (belt-and-braces alongside the observer).

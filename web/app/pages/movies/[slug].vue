@@ -10,7 +10,7 @@
        mirroring the episode/season ports + the playbar's --pb-accent. -->
   <div v-else-if="detail" class="scroll movie2 hero-flush" :style="toneStyle" style="height: 100%">
     <!-- ── HERO: A/B backdrop crossfade as sharp art, hard-clipped at the
-         ledger seam. HeroCanvas also publishes the graded (v2) art claim to
+         ledger seam. HeroCanvas also publishes the shared hero art claim to
          the global AmbientBackdrop, so the blurred underlay follows the
          carousel. ── -->
     <section class="hero-section movie-hero">
@@ -499,7 +499,7 @@ function videoEmbedSrc(key: string): string {
 }
 
 // Crossfade backdrops — shared carousel engine. HeroCanvas renders the sharp
-// A/B pair and claims the blurred ambient underlay (grade v2); the old
+// A/B pair and claims the shared blurred ambient underlay; the old
 // ambientEnabled-gated background.set() is retired (HeroCanvas owns the claim).
 const {
   showA, backdropA, backdropB, carouselPaused, cycleKey, backdropAssets,

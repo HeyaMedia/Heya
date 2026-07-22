@@ -1,9 +1,10 @@
-import Hls from 'hls.js'
+import type HlsType from 'hls.js'
 import type { VideoPlaybackDiagnostics, VideoPlaybackState } from '~/types/video-playback'
 import { isBearerAuthToken } from '~/composables/useAuth'
 
 export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
-  let hls: Hls | null = null
+  let hls: HlsType | null = null
+  let sourceGeneration = 0
 
   const state = reactive<VideoPlaybackState>({
     playing: false,
@@ -83,8 +84,9 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
     state.error = `${codes[e.code] || 'Error'}${e.message ? ` — ${e.message}` : ''}`
   })
 
-  function loadSource(src: string, token?: string) {
-    destroyHLS()
+  async function loadSource(src: string, token?: string) {
+    const generation = ++sourceGeneration
+    clearHLS()
     const v = videoRef.value
     if (!v) return
 
@@ -107,7 +109,23 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
 
     const isHLS = src.includes('.m3u8')
 
-    if (isHLS && Hls.isSupported()) {
+    // Safari can play HLS natively and never needs the half-megabyte JS
+    // engine. Other browsers import hls.js only when an HLS source is
+    // actually selected, keeping normal browsing out of the initial bundle.
+    if (isHLS && v.canPlayType('application/vnd.apple.mpegurl')) {
+      v.src = src
+      v.play().catch(() => {})
+      return
+    }
+
+    if (isHLS) {
+      const { default: Hls } = await import('hls.js')
+      if (generation !== sourceGeneration || !videoRef.value) return
+      if (!Hls.isSupported()) {
+        state.loading = false
+        state.error = 'HLS playback is not supported by this browser'
+        return
+      }
       hls = new Hls({
         maxBufferLength: 30,
         maxMaxBufferLength: 60,
@@ -123,7 +141,7 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
         },
       })
       hls.loadSource(src)
-      hls.attachMedia(v)
+      hls.attachMedia(videoRef.value)
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return
         if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
@@ -133,7 +151,7 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
         }
       })
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        v.play().catch(() => {})
+        videoRef.value?.play().catch(() => {})
       })
 
       // Bandwidth telemetry. hls.js fires FRAG_LOADED for every segment with
@@ -157,17 +175,19 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
         diagnostics.transport!.activeVariantIndex = data.level
         diagnostics.sampledAtMilliseconds = Date.now()
       })
-    } else if (isHLS && v.canPlayType('application/vnd.apple.mpegurl')) {
-      v.src = src
-      v.play().catch(() => {})
     } else {
       v.src = src
       v.play().catch(() => {})
     }
   }
 
-  function destroyHLS() {
+  function clearHLS() {
     if (hls) { hls.destroy(); hls = null }
+  }
+
+  function destroyHLS() {
+    sourceGeneration++
+    clearHLS()
   }
 
   const controls = {

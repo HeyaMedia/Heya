@@ -35,6 +35,7 @@ require (
 require (
 	github.com/caddyserver/certmagic v0.25.4
 	github.com/corazawaf/coraza-caddy/v2 v2.5.0
+	github.com/deepteams/webp v1.2.7
 	github.com/libdns/cloudflare v0.2.2
 	github.com/libdns/desec v1.1.1
 	github.com/libdns/duckdns v0.3.0

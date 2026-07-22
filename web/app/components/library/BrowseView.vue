@@ -51,7 +51,7 @@
         :loading-more="recentAddedLoading"
         show-added
         more="Show all"
-        @tile="go"
+        @tile="goRecentAdded"
         @more="navigateTo(section === 'movie' ? '/movies/all?sort=added' : '/tv/all?sort=added')"
         @load-more="loadMoreRecentAdded"
       />
@@ -104,6 +104,8 @@ import {
   type RecentEpisodeRow,
   type RecentTVEntry,
 } from '~/queries/rails'
+
+type RecentTVRowItem = MediaItem & Pick<RecentTVEntry, 'kind' | 'season_number' | 'episode_number'>
 
 const props = withDefaults(defineProps<{
   section: 'movie' | 'tv'
@@ -311,10 +313,15 @@ function go(item: MediaItem | RailItem) {
   navigateTo(mediaUrl(item as MediaItem))
 }
 
+function goRecentAdded(item: MediaItem) {
+  const event = item as RecentTVRowItem
+  navigateTo(props.section === 'tv' ? recentTVEntryUrl(event) : mediaUrl(item))
+}
+
 // Grouped TV event → rail card. Poster is the show's; the subtitle carries the
 // event; `key` keeps v-for happy when one show has two event cards. added_at
 // feeds the "3d ago" corner chip on the Recently Added rail.
-function tvEntryToRowItem(e: RecentTVEntry): MediaItem {
+function tvEntryToRowItem(e: RecentTVEntry): RecentTVRowItem {
   return {
     id: e.media_item_id,
     key: `${e.media_item_id}-${e.kind}-${e.season_number}-${e.episode_number}-${e.added_at}`,
@@ -323,9 +330,12 @@ function tvEntryToRowItem(e: RecentTVEntry): MediaItem {
     sub: tvEntrySub(e),
     media_type: 'tv',
     slug: e.slug,
+    kind: e.kind,
+    season_number: e.season_number,
+    episode_number: e.episode_number,
     added_at: e.added_at,
     available: true,
-  } as unknown as MediaItem
+  } as unknown as RecentTVRowItem
 }
 
 function tvEntrySub(e: RecentTVEntry): string {

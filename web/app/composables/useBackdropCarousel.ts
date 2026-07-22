@@ -43,7 +43,10 @@ export function useBackdropCarousel(detail: Ref<MediaDetail | null>, opts: Backd
     const n = backdropAssets.value.length
     if (n <= 1) return
     const url = getBackdropUrl((idx + 1) % n)
-    if (url) bgImg.warm(url)
+    if (url) {
+      bgImg.warm(url)
+      bgImg.warmAmbient(url)
+    }
   }
 
   const showA = ref(true)
@@ -88,11 +91,10 @@ export function useBackdropCarousel(detail: Ref<MediaDetail | null>, opts: Backd
       cycleKey.value++
       warmNext(idx)
     }
-    // Preload + decode the rendered variant BEFORE flipping, so the hero's
-    // crossfade starts on painted pixels — and so the ambient underlay (which
-    // fetches the byte-identical variant on the claim change) finds a hot,
-    // already-decoded image and fades in the same frame instead of trailing
-    // a beat behind the sharp art.
+    // Preload + decode the sharp rendered variant before asking HeroCanvas to
+    // flip. HeroCanvas also gates the final visual swap on its separate
+    // blurred WebP derivative, while warmNext keeps both variants hot during
+    // the normal rotation window.
     const img = new Image()
     img.onload = async () => {
       try { await img.decode() } catch { /* decodable enough to paint */ }
