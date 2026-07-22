@@ -71,6 +71,7 @@ function persistVolumePrefs(volume: number, muted: boolean) {
 // engine callbacks share the same values.
 let transitioning = false
 let prefetchedTrackId: number | null = null
+let preloadingTrackId: number | null = null
 let pendingNext: Track | null = null
 let pendingMode: 'gapless' | 'crossfade' = 'gapless'
 let pendingPlan: TransitionPlan | null = null
@@ -342,7 +343,8 @@ export const usePlayerStore = defineStore('player', () => {
   const settings = useAudioSettingsBindings()
   let nativeAudioProbe: Promise<NativeAudioPlaybackBackend | null> | null = null
   let nativePreloadGeneration = 0
-  let nativePreloadedTrackId: number | null = null
+  let nativePreloadRetryTrackId: number | null = null
+  let nativePreloadRetryTimer: ReturnType<typeof setTimeout> | null = null
   let nativeLastStartedTrackId: number | null = null
   let nativeEndedHandled = false
   let localClockTimer: ReturnType<typeof setInterval> | null = null
@@ -720,7 +722,7 @@ export const usePlayerStore = defineStore('player', () => {
             if (!next) return
             const finished = currentTrack.value
             if (finished) completeTrack(finished)
-            nativePreloadedTrackId = null
+            nativePreloadRetryTrackId = null
             advanceCurrentTo(next)
           })
           watch(() => backend.state.ended, (ended) => {
@@ -733,6 +735,25 @@ export const usePlayerStore = defineStore('player', () => {
             if (!message || playbackBackend.value !== 'native') return
             playing.value = false
             useToast().toast.err(message)
+          })
+          watch([() => backend.state.preloadStatus, () => backend.state.preloadTrackId], ([status, trackId]) => {
+            if (status === 'ready' && trackId === nativePreloadRetryTrackId) {
+              nativePreloadRetryTrackId = null
+              return
+            }
+            if (playbackBackend.value !== 'native' || status !== 'failed' || !trackId) return
+            const next = pendingNext
+            if (next?.id !== trackId) return
+            alog('player', `native preload failed for "${next.title}" — retrying once`, backend.state.preloadError)
+            if (nativePreloadRetryTrackId === trackId) return
+            nativePreloadRetryTrackId = trackId
+            if (nativePreloadRetryTimer) clearTimeout(nativePreloadRetryTimer)
+            nativePreloadRetryTimer = setTimeout(() => {
+              nativePreloadRetryTimer = null
+              if (playbackBackend.value === 'native' && pendingNext?.id === trackId) {
+                void prepareNativeTransition()
+              }
+            }, 350)
           })
           return backend
         })
@@ -788,7 +809,9 @@ export const usePlayerStore = defineStore('player', () => {
 
   async function disposeNativeAudio() {
     nativePreloadGeneration++
-    nativePreloadedTrackId = null
+    nativePreloadRetryTrackId = null
+    if (nativePreloadRetryTimer) clearTimeout(nativePreloadRetryTimer)
+    nativePreloadRetryTimer = null
     const backend = nativeAudioBackend.value
     if (backend) await backend.dispose()
     if (playbackBackend.value === 'native') playbackBackend.value = 'browser'
@@ -845,7 +868,7 @@ export const usePlayerStore = defineStore('player', () => {
     const generation = ++nativePreloadGeneration
     const next = peekNextTrack()
     pendingNext = next
-    nativePreloadedTrackId = null
+    if (nativePreloadRetryTrackId !== next?.id) nativePreloadRetryTrackId = null
     if (!next || next.isStream) return
     try {
       const current = currentTrack.value
@@ -867,9 +890,7 @@ export const usePlayerStore = defineStore('player', () => {
       ))
       if (!request || generation !== nativePreloadGeneration || playbackBackend.value !== 'native') return
       await backend.preload(request)
-      if (generation === nativePreloadGeneration) nativePreloadedTrackId = next.id
     } catch (error) {
-      if (generation === nativePreloadGeneration) nativePreloadedTrackId = null
       alog('player', `native preload failed for "${next.title}" — end transition will cold-load`, error)
     }
   }
@@ -1003,6 +1024,7 @@ export const usePlayerStore = defineStore('player', () => {
       pendingNext = null
       pendingPlan = null
       prefetchedTrackId = null
+      preloadingTrackId = null
       return
     }
     if (playbackBackend.value === 'native') return
@@ -1016,6 +1038,8 @@ export const usePlayerStore = defineStore('player', () => {
 
     const next = peekNextTrack()
     pendingNext = next
+    if (prefetchedTrackId !== next?.id) prefetchedTrackId = null
+    if (preloadingTrackId !== next?.id) preloadingTrackId = null
     if (!next) {
       e.scheduler?.setSmartTransitionPoint(null)
       alog('xfade', `arm: no next track (end of queue, repeat ${repeatMode.value})`)
@@ -1073,8 +1097,8 @@ export const usePlayerStore = defineStore('player', () => {
     if (!next.isStream) {
       applyPendingNorm(e, next)
       const url = resolveStreamUrl(next)
-      if (url && prefetchedTrackId !== next.id) {
-        prefetchedTrackId = next.id
+      if (url && prefetchedTrackId !== next.id && preloadingTrackId !== next.id) {
+        preloadingTrackId = next.id
         const targetId = next.id
         // armSync stays synchronous (called straight from watchers), so the
         // cache lookup that might turn `url` into a blob: URL happens off to
@@ -1083,13 +1107,17 @@ export const usePlayerStore = defineStore('player', () => {
         // targetId check guards against a late resolve loading a track that's
         // no longer the armed "next" (queue changed again in the meantime).
         void prefetchManager.resolvePlayable(next)
-          .then((playable) => {
-            if (prefetchedTrackId !== targetId) return
-            return e.loadNext(playable || url)
+          .then(async (playable) => {
+            if (preloadingTrackId !== targetId || pendingNext?.id !== targetId) return
+            await e.loadNext(playable || url)
+            if (preloadingTrackId !== targetId || pendingNext?.id !== targetId) return
+            prefetchedTrackId = targetId
+            preloadingTrackId = null
           })
           .catch((err) => {
             alog('xfade', `preload FAILED for "${next.title}" — will cold-play`, err)
             if (prefetchedTrackId === targetId) prefetchedTrackId = null
+            if (preloadingTrackId === targetId) preloadingTrackId = null
           })
       }
     }
@@ -1188,6 +1216,7 @@ export const usePlayerStore = defineStore('player', () => {
     listenedSeconds = 0
     lastTickTime = 0
     prefetchedTrackId = null
+    preloadingTrackId = null
     if (next.duration && Number.isFinite(next.duration)) duration.value = next.duration
     playing.value = true
     beginTrack(next)
@@ -1486,6 +1515,7 @@ export const usePlayerStore = defineStore('player', () => {
       // Manual play invalidates any armed transition / preloaded pending deck.
       transitioning = false
       prefetchedTrackId = null
+      preloadingTrackId = null
       currentTrack.value = track
       const gen = ++playGeneration
       const startPositionSeconds = Math.max(0, Math.min(
@@ -1618,6 +1648,7 @@ export const usePlayerStore = defineStore('player', () => {
       }
       transitioning = false
       prefetchedTrackId = null
+      preloadingTrackId = null
       pendingNext = null
       currentTrack.value = track
       position.value = 0
@@ -2112,6 +2143,7 @@ export const usePlayerStore = defineStore('player', () => {
     duration.value = 0
     transitioning = false
     prefetchedTrackId = null
+    preloadingTrackId = null
     pendingNext = null
     listenedSeconds = 0
     lastTickTime = 0
@@ -2153,6 +2185,7 @@ export const usePlayerStore = defineStore('player', () => {
     // drops any armed pending deck so a later "next" can't cold-swap to it.
     transitioning = false
     prefetchedTrackId = null
+    preloadingTrackId = null
     pendingNext = null
     await disposeNativeAudio()
     if (engineWired.value) ensureEngine().pause()

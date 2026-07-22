@@ -38,10 +38,17 @@ function initialState(): NativeAudioState {
     sourceChannels: null,
     outputSampleRateHz: null,
     outputChannels: null,
+    outputSampleFormat: null,
     outputDeviceId: null,
     outputDeviceName: null,
     resamplerActive: false,
     dspActive: false,
+    preloadTrackId: null,
+    preloadStatus: 'idle',
+    preloadBufferedSeconds: 0,
+    preloadError: undefined,
+    error: undefined,
+    terminationReason: undefined,
   }
 }
 
@@ -119,6 +126,7 @@ export function useNativeAudioPlaybackBackend(
       || event.stateRevision <= stateRevision) return
     stateRevision = event.stateRevision
     Object.assign(state, event.payload)
+    state.preloadError = event.payload.preloadError
     state.error = event.payload.error
     state.terminationReason = event.payload.terminationReason
     rememberClock()

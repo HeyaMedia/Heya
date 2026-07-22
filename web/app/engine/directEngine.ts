@@ -12,16 +12,26 @@ function clamp01(v: number): number {
 // Mirrors Deck.load's canplaythrough contract exactly (same event, same
 // error tolerance) so callers (usePlayer's loadNext/prepareTransition) see
 // identical timing/error behavior regardless of which engine is live.
-function waitCanPlayThrough(audio: HTMLAudioElement): Promise<void> {
+function waitCanPlayThrough(slot: ElementSlot): Promise<void> {
+  const audio = slot.audio
   return new Promise((resolve, reject) => {
+    let timeout: ReturnType<typeof setTimeout> | null = null
     const onCanPlay = () => { cleanup(); resolve() }
     const onError = () => { cleanup(); reject(new Error(audio.error?.message ?? 'Failed to load audio')) }
+    const cancel = () => { cleanup(); reject(new Error('Audio load superseded')) }
     const cleanup = () => {
+      if (timeout) clearTimeout(timeout)
       audio.removeEventListener('canplaythrough', onCanPlay)
       audio.removeEventListener('error', onError)
+      if (slot.cancelLoad === cancel) slot.cancelLoad = undefined
     }
+    slot.cancelLoad = cancel
     audio.addEventListener('canplaythrough', onCanPlay, { once: true })
     audio.addEventListener('error', onError, { once: true })
+    timeout = setTimeout(() => {
+      cleanup()
+      reject(new Error('Audio load timed out'))
+    }, 20_000)
   })
 }
 
@@ -39,6 +49,7 @@ interface ElementEvents {
 interface ElementSlot {
   audio: HTMLAudioElement
   events: ElementEvents
+  cancelLoad?: () => void
 }
 
 function makeSlot(): ElementSlot {
@@ -61,6 +72,7 @@ function makeSlot(): ElementSlot {
 }
 
 function resetSlot(slot: ElementSlot) {
+  slot.cancelLoad?.()
   slot.audio.pause()
   slot.audio.removeAttribute('src')
   slot.audio.load()
@@ -140,12 +152,13 @@ export function createDirectEngine() {
   async function play(url: string, startPositionSeconds = 0) {
     alog('engine', 'play (direct, cold load on active element)', shortUrl(url))
     const audio = active.audio
+    active.cancelLoad?.()
     if (!audio.paused) audio.pause()
     audio.removeAttribute('src')
     audio.src = url
     audio.load()
     applyActiveVolume()
-    await waitCanPlayThrough(audio)
+    await waitCanPlayThrough(active)
     if (startPositionSeconds > 0) {
       audio.currentTime = Math.max(0, Math.min(startPositionSeconds, audio.duration || 0))
     }
@@ -182,11 +195,12 @@ export function createDirectEngine() {
   async function loadNext(url: string) {
     alog('engine', 'loadNext (direct, buffering pending element)', shortUrl(url))
     const audio = pending.audio
+    pending.cancelLoad?.()
     if (!audio.paused) audio.pause()
     audio.removeAttribute('src')
     audio.src = url
     audio.load()
-    await waitCanPlayThrough(audio)
+    await waitCanPlayThrough(pending)
   }
 
   // ALWAYS a gapless swap regardless of `mode` — there's no Web Audio graph

@@ -180,7 +180,10 @@ const nativeSourceLabel = computed(() => {
 const outputLabel = computed(() => {
   if (!outputRate.value) return '—'
   const channels = nativeState.value?.outputChannels
-  return channels ? `${fmtHz(outputRate.value)} · ${chLabel(channels)}` : fmtHz(outputRate.value)
+  const format = nativeState.value?.outputSampleFormat
+  return [fmtHz(outputRate.value), format, channels ? chLabel(channels) : null]
+    .filter(Boolean)
+    .join(' · ')
 })
 const nativeDspLabel = computed(() => {
   const state = nativeState.value

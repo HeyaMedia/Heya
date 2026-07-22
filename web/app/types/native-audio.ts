@@ -104,10 +104,15 @@ export interface NativeAudioState {
   sourceChannels: number | null
   outputSampleRateHz: number | null
   outputChannels: number | null
+  outputSampleFormat: string | null
   outputDeviceId: string | null
   outputDeviceName: string | null
   resamplerActive: boolean
   dspActive: boolean
+  preloadTrackId: number | null
+  preloadStatus: 'idle' | 'loading' | 'ready' | 'failed'
+  preloadBufferedSeconds: number
+  preloadError?: string
   error?: { code: NativePlaybackErrorCode, message: string }
   terminationReason?: NativePlaybackTerminationReason
 }

@@ -15,6 +15,7 @@ export class Deck {
   readonly transitionGainNode: GainNode
   private events: Partial<DeckEvents> = {}
   private disposed = false
+  private cancelPendingLoad: (() => void) | null = null
 
   constructor(private ctx: AudioContext) {
     this.audio = new Audio()
@@ -57,6 +58,7 @@ export class Deck {
   }
 
   async load(url: string): Promise<void> {
+    this.cancelPendingLoad?.()
     // Pause before swapping src. Assigning a new `.src` to an element that is
     // still *playing* and wired into a MediaElementAudioSourceNode flushes the
     // old decode buffer through the graph as a brief garbled burst before the
@@ -69,14 +71,23 @@ export class Deck {
     this.audio.src = url
     this.audio.load()
     await new Promise<void>((resolve, reject) => {
+      let timeout: ReturnType<typeof setTimeout> | null = null
       const onCanPlay = () => { cleanup(); resolve() }
       const onError = () => { cleanup(); reject(new Error(this.audio.error?.message ?? 'Failed to load audio')) }
+      const cancel = () => { cleanup(); reject(new Error('Audio load superseded')) }
       const cleanup = () => {
+        if (timeout) clearTimeout(timeout)
         this.audio.removeEventListener('canplaythrough', onCanPlay)
         this.audio.removeEventListener('error', onError)
+        if (this.cancelPendingLoad === cancel) this.cancelPendingLoad = null
       }
+      this.cancelPendingLoad = cancel
       this.audio.addEventListener('canplaythrough', onCanPlay, { once: true })
       this.audio.addEventListener('error', onError, { once: true })
+      timeout = setTimeout(() => {
+        cleanup()
+        reject(new Error('Audio load timed out'))
+      }, 20_000)
     })
   }
 
@@ -125,6 +136,7 @@ export class Deck {
   }
 
   reset() {
+    this.cancelPendingLoad?.()
     this.audio.pause()
     this.audio.removeAttribute('src')
     this.audio.load()
@@ -133,6 +145,7 @@ export class Deck {
   dispose() {
     if (this.disposed) return
     this.disposed = true
+    this.cancelPendingLoad?.()
     this.audio.pause()
     this.audio.removeAttribute('src')
     this.sourceNode?.disconnect()
