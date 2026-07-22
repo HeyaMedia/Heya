@@ -30,7 +30,13 @@ const props = withDefaults(defineProps<{
   static: false,
 })
 
-const analyser = usePlaybackAnalyser()
+// The playbar uses this component as a frozen icon. It must not turn on the
+// native PCM/FFT bridge merely by being mounted; only live visualizers create
+// analyser demand.
+const analyser = usePlaybackAnalyser({
+  registerNativeDemand: !props.static,
+  connectBrowserEngine: !props.static,
+})
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const pageVisibility = useDocumentVisibility()
 // `prefers-reduced-motion` — the global CSS reset (heya.css) doesn't reach a

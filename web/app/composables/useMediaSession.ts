@@ -19,6 +19,22 @@ export function installBrowserMediaSession(player: PlayerBindings): () => void {
 
   const ms = navigator.mediaSession
   const stops: Array<() => void> = []
+  let lastPositionSent = Number.NEGATIVE_INFINITY
+
+  function publishPosition(force = false) {
+    const duration = player.duration.value
+    const position = player.position.value
+    if (duration <= 0 || !Number.isFinite(duration) || !Number.isFinite(position)) return
+    if (!force && Math.abs(position - lastPositionSent) < 5) return
+    try {
+      ms.setPositionState({
+        duration,
+        position: Math.max(0, Math.min(position, duration)),
+        playbackRate: 1,
+      })
+      lastPositionSent = position
+    } catch { /* browsers reject transiently inconsistent position state */ }
+  }
 
   function seekToSeconds(seconds: number) {
     const dur = player.duration.value
@@ -44,6 +60,7 @@ export function installBrowserMediaSession(player: PlayerBindings): () => void {
       ms.metadata = null
       ms.playbackState = 'none'
       lastMetadataKey = null
+      lastPositionSent = Number.NEGATIVE_INFINITY
       return
     }
     const key = systemMediaItemKey(track)
@@ -65,24 +82,20 @@ export function installBrowserMediaSession(player: PlayerBindings): () => void {
           ],
         }
       : base)
+    lastPositionSent = Number.NEGATIVE_INFINITY
+    publishPosition(true)
   }, { immediate: true, deep: true }))
 
   stops.push(watch(() => player.playing.value, (playing) => {
     ms.playbackState = player.currentTrack.value ? (playing ? 'playing' : 'paused') : 'none'
+    publishPosition(true)
   }, { immediate: true }))
 
-  stops.push(watchEffect(() => {
-    const duration = player.duration.value
-    const position = player.position.value
-    if (duration <= 0 || !Number.isFinite(duration) || !Number.isFinite(position)) return
-    try {
-      ms.setPositionState({
-        duration,
-        position: Math.max(0, Math.min(position, duration)),
-        playbackRate: 1,
-      })
-    } catch { /* browsers reject transiently inconsistent position state */ }
-  }))
+  // Media Session timelines extrapolate while playback is active. Refresh on
+  // state/duration changes and then every ~5 seconds of movement instead of
+  // forwarding the player's 4 Hz UI clock into browser/OS integration.
+  stops.push(watch(() => player.duration.value, () => publishPosition(true), { immediate: true }))
+  stops.push(watch(() => player.position.value, () => publishPosition()))
 
   return () => {
     for (const stop of stops) stop()

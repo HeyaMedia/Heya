@@ -14,20 +14,23 @@ export function nativeAnalyserDemandActive(): boolean {
 /**
  * Backend-neutral analyser data for Heya's lightweight canvas visualizers.
  *
- * Browser playback reads the existing WebAudio AnalyserNode. Native processed
- * playback reads HeyaClient's bounded PCM/FFT snapshots. Milkdrop is excluded:
- * butterchurn requires a real AnalyserNode connection, not copied sample data.
+ * Browser playback reads the existing WebAudio AnalyserNode. Native playback
+ * reads HeyaClient's bounded PCM/FFT snapshots; Milkdrop adapts those copied
+ * samples into butterchurn's explicit audio-level input.
  */
-export function usePlaybackAnalyser() {
+export function usePlaybackAnalyser(options: {
+  registerNativeDemand?: boolean
+  connectBrowserEngine?: boolean
+} = {}) {
   const player = usePlayerBindings()
-  const engine = useAudioEngine() as ReturnType<typeof useAudioEngine> & {
-    analyserBridge?: AnalyserBridge
-  }
+  const engine = options.connectBrowserEngine === false
+    ? null
+    : useAudioEngine() as ReturnType<typeof useAudioEngine> & { analyserBridge?: AnalyserBridge }
 
   // Each component instance counts as demand for its scope's lifetime, and
   // every 0↔1 flip re-pushes processing settings so the native engine starts
   // or stops its visualizer tap.
-  if (getCurrentScope()) {
+  if (options.registerNativeDemand !== false && getCurrentScope()) {
     const settings = useAudioSettingsStore()
     nativeAnalyserDemand.value++
     if (nativeAnalyserDemand.value === 1) settings.applyToEngine()
@@ -56,24 +59,24 @@ export function usePlaybackAnalyser() {
   const isNative = computed(() => player.playbackBackend.value === 'native')
   const available = computed(() => isNative.value
     ? player.nativeAudioVisualizer.value != null
-    : engine.analyserBridge != null)
+    : engine?.analyserBridge != null)
 
   function getFrequencyData(): Float32Array {
-    return nativeFrame() ? nativeFrequencyData : (engine.analyserBridge?.getFrequencyData() ?? new Float32Array(0))
+    return nativeFrame() ? nativeFrequencyData : (engine?.analyserBridge?.getFrequencyData() ?? new Float32Array(0))
   }
 
   function getTimeDomainData(): Float32Array {
-    return nativeFrame() ? nativeTimeData : (engine.analyserBridge?.getTimeDomainData() ?? new Float32Array(0))
+    return nativeFrame() ? nativeTimeData : (engine?.analyserBridge?.getTimeDomainData() ?? new Float32Array(0))
   }
 
   function fftSize(): number {
     if (nativeFrame()) return Math.max(2, (nativeFrequencyData.length - 1) * 2)
-    return engine.analyserBridge?.analyserNode.fftSize ?? 2048
+    return engine?.analyserBridge?.analyserNode.fftSize ?? 2048
   }
 
   function sampleRate(): number {
     if (nativeFrame()) return player.nativeAudioState.value?.outputSampleRateHz ?? 48_000
-    return engine.analyserBridge?.analyserNode.context.sampleRate ?? 48_000
+    return engine?.analyserBridge?.analyserNode.context.sampleRate ?? 48_000
   }
 
   return {
