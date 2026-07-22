@@ -3,8 +3,8 @@ import type {
   NativeAudioCapabilities,
 } from '~/types/native-audio'
 
-export const NATIVE_AUDIO_READY_EVENT = 'heya:native-audio:ready-v1' as const
-export const NATIVE_AUDIO_PROTOCOL_VERSION = 1 as const
+export const NATIVE_AUDIO_READY_EVENT = 'heya:native-audio:ready-v2' as const
+export const NATIVE_AUDIO_PROTOCOL_VERSION = 2 as const
 
 export interface NativeAudioHandshake {
   bridge: Readonly<HeyaNativeAudioBridge>
@@ -22,7 +22,7 @@ export async function waitForNativeAudioBridge(timeoutMilliseconds = 1200): Prom
   const immediate = currentBridge()
   if (immediate) {
     const capabilities = await immediate.getAudioCapabilities().catch(() => null)
-    return capabilities?.protocolVersion === 1 ? { bridge: immediate, capabilities } : null
+    return capabilities?.protocolVersion === NATIVE_AUDIO_PROTOCOL_VERSION ? { bridge: immediate, capabilities } : null
   }
   if (!import.meta.client) return null
 
@@ -37,9 +37,9 @@ export async function waitForNativeAudioBridge(timeoutMilliseconds = 1200): Prom
     }
     const onReady = (event: WindowEventMap[typeof NATIVE_AUDIO_READY_EVENT]) => {
       const bridge = currentBridge()
-      if (!bridge || event.detail?.protocolVersion !== 1) return
+      if (!bridge || event.detail?.protocolVersion !== NATIVE_AUDIO_PROTOCOL_VERSION) return
       void bridge.getAudioCapabilities()
-        .then(capabilities => finish(capabilities.protocolVersion === 1 ? { bridge, capabilities } : null))
+        .then(capabilities => finish(capabilities.protocolVersion === NATIVE_AUDIO_PROTOCOL_VERSION ? { bridge, capabilities } : null))
         .catch(() => finish(null))
     }
     const timer = setTimeout(() => finish(null), timeoutMilliseconds)

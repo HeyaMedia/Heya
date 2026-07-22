@@ -255,14 +255,6 @@ onMounted(async () => {
               :disabled="!!settingBusy || !nativeAudio?.available" size="md" aria-label="Native audio"
               @update:model-value="setSetting('nativeAudioEnabled', $event)" />
           </SettingsField>
-          <SettingsField label="Bit-perfect output"
-            :description="nativeAudio?.bitPerfectAvailable ? 'Preserve the source format when the output device allows it.' : (nativeAudio?.bitPerfectUnavailableReason ?? 'Not available on this platform.')"
-            v-slot="{ fieldId }">
-            <AppSwitch :id="fieldId" :model-value="applicationSnapshot.settings.bitPerfectAudioEnabled"
-              :disabled="!!settingBusy || !nativeAudio?.bitPerfectAvailable || !applicationSnapshot.settings.nativeAudioEnabled"
-              size="md" aria-label="Bit-perfect output"
-              @update:model-value="setSetting('bitPerfectAudioEnabled', $event)" />
-          </SettingsField>
         </SettingsSection>
       </div>
 

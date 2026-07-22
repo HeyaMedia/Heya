@@ -25,11 +25,7 @@
            engine/directEngine.ts) so there's no node to hang an equalizer
            off of. Show a notice instead of controls that would silently do
            nothing. -->
-      <div v-if="bitPerfectRequested" class="eq-unavailable">
-        <p class="eq-unavailable-title">Equalizer bypassed for bit-perfect output</p>
-        <p class="eq-extra-hint">Your processed-mode EQ remains saved. Turn off Bit-perfect in Playback to apply EQ, gain, ReplayGain, crossfade, limiter, and visualizers again.</p>
-      </div>
-      <div v-else-if="!eqAvailable" class="eq-unavailable">
+      <div v-if="!eqAvailable" class="eq-unavailable">
         <p class="eq-unavailable-title">Not available in compatibility playback mode (iOS)</p>
         <p class="eq-extra-hint">This device plays audio directly through the browser to keep it running in the background, which bypasses the equalizer stage entirely.</p>
       </div>
@@ -124,19 +120,9 @@
           <strong>{{ nativeRouteTitle }}</strong>
           <span>{{ nativeRouteDetail }}</span>
         </div>
-        <label class="eq-native-toggle">
-          <span>Bit-perfect</span>
-          <AppSwitch
-            :model-value="bitPerfectRequested"
-            :disabled="nativeModeSaving || !bitPerfectSupported"
-            size="sm"
-            aria-label="Bit-perfect native audio"
-            @update:model-value="setBitPerfectMode"
-          />
-        </label>
       </div>
 
-      <div class="eq-playback-processing" :class="{ 'eq-bypassed': bitPerfectRequested }">
+      <div class="eq-playback-processing">
         <div class="eq-extra-row">
           <span class="eq-extra-label">Crossfade</span>
           <div class="eq-select-wrap">
@@ -166,13 +152,7 @@
 
         <div v-if="crossfade.mode !== 'gapless'" class="eq-extra-row">
           <span class="eq-extra-label">Album segues</span>
-          <span class="eq-extra-hint">Skip crossfade between same-album tracks</span>
-          <AppSwitch
-            :model-value="crossfade.albumAware"
-            size="md"
-            aria-label="Album-aware crossfade"
-            @update:model-value="settings.setCrossfadeAlbumAware"
-          />
+          <span class="eq-extra-hint">Adjacent tracks from the same album always play gaplessly.</span>
         </div>
 
         <div class="eq-extra-row">
@@ -205,7 +185,7 @@
     </div>
 
     <!-- ── Effects ───────────────────────────────────────────────── -->
-    <div v-show="tab === 'effects'" id="eq-panel-effects" role="tabpanel" aria-labelledby="eq-tab-effects" class="eq-pane" :class="{ 'eq-bypassed': bitPerfectRequested }">
+    <div v-show="tab === 'effects'" id="eq-panel-effects" role="tabpanel" aria-labelledby="eq-tab-effects" class="eq-pane">
       <div class="eq-extra-row">
         <span class="eq-extra-label">Crossfeed</span>
         <span class="eq-extra-hint">Eases hard L/R separation on headphones</span>
@@ -254,10 +234,6 @@
 
     <!-- ── Output ────────────────────────────────────────────────── -->
     <div v-show="tab === 'output'" id="eq-panel-output" role="tabpanel" aria-labelledby="eq-tab-output" class="eq-pane">
-      <div v-if="isTauriClient && bitPerfectRequested" class="eq-unavailable">
-        <p class="eq-unavailable-title">Output selection is locked during bit-perfect playback</p>
-        <p class="eq-extra-hint">The current macOS exclusive-output path follows the system default device. Switch to Processed in Playback before selecting a specific output here.</p>
-      </div>
       <div v-if="!supported && isTauriClient" class="eq-unavailable">
         <p class="eq-unavailable-title">Native outputs are unavailable</p>
         <p class="eq-extra-hint">HeyaClient could not enumerate audio outputs. Check that an output device is connected, then try again.</p>
@@ -275,7 +251,7 @@
               v-if="isTauriClient"
               class="dev-reveal"
               :class="{ active: followsSystemDefault }"
-              :disabled="outputSaving || bitPerfectRequested"
+              :disabled="outputSaving"
               @click="selectSystemOutput"
             >Use system default</button>
             <button v-else-if="!labelsAvailable" class="dev-reveal" @click="devices.revealLabels()">Reveal names</button>
@@ -288,7 +264,7 @@
             :key="d.deviceId"
             class="dev-row"
             :class="{ active: d.deviceId === activeDeviceId }"
-            :disabled="outputSaving || bitPerfectRequested"
+            :disabled="outputSaving"
             @click="selectOutput(d.deviceId)"
           >
             <span class="dev-dot" />
@@ -329,34 +305,19 @@ const { isTauriClient } = useClientSurface()
 const engine = useAudioEngine()
 const eqAvailable = computed(() => !engine.directMode)
 const { eq, crossfade, replayGain, crossfeed, dspChain } = storeToRefs(settings)
-const nativeModeSaving = ref(false)
 const outputSaving = ref(false)
-const bitPerfectSupported = computed(() => !!player.nativeAudioCapabilities.value?.bitPerfect.available)
-const bitPerfectRequested = computed(() =>
-  player.nativeAudioCapabilities.value?.preferredOutputMode === 'bit_perfect')
 const nativeRouteTitle = computed(() => {
   if (!player.nativeAudioCapabilities.value) return 'Native audio · checking…'
   if (!player.nativeAudioCapabilities.value.available) return 'Native audio unavailable'
-  return bitPerfectRequested.value ? 'Heya Rust Audio · bit-perfect' : 'Heya Rust Audio · processed'
+  return 'Heya Rust Audio'
 })
 const nativeRouteDetail = computed(() => {
   const capabilities = player.nativeAudioCapabilities.value
   if (!capabilities) return 'Negotiating the origin-scoped audio bridge.'
-  if (!capabilities.bitPerfect.available) {
-    return capabilities.bitPerfect.unavailableReason ?? 'Processed native playback is available.'
-  }
-  return bitPerfectRequested.value
-    ? 'Exclusive source-rate output; all DSP is bypassed.'
-    : 'Gapless playback, crossfade, ReplayGain, EQ, limiter, and native diagnostics.'
+  return capabilities.available
+    ? 'Gapless playback, crossfade, ReplayGain, EQ, limiter, and native diagnostics.'
+    : 'The native audio renderer is unavailable.'
 })
-
-async function setBitPerfectMode(enabled: boolean) {
-  if (nativeModeSaving.value) return
-  nativeModeSaving.value = true
-  const changed = await player.setBitPerfectAudio(enabled)
-  nativeModeSaving.value = false
-  if (!changed) useToast().toast.err('Could not change the native audio output mode')
-}
 
 const TABS = [
   { id: 'eq', label: 'Equalizer' },
@@ -550,8 +511,6 @@ function onBandKeydown(e: KeyboardEvent, index: number) {
 .eq-native-route span { display: block; }
 .eq-native-route strong { color: var(--fg-1); font-size: 12px; font-weight: 600; }
 .eq-native-route > div > span { margin-top: 3px; color: var(--fg-3); font-size: 10px; }
-.eq-native-toggle { display: flex; align-items: center; gap: 9px; color: var(--fg-2); font-size: 11px; white-space: nowrap; }
-.eq-bypassed { opacity: 0.5; pointer-events: none; }
 .eq-playback-processing { display: flex; flex-direction: column; gap: 12px; }
 /* Standalone tab panes (Playback / Effects) — no top border, the tab bar
    already separates them from the header. */

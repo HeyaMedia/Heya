@@ -10,6 +10,7 @@ import { alog } from '~/engine/debug'
 import { prefetchManager } from '~/engine/prefetch'
 import { computeNormalizationGain } from '~/engine/dsp/normalization'
 import type { NativeAudioPlaybackBackend } from '~/composables/useNativeAudioPlaybackBackend'
+import type { AudioPlaybackClockSource } from '~/types/audio-playback'
 import type {
   NativeAudioProcessingSettings,
   NativeAudioTrackAnalysisUpdate,
@@ -26,6 +27,8 @@ export interface Track {
   stream_url?: string
   track_file_id?: number
   album_id?: number
+  disc_number?: number
+  track_number?: number
   artist_id?: number
   artist_slug?: string
   album_slug?: string
@@ -250,6 +253,8 @@ export const usePlayerStore = defineStore('player', () => {
       album: i.album_title,
       duration: i.duration,
       album_id: i.album_id,
+      disc_number: i.disc_number,
+      track_number: i.track_number,
       artist_id: i.artist_id,
       artist_slug: i.artist_slug,
       album_slug: i.album_slug,
@@ -330,6 +335,9 @@ export const usePlayerStore = defineStore('player', () => {
   let nativePreloadedTrackId: number | null = null
   let nativeLastStartedTrackId: number | null = null
   let nativeEndedHandled = false
+  let localClockTimer: ReturnType<typeof setInterval> | null = null
+  let nativeClockReconcileAt = 0
+  let nativeClockReconcileInFlight = false
   const nowPlaying = useNowPlayingSession()
 
   // Music sessions use the same Activity-page controls as video sessions.
@@ -373,7 +381,6 @@ export const usePlayerStore = defineStore('player', () => {
       // is a cold reload with an audible gap.
       e.setOnTransitionPoint(() => { void handleTransition() })
       watch(e.isPlaying, (v) => { playing.value = v })
-      watch(e.currentTime, acceptLocalPosition)
       watch(e.duration, (v) => {
         if (Number.isFinite(v) && v > 0) duration.value = v
       })
@@ -406,6 +413,58 @@ export const usePlayerStore = defineStore('player', () => {
     })
     return e
   }
+
+  function activeLocalClockSource(): AudioPlaybackClockSource | null {
+    if (playbackBackend.value === 'native') return nativeAudioBackend.value
+    if (playbackBackend.value === 'browser' && engineWired.value) return useAudioEngine()
+    return null
+  }
+
+  function sampleLocalClock() {
+    const source = activeLocalClockSource()
+    if (!source) return
+    const sample = source.readClock()
+    if (Number.isFinite(sample.positionSeconds)) acceptLocalPosition(sample.positionSeconds)
+    if (Number.isFinite(sample.durationSeconds) && sample.durationSeconds > 0) {
+      duration.value = sample.durationSeconds
+    }
+
+    if (source.kind !== 'native') return
+    // Events keep the normal path responsive. Once per second, independently
+    // reconcile with Rust's callback-owned PCM frame counter so a dropped Rust
+    // event or WebView injection can never strand the UI clock indefinitely.
+    const now = performance.now()
+    if (nativeClockReconcileInFlight || now < nativeClockReconcileAt) return
+    nativeClockReconcileAt = now + 1000
+    nativeClockReconcileInFlight = true
+    void Promise.resolve(source.reconcileClock())
+      .catch(error => alog('player', 'native audio clock reconciliation failed', error))
+      .finally(() => { nativeClockReconcileInFlight = false })
+  }
+
+  function updateLocalClockPolling() {
+    const nativeActive = playbackBackend.value === 'native'
+      && !!nativeAudioBackend.value?.rendererSessionId.value
+      && (playing.value || !!nativeAudioState.value?.loading || !!nativeAudioState.value?.buffering)
+    const browserActive = playbackBackend.value === 'browser' && engineWired.value && playing.value
+    const shouldPoll = !!currentTrack.value && (nativeActive || browserActive)
+    if (shouldPoll && !localClockTimer) {
+      sampleLocalClock()
+      localClockTimer = setInterval(sampleLocalClock, 250)
+    } else if (!shouldPoll && localClockTimer) {
+      clearInterval(localClockTimer)
+      localClockTimer = null
+    }
+  }
+
+  watch(
+    [playing, playbackBackend, currentTrack, () => nativeAudioState.value?.loading, () => nativeAudioState.value?.buffering],
+    updateLocalClockPolling,
+  )
+  onScopeDispose(() => {
+    if (localClockTimer) clearInterval(localClockTimer)
+    localClockTimer = null
+  })
 
   function sessionPayload() {
     const track = currentTrack.value
@@ -522,29 +581,10 @@ export const usePlayerStore = defineStore('player', () => {
       dspOrder: [...settings.dspChain.value.order],
       crossfadeMode: crossfade.mode,
       crossfadeSeconds: crossfade.durationSeconds,
-      albumAware: crossfade.albumAware,
       // Rust publishes bounded time-domain and FFT snapshots only while a
       // mounted visualizer is drawing them — every frame otherwise costs an
       // FFT + JSON serialize + webview eval for nobody.
       visualizerEnabled: nativeAnalyserDemandActive(),
-    }
-  }
-
-  function bitPerfectProcessingSettings(): NativeAudioProcessingSettings {
-    return {
-      replayGainEnabled: false,
-      eqEnabled: false,
-      eqBandsDb: Array(10).fill(0),
-      preampDb: 0,
-      postgainDb: 0,
-      limiterEnabled: false,
-      crossfeedEnabled: false,
-      crossfeedPreset: 'natural',
-      dspOrder: ['equalizer', 'crossfeed'],
-      crossfadeMode: 'gapless',
-      crossfadeSeconds: 0,
-      albumAware: true,
-      visualizerEnabled: false,
     }
   }
 
@@ -592,6 +632,7 @@ export const usePlayerStore = defineStore('player', () => {
   async function buildNativeTrackRequest(
     track: Track,
     startPositionSeconds = 0,
+    skipCrossfade = false,
   ): Promise<NativeAudioTrackRequest | null> {
     if (track.id <= 0 || track.isStream) return null
     await ensurePlaybackData(track.id)
@@ -616,11 +657,7 @@ export const usePlayerStore = defineStore('player', () => {
       durationSeconds: track.duration || 0,
       albumKey: track.album_id ? `album:${track.album_id}` : track.album,
       formatHint: format,
-      codec: data.format ?? undefined,
-      sampleRateHz: data.sample_rate_hz ?? undefined,
-      bitDepth: data.bit_depth ?? undefined,
-      channels: data.channels ?? undefined,
-      lossless: !!format && ['flac', 'alac', 'wav', 'wave', 'aiff', 'aif', 'ape'].includes(format),
+      skipCrossfade,
       gainDb: normalizationGainDb(track),
       introEndMs: data.intro_end_ms ?? undefined,
       outroStartMs: data.outro_start_ms ?? undefined,
@@ -658,13 +695,11 @@ export const usePlayerStore = defineStore('player', () => {
           watch(() => backend.state.playing, (value) => {
             if (playbackBackend.value === 'native') playing.value = value
           })
-          watch(() => backend.state.positionSeconds, (value) => {
-            if (playbackBackend.value === 'native') acceptLocalPosition(value)
-          })
           watch(() => backend.state.durationSeconds, (value) => {
             if (playbackBackend.value === 'native' && Number.isFinite(value) && value > 0) duration.value = value
           })
-          watch(() => backend.state.startedTrackId, (trackId) => {
+          watch([() => backend.state.startedTrackId, () => backend.state.currentTrackId], ([startedTrackId, currentTrackId]) => {
+            const trackId = startedTrackId ?? currentTrackId
             if (playbackBackend.value !== 'native' || !trackId || trackId === nativeLastStartedTrackId) return
             nativeLastStartedTrackId = trackId
             nativeEndedHandled = false
@@ -710,10 +745,7 @@ export const usePlayerStore = defineStore('player', () => {
       // before asking Rust to start so both can never emit sound together.
       if (engineWired.value) ensureEngine().stop()
       await backend.load({
-        mode: backend.capabilities.preferredOutputMode,
-        processing: backend.capabilities.preferredOutputMode === 'bit_perfect'
-          ? bitPerfectProcessingSettings()
-          : nativeProcessingSettings(),
+        processing: nativeProcessingSettings(),
         track: request,
       })
       playbackBackend.value = 'native'
@@ -725,13 +757,10 @@ export const usePlayerStore = defineStore('player', () => {
       if (backend.state.durationSeconds > 0) duration.value = backend.state.durationSeconds
       nativeLastStartedTrackId = track.id
       nativeEndedHandled = false
-      if (backend.capabilities.preferredOutputMode !== 'bit_perfect') {
-        await backend.setVolume(volume.value / 100)
-        await backend.setMuted(muted.value)
-      }
+      await backend.setVolume(volume.value / 100)
+      await backend.setMuted(muted.value)
       settings.registerEngineBridge(backend, () => {
-        if (playbackBackend.value === 'native'
-          && backend.state.outputMode === 'processed') {
+        if (playbackBackend.value === 'native') {
           void backend.updateProcessing(nativeProcessingSettings()).catch(() => {})
           const activeTrack = currentTrack.value
           if (activeTrack) void backend.updateTrackAnalysis(nativeTrackAnalysisUpdate(activeTrack)).catch(() => {})
@@ -759,35 +788,6 @@ export const usePlayerStore = defineStore('player', () => {
     return await ensureNativeAudioBackend()
   }
 
-  async function setBitPerfectAudio(enabled: boolean): Promise<boolean> {
-    const backend = await ensureNativeAudioBackend()
-    if (!backend || (enabled && !backend.capabilities.bitPerfect.available)) return false
-    const wasPlaying = playing.value
-    try {
-      await backend.setOutputMode(enabled ? 'bit_perfect' : 'processed')
-      const track = currentTrack.value
-      if (track && playbackBackend.value === 'native') {
-        const resumeAt = position.value
-        if (!await playNativeTrack(track, resumeAt)) {
-          // A lossy track, unsupported source format, or busy exclusive
-          // device can reject bit-perfect startup. Put the durable preference
-          // back into processed mode and restore playback rather than leaving
-          // the user with a stopped track and a sticky unusable setting.
-          if (enabled) await backend.setOutputMode('processed').catch(() => {})
-          await play(track, { skipQueueSync: true })
-          if (!wasPlaying) pause()
-          return false
-        }
-        if (!wasPlaying) await backend.pause().catch(() => {})
-        prepareTransition()
-      }
-      return true
-    } catch (error) {
-      alog('player', 'could not change native audio output mode', error)
-      return false
-    }
-  }
-
   async function refreshNativeAudioOutputs(): Promise<boolean> {
     const backend = await ensureNativeAudioBackend()
     if (!backend?.capabilities.outputDeviceSelection) return false
@@ -802,8 +802,7 @@ export const usePlayerStore = defineStore('player', () => {
 
   async function setNativeAudioOutputDevice(deviceId: string | null): Promise<boolean> {
     const backend = await ensureNativeAudioBackend()
-    if (!backend?.capabilities.outputDeviceSelection
-      || backend.capabilities.preferredOutputMode === 'bit_perfect') return false
+    if (!backend?.capabilities.outputDeviceSelection) return false
 
     const track = currentTrack.value
     const ownsPlayback = playbackBackend.value === 'native' && !!track
@@ -839,7 +838,23 @@ export const usePlayerStore = defineStore('player', () => {
     nativePreloadedTrackId = null
     if (!next || next.isStream) return
     try {
-      const request = await buildNativeTrackRequest(next)
+      const current = currentTrack.value
+      const request = await buildNativeTrackRequest(next, 0, !!current && shouldSuppressCrossfade(
+        {
+          trackId: current.id,
+          albumId: current.album_id,
+          albumName: current.album,
+          discNumber: current.disc_number,
+          trackNumber: current.track_number,
+        },
+        {
+          trackId: next.id,
+          albumId: next.album_id,
+          albumName: next.album,
+          discNumber: next.disc_number,
+          trackNumber: next.track_number,
+        },
+      ))
       if (!request || generation !== nativePreloadGeneration || playbackBackend.value !== 'native') return
       await backend.preload(request)
       if (generation === nativePreloadGeneration) nativePreloadedTrackId = next.id
@@ -1000,10 +1015,22 @@ export const usePlayerStore = defineStore('player', () => {
     const cf = settings.crossfade.value
     let mode: 'gapless' | 'crossfade' | 'smart' = cf.mode
     let suppressed = false
-    if ((mode === 'crossfade' || mode === 'smart') && cf.albumAware && next.id !== cur.id) {
+    if (mode === 'crossfade' || mode === 'smart') {
       const same = shouldSuppressCrossfade(
-        { albumId: cur.album_id, albumName: cur.album },
-        { albumId: next.album_id, albumName: next.album },
+        {
+          trackId: cur.id,
+          albumId: cur.album_id,
+          albumName: cur.album,
+          discNumber: cur.disc_number,
+          trackNumber: cur.track_number,
+        },
+        {
+          trackId: next.id,
+          albumId: next.album_id,
+          albumName: next.album,
+          discNumber: next.disc_number,
+          trackNumber: next.track_number,
+        },
       )
       if (same) { mode = 'gapless'; suppressed = true }
     }
@@ -1647,7 +1674,6 @@ export const usePlayerStore = defineStore('player', () => {
 
   function setVolume(v: number) {
     const clamped = Math.max(0, Math.min(100, v))
-    if (playbackBackend.value === 'native' && nativeAudioState.value?.bitPerfectActive) return
     // While muted the control's baseline reads 0, so a stray down-scroll or a
     // click on the zero-thumb would call setVolume(0) and wipe the remembered
     // pre-mute level (both in state and localStorage). Ignore a muted set-to-0
@@ -1671,7 +1697,6 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   function toggleMute() {
-    if (playbackBackend.value === 'native' && nativeAudioState.value?.bitPerfectActive) return
     muted.value = !muted.value
     if (useCastStore().engaged) {
       // No mute verb on the receiver — drive the stream volume to 0 and
@@ -2186,7 +2211,7 @@ export const usePlayerStore = defineStore('player', () => {
     toggleLoved, toggleQueue, toggleLyrics, formatTime,
     jumpTo, removeFromQueue, moveInQueue, clearUpcoming,
     addToQueue, playNext, setSimilarAutoplayEnabled,
-    probeNativeAudio, setBitPerfectAudio, refreshNativeAudioOutputs, setNativeAudioOutputDevice,
+    probeNativeAudio, refreshNativeAudioOutputs, setNativeAudioOutputDevice,
     startCastTo, stopCasting, castTrackEnded,
   }
 })
@@ -2226,7 +2251,6 @@ export function usePlayerBindings() {
     playNext: store.playNext,
     setSimilarAutoplayEnabled: store.setSimilarAutoplayEnabled,
     probeNativeAudio: store.probeNativeAudio,
-    setBitPerfectAudio: store.setBitPerfectAudio,
     refreshNativeAudioOutputs: store.refreshNativeAudioOutputs,
     setNativeAudioOutputDevice: store.setNativeAudioOutputDevice,
     startCastTo: store.startCastTo,

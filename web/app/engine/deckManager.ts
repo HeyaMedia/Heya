@@ -129,6 +129,14 @@ export class DeckManager {
   get pending(): Deck { return this.pendingDeck }
   get isTransitioning(): boolean { return this.transitioning }
 
+  readClock() {
+    return {
+      positionSeconds: this.activeDeck.currentTime,
+      durationSeconds: this.activeDeck.duration,
+      paused: this.activeDeck.paused,
+    }
+  }
+
   pause() {
     this.activeDeck.pause()
     if (this.transitioning) {

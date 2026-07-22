@@ -208,8 +208,8 @@ native playback can be load-balanced across replicas.
 5. Add MPV diagnostics and normalized track selection. (Done; variants reload
    a server HLS descriptor rather than setting an MPV property.)
 6. Evaluate an integrated render surface independently from transport/control.
-7. Prove native audio through MPV before adding a separate Rust bit-perfect
-   engine behind the same semantic backend contract.
+7. Keep native music on one observable shared-output pipeline; do not add an
+   exclusive-output mode without a proven use case and lifecycle contract.
 
 ## Primary references
 

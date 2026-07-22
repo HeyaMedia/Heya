@@ -1,5 +1,6 @@
 import type { Ref } from 'vue'
 import type { CrossfadeMode } from '~~/shared/types/audio'
+import type { AudioPlaybackClockSample } from '~/types/audio-playback'
 import { AnalyserBridge } from '~/engine/analysis/analyserBridge'
 import { getAudioContext, resumeContext, scheduleIdleSuspend } from '~/engine/context'
 import { alog, shortUrl } from '~/engine/debug'
@@ -163,6 +164,20 @@ function createEngine() {
   }
   function resetPendingNormalization() { deckManager.setPendingNormalization(1) }
 
+  function readClock(): AudioPlaybackClockSample {
+    const clock = deckManager.readClock()
+    return {
+      positionSeconds: clock.positionSeconds,
+      durationSeconds: clock.durationSeconds,
+      playing: isPlaying.value && !clock.paused,
+      paused: clock.paused,
+      loading: false,
+      buffering: false,
+      ended: false,
+      sampledAtMilliseconds: performance.now(),
+    }
+  }
+
   function dispose() {
     deckManager.dispose()
     signalChain.dispose()
@@ -171,6 +186,7 @@ function createEngine() {
   }
 
   return {
+    kind: 'browser' as const,
     isPlaying, currentTime, duration, volume,
     play, pause, stop, resume, seek, setVolume,
     loadNext, transition, setOnTransitionPoint, setOnEnded, setOnError,
@@ -179,6 +195,8 @@ function createEngine() {
     signalChain, analyserBridge, scheduler,
     setActiveNormalization, setPendingNormalization,
     resetActiveNormalization, resetPendingNormalization,
+    readClock,
+    reconcileClock: () => {},
     // Full Web Audio graph — the default everywhere except iOS. See
     // engine/directEngine.ts for the no-graph counterpart and `directMode`'s
     // purpose (gating EQ/visualizer UI that has nothing to attach to there).
@@ -190,6 +208,7 @@ function createEngine() {
 // server — callers can still import the composable from server code, they
 // just won't get a working engine until the client hydrates.
 type EngineStub = {
+  kind: 'browser'
   isPlaying: Ref<boolean>
   currentTime: Ref<number>
   duration: Ref<number>
@@ -210,6 +229,8 @@ type EngineStub = {
   setPendingNormalization: (integrated: number, truePeak: number, targetLufs?: number) => void
   resetActiveNormalization: () => void
   resetPendingNormalization: () => void
+  readClock: () => AudioPlaybackClockSample
+  reconcileClock: () => void
   // Present on every branch (graph, direct, SSR stub) so UI can read
   // `useAudioEngine().directMode` without a cast. True only for
   // engine/directEngine.ts's no-graph engine.
@@ -217,6 +238,7 @@ type EngineStub = {
 }
 
 const serverStub: EngineStub = {
+  kind: 'browser',
   isPlaying: ref(false),
   currentTime: ref(0),
   duration: ref(0),
@@ -237,6 +259,17 @@ const serverStub: EngineStub = {
   setPendingNormalization: () => {},
   resetActiveNormalization: () => {},
   resetPendingNormalization: () => {},
+  readClock: () => ({
+    positionSeconds: 0,
+    durationSeconds: 0,
+    playing: false,
+    paused: true,
+    loading: false,
+    buffering: false,
+    ended: false,
+    sampledAtMilliseconds: Date.now(),
+  }),
+  reconcileClock: () => {},
   directMode: false,
 }
 

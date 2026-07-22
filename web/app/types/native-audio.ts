@@ -3,7 +3,6 @@ import type {
   NativePlaybackTerminationReason,
 } from '~/types/native-playback'
 
-export type NativeAudioOutputMode = 'processed' | 'bit_perfect'
 export type NativeAudioCrossfadeMode = 'gapless' | 'crossfade' | 'smart'
 
 export interface NativeAudioProcessingSettings {
@@ -18,7 +17,6 @@ export interface NativeAudioProcessingSettings {
   dspOrder: Array<'equalizer' | 'crossfeed'>
   crossfadeMode: NativeAudioCrossfadeMode
   crossfadeSeconds: number
-  albumAware: boolean
   visualizerEnabled: boolean
 }
 
@@ -33,11 +31,6 @@ export interface NativeAudioTrackRequest {
   durationSeconds: number
   albumKey: string
   formatHint?: string
-  codec?: string
-  sampleRateHz?: number
-  bitDepth?: number
-  channels?: number
-  lossless?: boolean
   gainDb?: number
   skipCrossfade?: boolean
   startRamp?: string
@@ -50,7 +43,6 @@ export interface NativeAudioTrackRequest {
 }
 
 export interface NativeAudioLoadRequest {
-  mode: NativeAudioOutputMode
   processing: NativeAudioProcessingSettings
   track: NativeAudioTrackRequest
 }
@@ -71,7 +63,7 @@ export interface NativeAudioTrackAnalysisUpdate {
 }
 
 export interface NativeAudioCapabilities {
-  protocolVersion: 1
+  protocolVersion: 2
   backend: 'heya-rust-audio'
   available: boolean
   gapless: boolean
@@ -80,12 +72,6 @@ export interface NativeAudioCapabilities {
   equalizer: boolean
   visualizer: boolean
   outputDeviceSelection: boolean
-  preferredOutputMode: NativeAudioOutputMode
-  bitPerfect: {
-    available: boolean
-    requiresExclusiveDevice: boolean
-    unavailableReason?: string
-  }
   unavailableReason?: NativePlaybackErrorCode
 }
 
@@ -114,8 +100,6 @@ export interface NativeAudioState {
   currentTrackId: number | null
   startedTrackId: number | null
   endedTrackId: number | null
-  outputMode: NativeAudioOutputMode
-  bitPerfectActive: boolean
   sourceSampleRateHz: number | null
   sourceChannels: number | null
   outputSampleRateHz: number | null
@@ -129,14 +113,14 @@ export interface NativeAudioState {
 }
 
 export interface NativeAudioStateEvent {
-  protocolVersion: 1
+  protocolVersion: 2
   rendererSessionId: string
   stateRevision: number
   payload: NativeAudioState
 }
 
 export interface NativeAudioVisualizerEvent {
-  protocolVersion: 1
+  protocolVersion: 2
   rendererSessionId: string
   visualizerRevision: number
   samples: ReadonlyArray<number>
@@ -167,15 +151,14 @@ export interface NativeAudioCommandResult {
 }
 
 export interface HeyaNativeAudioBridge {
-  readonly protocolVersion: 1
+  readonly protocolVersion: 2
   getAudioCapabilities(): Promise<NativeAudioCapabilities>
-  setAudioOutputMode(mode: NativeAudioOutputMode): Promise<NativeAudioCapabilities>
   getAudioOutputDevices(): Promise<NativeAudioOutputDevices>
   setAudioOutputDevice(deviceId: string | null): Promise<NativeAudioOutputDevices>
   loadAudio(request: NativeAudioLoadRequest): Promise<{
     rendererSessionId: string
-    activeMode: NativeAudioOutputMode
   }>
+  getAudioState(request: { rendererSessionId: string }): Promise<NativeAudioStateEvent>
   preloadNextAudio(request: NativeAudioPreloadRequest): Promise<NativeAudioCommandResult>
   sendAudioCommand(command: NativeAudioCommand): Promise<NativeAudioCommandResult>
   subscribeAudioState(listener: (event: NativeAudioStateEvent) => void): () => void
@@ -189,8 +172,8 @@ declare global {
   }
 
   interface WindowEventMap {
-    'heya:native-audio:ready-v1': CustomEvent<{
-      protocolVersion: 1
+    'heya:native-audio:ready-v2': CustomEvent<{
+      protocolVersion: 2
       capabilities: NativeAudioCapabilities
     }>
   }

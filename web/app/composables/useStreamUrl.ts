@@ -20,7 +20,7 @@ export interface StreamableTrack {
 // For /stream URLs (the smart endpoint that picks the best playable file and
 // transcodes if needed) we also append the audio caps so the server can match
 // what this browser will actually decode, and — when the device settings ask
-// for a lower tier — a `quality` hint. /file/{id} URLs (bit-perfect direct
+// for a lower tier — a `quality` hint. /file/{id} URLs (original direct
 // file playback) and non-/stream `stream_url`s (e.g. internet radio) skip
 // both: caps/quality only make sense where the server is picking an encode.
 //

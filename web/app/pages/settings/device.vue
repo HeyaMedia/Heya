@@ -20,7 +20,7 @@ const { user } = useAuth()
 const userId = computed(() => (user.value?.id ?? Number(localStorage.getItem('heya_user_id'))) || null)
 
 const QUALITY_OPTIONS: { value: StreamQuality, label: string }[] = [
-  { value: 'original', label: 'Original (bit-perfect / best playable)' },
+  { value: 'original', label: 'Original (best playable)' },
   { value: 'aac-320',  label: 'AAC 320 kbps' },
   { value: 'aac-256',  label: 'AAC 256 kbps' },
   { value: 'aac-192',  label: 'AAC 192 kbps' },

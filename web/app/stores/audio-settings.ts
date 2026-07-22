@@ -17,7 +17,6 @@ export interface EQState {
 export interface CrossfadeState {
   mode: 'gapless' | 'crossfade' | 'smart'
   durationSeconds: number
-  albumAware: boolean
 }
 
 export interface ReplayGainState {
@@ -59,7 +58,7 @@ export interface StoredAudioSettings {
 
 const DEFAULTS: StoredAudioSettings = {
   eq: { enabled: false, preamp: 0, postgain: 0, bands: Array(AUDIO_BANDS).fill(0), presetName: 'Flat' },
-  crossfade: { mode: 'gapless', durationSeconds: 3, albumAware: true },
+  crossfade: { mode: 'gapless', durationSeconds: 3 },
   replayGain: { mode: 'auto', targetLufs: DEFAULT_TARGET_LUFS },
   crossfeed: { enabled: false, preset: 'natural' },
   dspChain: { order: ['equalizer', 'crossfeed'], limiterEnabled: true },
@@ -171,9 +170,6 @@ export const useAudioSettingsStore = defineStore('audio-settings', () => {
   function setCrossfadeDuration(seconds: number) {
     commit({ ...settings.value, crossfade: { ...settings.value.crossfade, durationSeconds: clamp(seconds, 1, 12) } })
   }
-  function setCrossfadeAlbumAware(albumAware: boolean) {
-    commit({ ...settings.value, crossfade: { ...settings.value.crossfade, albumAware } })
-  }
   function setReplayGainMode(mode: ReplayGainState['mode']) {
     commit({ ...settings.value, replayGain: { ...settings.value.replayGain, mode } })
   }
@@ -250,7 +246,7 @@ export const useAudioSettingsStore = defineStore('audio-settings', () => {
     settings, eq, crossfade, replayGain, crossfeed, dspChain,
     presets: BUILTIN_PRESETS,
     setEQEnabled, setEQBand, setPreamp, setPostgain, applyPreset,
-    setCrossfadeMode, setCrossfadeDuration, setCrossfadeAlbumAware,
+    setCrossfadeMode, setCrossfadeDuration,
     setReplayGainMode, setReplayGainTarget, setCrossfeedEnabled, setCrossfeedPreset,
     setLimiterEnabled, moveDspBlock,
     applyAudioProfile, currentAudioProfile, resetAudioProfile, registerEngineBridge,

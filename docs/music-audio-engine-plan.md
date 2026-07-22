@@ -48,7 +48,7 @@ Ranked by (audible/UX impact) ÷ effort. `S/M/L` = small/medium/large.
 | 1 | Prefetch next track onto the pending deck (`loadNext`, depth 1) | `usePlayer.ts` |
 | 5 | **Gapless** playback — `setOnTransitionPoint` → scheduler hard-cut swap | `usePlayer.ts` |
 | 8 | **Time-based crossfade** end-to-end (`TimeBasedCrossfade` → `engine.transition`) | `usePlayer.ts` |
-| 14 | Album-aware crossfade suppression + settings model (`albumAware`) + UI toggle | `useAudioSettings.ts`, `usePlayer.ts`, `EQPanel.vue` |
+| 14 | Album-continuity suppression: adjacent tracks on the same release and repeat-one loops are always gapless | `usePlayer.ts`, `engine/crossfade/albumAware.ts`, `EQPanel.vue` |
 | 4 | **Fixed shuffle** — reorders the upcoming queue in place + `originalOrder` restore (also fixes prevTrack / Up-Next mismatch) | `usePlayer.ts` |
 | 3 | **Fixed ReplayGain + real album/auto** — `off` truly disables; `track`/`album`/`auto` now use the right loudness. Album LUFS (already computed in Go) is exposed via the track-detail query (`al.integrated_lufs/true_peak_db` on `GetTrackDetailByID`); the player fetches `/api/music/tracks/{id}` (track loudness + boundaries + album loudness in one call), and `effectiveLoudness()` picks track vs album by mode (`auto` = track on shuffle, album otherwise), decided per track-load. Quality popover shows track + album LUFS and the applied gain with its source. | `queries/music.sql`, `usePlayer.ts`, `useAudioSettings.ts`, `PlaybarQuality.vue` |
 | 12 | **Scrobble on listened time** — accumulates pause/seek-aware wall-clock, not raw position | `usePlayer.ts` |

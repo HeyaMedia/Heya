@@ -66,7 +66,7 @@
           <div class="pbq-sec-label">Engine</div>
           <div class="pbq-rows">
             <div class="pbq-row"><span>Backend</span><span class="pbq-v">{{ backendLabel }}</span></div>
-            <div v-if="nativeState" class="pbq-row"><span>Mode</span><span class="pbq-v" :class="{ gold: nativeState.bitPerfectActive }">{{ nativePathLabel }}</span></div>
+            <div v-if="nativeState" class="pbq-row"><span>Mode</span><span class="pbq-v">{{ nativePathLabel }}</span></div>
             <div v-if="nativeState" class="pbq-row"><span>Source</span><span class="pbq-v">{{ nativeSourceLabel }}</span></div>
             <div class="pbq-row"><span>Output</span><span class="pbq-v">{{ outputLabel }}</span></div>
             <div v-if="nativeState" class="pbq-row"><span>Resampler</span><span class="pbq-v">{{ nativeState.resamplerActive ? 'active' : 'bypassed' }}</span></div>
@@ -154,7 +154,6 @@ const backendLabel = computed(() => ({
 const nativePathLabel = computed(() => {
   const state = nativeState.value
   if (!state) return 'processed'
-  if (state.bitPerfectActive) return 'bit-perfect · exclusive'
   return state.resamplerActive ? 'processed · resampled' : 'processed · source rate'
 })
 const nativeSourceLabel = computed(() => {
@@ -170,26 +169,20 @@ const outputLabel = computed(() => {
 const nativeDspLabel = computed(() => {
   const state = nativeState.value
   if (!state) return '—'
-  if (state.bitPerfectActive) return 'bypassed (bit-perfect)'
   return state.dspActive ? 'active' : 'bypassed'
 })
-const eqLabel = computed(() => nativeState.value?.bitPerfectActive
-  ? 'bypassed'
-  : (eq.value.enabled ? `on (${eq.value.presetName || 'custom'})` : 'off'))
+const eqLabel = computed(() => eq.value.enabled ? `on (${eq.value.presetName || 'custom'})` : 'off')
 const replayGainLabel = computed(() => {
-  if (nativeState.value?.bitPerfectActive) return 'bypassed'
   if (rg.value.mode === 'off') return 'off'
   return `${rg.value.mode} · ${rg.value.targetLufs} LUFS`
 })
-const effectiveCrossfadeLabel = computed(() => nativeState.value?.bitPerfectActive ? 'gapless (bit-perfect)' : crossfadeLabel.value)
-const effectiveCrossfeedLabel = computed(() => {
-  if (nativeState.value?.bitPerfectActive) return 'bypassed'
-  return crossfeed.value.enabled ? crossfeed.value.preset : 'off'
+const effectiveCrossfadeLabel = computed(() => {
+  const cf = crossfade.value
+  if (cf.mode === 'gapless') return 'gapless'
+  return `${cf.mode} · ${cf.durationSeconds}s`
 })
-const nativeAnalyzerLabel = computed(() => {
-  if (nativeState.value?.bitPerfectActive) return 'off (bit-perfect)'
-  return player.nativeAudioVisualizer.value ? 'PCM + FFT active' : 'waiting for frames'
-})
+const effectiveCrossfeedLabel = computed(() => crossfeed.value.enabled ? crossfeed.value.preset : 'off')
+const nativeAnalyzerLabel = computed(() => player.nativeAudioVisualizer.value ? 'PCM + FFT active' : 'waiting for frames')
 
 function toNum(v: unknown): number | null {
   if (v == null) return null
@@ -238,12 +231,6 @@ const qualityLabel = computed(() => {
   if (f.bit_depth && f.sample_rate_hz) return `${fmt} ${khz(f.sample_rate_hz)}/${f.bit_depth}`
   if (f.bitrate_kbps) return `${fmt} ${f.bitrate_kbps}k`
   return fmt || '···'
-})
-
-const crossfadeLabel = computed(() => {
-  const cf = crossfade.value
-  if (cf.mode === 'gapless') return 'gapless'
-  return `${cf.mode} · ${cf.durationSeconds}s`
 })
 
 function khz(hz: number) {

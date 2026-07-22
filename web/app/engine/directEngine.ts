@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import type { CrossfadeMode } from '~~/shared/types/audio'
+import type { AudioPlaybackClockSample } from '~/types/audio-playback'
 import { alog, shortUrl } from '~/engine/debug'
 import type { TransitionPlan } from '~/engine/crossfade/strategy'
 import { computeNormalizationGain } from '~/engine/dsp/normalization'
@@ -226,6 +227,19 @@ export function createDirectEngine() {
     pendingNormGain = 1
   }
 
+  function readClock(): AudioPlaybackClockSample {
+    return {
+      positionSeconds: active.audio.currentTime,
+      durationSeconds: active.audio.duration || 0,
+      playing: isPlaying.value && !active.audio.paused,
+      paused: active.audio.paused,
+      loading: false,
+      buffering: false,
+      ended: active.audio.ended,
+      sampledAtMilliseconds: performance.now(),
+    }
+  }
+
   function dispose() {
     stop()
     active.events = {}
@@ -233,12 +247,15 @@ export function createDirectEngine() {
   }
 
   return {
+    kind: 'browser' as const,
     isPlaying, currentTime, duration, volume,
     play, pause, stop, resume, seek, setVolume,
     loadNext, transition, setOnTransitionPoint, setOnEnded, setOnError,
     dispose,
     setActiveNormalization, setPendingNormalization,
     resetActiveNormalization, resetPendingNormalization,
+    readClock,
+    reconcileClock: () => {},
     // Diagnostic hint for gating UI (EQPanel notice, visualizer guards, the
     // NowPlayingSheet artwork-tap cycle) — see useAudioEngine.ts's
     // `data-engine` attribute for the equivalent device-inspectable signal.

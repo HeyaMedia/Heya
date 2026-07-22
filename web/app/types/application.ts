@@ -18,7 +18,6 @@ export interface ApplicationSettings {
   reconnectOnLaunch: boolean
   nativePlaybackEnabled: boolean
   nativeAudioEnabled: boolean
-  bitPerfectAudioEnabled: boolean
   audioOutputDeviceId: string | null
   trackChangeNotifications: boolean
 }
@@ -44,8 +43,6 @@ export interface NativeAudioStatus {
   available: boolean
   gapless: boolean
   crossfade: boolean
-  bitPerfectAvailable: boolean
-  bitPerfectUnavailableReason: string | null
 }
 
 export interface ApplicationUpdateStatus {
