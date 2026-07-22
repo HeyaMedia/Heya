@@ -45,6 +45,9 @@
         class="surface app-sheet-content"
         :class="side === 'left' ? 'app-sheet-left' : `app-sheet-${size}`"
         @open-auto-focus.prevent
+        @pointer-down-outside="persistent && $event.preventDefault()"
+        @interact-outside="persistent && $event.preventDefault()"
+        @escape-key-down="persistent && $event.preventDefault()"
       >
         <!-- Handle is a horizontal grip — the wrong shape for a side drawer,
              so it's force-hidden for side="left" regardless of the `handle`
@@ -78,6 +81,9 @@ withDefaults(defineProps<{
    *  full-height (100dvh) with a fixed width instead. */
   size?: 'auto' | 'full'
   handle?: boolean
+  /** Prevent backdrop/outside presses and Escape from closing the sheet while
+   *  retaining its swipe-dismiss gesture and explicit close controls. */
+  persistent?: boolean
   /** 'bottom' (default) = classic bottom sheet. 'left' = side drawer docked
    *  to the left edge, full height, fixed width — used for the compact-band
    *  section-sidebar drawers (movies/tv/books Library, music nav). */
@@ -85,6 +91,7 @@ withDefaults(defineProps<{
 }>(), {
   size: 'auto',
   handle: true,
+  persistent: false,
   side: 'bottom',
 })
 

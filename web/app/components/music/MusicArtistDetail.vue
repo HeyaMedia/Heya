@@ -6,7 +6,7 @@
        shell owns that), mirroring the movie/TV ports + the playbar's
        --pb-accent. Every descendant inherits --tone/--tone-rgb/--tone-ink. The
        Playbar keeps its own track-following --pb-accent untouched. -->
-  <div v-else class="artist2" :class="{ 'hero-flush': !isPhone }" :style="toneStyle">
+  <div v-else class="artist2 hero-flush" :style="toneStyle">
 
     <!-- ── HERO: full-bleed backdrop as sharp art, hard-clipped at the ledger
          seam. HeroCanvas also publishes the shared hero art claim to the global
@@ -101,10 +101,21 @@
           <div class="actions">
             <span v-if="!artistPlayable" class="missing"><Icon name="trash" :size="13" /> Missing on disk</span>
 
-            <button class="btn-play" :disabled="!artistPlayable" @click="playAll(false)">
-              <span class="tri" /> Play
-              <small v-if="playableTrackCount">{{ playableTrackCount }} TRACKS</small>
-            </button>
+            <div class="primary-actions">
+              <button class="btn-play" :disabled="!artistPlayable" @click="playAll(false)">
+                <span class="tri" /> Play
+                <small v-if="playableTrackCount">{{ playableTrackCount }} TRACKS</small>
+              </button>
+
+              <div class="hero-rating" @click.stop>
+                <ReactionControl
+                  :model-value="artistRatings.get(artist.id) ?? 0"
+                  size="sm"
+                  @update:model-value="(v) => onRateArtist(artist!.id, v)"
+                />
+              </div>
+            </div>
+
             <button class="pill" :disabled="!artistPlayable" @click="playAll(true)">
               <Icon name="shuffle" :size="15" /> Shuffle
             </button>
@@ -114,14 +125,6 @@
             <button class="pill" :disabled="radio.starting.value || !artistPlayable" @click="startArtistRadio">
               <Icon name="radio" :size="15" /> Station
             </button>
-
-            <div class="hero-rating" @click.stop>
-              <ReactionControl
-                :model-value="artistRatings.get(artist.id) ?? 0"
-                size="sm"
-                @update:model-value="(v) => onRateArtist(artist!.id, v)"
-              />
-            </div>
 
             <button v-if="isAdmin" class="pill icon hero-edit" title="Edit Metadata" aria-label="Edit metadata" @click="showMetadataEditor = true">
               <Icon name="pencil" :size="15" />
@@ -139,7 +142,7 @@
 
       <!-- Popular Tracks: .trk ledger rows, every current row feature kept. -->
       <section v-if="topTracks.length" class="section">
-        <SectionHeader title="Popular Tracks" subtitle="by plays">
+        <SectionHeader class="popular-header" title="Popular Tracks" subtitle="by plays">
           <template #actions>
             <button class="mini-pill" :disabled="!hasPlayableTopTracks" @click="playTopAll(false)">
               <Icon name="play" :size="12" /><span>Play</span>
@@ -1190,13 +1193,10 @@ if (import.meta.client) {
 .m-state { color: var(--fg-3); padding: 32px var(--pad-fluid); }
 
 /* The music shell owns the scroll root; this page just publishes tone vars and
-   lays out hero → ledger → body. On desktop/tablet the root carries `hero-flush`
-   so the artist art rides up under the fixed glass topbar like every other
-   detail page — the shell (pages/music.vue) then re-pads its MusicSidebar so the
-   sidebar's first nav item still clears the bar. On phone the class is dropped
-   (`!isPhone`) so the compact `.music-phone-header` keeps its topbar clearance
-   from the `.app-main` offset. The hero-inner's own top padding keeps the hero
-   text clear of the bar in the flush case. */
+   lays out hero → ledger → body. `hero-flush` lets the artist art ride beneath
+   the fixed glass topbar at every viewport; the hero-inner's own top padding
+   keeps its text clear. On desktop/tablet, pages/music.vue separately re-pads
+   the MusicSidebar so its first nav item still clears the bar. */
 .artist2 { --oink: 233 236 242; padding-bottom: 40px; }
 
 /* ═══ HERO ═════════════════════════════════════════════════════════════════ */
@@ -1363,6 +1363,11 @@ if (import.meta.client) {
   font: 600 11px var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em;
   color: var(--bad); width: 100%;
 }
+.primary-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
 
 /* tone-glowing primary Play (heya2.css .btn-play) */
 .btn-play {
@@ -1427,16 +1432,24 @@ if (import.meta.client) {
 .pill[disabled] { cursor: not-allowed; opacity: 0.4; }
 .pill.icon { width: 42px; height: 42px; padding: 0; justify-content: center; }
 
-/* artist rating — glass pill over the hero art */
+/* Artist taste controls use the same tone-tinted glass language as the hero's
+   secondary actions, while remaining a single compact three-button cluster. */
 .hero-rating {
   display: inline-flex;
   align-items: center;
-  padding: 5px 10px;
+  padding: 5px 8px;
   border-radius: 999px;
-  background: rgb(var(--shade) / 0.4);
-  border: 1px solid rgb(var(--oink) / 0.12);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: rgb(var(--tone-rgb) / 0.08);
+  border: 1px solid rgb(var(--tone-rgb) / 0.3);
+  box-shadow: 0 0 16px rgb(var(--tone-rgb) / 0.14), 5px 8px 22px -10px rgb(0 0 0 / 0.7);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.hero-rating:hover {
+  border-color: rgb(var(--tone-rgb) / 0.55);
+  background: rgb(var(--tone-rgb) / 0.15);
+  box-shadow: 0 0 24px rgb(var(--tone-rgb) / 0.28), 6px 10px 26px -10px rgb(0 0 0 / 0.75);
 }
 .hero-rating :deep(.reaction-btn) { color: rgb(var(--oink) / 0.7); }
 .hero-rating :deep(.reaction-btn:hover) { color: rgb(var(--oink) / 0.95); }
@@ -1752,11 +1765,50 @@ a.trk-al:hover { color: var(--tone); }
   .title { font-size: clamp(2rem, 9vw, 3rem); }
   .title-logo { max-height: 92px; }
   .actions { gap: 8px; row-gap: 10px; }
-  .btn-play { flex: 1 1 100%; justify-content: center; height: 48px; }
+  .primary-actions {
+    flex: 1 1 100%;
+    width: 100%;
+    gap: 8px;
+  }
+  .btn-play {
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: center;
+    height: 48px;
+    padding-inline: 14px;
+  }
+  .hero-rating {
+    flex: 0 0 auto;
+    height: 48px;
+    padding-inline: 7px;
+  }
   .pill:not(.icon) { flex: 1 1 auto; justify-content: center; height: 46px; }
   .pill.icon { width: 46px; height: 46px; }
   /* Metadata editor is a desktop-sized surface — no phone entry point. */
   .hero-edit { display: none; }
+
+  /* Popular Tracks: title/subtitle own the first line; the three section
+     actions get an evenly-sized row beneath instead of squeezing the title. */
+  .popular-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 12px;
+  }
+  .popular-header :deep(.sh-actions) {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+    margin-left: 0;
+    gap: 8px;
+  }
+  .popular-header .mini-pill {
+    min-width: 0;
+    min-height: 40px;
+    justify-content: center;
+    padding-inline: 8px;
+    white-space: nowrap;
+  }
 
   /* Popular Tracks: the rating widget ate the title column at 390px — hide it
      (the ⋯ ActionSheet carries Rate + play/queue) and give the text room; the
@@ -1769,7 +1821,14 @@ a.trk-al:hover { color: var(--tone); }
     align-items: center;
   }
   .trk-stars { display: none; }
-  .trk-meta { grid-row: 1; }
+  .trk-n {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+  .trk-meta {
+    grid-column: 2;
+    grid-row: 1;
+  }
   .trk-al {
     grid-column: 2;
     grid-row: 2;

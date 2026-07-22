@@ -29,76 +29,97 @@
 -->
 <template>
   <div ref="rootEl" class="qp-root">
-    <div class="qp-sticky-header">
-      <div class="qp-title">Queue</div>
-      <div class="qp-toolbar">
-        <button type="button" class="qp-chip" :class="{ active: shuffled }" aria-label="Shuffle" @click="toggleShuffle">
-          <Icon name="shuffle" :size="15" />
-          <span>Shuffle</span>
-        </button>
-        <button type="button" class="qp-chip" :class="{ active: repeatMode !== 'off' }" aria-label="Repeat" @click="cycleRepeat">
-          <Icon name="repeat" :size="15" />
-          <span>{{ repeatMode === 'one' ? 'Repeat one' : 'Repeat' }}</span>
-        </button>
-        <button type="button" class="qp-clear" @click="clearUpcoming">Clear</button>
-      </div>
-      <div class="qp-mobile-autoplay">
-        <div class="qp-mobile-autoplay-copy">
-          <div class="qp-mobile-autoplay-title">Play tracks like this…</div>
-          <div class="qp-mobile-autoplay-hint">
-            {{ localMode
-              ? 'Unavailable for live streams'
-              : similarAutoplayLoading
-                ? 'Finding more tracks…'
-                : similarAutoplayEnabled
-                  ? 'Keeps this queue going'
-                  : 'Stops when the queue ends' }}
-          </div>
-        </div>
-        <AppSwitch
-          :model-value="similarAutoplayEnabled"
-          :disabled="localMode"
-          size="md"
-          aria-label="Play tracks like this"
-          @update:model-value="setSimilarAutoplayEnabled"
-        />
-      </div>
-    </div>
+    <nav class="qp-tabs" role="tablist" aria-label="Queue views">
+      <button
+        v-for="tab in queueTabs"
+        :id="`qp-tab-${tab.id}`"
+        :key="tab.id"
+        type="button"
+        role="tab"
+        class="qp-tab"
+        :class="{ active: activeTab === tab.id }"
+        :aria-selected="activeTab === tab.id"
+        :aria-controls="`qp-panel-${tab.id}`"
+        @click="activeTab = tab.id"
+      >
+        {{ tab.label }}
+      </button>
+    </nav>
 
-    <div class="qp-list">
-      <template v-if="playedTracks.length">
-        <div class="qp-section-label">Played</div>
+    <section
+      v-if="activeTab === 'back-to'"
+      id="qp-panel-back-to"
+      role="tabpanel"
+      aria-labelledby="qp-tab-back-to"
+      class="qp-tab-panel"
+    >
+      <div v-if="historyTracks.length" class="qp-list qp-tab-list">
+        <!-- History is intentionally newest-first: the track immediately
+             before the current one is at the top; the oldest is at bottom. -->
         <button
-          v-for="(t, i) in playedTracks"
-          :key="`played-${t.id}-${i}`"
+          v-for="entry in historyTracks"
+          :key="`played-${entry.track.id}-${entry.queueIndex}`"
           type="button"
           class="qp-row qp-row-played"
-          @click="jumpTo(i)"
+          @click="jumpTo(entry.queueIndex)"
         >
-          <Poster :idx="t.id" :src="t.poster ?? null" aspect="1/1" :width="88" class="qp-thumb" />
+          <Poster :idx="entry.track.id" :src="entry.track.poster ?? null" aspect="1/1" :width="88" class="qp-thumb" />
           <div class="qp-row-info">
-            <div class="qp-row-title">{{ t.title }}</div>
-            <div class="qp-row-artist">{{ t.artist }}</div>
+            <div class="qp-row-title">{{ entry.track.title }}</div>
+            <div class="qp-row-artist">{{ entry.track.artist }}</div>
           </div>
-          <span class="qp-row-dur">{{ formatTime(t.duration) }}</span>
+          <span class="qp-row-dur">{{ formatTime(entry.track.duration) }}</span>
         </button>
-      </template>
+      </div>
+      <div v-else class="qp-empty">
+        <Icon name="prev" :size="28" />
+        <p>Nothing played in this queue yet.</p>
+      </div>
+    </section>
 
-      <template v-if="currentTrack">
-        <div class="qp-section-label">Now Playing</div>
-        <div class="qp-row qp-row-current">
-          <Poster :idx="currentTrack.id" :src="currentTrack.poster ?? null" aspect="1/1" :width="88" class="qp-thumb" />
-          <div class="qp-row-info">
-            <div class="qp-row-title">{{ currentTrack.title }}</div>
-            <div class="qp-row-artist">{{ currentTrack.artist }}</div>
-          </div>
-          <span v-if="currentTrack.isStream" class="qp-live-badge"><span class="qp-live-dot" />LIVE</span>
-          <span v-else class="qp-row-dur">{{ formatTime(currentTrack.duration) }}</span>
+    <section
+      v-else-if="activeTab === 'up-next'"
+      id="qp-panel-up-next"
+      role="tabpanel"
+      aria-labelledby="qp-tab-up-next"
+      class="qp-tab-panel"
+    >
+      <div class="qp-up-next-tools">
+        <div class="qp-toolbar">
+          <button type="button" class="qp-chip" :class="{ active: shuffled }" aria-label="Shuffle" @click="toggleShuffle">
+            <Icon name="shuffle" :size="15" />
+            <span>Shuffle</span>
+          </button>
+          <button type="button" class="qp-chip" :class="{ active: repeatMode !== 'off' }" aria-label="Repeat" @click="cycleRepeat">
+            <Icon name="repeat" :size="15" />
+            <span>{{ repeatMode === 'one' ? 'Repeat one' : 'Repeat' }}</span>
+          </button>
+          <button type="button" class="qp-clear" :disabled="!upcomingTracks.length" @click="clearUpcoming">Clear</button>
         </div>
-      </template>
+        <div class="qp-mobile-autoplay">
+          <div class="qp-mobile-autoplay-copy">
+            <div class="qp-mobile-autoplay-title">Play tracks like this…</div>
+            <div class="qp-mobile-autoplay-hint">
+              {{ localMode
+                ? 'Unavailable for live streams'
+                : similarAutoplayLoading
+                  ? 'Finding more tracks…'
+                  : similarAutoplayEnabled
+                    ? 'Keeps this queue going'
+                    : 'Stops when the queue ends' }}
+            </div>
+          </div>
+          <AppSwitch
+            :model-value="similarAutoplayEnabled"
+            :disabled="localMode"
+            size="md"
+            aria-label="Play tracks like this"
+            @update:model-value="setSimilarAutoplayEnabled"
+          />
+        </div>
+      </div>
 
-      <template v-if="upcomingTracks.length">
-        <div class="qp-section-label">Up Next · {{ upcomingTracks.length }}</div>
+      <div v-if="upcomingTracks.length" class="qp-list qp-tab-list">
         <div
           v-for="(t, i) in upcomingTracks"
           :key="`upcoming-${t.id}-${i}`"
@@ -106,21 +127,12 @@
           class="qp-row qp-row-upcoming"
           :style="rowStyle(i)"
         >
-          <!-- Long-press-drag has no keyboard equivalent — these two small
-               buttons are the fallback for reordering without a drag
-               gesture (keyboard, switch access, screen reader). -->
-          <div class="qp-reorder-btns">
-            <button type="button" class="qp-reorder-btn" :disabled="i === 0" aria-label="Move up" @click="moveUpcoming(i, -1)">
-              <Icon name="chevup" :size="12" />
-            </button>
-            <button type="button" class="qp-reorder-btn" :disabled="i === upcomingTracks.length - 1" aria-label="Move down" @click="moveUpcoming(i, 1)">
-              <Icon name="chevdown" :size="12" />
-            </button>
-          </div>
           <div class="qp-swipe-mask">
             <button
               type="button"
               class="qp-swipe-reveal"
+              :class="{ visible: rowOffsetX(i) < -1 }"
+              :tabindex="rowOffsetX(i) < -1 ? 0 : -1"
               :style="{ width: OPEN_WIDTH + 'px' }"
               aria-label="Remove from queue"
               @click="commitRemove(i)"
@@ -137,6 +149,7 @@
               @pointerup="onRowPointerUp($event, i)"
               @pointercancel="onRowPointerCancel($event, i)"
               @click="onRowClick(i)"
+              :aria-label="`${t.title} by ${t.artist}. Long press and drag to reorder.`"
             >
               <Poster :idx="t.id" :src="t.poster ?? null" aspect="1/1" :width="88" class="qp-thumb" />
               <div class="qp-row-info">
@@ -147,7 +160,53 @@
             </button>
           </div>
         </div>
-      </template>
+      </div>
+      <div v-else class="qp-empty">
+        <Icon name="queue" :size="28" />
+        <p>Nothing up next.</p>
+      </div>
+    </section>
+
+    <section
+      v-else
+      id="qp-panel-related"
+      role="tabpanel"
+      aria-labelledby="qp-tab-related"
+      class="qp-tab-panel"
+    >
+      <p v-if="currentTrack && relatedTrackId > 0" class="qp-related-intro">
+        Ranked by sonic similarity to <strong>{{ currentTrack.title }}</strong>
+      </p>
+      <div v-if="relatedLoading" class="qp-empty">
+        <Icon name="pulse" :size="28" />
+        <p>Finding sonic neighbours…</p>
+      </div>
+      <div v-else-if="relatedRows.length" class="qp-list qp-tab-list">
+        <button
+          v-for="(row, i) in relatedRows"
+          :key="row.track_id"
+          type="button"
+          class="qp-row qp-related-row"
+          :class="{ queued: upcomingTrackIds.has(row.track_id) }"
+          :disabled="relatedAdding === row.track_id"
+          :aria-label="`${row.track_title} by ${row.artist_name}. Play next.`"
+          @click="addRelatedNext(row)"
+        >
+          <span class="qp-related-rank">{{ i + 1 }}</span>
+          <Poster :idx="row.track_id" :src="useAlbumCoverUrl(row.artist_slug, row.album_slug)" aspect="1/1" :width="88" class="qp-thumb" />
+          <div class="qp-row-info">
+            <div class="qp-row-title">{{ row.track_title }}</div>
+            <div class="qp-row-artist">{{ row.artist_name }}</div>
+          </div>
+          <span class="qp-related-score">
+            {{ upcomingTrackIds.has(row.track_id) ? 'Queued' : `${similarityPercent(row.distance)}%` }}
+          </span>
+        </button>
+      </div>
+      <div v-else class="qp-empty">
+        <Icon name="pulse" :size="28" />
+        <p>{{ relatedUnavailable ? 'Sonic neighbours are unavailable for this track.' : 'No related tracks found.' }}</p>
+      </div>
 
       <template v-if="currentTrack?.source === 'radio' && radioSuggestions.length">
         <div class="qp-section-label">Also worth finding</div>
@@ -168,35 +227,91 @@
           <Icon v-if="suggestion.provider_url" name="external-link" :size="15" />
         </component>
       </template>
-
-      <div v-if="!queue.length && !currentTrack" class="qp-empty">
-        <Icon name="music" :size="32" style="opacity: 0.4; margin-bottom: 8px" />
-        <p>Queue is empty</p>
-      </div>
-    </div>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
+import { useQuery } from '@pinia/colada'
+import type { SimilarTracksByTrackRichRow, TrackResultsBody } from '~~/shared/api/types.gen'
+import type { Track } from '~/composables/usePlayer'
+
+type QueueTab = 'back-to' | 'up-next' | 'related'
+const queueTabs: Array<{ id: QueueTab, label: string }> = [
+  { id: 'back-to', label: 'Previously' },
+  { id: 'up-next', label: 'Next' },
+  { id: 'related', label: 'Related' },
+]
+const activeTab = ref<QueueTab>('up-next')
+
 const {
-  queue, currentTrack, currentIndex, playedTracks, upcomingTracks,
+  currentTrack, currentIndex, playedTracks, upcomingTracks,
   shuffled, repeatMode, formatTime,
   localMode, similarAutoplayEnabled, similarAutoplayLoading,
   jumpTo, moveInQueue, removeFromQueue, clearUpcoming, toggleShuffle, cycleRepeat,
-  setSimilarAutoplayEnabled,
+  playNext, setSimilarAutoplayEnabled,
 } = usePlayerBindings()
 const radioSuggestions = useState<import('~/composables/useRadio').MusicCatalogSuggestion[]>('music_radio_suggestions', () => [])
 
-function clamp(v: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, v))
+const historyTracks = computed(() => playedTracks.value
+  .map((track, queueIndex) => ({ track, queueIndex }))
+  .reverse())
+const upcomingTrackIds = computed(() => new Set(upcomingTracks.value.map(track => track.id)))
+
+// Related is the direct audio-embedding KNN endpoint: it is already ordered
+// by ascending cosine distance, so preserving response order preserves rank.
+const { $heya } = useNuxtApp()
+const relatedTrackId = computed(() => {
+  const track = currentTrack.value
+  return track && !track.isStream && track.id > 0 ? track.id : 0
+})
+const relatedQuery = useQuery(() => ({
+  key: ['music', 'track', 'sonic-similar', relatedTrackId.value],
+  query: async () => await $heya('/api/music/tracks/{id}/sonic-similar', {
+    path: { id: relatedTrackId.value },
+    query: { limit: 50 },
+  }) as TrackResultsBody,
+  enabled: activeTab.value === 'related' && relatedTrackId.value > 0,
+  staleTime: 1000 * 60 * 10,
+  retry: 0,
+}))
+const relatedRows = computed(() => relatedQuery.data.value?.items ?? [])
+const relatedLoading = computed(() => activeTab.value === 'related'
+  && relatedTrackId.value > 0
+  && relatedQuery.isPending.value)
+const relatedUnavailable = computed(() => relatedTrackId.value <= 0 || relatedQuery.error.value != null)
+const relatedAdding = ref<number | null>(null)
+
+function similarityPercent(distance: number) {
+  return Math.round(Math.max(0, Math.min(1, 1 - distance)) * 100)
 }
 
-// Keyboard/tap fallback for the drag-to-reorder gesture below — moves a row
-// one slot at a time via moveInQueue, same index math the gesture handlers use.
-function moveUpcoming(i: number, delta: number) {
-  const target = i + delta
-  if (target < 0 || target >= upcomingTracks.value.length) return
-  moveInQueue(currentIndex.value + 1 + i, currentIndex.value + 1 + target)
+function relatedRowToTrack(row: SimilarTracksByTrackRichRow): Track {
+  return {
+    id: row.track_id,
+    title: row.track_title,
+    artist: row.artist_name,
+    album: row.album_title,
+    duration: row.duration,
+    stream_url: `/api/music/tracks/${row.track_id}/stream`,
+    album_id: row.album_id,
+    artist_id: row.artist_id,
+    artist_slug: row.artist_slug,
+    album_slug: row.album_slug,
+    poster: useAlbumCoverUrl(row.artist_slug, row.album_slug) ?? undefined,
+    source: 'related',
+  }
+}
+
+async function addRelatedNext(row: SimilarTracksByTrackRichRow) {
+  if (relatedAdding.value !== null || upcomingTrackIds.value.has(row.track_id)) return
+  relatedAdding.value = row.track_id
+  try { await playNext(relatedRowToTrack(row)) }
+  finally { relatedAdding.value = null }
+}
+
+function clamp(v: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, v))
 }
 
 // --- Tunables ---------------------------------------------------------
@@ -293,6 +408,7 @@ function resetAllGestureState() {
   removingCollapsed.value = false
 }
 watch(() => upcomingTracks.value.length, () => resetAllGestureState())
+watch(activeTab, () => resetAllGestureState())
 
 // --- Pointer lifecycle ---------------------------------------------------
 function onRowPointerDown(e: PointerEvent, i: number) {
@@ -610,33 +726,54 @@ onScopeDispose(() => {
 -->
 <style>
 .qp-root {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-/* Pinned above the Played/Now Playing/Up Next rows as the pane scrolls —
-   solid (not the translucent `.surface` glass) so rows fully disappear
-   underneath it rather than ghosting through. A backdrop-filter here would
-   also just render ~30% opaque anyway: the AppSheet ancestor already has one
-   (docs/ui.md gotcha #4), so a flat opaque color is both simpler and correct. */
-.qp-sticky-header {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: var(--bg-2);
-  padding-top: 4px;
-  padding-bottom: 10px;
-  margin-bottom: 6px;
-  border-bottom: 1px solid var(--border);
+.qp-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-left: -20px;
+  margin-right: -20px;
+  padding-left: 20px;
+  padding-right: 20px;
+  border-bottom: 1px solid rgb(var(--ink) / 0.09);
 }
-.qp-title {
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+.qp-tab {
+  position: relative;
+  height: 52px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
   color: var(--fg-3);
-  padding: 2px 4px 10px;
+  font-size: 12px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.qp-tab::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 999px 999px 0 0;
+  background: var(--gold);
+  opacity: 0;
+  transform: scaleX(0.35);
+  transition: opacity 160ms ease, transform 180ms ease;
+}
+.qp-tab.active { color: var(--fg-0); }
+.qp-tab.active::after { opacity: 1; transform: scaleX(1); }
+.qp-tab-panel { min-height: 240px; }
+.qp-up-next-tools {
+  padding-top: 14px;
+  padding-bottom: 8px;
 }
 .qp-toolbar {
   display: flex;
@@ -649,9 +786,10 @@ onScopeDispose(() => {
   gap: 12px;
   margin-top: 10px;
   padding: 10px 11px;
-  border: 1px solid var(--border);
+  border: 1px solid rgb(var(--ink) / 0.09);
   border-radius: var(--r-md);
-  background: rgb(var(--ink) / 0.035);
+  background: rgba(0, 0, 0, 0.16);
+  box-shadow: 0 14px 30px -26px rgba(0, 0, 0, 0.9);
 }
 .qp-mobile-autoplay-copy { flex: 1; min-width: 0; }
 .qp-mobile-autoplay-title { font-size: 12px; font-weight: 650; color: var(--fg-0); }
@@ -681,6 +819,7 @@ onScopeDispose(() => {
   cursor: pointer;
 }
 .qp-clear:active { color: var(--gold); }
+.qp-clear:disabled { opacity: 0.35; cursor: default; }
 
 .qp-section-label {
   font-size: 10px;
@@ -703,13 +842,8 @@ onScopeDispose(() => {
   text-align: left;
   cursor: pointer;
 }
-.qp-row-played { opacity: 0.5; }
-.qp-row-current {
-  background: var(--gold-soft);
-  border-left-color: var(--gold);
-  border-radius: var(--r-sm);
-  cursor: default;
-}
+.qp-tab-list { padding-top: 10px; }
+.qp-row-played { opacity: 0.82; }
 .qp-catalog-suggestion {
   margin: 3px 0;
   padding: 10px;
@@ -746,30 +880,6 @@ onScopeDispose(() => {
   -webkit-tap-highlight-color: transparent;
   will-change: transform;
 }
-/* Keyboard/tap fallback for reordering — see the template comment above
-   these buttons. Sized to fit within the row's natural height (thumb 44px +
-   6px vertical padding either side) so adding them doesn't grow the row. */
-.qp-reorder-btns {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex-shrink: 0;
-  padding-left: 2px;
-}
-.qp-reorder-btn {
-  width: 26px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: var(--r-xs, 4px);
-  background: rgb(var(--ink) / 0.05);
-  color: var(--fg-2);
-  cursor: pointer;
-}
-.qp-reorder-btn:active { background: rgb(var(--ink) / 0.1); }
-.qp-reorder-btn:disabled { opacity: 0.3; }
 .qp-swipe-mask {
   position: relative;
   overflow: hidden;
@@ -793,7 +903,10 @@ onScopeDispose(() => {
   font-weight: 700;
   letter-spacing: 0.02em;
   cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
 }
+.qp-swipe-reveal.visible { opacity: 1; }
 .qp-swipe-content {
   position: relative;
   display: flex;
@@ -801,10 +914,9 @@ onScopeDispose(() => {
   gap: 12px;
   width: 100%;
   padding: 6px 4px;
-  /* Opaque so it fully occludes the red reveal behind it at rest — same
-     reasoning as `.qp-sticky-header` above (solid, not the translucent
-     `.surface` glass the AppSheet ancestor uses). */
-  background: var(--bg-2);
+  /* The reveal is explicitly hidden at rest, so this can remain transparent
+     and let the queue's feathered ultrablur treatment flow through the row. */
+  background: transparent;
   border: 0;
   text-align: left;
   cursor: pointer;
@@ -841,26 +953,47 @@ onScopeDispose(() => {
   flex-shrink: 0;
 }
 
-.qp-live-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: #f87171;
-  background: rgba(239, 68, 68, 0.15);
-  padding: 2px 6px;
-  border-radius: 999px;
-  font-family: var(--font-mono);
+.qp-related-intro {
+  margin: 0;
+  padding: 14px 4px 2px;
+  color: var(--fg-3);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.qp-related-intro strong { color: var(--fg-2); font-weight: 600; }
+.qp-related-row { border-radius: var(--r-sm); }
+.qp-related-row:active { background: rgb(var(--ink) / 0.06); }
+.qp-related-row.queued { background: rgb(var(--ink) / 0.025); }
+.qp-related-row:disabled { opacity: 0.65; }
+.qp-related-rank {
+  width: 18px;
   flex-shrink: 0;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--fg-3);
 }
-.qp-live-dot {
-  width: 5px;
-  height: 5px;
-  background: #f87171;
-  border-radius: 50%;
+.qp-related-score {
+  min-width: 40px;
+  flex-shrink: 0;
+  text-align: right;
+  font: 600 9px var(--font-mono);
+  letter-spacing: 0.02em;
+  color: var(--fg-3);
 }
+.qp-related-row.queued .qp-related-score { color: var(--gold); }
 
-.qp-empty { text-align: center; padding: 40px 16px; color: var(--fg-2); font-size: 13px; }
+.qp-empty {
+  display: flex;
+  min-height: 210px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--fg-2);
+  font-size: 13px;
+}
+.qp-empty p { margin: 0; }
 </style>

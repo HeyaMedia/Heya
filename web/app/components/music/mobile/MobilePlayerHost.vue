@@ -15,10 +15,10 @@
   <template v-if="isPhone && (currentTrack || videoCastSession)">
     <div class="global-miniplayer-dock">
       <CastVideoMiniPlayer v-if="videoCastSession" @expand="cast.videoRemoteOpen = true" />
-      <MiniPlayer v-else @expand="npOpen = true" />
+      <MiniPlayer v-else :ultrablur="ultrablur" @expand="npOpen = true" />
     </div>
     <CastVideoRemoteSheet v-if="videoCastSession" v-model:open="cast.videoRemoteOpen" />
-    <NowPlayingSheet v-else v-model:open="npOpen" />
+    <NowPlayingSheet v-else v-model:open="npOpen" :ultrablur="ultrablur" />
   </template>
 </template>
 
@@ -27,6 +27,8 @@ const { isPhone } = useViewport()
 const { currentTrack, muted, volume, toggleMute, setVolume } = usePlayerBindings()
 const cast = useCastStore()
 const videoCastSession = computed(() => cast.session?.media_kind === 'video' ? cast.session : null)
+const ultrablurEnabled = computed(() => isPhone.value && !videoCastSession.value)
+const ultrablur = useMusicUltrablur(currentTrack, ultrablurEnabled)
 
 const npOpen = ref(false)
 

@@ -25,8 +25,9 @@
   docs/ui.md gotcha #2.
 -->
 <template>
-  <AppSheet v-model:open="open" size="full" title="Now Playing">
+  <AppSheet v-model:open="open" size="full" title="Now Playing" persistent>
     <template #header>
+      <MusicUltrablur :target="ultrablur" variant="sheet" class="nps-ultrablur" />
       <header class="app-sheet-header nps-header">
         <DrawerTitle as="h3" class="app-sheet-title">Now Playing</DrawerTitle>
         <button type="button" class="nps-close" aria-label="Close" @click="open = false">
@@ -38,7 +39,12 @@
       <div class="nps-body nps-pane-np">
         <div class="nps-visual">
           <div v-if="open && !showLyrics" class="nps-art-wrap" @click="cycleVisual">
-            <Poster v-if="effectiveVisualMode === 'art'" :idx="currentTrack?.id ?? 0" :src="currentTrack?.poster ?? null" aspect="1/1" class="nps-art" />
+            <!-- Poster itself must clip its image to the rounded corners, so
+                 the outer wrapper owns the shadow and lets its soft bloom
+                 escape that clipping box. -->
+            <div v-if="effectiveVisualMode === 'art'" class="nps-art-shadow">
+              <Poster :idx="currentTrack?.id ?? 0" :src="currentTrack?.poster ?? null" aspect="1/1" class="nps-art" />
+            </div>
             <div v-else class="nps-viz-wrap">
               <VisualizerMilkdrop v-if="effectiveVisualMode === 'milkdrop'" />
               <VisualizerStarfield v-else-if="effectiveVisualMode === 'starfield'" />
@@ -71,13 +77,6 @@
           </div>
         </div>
 
-        <div class="nps-meta">
-          <NuxtLink v-if="albumTo" :to="albumTo" class="nps-title nps-link" @click="open = false">{{ currentTrack?.title }}</NuxtLink>
-          <div v-else class="nps-title">{{ currentTrack?.title ?? '—' }}</div>
-          <NuxtLink v-if="artistTo" :to="artistTo" class="nps-artist nps-link" @click="open = false">{{ currentTrack?.artist }}</NuxtLink>
-          <div v-else class="nps-artist">{{ currentTrack?.artist ?? '' }}</div>
-        </div>
-
         <div class="nps-seek">
           <span class="nps-time">{{ formatTime(position) }}</span>
           <!-- Waveform scrubber — same component + facet source as the desktop
@@ -95,12 +94,31 @@
           <span class="nps-time">{{ formatTime(duration) }}</span>
         </div>
 
+        <div class="nps-meta">
+          <div class="nps-title">{{ currentTrack?.title ?? '—' }}</div>
+          <NuxtLink v-if="artistTo" :to="artistTo" class="nps-artist nps-link" @click="open = false">{{ currentTrack?.artist }}</NuxtLink>
+          <div v-else class="nps-artist">{{ currentTrack?.artist ?? '' }}</div>
+          <NuxtLink v-if="albumTo && currentTrack?.album" :to="albumTo" class="nps-album nps-link" @click="open = false">{{ currentTrack.album }}</NuxtLink>
+          <div v-else-if="currentTrack?.album" class="nps-album">{{ currentTrack.album }}</div>
+        </div>
+
+        <!-- Plexamp-inspired information band, using Heya's existing quality
+             surface and three-state reaction language rather than star ratings. -->
+        <div v-if="currentTrack" class="nps-insights">
+          <div v-if="!currentTrack.isStream && currentTrack.id > 0" class="nps-quality">
+            <PlaybarQuality :track-id="currentTrack.id" display-only />
+          </div>
+          <span v-else class="nps-stream-label">Stream</span>
+          <ReactionControl
+            :model-value="ratings.get(currentTrack.id) ?? 0"
+            size="md"
+            @update:model-value="(v) => onRate(currentTrack!.id, v)"
+          />
+        </div>
+
         <div class="nps-transport">
-          <button type="button" class="nps-icon" :class="{ active: shuffled }" aria-label="Shuffle" :aria-pressed="shuffled" @click="toggleShuffle">
-            <Icon name="shuffle" :size="20" />
-          </button>
           <button type="button" class="nps-icon" aria-label="Previous" @click="prevTrack">
-            <Icon name="prev" :size="26" />
+            <Icon name="prev" :size="30" />
           </button>
           <button
             type="button"
@@ -112,26 +130,11 @@
             @pointerleave="clearPlayHold"
             @click="onPlayClick"
           >
-            <Icon :name="playing ? 'pause' : 'play'" :size="30" />
+            <Icon :name="playing ? 'pause' : 'play'" :size="34" />
           </button>
           <button type="button" class="nps-icon" aria-label="Next" @click="nextTrack">
-            <Icon name="next" :size="26" />
+            <Icon name="next" :size="30" />
           </button>
-          <button type="button" class="nps-icon" :class="{ active: repeatMode !== 'off' }" aria-label="Repeat" :aria-pressed="repeatMode !== 'off'" @click="cycleRepeat">
-            <Icon name="repeat" :size="20" />
-            <span v-if="repeatMode === 'one'" class="nps-repeat-badge">1</span>
-          </button>
-        </div>
-
-        <!-- Track taste — heart / like / dislike, the phone-screen equivalent
-             of the desktop Playbar's ReactionControl. Track-scoped, so it's
-             available whether playback is local or on a remote device. -->
-        <div v-if="currentTrack" class="nps-reactions">
-          <ReactionControl
-            :model-value="ratings.get(currentTrack.id) ?? 0"
-            size="md"
-            @update:model-value="(v) => onRate(currentTrack!.id, v)"
-          />
         </div>
 
         <!-- Device volume — only while an output is engaged (a cast receiver
@@ -163,10 +166,17 @@
 
         <div class="nps-secondary">
           <button type="button" class="nps-sicon" aria-label="Queue" @click="scrollToQueue">
-            <Icon name="queue" :size="18" />
+            <Icon name="queue" :size="20" />
           </button>
           <button type="button" class="nps-sicon" :class="{ active: showLyrics }" aria-label="Lyrics" :aria-pressed="showLyrics" @click="showLyrics = !showLyrics">
-            <Icon name="lyrics" :size="18" />
+            <Icon name="lyrics" :size="20" />
+          </button>
+          <button type="button" class="nps-sicon" :class="{ active: shuffled }" aria-label="Shuffle" :aria-pressed="shuffled" @click="toggleShuffle">
+            <Icon name="shuffle" :size="20" />
+          </button>
+          <button type="button" class="nps-sicon" :class="{ active: repeatMode !== 'off' }" aria-label="Repeat" :aria-pressed="repeatMode !== 'off'" @click="cycleRepeat">
+            <Icon name="repeat" :size="20" />
+            <span v-if="repeatMode === 'one'" class="nps-repeat-badge">1</span>
           </button>
         </div>
 
@@ -187,6 +197,9 @@
 import { useQuery } from '@pinia/colada'
 import { DrawerTitle } from 'reka-ui'
 import { trackLyricsQuery } from '~/queries/music'
+import type { MusicUltrablurTarget } from '~/composables/useMusicUltrablur'
+
+defineProps<{ ultrablur: MusicUltrablurTarget | null }>()
 
 const open = defineModel<boolean>('open', { default: false })
 
@@ -392,28 +405,73 @@ watch(activeLyricIdx, (i) => {
    without fighting free scrolling deep inside a long queue, which a
    `mandatory` snap would yank at on every scroll tick. */
 .nps-scroll {
+  position: relative;
+  z-index: 1;
   height: 100%;
   overflow-y: auto;
   scroll-snap-type: y proximity;
   overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.nps-scroll::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+.nps-ultrablur { z-index: 0; }
+.surface.app-sheet-content:has(> .nps-ultrablur) {
+  height: 100dvh;
+  max-height: 100dvh;
+  padding-top: var(--safe-top, 0px);
+  border-radius: 0;
+}
+.surface.app-sheet-content:has(> .nps-ultrablur)::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  height: calc(62px + var(--safe-top, 0px));
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.32), transparent);
+  pointer-events: none;
+}
+.surface.app-sheet-content:has(> .nps-ultrablur) > .app-sheet-body {
+  padding-left: 0;
+  padding-right: 0;
+  padding-bottom: 0;
+}
+.app-sheet-content:has(> .nps-ultrablur) > .app-sheet-handle {
+  position: absolute;
+  top: calc(10px + var(--safe-top, 0px));
+  left: 50%;
+  z-index: 4;
+  margin: 0;
+  transform: translateX(-50%);
 }
 
-/* Explicit close affordance — swipe-down/backdrop-tap dismiss the sheet but
-   have no discoverable/keyboard equivalent, so this header slot (replacing
-   AppSheet's default title-only header) adds a real, focusable close
-   button. Reuses .app-sheet-header/.app-sheet-title for identical chrome,
-   just in a flex row with the button pinned to the end. */
+/* Keep the accessible title and explicit close affordance without spending a
+   visual row on a redundant "Now Playing" heading. The sheet grip remains the
+   primary visual dismissal cue; close stays reachable in the upper corner. */
 .nps-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  position: absolute;
+  top: calc(10px + var(--safe-top, 0px));
+  right: 10px;
+  z-index: 3;
+  padding: 0;
 }
-.nps-header .app-sheet-title { margin: 0; }
+.nps-header .app-sheet-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .nps-close {
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   background: transparent;
   border: 0;
@@ -429,16 +487,41 @@ watch(activeLyricIdx, (i) => {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  gap: 18px;
+  gap: 14px;
 }
 .nps-pane-np {
   height: 100%;
+  padding-left: 20px;
+  padding-right: 20px;
   scroll-snap-align: start;
   scroll-snap-stop: always;
 }
 .nps-pane-queue {
+  position: relative;
+  isolation: isolate;
   min-height: 100%;
+  padding-left: 20px;
+  padding-right: 20px;
   scroll-snap-align: start;
+}
+/* Continue the track color field into the queue, then feather in just enough
+   literal dark to keep long lists readable. The oversized, masked tint begins
+   above the pane boundary so there is no rectangular "black panel" seam. */
+.nps-pane-queue::before {
+  content: '';
+  position: absolute;
+  inset: -180px 0 0;
+  z-index: 0;
+  background: radial-gradient(
+    ellipse 120% 145px at 50% 0,
+    transparent 0%,
+    rgba(0, 0, 0, 0.08) 42%,
+    rgba(0, 0, 0, 0.25) 72%,
+    rgba(0, 0, 0, 0.34) 100%
+  );
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, rgba(0, 0, 0, 0.24) 72px, #000 220px);
+          mask-image: linear-gradient(180deg, transparent 0, rgba(0, 0, 0, 0.24) 72px, #000 220px);
 }
 
 .nps-visual {
@@ -456,15 +539,33 @@ watch(activeLyricIdx, (i) => {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.nps-art {
-  width: min(70vw, 360px);
+.nps-art-shadow {
+  position: relative;
+  width: min(88vw, 46dvh, 400px);
   max-width: 100%;
+  aspect-ratio: 1 / 1;
+  isolation: isolate;
+}
+.nps-art-shadow::before {
+  content: '';
+  position: absolute;
+  inset: 8% 4% -4%;
+  z-index: -1;
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-3);
+  background: rgba(0, 0, 0, 0.74);
+  filter: blur(28px);
+  transform: translateY(18px) scale(0.98);
+  pointer-events: none;
+}
+.nps-art {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--r-lg);
+  box-shadow: 0 0 0 1px rgb(var(--ink) / 0.06);
 }
 .nps-viz-wrap {
   position: relative;
-  width: min(70vw, 360px);
+  width: min(88vw, 46dvh, 400px);
   aspect-ratio: 1 / 1;
   max-width: 100%;
   border-radius: var(--r-lg);
@@ -523,10 +624,13 @@ watch(activeLyricIdx, (i) => {
   font-size: 14px;
 }
 
-.nps-meta { text-align: center; }
+.nps-meta {
+  text-align: center;
+  min-width: 0;
+}
 .nps-title {
   display: block;
-  font-size: 19px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--fg-0);
   overflow: hidden;
@@ -537,7 +641,17 @@ watch(activeLyricIdx, (i) => {
 .nps-artist {
   margin-top: 4px;
   font-size: 14px;
-  color: var(--fg-2);
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.nps-album {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--fg-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -563,11 +677,11 @@ watch(activeLyricIdx, (i) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: clamp(28px, 10vw, 48px);
 }
 .nps-icon {
-  width: 44px;
-  height: 44px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   background: transparent;
   border: 0;
@@ -581,8 +695,8 @@ watch(activeLyricIdx, (i) => {
 .nps-icon:active { background: rgb(var(--ink) / 0.08); }
 .nps-icon.active { color: var(--gold); }
 .nps-play {
-  width: 64px;
-  height: 64px;
+  width: 72px;
+  height: 72px;
   border-radius: 50%;
   background: var(--gold);
   color: var(--bg-0);
@@ -606,17 +720,31 @@ watch(activeLyricIdx, (i) => {
   font-family: var(--font-mono);
 }
 
-/* Reactions row — centered under the transport, matching its rhythm. */
-.nps-reactions {
+/* File quality + Heya's dislike/like/heart vocabulary take the compact info
+   row that Plexamp uses for codec and star rating. */
+.nps-insights {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 16px;
+  min-height: 36px;
 }
 /* Bump the reaction tap targets up from ReactionControl's mouse-sized
    default toward the coarse-pointer floor. This whole <style> block is
    unscoped (portaled sheet), so the descendant selector reaches the
    child component's `.reaction-btn` fine. */
-.nps-reactions .reaction .reaction-btn { padding: 8px; }
+.nps-insights .reaction .reaction-btn { padding: 8px; }
+.nps-quality .pb-quality { height: 28px; }
+.nps-stream-label {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font: 600 10px var(--font-mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+  background: rgb(var(--ink) / 0.05);
+}
 
 /* Device volume — only present while casting. A caption naming the device
    we're controlling sits above the mute button + slider. */
@@ -668,13 +796,14 @@ watch(activeLyricIdx, (i) => {
 .nps-secondary {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
+  justify-content: space-around;
+  width: min(100%, 340px);
+  margin: 0 auto;
   padding-bottom: 4px;
 }
 .nps-sicon {
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
   background: transparent;
   border: 0;
@@ -682,6 +811,7 @@ watch(activeLyricIdx, (i) => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  position: relative;
   cursor: pointer;
 }
 .nps-sicon:active { background: rgb(var(--ink) / 0.08); }

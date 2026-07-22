@@ -6,7 +6,16 @@
   engine state. Inspired by the equivalent in the sibling player.
 -->
 <template>
-  <PopoverRoot v-model:open="open">
+  <span
+    v-if="displayOnly"
+    class="pb-quality pb-quality-static"
+    :class="{ hires: isHiRes }"
+    :title="qualityLabel"
+    aria-label="Audio quality"
+  >
+    <span class="pb-quality-text">{{ qualityLabel }}</span>
+  </span>
+  <PopoverRoot v-else v-model:open="open">
     <PopoverTrigger as-child>
       <button class="pb-quality" :class="{ hires: isHiRes, open }" :title="qualityLabel">
         <span class="pb-quality-text">{{ qualityLabel }}</span>
@@ -91,7 +100,14 @@ import { PopoverArrow, PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigge
 import { useAudioContextState } from '~/engine/context'
 import { computeNormalizationGain } from '~/engine/dsp/normalization'
 
-const props = defineProps<{ trackId: number }>()
+const props = withDefaults(defineProps<{
+  trackId: number
+  displayOnly?: boolean
+}>(), {
+  displayOnly: false,
+})
+
+const displayOnly = toRef(props, 'displayOnly')
 
 const open = ref(false)
 
@@ -275,7 +291,7 @@ function msClock(ms: number | null | undefined) {
   white-space: nowrap;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
-.pb-quality:hover,
+button.pb-quality:hover,
 .pb-quality.open {
   background: rgb(var(--ink) / 0.1);
   color: var(--fg-0);
@@ -286,6 +302,7 @@ function msClock(ms: number | null | undefined) {
   border-color: color-mix(in srgb, var(--gold) 35%, transparent);
   background: var(--gold-soft, rgba(230, 185, 74, 0.08));
 }
+.pb-quality-static { cursor: default; }
 </style>
 
 <!-- Unscoped: the popover content is portaled out of this component's subtree,

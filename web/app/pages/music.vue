@@ -8,12 +8,11 @@
         @create-playlist="createOpen = true"
       />
       <main class="music-main scroll">
-        <!-- Phone-only compact header: replaces the persistent MusicSidebar
-             with a section title. The nav itself opens from AppTopBar's burger
-             (the standardized section trigger — same as tablet), so there's no
-             per-page Browse button here anymore. Desktop/tablet are unchanged
-             (MusicSidebar stays). -->
-        <div v-if="isPhone" class="music-phone-header">
+        <!-- Phone-only compact header for named library sections. Detail routes
+             resolve to the generic "Music" fallback, which adds no context and
+             is deliberately omitted so their hero can begin immediately. The
+             nav itself opens from AppTopBar's standardized section trigger. -->
+        <div v-if="isPhone && phoneSectionTitle !== 'Music'" class="music-phone-header">
           <!-- The title doubles as "back to music home" — same destination
                as the bottom nav's Music tab, one fewer reach. -->
           <NuxtLink to="/music" class="mph-title">{{ phoneSectionTitle }}</NuxtLink>

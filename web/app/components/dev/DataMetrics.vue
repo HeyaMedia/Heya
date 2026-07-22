@@ -1,5 +1,6 @@
 <template>
   <details
+    v-if="!isPhone"
     class="dm-panel"
     :style="{ bottom: playbarVisible ? 'calc(var(--playbar-h, 88px) + 14px)' : '14px' }"
     @toggle="onToggle"
