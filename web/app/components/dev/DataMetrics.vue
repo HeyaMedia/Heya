@@ -2,15 +2,16 @@
   <details
     class="dm-panel"
     :style="{ bottom: playbarVisible ? 'calc(var(--playbar-h, 88px) + 14px)' : '14px' }"
+    @toggle="onToggle"
   >
-    <summary>Data · {{ metrics.cacheEntries }} cached</summary>
+    <summary>Data metrics</summary>
     <div class="dm-grid">
+      <span>Memory cache</span><b>{{ metrics.cacheEntries }} · {{ formatBytes(metrics.cacheBytes) }}</b>
       <span>Last navigation</span><b>{{ metrics.lastNavigationMs }} ms</b>
       <span>Average</span><b>{{ metrics.averageNavigationMs }} ms</b>
       <span>Warm / cold</span><b>{{ metrics.warmNavigations }} / {{ metrics.coldNavigations }}</b>
       <span>Prefetch used</span><b>{{ metrics.prefetchUsed }}/{{ metrics.prefetchAttempts }} · {{ metrics.prefetchUseRate }}%</b>
       <span>Prefetch wasted</span><b>{{ metrics.prefetchWasted }}</b>
-      <span>Memory estimate</span><b>{{ formatBytes(metrics.cacheBytes) }}</b>
       <span>Disk cache</span><b>{{ metrics.persistedEntries }} · {{ formatBytes(metrics.persistedBytes) }}</b>
       <span>Hydrated</span><b>{{ metrics.hydratedEntries }}</b>
     </div>
@@ -42,9 +43,23 @@ function sampleCache() {
   metrics.setCacheStats(entries.length, bytes)
 }
 
-const timer = setInterval(sampleCache, 1000)
-sampleCache()
-onScopeDispose(() => clearInterval(timer))
+// Serializing every cached response once per second made this closed dev-only
+// panel one of the largest sources of idle CPU. Sample only while somebody is
+// actually looking at it, and at a human-readable cadence.
+let timer: ReturnType<typeof setInterval> | null = null
+function stopSampling() {
+  if (timer === null) return
+  clearInterval(timer)
+  timer = null
+}
+function onToggle(event: Event) {
+  const open = (event.currentTarget as HTMLDetailsElement).open
+  stopSampling()
+  if (!open) return
+  sampleCache()
+  timer = setInterval(sampleCache, 5000)
+}
+onScopeDispose(stopSampling)
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`

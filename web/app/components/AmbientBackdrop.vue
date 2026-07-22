@@ -35,6 +35,7 @@
       v-if="srcA"
       class="ambient-layer"
       :class="[`grade-${gradeA}`, { visible: showA }]"
+      @transitionend="onLayerTransitionEnd('a', $event)"
     >
       <LoadingImage :src="srcA" class="ambient-img" :style="mainStyleA" alt="" />
       <NuxtImg v-if="mirrorStyleA" :src="srcA" class="ambient-mirror" :style="mirrorStyleA" alt="" />
@@ -43,6 +44,7 @@
       v-if="srcB"
       class="ambient-layer"
       :class="[`grade-${gradeB}`, { visible: !showA }]"
+      @transitionend="onLayerTransitionEnd('b', $event)"
     >
       <LoadingImage :src="srcB" class="ambient-img" :style="mainStyleB" alt="" />
       <NuxtImg v-if="mirrorStyleB" :src="srcB" class="ambient-mirror" :style="mirrorStyleB" alt="" />
@@ -154,6 +156,34 @@ const srcA = ref<string | null>(null)
 const srcB = ref<string | null>(null)
 const showA = ref(true)
 const shown = ref<string | null>(null)
+let layerCleanupTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearOutgoingLayer() {
+  if (showA.value) {
+    srcB.value = null
+    alignB.value = null
+    natB.value = null
+  } else {
+    srcA.value = null
+    alignA.value = null
+    natA.value = null
+  }
+  if (layerCleanupTimer) clearTimeout(layerCleanupTimer)
+  layerCleanupTimer = null
+}
+
+function scheduleLayerCleanup() {
+  if (layerCleanupTimer) clearTimeout(layerCleanupTimer)
+  // transitionend handles the normal path. The fallback covers reduced
+  // motion, interrupted transitions, and engines that omit the event.
+  layerCleanupTimer = setTimeout(clearOutgoingLayer, reducedMotion ? 0 : 2800)
+}
+
+function onLayerTransitionEnd(layer: 'a' | 'b', event: TransitionEvent) {
+  if (event.propertyName !== 'opacity') return
+  const outgoing = showA.value ? 'b' : 'a'
+  if (layer === outgoing) clearOutgoingLayer()
+}
 
 // Hero-alignment state, stamped per layer like the grade: the claim's hero
 // geometry plus the image's natural dimensions (captured at preload). An
@@ -313,6 +343,7 @@ function showImage(url: string, then?: (ok: boolean) => void) {
     }
     showA.value = !showA.value
     shown.value = url
+    scheduleLayerCleanup()
     then?.(true)
   }
   img.onerror = () => { if (seq === loadSeq) then?.(false) }
@@ -459,6 +490,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibility)
   window.removeEventListener('resize', measureViewport)
   stop()
+  if (layerCleanupTimer) clearTimeout(layerCleanupTimer)
   // Layout swap (e.g. into settings): the corner controls unmount with us,
   // so a lingering reveal would strand a faded page with no way back.
   ctl.value.mode = 'off'

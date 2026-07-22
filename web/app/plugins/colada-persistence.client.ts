@@ -125,7 +125,13 @@ export default defineNuxtPlugin({
       }
 
       const stopWatch = watch(
-        () => queryCache.getEntries().map(entry => [entry.keyHash, entry.when, entry.state.value.status, entry.meta.persistence, entry.meta.sensitivity]),
+        // Live-only entries (active sessions, progress, status) can change on
+        // every heartbeat but are never written to disk. Excluding them from
+        // this trigger prevents each heartbeat from serializing the entire
+        // cache only for prune() to discard the entry afterward.
+        () => queryCache.getEntries()
+          .filter(entry => approved(entry.meta))
+          .map(entry => [entry.keyHash, entry.when, entry.state.value.status, entry.meta.persistence, entry.meta.sensitivity]),
         schedule,
         { deep: true },
       )
