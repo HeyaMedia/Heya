@@ -298,20 +298,13 @@ export default defineNuxtConfig({
 
   // Experimental performance features
   experimental: {
-    // Nuxt 4.5 can share Vite's watcher instead of opening a second watcher
-    // tree, reducing file-descriptor pressure in Heya's large local workspace.
-    // Production generation does not use this watcher.
     watcher: "builder",
-    renderJsonPayloads: true, // Faster SSR JSON payloads via native JSON.parse
-    writeEarlyHints: false, // No-op on nitro's bun preset (node-only feature)
-    // View Transitions run the browser's default ~250ms full-root crossfade on
-    // every client-side nav: the old page visibly fades away, then the new
-    // page (snapshotted before its images decode) fades in. With home surfaces
-    // painting synchronously from the persisted query cache, that crossfade IS
-    // the perceived flicker — an instant swap reads as native. Re-enable only
-    // together with custom ::view-transition CSS for targeted shared elements.
+    renderJsonPayloads: true,
+    writeEarlyHints: false,
     viewTransition: false,
-    payloadExtraction: false, // Disabled — conflicts with dynamic route caching on disk
+    payloadExtraction: 'client',
+    sharedPrerenderData: true,
+    asyncContext: true,
   },
 
   css: [
