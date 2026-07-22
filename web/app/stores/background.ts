@@ -8,7 +8,6 @@ export const useBackgroundStore = defineStore('background', () => {
   const controls = ref<BackgroundControls>({
     mode: 'off',
     rotating: false,
-    cycle: 0,
     paused: false,
     shuffleReq: 0,
     reveal: false,

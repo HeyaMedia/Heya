@@ -34,7 +34,7 @@
     <div
       v-if="srcA"
       class="ambient-layer"
-      :class="[`grade-${gradeA}`, { visible: showA, drift: !reducedMotion && gradeA === 'pool' && showA }]"
+      :class="[`grade-${gradeA}`, { visible: showA }]"
     >
       <LoadingImage :src="srcA" class="ambient-img" :style="mainStyleA" alt="" />
       <NuxtImg v-if="mirrorStyleA" :src="srcA" class="ambient-mirror" :style="mirrorStyleA" alt="" />
@@ -42,7 +42,7 @@
     <div
       v-if="srcB"
       class="ambient-layer"
-      :class="[`grade-${gradeB}`, { visible: !showA, drift: !reducedMotion && gradeB === 'pool' && !showA }]"
+      :class="[`grade-${gradeB}`, { visible: !showA }]"
     >
       <LoadingImage :src="srcB" class="ambient-img" :style="mainStyleB" alt="" />
       <NuxtImg v-if="mirrorStyleB" :src="srcB" class="ambient-mirror" :style="mirrorStyleB" alt="" />
@@ -323,10 +323,10 @@ function scheduleRotation() {
   stop()
   if (reducedMotion || overrideUrl.value || ctl.value.paused) return
   timer = setTimeout(advance, BG_ROTATE_MS)
-  // A new rotation window: the corner ring re-keys off `cycle` and runs a
-  // BG_ROTATE_MS animation, so ring and timer stay in lockstep.
+  // Report that an automatic switch is armed. The corner marker is static:
+  // animating even a small progress ring would keep producing frames for the
+  // entire otherwise-idle 30-second window.
   ctl.value.rotating = true
-  ctl.value.cycle++
   warmAhead()
 }
 
@@ -483,7 +483,7 @@ onBeforeUnmount(() => {
 }
 
 /* One crossfade layer = wrapper + main img (+ optional mirror strip). The
-   wrapper carries blur/opacity/drift so its children composite into ONE
+   wrapper carries blur/opacity so its children composite into ONE
    raster before blurring (no bleed at the main/mirror join), and it hangs
    --bleed past the viewport on every side so the blur's edge fade happens
    off-screen — replacing the old per-image scale-up trick. */
@@ -523,15 +523,6 @@ onBeforeUnmount(() => {
 }
 .ambient-layer.grade-v2.visible {
   opacity: 1;
-}
-
-/* Slow push-in so pool artwork never reads as a static wallpaper. */
-.ambient-layer.drift {
-  animation: ambient-drift 60s ease-in-out infinite alternate;
-}
-@keyframes ambient-drift {
-  from { transform: scale(1); }
-  to { transform: scale(1.07); }
 }
 
 /* Default (no hero alignment): fill the whole oversized wrapper with a cover

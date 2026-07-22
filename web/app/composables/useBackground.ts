@@ -82,8 +82,7 @@ export function useBackgroundToneStyle() {
     tone.value ? { background: tone.value.main, color: tone.value.ink } : undefined)
 }
 
-/** Rotation cadence of the pool layer. The corner ring animates at exactly
- *  this duration, so indicator and timer can't drift apart. */
+/** Rotation cadence of the pool layer. */
 export const BG_ROTATE_MS = 30_000
 
 /** The one size the ambient layer renders at. Preloads MUST warm exactly
@@ -122,10 +121,8 @@ export function useBackgroundImageTools() {
 export interface BackgroundControls {
   /** What the layer is showing: an owner's art, a rotating pool, or nothing. */
   mode: 'off' | 'art' | 'pool'
-  /** True while an auto-rotation window is armed (the ring is running). */
+  /** True while an auto-rotation window is armed. */
   rotating: boolean
-  /** Increments when a rotation window starts — re-keys the progress ring. */
-  cycle: number
   /** User wish: stop auto-rotation. */
   paused: boolean
   /** Bump to request an immediate switch to a random pool image. */

@@ -16,16 +16,11 @@
         <Icon :name="ctl.reveal ? 'eye-slash' : 'eye'" :size="13" />
       </button>
       <button v-if="ctl.mode === 'pool'" class="actl actl-shuffle" aria-label="New background" title="New background" @click="ctl.shuffleReq++">
-        <!-- Ring = time until the next automatic switch. Re-keys on every new
-             rotation window; duration is bound to BG_ROTATE_MS so the ring and
-             the layer's timer can't drift. -->
-        <svg v-if="ctl.rotating && !reducedMotion" class="actl-ring" viewBox="0 0 26 26" aria-hidden="true">
-          <circle
-            :key="ctl.cycle"
-            class="actl-ring-fill"
-            :style="{ animationDuration: `${BG_ROTATE_MS}ms` }"
-            cx="13" cy="13" r="11.5"
-          />
+        <!-- Static marker means automatic rotation is armed. A continuously
+             filling ring kept the renderer producing frames for the whole
+             otherwise-idle interval. -->
+        <svg v-if="ctl.rotating" class="actl-ring" viewBox="0 0 26 26" aria-hidden="true">
+          <circle class="actl-ring-fill" cx="13" cy="13" r="11.5" />
         </svg>
         <Icon name="shuffle" :size="12" />
       </button>
@@ -102,10 +97,6 @@ const currentTo = computed(() => {
 const posterFailed = ref(false)
 watch(() => ctl.value.current?.poster, () => { posterFailed.value = false })
 
-const reducedMotion = import.meta.client
-  ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  : false
-
 // Escape is the panic exit from reveal — the faded page can't be clicked.
 function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape' && ctl.value.reveal) ctl.value.reveal = false
@@ -177,8 +168,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   .actl { min-width: 44px; min-height: 44px; }
 }
 
-/* Cycle-progress ring, same recipe as the hero carousels: fills from
-   12 o'clock; full = next image. */
+/* Static automatic-rotation marker. The timer still switches the image, but
+   the marker itself deliberately produces no continuous animation frames. */
 .actl-ring {
   position: absolute;
   inset: -1px;
@@ -190,11 +181,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   stroke: var(--gold);
   stroke-width: 2;
   stroke-linecap: round;
-  stroke-dasharray: 72.3; /* 2π · r(11.5) */
-  stroke-dashoffset: 72.3;
-  animation: actl-ring-fill linear forwards; /* duration bound inline = BG_ROTATE_MS */
+  stroke-dasharray: 18 54.3; /* partial arc of 2π · r(11.5) */
 }
-@keyframes actl-ring-fill { to { stroke-dashoffset: 0; } }
 
 /* The backdrop's poster IS the button: the link itself is the artwork
    (img just fills it), 26px wide at rest, growing to a full poster on

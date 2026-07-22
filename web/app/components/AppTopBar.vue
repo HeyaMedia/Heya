@@ -778,17 +778,12 @@ const { tabs, isActive } = useNavTabs()
 @media (hover: hover) and (pointer: fine) { .search-kbd { display: inline-block; } }
 /* Activity button — uses the global .btn-icon class for size/hover/active so it
    visually matches the Cast button. The .activity-btn marker only exists to
-   pin the spinning ring to the button (see unscoped block below — the button
-   element is rendered by AppMenu with a different data-v scope, so
+   pin the static activity ring to the button (see unscoped block below — the
+   button element is rendered by AppMenu with a different data-v scope, so
    position:relative + .activity-ring need to live outside `scoped`). */
 .ring-arc { transition: stroke-dashoffset 0.3s ease; }
 .activity-icon { z-index: 1; }
 .activity-icon.active { color: var(--gold); }
-
-@keyframes pulse-activity {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--gold) 40%, transparent); }
-  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--gold) 0%, transparent); }
-}
 
 /* Activity-dropdown styles moved to the non-scoped block below — see note there. */
 
@@ -917,10 +912,9 @@ const { tabs, isActive } = useNavTabs()
   position: absolute;
   inset: 0;
   width: 100%; height: 100%;
-  animation: spin-ring 1.4s linear infinite;
+  transform: rotate(-90deg);
   pointer-events: none;
 }
-@keyframes spin-ring { to { transform: rotate(360deg); } }
 
 .activity-header {
   display: flex;
@@ -952,11 +946,6 @@ const { tabs, isActive } = useNavTabs()
 }
 .activity-status.live .status-pulse {
   background: var(--good);
-  animation: pulse-activity 2s ease-in-out infinite;
-}
-@keyframes pulse-activity {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--gold) 40%, transparent); }
-  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--gold) 0%, transparent); }
 }
 
 .activity-section { padding: 10px 16px; }
