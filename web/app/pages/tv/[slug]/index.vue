@@ -48,8 +48,20 @@
             </template>
           </div>
 
-          <h1 v-if="heroLogoUrl && !heroLogoFailed" class="title title-art">
-            <LoadingImage :src="heroLogoUrl" :alt="heroTitle" :width="600" class="title-logo" @error="heroLogoFailed = true" />
+          <h1
+            v-if="heroLogoUrl && !heroLogoFailed"
+            class="title title-art"
+            :style="heroLogoStyle"
+          >
+            <LoadingImage
+              :src="heroLogoUrl"
+              :alt="heroTitle"
+              :width="600"
+              loading="eager"
+              fetchpriority="high"
+              class="title-logo"
+              @error="heroLogoFailed = true"
+            />
           </h1>
           <h1 v-else class="title">{{ heroTitle }}</h1>
 
@@ -418,9 +430,20 @@ const kindLabel = computed(() => detail.value?.media_item.media_type === 'anime'
 // A logo asset is title artwork; the detail payload tells us whether a logo row
 // exists so pages without one keep their text heading without a probe/404.
 const heroLogoFailed = ref(false)
+const heroLogoAsset = computed(() => detail.value?.assets?.find(asset => asset.asset_type === 'logo') ?? null)
 const heroLogoUrl = computed(() => {
-  if (!detail.value?.media_item || !detail.value.assets?.some(asset => asset.asset_type === 'logo')) return null
+  if (!detail.value?.media_item || !heroLogoAsset.value) return null
   return useImageUrl(detail.value.media_item, 'logo')
+})
+const heroLogoStyle = computed<Record<string, string>>(() => {
+  const asset = heroLogoAsset.value
+  const ratio = asset?.width && asset.height ? asset.width / asset.height : 3.5
+  return {
+    aspectRatio: String(ratio),
+    '--hero-logo-width': `${Math.min(460, 132 * ratio)}px`,
+    '--hero-logo-width-tablet': `${Math.min(300, 96 * ratio)}px`,
+    '--hero-logo-width-phone': `${Math.min(220, 64 * ratio)}px`,
+  }
 })
 watch(heroLogoUrl, () => { heroLogoFailed.value = false })
 
@@ -1103,13 +1126,16 @@ watch(detail, async (d) => {
   color: rgb(var(--oink) / 0.98);
   text-shadow: 0 2px 30px rgb(0 0 0 / 0.45);
 }
-.title-art { line-height: 0; min-height: 96px; display: flex; align-items: flex-end; }
+.title-art {
+  line-height: 0;
+  display: flex;
+  align-items: flex-end;
+  width: min(var(--hero-logo-width, 460px), 100%);
+}
 .title-logo {
   display: block;
-  width: auto;
-  height: auto;
-  max-width: min(460px, 100%);
-  max-height: 132px;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
   object-position: left bottom;
   filter: drop-shadow(0 6px 24px rgb(0 0 0 / 0.55));
@@ -1378,11 +1404,13 @@ watch(detail, async (d) => {
   .tv-hero-inner { padding: 100px var(--pad-fluid) 30px; gap: 28px; }
   .postercard { flex-basis: 184px; }
   .title { font-size: clamp(2rem, 6vw, 3rem); }
+  .title-art { width: min(var(--hero-logo-width-tablet, 300px), 100%); }
 }
 
 @media (max-width: 720px) {
   .tv-hero { min-height: 54vh; }
   .tv-hero-inner { padding: 84px var(--pad-fluid) 26px; gap: 20px; }
+  .title-art { width: min(var(--hero-logo-width-phone, 220px), 100%); }
   .postercard { display: none; }
   .tagline { display: none; }
   .actions { gap: 8px; }

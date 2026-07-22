@@ -50,53 +50,85 @@
 
     <div class="hero-inner">
       <div class="grow hero-ink">
-        <div class="eyebrow">
-          <span>Featured</span>
-          <span class="sep">&middot;</span>
-          <span>{{ current.chip || 'New in library' }}</span>
-          <span class="sep">&middot;</span>
-          <span>{{ typeLabel }}</span>
-        </div>
-
-        <NuxtLink :to="mediaUrl(current)" class="title-link">
-          <h1 v-if="logoOk[current.id]" class="title title-art">
-            <LoadingImage
-              class="title-logo"
-              :src="logoUrl(current)"
-              :alt="current.title"
-              :width="500"
-            />
-          </h1>
-          <h1 v-else class="title">{{ current.title }}</h1>
+        <NuxtLink
+          v-if="!isPhone && currentPosterUrl"
+          :to="mediaUrl(current)"
+          class="side-poster-link"
+          :aria-label="current.title"
+        >
+          <LoadingImage
+            :key="current.id"
+            class="side-featured-poster"
+            :src="currentPosterUrl"
+            :alt="current.title"
+            :width="320"
+            :quality="82"
+            loading="eager"
+            fetchpriority="high"
+          />
         </NuxtLink>
 
-        <p class="metaline">
-          <span v-if="current.year">{{ current.year }}</span>
-          <template v-if="runtimeUpper"><span class="dot">&middot;</span><span>{{ runtimeUpper }}</span></template>
-          <template v-if="ratingStr"><span class="dot">&middot;</span><span>&#9733; {{ ratingStr }}</span></template>
-          <template v-if="genres.length">
-            <span class="dot">&middot;</span>
-            <NuxtLink v-for="g in genres" :key="g" :to="`/genre/${encodeURIComponent(g)}`" class="genre">{{ g }}</NuxtLink>
-          </template>
-        </p>
+        <div class="hero-copy">
+          <div class="eyebrow">
+            <span>Featured</span>
+            <span class="sep">&middot;</span>
+            <span>{{ current.chip || 'New in library' }}</span>
+            <span class="sep">&middot;</span>
+            <span>{{ typeLabel }}</span>
+          </div>
 
-        <div class="actions">
-          <button
-            class="btn-play"
-            :disabled="!canPlayCurrent"
-            @click="$emit('play', current)"
-          >
-            <span class="tri" />
-            <span class="hero-play-label">{{ playLabel }}</span>
-          </button>
-          <NuxtLink :to="mediaUrl(current)" class="pill">
-            <Icon name="info" :size="15" />
-            Details
+          <NuxtLink :to="mediaUrl(current)" class="title-link">
+            <LoadingImage
+              v-if="isPhone && currentPosterUrl"
+              :key="current.id"
+              class="featured-poster"
+              :src="currentPosterUrl"
+              :alt="current.title"
+              :width="180"
+              :quality="82"
+              loading="eager"
+              fetchpriority="high"
+            />
+            <h1 v-else-if="!isPhone && logoOk[current.id]" class="title title-art">
+              <LoadingImage
+                class="title-logo"
+                :src="logoUrl(current)"
+                :alt="current.title"
+                :width="500"
+              />
+            </h1>
+            <h1 v-else class="title">{{ current.title }}</h1>
+            <span v-if="isPhone && currentPosterUrl && posterMeta" class="poster-meta">{{ posterMeta }}</span>
           </NuxtLink>
-          <span class="grow-spacer" />
-          <span v-if="items.length > 1" class="hero-count">
-            {{ pad(currentIdx + 1) }}<span class="dim"> / {{ pad(items.length) }}</span>
-          </span>
+
+          <p v-if="showMetaline" class="metaline">
+            <span v-if="current.year">{{ current.year }}</span>
+            <template v-if="runtimeUpper"><span class="dot">&middot;</span><span>{{ runtimeUpper }}</span></template>
+            <template v-if="!isPhone && ratingStr"><span class="dot">&middot;</span><span>&#9733; {{ ratingStr }}</span></template>
+            <template v-if="!isPhone && genres.length">
+              <span class="dot">&middot;</span>
+              <NuxtLink v-for="g in genres" :key="g" :to="`/genre/${encodeURIComponent(g)}`" class="genre">{{ g }}</NuxtLink>
+            </template>
+          </p>
+
+          <div class="actions">
+            <button
+              class="btn-play"
+              :disabled="!canPlayCurrent"
+              @click="$emit('play', current)"
+            >
+              <span class="tri" />
+              <span class="hero-play-label">{{ playLabel }}</span>
+            </button>
+            <NuxtLink :to="mediaUrl(current)" class="pill" aria-label="Details">
+              <Icon name="info" :size="15" />
+              <span class="details-label">Details</span>
+            </NuxtLink>
+            <span class="grow-spacer" />
+            <span v-if="items.length > 1" class="hero-count">
+              {{ pad(currentIdx + 1) }}<span class="dim"> / {{ pad(items.length) }}</span>
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -216,6 +248,8 @@ const toneVars = computed<Record<string, string> | undefined>(() => {
 // so we can safely treat this as defined inside that scope.
 const current = computed(() => (props.items[currentIdx.value] ?? props.items[0])!)
 const movie = computed(() => props.movies?.[current.value.id])
+const { isPhone } = useViewport()
+const currentPosterUrl = computed(() => usePosterUrl(current.value))
 
 const typeLabel = computed(() => (current.value?.media_type === 'movie' ? 'Film' : 'Series'))
 const genres = computed(() => (movie.value?.genres ?? []).slice(0, 3))
@@ -230,6 +264,13 @@ const runtimeUpper = computed(() => {
   const m = mins % 60
   return [h ? `${h}H` : '', m ? `${m}M` : ''].filter(Boolean).join(' ')
 })
+const posterMeta = computed(() => [current.value.year, runtimeUpper.value].filter(Boolean).join(' · '))
+const showMetaline = computed(() => !isPhone.value && !!(
+  current.value.year
+  || runtimeUpper.value
+  || ratingStr.value
+  || genres.value.length
+))
 function pad(n: number) { return String(n).padStart(2, '0') }
 
 const currentPlay = computed<HeroPlayInfo | undefined>(() => props.playInfo?.[current.value.id])
@@ -242,6 +283,13 @@ const { inProgress: heroInProgress } = useWatchResume(heroEntityType, heroEntity
 
 const playLabel = computed(() => {
   const info = currentPlay.value
+  if (isPhone.value) {
+    const episode = info?.label?.match(/\bS(\d+)E(\d+)\b/i)
+    if (episode?.[1] && episode[2]) {
+      return `Play - S${episode[1].padStart(2, '0')}E${episode[2].padStart(2, '0')}`
+    }
+    return 'Play'
+  }
   const verb = heroInProgress.value ? 'Resume' : 'Play'
   if (!info) return verb
   if (info.label) return `${verb} ${info.label}`
@@ -256,12 +304,21 @@ function logoUrl(item: HeroItem) {
   return `/api/media/${useMediaImageKey(item)}/image/logo`
 }
 function probeLogo(item: HeroItem) {
+  // The phone treatment uses the poster instead, so don't spend an extra
+  // request decoding title art that cannot be shown at this viewport.
+  if (isPhone.value) return
   if (logoOk.value[item.id] !== undefined) return
   const img = new Image()
   img.onload = () => { logoOk.value[item.id] = true }
   img.onerror = () => { logoOk.value[item.id] = false }
   img.src = logoUrl(item)
 }
+
+// A live resize from phone to a wider layout should pick up the logo without
+// waiting for the next carousel rotation.
+watch(isPhone, (phone) => {
+  if (!phone && current.value) probeLogo(current.value)
+})
 
 // --- Trailer takeover -----------------------------------------------------
 const trailerSrc = ref<string | null>(null)
@@ -496,6 +553,28 @@ onUnmounted(() => {
   padding: 110px var(--pad-fluid) 44px;
 }
 .hero-inner > .grow { flex: 1; min-width: 0; }
+.hero-ink {
+  display: flex;
+  align-items: flex-end;
+  gap: clamp(24px, 3vw, 42px);
+}
+.hero-copy { flex: 1; min-width: 0; }
+.side-poster-link {
+  display: block;
+  flex: 0 0 auto;
+  color: inherit;
+  text-decoration: none;
+}
+.side-featured-poster {
+  display: block;
+  width: clamp(136px, 12vw, 176px);
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: 3px;
+  box-shadow:
+    0 0 0 1px rgb(var(--oink) / 0.14),
+    0 20px 48px rgb(0 0 0 / 0.5);
+}
 
 /* mono content eyebrow (heya2.css .eyebrow) */
 .eyebrow {
@@ -530,6 +609,9 @@ onUnmounted(() => {
   transition: color 0.15s ease;
 }
 .title-art { line-height: 0; }
+.featured-poster {
+  display: none;
+}
 .title-logo {
   display: block;
   width: auto;
@@ -648,26 +730,107 @@ onUnmounted(() => {
 
 @media (max-width: 900px) {
   .hero-inner { padding: 96px var(--pad-fluid) 32px; }
+  .hero-ink { gap: 22px; }
+  .side-featured-poster { width: clamp(120px, 16vw, 144px); }
   .title { font-size: clamp(2rem, 7vw, 2.9rem); }
   .title-logo { max-width: 300px; max-height: 96px; }
 }
 
-/* Phone: tighter hero, the primary CTA fills its row so a long
-   "Resume S03E12 - Title" label truncates instead of pushing Details off. */
+/* Phone: artwork is the centered focal point and consumes the flexible hero
+   height. The compact action row sits below; only year/runtime metadata stays. */
 @media (max-width: 720px) {
   .hero-inner { padding: 84px var(--pad-fluid) 22px; }
-  .eyebrow { margin-bottom: 12px; gap: 8px; }
+  .hero-ink { display: block; }
+  .hero-copy {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "poster"
+      "actions"
+      "meta";
+    align-items: start;
+  }
+  .eyebrow { display: none; }
+  .title-link {
+    grid-area: poster;
+    justify-self: center;
+    position: relative;
+  }
   .title { font-size: clamp(1.8rem, 8vw, 2.5rem); }
+  .featured-poster {
+    display: block;
+    width: auto;
+    height: min(42dvh, 380px);
+    max-width: 100%;
+    aspect-ratio: 2 / 3;
+    object-fit: cover;
+    border-radius: 3px;
+    box-shadow:
+      0 0 0 1px rgb(var(--oink) / 0.14),
+      0 16px 38px rgb(0 0 0 / 0.46);
+  }
+  .poster-meta {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    display: inline-flex;
+    padding: 5px 7px;
+    border: 1px solid rgb(var(--oink) / 0.16);
+    border-radius: 999px;
+    background: rgb(7 9 13 / 0.72);
+    color: rgb(var(--oink) / 0.88);
+    font: 600 9.5px var(--font-mono);
+    letter-spacing: 0.08em;
+    line-height: 1;
+    text-transform: uppercase;
+    text-shadow: 0 1px 8px rgb(0 0 0 / 0.8);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    pointer-events: none;
+  }
   .title-logo { max-width: 220px; max-height: 64px; }
-  .metaline { font-size: 11.5px; }
-  .actions { margin-top: 18px; gap: 8px; }
-  .btn-play { flex: 1 1 auto; min-width: 0; justify-content: center; height: 48px; }
-  .pill { flex: 0 0 auto; height: 48px; }
+  .metaline {
+    grid-area: meta;
+    font-size: 11.5px;
+  }
+  .actions {
+    grid-area: actions;
+    align-items: center;
+    flex-wrap: nowrap;
+    margin-top: 16px;
+    gap: 8px;
+  }
+  .btn-play {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+    justify-content: center;
+    height: 48px;
+    min-height: 48px;
+    padding: 12px 16px;
+  }
+  .pill {
+    flex: 0 0 48px;
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    justify-content: center;
+  }
+  .details-label { display: none; }
+  .grow-spacer { display: none; }
   .hero-count { display: none; }
   .hero-play-label {
     overflow: hidden;
     text-overflow: ellipsis;
+    line-height: 1.25;
     white-space: nowrap;
   }
+}
+
+/* Keep the composition inside the 440px minimum hero on short phones. */
+@media (max-width: 720px) and (max-height: 700px) {
+  .hero-inner { padding-top: 76px; padding-bottom: 16px; }
+  .featured-poster { height: min(42dvh, 270px); }
+  .actions { margin-top: 12px; }
 }
 </style>
