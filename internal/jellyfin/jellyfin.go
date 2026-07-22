@@ -393,7 +393,10 @@ func ClaimsRootRequest(r *http.Request) bool {
 // hasJellyfinRequestIdentity recognizes both authenticated requests and the
 // client-identification header sent before login. Once a request identifies
 // itself as Jellyfin, even an unregistered lowercase path belongs to the
-// protocol and must receive JSON rather than SPA HTML.
+// protocol and must receive JSON rather than SPA HTML. Keep query identity to
+// Jellyfin's specific api_key spellings: a generic `token` parameter is also
+// used by Vite HMR and ordinary Heya links, so treating it as global protocol
+// identity sends unrelated requests to the Jellyfin surface.
 func hasJellyfinRequestIdentity(r *http.Request) bool {
 	if r.Header.Get("X-Emby-Authorization") != "" ||
 		r.Header.Get("X-Emby-Token") != "" ||
@@ -405,7 +408,7 @@ func hasJellyfinRequestIdentity(r *http.Request) bool {
 		return true
 	}
 	query := r.URL.Query()
-	return query.Get("api_key") != "" || query.Get("ApiKey") != "" || query.Get("token") != ""
+	return query.Get("api_key") != "" || query.Get("ApiKey") != ""
 }
 
 // claimsRouter is a handler-less route table for ClaimsPath. Handlers bound
