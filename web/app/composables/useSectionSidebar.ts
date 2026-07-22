@@ -1,12 +1,11 @@
 // Which section sidebar (if any) the current route offers, plus the open
 // state of the compact-band drawer that holds it.
 //
-// In the compact band (720.02–1200px, see useViewport().isCompact) the
+// On phones and in the compact band (up to 1200px; see useViewport()) the
 // persistent sidebars are hidden and AppTopBar shows a burger button instead;
-// tapping it opens the section's sidebar as a left-side drawer. The section
-// pages own the drawer mount; the topbar owns the trigger — this composable
-// is the shared state between them (module singleton, same pattern as
-// useToast/useConfirm).
+// tapping it or using the near-edge swipe opens the section's left drawer.
+// The section pages own the drawer mount; the topbar and TouchGestures share
+// this singleton state (same pattern as useToast/useConfirm).
 //
 // `kind` is derived from the route rather than registered by pages on mount:
 // registration would race page transitions (new page's setup can run before

@@ -4,9 +4,10 @@
   Two gestures, both gated to coarse (touch) pointers, wired with a single set
   of document-level listeners:
 
-  1. Left-edge swipe → opens the section sidebar (compact band only, 720–1200px,
-     where `useSectionSidebar().open` drives the burger drawer). A drag that
-     starts within the left edge zone and moves right past a threshold opens it.
+  1. Near-left-edge swipe → opens the section sidebar on phones and in the
+     compact band. Android owns the outermost edge for its system Back gesture
+     and web content cannot request a native gesture-exclusion rect, so the
+     activation band extends far enough inward to remain reachable there.
 
   2. Pull-to-refresh → pulling down while the page scroller is already at the top
      reveals a spinner; releasing past the threshold refetches the data behind
@@ -46,12 +47,17 @@
 <script setup lang="ts">
 import { useQueryCache } from '@pinia/colada'
 
-const { isCoarse, isCompact } = useViewport()
+const { isPhone, isCoarse, isCompact } = useViewport()
 const sidebar = useSectionSidebar()
 const queryClient = useQueryCache()
 
 // --- Tunables --------------------------------------------------------------
-const EDGE_ZONE = 24        // px from the left edge that arms the edge-swipe
+// Android's system Back gesture may consume a touch that begins on the
+// physical edge before the browser can dispatch it. Accept starts through a
+// wider near-edge band: 0–24px still works where the UA delivers it, while
+// roughly 24–72px gives Android users an intentional just-inside-the-edge
+// target without laying an element over page controls.
+const EDGE_ZONE = 72        // max x-coordinate that arms the drawer swipe
 const DIR_LOCK = 10         // px of travel before we commit to a gesture axis
 const EDGE_OPEN = 48        // px rightward past which the sidebar opens
 const PULL_RESIST = 0.5     // rubber-band factor on the pull distance
@@ -113,7 +119,11 @@ function onStart(e: TouchEvent) {
   const inContent = !!target?.closest('.app-main')
   const inRail = !!target?.closest('.app-rail')
 
-  edgeEligible = isCompact.value && !!sidebar.kind.value && !sidebar.open.value && startX <= EDGE_ZONE
+  edgeEligible = (isPhone.value || isCompact.value)
+    && inContent
+    && !!sidebar.kind.value
+    && !sidebar.open.value
+    && startX <= EDGE_ZONE
   scroller = inContent ? scrollableAncestor(target) : null
   // A rail drag owns its gesture. In particular, a slightly diagonal swipe
   // at page-top must not get axis-locked into pull-to-refresh.
