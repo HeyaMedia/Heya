@@ -718,7 +718,7 @@ const artistPosterUrl = computed(() => {
 
 // Crossfade backdrops — the same shared carousel engine as the movie/TV
 // heroes. HeroCanvas renders the sharp A/B pair and claims the blurred
-// ambient underlay; CycleControls' ring drives rotation.
+// ambient underlay; CycleControls owns the sleeping rotation clock.
 const {
   showA, backdropA, backdropB, carouselPaused, cycleKey, backdropAssets,
   advanceBackdrop, retreatBackdrop, seedCarousel, openBackdropLightbox,

@@ -290,7 +290,7 @@ const artistArtUrls = computed(() => {
   return urls
 })
 
-// MusicCollectionHero owns the rotation (CycleControls ring is the clock;
+// MusicCollectionHero owns the rotation (CycleControls owns the clock;
 // prev/pause/next/expand live in its tools cluster) — this page just
 // supplies the pool above and mirrors the shown image via @image for the
 // tone fallback sample.
@@ -590,4 +590,3 @@ async function onDelete() {
 .pl-edit-desc { resize: vertical; min-height: 70px; line-height: 1.5; }
 
 </style>
-

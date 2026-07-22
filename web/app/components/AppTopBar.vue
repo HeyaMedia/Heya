@@ -79,20 +79,11 @@
         content-class="activity-panel"
       >
         <template #trigger>
-          <svg v-if="hasActivity" class="activity-ring" viewBox="0 0 36 36" preserveAspectRatio="xMidYMid meet">
-            <circle cx="18" cy="18" r="16" fill="none" stroke="rgb(var(--ink) / 0.06)" stroke-width="2" />
-            <circle
-              class="ring-arc"
-              cx="18" cy="18" r="16"
-              fill="none"
-              stroke="var(--gold)"
-              stroke-width="2.5"
-              stroke-linecap="round"
-              stroke-dasharray="100.53"
-              stroke-dashoffset="70"
-            />
-          </svg>
           <Icon name="pulse" :size="15" class="activity-icon" :class="{ active: hasActivity }" />
+          <span v-if="streamCount" class="activity-badge activity-stream-count" aria-hidden="true">
+            {{ streamCount > 9 ? '9+' : streamCount }}
+          </span>
+          <span v-if="hasBackgroundActivity" class="activity-badge activity-work-badge" aria-hidden="true">A</span>
         </template>
             <div class="activity-header">
               <span class="activity-title">Activity</span>
@@ -217,7 +208,7 @@
                 View tasks
                 <Icon name="arrow-right" :size="11" />
               </NuxtLink>
-              <button v-if="hasActivity" class="activity-cancel" @click="cancelAllJobs">
+              <button v-if="hasBackgroundActivity" class="activity-cancel" @click="cancelAllJobs">
                 Cancel all
               </button>
             </div>
@@ -535,9 +526,15 @@ const TASK_LABELS: Record<string, { label: string, icon: string }> = {
   cleanup:              { label: 'Cleanup',          icon: 'trash' },
 }
 
-const hasActivity = computed(() =>
-  activeScans.value.length > 0 || scanActivityCount.value > 0 || activeJobs.value.length > 0 || queueStatus.value.pending > 0 || taskActivityCount.value > 0 || nowPlayingSessions.value.length > 0
+const hasBackgroundActivity = computed(() =>
+  activeScans.value.length > 0
+  || scanActivityCount.value > 0
+  || activeJobs.value.length > 0
+  || queueStatus.value.pending > 0
+  || taskActivityCount.value > 0
 )
+const streamCount = computed(() => nowPlayingSessions.value.length)
+const hasActivity = computed(() => hasBackgroundActivity.value || streamCount.value > 0)
 
 async function cancelAllJobs() {
   try {
@@ -776,14 +773,37 @@ const { tabs, isActive } = useNavTabs()
 /* Only surface the shortcut chip where there's a physical keyboard to press
    it — a touch tablet (coarse pointer) shows a bare pill. */
 @media (hover: hover) and (pointer: fine) { .search-kbd { display: inline-block; } }
-/* Activity button — uses the global .btn-icon class for size/hover/active so it
-   visually matches the Cast button. The .activity-btn marker only exists to
-   pin the static activity ring to the button (see unscoped block below — the
-   button element is rendered by AppMenu with a different data-v scope, so
-   position:relative + .activity-ring need to live outside `scoped`). */
-.ring-arc { transition: stroke-dashoffset 0.3s ease; }
+/* Activity button — the pulse lights up for either background work or live
+   streams. Tiny corner badges keep the two signals distinct without animation. */
 .activity-icon { z-index: 1; }
 .activity-icon.active { color: var(--gold); }
+.activity-badge {
+  position: absolute;
+  z-index: 2;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--bg-1);
+  font: 750 8px/1 var(--font-mono);
+  letter-spacing: -0.02em;
+  pointer-events: none;
+}
+.activity-stream-count {
+  top: -3px;
+  right: -3px;
+  background: var(--gold);
+  color: var(--accent-ink);
+}
+.activity-work-badge {
+  right: -3px;
+  bottom: -3px;
+  background: var(--bg-4);
+  color: var(--gold-bright);
+}
 
 /* Activity-dropdown styles moved to the non-scoped block below — see note there. */
 
@@ -906,14 +926,6 @@ const { tabs, isActive } = useNavTabs()
      panel content (Tasks section) is also reachable via Settings → Tasks,
      so the trigger is dropped rather than squeezed into the narrow bar. */
   .activity-btn { display: none; }
-}
-
-.activity-ring {
-  position: absolute;
-  inset: 0;
-  width: 100%; height: 100%;
-  transform: rotate(-90deg);
-  pointer-events: none;
 }
 
 .activity-header {

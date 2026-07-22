@@ -1,7 +1,7 @@
 export default defineNuxtConfig({
   ssr: false,
   compatibilityDate: "2025-05-19",
-  devtools: { enabled: true },
+  devtools: { enabled: false },
 
   modules: [
     "@pinia/nuxt",

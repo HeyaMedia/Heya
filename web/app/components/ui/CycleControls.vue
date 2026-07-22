@@ -1,33 +1,17 @@
 <template>
-  <div class="cyc-ctls" :class="{ inline }">
-    <button class="cyc-ctl" :aria-label="`Previous ${itemLabel}`" @click="$emit('prev')">
+  <div class="cyc-ctls" :class="{ inline: props.inline }">
+    <button class="cyc-ctl" :aria-label="`Previous ${props.itemLabel}`" @click="$emit('prev')">
       <Icon name="chevleft" :size="12" />
     </button>
     <button
-      class="cyc-ctl cyc-pause"
+      class="cyc-ctl"
       :aria-pressed="paused"
       :aria-label="paused ? 'Resume rotation' : 'Pause rotation'"
       @click="paused = !paused"
     >
-      <!-- The ring IS the rotation clock: a duration-long stroke animation
-           whose end advances the carousel — indicator and timer are the same
-           thing, so they can't drift. Re-keyed by the owner on every
-           advance/retreat/jump, which restarts the window. Reduced motion:
-           no ring, no auto-advance; prev/next still work. -->
-      <svg class="cyc-ring" viewBox="0 0 26 26" aria-hidden="true">
-        <circle
-          v-if="!reducedMotion"
-          :key="cycleKey"
-          class="cyc-ring-fill"
-          :class="{ paused: paused || ringPaused }"
-          :style="{ animationDuration: `${duration}ms` }"
-          cx="13" cy="13" r="11.5"
-          @animationend="$emit('next')"
-        />
-      </svg>
       <Icon :name="paused ? 'play' : 'pause'" :size="12" />
     </button>
-    <button class="cyc-ctl" :aria-label="`Next ${itemLabel}`" @click="$emit('next')">
+    <button class="cyc-ctl" :aria-label="`Next ${props.itemLabel}`" @click="$emit('next')">
       <Icon name="chevright" :size="12" />
     </button>
   </div>
@@ -36,18 +20,19 @@
 <script setup lang="ts">
 // The standard prev / pause / next cluster for everything that auto-rotates
 // artwork: the home heroes (Featured, New, Music) and the detail-page
-// backdrop carousels. The pause button doubles as the cycle-progress ring.
+// backdrop carousels. A timeout owns the clock so an idle page produces no
+// animation frames; the pause/play button is deliberately unanimated.
 //
 // Owner contract: keep a `cycleKey` counter and bump it on EVERY slide
-// change (auto or manual) — that re-keys the ring and starts a fresh
-// window. Handle @next/@prev by moving the carousel. `paused` is the
-// sticky user pause (v-model); `ringPaused` composes transient pause
+// change (auto or manual) — that restarts a fresh timer window. Handle
+// @next/@prev by moving the carousel. `paused` is the sticky user pause
+// (v-model); `ringPaused` composes transient pause
 // sources on top (hover, focus, an owning trailer) without overwriting
 // the user's wish.
-withDefaults(defineProps<{
-  /** Bumped by the owner on every slide change — re-keys the ring. */
+const props = withDefaults(defineProps<{
+  /** Bumped by the owner on every slide change — restarts the clock. */
   cycleKey: number
-  /** Full rotation window in ms (= the ring's animation duration). */
+  /** Full rotation window in ms. */
   duration: number
   /** Transient pause sources composed by the owner (hover/focus/trailer). */
   ringPaused?: boolean
@@ -64,11 +49,73 @@ withDefaults(defineProps<{
 /** Sticky user pause — only the button toggles it. */
 const paused = defineModel<boolean>('paused', { default: false })
 
-defineEmits<{ prev: []; next: [] }>()
+const emit = defineEmits<{ prev: []; next: [] }>()
 
-const reducedMotion = import.meta.client
-  ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  : false
+const reducedMotion = ref(false)
+const pageHidden = ref(false)
+let timer: ReturnType<typeof setTimeout> | null = null
+let remainingMs = 0
+let startedAt = 0
+let clockMounted = false
+
+function clockBlocked() {
+  return reducedMotion.value || paused.value || props.ringPaused || pageHidden.value
+}
+
+function stopClock(preserveRemaining: boolean) {
+  if (timer === null) return
+  if (preserveRemaining) {
+    remainingMs = Math.max(1, remainingMs - (performance.now() - startedAt))
+  }
+  clearTimeout(timer)
+  timer = null
+}
+
+function armClock() {
+  if (!clockMounted || clockBlocked() || timer !== null) return
+  if (remainingMs <= 0) remainingMs = Math.max(0, props.duration)
+  if (remainingMs <= 0) return
+  startedAt = performance.now()
+  timer = setTimeout(() => {
+    timer = null
+    remainingMs = Math.max(0, props.duration)
+    emit('next')
+  }, remainingMs)
+}
+
+function restartClock() {
+  stopClock(false)
+  remainingMs = Math.max(0, props.duration)
+  armClock()
+}
+
+watch(() => [props.cycleKey, props.duration], restartClock)
+watch([paused, () => props.ringPaused], () => {
+  if (!clockMounted) return
+  if (clockBlocked()) stopClock(true)
+  else armClock()
+})
+
+function onVisibilityChange() {
+  pageHidden.value = document.hidden
+  if (pageHidden.value) stopClock(true)
+  else armClock()
+}
+
+onMounted(() => {
+  clockMounted = true
+  reducedMotion.value = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  pageHidden.value = document.hidden
+  remainingMs = Math.max(0, props.duration)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  armClock()
+})
+
+onBeforeUnmount(() => {
+  clockMounted = false
+  stopClock(false)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+})
 </script>
 
 <style scoped>
@@ -90,24 +137,4 @@ const reducedMotion = import.meta.client
   transition: background 0.12s, color 0.12s;
 }
 .cyc-ctl:hover { background: var(--bg-3); color: var(--fg-0); }
-.cyc-pause { position: relative; }
-/* Cycle-progress ring: full = handoff. Drawn just inside the button edge,
-   rotated so it fills from 12 o'clock. */
-.cyc-ring {
-  position: absolute;
-  inset: -1px;
-  transform: rotate(-90deg);
-  pointer-events: none;
-}
-.cyc-ring-fill {
-  fill: none;
-  stroke: var(--gold);
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-dasharray: 72.3; /* 2π · r(11.5) */
-  stroke-dashoffset: 72.3;
-  animation: cyc-ring-fill linear forwards; /* duration bound inline */
-}
-.cyc-ring-fill.paused { animation-play-state: paused; }
-@keyframes cyc-ring-fill { to { stroke-dashoffset: 0; } }
 </style>

@@ -279,9 +279,8 @@ const bgImg = useBackgroundImageTools()
 function bdStyle(url: string | null) {
   return url ? { backgroundImage: `url("${bgImg.variant(url)}")` } : {}
 }
-// The clock is CycleControls' ring (BACKDROP_INTERVAL): its animationend
-// calls advance(); every move re-keys the ring for a fresh window. Pausing
-// freezes the ring, so nothing fires while paused — no timer bookkeeping.
+// CycleControls owns the BACKDROP_INTERVAL clock: every move re-keys it for
+// a fresh window. Pausing preserves the remaining time.
 function showIdx(idx: number) {
   const url = backdropUrls.value[idx] ?? null
   bdIdx.value = idx

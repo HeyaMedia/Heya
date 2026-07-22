@@ -36,6 +36,7 @@
         autoplay
         muted
         playsinline
+        preload="none"
         :src="trailerSrc"
         @playing="trailerVisible = true"
         @ended="endTrailer(true)"
@@ -101,9 +102,9 @@
     </div>
 
     <!-- Slide controls: the shared prev/pause/next cluster, teleported into
-         HeroDeck's top-right slot beside the mode tabs. The ring is the 30s
-         rotation clock; a trailer takeover freezes it, and any manual move
-         re-keys it — a fresh full window. -->
+         HeroDeck's top-right slot beside the mode tabs. Its timer rotates at
+         30s; a trailer takeover freezes it, and any manual move restarts a
+         fresh full window. -->
     <Teleport defer to="#hero-deck-aux">
       <CycleControls
         v-if="items.length > 1"
@@ -152,7 +153,7 @@ const props = defineProps<{
 
 defineEmits<{ play: [item: MediaItem] }>()
 
-// One rotation window — CycleControls' ring animates at exactly this.
+// One rotation window — CycleControls owns the sleeping timeout.
 const INTERVAL = 30_000
 const TRAILER_LINGER = 4000
 const currentIdx = ref(0)
@@ -169,7 +170,7 @@ const { ambientEnabled } = useAppearance()
 const background = useBackground()
 const bgImg = useBackgroundImageTools()
 // Warm the NEXT slide's backdrop whenever the current one settles, so the
-// ring-driven advance (and a shown deck's first rotation) crossfades from
+// timer-driven advance (and a shown deck's first rotation) crossfades from
 // a hot cache instead of stuttering mid-fade.
 watch(() => currentIdx.value + props.items.length, () => {
   if (props.items.length <= 1) return
@@ -268,23 +269,24 @@ const trailerVisible = ref(false)
 let trailerDelay: ReturnType<typeof setTimeout> | null = null
 let reducedMotion = false
 
-// Attract-mode guard: the hero rotates forever, and every slide with a local
-// trailer takes over with an autoplaying <video>. Fine while someone is
-// browsing — pure waste (continuous video decode) when the app has sat
-// untouched on the home page for a long while. Backdrop crossfades keep
-// running (they're cheap); only new trailer takeovers stop until the next
-// interaction.
+// Trailer decode is demand-gated: loading the home page is not interaction.
+// A local trailer is armed only after a pointer/key/wheel event, then future
+// takeovers remain available while the user is actively browsing. This keeps
+// a newly opened or backgrounded home page at rest.
 const TRAILER_IDLE_LIMIT_MS = 5 * 60 * 1000
-let lastInteractionAt = Date.now()
-function noteInteraction() { lastInteractionAt = Date.now() }
+let lastInteractionAt = 0
+function noteInteraction() {
+  lastInteractionAt = Date.now()
+  if (!trailerSrc.value && !trailerDelay) armTrailer()
+}
 
 function armTrailer() {
   if (trailerDelay) { clearTimeout(trailerDelay); trailerDelay = null }
-  if (Date.now() - lastInteractionAt > TRAILER_IDLE_LIMIT_MS) return
+  if (!lastInteractionAt || Date.now() - lastInteractionAt > TRAILER_IDLE_LIMIT_MS) return
   const extraID = props.trailers?.[current.value.id]
   if (!extraID || reducedMotion || props.items.length === 0) return
   trailerDelay = setTimeout(() => {
-    // Takeover: setting trailerSrc freezes the cycle ring (ring-paused);
+    // Takeover: setting trailerSrc freezes the carousel timer (ring-paused);
     // the trailer owns the slide until it ends (advance) or errors
     // (rotation resumes in place). Same-origin media requests carry Heya's
     // HttpOnly session cookie.
@@ -318,11 +320,10 @@ function advanceHero() {
   currentIdx.value = nextIdx
 }
 
-// ── Ring clock (CycleControls) ──
-// The cluster's progress ring IS the 30s timer: its animationend calls
-// advance(); every slide change re-keys it via cycleKey for a fresh full
-// window. The trailer takeover freezes the ring through the ring-paused prop;
-// the sticky pause is the v-model.
+// ── Rotation clock (CycleControls) ──
+// CycleControls sleeps on a 30s timeout, then calls advance(). Every slide
+// change bumps cycleKey for a fresh full window. A trailer takeover freezes
+// the remaining time through ringPaused; the sticky pause is the v-model.
 const userPaused = ref(false)
 
 function advance() {
@@ -411,13 +412,19 @@ onMounted(() => {
   window.addEventListener('pointerdown', noteInteraction, { passive: true })
   window.addEventListener('keydown', noteInteraction, { passive: true })
   window.addEventListener('wheel', noteInteraction, { passive: true })
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
+
+function onVisibilityChange() {
+  if (document.hidden) killTrailer()
+}
 
 onUnmounted(() => {
   killTrailer()
   window.removeEventListener('pointerdown', noteInteraction)
   window.removeEventListener('keydown', noteInteraction)
   window.removeEventListener('wheel', noteInteraction)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>
 

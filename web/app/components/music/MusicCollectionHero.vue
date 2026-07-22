@@ -23,8 +23,8 @@
     <HeroCanvas :src="aSrc || ''" :src-b="bSrc" :show-a="showA" object-position="center 25%" />
 
     <!-- Backdrop tools — expand-to-lightbox + the shared prev/pause/next
-         ring, top-right (same cluster as the artist/movie/TV heroes). The
-         ring IS the rotation clock: its animationend fires @next. -->
+         cluster, top-right (same cluster as the artist/movie/TV heroes).
+         CycleControls owns the sleeping rotation timer. -->
     <div v-if="images.length > 0 || backdrop" class="hero-tools mch-tools">
       <button class="hero-expand" aria-label="Expand backdrop" @click="openLightbox">
         <Icon name="expand" :size="13" />
@@ -63,7 +63,7 @@ const props = withDefaults(defineProps<{
   description?: string
   /** Rotating hero image pool (the collection's artists). The component
    *  owns the carousel: random start, A/B crossfade, the CycleControls
-   *  ring as the clock, lightbox expand. HeroCanvas mirrors the shown
+   *  timer, lightbox expand. HeroCanvas mirrors the shown
    *  image to the ambient layer, keeping the blur below the ledger in
    *  sync automatically. */
   images?: string[]

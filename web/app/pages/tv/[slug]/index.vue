@@ -472,7 +472,7 @@ function videoEmbedSrc(key: string): string {
 }
 
 // ── Crossfade backdrops — shared carousel engine. HeroCanvas renders the A/B
-// pair and owns the graded ambient claim; the CycleControls ring drives the
+// pair and owns the graded ambient claim; CycleControls owns the sleeping
 // 30s rotation clock. ────────────────────────────────────────────────────────
 const {
   showA, backdropA, backdropB, carouselPaused, cycleKey, backdropAssets,

@@ -74,9 +74,8 @@
         <!-- Controls ride the deck's top-right cluster beside the mode tabs
              (same slot HeroA's navigator uses). On phones the aux slot is
              hidden, so the teleport is disabled and they render inline —
-             touch users must always have a pause control. CycleControls'
-             ring IS the cycle clock: its animationend advances the
-             carousel, so ring and rotation can't drift. -->
+             touch users must always have a pause control. CycleControls owns
+             the sleeping rotation timer. -->
         <Teleport defer :disabled="isPhone" to="#hero-deck-aux">
           <CycleControls
             v-model:paused="userPaused"
@@ -238,11 +237,10 @@ const feed = computed<FeedRow[]>(() => {
 })
 
 // ── Carousel clock ──
-// CycleControls' ring IS the timer (see that component): its animationend
-// calls advance(); every advance/retreat re-keys the ring, restarting the
-// countdown. Pausing (hover, keyboard focusin via ring-paused, or the
-// sticky button via v-model) freezes it — clock and indicator are the same
-// thing, so they can't drift.
+// CycleControls owns the sleeping timer (see that component): every
+// advance/retreat re-keys it, restarting the countdown. Pausing (hover,
+// keyboard focusin via ring-paused, or the sticky button via v-model)
+// preserves the remaining time.
 const CYCLE_MS = 15_000
 const cursor = ref(0)
 const cycleKey = ref(0)

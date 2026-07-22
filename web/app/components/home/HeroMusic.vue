@@ -79,8 +79,7 @@
           <!-- Controls ride the deck's top-right cluster beside the mode tabs
                (same slot the other heroes use). On phones the aux slot is
                hidden, so the teleport is disabled and they render inline.
-               CycleControls' ring IS the cycle clock: its animationend
-               advances the carousel, so ring and rotation can't drift. -->
+               CycleControls owns the sleeping rotation timer. -->
           <Teleport defer :disabled="isPhone" to="#hero-deck-aux">
             <CycleControls
               v-model:paused="userPaused"
@@ -207,7 +206,7 @@ function ensureProbe(url: string | null) {
 watch(feed, (rows) => { for (const r of rows) ensureProbe(r.backdrop) }, { immediate: true })
 
 // ── Carousel clock ──
-// Identical mechanics to HeroNewIn: CycleControls' ring IS the timer;
+// Identical mechanics to HeroNewIn: CycleControls owns the timer;
 // advance/retreat re-key it. Hover, keyboard focus (ring-paused), and the
 // sticky button (v-model) pause independently and compose.
 const CYCLE_MS = 15_000
