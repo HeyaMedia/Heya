@@ -39,14 +39,20 @@
         v-if="continueWatching.length && showSection('continue-watching')"
         :style="sectionStyle('continue-watching')"
         :items="continueWatching"
+        :has-more="continueWatchingQuery.hasNextPage.value"
+        :loading-more="continueWatchingQuery.asyncStatus.value === 'loading'"
         @play="playContinue"
+        @load-more="loadMoreContinueWatching"
       />
 
       <UpNextRow
         v-if="upNextItems.length && showSection('up-next')"
         :style="sectionStyle('up-next')"
         :items="upNextItems"
+        :has-more="upNextHasMore"
+        :loading-more="upNextLoadingMore"
         @play="playUpNext"
+        @load-more="loadMoreUpNext"
       />
 
       <ContentRow
@@ -122,7 +128,7 @@
       />
 
       <ContentRow
-        v-if="(recentArtists.length || musicHomeQuery.isPending.value) && showSection('recent-artists')"
+        v-if="(recentArtists.length || artistsQuery.isPending.value) && showSection('recent-artists')"
         :style="sectionStyle('recent-artists')"
         title="Recently Added Artists"
         subtitle="New & updated artists"
@@ -130,12 +136,15 @@
         :context-items="homeArtistContextItems"
         :aspect="'1/1'"
         :tile-width="168"
-        :pending="musicHomeQuery.isPending.value"
+        :has-more="artistsQuery.hasNextPage.value"
+        :loading-more="artistsQuery.asyncStatus.value === 'loading'"
+        :pending="artistsQuery.isPending.value"
         show-added
         more="Show all"
         @tile="(item) => navigateTo(mediaUrl(item))"
         @intent="prefetchMediaIntent"
         @more="navigateTo('/music/artists')"
+        @load-more="loadMoreArtists"
       />
 
       <ContentRow
@@ -177,10 +186,10 @@ import { useInfiniteQuery, useQuery, useQueryCache } from '@pinia/colada'
 import { meSettingsQuery, type UserSettingsBlob } from '~/queries/user'
 import { mediaUserStateQuery, movieUserStateQuery, seriesUserStateQuery, userListsQuery as userListsOptions } from '~/queries/catalog'
 import { mediaDetailQuery, mediaDetailTarget } from '~/queries/media'
-import { continueWatchingQuery as continueWatchingOptions } from '~/queries/activity'
+import { continueWatchingInfinite } from '~/queries/activity'
 import {
   forYouInfinite,
-  homeRecentArtistsQuery,
+  recentArtistsInfinite,
   recentAlbumsInfinite,
   recentMediaInfinite,
   recentTVInfinite,
@@ -225,11 +234,10 @@ const loadMoreTV = railLoadMore(tvQuery)
 const loadMoreBooks = railLoadMore(booksQuery)
 const loadMoreAlbums = railLoadMore(albumsQuery)
 
-// Artists still ride /api/music/home — the grouped new/updated events have
-// no offset semantics (finite rail). The cache holds the raw entries (that's
-// what persists to disk); the MediaItem-ish mapping happens in the computed.
-const musicHomeQuery = useQuery(homeRecentArtistsQuery())
-const continueWatchingQuery = useQuery(continueWatchingOptions())
+const artistsQuery = useInfiniteQuery(() => recentArtistsInfinite())
+const continueWatchingQuery = useInfiniteQuery(() => continueWatchingInfinite())
+const loadMoreArtists = railLoadMore(artistsQuery)
+const loadMoreContinueWatching = railLoadMore(continueWatchingQuery)
 // Personalized "For You" — the taste-vector + TMDB-graph engine. Excludes
 // seeds (hearts / watched) server-side, so no client-side filtering needed.
 const forYouQuery = useInfiniteQuery(() => forYouInfinite({ section: 'all' }))
@@ -243,7 +251,8 @@ const mediaStateQuery = useQuery(mediaUserStateQuery())
 const recentMovies = computed<MediaItem[]>(() => (moviesQuery.data.value?.pages ?? []).flat())
 const recentBooks = computed<MediaItem[]>(() => (booksQuery.data.value?.pages ?? []).flat())
 const recentAlbums = computed<AlbumRowItem[]>(() => (albumsQuery.data.value?.pages ?? []).flat().map(albumToRowItem))
-const recentArtists = computed<ArtistRowItem[]>(() => (musicHomeQuery.data.value ?? []).map(artistToRowItem))
+const recentArtists = computed<ArtistRowItem[]>(() =>
+  (artistsQuery.data.value?.pages ?? []).flat().map(artistToRowItem))
 
 // Flattened grouped-TV events across loaded pages — rail, hero and chips all
 // derive from this one list.
@@ -273,7 +282,8 @@ const recentTVShows = computed<MediaItem[]>(() => {
   return out
 })
 
-const continueWatching = computed<ContinueWatchingItem[]>(() => continueWatchingQuery.data.value ?? [])
+const continueWatching = computed<ContinueWatchingItem[]>(() =>
+  (continueWatchingQuery.data.value?.pages ?? []).flat())
 
 // Hero/Up Next/Favorites/Recommendations are derived from the queries above.
 const movieDetails = ref<Record<number, Movie>>({})
@@ -282,7 +292,13 @@ const heroTrailers = ref<Record<number, number>>({})
 
 // Up Next + player navigation are shared with the Movies/TV Recommended
 // landings — see useUpNext / usePlaybackNav.
-const { upNextItems, isPending: upNextPending } = useUpNext()
+const {
+  upNextItems,
+  isPending: upNextPending,
+  hasMore: upNextHasMore,
+  loadingMore: upNextLoadingMore,
+  loadMore: loadMoreUpNext,
+} = useUpNext()
 const { playContinue, playUpNext } = usePlaybackNav()
 
 // Pinned hero mode — server-persisted in user settings so it follows the
@@ -321,7 +337,7 @@ const recommendedItems = computed<MediaItem[]>(() =>
 
 const loading = computed(() =>
   moviesQuery.isPending.value || tvQuery.isPending.value || booksQuery.isPending.value
-  || albumsQuery.isPending.value || musicHomeQuery.isPending.value
+  || albumsQuery.isPending.value || artistsQuery.isPending.value
 )
 
 // Ledger shell: while the cell-feeding queries are still pending on a truly
@@ -636,47 +652,75 @@ async function addHomeItemToList(listId: number, mediaId: number) {
   } catch { /* ignore */ }
 }
 
-// Hero details — resolves movie/tv detail for each hero tile so the
-// HeroA component can render genres/rating/play button. Recomputed when
-// the underlying movie/tv lists refresh. All slides resolve concurrently
-// (the first slide's data still lands as fast as it can); each slide's
-// reactive write happens as its own fetch settles.
+// Copy one detail response into the hero's presentation maps. Keeping this
+// synchronous is important on Back: the Colada entry is already warm, so the
+// hero should paint its rating/genres/Play state in the first returned frame
+// instead of briefly reverting to its data-less shape.
+function applyHeroDetail(item: MediaItem, detail: MediaDetail) {
+  const trailer = detail.extras?.find(x => x.extra_type === 'trailer' && x.file_path)
+  if (trailer) heroTrailers.value[item.id] = trailer.id
+  if (detail.movie) {
+    movieDetails.value[item.id] = detail.movie
+    const fileId = detail.files?.[0]?.public_id || detail.files?.[0]?.id || null
+    if (fileId) heroPlayInfo.value[item.id] = { fileId }
+    return
+  }
+  if (!detail.tv_series) return
+  movieDetails.value[item.id] = {
+    id: 0, media_item_id: item.id,
+    runtime_minutes: 0, tagline: '', genres: detail.tv_series.genres || [],
+    rating: detail.tv_series.rating, release_date: detail.tv_series.first_air_date,
+    original_title: '', original_language: '', budget: 0, revenue: 0,
+  }
+
+  // The shared Up Next query is device-persisted and normally has the Play
+  // target already. Reuse it before falling back to the per-series request.
+  const up = upNextItems.value.find(candidate => candidate.id === item.id)
+  const fileId = up?.play_file_public_id || up?.play_file_id
+  if (up && fileId) {
+    const s = String(up.season_number ?? 0).padStart(2, '0')
+    const e = String(up.episode_number ?? 0).padStart(2, '0')
+    const base = `S${s}E${e}`
+    const separator = up.episode_label.indexOf(' · ')
+    const episodeTitle = separator >= 0 ? up.episode_label.slice(separator + 3) : ''
+    heroPlayInfo.value[item.id] = {
+      fileId,
+      label: episodeTitle ? `${base} - ${episodeTitle}` : base,
+      episodeId: up.episode_id,
+    }
+  }
+}
+
+async function resolveHeroTVPlayInfo(item: MediaItem) {
+  if (heroPlayInfo.value[item.id]) return
+  try {
+    const up = await $heya('/api/media/{id}/up-next', { path: { id: item.id as never } }) as {
+      has_next: boolean; file_id?: number; file_public_id?: string; episode_id?: number
+      season_number?: number; episode_number?: number; episode_title?: string
+    }
+    const fileId = up?.file_public_id || up?.file_id
+    if (!up?.has_next || !fileId) return
+    const s = String(up.season_number ?? 0).padStart(2, '0')
+    const e = String(up.episode_number ?? 0).padStart(2, '0')
+    const base = `S${s}E${e}`
+    const label = up.episode_title ? `${base} - ${up.episode_title}` : base
+    heroPlayInfo.value[item.id] = { fileId, label, episodeId: up.episode_id }
+  } catch { /* empty */ }
+}
+
+// Hero details — paint warm Colada data synchronously, then revalidate it in
+// place. A cold entry still resolves concurrently with the other slides.
 async function rebuildHeroDetails() {
   await Promise.allSettled(heroItems.value.map(async (item) => {
-    if (movieDetails.value[item.id]) return // already fetched in this session
     try {
       const entry = queryClient.ensure(mediaDetailQuery(mediaDetailTarget(item)))
+      const cached = entry.state.value.data as MediaDetail | undefined
+      if (cached) applyHeroDetail(item, cached)
+
       const detail = (await queryClient.refresh(entry)).data
       if (!detail) return
-      // Local trailer file → hero trailer takeover for this slide.
-      const trailer = detail.extras?.find(x => x.extra_type === 'trailer' && x.file_path)
-      if (trailer) heroTrailers.value[item.id] = trailer.id
-      if (detail.movie) {
-        movieDetails.value[item.id] = detail.movie
-        const fileId = detail.files?.[0]?.public_id || detail.files?.[0]?.id || null
-        if (fileId) heroPlayInfo.value[item.id] = { fileId }
-      } else if (detail.tv_series) {
-        movieDetails.value[item.id] = {
-          id: 0, media_item_id: item.id,
-          runtime_minutes: 0, tagline: '', genres: detail.tv_series.genres || [],
-          rating: detail.tv_series.rating, release_date: detail.tv_series.first_air_date,
-          original_title: '', original_language: '', budget: 0, revenue: 0,
-        }
-        try {
-          const up = await $heya('/api/media/{id}/up-next', { path: { id: item.id as never } }) as {
-            has_next: boolean; file_id?: number; file_public_id?: string; episode_id?: number
-            season_number?: number; episode_number?: number; episode_title?: string
-          }
-          const fileId = up?.file_public_id || up?.file_id
-          if (up?.has_next && fileId) {
-            const s = String(up.season_number ?? 0).padStart(2, '0')
-            const e = String(up.episode_number ?? 0).padStart(2, '0')
-            const base = `S${s}E${e}`
-            const label = up.episode_title ? `${base} - ${up.episode_title}` : base
-            heroPlayInfo.value[item.id] = { fileId, label, episodeId: up.episode_id }
-          }
-        } catch { /* empty */ }
-      }
+      applyHeroDetail(item, detail as MediaDetail)
+      if (detail.tv_series) await resolveHeroTVPlayInfo(item)
     } catch { /* empty */ }
   }))
 }

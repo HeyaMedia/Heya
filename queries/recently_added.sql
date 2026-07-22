@@ -107,7 +107,9 @@ CROSS JOIN LATERAL (
   FROM library_files lf
   WHERE lf.library_id = l.id AND lf.deleted_at IS NULL
   ORDER BY lf.created_at DESC
-  LIMIT $1
+  -- 0 is the service's final uncapped fallback for genuinely deep pages;
+  -- ordinary pages use a bounded window that expands only as needed.
+  LIMIT NULLIF(sqlc.arg(file_window)::int, 0)
 ) r
 JOIN track_files tf ON tf.library_file_id = r.id
 JOIN tracks      t  ON t.id = tf.track_id

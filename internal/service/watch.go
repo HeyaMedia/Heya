@@ -119,9 +119,15 @@ func (a *App) UpdateWatchProgress(ctx context.Context, userID int64, entityType 
 	return row, nil
 }
 
-func (a *App) ListContinueWatching(ctx context.Context, userID int64) ([]ContinueWatchingEnrichedRow, error) {
+func (a *App) ListContinueWatching(ctx context.Context, userID int64, limit, offset int32) ([]ContinueWatchingEnrichedRow, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	q := sqlc.New(a.db)
-	rows, err := q.ListContinueWatching(ctx, userID)
+	rows, err := q.ListContinueWatching(ctx, sqlc.ListContinueWatchingParams{UserID: userID, Lim: limit, Off: offset})
 	if err != nil {
 		return nil, err
 	}

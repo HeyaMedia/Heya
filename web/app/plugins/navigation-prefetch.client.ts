@@ -1,7 +1,7 @@
 import { setInfiniteQueryData, useQueryCache, type EntryKey, type UseQueryOptions } from '@pinia/colada'
 import { collectionDetailQuery, personDetailQuery } from '~/queries/discovery'
 import { mediaDetailQuery } from '~/queries/media'
-import { continueWatchingQuery, upNextRailQuery } from '~/queries/activity'
+import { continueWatchingInfinite, upNextRailInfinite } from '~/queries/activity'
 import { meSettingsQuery } from '~/queries/user'
 import {
   musicAlbumDetailQuery,
@@ -12,15 +12,15 @@ import {
   musicMixesQuery,
   musicMoreByArtistsQuery,
   musicMostPlayedShelfQuery,
-  musicOnThisDayQuery,
-  musicRecentArtistsQuery,
-  musicRecentPlaylistsQuery,
+  musicOnThisDayInfinite,
+  musicRecentArtistsInfinite,
+  musicRecentPlaylistsInfinite,
   playlistDetailQuery,
 } from '~/queries/music'
 import { enrichedCatalogQuery } from '~/queries/catalog'
 import {
   forYouInfinite,
-  homeRecentArtistsQuery,
+  recentArtistsInfinite,
   recentAlbumsInfinite,
   recentMediaInfinite,
   recentTVInfinite,
@@ -38,19 +38,11 @@ function queriesForPath(pathname: string): UseQueryOptions<unknown>[] {
   if (!parts.length) {
     // Home: hero/ledger feeders + every finite rail (infinite rails are
     // listed separately in infiniteRailsForPath).
-    return [
-      continueWatchingQuery(),
-      upNextRailQuery(),
-      homeRecentArtistsQuery(),
-      meSettingsQuery(),
-    ]
+    return [meSettingsQuery()]
   }
   if (parts[0] === 'music' && !parts[1]) {
     return [
       musicMixesQuery(),
-      musicRecentArtistsQuery(),
-      musicOnThisDayQuery(),
-      musicRecentPlaylistsQuery(),
       musicMoreByArtistsQuery(),
       musicGenreShelfQuery(),
       musicMostPlayedShelfQuery(),
@@ -105,12 +97,20 @@ function infiniteRailsForPath(pathname: string): WarmableInfiniteRail[] {
       recentMediaInfinite('movie'),
       recentTVInfinite(),
       recentAlbumsInfinite(),
+      recentArtistsInfinite(),
       recentMediaInfinite('book'),
       forYouInfinite({ section: 'all' }),
+      continueWatchingInfinite(),
+      upNextRailInfinite(),
     ] as unknown as WarmableInfiniteRail[]
   }
   if (parts[0] === 'music' && !parts[1]) {
-    return [recentAlbumsInfinite()] as unknown as WarmableInfiniteRail[]
+    return [
+      recentAlbumsInfinite(),
+      musicRecentArtistsInfinite(),
+      musicOnThisDayInfinite(),
+      musicRecentPlaylistsInfinite(),
+    ] as unknown as WarmableInfiniteRail[]
   }
   return []
 }

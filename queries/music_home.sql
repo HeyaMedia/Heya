@@ -27,12 +27,12 @@ WITH artist_plays AS (
     JOIN albums      al ON al.id = t.album_id
     JOIN artists     a  ON a.id  = al.artist_id
     JOIN media_item_cards mi ON mi.id = a.media_item_id
-    WHERE pe.user_id = $1
+    WHERE pe.user_id = sqlc.arg(user_id)
     ORDER BY a.id, pe.played_at DESC
 )
 SELECT * FROM artist_plays
 ORDER BY last_played_at DESC
-LIMIT $2;
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
 
 -- name: ListOnThisDayAlbums :many
 -- Anniversary releases — albums whose release_date month+day matches today.
@@ -54,7 +54,7 @@ WHERE l.media_type = 'music'
   AND EXTRACT(DAY   FROM al.release_date) = EXTRACT(DAY   FROM CURRENT_DATE)
   AND EXISTS (SELECT 1 FROM tracks atrk JOIN track_files atf ON atf.track_id = atrk.id JOIN library_files alf ON alf.id = atf.library_file_id WHERE atrk.album_id = al.id AND alf.deleted_at IS NULL)
 ORDER BY al.release_date DESC
-LIMIT $1;
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
 
 -- name: ListRecentUserPlaylists :many
 -- Playlists ordered by the most recent play of any of their tracks (derived
@@ -63,7 +63,7 @@ LIMIT $1;
 WITH last_per_playlist AS (
     SELECT upt.playlist_id, max(pe.played_at) AS last_played_at
     FROM user_playlist_tracks upt
-    LEFT JOIN play_events pe ON pe.track_id = upt.track_id AND pe.user_id = $1
+    LEFT JOIN play_events pe ON pe.track_id = upt.track_id AND pe.user_id = sqlc.arg(user_id)
     GROUP BY upt.playlist_id
 )
 SELECT up.id,
@@ -101,9 +101,9 @@ SELECT up.id,
        ) AS auto_artist_slug
 FROM user_playlists up
 LEFT JOIN last_per_playlist lpp ON lpp.playlist_id = up.id
-WHERE up.user_id = $1
+WHERE up.user_id = sqlc.arg(user_id)
 ORDER BY last_activity_at DESC, up.id DESC
-LIMIT $2;
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
 
 -- name: PickRandomPlayedArtists :many
 -- "More By" seeds — sample N artists from the user's play history with a

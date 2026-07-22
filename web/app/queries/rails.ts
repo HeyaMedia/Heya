@@ -8,7 +8,7 @@
 // pages already register (['media','recent','movie'], ['for-you', section],
 // ['me','watch','recent'], …) keep matching. On invalidation Pinia Colada
 // refetches every loaded page of an active infinite entry in order.
-import { defineInfiniteQueryOptions, defineQueryOptions } from '@pinia/colada'
+import { defineInfiniteQueryOptions } from '@pinia/colada'
 import type { MediaItem } from '~~/shared/types'
 
 // Home rails are the first thing a cold app-open renders, so every one of
@@ -81,7 +81,7 @@ export interface RecentAlbumRow {
   available?: boolean
 }
 
-/** Grouped new/updated artist event from /api/music/home (finite rail). */
+/** Grouped new/updated artist event from /api/music/home. */
 export interface RecentArtistEntry {
   id: number
   media_item_id: number
@@ -217,17 +217,21 @@ export const recentEpisodesInfinite = defineInfiniteQueryOptions(() => ({
   meta: railMetaPrivate,
 }))
 
-// Artists ride /api/music/home — the grouped new/updated events have no
-// offset semantics, so this one stays a plain finite query.
-export const homeRecentArtistsQuery = defineQueryOptions(() => ({
-  key: ['home', 'recent-artists'],
-  query: async () => {
+/** Grouped recently-added artist events — full-history continuation. */
+export const recentArtistsInfinite = defineInfiniteQueryOptions(() => ({
+  key: ['home', 'recent-artists', 'inf'],
+  initialPageParam: 0,
+  query: async ({ pageParam }): Promise<RecentArtistEntry[]> => {
     const { $heya } = useNuxtApp()
-    const home = await $heya('/api/music/home', { query: { limit: 20 } }) as {
+    const home = await $heya('/api/music/home', {
+      query: { limit: RAIL_PAGE, offset: pageParam },
+    }) as {
       recent_artists: RecentArtistEntry[]
     }
     return home.recent_artists ?? []
   },
+  getNextPageParam: (last: RecentArtistEntry[], _all: RecentArtistEntry[][], lastParam: number) =>
+    nextOffset(last.length, RAIL_PAGE, lastParam),
   staleTime: 1000 * 60,
   meta: railMeta,
 }))

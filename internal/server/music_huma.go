@@ -54,9 +54,10 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/home", "music-home", "Music homepage feed", "Music")),
 		func(ctx context.Context, in *struct {
-			Limit int32 `query:"limit" minimum:"1" maximum:"100" default:"24"`
+			Limit  int32 `query:"limit" minimum:"1" maximum:"100" default:"24"`
+			Offset int32 `query:"offset" minimum:"0" default:"0"`
 		}) (*JSONOutput[*service.MusicHomeData], error) {
-			data, err := app.GetMusicHome(ctx, in.Limit)
+			data, err := app.GetMusicHome(ctx, in.Limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}

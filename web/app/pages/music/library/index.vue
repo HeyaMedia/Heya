@@ -44,6 +44,9 @@
       :card-size="170"
       :items="recentAlbums"
       :item-key="(al, i) => `ra-${al.id}`"
+      :has-more="albumsQuery.hasNextPage.value"
+      :loading-more="albumsQuery.asyncStatus.value === 'loading'"
+      @load-more="loadMoreAlbums"
     >
       <template #default="{ item: al, index: i }">
       <AppContextMenu
@@ -74,6 +77,9 @@
       :card-size="170"
       :items="recentArtists"
       :item-key="(ar, i) => `ar-${ar.id}`"
+      :has-more="artistsQuery.hasNextPage.value"
+      :loading-more="artistsQuery.asyncStatus.value === 'loading'"
+      @load-more="loadMoreArtists"
     >
       <template #default="{ item: ar }">
       <AppContextMenu
@@ -110,8 +116,14 @@
 import type { Track } from '~/composables/usePlayer'
 import type { ImageTone } from '~/composables/useImageTone'
 import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
-import { useQuery } from '@pinia/colada'
+import { useInfiniteQuery, useQuery } from '@pinia/colada'
 import { musicAlbumDetailQuery } from '~/queries/music'
+import {
+  recentAlbumsInfinite,
+  recentArtistsInfinite,
+  type RecentAlbumRow,
+  type RecentArtistEntry,
+} from '~/queries/rails'
 
 definePageMeta({ layout: 'default' })
 
@@ -122,30 +134,6 @@ const { $heya } = useNuxtApp()
 const actions = useMusicActions()
 const loadQuery = useQueryLoader()
 
-interface RecentAlbumRow {
-  id: number
-  title: string
-  slug: string
-  year: string
-  album_type: string
-  cover_path: string
-  artist_name: string
-  artist_slug: string
-  artist_id: number
-}
-interface RecentArtistRow {
-  id: number
-  name: string
-  slug: string
-  media_item_id: number
-  media_item_public_id?: string
-  album_count: number
-  track_count: number
-}
-interface MusicHomeBody {
-  recent_albums: RecentAlbumRow[]
-  recent_artists: RecentArtistRow[]
-}
 interface MusicCounts { artists: number; albums: number; tracks: number }
 
 // Counts — one dedicated endpoint. The old limit=1 list calls each ran the
@@ -162,20 +150,17 @@ const albumCount = computed(() => countsQuery.data.value?.albums ?? 0)
 const trackCount = computed(() => countsQuery.data.value?.tracks ?? 0)
 const statsLoading = computed(() => countsQuery.isLoading.value)
 
-// Recent shelves come from the existing music-home aggregator (single call).
-const homeQuery = useQuery({
-  key: ['music', 'library', 'home'],
-  query: async () => {
-    const r = await $heya('/api/music/home', { query: { limit: 18 } }) as unknown as MusicHomeBody
-    return r
-  },
-  staleTime: 1000 * 60,
-})
-await Promise.all([waitForQuery(countsQuery), waitForQuery(homeQuery)])
+// Share the same persisted, paginated shelves as Home. A library revisit
+// paints the already-loaded pages synchronously and can keep walking deeper.
+const albumsQuery = useInfiniteQuery(() => recentAlbumsInfinite())
+const artistsQuery = useInfiniteQuery(() => recentArtistsInfinite())
+await Promise.all([waitForQuery(countsQuery), waitForQuery(albumsQuery), waitForQuery(artistsQuery)])
 
-const recentAlbums = computed<RecentAlbumRow[]>(() => homeQuery.data.value?.recent_albums ?? [])
-const recentArtists = computed<RecentArtistRow[]>(() => homeQuery.data.value?.recent_artists ?? [])
-const homeLoading = computed(() => homeQuery.isLoading.value)
+const recentAlbums = computed<RecentAlbumRow[]>(() => (albumsQuery.data.value?.pages ?? []).flat())
+const recentArtists = computed<RecentArtistEntry[]>(() => (artistsQuery.data.value?.pages ?? []).flat())
+const homeLoading = computed(() => albumsQuery.isLoading.value || artistsQuery.isLoading.value)
+const loadMoreAlbums = railLoadMore(albumsQuery)
+const loadMoreArtists = railLoadMore(artistsQuery)
 
 // ── Page tone: follow the ambient music pool's sampled colour (the shell owns
 // the pool claim; we only publish the vars), mirroring MusicHome. Falls back to

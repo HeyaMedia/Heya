@@ -1,4 +1,4 @@
-import { defineQueryOptions } from '@pinia/colada'
+import { defineInfiniteQueryOptions, defineQueryOptions } from '@pinia/colada'
 import type { MediaDetail, MusicAlbumDetail, MusicAlbumRow, MusicArtistRow, MusicListPage } from '~~/shared/types'
 import type { RichTrackWire } from '~/utils/trackListMeta'
 
@@ -396,23 +396,54 @@ async function fetchShelfItems<T>(path: string): Promise<T[]> {
   return res.items ?? []
 }
 
-export const musicRecentArtistsQuery = defineQueryOptions(() => ({
-  key: ['music', 'home', 'recently-played-artists'],
-  query: () => fetchShelfItems<RecentPlayedArtistRow>('/api/music/home/recently-played-artists'),
+const MUSIC_SHELF_PAGE = 20
+const nextShelfOffset = (length: number, lastParam: number) =>
+  length === MUSIC_SHELF_PAGE ? lastParam + length : null
+
+export const musicRecentArtistsInfinite = defineInfiniteQueryOptions(() => ({
+  key: ['music', 'home', 'recently-played-artists', 'inf'],
+  initialPageParam: 0,
+  query: async ({ pageParam }): Promise<RecentPlayedArtistRow[]> => {
+    const { $heya } = useNuxtApp()
+    const body = await $heya('/api/music/home/recently-played-artists', {
+      query: { limit: MUSIC_SHELF_PAGE, offset: pageParam },
+    }) as { items: RecentPlayedArtistRow[] }
+    return body.items ?? []
+  },
+  getNextPageParam: (last: RecentPlayedArtistRow[], _all: RecentPlayedArtistRow[][], lastParam: number) =>
+    nextShelfOffset(last.length, lastParam),
   staleTime: 1000 * 30,
   meta: shelfMetaPrivate,
 }))
 
-export const musicOnThisDayQuery = defineQueryOptions(() => ({
-  key: ['music', 'home', 'on-this-day'],
-  query: () => fetchShelfItems<OnThisDayRow>('/api/music/home/on-this-day'),
+export const musicOnThisDayInfinite = defineInfiniteQueryOptions(() => ({
+  key: ['music', 'home', 'on-this-day', 'inf'],
+  initialPageParam: 0,
+  query: async ({ pageParam }): Promise<OnThisDayRow[]> => {
+    const { $heya } = useNuxtApp()
+    const body = await $heya('/api/music/home/on-this-day', {
+      query: { limit: MUSIC_SHELF_PAGE, offset: pageParam },
+    }) as { items: OnThisDayRow[] }
+    return body.items ?? []
+  },
+  getNextPageParam: (last: OnThisDayRow[], _all: OnThisDayRow[][], lastParam: number) =>
+    nextShelfOffset(last.length, lastParam),
   staleTime: 1000 * 60 * 60 * 6,
   meta: shelfMeta,
 }))
 
-export const musicRecentPlaylistsQuery = defineQueryOptions(() => ({
-  key: ['music', 'home', 'recent-playlists'],
-  query: () => fetchShelfItems<HomePlaylistRow>('/api/music/home/recent-playlists'),
+export const musicRecentPlaylistsInfinite = defineInfiniteQueryOptions(() => ({
+  key: ['music', 'home', 'recent-playlists', 'inf'],
+  initialPageParam: 0,
+  query: async ({ pageParam }): Promise<HomePlaylistRow[]> => {
+    const { $heya } = useNuxtApp()
+    const body = await $heya('/api/music/home/recent-playlists', {
+      query: { limit: MUSIC_SHELF_PAGE, offset: pageParam },
+    }) as { items: HomePlaylistRow[] }
+    return body.items ?? []
+  },
+  getNextPageParam: (last: HomePlaylistRow[], _all: HomePlaylistRow[][], lastParam: number) =>
+    nextShelfOffset(last.length, lastParam),
   staleTime: 1000 * 30,
   meta: shelfMetaPrivate,
 }))
@@ -533,6 +564,42 @@ export const lovedAlbumsQuery = defineQueryOptions((limit: number) => ({
   staleTime: 1000 * 30,
 }))
 
+const LOVED_SHELF_PAGE = 20
+
+export const lovedArtistsInfinite = defineInfiniteQueryOptions(() => ({
+  key: ['me', 'loved', 'artists', 'inf'],
+  initialPageParam: 0,
+  query: async ({ pageParam }): Promise<MusicListPage<LovedArtistRow>> => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/me/ratings/artists', {
+      query: { min_rating: 1, limit: LOVED_SHELF_PAGE, offset: pageParam },
+    }) as unknown as MusicListPage<LovedArtistRow>
+  },
+  getNextPageParam: (last, all, lastParam) => {
+    const loaded = all.reduce((total, page) => total + page.items.length, 0)
+    return last.items.length > 0 && loaded < last.total ? lastParam + last.items.length : null
+  },
+  staleTime: 1000 * 30,
+  meta: { prefetch: 'none', persistence: 'device', sensitivity: 'private' },
+}))
+
+export const lovedAlbumsInfinite = defineInfiniteQueryOptions(() => ({
+  key: ['me', 'loved', 'albums', 'inf'],
+  initialPageParam: 0,
+  query: async ({ pageParam }): Promise<MusicListPage<LovedAlbumRow>> => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/me/ratings/albums', {
+      query: { min_rating: 1, limit: LOVED_SHELF_PAGE, offset: pageParam },
+    }) as unknown as MusicListPage<LovedAlbumRow>
+  },
+  getNextPageParam: (last, all, lastParam) => {
+    const loaded = all.reduce((total, page) => total + page.items.length, 0)
+    return last.items.length > 0 && loaded < last.total ? lastParam + last.items.length : null
+  },
+  staleTime: 1000 * 30,
+  meta: { prefetch: 'none', persistence: 'device', sensitivity: 'private' },
+}))
+
 export const trackLyricsQuery = defineQueryOptions((trackId: number) => ({
   key: ['music', 'track', trackId, 'lyrics'],
   query: async () => {
@@ -542,4 +609,3 @@ export const trackLyricsQuery = defineQueryOptions((trackId: number) => ({
   staleTime: 1000 * 60 * 30,
   meta: { prefetch: 'none', persistence: 'device', sensitivity: 'normal' },
 }))
-

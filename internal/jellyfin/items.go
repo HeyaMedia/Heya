@@ -297,7 +297,7 @@ func (s *Server) handleResume(w http.ResponseWriter, r *http.Request, p Params) 
 		limit = 12
 	}
 
-	rows, err := s.app.ListContinueWatching(ctx, u.ID)
+	rows, err := s.app.ListContinueWatching(ctx, u.ID, int32(min(limit, 100)), 0)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -417,7 +417,7 @@ func (s *Server) handleNextUp(w http.ResponseWriter, r *http.Request, p Params) 
 		// prefiltered. The old derivation here (first 20 recently-watched
 		// rows → per-series next-episode fan-out) went blind after a bulk
 		// mark-watched pass and nominated S0 specials for finished shows.
-		rail, err := s.app.ListUpNextRail(ctx, u.ID, limit)
+		rail, err := s.app.ListUpNextRail(ctx, u.ID, min(limit, 50), 0)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return

@@ -9,6 +9,25 @@
 let sharedObserver: IntersectionObserver | null = null
 const observedTargets = new WeakMap<Element, (visible: boolean) => void>()
 
+// Vue route changes remount image elements even when Pinia Colada paints the
+// surrounding page from a warm cache. The browser still has those immutable
+// image responses, but a fresh LoadingImage instance used to hide every one
+// until its new `load` event fired. On phones that made a cached Back action
+// replay the whole rail/hero pop-in sequence.
+//
+// Remember successful *request variants* (source + NuxtImg sizing hints), then
+// let the browser paint them natively on later mounts. This stores only small
+// strings, not decoded pixels or blobs; the browser remains the actual cache.
+const loadedRequestKeys = new Set<string>()
+const MAX_LOADED_REQUEST_KEYS = 2500
+
+function rememberLoadedRequest(key: string) {
+  if (!key || loadedRequestKeys.has(key)) return
+  loadedRequestKeys.add(key)
+  if (loadedRequestKeys.size <= MAX_LOADED_REQUEST_KEYS) return
+  for (const stale of [...loadedRequestKeys].slice(0, 250)) loadedRequestKeys.delete(stale)
+}
+
 function observeVisibility(el: Element, set: (visible: boolean) => void) {
   if (typeof IntersectionObserver === 'undefined') return
   sharedObserver ??= new IntersectionObserver((entries) => {
@@ -40,10 +59,12 @@ const emit = defineEmits<{
 
 const attrs = useAttrs()
 const transparentPixel = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
+const railMoving = inject<Readonly<Ref<boolean>> | null>('heya:rail-moving', null)
 const resolvedSource = ref('')
 const loading = ref(false)
 const failed = ref(false)
 const eased = ref(false)
+const waitingForRailIdle = ref(false)
 let generation = 0
 let objectURL = ''
 let controller: AbortController | null = null
@@ -78,6 +99,19 @@ function trackImgEl(instance: unknown) {
       offscreen.value = !visible
       if (visible) resolveVisibilityWaiters()
     })
+    // A memory/disk-cache hit can already be complete when Vue assigns the
+    // function ref. Clear the JS loading treatment before the first paint;
+    // the browser has decoded pixels ready and does not need our reveal gate.
+    if (!waitingForRailIdle.value
+      && !fetchPersistentSource.value
+      && observedEl instanceof HTMLImageElement
+      && observedEl.complete
+      && observedEl.naturalWidth > 0) {
+      rememberLoadedRequest(requestKey.value)
+      loading.value = false
+      failed.value = false
+      eased.value = false
+    }
   }
 }
 
@@ -94,8 +128,19 @@ const forwardedAttrs = computed(() => {
 
 const canonicalSource = computed(() => metadataImageProxyUrl(props.src))
 const fetchPersistentSource = computed(() => props.persistent && canonicalSource.value === props.src)
+const requestKey = computed(() => JSON.stringify([
+  canonicalSource.value,
+  attrs.width ?? '',
+  attrs.height ?? '',
+  attrs.quality ?? '',
+  attrs.densities ?? '',
+  attrs.sizes ?? '',
+  attrs.format ?? '',
+  import.meta.client ? window.devicePixelRatio : 1,
+]))
 
 const renderedSource = computed(() => {
+  if (waitingForRailIdle.value) return transparentPixel
   if (fetchPersistentSource.value && loading.value) return transparentPixel
   return resolvedSource.value || canonicalSource.value
 })
@@ -167,34 +212,53 @@ async function materialize(source: string, current: number) {
 
 function begin() {
   const current = ++generation
+  const remembered = !fetchPersistentSource.value && loadedRequestKeys.has(requestKey.value)
+  waitingForRailIdle.value = !!props.src && !remembered && !!railMoving?.value
   controller?.abort()
   controller = import.meta.client ? new AbortController() : null
   releaseObjectURL()
   resolvedSource.value = fetchPersistentSource.value ? '' : canonicalSource.value
   failed.value = false
   eased.value = false
-  loading.value = !!props.src
+  loading.value = !!props.src && !remembered
   startedAt = performance.now()
-  if (props.src && fetchPersistentSource.value && import.meta.client) void materialize(props.src, current)
+  if (props.src && fetchPersistentSource.value && import.meta.client && !waitingForRailIdle.value) {
+    void materialize(props.src, current)
+  }
 }
 
 function onLoad(event: Event | string) {
-  // The transparent pixel is only a stable layout surface while fetch polling.
-  if (fetchPersistentSource.value && loading.value) return
-  eased.value = performance.now() - startedAt > FAST_LOAD_MS
+  // The transparent pixel is only a stable layout surface while fetch polling
+  // or while a rail fling postpones image decode/texture work.
+  if (waitingForRailIdle.value || (fetchPersistentSource.value && loading.value)) return
+  const remembered = loadedRequestKeys.has(requestKey.value)
+  if (!fetchPersistentSource.value) rememberLoadedRequest(requestKey.value)
+  eased.value = !remembered && performance.now() - startedAt > FAST_LOAD_MS
   loading.value = false
   failed.value = false
   emit('load', event)
 }
 
 function onError(event: Event | string) {
-  if (fetchPersistentSource.value) return
+  if (waitingForRailIdle.value || fetchPersistentSource.value) return
   loading.value = false
   failed.value = true
   emit('error', event)
 }
 
 watch(() => [props.src, props.persistent], begin, { immediate: true })
+watch(() => railMoving?.value ?? false, (moving) => {
+  if (moving) {
+    // Only pause unresolved work. A successful image stays mounted and keeps
+    // scrolling as a compositor texture; there is no flash or re-request.
+    if (!loading.value || !props.src || loadedRequestKeys.has(requestKey.value)) return
+    waitingForRailIdle.value = true
+    generation++
+    controller?.abort()
+    return
+  }
+  if (waitingForRailIdle.value) begin()
+})
 onBeforeUnmount(() => {
   generation++
   controller?.abort()
@@ -213,7 +277,7 @@ onBeforeUnmount(() => {
     decoding="async"
     v-bind="forwardedAttrs"
     :src="renderedSource"
-    :class="[attrs.class, 'heya-loading-image', { 'is-loading': loading, 'is-failed': failed, 'is-eased': eased, 'is-offscreen': offscreen }]"
+    :class="[attrs.class, 'heya-loading-image', { 'is-loading': loading, 'is-failed': failed, 'is-eased': eased, 'is-offscreen': offscreen, 'is-rail-deferred': waitingForRailIdle }]"
     @load="onLoad"
     @error="onError"
   />
@@ -269,6 +333,14 @@ onBeforeUnmount(() => {
    already-loaded image at fully invisible until it crosses the viewport. */
 .heya-loading-image.is-loading.is-offscreen {
   animation-play-state: paused;
+}
+
+/* During a fling the transparent stand-in is deliberately inert: no image
+   decode, no texture upload and no spinner repaint competing with scrolling. */
+.heya-loading-image.is-loading.is-rail-deferred {
+  opacity: 0;
+  background-image: none;
+  animation: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

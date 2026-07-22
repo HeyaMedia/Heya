@@ -83,6 +83,12 @@ const trackWidth = computed(() =>
 const scrollEl = ref<HTMLElement>()
 const scrollLeft = ref(0)
 const viewportW = ref(0)
+const railMoving = ref(false)
+let settleTimer: ReturnType<typeof setTimeout> | null = null
+
+// LoadingImage descendants use this to postpone only *new* image work while
+// a native fling is active. Already-painted tiles remain untouched.
+provide('heya:rail-moving', readonly(railMoving))
 
 const OVERSCAN = 4
 const visibleTiles = computed(() => {
@@ -126,7 +132,10 @@ onMounted(() => {
   })
   ro.observe(scrollEl.value)
 })
-onBeforeUnmount(() => ro?.disconnect())
+onBeforeUnmount(() => {
+  ro?.disconnect()
+  if (settleTimer) clearTimeout(settleTimer)
+})
 
 // Ask for the next page while the user still has ~8 tiles of runway, so the
 // rail keeps flowing instead of hitting a wall. The watchEffect also covers
@@ -138,6 +147,12 @@ function maybeLoadMore() {
   if (remaining < stride.value * LOAD_AHEAD_TILES) emit('load-more')
 }
 function onScroll() {
+  railMoving.value = true
+  if (settleTimer) clearTimeout(settleTimer)
+  settleTimer = setTimeout(() => {
+    railMoving.value = false
+    settleTimer = null
+  }, 120)
   if (scrollEl.value) scrollLeft.value = scrollEl.value.scrollLeft
   maybeLoadMore()
 }
@@ -202,6 +217,19 @@ defineExpose({ scrollByDir, scrollToIndex, scrollToStart, overflows })
 }
 .app-rail::-webkit-scrollbar { display: none; }
 .rail-snap { scroll-snap-type: x proximity; }
+
+/* Card snapping is pleasant for mouse-wheel/button navigation but it arrests
+   native fling momentum unpredictably on touch — the same swipe can glide or
+   stick after two cards depending on where deceleration crosses a snap point.
+   Coarse pointers get an unopinionated compositor-driven scroller instead. */
+@media (pointer: coarse) {
+  .app-rail {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-inline: contain;
+    touch-action: pan-x pan-y pinch-zoom;
+  }
+  .rail-snap { scroll-snap-type: none; }
+}
 
 .rail-track { position: relative; }
 .rail-tile { position: absolute; top: 0; }

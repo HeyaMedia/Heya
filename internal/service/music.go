@@ -435,19 +435,22 @@ type MusicHomeData struct {
 // GetMusicHome assembles the small set of rows the landing page renders.
 // More rows (recently played, made for you, by genre) wait on play history
 // and a richer recommendation surface.
-func (a *App) GetMusicHome(ctx context.Context, limit int32) (*MusicHomeData, error) {
+func (a *App) GetMusicHome(ctx context.Context, limit, offset int32) (*MusicHomeData, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 24
+	}
+	if offset < 0 {
+		offset = 0
 	}
 	q := sqlc.New(a.db)
 	// Recent artists are grouped file-arrival events (new artist vs new
 	// releases for a known artist), not raw enrichment order — see
 	// listRecentArtistEvents.
-	artists, err := a.listRecentArtistEvents(ctx, q, limit)
+	artists, err := a.listRecentArtistEvents(ctx, q, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("recent artists: %w", err)
 	}
-	albums, err := q.ListRecentlyAddedAlbums(ctx, sqlc.ListRecentlyAddedAlbumsParams{Lim: limit})
+	albums, err := q.ListRecentlyAddedAlbums(ctx, sqlc.ListRecentlyAddedAlbumsParams{Lim: limit, Off: offset})
 	if err != nil {
 		return nil, fmt.Errorf("recent albums: %w", err)
 	}

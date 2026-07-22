@@ -80,7 +80,7 @@ LEFT JOIN tv_episodes ep ON wp.entity_type = 'episode' AND ep.id = wp.entity_id
 LEFT JOIN tv_seasons s ON ep.season_id = s.id
 LEFT JOIN tv_series ts ON s.series_id = ts.id
 LEFT JOIN media_item_cards ep_mi ON ts.media_item_id = ep_mi.id
-WHERE wp.user_id = $1 AND wp.completed = false AND wp.progress_seconds > 30
+WHERE wp.user_id = sqlc.arg(user_id) AND wp.completed = false AND wp.progress_seconds > 30
   -- Skip items whose file is missing on disk. For a movie that's any live
   -- file on the media item; for an episode it must be the specific file
   -- matching this season+episode (a sibling episode surviving doesn't make
@@ -98,7 +98,7 @@ WHERE wp.user_id = $1 AND wp.completed = false AND wp.progress_seconds > 30
     ))
   )
 ORDER BY wp.updated_at DESC
-LIMIT 20;
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
 
 -- Recently watched (completed items). DISTINCT ON dedupes to one row per
 -- media item (the newest watch); the outer ORDER BY restores recency order —
@@ -270,4 +270,4 @@ FROM next_ep n
 JOIN candidates c ON c.mid = n.mid
 JOIN media_item_cards mic ON mic.id = n.mid
 ORDER BY c.last_watch DESC
-LIMIT sqlc.arg(lim);
+LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);

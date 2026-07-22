@@ -599,9 +599,15 @@ type UpNextRailItem struct {
 // file, that next episode (specials excluded), newest watch first. One query
 // replaces the old per-series GetUpNext fan-out and, unlike it, never
 // nominates an episode the library holds no file for.
-func (a *App) ListUpNextRail(ctx context.Context, userID int64, limit int32) ([]UpNextRailItem, error) {
+func (a *App) ListUpNextRail(ctx context.Context, userID int64, limit, offset int32) ([]UpNextRailItem, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 24
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	q := sqlc.New(a.db)
-	rows, err := q.ListUpNextRail(ctx, sqlc.ListUpNextRailParams{UserID: userID, Lim: limit})
+	rows, err := q.ListUpNextRail(ctx, sqlc.ListUpNextRailParams{UserID: userID, Lim: limit, Off: offset})
 	if err != nil {
 		return nil, err
 	}

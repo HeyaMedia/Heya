@@ -1,5 +1,8 @@
-import { defineQueryOptions } from '@pinia/colada'
+import { defineInfiniteQueryOptions, defineQueryOptions } from '@pinia/colada'
 import type { ContinueWatchingItem } from '~/types/home'
+
+const ACTIVITY_RAIL_PAGE = 20
+const privateRailMeta = { prefetch: 'none', persistence: 'device', sensitivity: 'private' } as const
 
 export interface ActivityItem {
   type: string
@@ -20,6 +23,21 @@ export const continueWatchingQuery = defineQueryOptions(() => ({
   },
   staleTime: 1000 * 30,
   meta: { prefetch: 'none', persistence: 'offline-essential', sensitivity: 'private' },
+}))
+
+export const continueWatchingInfinite = defineInfiniteQueryOptions(() => ({
+  key: ['me', 'watch', 'continue', 'inf'],
+  initialPageParam: 0,
+  query: async ({ pageParam }): Promise<ContinueWatchingItem[]> => {
+    const { $heya } = useNuxtApp()
+    return (await $heya('/api/me/watch/continue', {
+      query: { limit: ACTIVITY_RAIL_PAGE, offset: pageParam },
+    }) as ContinueWatchingItem[] | null) ?? []
+  },
+  getNextPageParam: (last: ContinueWatchingItem[], _all: ContinueWatchingItem[][], lastParam: number) =>
+    last.length === ACTIVITY_RAIL_PAGE ? lastParam + last.length : null,
+  staleTime: 1000 * 30,
+  meta: privateRailMeta,
 }))
 
 /** Row of /api/me/up-next — the server-resolved Up Next rail. */
@@ -51,6 +69,21 @@ export const upNextRailQuery = defineQueryOptions(() => ({
   },
   staleTime: 1000 * 30,
   meta: { prefetch: 'none', persistence: 'device', sensitivity: 'private' },
+}))
+
+export const upNextRailInfinite = defineInfiniteQueryOptions(() => ({
+  key: ['me', 'up-next', 'inf'],
+  initialPageParam: 0,
+  query: async ({ pageParam }): Promise<UpNextRailRow[]> => {
+    const { $heya } = useNuxtApp()
+    return (await $heya('/api/me/up-next', {
+      query: { limit: ACTIVITY_RAIL_PAGE, offset: pageParam },
+    }) as UpNextRailRow[] | null) ?? []
+  },
+  getNextPageParam: (last: UpNextRailRow[], _all: UpNextRailRow[][], lastParam: number) =>
+    last.length === ACTIVITY_RAIL_PAGE ? lastParam + last.length : null,
+  staleTime: 1000 * 30,
+  meta: privateRailMeta,
 }))
 
 export const activityFeedQuery = defineQueryOptions(() => ({

@@ -97,9 +97,10 @@ func registerMusicHomeRoutes(api huma.API, app *service.App) {
 	// 3. Recently Played Artists (artist-grain, deduped).
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/home/recently-played-artists", "music-home-recent-artists", "Distinct artists from recent plays", "MusicHome")),
 		func(ctx context.Context, in *struct {
-			Limit int32 `query:"limit" minimum:"1" maximum:"100" default:"20"`
+			Limit  int32 `query:"limit" minimum:"1" maximum:"100" default:"20"`
+			Offset int32 `query:"offset" minimum:"0" default:"0"`
 		}) (*JSONOutput[recentArtistsBody], error) {
-			rows, err := app.RecentlyPlayedArtistsForUser(ctx, userFrom(ctx).ID, in.Limit)
+			rows, err := app.RecentlyPlayedArtistsForUser(ctx, userFrom(ctx).ID, in.Limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
@@ -109,9 +110,10 @@ func registerMusicHomeRoutes(api huma.API, app *service.App) {
 	// 4. On This Day — albums whose release_date hits today.
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/home/on-this-day", "music-home-on-this-day", "Anniversary releases (release_date matches today)", "MusicHome")),
 		func(ctx context.Context, in *struct {
-			Limit int32 `query:"limit" minimum:"1" maximum:"50" default:"20"`
+			Limit  int32 `query:"limit" minimum:"1" maximum:"50" default:"20"`
+			Offset int32 `query:"offset" minimum:"0" default:"0"`
 		}) (*JSONOutput[onThisDayBody], error) {
-			rows, err := app.OnThisDayAlbums(ctx, in.Limit)
+			rows, err := app.OnThisDayAlbums(ctx, in.Limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
@@ -121,9 +123,10 @@ func registerMusicHomeRoutes(api huma.API, app *service.App) {
 	// 5. Recent Playlists — user playlists ordered by derived last-play.
 	huma.Register(api, secured(op(http.MethodGet, "/api/music/home/recent-playlists", "music-home-recent-playlists", "User playlists ordered by last play", "MusicHome")),
 		func(ctx context.Context, in *struct {
-			Limit int32 `query:"limit" minimum:"1" maximum:"50" default:"12"`
+			Limit  int32 `query:"limit" minimum:"1" maximum:"50" default:"12"`
+			Offset int32 `query:"offset" minimum:"0" default:"0"`
 		}) (*JSONOutput[recentPlaylistsBody], error) {
-			rows, err := app.RecentPlaylistsForUser(ctx, userFrom(ctx).ID, in.Limit)
+			rows, err := app.RecentPlaylistsForUser(ctx, userFrom(ctx).ID, in.Limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}

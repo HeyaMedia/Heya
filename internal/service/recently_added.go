@@ -334,11 +334,35 @@ type recentMusicFile struct {
 
 // listRecentArtistEvents derives the artists rail from music file arrivals.
 // One entry per artist (their newest burst), classified new vs updated.
-func (a *App) listRecentArtistEvents(ctx context.Context, q *sqlc.Queries, limit int32) ([]RecentArtistEntry, error) {
-	rows, err := q.ListRecentlyAddedMusicFiles(ctx, recentFileWindow*4)
-	if err != nil {
-		return nil, fmt.Errorf("recent music files: %w", err)
+func (a *App) listRecentArtistEvents(ctx context.Context, q *sqlc.Queries, limit, offset int32) ([]RecentArtistEntry, error) {
+	window := int32(recentFileWindow * 4)
+	required := int(offset + limit)
+	for {
+		rows, err := q.ListRecentlyAddedMusicFiles(ctx, window)
+		if err != nil {
+			return nil, fmt.Errorf("recent music files: %w", err)
+		}
+		out, err := a.recentArtistEventsFromRows(ctx, q, rows)
+		if err != nil {
+			return nil, err
+		}
+		// The common first continuation page is normally already represented by
+		// the cheap 2k-file window. Expand only when its requested slice is not;
+		// 0 is the final uncapped pass for genuinely deep histories.
+		if len(out) >= required || window == 0 {
+			start := min(int(offset), len(out))
+			end := min(len(out), start+int(limit))
+			return out[start:end], nil
+		}
+		if window >= 256_000 {
+			window = 0
+		} else {
+			window *= 2
+		}
 	}
+}
+
+func (a *App) recentArtistEventsFromRows(ctx context.Context, q *sqlc.Queries, rows []sqlc.ListRecentlyAddedMusicFilesRow) ([]RecentArtistEntry, error) {
 	if len(rows) == 0 {
 		return []RecentArtistEntry{}, nil
 	}
@@ -479,8 +503,5 @@ func (a *App) listRecentArtistEvents(ctx context.Context, q *sqlc.Queries, limit
 		out = append(out, e)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].AddedAt.After(out[j].AddedAt) })
-	if len(out) > int(limit) {
-		out = out[:limit]
-	}
 	return out, nil
 }

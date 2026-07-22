@@ -116,7 +116,10 @@
       :card-size="150"
       :items="recentArtists"
       :item-key="(a, i) => `artist-${a.artist_id}`"
+      :has-more="recentArtistsQuery.hasNextPage.value"
+      :loading-more="recentArtistsQuery.asyncStatus.value === 'loading'"
       :pending="recentArtistsQuery.isPending.value"
+      @load-more="loadMoreRecentArtists"
     >
       <template #default="{ item: a }">
       <AppContextMenu
@@ -148,6 +151,9 @@
       :card-size="170"
       :items="onThisDay"
       :item-key="(al, i) => `otd-${al.id}`"
+      :has-more="onThisDayQuery.hasNextPage.value"
+      :loading-more="onThisDayQuery.asyncStatus.value === 'loading'"
+      @load-more="loadMoreOnThisDay"
     >
       <template #default="{ item: al }">
       <AppContextMenu
@@ -181,6 +187,9 @@
       :card-size="170"
       :items="recentPlaylists"
       :item-key="(p, i) => `pl-${p.id}`"
+      :has-more="recentPlaylistsQuery.hasNextPage.value"
+      :loading-more="recentPlaylistsQuery.asyncStatus.value === 'loading'"
+      @load-more="loadMoreRecentPlaylists"
     >
       <template #default="{ item: p }">
       <AppContextMenu
@@ -390,9 +399,9 @@ import {
   musicMixesQuery,
   musicMoreByArtistsQuery,
   musicMostPlayedShelfQuery,
-  musicOnThisDayQuery,
-  musicRecentArtistsQuery,
-  musicRecentPlaylistsQuery,
+  musicOnThisDayInfinite,
+  musicRecentArtistsInfinite,
+  musicRecentPlaylistsInfinite,
   type GenreShelf,
   type HomePlaylistRow as PlaylistRow,
   type LabelAlbum,
@@ -430,8 +439,9 @@ const recentAlbumsQuery = useInfiniteQuery(() => recentAlbumsInfinite())
 const recentAlbums = computed<RecentAlbumRow[]>(() => (recentAlbumsQuery.data.value?.pages ?? []).flat())
 const loadMoreRecentAlbums = railLoadMore(recentAlbumsQuery)
 
-const recentArtistsQuery = useQuery(musicRecentArtistsQuery())
-const recentArtists = computed<RecentArtistRow[]>(() => recentArtistsQuery.data.value ?? [])
+const recentArtistsQuery = useInfiniteQuery(() => musicRecentArtistsInfinite())
+const recentArtists = computed<RecentArtistRow[]>(() => (recentArtistsQuery.data.value?.pages ?? []).flat())
+const loadMoreRecentArtists = railLoadMore(recentArtistsQuery)
 
 const albumRatings = useRatings('album')
 const artistRatings = useRatings('artist')
@@ -440,11 +450,13 @@ const artistRatingValues = artistRatings.ratings
 watch(recentAlbums, items => { if (items.length) void albumRatings.primeBulk(items.map(al => al.id)) }, { immediate: true })
 watch(recentArtists, items => { if (items.length) void artistRatings.primeBulk(items.map(a => a.artist_id)) }, { immediate: true })
 
-const onThisDayQuery = useQuery(musicOnThisDayQuery())
-const onThisDay = computed<OnThisDayRow[]>(() => onThisDayQuery.data.value ?? [])
+const onThisDayQuery = useInfiniteQuery(() => musicOnThisDayInfinite())
+const onThisDay = computed<OnThisDayRow[]>(() => (onThisDayQuery.data.value?.pages ?? []).flat())
+const loadMoreOnThisDay = railLoadMore(onThisDayQuery)
 
-const recentPlaylistsQuery = useQuery(musicRecentPlaylistsQuery())
-const recentPlaylists = computed<PlaylistRow[]>(() => recentPlaylistsQuery.data.value ?? [])
+const recentPlaylistsQuery = useInfiniteQuery(() => musicRecentPlaylistsInfinite())
+const recentPlaylists = computed<PlaylistRow[]>(() => (recentPlaylistsQuery.data.value?.pages ?? []).flat())
+const loadMoreRecentPlaylists = railLoadMore(recentPlaylistsQuery)
 
 // Rotating shelves — server rotates the seed every 5 minutes; their options
 // autoRefetch at the same cadence so the rotation surfaces automatically.

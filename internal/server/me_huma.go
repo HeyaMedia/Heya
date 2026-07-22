@@ -44,8 +44,11 @@ func registerMeRoutes(api huma.API, app *service.App) {
 		})
 
 	huma.Register(api, secured(op(http.MethodGet, "/api/me/watch/continue", "continue-watching", "Items the user can resume", "Me")),
-		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]service.ContinueWatchingEnrichedRow], error) {
-			items, err := app.ListContinueWatching(ctx, userFrom(ctx).ID)
+		func(ctx context.Context, in *struct {
+			Limit  int32 `query:"limit" minimum:"1" maximum:"100" default:"20"`
+			Offset int32 `query:"offset" minimum:"0" default:"0"`
+		}) (*JSONOutput[[]service.ContinueWatchingEnrichedRow], error) {
+			items, err := app.ListContinueWatching(ctx, userFrom(ctx).ID, in.Limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
@@ -533,9 +536,10 @@ func registerMeRoutes(api huma.API, app *service.App) {
 	// /api/media/{id}/up-next below stays for player chaining and detail pages.
 	huma.Register(api, secured(op(http.MethodGet, "/api/me/up-next", "up-next-rail", "Next unwatched episode per recently-watched series", "Me")),
 		func(ctx context.Context, in *struct {
-			Limit int32 `query:"limit" minimum:"1" maximum:"50" default:"24"`
+			Limit  int32 `query:"limit" minimum:"1" maximum:"50" default:"24"`
+			Offset int32 `query:"offset" minimum:"0" default:"0"`
 		}) (*JSONOutput[[]service.UpNextRailItem], error) {
-			items, err := app.ListUpNextRail(ctx, userFrom(ctx).ID, in.Limit)
+			items, err := app.ListUpNextRail(ctx, userFrom(ctx).ID, in.Limit, in.Offset)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}

@@ -15729,6 +15729,7 @@ export type UpNextRailData = {
     path?: never;
     query?: {
         limit?: number;
+        offset?: number;
     };
     url: '/api/me/up-next';
 };
@@ -15754,7 +15755,10 @@ export type UpNextRailResponse = UpNextRailResponses[keyof UpNextRailResponses];
 export type ContinueWatchingData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        limit?: number;
+        offset?: number;
+    };
     url: '/api/me/watch/continue';
 };
 
@@ -17391,6 +17395,7 @@ export type MusicHomeData2 = {
     path?: never;
     query?: {
         limit?: number;
+        offset?: number;
     };
     url: '/api/music/home';
 };
@@ -17611,6 +17616,7 @@ export type MusicHomeOnThisDayData = {
     path?: never;
     query?: {
         limit?: number;
+        offset?: number;
     };
     url: '/api/music/home/on-this-day';
 };
@@ -17638,6 +17644,7 @@ export type MusicHomeRecentPlaylistsData = {
     path?: never;
     query?: {
         limit?: number;
+        offset?: number;
     };
     url: '/api/music/home/recent-playlists';
 };
@@ -17693,6 +17700,7 @@ export type MusicHomeRecentArtistsData = {
     path?: never;
     query?: {
         limit?: number;
+        offset?: number;
     };
     url: '/api/music/home/recently-played-artists';
 };

@@ -1,4 +1,5 @@
-import { upNextRailQuery } from '~/queries/activity'
+import { useInfiniteQuery } from '@pinia/colada'
+import { upNextRailInfinite } from '~/queries/activity'
 import type { UpNextItem } from '~/types/home'
 
 // The "Up Next" rail, server-owned: /api/me/up-next resolves the next
@@ -9,9 +10,9 @@ import type { UpNextItem } from '~/types/home'
 // TV Recommended landing; `enabled` gates the fetch on pages that only
 // conditionally show the rail.
 export function useUpNext(enabled: () => boolean = () => true) {
-  const query = useQuery(() => ({ ...upNextRailQuery(), enabled: enabled() }))
+  const query = useInfiniteQuery(() => ({ ...upNextRailInfinite(), enabled: enabled() }))
 
-  const upNextItems = computed<UpNextItem[]>(() => (query.data.value ?? []).map((row) => {
+  const upNextItems = computed<UpNextItem[]>(() => (query.data.value?.pages ?? []).flat().map((row) => {
     const s = String(row.season_number).padStart(2, '0')
     const e = String(row.episode_number).padStart(2, '0')
     return {
@@ -29,5 +30,11 @@ export function useUpNext(enabled: () => boolean = () => true) {
     }
   }))
 
-  return { upNextItems, isPending: query.isPending }
+  return {
+    upNextItems,
+    isPending: query.isPending,
+    hasMore: query.hasNextPage,
+    loadingMore: computed(() => query.asyncStatus.value === 'loading'),
+    loadMore: railLoadMore(query),
+  }
 }

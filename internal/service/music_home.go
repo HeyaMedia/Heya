@@ -226,35 +226,46 @@ func (a *App) ArtistPlayQueue(ctx context.Context, userID int64, slug string, li
 
 // RecentlyPlayedArtistsForUser — the "Recently Played" shelf at artist
 // granularity (not track granularity). Distinct artists, newest-play first.
-func (a *App) RecentlyPlayedArtistsForUser(ctx context.Context, userID int64, limit int32) ([]sqlc.ListRecentlyPlayedArtistsRow, error) {
+func (a *App) RecentlyPlayedArtistsForUser(ctx context.Context, userID int64, limit, offset int32) ([]sqlc.ListRecentlyPlayedArtistsRow, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
+	if offset < 0 {
+		offset = 0
+	}
 	return sqlc.New(a.db).ListRecentlyPlayedArtists(ctx, sqlc.ListRecentlyPlayedArtistsParams{
 		UserID: userID,
-		Limit:  limit,
+		Lim:    limit,
+		Off:    offset,
 	})
 }
 
 // OnThisDayAlbums — anniversaries. Empty for libraries thin on release-date
 // metadata; that's fine, the FE hides empty rails.
-func (a *App) OnThisDayAlbums(ctx context.Context, limit int32) ([]sqlc.ListOnThisDayAlbumsRow, error) {
+func (a *App) OnThisDayAlbums(ctx context.Context, limit, offset int32) ([]sqlc.ListOnThisDayAlbumsRow, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
-	return sqlc.New(a.db).ListOnThisDayAlbums(ctx, limit)
+	if offset < 0 {
+		offset = 0
+	}
+	return sqlc.New(a.db).ListOnThisDayAlbums(ctx, sqlc.ListOnThisDayAlbumsParams{Lim: limit, Off: offset})
 }
 
 // RecentPlaylistsForUser — playlists ordered by "last played" (max played_at
 // across the playlist's tracks for this user). Falls back to updated_at when
 // the user hasn't actually played anything from it.
-func (a *App) RecentPlaylistsForUser(ctx context.Context, userID int64, limit int32) ([]sqlc.ListRecentUserPlaylistsRow, error) {
+func (a *App) RecentPlaylistsForUser(ctx context.Context, userID int64, limit, offset int32) ([]sqlc.ListRecentUserPlaylistsRow, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 12
 	}
+	if offset < 0 {
+		offset = 0
+	}
 	return sqlc.New(a.db).ListRecentUserPlaylists(ctx, sqlc.ListRecentUserPlaylistsParams{
 		UserID: userID,
-		Limit:  limit,
+		Lim:    limit,
+		Off:    offset,
 	})
 }
 

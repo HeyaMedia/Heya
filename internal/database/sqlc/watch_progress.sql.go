@@ -137,8 +137,14 @@ WHERE wp.user_id = $1 AND wp.completed = false AND wp.progress_seconds > 30
     ))
   )
 ORDER BY wp.updated_at DESC
-LIMIT 20
+LIMIT $3 OFFSET $2
 `
+
+type ListContinueWatchingParams struct {
+	UserID int64 `json:"user_id"`
+	Off    int32 `json:"off"`
+	Lim    int32 `json:"lim"`
+}
 
 type ListContinueWatchingRow struct {
 	ID                int64              `json:"id"`
@@ -160,8 +166,8 @@ type ListContinueWatchingRow struct {
 }
 
 // Continue watching: incomplete progress across movies and episodes
-func (q *Queries) ListContinueWatching(ctx context.Context, userID int64) ([]ListContinueWatchingRow, error) {
-	rows, err := q.db.Query(ctx, listContinueWatching, userID)
+func (q *Queries) ListContinueWatching(ctx context.Context, arg ListContinueWatchingParams) ([]ListContinueWatchingRow, error) {
+	rows, err := q.db.Query(ctx, listContinueWatching, arg.UserID, arg.Off, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
@@ -483,7 +489,7 @@ WITH watched AS (
   JOIN tv_episodes e ON e.id = wp.entity_id
   JOIN tv_seasons s ON s.id = e.season_id
   JOIN tv_series ts ON ts.id = s.series_id
-  WHERE wp.user_id = $2 AND wp.entity_type = 'episode' AND wp.completed = true
+  WHERE wp.user_id = $3 AND wp.entity_type = 'episode' AND wp.completed = true
   GROUP BY ts.media_item_id, ts.id
 ),
 totals AS (
@@ -519,7 +525,7 @@ next_ep AS (
   JOIN file_keys fk ON fk.mid = c.mid AND fk.season = s.season_number AND fk.ep = e.episode_number
   WHERE NOT EXISTS (
     SELECT 1 FROM user_watch_progress wp3
-    WHERE wp3.entity_id = e.id AND wp3.entity_type = 'episode' AND wp3.completed = true AND wp3.user_id = $2
+    WHERE wp3.entity_id = e.id AND wp3.entity_type = 'episode' AND wp3.completed = true AND wp3.user_id = $3
   )
   ORDER BY c.mid, s.season_number ASC, e.episode_number ASC, fk.file_id ASC
 )
@@ -537,10 +543,11 @@ FROM next_ep n
 JOIN candidates c ON c.mid = n.mid
 JOIN media_item_cards mic ON mic.id = n.mid
 ORDER BY c.last_watch DESC
-LIMIT $1
+LIMIT $2 OFFSET $1
 `
 
 type ListUpNextRailParams struct {
+	Off    int32 `json:"off"`
 	Lim    int32 `json:"lim"`
 	UserID int64 `json:"user_id"`
 }
@@ -575,7 +582,7 @@ type ListUpNextRailRow struct {
 // expansion (the expensive part — multi-KB jsonb detoast per file), and the
 // LIMIT 100 bounds the worst case. Specials (season 0) are never nominated.
 func (q *Queries) ListUpNextRail(ctx context.Context, arg ListUpNextRailParams) ([]ListUpNextRailRow, error) {
-	rows, err := q.db.Query(ctx, listUpNextRail, arg.Lim, arg.UserID)
+	rows, err := q.db.Query(ctx, listUpNextRail, arg.Off, arg.Lim, arg.UserID)
 	if err != nil {
 		return nil, err
 	}

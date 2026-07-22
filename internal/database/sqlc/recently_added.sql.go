@@ -227,7 +227,9 @@ CROSS JOIN LATERAL (
   FROM library_files lf
   WHERE lf.library_id = l.id AND lf.deleted_at IS NULL
   ORDER BY lf.created_at DESC
-  LIMIT $1
+  -- 0 is the service's final uncapped fallback for genuinely deep pages;
+  -- ordinary pages use a bounded window that expands only as needed.
+  LIMIT NULLIF($1::int, 0)
 ) r
 JOIN track_files tf ON tf.library_file_id = r.id
 JOIN tracks      t  ON t.id = tf.track_id
@@ -250,8 +252,8 @@ type ListRecentlyAddedMusicFilesRow struct {
 // can't be attributed to an artist event yet. Per-library LATERAL top-N for
 // the same reason as ListRecentlyAddedTVFiles: the global created_at walk
 // degrades whenever another library type dominates recent additions.
-func (q *Queries) ListRecentlyAddedMusicFiles(ctx context.Context, limit int32) ([]ListRecentlyAddedMusicFilesRow, error) {
-	rows, err := q.db.Query(ctx, listRecentlyAddedMusicFiles, limit)
+func (q *Queries) ListRecentlyAddedMusicFiles(ctx context.Context, fileWindow int32) ([]ListRecentlyAddedMusicFilesRow, error) {
+	rows, err := q.db.Query(ctx, listRecentlyAddedMusicFiles, fileWindow)
 	if err != nil {
 		return nil, err
 	}

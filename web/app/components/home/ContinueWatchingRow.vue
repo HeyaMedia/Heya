@@ -18,6 +18,9 @@
       aspect="16/9"
       memory-key="continue-watching"
       snap
+      :has-more="hasMore"
+      :loading-more="loadingMore"
+      @load-more="$emit('load-more')"
     >
       <template #default="{ item, index }">
         <div class="cw-tile card-tile" @click="$emit('play', item)">
@@ -48,8 +51,8 @@
 <script setup lang="ts">
 import type { ContinueWatchingItem } from '~/types/home'
 
-defineProps<{ items: ContinueWatchingItem[] }>()
-defineEmits<{ play: [item: ContinueWatchingItem] }>()
+defineProps<{ items: ContinueWatchingItem[]; hasMore?: boolean; loadingMore?: boolean }>()
+defineEmits<{ play: [item: ContinueWatchingItem]; 'load-more': [] }>()
 
 // AppRail is generic, so InstanceType<> can't name it — type the exposed
 // surface directly (same pattern as ContentRow).

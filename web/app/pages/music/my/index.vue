@@ -58,6 +58,9 @@
       :card-size="160"
       :items="lovedArtists"
       :item-key="(ar, i) => `la-${ar.id}`"
+      :has-more="lovedArtistsShelfQuery.hasNextPage.value"
+      :loading-more="lovedArtistsShelfQuery.asyncStatus.value === 'loading'"
+      @load-more="loadMoreLovedArtists"
     >
       <template #default="{ item: ar }">
       <AppContextMenu
@@ -87,6 +90,9 @@
       :card-size="170"
       :items="lovedAlbums"
       :item-key="(al, i) => `lal-${al.id}`"
+      :has-more="lovedAlbumsShelfQuery.hasNextPage.value"
+      :loading-more="lovedAlbumsShelfQuery.asyncStatus.value === 'loading'"
+      @load-more="loadMoreLovedAlbums"
     >
       <template #default="{ item: al }">
       <AppContextMenu
@@ -159,8 +165,8 @@
 import type { Track } from '~/composables/usePlayer'
 import type { ImageTone } from '~/composables/useImageTone'
 import type { LovedAlbumRow } from '~/queries/music'
-import { useQuery } from '@pinia/colada'
-import { lovedAlbumsQuery, lovedArtistsQuery, musicAlbumDetailQuery, userPlaylistsQuery } from '~/queries/music'
+import { useInfiniteQuery, useQuery } from '@pinia/colada'
+import { lovedAlbumsInfinite, lovedArtistsInfinite, musicAlbumDetailQuery, userPlaylistsQuery } from '~/queries/music'
 
 definePageMeta({ layout: 'default' })
 
@@ -217,10 +223,8 @@ const lovedTracksQuery = useQuery({
   query: async () => (await $heya('/api/me/ratings/tracks', { query: { min_rating: 1, limit: 8 } })) as unknown as ListBody<RatedTrackRow>,
   staleTime: 1000 * 30,
 })
-// Shelf preview — capped at 12, same query factory (and cache key shape) the
-// dedicated My Artists/My Albums pages use at limit 500.
-const lovedArtistsShelfQuery = useQuery(lovedArtistsQuery(12))
-const lovedAlbumsShelfQuery = useQuery(lovedAlbumsQuery(12))
+const lovedArtistsShelfQuery = useInfiniteQuery(() => lovedArtistsInfinite())
+const lovedAlbumsShelfQuery = useInfiniteQuery(() => lovedAlbumsInfinite())
 await Promise.all([
   waitForQuery(playlistsQuery),
   waitForQuery(lovedTracksQuery),
@@ -230,12 +234,14 @@ await Promise.all([
 
 const playlists = computed(() => playlistsQuery.data.value?.items ?? [])
 const lovedTracks = computed(() => lovedTracksQuery.data.value?.items ?? [])
-const lovedArtists = computed(() => lovedArtistsShelfQuery.data.value?.items ?? [])
-const lovedAlbums = computed(() => lovedAlbumsShelfQuery.data.value?.items ?? [])
+const lovedArtists = computed(() => (lovedArtistsShelfQuery.data.value?.pages ?? []).flatMap(page => page.items))
+const lovedAlbums = computed(() => (lovedAlbumsShelfQuery.data.value?.pages ?? []).flatMap(page => page.items))
+const loadMoreLovedArtists = railLoadMore(lovedArtistsShelfQuery)
+const loadMoreLovedAlbums = railLoadMore(lovedAlbumsShelfQuery)
 
 const lovedTracksCount = computed(() => lovedTracksQuery.data.value?.total ?? 0)
-const lovedArtistsCount = computed(() => lovedArtistsShelfQuery.data.value?.total ?? 0)
-const lovedAlbumsCount = computed(() => lovedAlbumsShelfQuery.data.value?.total ?? 0)
+const lovedArtistsCount = computed(() => lovedArtistsShelfQuery.data.value?.pages[0]?.total ?? 0)
+const lovedAlbumsCount = computed(() => lovedAlbumsShelfQuery.data.value?.pages[0]?.total ?? 0)
 
 const isLoading = computed(() =>
   playlistsQuery.isLoading.value

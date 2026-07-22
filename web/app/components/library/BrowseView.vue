@@ -12,13 +12,19 @@
       <ContinueWatchingRow
         v-if="continueItems.length"
         :items="continueItems"
+        :has-more="continueQuery.hasNextPage.value"
+        :loading-more="continueQuery.asyncStatus.value === 'loading'"
         @play="playContinue"
+        @load-more="loadMoreContinue"
       />
 
       <UpNextRow
         v-if="section === 'tv' && upNextItems.length"
         :items="upNextItems"
+        :has-more="upNextHasMore"
+        :loading-more="upNextLoadingMore"
         @play="playUpNext"
+        @load-more="loadMoreUpNext"
       />
 
       <ContentRow
@@ -86,7 +92,7 @@ import type { LedgerCell } from '~/components/ui/LedgerStrip.vue'
 import type { Crumb } from '~/components/library/LibHead.vue'
 import { useInfiniteQuery, useQuery, useQueryCache } from '@pinia/colada'
 import { movieUserStateQuery, seriesUserStateQuery, userListsQuery as userListsOptions } from '~/queries/catalog'
-import { continueWatchingQuery } from '~/queries/activity'
+import { continueWatchingInfinite } from '~/queries/activity'
 import {
   forYouInfinite,
   recentEpisodesInfinite,
@@ -162,10 +168,11 @@ const loadMoreRecentTV = railLoadMore(recentTVQuery)
 const loadMoreRecentAdded = () => (props.section === 'movie' ? loadMoreRecentMovies() : loadMoreRecentTV())
 
 // ── Continue Watching / Recently Watched ──────────────────────────────────
-const continueQuery = useQuery(continueWatchingQuery())
+const continueQuery = useInfiniteQuery(() => continueWatchingInfinite())
 const continueItems = computed<ContinueWatchingItem[]>(() =>
-  (continueQuery.data.value ?? []).filter(i => mediaTypeInSection(i.media_type, props.section)),
+  (continueQuery.data.value?.pages ?? []).flat().filter(i => mediaTypeInSection(i.media_type, props.section)),
 )
+const loadMoreContinue = railLoadMore(continueQuery)
 
 // Movies: one tile per watched movie (deduped to the item). TV: one tile per
 // watched EPISODE, each painted with the show's poster and an "S02E03 · Title"
@@ -285,7 +292,12 @@ const isEmpty = computed(() =>
 // ── Up Next (TV) + player navigation ──────────────────────────────────────
 // Shared with the Home page — the server owns the derivation (see useUpNext);
 // only the TV landing renders the rail, so the fetch is gated to it.
-const { upNextItems } = useUpNext(() => props.section === 'tv')
+const {
+  upNextItems,
+  hasMore: upNextHasMore,
+  loadingMore: upNextLoadingMore,
+  loadMore: loadMoreUpNext,
+} = useUpNext(() => props.section === 'tv')
 const { playContinue, playUpNext } = usePlaybackNav()
 
 // ContentRow types its tiles as MediaItem-ish; RailItem carries just the subset

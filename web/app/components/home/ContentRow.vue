@@ -2,7 +2,10 @@
   <section class="content-row">
     <SectionHeader :title="title" :subtitle="subtitle">
       <template #actions>
-        <button v-if="more" class="more" @click="$emit('more')">{{ more }}</button>
+        <button v-if="more" class="more" :aria-label="more" :title="more" @click="$emit('more')">
+          <span class="more-label">{{ more }}</span>
+          <span class="more-phone" aria-hidden="true">A</span>
+        </button>
         <AppHoldButton class="scroll-btn" aria-label="Scroll left" title="Hold to jump to start" @click="rail?.scrollByDir(-1)" @hold="rail?.scrollToStart()"><Icon name="chevleft" :size="16" /></AppHoldButton>
         <button class="scroll-btn" aria-label="Scroll right" @click="rail?.scrollByDir(1)"><Icon name="chevright" :size="16" /></button>
       </template>
@@ -176,6 +179,33 @@ function contextMenuItems(item: RowItem): ContextMenuItem[] {
 .scroll-btn:hover {
   background: rgb(var(--ink) / 0.12);
   color: var(--fg-0);
+}
+.more-phone { display: none; }
+
+/* A full "Show all" label crowds the phone rail header after the arrows are
+   removed. Keep the same action in the control cluster as a small glass
+   circle; its title/aria-label still expose the complete wording. */
+@media (max-width: 720px) {
+  .more {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    background: color-mix(in oklab, var(--bg-2) 78%, transparent);
+    backdrop-filter: blur(var(--glass-blur-sm));
+    -webkit-backdrop-filter: blur(var(--glass-blur-sm));
+    border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-el);
+  }
+  .more-label { display: none; }
+  .more-phone {
+    display: inline;
+    font: 700 12px var(--font-mono);
+    letter-spacing: 0;
+  }
 }
 
 /* Touch: swipe replaces the mouse-only scroll arrows. */

@@ -18,6 +18,9 @@
       aspect="2/3"
       memory-key="up-next"
       snap
+      :has-more="hasMore"
+      :loading-more="loadingMore"
+      @load-more="$emit('load-more')"
     >
       <!-- Mouse-click plays the next episode; the title deep-links to the
            series detail page (same interaction model as Continue Watching) so
@@ -52,8 +55,8 @@
 <script setup lang="ts">
 import type { UpNextItem } from '~/types/home'
 
-defineProps<{ items: UpNextItem[] }>()
-defineEmits<{ play: [item: UpNextItem] }>()
+defineProps<{ items: UpNextItem[]; hasMore?: boolean; loadingMore?: boolean }>()
+defineEmits<{ play: [item: UpNextItem]; 'load-more': [] }>()
 
 // AppRail is generic, so InstanceType<> can't name it — type the exposed
 // surface directly (same pattern as ContentRow).

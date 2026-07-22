@@ -600,8 +600,13 @@ WHERE l.media_type = 'music'
   AND EXTRACT(DAY   FROM al.release_date) = EXTRACT(DAY   FROM CURRENT_DATE)
   AND EXISTS (SELECT 1 FROM tracks atrk JOIN track_files atf ON atf.track_id = atrk.id JOIN library_files alf ON alf.id = atf.library_file_id WHERE atrk.album_id = al.id AND alf.deleted_at IS NULL)
 ORDER BY al.release_date DESC
-LIMIT $1
+LIMIT $2 OFFSET $1
 `
+
+type ListOnThisDayAlbumsParams struct {
+	Off int32 `json:"off"`
+	Lim int32 `json:"lim"`
+}
 
 type ListOnThisDayAlbumsRow struct {
 	ID                 int64              `json:"id"`
@@ -660,8 +665,8 @@ type ListOnThisDayAlbumsRow struct {
 // Ordered newest-year first so the user sees this-year-vs-decades-back at a
 // glance. Falls back to nothing when albums lack release_date — that's
 // expected for stub items not yet fully enriched.
-func (q *Queries) ListOnThisDayAlbums(ctx context.Context, limit int32) ([]ListOnThisDayAlbumsRow, error) {
-	rows, err := q.db.Query(ctx, listOnThisDayAlbums, limit)
+func (q *Queries) ListOnThisDayAlbums(ctx context.Context, arg ListOnThisDayAlbumsParams) ([]ListOnThisDayAlbumsRow, error) {
+	rows, err := q.db.Query(ctx, listOnThisDayAlbums, arg.Off, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
@@ -775,12 +780,13 @@ FROM user_playlists up
 LEFT JOIN last_per_playlist lpp ON lpp.playlist_id = up.id
 WHERE up.user_id = $1
 ORDER BY last_activity_at DESC, up.id DESC
-LIMIT $2
+LIMIT $3 OFFSET $2
 `
 
 type ListRecentUserPlaylistsParams struct {
 	UserID int64 `json:"user_id"`
-	Limit  int32 `json:"limit"`
+	Off    int32 `json:"off"`
+	Lim    int32 `json:"lim"`
 }
 
 type ListRecentUserPlaylistsRow struct {
@@ -803,7 +809,7 @@ type ListRecentUserPlaylistsRow struct {
 // — there's no last_played_at column on user_playlists). Nulls land last,
 // so freshly-created playlists show up below ones the user actually plays.
 func (q *Queries) ListRecentUserPlaylists(ctx context.Context, arg ListRecentUserPlaylistsParams) ([]ListRecentUserPlaylistsRow, error) {
-	rows, err := q.db.Query(ctx, listRecentUserPlaylists, arg.UserID, arg.Limit)
+	rows, err := q.db.Query(ctx, listRecentUserPlaylists, arg.UserID, arg.Off, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
@@ -855,17 +861,18 @@ WITH artist_plays AS (
     JOIN albums      al ON al.id = t.album_id
     JOIN artists     a  ON a.id  = al.artist_id
     JOIN media_item_cards mi ON mi.id = a.media_item_id
-    WHERE pe.user_id = $1
+    WHERE pe.user_id = $3
     ORDER BY a.id, pe.played_at DESC
 )
 SELECT artist_id, artist_name, media_item_id, media_item_public_id, artist_slug, poster_path, last_played_at, album_count, track_count, available FROM artist_plays
 ORDER BY last_played_at DESC
-LIMIT $2
+LIMIT $2 OFFSET $1
 `
 
 type ListRecentlyPlayedArtistsParams struct {
+	Off    int32 `json:"off"`
+	Lim    int32 `json:"lim"`
 	UserID int64 `json:"user_id"`
-	Limit  int32 `json:"limit"`
 }
 
 type ListRecentlyPlayedArtistsRow struct {
@@ -892,7 +899,7 @@ type ListRecentlyPlayedArtistsRow struct {
 // discography still sees diversity. last_played_at is the max(played_at)
 // over any of that artist's tracks.
 func (q *Queries) ListRecentlyPlayedArtists(ctx context.Context, arg ListRecentlyPlayedArtistsParams) ([]ListRecentlyPlayedArtistsRow, error) {
-	rows, err := q.db.Query(ctx, listRecentlyPlayedArtists, arg.UserID, arg.Limit)
+	rows, err := q.db.Query(ctx, listRecentlyPlayedArtists, arg.Off, arg.Lim, arg.UserID)
 	if err != nil {
 		return nil, err
 	}

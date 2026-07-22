@@ -71,6 +71,19 @@ let mode: 'idle' | 'ptr' | 'edge' | 'reject' = 'idle'
 let edgeEligible = false
 let ptrEligible = false
 let scroller: HTMLElement | null = null
+let moveAttached = false
+
+function attachMove() {
+  if (moveAttached) return
+  window.addEventListener('touchmove', onMove, { passive: false })
+  moveAttached = true
+}
+
+function detachMove() {
+  if (!moveAttached) return
+  window.removeEventListener('touchmove', onMove)
+  moveAttached = false
+}
 
 // Nearest scrollable ancestor of the touch target — pull-to-refresh only
 // engages when *that* element (not just the window) is scrolled to the top.
@@ -89,6 +102,7 @@ function atTop(): boolean {
 }
 
 function onStart(e: TouchEvent) {
+  detachMove()
   if (refreshing.value || e.touches.length !== 1) { mode = 'reject'; return }
   const t = e.touches[0]!
   startX = t.clientX
@@ -97,10 +111,17 @@ function onStart(e: TouchEvent) {
 
   const target = e.target as HTMLElement | null
   const inContent = !!target?.closest('.app-main')
+  const inRail = !!target?.closest('.app-rail')
 
   edgeEligible = isCompact.value && !!sidebar.kind.value && !sidebar.open.value && startX <= EDGE_ZONE
   scroller = inContent ? scrollableAncestor(target) : null
-  ptrEligible = inContent && atTop()
+  // A rail drag owns its gesture. In particular, a slightly diagonal swipe
+  // at page-top must not get axis-locked into pull-to-refresh.
+  ptrEligible = inContent && !inRail && atTop()
+  // Keep the scroll-blocking listener off the hot path entirely for ordinary
+  // page/rail touches. It exists only during a gesture that may need to cancel
+  // native scrolling.
+  if (edgeEligible || ptrEligible) attachMove()
 }
 
 function onMove(e: TouchEvent) {
@@ -114,24 +135,25 @@ function onMove(e: TouchEvent) {
     if (Math.abs(dx) < DIR_LOCK && Math.abs(dy) < DIR_LOCK) return
     if (edgeEligible && dx > 0 && Math.abs(dx) > Math.abs(dy)) mode = 'edge'
     else if (ptrEligible && dy > 0 && Math.abs(dy) > Math.abs(dx)) mode = 'ptr'
-    else { mode = 'reject'; return }
+    else { mode = 'reject'; detachMove(); return }
   }
 
   if (mode === 'edge') {
     e.preventDefault()
-    if (dx >= EDGE_OPEN) { sidebar.open.value = true; mode = 'reject' }
+    if (dx >= EDGE_OPEN) { sidebar.open.value = true; mode = 'reject'; detachMove() }
     return
   }
 
   if (mode === 'ptr') {
     // Bailed back above the top (or scrolled up) — hand control back to native.
-    if (dy <= 0 || !atTop()) { pullY.value = 0; mode = 'reject'; return }
+    if (dy <= 0 || !atTop()) { pullY.value = 0; mode = 'reject'; detachMove(); return }
     e.preventDefault() // suppress the native overscroll/bounce while pulling
     pullY.value = Math.min(PULL_MAX, dy * PULL_RESIST)
   }
 }
 
 function onEnd() {
+  detachMove()
   if (mode === 'ptr') {
     if (pullY.value >= REFRESH_AT) { void doRefresh(); return }
     pullY.value = 0 // animates back via the CSS transition
@@ -159,16 +181,15 @@ async function doRefresh() {
 }
 
 function attach() {
-  // touchmove must be non-passive so we can preventDefault the native scroll
-  // while a gesture is active; the others stay passive for scroll perf.
+  // touchmove is attached lazily by onStart only for a gesture that may need
+  // preventDefault; ordinary scrolling keeps a fully passive listener path.
   window.addEventListener('touchstart', onStart, { passive: true })
-  window.addEventListener('touchmove', onMove, { passive: false })
   window.addEventListener('touchend', onEnd, { passive: true })
   window.addEventListener('touchcancel', onEnd, { passive: true })
 }
 function detach() {
   window.removeEventListener('touchstart', onStart)
-  window.removeEventListener('touchmove', onMove)
+  detachMove()
   window.removeEventListener('touchend', onEnd)
   window.removeEventListener('touchcancel', onEnd)
 }
