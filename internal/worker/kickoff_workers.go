@@ -754,12 +754,11 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 
 type ApplyLibraryScanWorker struct {
 	river.WorkerDefaults[ApplyLibraryScanArgs]
-	DB           *pgxpool.Pool
-	Heya         *heyametadata.HeyaProvider
-	Hub          EventPublisher
-	Watcher      WatcherPauser
-	SonicEnabled SonicEnabledFn
-	Progress     *TaskProgressBroadcaster
+	DB       *pgxpool.Pool
+	Heya     *heyametadata.HeyaProvider
+	Hub      EventPublisher
+	Watcher  WatcherPauser
+	Progress *TaskProgressBroadcaster
 	// BeforeFanoutCommit is a narrow fault-injection seam for proving that
 	// River inserts and scanner finalization roll back together.
 	BeforeFanoutCommit func() error
@@ -923,9 +922,6 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 		Int("trickplay", fanout.Trickplay).
 		Int("segments", fanout.Segments).
 		Int("thumbnails", fanout.Thumbnails).
-		Int("fingerprint", fanout.Fingerprint).
-		Int("loudness", fanout.Loudness).
-		Int("sonic", fanout.Sonic).
 		Int("rich_metadata", richQueued).
 		Int("rich_metadata_failed", richFailed).
 		Int("fanout_failed", fanout.Failed).
@@ -2518,9 +2514,6 @@ type postApplyFanout struct {
 	Trickplay    int
 	Segments     int
 	Thumbnails   int
-	Fingerprint  int
-	Loudness     int
-	Sonic        int
 	Skipped      int
 	Failed       int
 }
@@ -2549,8 +2542,6 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWorkTx(ctx context.Context, q *
 	saveMusicNFOQueued := map[int64]bool{}
 	trickplayQueued := map[int64]bool{}
 	segmentsQueued := map[int64]bool{}
-	sonicQueued := map[int64]bool{}
-	sonicEnabled := w.sonicEnabled(ctx)
 
 	// Every job below — across every file and, later, every media item — is
 	// accumulated here instead of inserted one row at a time; flush() does a
@@ -2660,49 +2651,6 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWorkTx(ctx context.Context, q *
 				segmentsQueued[file.ID] = true
 			}
 		}
-
-		trackFile, err := q.GetTrackFileByLibraryFileID(ctx, file.ID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			log.Warn().Err(err).Int64("file_id", file.ID).Msg("apply_metadata: track file lookup failed")
-			fanout.Failed++
-			continue
-		}
-		fingerprint, fpErr := q.GetLibraryFileFingerprint(ctx, file.ID)
-		if errors.Is(fpErr, pgx.ErrNoRows) || (fpErr == nil && !libraryFingerprintCurrent(fingerprint, file)) {
-			enqueue(ScanTrackFingerprintArgs{LibraryFileID: file.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source), "chromaprint", &fanout.Fingerprint)
-		} else if fpErr != nil {
-			log.Warn().Err(fpErr).Int64("file_id", file.ID).Msg("apply_metadata: fingerprint lookup failed")
-			fanout.Failed++
-		}
-		if trackFileNeedsLoudness(trackFile) {
-			// Re-read immediately before accumulating the job, preserving the
-			// on-demand-analysis race guard while keeping the eventual insert in
-			// the same transaction as every other fanout job.
-			latest, latestErr := q.GetTrackFileByID(ctx, trackFile.ID)
-			if errors.Is(latestErr, pgx.ErrNoRows) || (latestErr == nil && !trackFileNeedsLoudness(latest)) {
-				fanout.Skipped++
-			} else if latestErr != nil {
-				log.Warn().Err(latestErr).Int64("track_file_id", trackFile.ID).Msg("apply_metadata: loudness eligibility lookup failed")
-				fanout.Failed++
-			} else {
-				enqueue(ScanTrackLoudnessArgs{TrackFileID: trackFile.ID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source), "loudness", &fanout.Loudness)
-			}
-		}
-		if sonicEnabled {
-			if sonicQueued[trackFile.TrackID] {
-				// Sonic jobs are unique by track, while post-apply walks physical
-				// track files. A track can have multiple files (for example FLAC
-				// and MP3), and sending both copies through one InsertMany makes
-				// PostgreSQL's ON CONFLICT update the same River row twice.
-				fanout.Skipped++
-			} else if trackNeedsSonicAnalysis(ctx, q, trackFile.TrackID) {
-				enqueue(AnalyzeTrackFacetsArgs{TrackID: trackFile.TrackID, ScheduledTaskID: taskID}, scheduledJobInsertOpts(source), "sonic analysis", &fanout.Sonic)
-				sonicQueued[trackFile.TrackID] = true
-			}
-		}
 	}
 	for mediaItemID := range mediaItemIDs {
 		if scannerMediaTypeFetchesRatings(lib.MediaType) {
@@ -2724,10 +2672,6 @@ func (w *ApplyLibraryScanWorker) enqueuePostApplyWorkTx(ctx context.Context, q *
 	}
 	flush()
 	return fanout
-}
-
-func (w *ApplyLibraryScanWorker) sonicEnabled(ctx context.Context) bool {
-	return w != nil && w.SonicEnabled != nil && w.SonicEnabled(ctx)
 }
 
 func scannerInventoryPostApplyPaths(inv scanner.Inventory) []string {
@@ -2791,23 +2735,6 @@ func libraryFileNeedsProbe(file sqlc.LibraryFile) bool {
 
 func trackFileNeedsLoudness(file sqlc.TrackFile) bool {
 	return !file.IntegratedLufs.Valid || !file.BoundariesAnalyzedAt.Valid
-}
-
-func trackNeedsSonicAnalysis(ctx context.Context, q *sqlc.Queries, trackID int64) bool {
-	if trackID <= 0 {
-		return false
-	}
-	ids, err := q.ListPendingAnalysisTracks(ctx, sqlc.ListPendingAnalysisTracksParams{
-		AfterID:            trackID - 1,
-		MaxDurationSeconds: sonicanalysis.MaxAnalysisDurationSeconds,
-		AnalyzerVersion:    sonicanalysis.AnalyzerVersion,
-		LimitCount:         1,
-	})
-	if err != nil {
-		log.Warn().Err(err).Int64("track_id", trackID).Msg("apply_metadata: sonic eligibility lookup failed")
-		return false
-	}
-	return len(ids) > 0 && ids[0] == trackID
 }
 
 func scannerSearchOptions(db *pgxpool.Pool, heya *heyametadata.HeyaProvider) scanner.Options {

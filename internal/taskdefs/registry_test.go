@@ -28,7 +28,7 @@ func TestRegistryHasUniqueIDsAndKinds(t *testing.T) {
 
 func TestWorkToTaskOmitsSharedKinds(t *testing.T) {
 	workToTask := WorkToTask()
-	for _, kind := range []string{"enrich_media_item", "detect_local_assets", "scan_track_fingerprint", "scan_track_loudness", "scan_album_loudness", "analyze_track_facets", "refresh_artist_centroids", "refresh_album_centroids"} {
+	for _, kind := range []string{"enrich_media_item", "detect_local_assets"} {
 		if owner, exists := workToTask[kind]; exists {
 			t.Fatalf("shared kind %q resolved to %q", kind, owner)
 		}
@@ -48,6 +48,18 @@ func TestWorkToTaskOmitsSharedKinds(t *testing.T) {
 	if owner := workToTask["apply_metadata"]; owner != "scan_libraries" {
 		t.Fatalf("apply_metadata resolved to %q, want scan_libraries", owner)
 	}
+	for kind, want := range map[string]string{
+		"scan_track_fingerprint":   "scan_music_fingerprint",
+		"scan_track_loudness":      "scan_music_loudness",
+		"scan_album_loudness":      "scan_music_loudness",
+		"analyze_track_facets":     "analyze_music_facets",
+		"refresh_artist_centroids": "analyze_music_facets",
+		"refresh_album_centroids":  "analyze_music_facets",
+	} {
+		if owner := workToTask[kind]; owner != want {
+			t.Fatalf("%s resolved to %q, want %q", kind, owner, want)
+		}
+	}
 }
 
 func TestTaskOwnsKind(t *testing.T) {
@@ -61,10 +73,10 @@ func TestTaskOwnsKind(t *testing.T) {
 		{task: "scan_libraries", kind: "apply_metadata"},
 		{task: "scan_libraries", kind: "scan_keyframes"},
 		{task: "scan_libraries", kind: "enrich_media_item"},
-		{task: "scan_libraries", kind: "scan_track_fingerprint"},
-		{task: "scan_libraries", kind: "analyze_track_facets"},
 		{task: "refresh_stale_items", kind: "detect_local_assets"},
 		{task: "scan_music_loudness", kind: "scan_track_loudness"},
+		{task: "scan_music_fingerprint", kind: "scan_track_fingerprint"},
+		{task: "analyze_music_facets", kind: "analyze_track_facets"},
 	} {
 		if !TaskOwnsKind(tc.task, tc.kind) {
 			t.Fatalf("expected %q to own %q", tc.task, tc.kind)
@@ -72,5 +84,10 @@ func TestTaskOwnsKind(t *testing.T) {
 	}
 	if TaskOwnsKind("refresh_stale_items", "ffprobe") {
 		t.Fatal("refresh_stale_items unexpectedly owns ffprobe")
+	}
+	for _, kind := range []string{"scan_track_fingerprint", "scan_track_loudness", "scan_album_loudness", "analyze_track_facets", "refresh_artist_centroids", "refresh_album_centroids"} {
+		if TaskOwnsKind("scan_libraries", kind) {
+			t.Fatalf("scan_libraries unexpectedly owns %s", kind)
+		}
 	}
 }

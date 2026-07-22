@@ -2,7 +2,9 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -578,13 +580,25 @@ func finishKickoff(ctx context.Context, q *sqlc.Queries, taskID string, startedA
 	}
 
 	result := "completed"
+	lastRunError := ""
 	switch {
 	case runErr != nil:
 		result = "error"
+		lastRunError = runErr.Error()
 	case itemsFailed > 0 && itemsFailed >= items:
 		result = "error"
+		lastRunError = fmt.Sprintf("%d work items could not be queued", itemsFailed)
 	case itemsFailed > 0:
 		result = "partial"
+		lastRunError = fmt.Sprintf("%d work items could not be queued", itemsFailed)
+	}
+	const maxLastRunErrorBytes = 4096
+	if len(lastRunError) > maxLastRunErrorBytes {
+		end := maxLastRunErrorBytes
+		for end > 0 && !utf8.RuneStart(lastRunError[end]) {
+			end--
+		}
+		lastRunError = lastRunError[:end]
 	}
 
 	nextRun := computeNextRun(completedAt, dbTask.IntervalHours, dbTask.DailyStartTime, dbTask.DailyEndTime)
@@ -596,6 +610,7 @@ func finishKickoff(ctx context.Context, q *sqlc.Queries, taskID string, startedA
 		LastRunItemsProcessed: int32(items),
 		LastRunItemsTotal:     int32(items + itemsFailed),
 		NextRunAt:             pgtype.Timestamptz{Time: nextRun, Valid: true},
+		LastRunError:          lastRunError,
 	}); err != nil {
 		log.Warn().Err(err).Str("task", taskID).Msg("kickoff: update scheduled_tasks row failed")
 	}

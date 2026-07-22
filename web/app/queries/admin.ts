@@ -11,6 +11,7 @@ export type {
   MetadataQueueStatus,
   ReadyBody as Ready,
   TaskResponse,
+  TaskStats,
   TranscodeStatusBody as TranscodeStatus,
   TranscodeSessionsBody as TranscodeSessions,
   TranscodeSessionBody as TranscodeSession,
@@ -28,6 +29,7 @@ import type {
   MetadataQueueStatus,
   ReadyBody as Ready,
   TaskResponse,
+  TaskStats,
   TranscodeStatusBody as TranscodeStatus,
   TranscodeSessionsBody as TranscodeSessions,
 } from '~~/shared/api/types.gen'
@@ -165,5 +167,15 @@ export const adminTasksQuery = defineQueryOptions(() => ({
     return (await $heya('/api/tasks') as TaskResponse[] | null) ?? []
   },
   staleTime: 1000 * 5,
+  meta: privateRuntime,
+}))
+
+export const adminTaskStatsQuery = defineQueryOptions(() => ({
+  key: ['admin', 'tasks', 'stats'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return (await $heya('/api/tasks/stats') as Record<string, TaskStats> | null) ?? {}
+  },
+  staleTime: 1000 * 60,
   meta: privateRuntime,
 }))

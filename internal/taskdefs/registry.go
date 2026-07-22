@@ -15,7 +15,7 @@ type Definition struct {
 }
 
 var definitions = []Definition{
-	{ID: "scan_libraries", KickoffKind: "kickoff_library_scan", WorkKinds: []string{"process_scan", "search_metadata", "fetch_metadata", "apply_metadata", "ffprobe", "scan_keyframes", "enrich_media_item", "detect_local_assets", "scan_track_fingerprint", "scan_track_loudness", "scan_album_loudness", "analyze_track_facets", "refresh_artist_centroids", "refresh_album_centroids"}},
+	{ID: "scan_libraries", KickoffKind: "kickoff_library_scan", WorkKinds: []string{"process_scan", "search_metadata", "fetch_metadata", "apply_metadata", "ffprobe", "scan_keyframes", "enrich_media_item", "detect_local_assets"}},
 	{ID: "refresh_stale_items", KickoffKind: "kickoff_refresh_stale", WorkKinds: []string{"enrich_media_item", "detect_local_assets"}},
 	{ID: "scan_music_loudness", KickoffKind: "kickoff_music_loudness", WorkKinds: []string{"scan_track_loudness", "scan_album_loudness"}, Pump: true},
 	{ID: "scan_music_fingerprint", KickoffKind: "kickoff_music_fingerprint", WorkKinds: []string{"scan_track_fingerprint"}, Pump: true},

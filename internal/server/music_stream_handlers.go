@@ -123,18 +123,12 @@ func handleStreamTrack(app *service.App) http.HandlerFunc {
 		caps := parseAudioCaps(r)
 
 		if !hasCaps {
-			if !ensureTrackLoudness(w, r, app, trackID, files[0].ID) {
-				return
-			}
 			_, _ = app.EnsureFileProbed(r.Context(), files[0].LibraryFileID)
 			serveTrackFileBytes(w, r, app, files[0].LibraryFileID)
 			return
 		}
 
 		if tf, ok := pickBestPlayableFile(files, caps); ok {
-			if !ensureTrackLoudness(w, r, app, trackID, tf.ID) {
-				return
-			}
 			_, _ = app.EnsureFileProbed(r.Context(), tf.LibraryFileID)
 			serveTrackFileBytes(w, r, app, tf.LibraryFileID)
 			return
@@ -157,9 +151,6 @@ func handleStreamTrack(app *service.App) http.HandlerFunc {
 // a tier is requested.
 func handleStreamTrackQualityTier(w http.ResponseWriter, r *http.Request, app *service.App, files []sqlc.TrackFile, caps transcoder.AudioCaps, tierKbps int) {
 	if tf, ok := pickBestPlayableFile(files, caps); ok && !transcoder.ShouldTranscodeForTier(tf.Format, int(tf.BitrateKbps), tierKbps) {
-		if !ensureTrackLoudness(w, r, app, tf.TrackID, tf.ID) {
-			return
-		}
 		_, _ = app.EnsureFileProbed(r.Context(), tf.LibraryFileID)
 		serveTrackFileBytes(w, r, app, tf.LibraryFileID)
 		return
@@ -172,9 +163,6 @@ func handleStreamTrackQualityTier(w http.ResponseWriter, r *http.Request, app *s
 // given bitrate, then range-serves the result. Shared by the legacy
 // caps-fallback path and the explicit quality-tier override.
 func transcodePrimaryAndServe(w http.ResponseWriter, r *http.Request, app *service.App, primary sqlc.TrackFile, bitrateKbps int) {
-	if !ensureTrackLoudness(w, r, app, primary.TrackID, primary.ID) {
-		return
-	}
 	audio := app.AudioSessions()
 	if audio == nil {
 		writeError(w, http.StatusServiceUnavailable, "no compatible format and ffmpeg unavailable for transcode")
@@ -223,20 +211,9 @@ func handleStreamTrackFile(app *service.App) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "track file not found")
 			return
 		}
-		if !ensureTrackLoudness(w, r, app, trackID, tf.ID) {
-			return
-		}
 		_, _ = app.EnsureFileProbed(r.Context(), tf.LibraryFileID)
 		serveTrackFileBytes(w, r, app, tf.LibraryFileID)
 	}
-}
-
-func ensureTrackLoudness(w http.ResponseWriter, r *http.Request, app *service.App, trackID, trackFileID int64) bool {
-	if err := app.EnsureTrackPlaybackReady(r.Context(), trackID, trackFileID); err != nil {
-		writeError(w, http.StatusInternalServerError, "loudness analysis failed")
-		return false
-	}
-	return true
 }
 
 func serveTrackFileBytes(w http.ResponseWriter, r *http.Request, app *service.App, libraryFileID int64) {

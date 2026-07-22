@@ -3,7 +3,9 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -12,6 +14,29 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestFinishKickoffRecordsAndClearsLastRunError(t *testing.T) {
+	pool := personMergeTestPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx) //nolint:errcheck
+	qtx := sqlc.New(pool).WithTx(tx)
+
+	startedAt := time.Now().Add(-2 * time.Second)
+	finishKickoff(ctx, qtx, "scan_music_loudness", startedAt, 0, 0, errors.New("audio decoder unavailable"))
+	failed, err := qtx.GetScheduledTask(ctx, "scan_music_loudness")
+	require.NoError(t, err)
+	assert.Equal(t, "error", failed.LastRunResult)
+	assert.Equal(t, "audio decoder unavailable", failed.LastRunError)
+
+	finishKickoff(ctx, qtx, "scan_music_loudness", startedAt, 3, 0, nil)
+	completed, err := qtx.GetScheduledTask(ctx, "scan_music_loudness")
+	require.NoError(t, err)
+	assert.Equal(t, "completed", completed.LastRunResult)
+	assert.Empty(t, completed.LastRunError)
+}
 
 // TestPumpStatePatchPreservesSource is the invariant the mid-run "upgrade to
 // manual" depends on: the pump's metadata patch must never carry the source

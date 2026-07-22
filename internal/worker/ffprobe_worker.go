@@ -91,7 +91,6 @@ func (w *FFProbeWorker) Work(ctx context.Context, job *river.Job[FFProbeArgs]) e
 
 	if hasAudio && primaryAudio != nil {
 		w.Analysis.UpdateAudioTrackFileFromProbe(ctx, job.Args.LibraryFileID, info, primaryAudio)
-		w.enqueueLoudnessIfMusic(ctx, q, job.Args.LibraryFileID, job.Args.ScheduledTaskID, source)
 	}
 
 	if hasVideo {
@@ -162,35 +161,5 @@ func (w *FFProbeWorker) enqueuePostProbeVideoWork(ctx context.Context, q *sqlc.Q
 				log.Warn().Err(err).Int64("extra_id", link.ID).Msg("ffprobe: enqueue extra thumbnail failed")
 			}
 		}
-	}
-}
-
-// enqueueLoudnessIfMusic schedules an ebur128 pass for the file's track_files
-// row when the file lives in a music library. Silently noops outside music
-// libraries or when no track_files row exists yet (matcher hasn't run).
-func (w *FFProbeWorker) enqueueLoudnessIfMusic(ctx context.Context, q *sqlc.Queries, libraryFileID int64, scheduledTaskID string, source string) {
-	tf, err := q.GetTrackFileByLibraryFileID(ctx, libraryFileID)
-	if err != nil {
-		// Matcher hasn't created the track_files row yet. It'll re-trigger
-		// loudness when the row eventually appears via the scheduled
-		// backstop. Don't block the probe pipeline on it.
-		return
-	}
-
-	lf, err := q.GetLibraryFileByID(ctx, libraryFileID)
-	if err != nil {
-		return
-	}
-	lib, err := q.GetLibraryByID(ctx, lf.LibraryID)
-	if err != nil || lib.MediaType != sqlc.MediaTypeMusic {
-		return
-	}
-
-	client := river.ClientFromContext[pgx.Tx](ctx)
-	if client == nil {
-		return
-	}
-	if _, _, err := enqueueTrackLoudnessIfNeeded(ctx, q, client, ScanTrackLoudnessArgs{TrackFileID: tf.ID, ScheduledTaskID: scheduledTaskID}, scheduledJobInsertOpts(source)); err != nil {
-		log.Warn().Err(err).Int64("track_file_id", tf.ID).Msg("enqueue track loudness failed")
 	}
 }

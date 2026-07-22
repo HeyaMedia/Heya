@@ -20637,6 +20637,9 @@
             "format": "int32",
             "type": "integer"
           },
+          "last_run_error": {
+            "type": "string"
+          },
           "last_run_items_processed": {
             "format": "int32",
             "type": "integer"
@@ -20663,9 +20666,6 @@
           },
           "state": {
             "type": "string"
-          },
-          "stats": {
-            "$ref": "#/components/schemas/TaskStats"
           }
         },
         "required": [
@@ -45947,6 +45947,52 @@
           }
         ],
         "summary": "List scheduled tasks",
+        "tags": [
+          "Tasks"
+        ]
+      }
+    },
+    "/api/tasks/stats": {
+      "get": {
+        "operationId": "task-stats",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/TaskStats"
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Coverage statistics for scheduled tasks",
         "tags": [
           "Tasks"
         ]

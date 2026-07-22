@@ -25,7 +25,10 @@
         </TabsRoot>
 
         <div class="modal-body">
-          <div v-if="loading && !items.length" class="loading-hint">Loading...</div>
+          <div v-if="loadError" class="error-hint">
+            <Icon name="warning" :size="14" /> {{ loadError }}
+          </div>
+          <div v-else-if="loading && !items.length" class="loading-hint">Loading...</div>
           <div v-else-if="!items.length" class="empty-hint">
             <Icon name="check" :size="14" />
             No items{{ activeTab !== 'all' ? ' matching filter' : '' }}
@@ -87,6 +90,7 @@ const completeCount = ref(0)
 const pendingCount = ref(0)
 const failedCount = ref(0)
 const loading = ref(false)
+const loadError = ref('')
 const activeTab = ref('all')
 const offset = ref(0)
 const pageSize = 50
@@ -107,6 +111,7 @@ const tabs = computed(() => {
 
 async function fetchItems() {
   loading.value = true
+  loadError.value = ''
   try {
     const { $heya } = useNuxtApp()
     const query: Record<string, any> = { limit: pageSize, offset: offset.value }
@@ -121,8 +126,9 @@ async function fetchItems() {
     completeCount.value = res.complete
     pendingCount.value = res.pending
     failedCount.value = res.failed ?? 0
-  } catch {
+  } catch (e: any) {
     items.value = []
+    loadError.value = e?.message ?? 'Failed to load task items.'
   }
   loading.value = false
 }
@@ -196,10 +202,11 @@ onMounted(fetchItems)
   flex: 1; overflow-y: auto; padding: 0;
 }
 
-.loading-hint, .empty-hint {
+.loading-hint, .empty-hint, .error-hint {
   display: flex; align-items: center; justify-content: center; gap: 8px;
   color: var(--fg-3); font-size: 13px; padding: 40px 22px;
 }
+.error-hint { color: var(--bad); }
 
 .item-list { }
 .item-row {
@@ -220,7 +227,7 @@ onMounted(fetchItems)
 .item-info { flex: 1; min-width: 0; }
 .item-name { font-size: 13px; font-weight: 500; color: var(--fg-1); }
 .item-path {
-  font-size: 11px; font-family: var(--font-mono); color: var(--fg-4);
+  font-size: 11.5px; font-family: var(--font-mono); color: var(--fg-3);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px;
 }
 
@@ -239,8 +246,13 @@ onMounted(fetchItems)
 .item-status-label.failed { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
 
 .item-error {
-  font-size: 11px; font-family: var(--font-mono); color: var(--bad);
-  margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  margin-top: 4px;
+  color: var(--bad);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .modal-footer {

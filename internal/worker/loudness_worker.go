@@ -22,9 +22,8 @@ import (
 )
 
 // enqueueTrackLoudnessIfNeeded re-reads the row immediately before insertion.
-// Pump and scan callers often operate from an older candidate snapshot; an
-// on-demand playback analysis may have completed after that snapshot was
-// built, and must not be resurrected as redundant queued work.
+// A previous scheduled batch may have completed after the pump built its
+// candidate snapshot, and must not be resurrected as redundant queued work.
 func enqueueTrackLoudnessIfNeeded(ctx context.Context, q *sqlc.Queries, client *river.Client[pgx.Tx], args ScanTrackLoudnessArgs, opts *river.InsertOpts) (enqueued, duplicate bool, err error) {
 	tf, err := q.GetTrackFileByID(ctx, args.TrackFileID)
 	if errors.Is(err, pgx.ErrNoRows) {

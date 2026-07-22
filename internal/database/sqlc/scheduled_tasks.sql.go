@@ -12,7 +12,7 @@ import (
 )
 
 const getScheduledTask = `-- name: GetScheduledTask :one
-SELECT id, display_name, description, category, enabled, interval_hours, daily_start_time, daily_end_time, max_runtime_minutes, last_run_at, last_run_result, last_run_duration_sec, last_run_items_processed, last_run_items_total, next_run_at, created_at, updated_at FROM scheduled_tasks WHERE id = $1
+SELECT id, display_name, description, category, enabled, interval_hours, daily_start_time, daily_end_time, max_runtime_minutes, last_run_at, last_run_result, last_run_duration_sec, last_run_items_processed, last_run_items_total, next_run_at, created_at, updated_at, last_run_error FROM scheduled_tasks WHERE id = $1
 `
 
 func (q *Queries) GetScheduledTask(ctx context.Context, id string) (ScheduledTask, error) {
@@ -36,12 +36,13 @@ func (q *Queries) GetScheduledTask(ctx context.Context, id string) (ScheduledTas
 		&i.NextRunAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LastRunError,
 	)
 	return i, err
 }
 
 const listScheduledTasks = `-- name: ListScheduledTasks :many
-SELECT id, display_name, description, category, enabled, interval_hours, daily_start_time, daily_end_time, max_runtime_minutes, last_run_at, last_run_result, last_run_duration_sec, last_run_items_processed, last_run_items_total, next_run_at, created_at, updated_at FROM scheduled_tasks ORDER BY category, display_name
+SELECT id, display_name, description, category, enabled, interval_hours, daily_start_time, daily_end_time, max_runtime_minutes, last_run_at, last_run_result, last_run_duration_sec, last_run_items_processed, last_run_items_total, next_run_at, created_at, updated_at, last_run_error FROM scheduled_tasks ORDER BY category, display_name
 `
 
 func (q *Queries) ListScheduledTasks(ctx context.Context) ([]ScheduledTask, error) {
@@ -71,6 +72,7 @@ func (q *Queries) ListScheduledTasks(ctx context.Context) ([]ScheduledTask, erro
 			&i.NextRunAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LastRunError,
 		); err != nil {
 			return nil, err
 		}
@@ -87,7 +89,7 @@ UPDATE scheduled_tasks
 SET enabled = $2, interval_hours = $3,
     daily_start_time = $4, daily_end_time = $5,
     max_runtime_minutes = $6, next_run_at = $7, updated_at = now()
-WHERE id = $1 RETURNING id, display_name, description, category, enabled, interval_hours, daily_start_time, daily_end_time, max_runtime_minutes, last_run_at, last_run_result, last_run_duration_sec, last_run_items_processed, last_run_items_total, next_run_at, created_at, updated_at
+WHERE id = $1 RETURNING id, display_name, description, category, enabled, interval_hours, daily_start_time, daily_end_time, max_runtime_minutes, last_run_at, last_run_result, last_run_duration_sec, last_run_items_processed, last_run_items_total, next_run_at, created_at, updated_at, last_run_error
 `
 
 type UpdateScheduledTaskConfigParams struct {
@@ -129,6 +131,7 @@ func (q *Queries) UpdateScheduledTaskConfig(ctx context.Context, arg UpdateSched
 		&i.NextRunAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LastRunError,
 	)
 	return i, err
 }
@@ -137,7 +140,7 @@ const updateScheduledTaskRun = `-- name: UpdateScheduledTaskRun :exec
 UPDATE scheduled_tasks
 SET last_run_at = $2, last_run_result = $3, last_run_duration_sec = $4,
     last_run_items_processed = $5, last_run_items_total = $6,
-    next_run_at = $7, updated_at = now()
+    next_run_at = $7, last_run_error = $8, updated_at = now()
 WHERE id = $1
 `
 
@@ -149,6 +152,7 @@ type UpdateScheduledTaskRunParams struct {
 	LastRunItemsProcessed int32              `json:"last_run_items_processed"`
 	LastRunItemsTotal     int32              `json:"last_run_items_total"`
 	NextRunAt             pgtype.Timestamptz `json:"next_run_at"`
+	LastRunError          string             `json:"last_run_error"`
 }
 
 func (q *Queries) UpdateScheduledTaskRun(ctx context.Context, arg UpdateScheduledTaskRunParams) error {
@@ -160,6 +164,7 @@ func (q *Queries) UpdateScheduledTaskRun(ctx context.Context, arg UpdateSchedule
 		arg.LastRunItemsProcessed,
 		arg.LastRunItemsTotal,
 		arg.NextRunAt,
+		arg.LastRunError,
 	)
 	return err
 }

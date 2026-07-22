@@ -552,7 +552,7 @@ async function cancelAllJobs() {
 // backend's worker.TaskKinds (scheduled + synthetic).
 const TASK_KINDS_BY_TASK: Record<string, string[]> = {
   // Scheduled.
-  scan_libraries:       ['kickoff_library_scan', 'process_scan', 'search_metadata', 'fetch_metadata', 'apply_metadata', 'ffprobe', 'scan_keyframes', 'detect_local_assets', 'enrich_media_item', 'scan_track_fingerprint', 'scan_track_loudness', 'scan_album_loudness', 'analyze_track_facets', 'refresh_artist_centroids', 'refresh_album_centroids'],
+  scan_libraries:       ['kickoff_library_scan', 'process_scan', 'search_metadata', 'fetch_metadata', 'apply_metadata', 'ffprobe', 'scan_keyframes', 'detect_local_assets', 'enrich_media_item'],
   refresh_stale_items:  ['kickoff_refresh_stale', 'enrich_media_item'],
   scan_music_loudness:  ['kickoff_music_loudness', 'scan_track_loudness', 'scan_album_loudness'],
   scan_music_fingerprint: ['kickoff_music_fingerprint', 'scan_track_fingerprint'],

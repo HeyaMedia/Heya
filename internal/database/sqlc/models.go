@@ -1154,6 +1154,7 @@ type ScheduledTask struct {
 	NextRunAt             pgtype.Timestamptz `json:"next_run_at"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	LastRunError          string             `json:"last_run_error"`
 }
 
 type Session struct {

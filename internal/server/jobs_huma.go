@@ -119,15 +119,19 @@ func registerTaskRoutes(api huma.API, app *service.App) {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}
 			runtime := app.GetAllTaskRuntimeState(ctx)
-			statsMap := app.QueryTaskStats(ctx)
 			result := make([]taskResponse, len(tasks))
 			for i, t := range tasks {
 				result[i] = taskToResponse(t, runtime)
-				if s, ok := statsMap[t.ID]; ok {
-					result[i].Stats = &s
-				}
 			}
 			return noStoreJSON(result), nil
+		})
+
+	// Coverage scans large media tables and must never hold up the controls or
+	// live task state above. The frontend loads this separately and caches it
+	// for a minute instead of repeating the scans with its five-second poll.
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/tasks/stats", "task-stats", "Coverage statistics for scheduled tasks", "Tasks")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[map[string]service.TaskStats], error) {
+			return noStoreJSON(app.QueryTaskStats(ctx)), nil
 		})
 
 	huma.Register(api, adminSecured(op(http.MethodPost, "/api/tasks/{id}/run", "run-task", "Trigger a scheduled task immediately", "Tasks")),
@@ -246,24 +250,24 @@ type taskRuntime struct {
 }
 
 type taskResponse struct {
-	ID                    string             `json:"id"`
-	DisplayName           string             `json:"display_name"`
-	Description           string             `json:"description"`
-	Category              string             `json:"category"`
-	Enabled               bool               `json:"enabled"`
-	IntervalHours         int32              `json:"interval_hours"`
-	DailyStartTime        string             `json:"daily_start_time"`
-	DailyEndTime          string             `json:"daily_end_time"`
-	MaxRuntimeMinutes     int32              `json:"max_runtime_minutes"`
-	LastRunAt             *string            `json:"last_run_at"`
-	LastRunResult         string             `json:"last_run_result"`
-	LastRunDurationSec    int32              `json:"last_run_duration_sec"`
-	LastRunItemsProcessed int32              `json:"last_run_items_processed"`
-	LastRunItemsTotal     int32              `json:"last_run_items_total"`
-	NextRunAt             *string            `json:"next_run_at"`
-	State                 string             `json:"state"`
-	Runtime               *taskRuntime       `json:"runtime,omitempty"`
-	Stats                 *service.TaskStats `json:"stats,omitempty"`
+	ID                    string       `json:"id"`
+	DisplayName           string       `json:"display_name"`
+	Description           string       `json:"description"`
+	Category              string       `json:"category"`
+	Enabled               bool         `json:"enabled"`
+	IntervalHours         int32        `json:"interval_hours"`
+	DailyStartTime        string       `json:"daily_start_time"`
+	DailyEndTime          string       `json:"daily_end_time"`
+	MaxRuntimeMinutes     int32        `json:"max_runtime_minutes"`
+	LastRunAt             *string      `json:"last_run_at"`
+	LastRunResult         string       `json:"last_run_result"`
+	LastRunError          string       `json:"last_run_error,omitempty"`
+	LastRunDurationSec    int32        `json:"last_run_duration_sec"`
+	LastRunItemsProcessed int32        `json:"last_run_items_processed"`
+	LastRunItemsTotal     int32        `json:"last_run_items_total"`
+	NextRunAt             *string      `json:"next_run_at"`
+	State                 string       `json:"state"`
+	Runtime               *taskRuntime `json:"runtime,omitempty"`
 }
 
 func taskToResponse(t sqlc.ScheduledTask, runtime map[string]service.TaskRuntimeState) taskResponse {
@@ -278,6 +282,7 @@ func taskToResponse(t sqlc.ScheduledTask, runtime map[string]service.TaskRuntime
 		DailyEndTime:          t.DailyEndTime,
 		MaxRuntimeMinutes:     t.MaxRuntimeMinutes,
 		LastRunResult:         t.LastRunResult,
+		LastRunError:          secrettext.Redact(t.LastRunError),
 		LastRunDurationSec:    t.LastRunDurationSec,
 		LastRunItemsProcessed: t.LastRunItemsProcessed,
 		LastRunItemsTotal:     t.LastRunItemsTotal,

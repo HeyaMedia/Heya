@@ -304,6 +304,7 @@ func (a *App) CancelTask(ctx context.Context, taskID string) error {
 			UPDATE scheduled_tasks
 			   SET last_run_at = $2,
 			       last_run_result = 'stopped',
+			       last_run_error = '',
 			       last_run_duration_sec = $3,
 			       last_run_items_processed = $4,
 			       last_run_items_total = $5

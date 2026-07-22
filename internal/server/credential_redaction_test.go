@@ -82,6 +82,19 @@ func TestTaskItemsResponseRedactsWithoutMutatingServiceResult(t *testing.T) {
 	}
 }
 
+func TestTaskRunErrorResponseRedactsCredentials(t *testing.T) {
+	t.Parallel()
+
+	row := sqlc.ScheduledTask{ID: "scan_libraries", LastRunError: "open " + credentialedURLPath}
+	got := taskToResponse(row, nil)
+	if strings.Contains(got.LastRunError, "alice") || strings.Contains(got.LastRunError, "correct-horse") {
+		t.Fatalf("credentials remain in task run error: %q", got.LastRunError)
+	}
+	if row.LastRunError != "open "+credentialedURLPath {
+		t.Fatal("response redaction mutated the scheduled task row")
+	}
+}
+
 func TestHumaErrorTransformerIsFinalCredentialBoundary(t *testing.T) {
 	t.Parallel()
 

@@ -1036,7 +1036,7 @@ func TestScannerInventoryPostApplyPaths(t *testing.T) {
 	}, scannerInventoryPostApplyPaths(inv))
 }
 
-func TestPostApplySonicDeduplicatesTracksWithMultipleFiles(t *testing.T) {
+func TestPostApplyDefersMusicAnalysisToScheduledTasks(t *testing.T) {
 	pool := testutil.SetupDB(t)
 	ctx := context.Background()
 	q := sqlc.New(pool)
@@ -1073,38 +1073,22 @@ func TestPostApplySonicDeduplicatesTracksWithMultipleFiles(t *testing.T) {
 	})
 	require.NoError(t, err)
 	fileIDs := make([]int64, 0, len(paths))
-	trackFileIDs := make([]int64, 0, len(paths))
 	for _, path := range paths {
 		file, err := q.UpsertLibraryFile(ctx, sqlc.UpsertLibraryFileParams{
 			LibraryID: lib.ID, Path: path, ParseResult: []byte("{}"), Status: sqlc.FileStatusMatched,
 		})
 		require.NoError(t, err)
-		trackFile, err := q.UpsertTrackFile(ctx, sqlc.UpsertTrackFileParams{
+		_, err = q.UpsertTrackFile(ctx, sqlc.UpsertTrackFileParams{
 			TrackID: track.ID, LibraryFileID: file.ID,
 		})
 		require.NoError(t, err)
 		fileIDs = append(fileIDs, file.ID)
-		trackFileIDs = append(trackFileIDs, trackFile.ID)
 	}
 	_, err = pool.Exec(ctx, `
 		UPDATE library_files
 		SET media_info = '{"streams":[{"codec_type":"audio"}]}'::jsonb
 		WHERE id = ANY($1::bigint[])`, fileIDs)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `
-		UPDATE track_files
-		SET integrated_lufs = -14, boundaries_analyzed_at = now()
-		WHERE id = ANY($1::bigint[])`, trackFileIDs)
-	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `
-		INSERT INTO library_file_fingerprints (
-			library_file_id, algorithm, fingerprint, fingerprint_duration_secs,
-			source_duration_secs, source_size, source_mtime
-		)
-		SELECT id, 1, 'test-fingerprint-' || id, 1, 1, size, mtime
-		FROM library_files WHERE id = ANY($1::bigint[])`, fileIDs)
-	require.NoError(t, err)
-
 	rc, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
 	require.NoError(t, err)
 	taskID := "post-apply-sonic-dedupe"
@@ -1118,21 +1102,23 @@ func TestPostApplySonicDeduplicatesTracksWithMultipleFiles(t *testing.T) {
 			{Path: paths[1], Class: scanner.ClassPrimaryMedia},
 		},
 	}}}}
-	worker := &ApplyLibraryScanWorker{SonicEnabled: func(context.Context) bool { return true }}
+	worker := &ApplyLibraryScanWorker{}
 	fanout := worker.enqueuePostApplyWork(ctx, q, rc, lib, result, taskID, "")
 
 	require.Equal(t, 2, fanout.Files)
-	require.Equal(t, 1, fanout.Sonic)
-	require.Equal(t, 1, fanout.Skipped)
+	require.Zero(t, fanout.Skipped)
 	require.Zero(t, fanout.Failed)
 
 	var jobs int
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*) FROM river_job
-		WHERE kind = 'analyze_track_facets'
-		  AND (args->>'track_id')::bigint = $1
-		  AND args->>'scheduled_task_id' = $2`, track.ID, taskID).Scan(&jobs))
-	require.Equal(t, 1, jobs)
+		WHERE kind = ANY($1::text[])
+		  AND args->>'scheduled_task_id' = $2`, []string{
+		"scan_track_fingerprint",
+		"scan_track_loudness",
+		"analyze_track_facets",
+	}, taskID).Scan(&jobs))
+	require.Zero(t, jobs)
 }
 
 func TestCompactScannerScopesDropsChildren(t *testing.T) {

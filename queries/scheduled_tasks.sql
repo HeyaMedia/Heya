@@ -15,5 +15,5 @@ WHERE id = $1 RETURNING *;
 UPDATE scheduled_tasks
 SET last_run_at = $2, last_run_result = $3, last_run_duration_sec = $4,
     last_run_items_processed = $5, last_run_items_total = $6,
-    next_run_at = $7, updated_at = now()
+    next_run_at = $7, last_run_error = $8, updated_at = now()
 WHERE id = $1;

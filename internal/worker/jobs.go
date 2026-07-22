@@ -20,7 +20,7 @@ const (
 	PriorityMatch      = 1 // metadata fetch/review work — matching is the critical path
 	PriorityScan       = 2 // bulk library-scan support jobs
 	PriorityEnrichment = 3 // ffprobe / images / nfo writing / ratings — happens after match
-	PriorityAnalysis   = 4 // ebur128, future ML / fingerprinting — runs whenever spare
+	PriorityAnalysis   = 4 // scheduled ebur128, ML, and audio fingerprinting
 )
 
 type PersonFetchArgs struct {

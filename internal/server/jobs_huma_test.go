@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,4 +36,13 @@ func TestJobWorkerSettingsRouteReturnsJSON(t *testing.T) {
 	assert.Equal(t, 4, byKind["fetch_metadata"])
 	assert.Equal(t, 4, byKind["fetch_metadata_poll"])
 	assert.Equal(t, 4, byKind["apply_metadata"])
+}
+
+func TestTaskResponseDoesNotEmbedCoverageStats(t *testing.T) {
+	encoded, err := json.Marshal(taskToResponse(sqlc.ScheduledTask{}, nil))
+	require.NoError(t, err)
+
+	var task map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &task))
+	assert.NotContains(t, task, "stats", "basic task response should not wait for coverage stats")
 }

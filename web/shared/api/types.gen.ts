@@ -5806,6 +5806,7 @@ export type TaskResponse = {
     interval_hours: number;
     last_run_at: string | null;
     last_run_duration_sec: number;
+    last_run_error?: string;
     last_run_items_processed: number;
     last_run_items_total: number;
     last_run_result: string;
@@ -5813,7 +5814,6 @@ export type TaskResponse = {
     next_run_at: string | null;
     runtime?: TaskRuntime;
     state: string;
-    stats?: TaskStats;
 };
 
 export type TaskRuntime = {
@@ -8515,6 +8515,7 @@ export type TaskResponseWritable = {
     interval_hours: number;
     last_run_at: string | null;
     last_run_duration_sec: number;
+    last_run_error?: string;
     last_run_items_processed: number;
     last_run_items_total: number;
     last_run_result: string;
@@ -8522,7 +8523,6 @@ export type TaskResponseWritable = {
     next_run_at: string | null;
     runtime?: TaskRuntime;
     state: string;
-    stats?: TaskStats;
 };
 
 export type TempoBucketsBodyWritable = {
@@ -19822,6 +19822,33 @@ export type ListTasksResponses = {
 };
 
 export type ListTasksResponse = ListTasksResponses[keyof ListTasksResponses];
+
+export type TaskStatsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/tasks/stats';
+};
+
+export type TaskStatsErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type TaskStatsError = TaskStatsErrors[keyof TaskStatsErrors];
+
+export type TaskStatsResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: TaskStats;
+    };
+};
+
+export type TaskStatsResponse = TaskStatsResponses[keyof TaskStatsResponses];
 
 export type UpdateTaskData = {
     body: UpdateTaskRequestWritable;
