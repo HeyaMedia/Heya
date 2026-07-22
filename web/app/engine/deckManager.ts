@@ -41,12 +41,19 @@ export class DeckManager {
   getActiveOutput(): AudioNode { return this.activeDeck.getOutputNode() }
 
   async loadAndPlay(url: string, startPositionSeconds = 0): Promise<void> {
+    // Cold loads enter silently and are faded to unity by the engine. The
+    // shared master gain applies the user's actual volume after the deck mix.
+    this.activeDeck.setTransitionGain(0)
     await this.activeDeck.load(url)
     if (startPositionSeconds > 0) this.activeDeck.seek(startPositionSeconds)
     await this.activeDeck.play()
   }
 
   async loadNext(url: string): Promise<void> {
+    // A deck retired by a previous crossfade ends at zero. Reset it before it
+    // becomes a gapless pending deck; crossfade curves explicitly start it at
+    // zero again when overlap is requested.
+    this.pendingDeck.setTransitionGain(1)
     await this.pendingDeck.load(url)
   }
 
@@ -65,8 +72,8 @@ export class DeckManager {
     const fadeInCurve = plan?.fadeInCurve ?? generateFadeIn(durationSeconds * 100)
     const now = this.ctx.currentTime
 
-    this.activeDeck.gainNode.gain.setValueCurveAtTime(new Float32Array(fadeOutCurve), now, durationSeconds)
-    this.pendingDeck.gainNode.gain.setValueCurveAtTime(new Float32Array(fadeInCurve), now, durationSeconds)
+    this.activeDeck.transitionGainNode.gain.setValueCurveAtTime(new Float32Array(fadeOutCurve), now, durationSeconds)
+    this.pendingDeck.transitionGainNode.gain.setValueCurveAtTime(new Float32Array(fadeInCurve), now, durationSeconds)
 
     this.transitioning = true
     await this.pendingDeck.play()
@@ -96,10 +103,10 @@ export class DeckManager {
     this.transitioning = false
 
     const now = this.ctx.currentTime
-    this.activeDeck.gainNode.gain.cancelScheduledValues(now)
-    this.activeDeck.gainNode.gain.setValueAtTime(1, now)
-    this.pendingDeck.gainNode.gain.cancelScheduledValues(now)
-    this.pendingDeck.gainNode.gain.setValueAtTime(1, now)
+    this.activeDeck.transitionGainNode.gain.cancelScheduledValues(now)
+    this.activeDeck.transitionGainNode.gain.setValueAtTime(1, now)
+    this.pendingDeck.transitionGainNode.gain.cancelScheduledValues(now)
+    this.pendingDeck.transitionGainNode.gain.setValueAtTime(1, now)
 
     this.activeDeck.pause()
     this.activeDeck.reset()
@@ -158,10 +165,10 @@ export class DeckManager {
       this.transitioning = false
 
       const now = this.ctx.currentTime
-      this.activeDeck.gainNode.gain.cancelScheduledValues(now)
-      this.activeDeck.gainNode.gain.setValueAtTime(1, now)
-      this.pendingDeck.gainNode.gain.cancelScheduledValues(now)
-      this.pendingDeck.gainNode.gain.setValueAtTime(1, now)
+      this.activeDeck.transitionGainNode.gain.cancelScheduledValues(now)
+      this.activeDeck.transitionGainNode.gain.setValueAtTime(1, now)
+      this.pendingDeck.transitionGainNode.gain.cancelScheduledValues(now)
+      this.pendingDeck.transitionGainNode.gain.setValueAtTime(1, now)
 
       this.transitionResolve?.()
       this.transitionResolve = null

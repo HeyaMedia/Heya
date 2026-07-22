@@ -5,14 +5,14 @@ export interface DeckEvents {
 }
 
 // A Deck wraps one HTMLAudioElement plumbed into the Web Audio graph through
-// a normGain → gain pair so we can apply per-track normalization and a
-// per-deck volume independently. The DeckManager swaps two of these for
-// gapless and crossfade transitions.
+// a normalization gain and a transition gain. User volume belongs to the
+// shared master output after both decks are mixed; keeping it out of this
+// class prevents crossfade automation from overriding the listener's level.
 export class Deck {
   private audio: HTMLAudioElement
   private sourceNode: MediaElementAudioSourceNode | null = null
   readonly normGainNode: GainNode
-  readonly gainNode: GainNode
+  readonly transitionGainNode: GainNode
   private events: Partial<DeckEvents> = {}
   private disposed = false
 
@@ -21,7 +21,7 @@ export class Deck {
     this.audio.crossOrigin = 'use-credentials'
     this.audio.preload = 'auto'
     this.normGainNode = ctx.createGain()
-    this.gainNode = ctx.createGain()
+    this.transitionGainNode = ctx.createGain()
 
     this.audio.addEventListener('ended', () => this.events.onEnded?.())
     this.audio.addEventListener('timeupdate', () => {
@@ -45,9 +45,9 @@ export class Deck {
     if (!this.sourceNode) {
       this.sourceNode = this.ctx.createMediaElementSource(this.audio)
       this.sourceNode.connect(this.normGainNode)
-      this.normGainNode.connect(this.gainNode)
+      this.normGainNode.connect(this.transitionGainNode)
     }
-    return this.gainNode
+    return this.transitionGainNode
   }
 
   setNormGain(gainLinear: number) {
@@ -94,9 +94,9 @@ export class Deck {
   get duration(): number { return this.audio.duration || 0 }
   get paused(): boolean { return this.audio.paused }
 
-  setVolume(value: number) {
-    this.gainNode.gain.cancelScheduledValues(this.ctx.currentTime)
-    this.gainNode.gain.setValueAtTime(value, this.ctx.currentTime)
+  setTransitionGain(value: number) {
+    this.transitionGainNode.gain.cancelScheduledValues(this.ctx.currentTime)
+    this.transitionGainNode.gain.setValueAtTime(value, this.ctx.currentTime)
   }
 
   // Fast linear fade of the deck gain to silence, resolving when it completes.
@@ -105,7 +105,7 @@ export class Deck {
   fadeOut(seconds: number): Promise<void> {
     return new Promise((resolve) => {
       const now = this.ctx.currentTime
-      const g = this.gainNode.gain
+      const g = this.transitionGainNode.gain
       g.cancelScheduledValues(now)
       g.setValueAtTime(g.value, now)
       g.linearRampToValueAtTime(0, now + seconds)
@@ -118,7 +118,7 @@ export class Deck {
   // snapping to full level.
   fadeIn(target: number, seconds: number) {
     const now = this.ctx.currentTime
-    const g = this.gainNode.gain
+    const g = this.transitionGainNode.gain
     g.cancelScheduledValues(now)
     g.setValueAtTime(g.value, now)
     g.linearRampToValueAtTime(target, now + seconds)
@@ -137,6 +137,6 @@ export class Deck {
     this.audio.removeAttribute('src')
     this.sourceNode?.disconnect()
     this.normGainNode.disconnect()
-    this.gainNode.disconnect()
+    this.transitionGainNode.disconnect()
   }
 }

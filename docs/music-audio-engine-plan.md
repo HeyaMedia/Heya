@@ -58,6 +58,7 @@ Ranked by (audible/UX impact) ÷ effort. `S/M/L` = small/medium/large.
 | — | **Click-free manual switch** — hot-swapping a track previously (a) flushed the old decode buffer as a garbled burst, and (b) clicked from the gain stepping to zero on a hard pause. Fixed in two layers: pause + `removeAttribute('src')` before assigning the new src (no buffer flush), and a Jellyfin-style ~60ms gain fade-out before the swap + fade-in on the new track (no discontinuity). | `deck.ts`, `useAudioEngine.ts` |
 | 13 | **Smart crossfade** — Go RMS-envelope boundary detection (`boundaries.go`, ported + unit-tested) writes intro/outro/fade/silence ms to `track_files` (migration 00033) from the loudness worker (skip-if-present; backfills existing libraries via the widened pending query). Flows through `SELECT *` → `TrackFile` → `/files`. `usePlayer` lazily fetches+caches `/files` analysis (also fixes spotty normalization threading), builds `BoundaryHints`, and arms `SmartCrossfade` via `scheduler.setSmartTransitionPoint`. New **Smart** mode in settings + EQ panel; falls back to timed when a track lacks boundaries. | `internal/sonicanalysis/boundaries.go`(+test), `migrations/00033`, `queries/music.sql`, `loudness_worker.go`, `usePlayer.ts`, `useAudioSettings.ts`, `EQPanel.vue` |
 | — | **Gapless no-clip rework** — gapless now swaps on the outgoing deck's natural `ended` (track plays in full → no clipped tail), to the already-buffered+normalized pending deck. The scheduler's early fire is reserved for crossfade only (which plays through its fade to the real end). Fixes the bug where firing 100ms early reliably lopped the tail off every track. | `scheduler.ts`, `usePlayer.ts`, `useAudioEngine.ts` |
+| — | **Master-volume mix bus** (2026-07-22) — user volume/mute now lives in one post-mix gain stage; per-deck gains exclusively automate transitions. Incoming crossfades therefore respect low volume and mute, and retired zero-gain decks are reset before later gapless reuse. | `masterOutput.ts`, `deck.ts`, `deckManager.ts`, `useAudioEngine.ts` |
 
 ### ✅ Done — quick wins, DSP chain, output devices, visualizer (2026-07-01)
 
@@ -80,8 +81,9 @@ Repeat-one is now a seamless gapless loop. Pending-deck normalization is applied
 before a crossfade so the incoming track plays at the right level during overlap.
 
 **Needs verification by ear/eye** (can't be type-checked): gapless has no gap;
-crossfade fades smoothly; album segues stay gapless; crossfeed audibly narrows
-the stage on headphones; MediaSession shows on the OS lock screen.
+crossfade fades smoothly and respects low volume/mute; album segues stay
+gapless; crossfeed audibly narrows the stage on headphones; MediaSession shows
+on the OS lock screen.
 
 ### ⏭ Remaining backlog
 
@@ -102,9 +104,5 @@ the stage on headphones; MediaSession shows on the OS lock screen.
   `AudioBuffer`s and scheduling the next on the `AudioContext` clock — a sizable
   engine rewrite away from `MediaElementSource`. Revisit only if the seam is
   audible on segue-heavy albums.
-- During a **crossfade** the incoming deck's gain ramps to unity (1.0), not to
-  the user's volume, because the deck `gainNode` serves double duty as volume +
-  fade gain (shared with Hibiki). Gapless (the default) is unaffected. A clean
-  fix separates a volume gain from the crossfade gain in the engine.
-- `prefetch.ts` (`PrefetchQueue` LRU) remains unused — single-track `loadNext`
-  is the right depth. Either repurpose for `/file/{id}` warming or delete.
+- The Cache API prefetch manager warms the configured upcoming-track window;
+  the pending deck still preloads only the immediate next track for transitions.

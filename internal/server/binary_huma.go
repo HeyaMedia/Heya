@@ -134,7 +134,7 @@ func registerBinaryRoutes(api huma.API, app *service.App) {
 	huma.Register(api, securedBinary(http.MethodGet, "/api/music/tracks/{id}/stream", "stream-track", "Best-quality playable audio for a track", "Music"),
 		wrapStreamAs[musicTrackStreamInput](handleStreamTrack(app)))
 
-	huma.Register(api, securedBinary(http.MethodGet, "/api/music/tracks/{id}/file/{track_file_id}", "stream-track-file", "Specific track file (bit-perfect)", "Music"),
+	huma.Register(api, securedBinary(http.MethodGet, "/api/music/tracks/{id}/file/{track_file_id}", "stream-track-file", "Specific original track file", "Music"),
 		wrapStreamAs[musicTrackFileInput](handleStreamTrackFile(app)))
 
 	// --- Internet-radio stream proxy (long-lived, ICY metadata stripped) ---

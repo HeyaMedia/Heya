@@ -191,8 +191,8 @@ func transcodePrimaryAndServe(w http.ResponseWriter, r *http.Request, app *servi
 
 // handleStreamTrackFile range-serves an explicitly chosen format of a track.
 // Untouched bytes — caller picks the format (FLAC vs MP3, 24/96 vs 16/44).
-// Bit-perfect path: no transcoding, no remux, no resampling. Future native
-// clients hit this for exclusive-mode audio output.
+// This is also how the quality picker requests a specific original file; the
+// endpoint makes no promises about the renderer or downstream output path.
 func handleStreamTrackFile(app *service.App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		trackID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)

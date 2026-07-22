@@ -15,6 +15,7 @@ import { createPostgain } from '~/engine/dsp/postgain'
 import { createPreamp } from '~/engine/dsp/preamp'
 import { Scheduler } from '~/engine/scheduler'
 import { SignalChain } from '~/engine/signalChain'
+import { MasterOutput } from '~/engine/masterOutput'
 
 let instance: ReturnType<typeof createEngine> | ReturnType<typeof createDirectEngine> | null = null
 
@@ -23,6 +24,7 @@ function createEngine() {
   const deckManager = new DeckManager(ctx)
   const signalChain = new SignalChain()
   const analyserBridge = new AnalyserBridge(ctx)
+  const masterOutput = new MasterOutput(ctx, analyserBridge.analyserNode)
 
   const normalization = createNormalization(ctx)
   const preamp = createPreamp(ctx)
@@ -46,7 +48,7 @@ function createEngine() {
   // limiter still catches any peaks the channel summing introduces.
   signalChain.setBlocks([normalization, preamp, equalizer, postgain, crossfeed, limiter])
   signalChain.setSource(deckManager.getActiveOutput())
-  signalChain.setDestination(analyserBridge.analyserNode)
+  signalChain.setDestination(masterOutput.inputNode)
   analyserBridge.analyserNode.connect(ctx.destination)
 
   deckManager.setOnSwap(() => {
@@ -100,7 +102,7 @@ function createEngine() {
       await deckManager.active.fadeOut(SWITCH_FADE_SECONDS)
     }
     await deckManager.loadAndPlay(url, startPositionSeconds)
-    deckManager.active.fadeIn(volume.value, SWITCH_FADE_SECONDS)
+    deckManager.active.fadeIn(1, SWITCH_FADE_SECONDS)
     isPlaying.value = true
     scheduler.reset()
   }
@@ -128,7 +130,7 @@ function createEngine() {
   function setVolume(v: number) {
     const clamped = Math.max(0, Math.min(1, v))
     volume.value = clamped
-    deckManager.active.setVolume(clamped)
+    masterOutput.setVolume(clamped)
   }
 
   async function loadNext(url: string) {
@@ -143,7 +145,6 @@ function createEngine() {
       signalChain.connectAdditionalSource(deckManager.pending.getOutputNode())
     }
     await deckManager.transition(mode, plan)
-    deckManager.active.setVolume(volume.value)
     scheduler.reset()
     isPlaying.value = true
   }
@@ -181,6 +182,7 @@ function createEngine() {
   function dispose() {
     deckManager.dispose()
     signalChain.dispose()
+    masterOutput.dispose()
     analyserBridge.dispose()
     instance = null
   }
