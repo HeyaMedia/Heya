@@ -615,8 +615,10 @@ function mixArtistImages(mix: Mix): string[] {
 
   const urls: string[] = []
   const seen = new Set<string>()
-  for (const ref of refs) {
-    for (const url of [useBackdropUrl(ref), usePosterUrl(ref)]) {
+  // Named `entry`, not `ref` — a local binding called `ref` makes unimport
+  // skip injecting Vue's ref import for the whole file (prod-only crash).
+  for (const entry of refs) {
+    for (const url of [useBackdropUrl(entry), usePosterUrl(entry)]) {
       if (!url || seen.has(url)) continue
       seen.add(url)
       urls.push(url)
