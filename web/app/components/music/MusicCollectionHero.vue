@@ -12,9 +12,6 @@
   local fallback); this component only consumes the vars.
 
   Slots:
-    #art      — content of the square record-card (LoadingImage /
-                MixCollage / fallback icon). The card provides the
-                gradient placeholder + shadow.
     #stats    — the mono metaline under the title.
     #actions  — the action buttons row (.btn-play / .pill markup).
 -->
@@ -41,9 +38,6 @@
     </div>
 
     <div class="mch-inner">
-      <div class="mch-card">
-        <slot name="art" />
-      </div>
       <div class="mch-meta">
         <div class="eyebrow">{{ kind }}</div>
         <h1 class="m-title">{{ title }}</h1>
@@ -169,27 +163,7 @@ function openLightbox() {
   padding: 92px var(--pad-fluid) 36px;
 }
 
-/* Square record-card — same directional shadow as the album postercard. */
-.mch-card {
-  flex: 0 0 200px;
-  width: 200px;
-  height: 200px;
-  border-radius: var(--r-md);
-  /* Accent-derived placeholder (same pair as the avatar / Loved tile). */
-  background: linear-gradient(135deg, var(--gold-deep, var(--gold)), var(--gold));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: rgba(255, 255, 255, 0.9); /* icon on the generated placeholder art — stays literal */
-  overflow: hidden;
-  box-shadow:
-    0 0 0 1px rgb(var(--oink) / 0.14),
-    10px 18px 34px -12px rgb(0 0 0 / 0.8),
-    24px 44px 90px -20px rgb(0 0 0 / 0.95);
-}
-.mch-card :deep(img) { width: 100%; height: 100%; object-fit: cover; }
-
-.mch-meta { flex: 1; min-width: 0; }
+.mch-meta { flex: 1; min-width: 0; text-align: left; }
 
 /* mono eyebrow — complement-colored over the dark grade (artist grammar). */
 .eyebrow {
@@ -230,17 +204,21 @@ function openLightbox() {
 
 .m-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 
-/* Phone (<=720px): stack the hero, center the art, wrap the action row. */
+/* Phone (<=720px): reserve a sharp-art window, then center the identity. */
 @media (max-width: 720px) {
   .mch { min-height: 0; }
   .mch-inner {
     flex-direction: column;
     align-items: center;
     text-align: center;
-    padding: 24px 20px 20px;
+    padding: clamp(150px, 24vh, 210px) 20px 20px;
     gap: 14px;
   }
-  .mch-card { flex-basis: auto; width: min(55vw, 240px); height: min(55vw, 240px); }
+  /* The header ends immediately after the actions, so all spare sharp-art
+     space remains above the identity instead of becoming a dead field below. */
+  .mch-inner .mch-meta { text-align: center; }
+  .mch-inner .mch-stats,
+  .mch-inner .m-actions { justify-content: center; }
   .mch-meta { width: 100%; }
   .mch-stats { justify-content: center; }
   .m-actions { justify-content: center; }
@@ -317,5 +295,10 @@ function openLightbox() {
   .mch .btn-play { flex: 1 1 100%; justify-content: center; height: 48px; }
   .mch .pill:not(.icon) { flex: 1 1 auto; justify-content: center; height: 46px; }
   .mch .pill.icon { width: 46px; height: 46px; }
+  .mch .collection-half {
+    flex: 1 1 calc(50% - 5px);
+    min-width: 0;
+    justify-content: center;
+  }
 }
 </style>

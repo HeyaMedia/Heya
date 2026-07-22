@@ -8,15 +8,6 @@
         @create-playlist="createOpen = true"
       />
       <main class="music-main scroll">
-        <!-- Phone-only compact header for named library sections. Detail routes
-             resolve to the generic "Music" fallback, which adds no context and
-             is deliberately omitted so their hero can begin immediately. The
-             nav itself opens from AppTopBar's standardized section trigger. -->
-        <div v-if="isPhone && phoneSectionTitle !== 'Music'" class="music-phone-header">
-          <!-- The title doubles as "back to music home" — same destination
-               as the bottom nav's Music tab, one fewer reach. -->
-          <NuxtLink to="/music" class="mph-title">{{ phoneSectionTitle }}</NuxtLink>
-        </div>
         <NuxtPage />
       </main>
       <!-- QueuePanel handles its own compact-band overlay styling internally
@@ -109,39 +100,6 @@ const playlistsApi = usePlaylists()
 if (import.meta.client) playlistsApi.ensureLoaded()
 const sidebarPlaylists = playlistsApi.sidebarRows
 
-// Phone-only compact header title — same section keys as the sidebar
-// highlight above, mapped to a human label. Playlist sections look up the
-// name from sidebarPlaylists since the key only carries the id.
-const SECTION_TITLES: Record<string, string> = {
-  home: 'Home',
-  library: 'Library',
-  artists: 'Artists',
-  albums: 'Albums',
-  songs: 'Songs',
-  loved: 'Loved Songs',
-  my: 'My Music',
-  'my-artists': 'My Artists',
-  'my-albums': 'My Albums',
-  'my-favorites': 'My Favorites',
-  stats: 'My Sound',
-  stations: 'Stations',
-  'stations-mixes': 'Mixes',
-  'stations-builder': 'Mix Builder',
-  podcasts: 'Podcasts',
-  radio: 'Internet Radio',
-}
-const phoneSectionTitle = computed(() => {
-  const s = currentSection.value
-  if (s in SECTION_TITLES) return SECTION_TITLES[s]
-  if (s?.startsWith('browse')) return 'Browse'
-  if (s?.startsWith('playlist-')) {
-    // URL segment is the slug now (numeric id still resolves for old links).
-    const playlistRef = s.slice('playlist-'.length)
-    return sidebarPlaylists.value.find((p) => p.slug === playlistRef || String(p.id) === playlistRef)?.name ?? 'Playlist'
-  }
-  return 'Music'
-})
-
 function onCreated(row: { id: number; slug: string }) {
   // Jump to the new playlist so the user lands on something concrete.
   router.push(`/music/playlist/${row.slug || row.id}`)
@@ -178,21 +136,4 @@ function onCreated(row: { id: number; slug: string }) {
   padding-top: calc(var(--topbar-h) + 16px);
 }
 
-/* Phone-only compact header — replaces MusicSidebar's persistent presence
-   with a section title (the nav opens from AppTopBar's burger). */
-.music-phone-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px 10px;
-}
-.mph-title {
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--fg-0);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 </style>

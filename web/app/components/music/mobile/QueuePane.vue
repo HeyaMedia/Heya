@@ -794,7 +794,7 @@ onScopeDispose(() => {
 .qp-mobile-autoplay-copy { flex: 1; min-width: 0; }
 .qp-mobile-autoplay-title { font-size: 12px; font-weight: 650; color: var(--fg-0); }
 .qp-mobile-autoplay-hint { margin-top: 2px; font-size: 10px; color: var(--fg-3); }
-.qp-chip {
+.qp-root .qp-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -807,7 +807,7 @@ onScopeDispose(() => {
   font-size: 12px;
   cursor: pointer;
 }
-.qp-chip.active { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 40%, transparent); background: var(--gold-soft); }
+.qp-root .qp-chip.active { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 40%, transparent); background: var(--gold-soft); }
 .qp-clear {
   margin-left: auto;
   height: 36px;

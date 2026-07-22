@@ -463,13 +463,13 @@ if (import.meta.client) {
             <button class="btn-play" :disabled="!albumPlayable" @click="playAll(false)">
               <span class="tri" /> Play
             </button>
-            <button class="pill" :disabled="!albumPlayable" @click="playAll(true)">
+            <button class="pill album-secondary-action" :disabled="!albumPlayable" @click="playAll(true)">
               <Icon name="shuffle" :size="15" /> Shuffle
             </button>
-            <button class="pill" :disabled="!albumPlayable" @click="queueAll">
+            <button class="pill album-secondary-action" :disabled="!albumPlayable" @click="queueAll">
               <Icon name="plus" :size="15" /> Add to queue
             </button>
-            <button class="pill" :disabled="radio.starting.value || !albumPlayable" @click="startAlbumRadio">
+            <button class="pill album-secondary-action" :disabled="radio.starting.value || !albumPlayable" @click="startAlbumRadio">
               <Icon name="radio" :size="15" /> Station
             </button>
 
@@ -1093,24 +1093,60 @@ if (import.meta.client) {
   .actions { gap: 8px; row-gap: 10px; }
   .btn-play { flex: 1 1 100%; justify-content: center; height: 48px; }
   .pill:not(.icon) { flex: 1 1 auto; justify-content: center; height: 46px; }
+  .pill.album-secondary-action {
+    flex: 1 1 0;
+    min-width: 0;
+    gap: 5px;
+    padding-inline: 7px;
+    font-size: clamp(10px, 3vw, 12px);
+    white-space: nowrap;
+  }
   .pill.icon { width: 46px; height: 46px; }
   /* Album rating + metadata editor are desktop-sized affordances — the rows'
      ⋯ ActionSheet carries React + Track info on phone instead. */
   .hero-rating { display: none; }
   .hero-edit { display: none; }
-  .hero-ext { display: flex; justify-content: center; }
+  .hero-ext { display: none; }
 
   /* Track rows: drop the inline rating (ate the title at 390px) → ⋯ sheet
-     carries React. Album drops onto its own line under the title. */
+     carries React. Match Popular Tracks' two-line mobile ledger: the number,
+     duration, and menu span both lines while quality sits under the title. */
   .trk {
-    grid-template-columns: 34px minmax(0, 1fr) 60px 40px;
-    gap: 10px;
-    padding: 8px 4px;
-    min-height: 52px;
+    grid-template-columns: 30px minmax(0, 1fr) max-content 40px;
+    grid-template-rows: auto auto;
+    gap: 0 8px;
+    padding: 9px 0;
+    min-height: 58px;
   }
   .trk-stars { display: none; }
-  .trk-d { grid-column: 3; }
-  .trk-more { grid-column: 4; opacity: 1; width: 40px; height: 40px; }
+  .trk-n {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+  .trk-meta { display: contents; }
+  .trk-t {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: end;
+  }
+  .trk-q {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: start;
+    min-width: 0;
+    margin-top: -1px;
+  }
+  .trk-d {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+  .trk-more {
+    grid-column: 4;
+    grid-row: 1 / span 2;
+    opacity: 1;
+    width: 40px;
+    height: 40px;
+  }
 }
 
 /* ── About / review prose (artist-page .prose vocabulary) ── */

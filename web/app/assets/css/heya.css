@@ -546,6 +546,7 @@ a { color: inherit; text-decoration: none; }
    stacking context, so a background on it would paint OVER the layer. */
 .app {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   /* Topbar is NO LONGER a grid row — it's lifted out of flow into a fixed
      glass overlay (see AppTopBar.vue `.topbar`) so hero art and page content
      scroll UNDER it. The main region therefore spans the full viewport
@@ -592,6 +593,11 @@ a { color: inherit; text-decoration: none; }
 
 .app-main {
   position: relative;
+  /* Grid items default to min-width:auto, which lets a rich TrackList's
+     intrinsic desktop columns widen the whole app past the viewport around
+     the sidebar breakpoint. The scroll child already owns horizontal
+     containment, so the grid item itself must be allowed to shrink. */
+  min-width: 0;
   overflow: hidden;
   /* The fixed glass topbar overlays the top --topbar-h of the viewport; this
      border-box padding starts ordinary (non-hero) page content just below it

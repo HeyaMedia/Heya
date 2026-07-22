@@ -31,7 +31,7 @@
 
     <div class="page-pad mh-body">
 
-    <!-- 1. Mixes for You — Heya 2.0 gradient .mix-card tiles. The first three
+    <!-- 1. Mixes for You — square, artist-led ultrablur tiles. The first three
          shelves are above the fold, so they hold their height with skeleton
          tiles on a cold cache instead of popping in and shoving the page. -->
     <MusicScrollRow
@@ -56,9 +56,8 @@
       >
         <MusicMixCard
           :name="mix.name"
-          :track-count="mix.tracks.length"
-          :artists="mixArtistsLine(mix)"
-          :gradient="mixGradient(mix.name)"
+          :images="mixArtistImages(mix)"
+          :artists="mixArtistNames(mix)"
           :no-play="mix.tracks.length === 0"
           @play="playMix(mix)"
         />
@@ -575,20 +574,16 @@ function formatLapsed(a: LapsedArtist) {
   return 'a while ago — back to'
 }
 
-// Deterministic gradient per mix name (never random at render — the mockup's
-// .mix-card colour idiom). Hash → hue, two analogous stops. hsl() is computed
-// (not a static literal); dark ink over it is token-clean via --shade.
-function mixGradient(name: string): string {
-  let h = 2166136261
-  for (let i = 0; i < name.length; i++) { h ^= name.charCodeAt(i); h = Math.imul(h, 16777619) }
-  const hue = (h >>> 0) % 360
-  const hue2 = (hue + 42) % 360
-  return `linear-gradient(135deg, hsl(${hue} 66% 60%), hsl(${hue2} 74% 73%))`
-}
-// Seed-artist line for a mix: distinct track artists (top 3), uppercased.
-function mixArtistsLine(mix: Mix): string {
+// Representative artist labels for the bottom chips: distinct track artists
+// in mix order, with the explicit seed as a fallback.
+function mixArtistNames(mix: Mix): string[] {
   const seen = new Set<string>()
   const names: string[] = []
+  const seed = mix.seed_artist_name?.trim()
+  if (seed) {
+    seen.add(seed.toLowerCase())
+    names.push(seed)
+  }
   for (const t of mix.tracks) {
     const n = t.artist_name?.trim()
     if (!n || seen.has(n.toLowerCase())) continue
@@ -596,8 +591,38 @@ function mixArtistsLine(mix: Mix): string {
     names.push(n)
     if (names.length >= 3) break
   }
-  if (!names.length && mix.seed_artist_name) names.push(mix.seed_artist_name)
-  return names.join(' · ').toUpperCase()
+  return names
+}
+
+// Deterministically choose one of the mix's artists, then try each artist's
+// backdrop and poster. The explicit seed leads when available; remaining
+// artists are rotated by the mix hash so adjacent cards don't all inherit the
+// first track's artwork. MusicMixCard advances through this list on 404/error.
+function mixArtistImages(mix: Mix): string[] {
+  const refs: Array<number | string | { id?: number; public_id?: string }> = []
+  if (mix.seed_artist_media_item_id) {
+    refs.push({
+      id: mix.seed_artist_media_item_id,
+      public_id: mix.seed_artist_media_item_public_id,
+    })
+  }
+
+  const slugs = [...new Set(mix.tracks.map(track => track.artist_slug).filter(Boolean))].slice(0, 3)
+  if (slugs.length) {
+    const start = musicUltrablurHash(mix.slug || mix.name) % slugs.length
+    for (let i = 0; i < slugs.length; i++) refs.push(slugs[(start + i) % slugs.length]!)
+  }
+
+  const urls: string[] = []
+  const seen = new Set<string>()
+  for (const ref of refs) {
+    for (const url of [useBackdropUrl(ref), usePosterUrl(ref)]) {
+      if (!url || seen.has(url)) continue
+      seen.add(url)
+      urls.push(url)
+    }
+  }
+  return urls
 }
 
 const { play, queue, playTracks, setSimilarAutoplayEnabled } = usePlayerBindings()

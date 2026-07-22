@@ -116,13 +116,13 @@
               </div>
             </div>
 
-            <button class="pill" :disabled="!artistPlayable" @click="playAll(true)">
+            <button class="pill artist-secondary-action" :disabled="!artistPlayable" @click="playAll(true)">
               <Icon name="shuffle" :size="15" /> Shuffle
             </button>
-            <button class="pill" :disabled="!artistPlayable" @click="addAllToQueue">
+            <button class="pill artist-secondary-action" :disabled="!artistPlayable" @click="addAllToQueue">
               <Icon name="plus" :size="15" /> Add to queue
             </button>
-            <button class="pill" :disabled="radio.starting.value || !artistPlayable" @click="startArtistRadio">
+            <button class="pill artist-secondary-action" :disabled="radio.starting.value || !artistPlayable" @click="startArtistRadio">
               <Icon name="radio" :size="15" /> Station
             </button>
 
@@ -1783,6 +1783,14 @@ a.trk-al:hover { color: var(--tone); }
     padding-inline: 7px;
   }
   .pill:not(.icon) { flex: 1 1 auto; justify-content: center; height: 46px; }
+  .pill.artist-secondary-action {
+    flex: 1 1 0;
+    min-width: 0;
+    gap: 5px;
+    padding-inline: 7px;
+    font-size: clamp(10px, 3vw, 12px);
+    white-space: nowrap;
+  }
   .pill.icon { width: 46px; height: 46px; }
   /* Metadata editor is a desktop-sized surface — no phone entry point. */
   .hero-edit { display: none; }

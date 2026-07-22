@@ -9,38 +9,37 @@
   <!-- Tone-follow: every descendant (hero buttons, ledger tone cells)
        inherits --tone/--tone-rgb/--tone-ink published here. -->
   <div v-else class="pl-page" :style="toneStyle">
-    <!-- Shared collection hero (MusicCollectionHero owns the ambient-extended
-         convention — with ambient ON the app's background layer rotates
-         through this playlist's artists and the hero paints nothing). -->
-    <MusicCollectionHero
+    <MusicCollectionDetail
       kind="Playlist"
       :title="pl.name"
       :description="plainDescription"
       :images="artistArtUrls"
       :backdrop="backdropSrc"
+      :ledger-cells="ledgerCells"
+      :tracks="tlRows"
+      :columns="columns"
+      storage-key="playlist"
+      :context-items="contextItemsFor"
+      :active-track-id="currentTrack?.id ?? null"
+      :playing="playing"
+      vu-meter-in="art"
+      :duration-formatter="formatTime"
+      :on-rating-change="onRatingChange"
+      :virtualized="tlRows.length > 200"
+      :tracks-meta="`${tracks.length} ${tracks.length === 1 ? 'track' : 'tracks'}`"
       @image="currentBgArt = $event"
+      @row-click="playFrom"
     >
-      <template #art>
-        <!-- Cover: the user's uploaded image when set; otherwise a collage
-             built from the playlist's own albums (MixCollage dedupes to 4,
-             falls back to the first album cover, then the icon tile).
-             @art reports the image the collage ACTUALLY rendered (post
-             error-cascade) — the tone sampler follows it, never a candidate
-             URL that may 404. -->
-        <LoadingImage v-if="customCoverUrl" :src="customCoverUrl" :width="400" :quality="85" :alt="`${pl.name} cover`" />
-        <MixCollage v-else-if="tracks.length" :tracks="tracks" :seed-src="firstAlbumCover" :alt="`${pl.name} cover`" class="pl-hero-collage" @art="collageArt = $event" />
-        <Icon v-else name="heart" :size="48" />
-      </template>
       <template #stats>
         <span>{{ tracks.length }} {{ tracks.length === 1 ? 'track' : 'tracks' }}</span>
         <span v-if="totalDuration > 0" class="dot">·</span>
         <span v-if="totalDuration > 0">{{ formatRunTime(totalDuration) }}</span>
       </template>
       <template #actions>
-        <button class="btn-play" :disabled="!tracks.length" @click="playAll(false)">
+        <button class="btn-play collection-half" :disabled="!tracks.length" @click="playAll(false)">
           <span class="tri" /> Play <small>{{ tracks.length }} {{ tracks.length === 1 ? 'TRACK' : 'TRACKS' }}</small>
         </button>
-        <button class="pill" :disabled="!tracks.length" @click="playAll(true)">
+        <button class="pill collection-half" :disabled="!tracks.length" @click="playAll(true)">
           <Icon name="shuffle" :size="15" /> Shuffle
         </button>
         <button class="pill" :disabled="syncBusy" @click="playlistSyncAction">
@@ -66,41 +65,14 @@
              as the metadata editor's artwork upload). -->
         <input ref="coverInput" type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" class="pl-cover-input" @change="onCoverPicked" />
       </template>
-    </MusicCollectionHero>
-
-    <!-- The Heya 2.0 spec strip at the hero's hard-clip seam — same element
-         the album/artist detail pages carry. -->
-    <LedgerStrip :cells="ledgerCells" />
-
-    <section v-if="!tracks.length" class="page-pad">
-      <MusicEmptyState icon="music" title="This playlist is empty" compact>
-        Right-click any track (long-press on touch) and pick
-        <strong>Add to playlist</strong> — from <NuxtLink to="/music/songs">All Songs</NuxtLink>,
-        an album, or search.
-      </MusicEmptyState>
-    </section>
-
-    <!-- One TrackList for every width — the shared component brings the
-         glass panel, phone layout, virtualization (page-mode RecycleScroller
-         for thousand-track playlists), drag, and the context/action sheet.
-         The playlist extras (Added date, per-row remove) ride the
-         kind:'custom' cell slots; on phone those columns don't render and
-         Remove lives in the row's ⋯ sheet via contextItemsFor. -->
-    <section v-else class="page-pad pl-tracks">
-      <TrackList
-        :tracks="tlRows"
-        :columns="columns"
-        storage-key="playlist"
-        :context-items="contextItemsFor"
-        :active-track-id="currentTrack?.id ?? null"
-        :playing="playing"
-        vu-meter-in="art"
-        :duration-formatter="formatTime"
-        :on-rating-change="onRatingChange"
-        :virtualized="tlRows.length > 200"
-        @row-click="playFrom"
-      >
-        <template #cell-remove="{ index }">
+      <template #empty>
+        <MusicEmptyState icon="music" title="This playlist is empty" compact>
+          Right-click any track (long-press on touch) and pick
+          <strong>Add to playlist</strong> — from <NuxtLink to="/music/songs">All Songs</NuxtLink>,
+          an album, or search.
+        </MusicEmptyState>
+      </template>
+      <template #cell-remove="{ index }">
           <button
             type="button"
             class="pl-remove"
@@ -110,9 +82,8 @@
           >
             <Icon name="close" :size="14" />
           </button>
-        </template>
-      </TrackList>
-    </section>
+      </template>
+    </MusicCollectionDetail>
 
     <!-- Edit details — rename regenerates the slug server-side; we re-route
          to the new URL after saving so the address always mirrors the name. -->
@@ -220,11 +191,9 @@ const firstAlbumCover = computed(() => {
   const first = tracks.value[0]
   return first ? useAlbumCoverUrl(first.artist_slug, first.album_slug) : null
 })
-// What MixCollage ACTUALLY rendered (post error-cascade) — null until its
-// first image lands or when it fell through to the icon tile.
-const collageArt = ref<string | null>(null)
-// The blurred hero backdrop (ambient-off mode) follows the healed art too.
-const backdropSrc = computed(() => customCoverUrl.value || collageArt.value || firstAlbumCover.value)
+// The custom cover remains useful as the full-bleed fallback even though
+// playlist pages no longer repeat it in a square card above the metadata.
+const backdropSrc = computed(() => customCoverUrl.value || firstAlbumCover.value)
 
 // ── Ledger strip — playlist facts from the (fully loaded) tracklist ────
 const LOSSLESS_FORMATS = new Set(['flac', 'alac', 'wav', 'aiff'])
@@ -258,7 +227,7 @@ const currentBgArt = ref<string | null>(null)
 const bgTone = useBackgroundTone()
 const localTone = ref<ImageTone | null>(null)
 let toneSeq = 0
-watch(() => currentBgArt.value || customCoverUrl.value || collageArt.value, (src) => {
+watch(() => currentBgArt.value || customCoverUrl.value || firstAlbumCover.value, (src) => {
   const seq = ++toneSeq
   if (!src || !import.meta.client) { localTone.value = null; return }
   sampleImageTone(src).then((t) => {
@@ -528,7 +497,7 @@ async function onDelete() {
 </script>
 
 <style scoped>
-.pl-page { padding-bottom: 80px; }
+.pl-page { padding-bottom: 0; }
 .pl-sync-heading { margin-top: 6px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--fg-0); font-size: 12px; font-weight: 650; }
 .pl-sync-service { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 11px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-2); }
 .pl-sync-service > div:first-child { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -538,14 +507,11 @@ async function onDelete() {
 .pl-sync-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 .m-loading { color: var(--fg-2); padding: 32px 40px; font-size: 13px; text-shadow: 0 0 12px var(--bg-1), 0 1px 3px var(--bg-1); }
 
-/* Hero grammar lives in MusicCollectionHero now — this page keeps only its
-   own extras (collage flattening, hidden file input, tracklist cells). */
-/* The collage manages its own radius/shadow — flatten inside the frame. */
-.pl-hero-collage { width: 100%; height: 100%; border-radius: 0; box-shadow: none; }
+/* Hero/list grammar lives in MusicCollectionDetail; this page keeps only
+   playlist-specific controls and cells. */
 .dot { color: var(--fg-3); }
 .pl-cover-input { display: none; }
 
-.pl-tracks { padding-top: 24px; }
 /* Playlist-specific cells inside the shared TrackList — the glass panel,
    grid, and row chrome all come from TrackList itself. Scoped rules reach
    this content because it renders through OUR cell-slot templates. */

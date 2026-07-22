@@ -2,20 +2,30 @@
   <!-- Tone-follow: every descendant (hero buttons, ledger tone cells)
        inherits --tone/--tone-rgb/--tone-ink published here. -->
   <div class="ml" :style="toneStyle">
-    <!-- Shared collection hero — same grammar as the playlist detail page:
-         collage art from the loved tracks' albums, display title, stats
-         line, Play/Shuffle. -->
-    <MusicCollectionHero
+    <MusicCollectionDetail
       kind="Collection"
       title="Loved Songs"
       :images="artistArtUrls"
-      :backdrop="collageArt"
+      :backdrop="firstAlbumCover"
+      :ledger-cells="ledgerCells"
+      :ledger-pending="pending"
+      :tracks="tlRows"
+      :tracks-pending="pending"
+      :tracks-meta="`${(total ?? 0).toLocaleString()} ${(total ?? 0) === 1 ? 'track' : 'tracks'}`"
+      :columns="columns"
+      storage-key="loved"
+      :context-items="contextItemsFor"
+      :active-track-id="activeTrackId"
+      :playing="playing"
+      vu-meter-in="art"
+      :art-play-icon-size="13"
+      :duration-formatter="formatTime"
+      :on-rating-change="onRatingChange"
+      virtualized
       @image="currentBgArt = $event"
+      @row-click="playFrom"
+      @range="ensureRange"
     >
-      <template #art>
-        <MixCollage v-if="collageTracks.length" :tracks="collageTracks" :alt="'Loved Songs collage'" class="ml-hero-collage" @art="collageArt = $event" />
-        <Icon v-else name="heartfill" :size="48" />
-      </template>
       <template #stats>
         <span>{{ (total ?? 0).toLocaleString() }} {{ (total ?? 0) === 1 ? 'track' : 'tracks' }}</span>
         <template v-if="stats && stats.total_duration > 0">
@@ -24,46 +34,22 @@
         </template>
       </template>
       <template #actions>
-        <button class="btn-play" :disabled="!total" @click="playAll(false)">
+        <button class="btn-play collection-half" :disabled="!total" @click="playAll(false)">
           <span class="tri" /> Play <small>{{ (total ?? 0).toLocaleString() }} {{ (total ?? 0) === 1 ? 'TRACK' : 'TRACKS' }}</small>
         </button>
-        <button class="pill" :disabled="!total" @click="playAll(true)">
+        <button class="pill collection-half" :disabled="!total" @click="playAll(true)">
           <Icon name="shuffle" :size="15" /> Shuffle
         </button>
       </template>
-    </MusicCollectionHero>
-
-    <!-- The Heya 2.0 spec strip at the hero's hard-clip seam. -->
-    <LedgerStrip :cells="ledgerCells" :pending="pending" />
-
-    <div v-if="pending" class="ml-loading page-pad">Loading…</div>
-
-    <div v-else-if="!total" class="ml-empty page-pad">
-      <Icon name="star" :size="40" />
-      <h3>No loved tracks yet</h3>
-      <p>Heart or thumbs-up a track from the <NuxtLink to="/music/songs">Songs page</NuxtLink>, the player, or an album page. It'll appear here as soon as you love something.</p>
-    </div>
-
-    <!-- Sparse full-length list — the scrollbar spans every loved track;
-         pages stream in wherever it's dragged. Rich optional columns
-         (plays, bitrate, BPM, key, …) ride the column picker. -->
-    <section v-else class="page-pad ml-tracks">
-      <TrackList
-        :tracks="tlRows"
-        :columns="columns"
-        storage-key="loved"
-        :context-items="contextItemsFor"
-        :active-track-id="activeTrackId"
-        :playing="playing"
-        vu-meter-in="art"
-        :art-play-icon-size="13"
-        :duration-formatter="formatTime"
-        :on-rating-change="onRatingChange"
-        virtualized
-        @row-click="playFrom"
-        @range="ensureRange"
-      />
-    </section>
+      <template #loading>Loading…</template>
+      <template #empty>
+        <div class="ml-empty">
+          <Icon name="star" :size="40" />
+          <h3>No loved tracks yet</h3>
+          <p>Heart or thumbs-up a track from the <NuxtLink to="/music/songs">Songs page</NuxtLink>, the player, or an album page. It'll appear here as soon as you love something.</p>
+        </div>
+      </template>
+    </MusicCollectionDetail>
   </div>
 </template>
 
@@ -166,19 +152,13 @@ const ledgerCells = computed<LedgerCell[]>(() => {
 })
 
 // ── Hero art + tone-follow ───────────────────────────────────────────
-// Collage candidates: the first loaded rows' (artist, album) pairs.
-// Re-computes as pages stream in; MixCollage dedupes to 4.
-const collageTracks = computed(() => {
-  const out: Array<{ artist_slug: string; album_slug: string }> = []
-  const n = Math.min(total.value ?? 0, 50)
-  for (let i = 0; i < n; i++) {
-    const t = itemAt(i)
-    if (t) out.push({ artist_slug: t.artist_slug, album_slug: t.album_slug })
-    if (out.length >= 16) break
-  }
-  return out
+// Album art is only a fallback for the full-bleed background now; the
+// foreground collage was intentionally removed to keep collection heroes
+// focused on their title and actions.
+const firstAlbumCover = computed(() => {
+  const first = itemAt(0)
+  return first ? useAlbumCoverUrl(first.artist_slug, first.album_slug) : null
 })
-const collageArt = ref<string | null>(null)
 
 // Current hero image (declared ahead of the tone watch below, which reads
 // it with immediate: true). Driven by the rotation block further down.
@@ -191,7 +171,7 @@ const currentBgArt = ref<string | null>(null)
 const bgTone = useBackgroundTone()
 const localTone = ref<ImageTone | null>(null)
 let toneSeq = 0
-watch(() => currentBgArt.value || collageArt.value, (src) => {
+watch(() => currentBgArt.value || firstAlbumCover.value, (src) => {
   const seq = ++toneSeq
   if (!src || !import.meta.client) { localTone.value = null; return }
   sampleImageTone(src).then((t) => {
@@ -334,16 +314,10 @@ async function playFrom(i: number) {
 </script>
 
 <style scoped>
-.ml { padding-bottom: 80px; }
+.ml { padding-bottom: 0; }
 
 .dot { opacity: 0.4; }
 
-/* The collage manages its own radius/shadow — flatten inside the frame. */
-.ml-hero-collage { width: 100%; height: 100%; border-radius: 0; box-shadow: none; }
-
-.ml-tracks { padding-top: 24px; }
-
-.ml-loading { color: var(--fg-3); font-size: 13px; padding: 40px 0; text-align: center; }
 .ml-empty {
   text-align: center; padding: 80px 20px; color: var(--fg-3);
 }
