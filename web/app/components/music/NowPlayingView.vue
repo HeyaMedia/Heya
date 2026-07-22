@@ -84,7 +84,7 @@
             <span class="np-time">{{ formatTime(duration) }}</span>
           </div>
           <div class="np-controls">
-            <button class="np-icon" :class="{ active: shuffled }" :aria-pressed="shuffled" aria-label="Shuffle" @click="toggleShuffle" title="Shuffle">
+            <button class="np-icon" :class="{ active: shuffled }" :disabled="djMode !== 'off'" :aria-pressed="shuffled" aria-label="Shuffle" @click="toggleShuffle" :title="djMode !== 'off' ? 'Turn off the DJ to change shuffle' : 'Shuffle'">
               <Icon name="shuffle" :size="18" />
             </button>
             <button class="np-icon" aria-label="Previous" @click="prevTrack" title="Previous">
@@ -102,6 +102,7 @@
             </button>
           </div>
           <div class="np-sidekicks">
+            <DJMenu v-if="track" :icon-size="18" />
             <div v-if="track" class="np-rate" @click.stop>
               <ReactionControl
                 :model-value="ratings.get(track.id) ?? 0"
@@ -122,10 +123,10 @@
             <button
               v-if="track"
               class="np-icon"
-              aria-label="DJ mix (harmonically-compatible tracks)"
+              aria-label="Harmonic mix"
               @click="startDJMixHere"
               :disabled="radio.starting.value"
-              title="DJ mix (harmonically-compatible tracks)"
+              title="Harmonic mix"
             >
               <Icon name="shuffle" :size="18" />
             </button>
@@ -171,7 +172,7 @@ defineEmits<{ close: [] }>()
 
 const {
   playing, currentTrack, position, duration, volume, muted,
-  shuffled, repeatMode,
+  shuffled, repeatMode, djMode,
   togglePlay, seek, setVolume, toggleMute, toggleShuffle, cycleRepeat,
   nextTrack, prevTrack, formatTime, toggleQueue,
 } = usePlayerBindings()
@@ -546,6 +547,7 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
   gap: 8px;
   grid-column: 3;
 }
+.np-sidekicks :deep(.dj-trigger-icon) { width: 42px; height: 42px; }
 .np-volume { display: flex; align-items: center; gap: 6px; }
 
 .np-icon {
@@ -564,6 +566,7 @@ useEventListener(window, 'keydown', (e: KeyboardEvent) => {
 }
 .np-icon:hover { background: rgba(255, 255, 255, 0.07); color: var(--fg-0); } /* floating over the backdrop art — stays literal */
 .np-icon.active { color: var(--gold); }
+.np-icon:disabled { opacity: 0.35; cursor: default; }
 .np-play {
   width: 60px;
   height: 60px;

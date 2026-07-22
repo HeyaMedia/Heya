@@ -30,6 +30,8 @@
       </div>
     </div>
 
+    <DJMenu variant="mini" />
+
     <div class="mp-controls">
       <button
         type="button"
@@ -155,10 +157,12 @@ onScopeDispose(() => {
 
 .mp-art,
 .mp-info,
+.mini-player :deep(.dj-trigger),
 .mp-controls {
   position: relative;
   z-index: 2;
 }
+.mini-player :deep(.dj-trigger) { flex-shrink: 0; }
 
 .mp-ultrablur { z-index: 0; }
 

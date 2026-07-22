@@ -168,10 +168,11 @@
           <button type="button" class="nps-sicon" aria-label="Queue" @click="scrollToQueue">
             <Icon name="queue" :size="20" />
           </button>
+          <DJMenu :icon-size="20" />
           <button type="button" class="nps-sicon" :class="{ active: showLyrics }" aria-label="Lyrics" :aria-pressed="showLyrics" @click="showLyrics = !showLyrics">
             <Icon name="lyrics" :size="20" />
           </button>
-          <button type="button" class="nps-sicon" :class="{ active: shuffled }" aria-label="Shuffle" :aria-pressed="shuffled" @click="toggleShuffle">
+          <button type="button" class="nps-sicon" :class="{ active: shuffled }" :disabled="djMode !== 'off'" aria-label="Shuffle" :aria-pressed="shuffled" @click="toggleShuffle">
             <Icon name="shuffle" :size="20" />
           </button>
           <button type="button" class="nps-sicon" :class="{ active: repeatMode !== 'off' }" aria-label="Repeat" :aria-pressed="repeatMode !== 'off'" @click="cycleRepeat">
@@ -205,7 +206,7 @@ const open = defineModel<boolean>('open', { default: false })
 
 const {
   currentTrack, playing, position, duration,
-  shuffled, repeatMode, volume, muted,
+  shuffled, repeatMode, djMode, volume, muted,
   togglePlay, seek, stop, setVolume, toggleMute,
   toggleShuffle, cycleRepeat, nextTrack, prevTrack, formatTime,
 } = usePlayerBindings()
@@ -812,6 +813,7 @@ body:has(.nps-ultrablur) .app-sheet-overlay {
   margin: 0 auto;
   padding-bottom: 4px;
 }
+.nps-secondary .dj-trigger-icon { width: 48px; height: 48px; }
 .nps-sicon {
   width: 48px;
   height: 48px;
@@ -827,6 +829,7 @@ body:has(.nps-ultrablur) .app-sheet-overlay {
 }
 .nps-sicon:active { background: rgb(var(--ink) / 0.08); }
 .nps-sicon.active { color: var(--gold); }
+.nps-sicon:disabled { opacity: 0.35; cursor: default; }
 
 /* Bottom-of-pane hint that the queue lives one swipe below. */
 .nps-queue-hint {

@@ -71,8 +71,8 @@
     <!-- Center: controls + scrubber -->
     <div class="pb-center">
       <div class="pb-controls">
-        <AppTooltip :label="shuffled ? 'Shuffle on' : 'Shuffle'">
-          <button class="btn-icon" :class="{ active: shuffled }" :aria-pressed="shuffled" @click="toggleShuffle">
+        <AppTooltip :label="djMode !== 'off' ? 'Turn off the DJ to change shuffle' : shuffled ? 'Shuffle on' : 'Shuffle'">
+          <button class="btn-icon" :class="{ active: shuffled }" :disabled="djMode !== 'off'" :aria-pressed="shuffled" @click="toggleShuffle">
             <Icon name="shuffle" :size="16" />
           </button>
         </AppTooltip>
@@ -142,6 +142,7 @@
          mounted side effects (SleepTimer's 1Hz interval, PlaybarQuality's
          popover state) never double-mount. -->
     <div v-if="!isCompact" class="pb-right">
+      <DJMenu v-if="currentTrack" :icon-size="16" />
       <ReactionControl
         v-if="currentTrack"
         :model-value="ratings.get(currentTrack.id) ?? 0"
@@ -187,6 +188,7 @@
       </AppTooltip>
     </div>
     <div v-else class="pb-right">
+      <DJMenu v-if="currentTrack" :icon-size="16" />
       <AppTooltip label="Queue">
         <button class="btn-icon" :class="{ active: queueOpen && sideTab === 'queue' }" @click="toggleQueue"><Icon name="queue" :size="16" /></button>
       </AppTooltip>
@@ -294,7 +296,7 @@
 <script setup lang="ts">
 const {
   playing, currentTrack, position, duration, volume, muted,
-  shuffled, repeatMode, queueOpen, sideTab,
+  shuffled, repeatMode, djMode, queueOpen, sideTab,
   togglePlay, seek, setVolume, toggleMute, toggleShuffle,
   cycleRepeat, nextTrack, prevTrack, stop, pause,
   toggleQueue, toggleLyrics, formatTime,

@@ -1030,14 +1030,19 @@ type PlayQueue struct {
 	ActiveOutput    string             `json:"active_output"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	DeviceID        string             `json:"device_id"`
+	DjMode          string             `json:"dj_mode"`
+	DjSession       int64              `json:"dj_session"`
 }
 
 type PlayQueueItem struct {
-	ID      int64 `json:"id"`
-	QueueID int64 `json:"queue_id"`
-	Ord     int64 `json:"ord"`
-	TrackID int64 `json:"track_id"`
-	SrcOrd  int32 `json:"src_ord"`
+	ID                 int64  `json:"id"`
+	QueueID            int64  `json:"queue_id"`
+	Ord                int64  `json:"ord"`
+	TrackID            int64  `json:"track_id"`
+	SrcOrd             int32  `json:"src_ord"`
+	DjSession          int64  `json:"dj_session"`
+	DjMode             string `json:"dj_mode"`
+	DjProcessedSession int64  `json:"dj_processed_session"`
 }
 
 type ProductionCompany struct {

@@ -317,4 +317,127 @@ func TestQueuesAreIsolatedPerDevice(t *testing.T) {
 	require.Equal(t, f.trackIDs[1], phone.Items[0].TrackID)
 }
 
+func TestQueueDJOwnsAndCleansOnlyGeneratedTracks(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	app := &App{db: pool}
+	userID := testutil.TestUserID(t, pool)
+	f := setupQueueFixture(t, pool, userID, "dj-encore", 5)
+	ctx := context.Background()
+
+	// Start with a deliberately short user queue while leaving more tracks by
+	// the same artist available for Encore to discover.
+	view, err := app.ReplaceQueue(ctx, userID, "dj-test", QueueSource{
+		Kind: "tracks", TrackIDs: []int64{f.trackIDs[0]},
+	}, 0, false, "local:dj-test")
+	require.NoError(t, err)
+	require.EqualValues(t, 1, view.Total)
+
+	view, err = app.SetQueueDJ(ctx, userID, "dj-test", DJModeEncore)
+	require.NoError(t, err)
+	require.Equal(t, DJModeEncore, view.DJMode)
+	require.EqualValues(t, 2, view.Total)
+	require.False(t, view.Items[0].DJGenerated)
+	require.True(t, view.Items[1].DJGenerated)
+	require.Equal(t, DJModeEncore, view.Items[1].DJMode)
+
+	// Turning it off removes the future generated item but not the user's
+	// current item. The queue remains playable at the same pointer.
+	current := view.CurrentItemID
+	view, err = app.SetQueueDJ(ctx, userID, "dj-test", DJModeOff)
+	require.NoError(t, err)
+	require.Equal(t, DJModeOff, view.DJMode)
+	require.Equal(t, current, view.CurrentItemID)
+	require.EqualValues(t, 1, view.Total)
+	require.Equal(t, f.trackIDs[0], view.Items[0].TrackID)
+}
+
+func TestQueueNonIncrementalDJDecoratesOnlyUserTracks(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	app := &App{db: pool}
+	userID := testutil.TestUserID(t, pool)
+	f := setupQueueFixture(t, pool, userID, "dj-alternate", 6)
+	ctx := context.Background()
+
+	_, err := app.ReplaceQueue(ctx, userID, "dj-test", QueueSource{
+		Kind: "tracks", TrackIDs: []int64{f.trackIDs[0], f.trackIDs[1]},
+	}, 0, false, "local:dj-test")
+	require.NoError(t, err)
+	view, err := app.SetQueueDJ(ctx, userID, "dj-test", DJModeEncore)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, view.Total)
+	require.False(t, view.Items[0].DJGenerated)
+	require.True(t, view.Items[1].DJGenerated)
+	require.False(t, view.Items[2].DJGenerated)
+
+	// Playing the generated bridge must not recursively add another bridge.
+	view, err = app.AdvanceQueue(ctx, userID, "dj-test", view.CurrentItemID, "ended")
+	require.NoError(t, err)
+	require.True(t, view.Items[view.CurrentIndex].DJGenerated)
+	require.EqualValues(t, 3, view.Total)
+
+	// The next user-owned track becomes a fresh anchor and receives exactly
+	// one Encore contribution of its own.
+	view, err = app.AdvanceQueue(ctx, userID, "dj-test", view.CurrentItemID, "ended")
+	require.NoError(t, err)
+	require.False(t, view.Items[view.CurrentIndex].DJGenerated)
+	require.EqualValues(t, 4, view.Total)
+	require.True(t, view.Items[int(view.CurrentIndex)+1].DJGenerated)
+}
+
+func TestQueueIncrementalDJMaintainsRunwayAndPreservesPlayingGeneratedItem(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	app := &App{db: pool}
+	userID := testutil.TestUserID(t, pool)
+	f := setupQueueFixture(t, pool, userID, "dj-spotlight", 7)
+	ctx := context.Background()
+
+	_, err := app.ReplaceQueue(ctx, userID, "dj-test", QueueSource{
+		Kind: "tracks", TrackIDs: []int64{f.trackIDs[0]},
+	}, 0, false, "local:dj-test")
+	require.NoError(t, err)
+	view, err := app.SetQueueDJ(ctx, userID, "dj-test", DJModeSpotlight)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, view.Total, "current plus two-track DJ runway")
+	require.True(t, view.Items[1].DJGenerated)
+	require.True(t, view.Items[2].DJGenerated)
+
+	view, err = app.AdvanceQueue(ctx, userID, "dj-test", view.CurrentItemID, "ended")
+	require.NoError(t, err)
+	require.Equal(t, DJModeSpotlight, view.DJMode)
+	require.True(t, view.Items[view.CurrentIndex].DJGenerated)
+	require.GreaterOrEqual(t, len(view.Items)-int(view.CurrentIndex)-1, 2, "runway is replenished at the boundary")
+
+	playingGenerated := view.CurrentItemID
+	view, err = app.SetQueueDJ(ctx, userID, "dj-test", DJModeOff)
+	require.NoError(t, err)
+	require.Equal(t, playingGenerated, view.CurrentItemID, "the playing DJ track is history, not disposable future work")
+	require.EqualValues(t, 2, view.Total, "original history plus the current generated track remain")
+	require.Empty(t, view.Items[int(view.CurrentIndex)+1:])
+}
+
+func TestQueueReplacementInvalidatesDJSession(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	app := &App{db: pool}
+	userID := testutil.TestUserID(t, pool)
+	f := setupQueueFixture(t, pool, userID, "dj-replace", 4)
+	ctx := context.Background()
+
+	_, err := app.ReplaceQueue(ctx, userID, "dj-test", QueueSource{
+		Kind: "tracks", TrackIDs: []int64{f.trackIDs[0]},
+	}, 0, false, "local:dj-test")
+	require.NoError(t, err)
+	_, err = app.SetQueueDJ(ctx, userID, "dj-test", DJModeEncore)
+	require.NoError(t, err)
+
+	view, err := app.ReplaceQueue(ctx, userID, "dj-test", QueueSource{
+		Kind: "tracks", TrackIDs: []int64{f.trackIDs[2], f.trackIDs[3]},
+	}, 0, false, "local:dj-test")
+	require.NoError(t, err)
+	require.Equal(t, DJModeOff, view.DJMode)
+	require.EqualValues(t, 2, view.Total)
+	for _, item := range view.Items {
+		require.False(t, item.DJGenerated)
+	}
+}
+
 func ptrInt64(v int64) *int64 { return &v }

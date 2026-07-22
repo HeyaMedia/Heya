@@ -324,5 +324,6 @@ type QueueChangedPayload struct {
 	Playing       bool    `json:"playing"`
 	RepeatMode    string  `json:"repeat_mode"`
 	Shuffled      bool    `json:"shuffled"`
+	DJMode        string  `json:"dj_mode"`
 	ActiveOutput  string  `json:"active_output,omitempty"`
 }

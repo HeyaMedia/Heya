@@ -1,6 +1,6 @@
 import { useAudioEngine } from '~/composables/useAudioEngine'
 import { nativeAnalyserDemandActive } from '~/composables/usePlaybackAnalyser'
-import type { QueueItem, QueueSourceInput } from '~/composables/useQueue'
+import type { DJMode, QueueItem, QueueSourceInput } from '~/composables/useQueue'
 import { resumeContext } from '~/engine/context'
 import { shouldSuppressCrossfade } from '~/engine/crossfade/albumAware'
 import { SmartCrossfade } from '~/engine/crossfade/smartCrossfade'
@@ -39,6 +39,8 @@ export interface Track {
   integrated_lufs?: number | null
   true_peak_db?: number | null
   available?: boolean
+  dj_generated?: boolean
+  dj_mode?: DJMode
 }
 
 // Track shape consumed by the player UI. `stream_url` is what the engine
@@ -232,6 +234,12 @@ export const usePlayerStore = defineStore('player', () => {
   const originalOrder = ref<Track[]>([]) // local-mode shuffle restore
   const localShuffled = ref(false)
   const localRepeat = ref<'off' | 'all' | 'one'>('off')
+  const djChanging = ref(false)
+  const djMode = computed<DJMode>(() => localMode.value ? 'off' : qs.djMode)
+  const djAvailable = computed(() => !localMode.value
+    && !!currentTrack.value
+    && !currentTrack.value.isStream
+    && currentTrack.value.id > 0)
 
   // Similar autoplay is deliberately queue-session state, not a second queue.
   // Context tracks describe what the listener intentionally started/added;
@@ -259,6 +267,8 @@ export const usePlayerStore = defineStore('player', () => {
       artist_slug: i.artist_slug,
       album_slug: i.album_slug,
       poster: useAlbumCoverUrl(i.artist_slug, i.album_slug) ?? undefined,
+      dj_generated: i.dj_generated,
+      dj_mode: i.dj_mode,
     }
   }
   const serverQueueTracks = computed(() => qs.items.map(itemToTrack))
@@ -1292,7 +1302,7 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   function ensureSimilarAutoplayQueue(force = false): Promise<boolean> {
-    if (!similarAutoplayEnabled.value || localMode.value) return Promise.resolve(false)
+    if (!similarAutoplayEnabled.value || localMode.value || qs.djMode !== 'off') return Promise.resolve(false)
     if (!currentTrack.value || currentTrack.value.id <= 0 || repeatMode.value !== 'off') return Promise.resolve(false)
     const remaining = Math.max(0, qs.total - qs.currentIndex - 1)
     if (!force && remaining > SIMILAR_AUTOPLAY_REFILL_AT) return Promise.resolve(false)
@@ -1363,9 +1373,21 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   watch(
-    [similarAutoplayEnabled, localMode, () => qs.total, () => qs.currentIndex, repeatMode],
+    [similarAutoplayEnabled, localMode, () => qs.total, () => qs.currentIndex, repeatMode, () => qs.djMode],
     () => { void ensureSimilarAutoplayQueue() },
   )
+
+  async function setDJMode(mode: DJMode) {
+    if (!djAvailable.value && mode !== 'off') return
+    djChanging.value = true
+    similarAutoplayGeneration++
+    try {
+      await qs.setDJMode(mode)
+      prepareTransition()
+    } finally {
+      djChanging.value = false
+    }
+  }
 
   // --- Context playback: THE way to start playing something ---------------
   // The server materializes the full source (an artist's whole
@@ -1749,6 +1771,7 @@ export const usePlayerStore = defineStore('player', () => {
   }
   async function toggleShuffle() {
     if (!localMode.value) {
+      if (qs.djMode !== 'off') return
       try {
         await qs.setShuffle(!qs.shuffled)
         // The modes event's structural refetch is intentionally async. Fetch
@@ -2203,6 +2226,7 @@ export const usePlayerStore = defineStore('player', () => {
     nativeAudioOutputDevices, nativeAudioOutputDeviceId, nativeAudioFollowsSystemDefault,
     scrobbledTrackId, sleepAtTrackEnd, sleepDeadline, sleepNowTick,
     similarAutoplayEnabled, similarAutoplayLoading, similarAutoplayAvailable,
+    djMode, djChanging, djAvailable,
     currentIndex, playedTracks, upcomingTracks, upcomingCount,
     nextUp, progress, hasPrevious, hasNext,
     play, pause, togglePlay, seek, setVolume, toggleMute, stop,
@@ -2210,7 +2234,7 @@ export const usePlayerStore = defineStore('player', () => {
     toggleShuffle, cycleRepeat, nextTrack, prevTrack,
     toggleLoved, toggleQueue, toggleLyrics, formatTime,
     jumpTo, removeFromQueue, moveInQueue, clearUpcoming,
-    addToQueue, playNext, setSimilarAutoplayEnabled,
+    addToQueue, playNext, setSimilarAutoplayEnabled, setDJMode,
     probeNativeAudio, refreshNativeAudioOutputs, setNativeAudioOutputDevice,
     startCastTo, stopCasting, castTrackEnded,
   }
@@ -2250,6 +2274,7 @@ export function usePlayerBindings() {
     addToQueue: store.addToQueue,
     playNext: store.playNext,
     setSimilarAutoplayEnabled: store.setSimilarAutoplayEnabled,
+    setDJMode: store.setDJMode,
     probeNativeAudio: store.probeNativeAudio,
     refreshNativeAudioOutputs: store.refreshNativeAudioOutputs,
     setNativeAudioOutputDevice: store.setNativeAudioOutputDevice,

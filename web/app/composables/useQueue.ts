@@ -22,6 +22,20 @@ export interface QueueItem {
   artist_id: number
   artist_name: string
   artist_slug: string
+  dj_generated: boolean
+  dj_mode?: DJMode
+}
+
+export type DJMode = 'off' | 'echo' | 'flow' | 'voyage' | 'encore' | 'spotlight' | 'timewarp'
+
+export const DJ_MODE_LABELS: Record<DJMode, string> = {
+  off: 'Off',
+  echo: 'Echo',
+  flow: 'Flow',
+  voyage: 'Voyage',
+  encore: 'Encore',
+  spotlight: 'Spotlight',
+  timewarp: 'Timewarp',
 }
 
 export interface QueueViewPayload {
@@ -33,6 +47,7 @@ export interface QueueViewPayload {
   playing: boolean
   repeat_mode: string
   shuffled: boolean
+  dj_mode: DJMode
   active_output?: string
   items: QueueItem[]
   window_start_index: number
@@ -49,6 +64,7 @@ export interface QueueChangedEvent {
   playing: boolean
   repeat_mode: string
   shuffled: boolean
+  dj_mode: DJMode
   active_output?: string
 }
 
@@ -76,6 +92,7 @@ export const useQueueStore = defineStore('playQueue', () => {
   const playing = ref(false) // server transport state
   const repeatMode = ref<'off' | 'all' | 'one'>('off')
   const shuffled = ref(false)
+  const djMode = ref<DJMode>('off')
   const activeOutput = ref('')
   const loaded = ref(false)
 
@@ -115,6 +132,7 @@ export const useQueueStore = defineStore('playQueue', () => {
     playing.value = v.playing
     repeatMode.value = (v.repeat_mode as typeof repeatMode.value) || 'off'
     shuffled.value = v.shuffled
+    djMode.value = v.dj_mode || 'off'
     activeOutput.value = v.active_output ?? ''
     loaded.value = true
   }
@@ -205,8 +223,23 @@ export const useQueueStore = defineStore('playQueue', () => {
   }
 
   async function setShuffle(on: boolean) {
+    const previous = shuffled.value
     shuffled.value = on // optimistic; the items event refetches the order
-    await queueAPI('/api/me/queue/shuffle', { method: 'POST', body: { on } })
+    try {
+      await queueAPI('/api/me/queue/shuffle', { method: 'POST', body: { on } })
+    } catch (error) {
+      shuffled.value = previous
+      throw error
+    }
+  }
+
+  async function setDJMode(mode: DJMode) {
+    const view = await queueAPI('/api/me/queue/dj', {
+      method: 'POST',
+      body: { mode },
+    }) as QueueViewPayload
+    applyView(view)
+    return view
   }
 
   async function setRepeat(mode: 'off' | 'all' | 'one') {
@@ -233,6 +266,7 @@ export const useQueueStore = defineStore('playQueue', () => {
     currentItemID.value = 0
     currentIndex.value = -1
     playing.value = false
+    djMode.value = 'off'
     try {
       await queueAPI('/api/me/queue', { method: 'DELETE' })
     } catch { /* already gone */ }
@@ -268,6 +302,7 @@ export const useQueueStore = defineStore('playQueue', () => {
     version.value = p.version
     repeatMode.value = (p.repeat_mode as typeof repeatMode.value) || repeatMode.value
     shuffled.value = p.shuffled
+    djMode.value = p.dj_mode || 'off'
     activeOutput.value = p.active_output ?? ''
     positionSeconds.value = p.position_sec
     playing.value = p.playing
@@ -288,10 +323,10 @@ export const useQueueStore = defineStore('playQueue', () => {
 
   return {
     version, items, windowStart, total, currentItemID, currentIndex,
-    positionSeconds, playing, repeatMode, shuffled, activeOutput, loaded,
+    positionSeconds, playing, repeatMode, shuffled, djMode, activeOutput, loaded,
     outputID, targetDeviceID, isActiveOutput, currentWindowIndex,
     refetch, replace, enqueue, removeItem, moveItem, jump, advance,
-    setShuffle, setRepeat, clearUpcoming, clearAll, claim, heartbeat,
+    setShuffle, setRepeat, setDJMode, clearUpcoming, clearAll, claim, heartbeat,
     applyEvent, applyView, selectTarget,
   }
 })

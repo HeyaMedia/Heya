@@ -147,6 +147,20 @@ func registerQueueRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(view), nil
 		})
 
+	huma.Register(api, secured(op(http.MethodPost, "/api/me/queue/dj", "queue-dj", "Choose or disable the queue DJ", "Queue")),
+		func(ctx context.Context, in *struct {
+			DeviceID string `query:"device_id"`
+			Body     struct {
+				Mode string `json:"mode" enum:"off,echo,flow,voyage,encore,spotlight,timewarp" doc:"DJ insertion strategy; off removes only future DJ-generated tracks"`
+			}
+		}) (*JSONOutput[service.QueueView], error) {
+			view, err := app.SetQueueDJ(ctx, userFrom(ctx).ID, queueDevice(in.DeviceID), in.Body.Mode)
+			if err != nil {
+				return nil, huma.Error422UnprocessableEntity(err.Error())
+			}
+			return noStoreJSON(view), nil
+		})
+
 	huma.Register(api, secured(op(http.MethodPost, "/api/me/queue/shuffle", "queue-shuffle", "Toggle server-side shuffle", "Queue")),
 		func(ctx context.Context, in *struct {
 			DeviceID string `query:"device_id"`

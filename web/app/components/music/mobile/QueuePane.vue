@@ -86,7 +86,7 @@
     >
       <div class="qp-up-next-tools">
         <div class="qp-toolbar">
-          <button type="button" class="qp-chip" :class="{ active: shuffled }" aria-label="Shuffle" @click="toggleShuffle">
+          <button type="button" class="qp-chip" :class="{ active: shuffled }" :disabled="djMode !== 'off'" aria-label="Shuffle" @click="toggleShuffle">
             <Icon name="shuffle" :size="15" />
             <span>Shuffle</span>
           </button>
@@ -100,7 +100,9 @@
           <div class="qp-mobile-autoplay-copy">
             <div class="qp-mobile-autoplay-title">Play tracks like this…</div>
             <div class="qp-mobile-autoplay-hint">
-              {{ localMode
+              {{ djMode !== 'off'
+                ? `DJ ${DJ_MODE_LABELS[djMode]} is managing what comes next`
+                : localMode
                 ? 'Unavailable for live streams'
                 : similarAutoplayLoading
                   ? 'Finding more tracks…'
@@ -110,8 +112,8 @@
             </div>
           </div>
           <AppSwitch
-            :model-value="similarAutoplayEnabled"
-            :disabled="localMode"
+            :model-value="djMode !== 'off' || similarAutoplayEnabled"
+            :disabled="localMode || djMode !== 'off'"
             size="md"
             aria-label="Play tracks like this"
             @update:model-value="setSimilarAutoplayEnabled"
@@ -156,6 +158,7 @@
                 <div class="qp-row-title">{{ t.title }}</div>
                 <div class="qp-row-artist">{{ t.artist }}</div>
               </div>
+              <Icon v-if="t.dj_generated" name="sparkle" :size="12" class="qp-dj-mark" />
               <span class="qp-row-dur">{{ formatTime(t.duration) }}</span>
             </button>
           </div>
@@ -235,6 +238,7 @@
 import { useQuery } from '@pinia/colada'
 import type { SimilarTracksByTrackRichRow, TrackResultsBody } from '~~/shared/api/types.gen'
 import type { Track } from '~/composables/usePlayer'
+import { DJ_MODE_LABELS } from '~/composables/useQueue'
 
 type QueueTab = 'back-to' | 'up-next' | 'related'
 const queueTabs: Array<{ id: QueueTab, label: string }> = [
@@ -247,7 +251,7 @@ const activeTab = ref<QueueTab>('up-next')
 const {
   currentTrack, currentIndex, playedTracks, upcomingTracks,
   shuffled, repeatMode, formatTime,
-  localMode, similarAutoplayEnabled, similarAutoplayLoading,
+  localMode, similarAutoplayEnabled, similarAutoplayLoading, djMode,
   jumpTo, moveInQueue, removeFromQueue, clearUpcoming, toggleShuffle, cycleRepeat,
   playNext, setSimilarAutoplayEnabled,
 } = usePlayerBindings()
@@ -808,6 +812,7 @@ onScopeDispose(() => {
   cursor: pointer;
 }
 .qp-root .qp-chip.active { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 40%, transparent); background: var(--gold-soft); }
+.qp-root .qp-chip:disabled { opacity: 0.4; cursor: default; }
 .qp-clear {
   margin-left: auto;
   height: 36px;
@@ -952,6 +957,7 @@ onScopeDispose(() => {
   color: var(--fg-3);
   flex-shrink: 0;
 }
+.qp-dj-mark { flex-shrink: 0; color: var(--gold); opacity: 0.82; }
 
 .qp-related-intro {
   margin: 0;

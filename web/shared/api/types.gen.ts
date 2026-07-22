@@ -4376,6 +4376,17 @@ export type QueueClaimRequest = {
     output: string;
 };
 
+export type QueueDjRequest = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    /**
+     * DJ insertion strategy; off removes only future DJ-generated tracks
+     */
+    mode: 'off' | 'echo' | 'flow' | 'voyage' | 'encore' | 'spotlight' | 'timewarp';
+};
+
 export type QueueEnqueueRequest = {
     /**
      * A URL to the JSON Schema for this object.
@@ -4458,6 +4469,8 @@ export type QueueItemView = {
     artist_name: string;
     artist_slug: string;
     disc_number: number;
+    dj_generated: boolean;
+    dj_mode?: string;
     duration: number;
     item_id: number;
     ord: number;
@@ -4493,6 +4506,7 @@ export type QueueView = {
     active_output?: string;
     current_index: number;
     current_item_id?: number;
+    dj_mode: string;
     items: Array<QueueItemView> | null;
     playing: boolean;
     position_seconds: number;
@@ -7940,6 +7954,13 @@ export type QueueClaimRequestWritable = {
     output: string;
 };
 
+export type QueueDjRequestWritable = {
+    /**
+     * DJ insertion strategy; off removes only future DJ-generated tracks
+     */
+    mode: 'off' | 'echo' | 'flow' | 'voyage' | 'encore' | 'spotlight' | 'timewarp';
+};
+
 export type QueueEnqueueRequestWritable = {
     at?: 'end' | 'next';
     track_ids: Array<number> | null;
@@ -7990,6 +8011,7 @@ export type QueueViewWritable = {
     active_output?: string;
     current_index: number;
     current_item_id?: number;
+    dj_mode: string;
     items: Array<QueueItemView> | null;
     playing: boolean;
     position_seconds: number;
@@ -14573,6 +14595,33 @@ export type QueueClaimResponses = {
 };
 
 export type QueueClaimResponse = QueueClaimResponses[keyof QueueClaimResponses];
+
+export type QueueDjData = {
+    body: QueueDjRequestWritable;
+    path?: never;
+    query?: {
+        device_id?: string;
+    };
+    url: '/api/me/queue/dj';
+};
+
+export type QueueDjErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type QueueDjError = QueueDjErrors[keyof QueueDjErrors];
+
+export type QueueDjResponses = {
+    /**
+     * OK
+     */
+    200: QueueView;
+};
+
+export type QueueDjResponse = QueueDjResponses[keyof QueueDjResponses];
 
 export type QueueHeartbeatData = {
     body: QueueHeartbeatRequestWritable;

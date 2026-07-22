@@ -45,6 +45,8 @@ CREATE TABLE play_queues (
   playing          BOOLEAN NOT NULL DEFAULT false,
   repeat_mode      TEXT NOT NULL DEFAULT 'off',     -- off | all | one
   shuffled         BOOLEAN NOT NULL DEFAULT false,
+  dj_mode          TEXT NOT NULL DEFAULT 'off',     -- off | echo | flow | voyage | encore | spotlight | timewarp
+  dj_session       BIGINT NOT NULL DEFAULT 0,       -- invalidates in-flight DJ work
   source           JSONB,                           -- {kind, id, shuffle} provenance
   active_output    TEXT,                            -- 'local:<client_id>' | 'cast:<device_id>' | NULL
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -55,6 +57,8 @@ CREATE TABLE play_queue_items (
   queue_id  BIGINT NOT NULL REFERENCES play_queues(id) ON DELETE CASCADE,
   ord       BIGINT NOT NULL,                        -- sparse: n*1024, renumber lazily
   track_id  BIGINT NOT NULL,
+  dj_session BIGINT NOT NULL DEFAULT 0,             -- 0 = user-owned
+  dj_mode   TEXT NOT NULL DEFAULT '',
   UNIQUE (queue_id, ord)
 );
 ```
@@ -85,12 +89,13 @@ CREATE TABLE play_queue_items (
 | `POST   /api/me/queue/items/{id}/move` | `{after_item_id \| first}` — sparse-key reorder |
 | `POST   /api/me/queue/jump` | `{item_id}` — pointer jump |
 | `POST   /api/me/queue/advance` | `{from_item_id, reason: 'ended'\|'skip'\|'prev'}` — renderer reports; idempotent (from guards double-fires) |
+| `POST   /api/me/queue/dj` | `{mode}` — choose a DJ or turn it off; switching removes only future DJ-owned items |
 | `POST   /api/me/queue/shuffle` / `…/repeat` | Mode flips; shuffle reshuffles/restores the upcoming slice server-side |
 | `POST   /api/me/queue/heartbeat` | `{client_id, position_seconds, playing}` — coarse position + renderer liveness (~15s while playing) |
 | `POST   /api/me/queue/claim` | `{output: 'local:<client_id>' \| 'cast:<device_id>'}` — become the active output; everyone else drops to mirror |
 | `DELETE /api/me/queue` | Clear |
 
-WS: one per-user event, `queue.changed {device_id, version, kind: 'replaced'|'items'|'pointer'|'transport'|'output', current_item_id, position_seconds, playing, active_output}`.
+WS: one per-user event, `queue.changed {device_id, version, kind: 'replaced'|'items'|'pointer'|'transport'|'output', current_item_id, position_seconds, playing, dj_mode, active_output}`.
 Common cases (pointer move, transport flip) apply straight from the
 payload; anything structural (`replaced`, `items`) triggers a window
 refetch. CLI mutations reach the serve process's hub via the existing
@@ -174,6 +179,19 @@ respawn-per-track if the boundary glitches. `startCastTo` becomes
 handoff position the server already knows. Kills `localHandoff` and the
 FE advance-ownership machinery from cast Phase 2.
 
+## Queue DJs
+
+DJs are persisted queue-insertion strategies, shared by every controller of
+the same device queue. Echo, Encore, and Voyage decorate user-owned tracks;
+Flow, Spotlight, and Timewarp continuously maintain a two-track runway. Every
+generated item carries its DJ session and mode, so switching or disabling a DJ
+deletes only its future contributions and never the listener's queue or played
+history. Queue replacement invalidates the session and turns the DJ off.
+
+Recommendation work runs outside the queue transaction. The commit rechecks
+the queue, current item, mode, and monotonically increasing session before it
+can insert anything, making a late result from an old DJ harmless.
+
 ## Phase D — playlists go live-collab
 
 Same rails, much smaller: playlist mutations already run through the
@@ -186,7 +204,6 @@ the real work, deliberately deferred).
 
 ## Later / out of scope for now
 
-- Radio / endless mode (source descriptor + sampler that tops up the tail)
 - Cross-user shared playlists (Phase D groundwork)
 - Multiple named queues per user (explicitly not doing this)
 - Jellyfin/Subsonic compat queues (their clients own playback; untouched)

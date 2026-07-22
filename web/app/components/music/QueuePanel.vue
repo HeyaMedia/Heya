@@ -14,7 +14,9 @@
         <div class="qp-autoplay-copy">
           <div class="qp-autoplay-title">Play tracks like this…</div>
           <div class="qp-autoplay-hint">
-            {{ localMode
+            {{ djMode !== 'off'
+              ? `DJ ${DJ_MODE_LABELS[djMode]} is managing what comes next`
+              : localMode
               ? 'Unavailable for live streams'
               : similarAutoplayLoading
                 ? 'Finding more tracks for this queue…'
@@ -24,8 +26,8 @@
           </div>
         </div>
         <AppSwitch
-          :model-value="similarAutoplayEnabled"
-          :disabled="localMode"
+          :model-value="djMode !== 'off' || similarAutoplayEnabled"
+          :disabled="localMode || djMode !== 'off'"
           size="md"
           aria-label="Play tracks like this"
           @update:model-value="setSimilarAutoplayEnabled"
@@ -52,6 +54,7 @@
             <div class="qp-row-title">{{ t.title }}</div>
             <div class="qp-row-artist">{{ t.artist }}</div>
           </div>
+          <Icon v-if="t.dj_generated" name="sparkle" :size="12" class="qp-dj-mark" />
           <span class="qp-row-dur">{{ formatTime(t.duration) }}</span>
         </div>
       </template>
@@ -65,6 +68,7 @@
             <div class="qp-row-title">{{ currentTrack.title }}</div>
             <div class="qp-row-artist">{{ currentTrack.artist }}</div>
           </div>
+          <Icon v-if="currentTrack.dj_generated" name="sparkle" :size="12" class="qp-dj-mark" />
           <span v-if="currentTrack.isStream" class="qp-live-badge">
             <span class="qp-live-dot" /> LIVE
           </span>
@@ -111,6 +115,7 @@
             <div class="qp-row-title">{{ t.title }}</div>
             <div class="qp-row-artist">{{ t.artist }}</div>
           </div>
+          <Icon v-if="t.dj_generated" name="sparkle" :size="12" class="qp-dj-mark" />
           <span class="qp-row-dur">{{ formatTime(t.duration) }}</span>
           <button
             class="qp-remove"
@@ -239,11 +244,12 @@
 <script setup lang="ts">
 import { useQuery } from '@pinia/colada'
 import { trackLyricsQuery, type LyricsLine } from '~/queries/music'
+import { DJ_MODE_LABELS } from '~/composables/useQueue'
 
 const {
   playing, currentTrack, queue, queueOpen, position, formatTime,
   shuffled, repeatMode, currentIndex, playedTracks, upcomingTracks,
-  localMode, similarAutoplayEnabled, similarAutoplayLoading,
+  localMode, similarAutoplayEnabled, similarAutoplayLoading, djMode,
   jumpTo, removeFromQueue, moveInQueue, clearUpcoming, seek, sideTab,
   setSimilarAutoplayEnabled,
 } = usePlayerBindings()
@@ -596,6 +602,7 @@ function onQueueRowKeydown(e: KeyboardEvent, action: () => void) {
   color: var(--fg-3);
   flex-shrink: 0;
 }
+.qp-dj-mark { flex-shrink: 0; color: var(--gold); opacity: 0.85; }
 .qp-remove {
   background: transparent;
   border: 0;

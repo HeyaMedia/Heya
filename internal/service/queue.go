@@ -62,6 +62,8 @@ type QueueItemView struct {
 	ArtistID    int64  `json:"artist_id"`
 	ArtistName  string `json:"artist_name"`
 	ArtistSlug  string `json:"artist_slug"`
+	DJGenerated bool   `json:"dj_generated"`
+	DJMode      string `json:"dj_mode,omitempty"`
 }
 
 // QueueView is the windowed client mirror: meta + a contiguous item
@@ -76,18 +78,20 @@ type QueueView struct {
 	Playing          bool            `json:"playing"`
 	RepeatMode       string          `json:"repeat_mode"`
 	Shuffled         bool            `json:"shuffled"`
+	DJMode           string          `json:"dj_mode"`
 	ActiveOutput     string          `json:"active_output,omitempty"`
 	Source           *QueueSource    `json:"source,omitempty"`
 	Items            []QueueItemView `json:"items"`
 	WindowStartIndex int64           `json:"window_start_index"` // index of Items[0]
 }
 
-func queueItemView(id, ord, trackID int64, title string, duration, disc, track int32, albumID int64, albumTitle, albumSlug string, artistID int64, artistName, artistSlug string) QueueItemView {
+func queueItemView(id, ord, trackID, djSession int64, djMode, title string, duration, disc, track int32, albumID int64, albumTitle, albumSlug string, artistID int64, artistName, artistSlug string) QueueItemView {
 	return QueueItemView{
 		ItemID: id, Ord: ord, TrackID: trackID,
 		Title: title, Duration: duration, DiscNumber: disc, TrackNumber: track,
 		AlbumID: albumID, AlbumTitle: albumTitle, AlbumSlug: albumSlug,
 		ArtistID: artistID, ArtistName: artistName, ArtistSlug: artistSlug,
+		DJGenerated: djSession > 0, DJMode: djMode,
 	}
 }
 
@@ -118,6 +122,7 @@ func (a *App) queueViewWindow(ctx context.Context, q *sqlc.Queries, pq sqlc.Play
 		Playing:         pq.Playing,
 		RepeatMode:      pq.RepeatMode,
 		Shuffled:        pq.Shuffled,
+		DJMode:          pq.DjMode,
 		ActiveOutput:    pq.ActiveOutput,
 		Items:           []QueueItemView{},
 	}
@@ -173,10 +178,10 @@ func (a *App) queueViewWindow(ctx context.Context, q *sqlc.Queries, pq sqlc.Play
 	items := make([]QueueItemView, 0, len(before)+len(after))
 	for i := len(before) - 1; i >= 0; i-- { // DESC → ascend
 		r := before[i]
-		items = append(items, queueItemView(r.ID, r.Ord, r.TrackID, r.Title, r.Duration, r.DiscNumber, r.TrackNumber, r.AlbumID, r.AlbumTitle, r.AlbumSlug, r.ArtistID, r.ArtistName, r.ArtistSlug))
+		items = append(items, queueItemView(r.ID, r.Ord, r.TrackID, r.DjSession, r.DjMode, r.Title, r.Duration, r.DiscNumber, r.TrackNumber, r.AlbumID, r.AlbumTitle, r.AlbumSlug, r.ArtistID, r.ArtistName, r.ArtistSlug))
 	}
 	for _, r := range after {
-		items = append(items, queueItemView(r.ID, r.Ord, r.TrackID, r.Title, r.Duration, r.DiscNumber, r.TrackNumber, r.AlbumID, r.AlbumTitle, r.AlbumSlug, r.ArtistID, r.ArtistName, r.ArtistSlug))
+		items = append(items, queueItemView(r.ID, r.Ord, r.TrackID, r.DjSession, r.DjMode, r.Title, r.Duration, r.DiscNumber, r.TrackNumber, r.AlbumID, r.AlbumTitle, r.AlbumSlug, r.ArtistID, r.ArtistName, r.ArtistSlug))
 	}
 	view.Items = items
 	if len(items) > 0 {
@@ -598,6 +603,7 @@ func (a *App) AdvanceQueue(ctx context.Context, userID int64, deviceID string, f
 			kind = "items"
 		}
 		a.emitQueue(userID, out, kind, 0)
+		a.processQueueDJBestEffort(ctx, userID, deviceID)
 	}
 	return a.GetQueue(ctx, userID, deviceID, nil, queueWindowDefault)
 }
@@ -611,6 +617,9 @@ func (a *App) SetQueueShuffle(ctx context.Context, userID int64, deviceID string
 		pq, err := q.GetPlayQueueByUserDevice(ctx, sqlc.GetPlayQueueByUserDeviceParams{UserID: userID, DeviceID: deviceID})
 		if err != nil {
 			return fmt.Errorf("no queue")
+		}
+		if pq.DjMode != DJModeOff {
+			return fmt.Errorf("turn off the DJ before changing shuffle")
 		}
 		if err := q.ReorderUpcoming(ctx, sqlc.ReorderUpcomingParams{QueueID: pq.ID, Shuffle: on, AfterOrd: anchorOrDefault(ctx, q, pq)}); err != nil {
 			return err
@@ -696,8 +705,15 @@ func (a *App) ClearUpcoming(ctx context.Context, userID int64, deviceID string) 
 		n, err := q.DeleteUpcomingQueueItems(ctx, sqlc.DeleteUpcomingQueueItemsParams{
 			QueueID: pq.ID, Ord: anchorOrDefault(ctx, q, pq),
 		})
-		if err != nil || n == 0 {
+		if err != nil {
 			return err
+		}
+		if pq.DjMode != DJModeOff {
+			out, err = q.SetQueueDJMode(ctx, sqlc.SetQueueDJModeParams{QueueID: pq.ID, DjMode: DJModeOff})
+			return err
+		}
+		if n == 0 {
+			return nil
 		}
 		out, err = q.BumpQueueVersion(ctx, pq.ID)
 		return err
@@ -752,6 +768,7 @@ func (a *App) emitQueue(userID int64, pq sqlc.PlayQueue, kind string, trackID in
 		Playing:      pq.Playing,
 		RepeatMode:   pq.RepeatMode,
 		Shuffled:     pq.Shuffled,
+		DJMode:       pq.DjMode,
 		ActiveOutput: pq.ActiveOutput,
 		TrackID:      trackID,
 	}
