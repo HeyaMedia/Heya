@@ -391,6 +391,9 @@ func (a *App) EnqueueTracks(ctx context.Context, userID int64, deviceID string, 
 	}
 	if added > 0 {
 		a.emitQueue(userID, out, "items", 0)
+		if out.DjMode == DJModeVoyage {
+			a.replanQueueDJBestEffort(ctx, userID, deviceID, DJModeVoyage)
+		}
 	}
 	return added, nil
 }

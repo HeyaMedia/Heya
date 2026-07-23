@@ -17,7 +17,7 @@ import (
 // item so switching/off removes only future DJ contributions.
 const (
 	DJModeOff       = "off"
-	DJModeEcho      = "echo"      // closest musical neighbour, another artist
+	DJModeEcho      = "echo"      // endlessly chain the closest musical neighbour
 	DJModeFlow      = "flow"      // maintain a two-track recommendation runway
 	DJModeVoyage    = "voyage"    // three interpolated steps toward next user track
 	DJModeEncore    = "encore"    // one more from this artist
@@ -28,7 +28,7 @@ const (
 const (
 	djMinDurationSeconds = 60
 	djMaxDurationSeconds = 20 * 60
-	djIncrementalRunway  = 2
+	djContinuousRunway   = 2
 )
 
 var djModes = map[string]bool{
@@ -37,18 +37,25 @@ var djModes = map[string]bool{
 	DJModeSpotlight: true, DJModeTimewarp: true,
 }
 
-func djModeIncremental(mode string) bool {
-	return mode == DJModeFlow || mode == DJModeSpotlight || mode == DJModeTimewarp
+func djModeExtendsFromRunway(mode string) bool {
+	// Flow explicitly continues from the last recommendation already waiting
+	// in the queue. Echo has a one-track runway, so this also makes its nearest
+	// neighbour chain explicit even though the anchor is normally the current
+	// item at a playback boundary.
+	return mode == DJModeEcho || mode == DJModeFlow
 }
 
-func djModeBatchSize(mode string) int {
-	if mode == DJModeVoyage {
-		return 3
+func djModeRunway(mode string) int {
+	switch mode {
+	case DJModeEcho:
+		return 1
+	case DJModeEncore:
+		return 1
+	case DJModeFlow, DJModeSpotlight, DJModeTimewarp:
+		return djContinuousRunway
+	default:
+		return 0
 	}
-	if djModeIncremental(mode) {
-		return djIncrementalRunway
-	}
-	return 1
 }
 
 type djSnapshot struct {
@@ -60,6 +67,50 @@ type djSnapshot struct {
 	targetTrack int64
 	need        int
 	exclude     []int64
+}
+
+type djQueuePlan struct {
+	process     bool
+	need        int
+	runway      []sqlc.PlayQueueItem
+	targetTrack int64
+}
+
+// planDJQueue captures the scheduling difference between takeover DJs and
+// interleaving DJs. Echo/Spotlight/Timewarp always keep their runway ahead.
+// Flow/Encore yield after their contribution when a listener-owned item is
+// waiting, but extend from their own tail when the listener queue runs out.
+// Voyage waits for its three inserted steps to finish before planning again.
+func planDJQueue(mode string, session int64, current sqlc.PlayQueueItem, nextItems []sqlc.PlayQueueItem, nextUser *sqlc.PlayQueueItem) djQueuePlan {
+	currentOwned := current.DjSession == session
+	hasNextUser := nextUser != nil
+
+	if mode == DJModeVoyage {
+		if currentOwned {
+			if hasNextUser || (len(nextItems) > 0 && nextItems[0].DjSession == session) {
+				return djQueuePlan{}
+			}
+		}
+		plan := djQueuePlan{process: true, need: 3}
+		if nextUser != nil {
+			plan.targetTrack = nextUser.TrackID
+		}
+		return plan
+	}
+
+	if (mode == DJModeFlow || mode == DJModeEncore) && currentOwned && hasNextUser {
+		return djQueuePlan{}
+	}
+	targetRunway := djModeRunway(mode)
+	if targetRunway == 0 {
+		return djQueuePlan{}
+	}
+	runway := consecutiveDJRunway(nextItems, session)
+	return djQueuePlan{
+		process: true,
+		need:    max(0, targetRunway-len(runway)),
+		runway:  runway,
+	}
 }
 
 // SetQueueDJ switches the active strategy for one device queue. A mode switch
@@ -138,6 +189,42 @@ func (a *App) processQueueDJBestEffort(ctx context.Context, userID int64, device
 	}
 }
 
+// replanQueueDJ invalidates future generated items without touching the
+// playing item or listener-owned queue. Voyage uses this when a listener adds
+// a destination while its chill fallback is already underway.
+func (a *App) replanQueueDJ(ctx context.Context, userID int64, deviceID, mode string) error {
+	var out sqlc.PlayQueue
+	err := a.withTx(ctx, func(q *sqlc.Queries) error {
+		pq, err := q.GetPlayQueueByUserDevice(ctx, sqlc.GetPlayQueueByUserDeviceParams{UserID: userID, DeviceID: deviceID})
+		if err != nil || pq.DjMode != mode || !pq.CurrentItemID.Valid {
+			return err
+		}
+		current, err := q.GetQueueItem(ctx, sqlc.GetQueueItemParams{ID: pq.CurrentItemID.Int64, QueueID: pq.ID})
+		if err != nil {
+			return err
+		}
+		if _, err := q.DeleteUpcomingDJQueueItems(ctx, sqlc.DeleteUpcomingDJQueueItemsParams{
+			QueueID: pq.ID, AfterOrd: current.Ord,
+		}); err != nil {
+			return err
+		}
+		out, err = q.SetQueueDJMode(ctx, sqlc.SetQueueDJModeParams{QueueID: pq.ID, DjMode: mode})
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	a.emitQueue(userID, out, "items", 0)
+	return a.processQueueDJ(ctx, userID, deviceID)
+}
+
+func (a *App) replanQueueDJBestEffort(ctx context.Context, userID int64, deviceID, mode string) {
+	if err := a.replanQueueDJ(ctx, userID, deviceID, mode); err != nil {
+		log.Warn().Err(err).Int64("user_id", userID).Str("device_id", deviceID).Str("mode", mode).
+			Msg("music DJ could not replan queue")
+	}
+}
+
 func (a *App) snapshotQueueDJ(ctx context.Context, userID int64, deviceID string) (*djSnapshot, error) {
 	q := sqlc.New(a.db)
 	pq, err := q.GetPlayQueueByUserDevice(ctx, sqlc.GetPlayQueueByUserDeviceParams{UserID: userID, DeviceID: deviceID})
@@ -164,42 +251,34 @@ func (a *App) snapshotQueueDJ(ctx context.Context, userID int64, deviceID string
 	snap := &djSnapshot{
 		queueID: pq.ID, mode: pq.DjMode,
 		session: pq.DjSession, current: current, anchor: current,
-		need: djModeBatchSize(pq.DjMode),
 	}
-	if djModeIncremental(pq.DjMode) {
-		nextItems, err := q.ListNextTwoQueueItems(ctx, sqlc.ListNextTwoQueueItemsParams{
-			QueueID: pq.ID, AfterOrd: current.Ord,
+	nextItems, err := q.ListNextTwoQueueItems(ctx, sqlc.ListNextTwoQueueItemsParams{
+		QueueID: pq.ID, AfterOrd: current.Ord,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var nextUser *sqlc.PlayQueueItem
+	target, targetErr := q.FirstUserQueueItemAfter(ctx, sqlc.FirstUserQueueItemAfterParams{
+		QueueID: pq.ID, AfterOrd: current.Ord,
+	})
+	if targetErr == nil {
+		nextUser = &target
+	} else if !errors.Is(targetErr, pgx.ErrNoRows) {
+		return nil, targetErr
+	}
+	plan := planDJQueue(pq.DjMode, pq.DjSession, current, nextItems, nextUser)
+	if !plan.process {
+		return nil, nil
+	}
+	snap.need = plan.need
+	snap.targetTrack = plan.targetTrack
+	if len(plan.runway) > 0 {
+		snap.anchor, err = q.GetQueueItem(ctx, sqlc.GetQueueItemParams{
+			ID: plan.runway[len(plan.runway)-1].ID, QueueID: pq.ID,
 		})
 		if err != nil {
 			return nil, err
-		}
-		runway := consecutiveDJRunway(nextItems, pq.DjSession)
-		snap.need = max(0, djIncrementalRunway-len(runway))
-		if len(runway) > 0 {
-			snap.anchor, err = q.GetQueueItem(ctx, sqlc.GetQueueItemParams{
-				ID: runway[len(runway)-1].ID, QueueID: pq.ID,
-			})
-			if err != nil {
-				return nil, err
-			}
-		}
-	} else if current.DjSession > 0 {
-		// Echo/Encore/Voyage decorate user-owned tracks. A generated item is a
-		// bridge, not another anchor, which keeps the original queue moving.
-		return nil, nil
-	}
-
-	if snap.need == 0 {
-		return snap, nil
-	}
-	if pq.DjMode == DJModeVoyage {
-		target, err := q.FirstUserQueueItemAfter(ctx, sqlc.FirstUserQueueItemAfterParams{QueueID: pq.ID, AfterOrd: current.Ord})
-		if errors.Is(err, pgx.ErrNoRows) {
-			snap.need = 0
-		} else if err != nil {
-			return nil, err
-		} else {
-			snap.targetTrack = target.TrackID
 		}
 	}
 	snap.exclude, err = q.ListQueueTrackIDs(ctx, pq.ID)
@@ -216,20 +295,33 @@ func (a *App) generateDJTracks(ctx context.Context, userID int64, snap djSnapsho
 	var candidates []int64
 	var err error
 	seedTrackID := snap.current.TrackID
-	if djModeIncremental(snap.mode) {
+	if djModeExtendsFromRunway(snap.mode) {
 		// Extend from the end of the existing runway, not from the track two
-		// positions behind it. This keeps Flow cohesive as one item is consumed.
+		// positions behind it. Spotlight and Timewarp intentionally keep using
+		// the track that is actually playing as their similarity/era seed.
 		seedTrackID = snap.anchor.TrackID
 	}
 	switch snap.mode {
 	case DJModeEcho:
-		candidates, err = a.echoDJCandidates(ctx, userID, snap.current.TrackID, snap.exclude, max(30, snap.need*10))
+		candidates, err = a.echoDJCandidates(ctx, userID, seedTrackID, snap.exclude, max(30, snap.need*10))
 	case DJModeFlow:
 		candidates, err = a.flowDJCandidates(ctx, userID, seedTrackID, snap.exclude, max(20, snap.need*8))
 	case DJModeVoyage:
-		candidates, err = a.voyageDJCandidates(ctx, userID, snap.current.TrackID, snap.targetTrack, snap.exclude, snap.need)
-	case DJModeEncore, DJModeSpotlight:
+		targetTrackID := snap.targetTrack
+		includeTarget := false
+		if targetTrackID == 0 {
+			targetTrackID, err = a.chillDJTarget(ctx, userID, snap.current.TrackID, snap.exclude)
+			includeTarget = targetTrackID > 0
+		}
+		if err == nil && targetTrackID > 0 {
+			candidates, err = a.voyageDJCandidates(ctx, userID, snap.current.TrackID, targetTrackID, snap.exclude, snap.need, includeTarget)
+		} else if err == nil {
+			candidates, err = a.flowDJCandidates(ctx, userID, snap.current.TrackID, snap.exclude, max(24, snap.need*8))
+		}
+	case DJModeEncore:
 		candidates, err = a.artistDJCandidates(ctx, userID, seedTrackID, snap.exclude, snap.session, max(30, snap.need*10))
+	case DJModeSpotlight:
+		candidates, err = a.spotlightDJCandidates(ctx, userID, seedTrackID, snap.exclude, snap.session, max(30, snap.need*10))
 	case DJModeTimewarp:
 		candidates, err = a.timewarpDJCandidates(ctx, userID, seedTrackID, snap.exclude, snap.session, max(40, snap.need*12))
 	default:
@@ -319,17 +411,54 @@ func (a *App) artistDJCandidates(ctx context.Context, userID, seedTrackID int64,
 	return scanInt64Rows(rows)
 }
 
-func (a *App) timewarpDJCandidates(ctx context.Context, userID, seedTrackID int64, exclude []int64, session int64, limit int) ([]int64, error) {
+func (a *App) spotlightDJCandidates(ctx context.Context, userID, seedTrackID int64, exclude []int64, session int64, limit int) ([]int64, error) {
 	rows, err := a.db.Query(ctx, `
 		WITH seed AS (
-			SELECT CASE WHEN album.year ~ '[0-9]{4}' THEN substring(album.year FROM '[0-9]{4}')::int ELSE NULL END AS year
+			SELECT album.artist_id, facets.track_embedding
+			FROM tracks track
+			JOIN albums album ON album.id = track.album_id
+			LEFT JOIN track_facets facets ON facets.track_id = track.id
+			WHERE track.id = $2
+		)
+		SELECT candidate.id
+		FROM seed
+		JOIN albums album ON album.artist_id = seed.artist_id
+		JOIN tracks candidate ON candidate.album_id = album.id
+		LEFT JOIN track_facets facets ON facets.track_id = candidate.id
+		LEFT JOIN user_track_ratings rating ON rating.user_id = $1 AND rating.track_id = candidate.id
+		WHERE NOT (candidate.id = ANY($3::bigint[]))
+		  AND (rating.rating IS NULL OR rating.rating > 3)
+		  AND EXISTS (SELECT 1 FROM track_files file JOIN library_files library_file ON library_file.id = file.library_file_id
+		              WHERE file.track_id = candidate.id AND library_file.deleted_at IS NULL)
+		ORDER BY CASE
+		           WHEN seed.track_embedding IS NOT NULL AND facets.track_embedding IS NOT NULL
+		           THEN facets.track_embedding <=> seed.track_embedding
+		         END NULLS LAST,
+		         (SELECT count(*) FROM play_events event WHERE event.track_id = candidate.id AND event.completed) DESC,
+		         md5(candidate.id::text || ':' || ($4::bigint)::text)
+		LIMIT $5`, userID, seedTrackID, exclude, session, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanInt64Rows(rows)
+}
+
+func (a *App) timewarpDJCandidates(ctx context.Context, userID, seedTrackID int64, exclude []int64, session int64, limit int) ([]int64, error) {
+	rows, err := a.db.Query(ctx, `
+	WITH seed AS (
+			SELECT CASE WHEN album.year ~ '[0-9]{4}' THEN substring(album.year FROM '[0-9]{4}')::int ELSE NULL END AS year,
+			       album.genres,
+			       facets.track_embedding
 			FROM tracks track JOIN albums album ON album.id = track.album_id
+			LEFT JOIN track_facets facets ON facets.track_id = track.id
 			WHERE track.id = $2
 		)
 		SELECT track.id
 		FROM seed
 		JOIN albums album ON seed.year IS NOT NULL
 		JOIN tracks track ON track.album_id = album.id
+		LEFT JOIN track_facets facets ON facets.track_id = track.id
 		LEFT JOIN user_track_ratings rating ON rating.user_id = $1 AND rating.track_id = track.id
 		WHERE CASE WHEN album.year ~ '[0-9]{4}' THEN substring(album.year FROM '[0-9]{4}')::int ELSE NULL END
 		      BETWEEN seed.year - 2 AND seed.year + 2
@@ -339,7 +468,12 @@ func (a *App) timewarpDJCandidates(ctx context.Context, userID, seedTrackID int6
 		  AND (rating.rating IS NULL OR rating.rating > 3)
 		  AND EXISTS (SELECT 1 FROM track_files file JOIN library_files library_file ON library_file.id = file.library_file_id
 		              WHERE file.track_id = track.id AND library_file.deleted_at IS NULL)
-		ORDER BY abs((substring(album.year FROM '[0-9]{4}')::int) - seed.year),
+		ORDER BY (album.genres && seed.genres) DESC,
+		         CASE
+		           WHEN seed.track_embedding IS NOT NULL AND facets.track_embedding IS NOT NULL
+		           THEN facets.track_embedding <=> seed.track_embedding
+		         END NULLS LAST,
+		         abs((substring(album.year FROM '[0-9]{4}')::int) - seed.year),
 		         md5(track.id::text || ':' || ($4::bigint)::text)
 		LIMIT $5`, userID, seedTrackID, exclude, session, limit)
 	if err != nil {
@@ -355,7 +489,38 @@ func (a *App) timewarpDJCandidates(ctx context.Context, userID, seedTrackID int6
 	return a.flowDJCandidates(ctx, userID, seedTrackID, exclude, limit)
 }
 
-func (a *App) voyageDJCandidates(ctx context.Context, userID, startTrackID, endTrackID int64, exclude []int64, steps int) ([]int64, error) {
+func (a *App) chillDJTarget(ctx context.Context, userID, seedTrackID int64, exclude []int64) (int64, error) {
+	var trackID int64
+	err := a.db.QueryRow(ctx, `
+		WITH seed AS (
+			SELECT track_embedding
+			FROM track_facets
+			WHERE track_id = $2 AND track_embedding IS NOT NULL
+		)
+		SELECT track.id
+		FROM track_facets facets
+		JOIN tracks track ON track.id = facets.track_id
+		LEFT JOIN seed ON true
+		LEFT JOIN user_track_ratings rating ON rating.user_id = $1 AND rating.track_id = track.id
+		WHERE facets.track_embedding IS NOT NULL
+		  AND COALESCE((facets.mood_tags->>'mood_relaxed')::real, 0) >= 0.55
+		  AND NOT (track.id = ANY($3::bigint[]))
+		  AND track.duration BETWEEN $4 AND $5
+		  AND (rating.rating IS NULL OR rating.rating > 3)
+		  AND EXISTS (SELECT 1 FROM track_files file JOIN library_files library_file ON library_file.id = file.library_file_id
+		              WHERE file.track_id = track.id AND library_file.deleted_at IS NULL)
+		ORDER BY COALESCE(facets.track_embedding <=> seed.track_embedding, 0.5)
+		         - COALESCE((facets.mood_tags->>'mood_relaxed')::real, 0) * 0.35
+		         + COALESCE((facets.mood_tags->>'mood_aggressive')::real, 0) * 0.15
+		         + COALESCE((facets.mood_tags->>'mood_party')::real, 0) * 0.10
+		LIMIT 1`, userID, seedTrackID, exclude, djMinDurationSeconds, djMaxDurationSeconds).Scan(&trackID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	return trackID, err
+}
+
+func (a *App) voyageDJCandidates(ctx context.Context, userID, startTrackID, endTrackID int64, exclude []int64, steps int, includeTarget bool) ([]int64, error) {
 	if endTrackID <= 0 || steps <= 0 {
 		return []int64{}, nil
 	}
@@ -372,8 +537,16 @@ func (a *App) voyageDJCandidates(ctx context.Context, userID, startTrackID, endT
 	}
 	blocked[startTrackID], blocked[endTrackID] = true, true
 	ids := make([]int64, 0, steps)
-	for step := 1; step <= steps; step++ {
-		ratio := float32(step) / float32(steps+1)
+	interiorSteps := steps
+	if includeTarget {
+		interiorSteps--
+	}
+	for step := 1; step <= interiorSteps; step++ {
+		denominator := steps + 1
+		if includeTarget {
+			denominator = steps
+		}
+		ratio := float32(step) / float32(denominator)
 		point := interpolateDJVector(start.TrackEmbedding, end.TrackEmbedding, ratio)
 		rows, err := a.tasteNeighborTracks(ctx, userID, point, 60)
 		if err != nil {
@@ -387,6 +560,29 @@ func (a *App) voyageDJCandidates(ctx context.Context, userID, startTrackID, endT
 			ids = append(ids, row.TrackID)
 			break
 		}
+	}
+	if len(ids) < interiorSteps {
+		fallbackExclude := make([]int64, 0, len(exclude)+len(ids)+2)
+		fallbackExclude = append(fallbackExclude, exclude...)
+		fallbackExclude = append(fallbackExclude, startTrackID, endTrackID)
+		fallbackExclude = append(fallbackExclude, ids...)
+		fallback, err := a.flowDJCandidates(ctx, userID, startTrackID, fallbackExclude, max(24, (interiorSteps-len(ids))*8))
+		if err != nil {
+			return nil, err
+		}
+		for _, trackID := range fallback {
+			if blocked[trackID] {
+				continue
+			}
+			blocked[trackID] = true
+			ids = append(ids, trackID)
+			if len(ids) == interiorSteps {
+				break
+			}
+		}
+	}
+	if includeTarget {
+		ids = append(ids, endTrackID)
 	}
 	return ids, nil
 }
@@ -463,35 +659,33 @@ func (a *App) commitDJTracks(ctx context.Context, userID int64, deviceID string,
 		if err != nil || current.DjProcessedSession == pq.DjSession {
 			return err
 		}
-		if !djModeIncremental(pq.DjMode) && current.DjSession > 0 {
+		nextItems, err := q.ListNextTwoQueueItems(ctx, sqlc.ListNextTwoQueueItemsParams{
+			QueueID: pq.ID, AfterOrd: current.Ord,
+		})
+		if err != nil {
+			return err
+		}
+		var nextUser *sqlc.PlayQueueItem
+		target, targetErr := q.FirstUserQueueItemAfter(ctx, sqlc.FirstUserQueueItemAfterParams{
+			QueueID: pq.ID, AfterOrd: current.Ord,
+		})
+		if targetErr == nil {
+			nextUser = &target
+		} else if !errors.Is(targetErr, pgx.ErrNoRows) {
+			return targetErr
+		}
+		plan := planDJQueue(pq.DjMode, pq.DjSession, current, nextItems, nextUser)
+		if !plan.process || plan.targetTrack != snap.targetTrack {
 			return nil
 		}
 
 		anchor := current
-		need := djModeBatchSize(pq.DjMode)
-		if djModeIncremental(pq.DjMode) {
-			nextItems, err := q.ListNextTwoQueueItems(ctx, sqlc.ListNextTwoQueueItemsParams{
-				QueueID: pq.ID, AfterOrd: current.Ord,
+		need := plan.need
+		if len(plan.runway) > 0 {
+			anchor, err = q.GetQueueItem(ctx, sqlc.GetQueueItemParams{
+				ID: plan.runway[len(plan.runway)-1].ID, QueueID: pq.ID,
 			})
 			if err != nil {
-				return err
-			}
-			runway := consecutiveDJRunway(nextItems, pq.DjSession)
-			need = max(0, djIncrementalRunway-len(runway))
-			if len(runway) > 0 {
-				anchor, err = q.GetQueueItem(ctx, sqlc.GetQueueItemParams{
-					ID: runway[len(runway)-1].ID, QueueID: pq.ID,
-				})
-				if err != nil {
-					return err
-				}
-			}
-		}
-		if pq.DjMode == DJModeVoyage {
-			target, err := q.FirstUserQueueItemAfter(ctx, sqlc.FirstUserQueueItemAfterParams{QueueID: pq.ID, AfterOrd: current.Ord})
-			if errors.Is(err, pgx.ErrNoRows) || (err == nil && target.TrackID != snap.targetTrack) {
-				need = 0
-			} else if err != nil {
 				return err
 			}
 		}

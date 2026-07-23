@@ -73,12 +73,12 @@ interface DJChoice {
 }
 
 const modes: DJChoice[] = [
-  { id: 'echo', name: DJ_MODE_LABELS.echo, icon: 'pulse', description: 'Adds the closest musical match from another artist.' },
-  { id: 'flow', name: DJ_MODE_LABELS.flow, icon: 'queue', description: 'Keeps two cohesive recommendations ahead.' },
-  { id: 'voyage', name: DJ_MODE_LABELS.voyage, icon: 'compass', description: 'Builds a three-track path to the next song.' },
-  { id: 'encore', name: DJ_MODE_LABELS.encore, icon: 'repeat', description: 'Adds one more track from the current artist.' },
-  { id: 'spotlight', name: DJ_MODE_LABELS.spotlight, icon: 'target', description: 'Stays with the current artist until you turn it off.' },
-  { id: 'timewarp', name: DJ_MODE_LABELS.timewarp, icon: 'clock', description: 'Keeps the music within roughly the same era.' },
+  { id: 'echo', name: DJ_MODE_LABELS.echo, icon: 'pulse', description: 'Keeps following the closest musical match without repeats.' },
+  { id: 'flow', name: DJ_MODE_LABELS.flow, icon: 'queue', description: 'Adds two recommendations, then hands back to your queue.' },
+  { id: 'voyage', name: DJ_MODE_LABELS.voyage, icon: 'compass', description: 'Builds three steps to your next song, or toward chill.' },
+  { id: 'encore', name: DJ_MODE_LABELS.encore, icon: 'repeat', description: 'Adds one same-artist track between queued songs.' },
+  { id: 'spotlight', name: DJ_MODE_LABELS.spotlight, icon: 'target', description: 'Takes over with the current artist’s closest sonic matches.' },
+  { id: 'timewarp', name: DJ_MODE_LABELS.timewarp, icon: 'clock', description: 'Keeps the era going, favoring matching genres and styles.' },
 ]
 
 const { djMode, djChanging, djAvailable, setDJMode } = usePlayerBindings()

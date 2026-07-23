@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/testutil"
+	"github.com/pgvector/pgvector-go"
 	"github.com/stretchr/testify/require"
 )
 
@@ -351,7 +353,219 @@ func TestQueueDJOwnsAndCleansOnlyGeneratedTracks(t *testing.T) {
 	require.Equal(t, f.trackIDs[0], view.Items[0].TrackID)
 }
 
-func TestQueueNonIncrementalDJDecoratesOnlyUserTracks(t *testing.T) {
+func TestDJQueueSchedulingPolicies(t *testing.T) {
+	const session = int64(42)
+	userCurrent := sqlc.PlayQueueItem{ID: 1, TrackID: 101}
+	userNext := sqlc.PlayQueueItem{ID: 9, TrackID: 109}
+	generated := sqlc.PlayQueueItem{ID: 2, TrackID: 102, DjSession: session}
+	generatedNext := sqlc.PlayQueueItem{ID: 3, TrackID: 103, DjSession: session}
+
+	tests := []struct {
+		name        string
+		mode        string
+		current     sqlc.PlayQueueItem
+		next        []sqlc.PlayQueueItem
+		nextUser    *sqlc.PlayQueueItem
+		process     bool
+		need        int
+		targetTrack int64
+	}{
+		{"echo takes over past a user track", DJModeEcho, generated, []sqlc.PlayQueueItem{userNext}, &userNext, true, 1, 0},
+		{"flow adds two after a user track", DJModeFlow, userCurrent, []sqlc.PlayQueueItem{userNext}, &userNext, true, 2, 0},
+		{"flow yields after its pair", DJModeFlow, generated, []sqlc.PlayQueueItem{generatedNext, userNext}, &userNext, false, 0, 0},
+		{"flow extends its own tail", DJModeFlow, generated, nil, nil, true, 2, 0},
+		{"voyage targets the next user track", DJModeVoyage, userCurrent, []sqlc.PlayQueueItem{userNext}, &userNext, true, 3, userNext.TrackID},
+		{"voyage waits for its path", DJModeVoyage, generated, []sqlc.PlayQueueItem{generatedNext, userNext}, &userNext, false, 0, 0},
+		{"voyage heads toward chill at the tail", DJModeVoyage, generated, nil, nil, true, 3, 0},
+		{"encore adds one after a user track", DJModeEncore, userCurrent, []sqlc.PlayQueueItem{userNext}, &userNext, true, 1, 0},
+		{"encore yields to the listener queue", DJModeEncore, generated, []sqlc.PlayQueueItem{userNext}, &userNext, false, 0, 0},
+		{"encore extends when the queue ends", DJModeEncore, generated, nil, nil, true, 1, 0},
+		{"spotlight keeps control", DJModeSpotlight, generated, []sqlc.PlayQueueItem{userNext}, &userNext, true, 2, 0},
+		{"timewarp keeps control", DJModeTimewarp, generated, []sqlc.PlayQueueItem{userNext}, &userNext, true, 2, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := planDJQueue(tt.mode, session, tt.current, tt.next, tt.nextUser)
+			require.Equal(t, tt.process, plan.process)
+			require.Equal(t, tt.need, plan.need)
+			require.Equal(t, tt.targetTrack, plan.targetTrack)
+		})
+	}
+}
+
+func TestQueueEchoChainsFromEachGeneratedTrackWithoutRepeating(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	app := &App{db: pool}
+	userID := testutil.TestUserID(t, pool)
+	seed := setupQueueFixture(t, pool, userID, "dj-echo-seed", 1)
+	neighborA := setupQueueFixture(t, pool, userID, "dj-echo-a", 1)
+	neighborB := setupQueueFixture(t, pool, userID, "dj-echo-b", 1)
+	neighborC := setupQueueFixture(t, pool, userID, "dj-echo-c", 1)
+	ctx := context.Background()
+
+	// Four distinct artists on a gently curving line in embedding space.
+	// Each generated track should therefore seed the next nearest unplayed
+	// artist, while the queue-wide exclusion set prevents walking backwards.
+	tracks := []struct {
+		id int64
+		x  float32
+		y  float32
+	}{
+		{seed.trackIDs[0], 1, 0},
+		{neighborA.trackIDs[0], 0.995, 0.10},
+		{neighborB.trackIDs[0], 0.980, 0.20},
+		{neighborC.trackIDs[0], 0.955, 0.30},
+	}
+	for _, track := range tracks {
+		vector := make([]float32, 512)
+		vector[0], vector[1] = track.x, track.y
+		_, err := pool.Exec(ctx,
+			`INSERT INTO track_facets (track_id, track_embedding) VALUES ($1, $2)`,
+			track.id, pgvector.NewVector(vector))
+		require.NoError(t, err)
+	}
+
+	_, err := app.ReplaceQueue(ctx, userID, "dj-echo-test", QueueSource{
+		Kind: "tracks", TrackIDs: []int64{seed.trackIDs[0]},
+	}, 0, false, "local:dj-echo-test")
+	require.NoError(t, err)
+	view, err := app.SetQueueDJ(ctx, userID, "dj-echo-test", DJModeEcho)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, view.Total, "Echo keeps exactly one recommendation ready")
+	require.Equal(t, neighborA.trackIDs[0], view.Items[1].TrackID)
+	require.True(t, view.Items[1].DJGenerated)
+
+	view, err = app.AdvanceQueue(ctx, userID, "dj-echo-test", view.CurrentItemID, "ended")
+	require.NoError(t, err)
+	require.Equal(t, neighborA.trackIDs[0], view.Items[view.CurrentIndex].TrackID)
+	require.EqualValues(t, 3, view.Total)
+	require.Equal(t, neighborB.trackIDs[0], view.Items[int(view.CurrentIndex)+1].TrackID)
+
+	view, err = app.AdvanceQueue(ctx, userID, "dj-echo-test", view.CurrentItemID, "ended")
+	require.NoError(t, err)
+	require.Equal(t, neighborB.trackIDs[0], view.Items[view.CurrentIndex].TrackID)
+	require.EqualValues(t, 4, view.Total)
+	require.Equal(t, neighborC.trackIDs[0], view.Items[int(view.CurrentIndex)+1].TrackID)
+
+	seen := map[int64]bool{}
+	for _, item := range view.Items {
+		require.False(t, seen[item.TrackID], "Echo must not repeat track %d", item.TrackID)
+		seen[item.TrackID] = true
+	}
+}
+
+func TestQueueVoyageFallsBackToChillAndReplansForNewDestination(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	app := &App{db: pool}
+	userID := testutil.TestUserID(t, pool)
+	f := setupQueueFixture(t, pool, userID, "dj-voyage", 4)
+	ctx := context.Background()
+
+	vectors := [][2]float32{{1, 0}, {0.9, 0.2}, {0.4, 0.7}, {0, 1}}
+	for i, trackID := range f.trackIDs {
+		vector := make([]float32, 512)
+		vector[0], vector[1] = vectors[i][0], vectors[i][1]
+		moods := `{}`
+		if i == len(f.trackIDs)-1 {
+			moods = `{"mood_relaxed":0.95,"mood_aggressive":0.02,"mood_party":0.05}`
+		}
+		_, err := pool.Exec(ctx,
+			`INSERT INTO track_facets
+			 (track_id, track_embedding, artist_embedding, release_embedding, text_embedding, mood_tags)
+			 VALUES ($1, $2, $2, $2, $2, $3::jsonb)`,
+			trackID, pgvector.NewVector(vector), moods)
+		require.NoError(t, err)
+	}
+
+	_, err := app.ReplaceQueue(ctx, userID, "dj-voyage-test", QueueSource{
+		Kind: "tracks", TrackIDs: []int64{f.trackIDs[0]},
+	}, 0, false, "local:dj-voyage-test")
+	require.NoError(t, err)
+	view, err := app.SetQueueDJ(ctx, userID, "dj-voyage-test", DJModeVoyage)
+	require.NoError(t, err)
+	require.EqualValues(t, 4, view.Total)
+	require.Equal(t, f.trackIDs[3], view.Items[3].TrackID, "the third fallback step is the relaxed destination")
+
+	// A listener-owned destination arriving mid-voyage invalidates the chill
+	// path and immediately replaces it with three steps toward the new track.
+	destination := setupQueueFixture(t, pool, userID, "dj-voyage-target", 1)
+	targetVector := make([]float32, 512)
+	targetVector[0], targetVector[1] = -1, 0
+	_, err = pool.Exec(ctx,
+		`INSERT INTO track_facets
+		 (track_id, track_embedding, artist_embedding, release_embedding, text_embedding)
+		 VALUES ($1, $2, $2, $2, $2)`,
+		destination.trackIDs[0], pgvector.NewVector(targetVector))
+	require.NoError(t, err)
+	added, err := app.EnqueueTracks(ctx, userID, "dj-voyage-test", destination.trackIDs, "end")
+	require.NoError(t, err)
+	require.EqualValues(t, 1, added)
+	view, err = app.GetQueue(ctx, userID, "dj-voyage-test", nil, 20)
+	require.NoError(t, err)
+	require.EqualValues(t, 5, view.Total)
+	require.Equal(t, destination.trackIDs[0], view.Items[4].TrackID)
+	for _, item := range view.Items[1:4] {
+		require.True(t, item.DJGenerated)
+		require.Equal(t, DJModeVoyage, item.DJMode)
+	}
+}
+
+func TestSpotlightRanksSameArtistTracksBySonicProximity(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	app := &App{db: pool}
+	userID := testutil.TestUserID(t, pool)
+	f := setupQueueFixture(t, pool, userID, "dj-spotlight-sonic", 4)
+	ctx := context.Background()
+
+	vectors := [][2]float32{{1, 0}, {0.99, 0.08}, {0.7, 0.7}, {0, 1}}
+	for i, trackID := range f.trackIDs {
+		vector := make([]float32, 512)
+		vector[0], vector[1] = vectors[i][0], vectors[i][1]
+		_, err := pool.Exec(ctx,
+			`INSERT INTO track_facets (track_id, track_embedding) VALUES ($1, $2)`,
+			trackID, pgvector.NewVector(vector))
+		require.NoError(t, err)
+	}
+
+	ids, err := app.spotlightDJCandidates(ctx, userID, f.trackIDs[0], []int64{f.trackIDs[0]}, 1, 10)
+	require.NoError(t, err)
+	require.NotEmpty(t, ids)
+	require.Equal(t, f.trackIDs[1], ids[0])
+}
+
+func TestTimewarpPrioritizesGenreWithinTheEra(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	app := &App{db: pool}
+	userID := testutil.TestUserID(t, pool)
+	seed := setupQueueFixture(t, pool, userID, "dj-timewarp-seed", 1)
+	overlap := setupQueueFixture(t, pool, userID, "dj-timewarp-overlap", 1)
+	other := setupQueueFixture(t, pool, userID, "dj-timewarp-other", 1)
+	ctx := context.Background()
+
+	_, err := pool.Exec(ctx, `UPDATE albums SET year = '2000', genres = '{Synthpop}' WHERE id = $1`, seed.albumID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `UPDATE albums SET year = '2001', genres = '{Synthpop,Electronic}' WHERE id = $1`, overlap.albumID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `UPDATE albums SET year = '2000', genres = '{Death Metal}' WHERE id = $1`, other.albumID)
+	require.NoError(t, err)
+
+	ids, err := app.timewarpDJCandidates(ctx, userID, seed.trackIDs[0], []int64{seed.trackIDs[0]}, 1, 500)
+	require.NoError(t, err)
+	overlapIndex, otherIndex := -1, -1
+	for i, id := range ids {
+		if id == overlap.trackIDs[0] {
+			overlapIndex = i
+		}
+		if id == other.trackIDs[0] {
+			otherIndex = i
+		}
+	}
+	require.GreaterOrEqual(t, overlapIndex, 0)
+	require.GreaterOrEqual(t, otherIndex, 0)
+	require.Less(t, overlapIndex, otherIndex, "genre/style overlap outranks an exact-year mismatch")
+}
+
+func TestQueueEncoreYieldsToListenerOwnedTrack(t *testing.T) {
 	pool := testutil.SetupDB(t)
 	app := &App{db: pool}
 	userID := testutil.TestUserID(t, pool)
