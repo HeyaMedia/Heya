@@ -85,6 +85,10 @@ let trackStartedAtUnix = 0
 // analysis fetch so a stale request that resolves late can detect it's been
 // superseded by a newer one and bail instead of clobbering the active deck.
 let playGeneration = 0
+// Non-null while an explicit play(track) is resolving queue ownership,
+// analysis and the renderer load. Queue/analysis watchers must not arm a
+// scheduler against the old audible deck using the new track's boundaries.
+let loadingTrackGeneration: number | null = null
 // Set by stopCasting(): the local engine has nothing loaded (or something
 // stale), so the next resume must cold-load the track and seek to where the
 // cast session left off instead of resuming a dead deck.
@@ -710,12 +714,20 @@ export const usePlayerStore = defineStore('player', () => {
           watch(() => backend.state.durationSeconds, (value) => {
             if (playbackBackend.value === 'native' && Number.isFinite(value) && value > 0) duration.value = value
           })
-          watch([() => backend.state.startedTrackId, () => backend.state.currentTrackId], ([startedTrackId, currentTrackId]) => {
-            const trackId = startedTrackId ?? currentTrackId
+          // `currentTrackId` means Rust accepted the load; it does NOT mean a
+          // decoder has produced PCM or that the deck is active. Only the
+          // transient TrackStarted marker may advance queue identity or arm a
+          // preload, otherwise the current load and its preload can both target
+          // the same pending deck and cancel each other.
+          watch(() => backend.state.startedTrackId, (trackId) => {
             if (playbackBackend.value !== 'native' || !trackId || trackId === nativeLastStartedTrackId) return
             nativeLastStartedTrackId = trackId
             nativeEndedHandled = false
-            if (currentTrack.value?.id === trackId) return
+            if (currentTrack.value?.id === trackId) {
+              beginTrack(currentTrack.value)
+              prepareTransition()
+              return
+            }
             const next = pendingNext?.id === trackId
               ? pendingNext
               : queue.value.find(track => track.id === trackId)
@@ -786,8 +798,17 @@ export const usePlayerStore = defineStore('player', () => {
       playing.value = backend.state.playing
       acceptLocalPosition(backend.state.positionSeconds)
       if (backend.state.durationSeconds > 0) duration.value = backend.state.durationSeconds
-      nativeLastStartedTrackId = track.id
+      // A load acknowledgement only means the command/session was accepted.
+      // Wait for Rust's TrackStarted event before considering this deck active.
+      nativeLastStartedTrackId = null
       nativeEndedHandled = false
+      // A tiny/cached source can start before load() finishes reconciling the
+      // initial snapshot. The watcher ignored that event while browser still
+      // owned playback, so consume the authoritative marker once here.
+      if (backend.state.startedTrackId === track.id) {
+        nativeLastStartedTrackId = track.id
+        beginTrack(track)
+      }
       await backend.setVolume(volume.value / 100)
       await backend.setMuted(muted.value)
       settings.registerEngineBridge(backend, () => {
@@ -865,13 +886,14 @@ export const usePlayerStore = defineStore('player', () => {
   async function prepareNativeTransition() {
     const backend = nativeAudioBackend.value
     if (!backend || playbackBackend.value !== 'native') return
+    const current = currentTrack.value
+    if (!current || nativeLastStartedTrackId !== current.id) return
     const generation = ++nativePreloadGeneration
     const next = peekNextTrack()
     pendingNext = next
     if (nativePreloadRetryTrackId !== next?.id) nativePreloadRetryTrackId = null
     if (!next || next.isStream) return
     try {
-      const current = currentTrack.value
       const request = await buildNativeTrackRequest(next, 0, !!current && shouldSuppressCrossfade(
         {
           trackId: current.id,
@@ -1007,6 +1029,15 @@ export const usePlayerStore = defineStore('player', () => {
     if (repeatMode.value === 'one') return currentTrack.value
     const idx = currentIndex.value
     if (idx < 0) return null
+    // The server pointer is authoritative for queue order, but it moves over
+    // HTTP/WS while the renderer changes tracks locally. Never arm a transition
+    // unless both sides agree which queue row is currently audible; otherwise
+    // the next row can temporarily be the current track itself and its smart
+    // boundary gets scheduled onto the wrong audio deck.
+    if (!localMode.value) {
+      const pointerTrackId = qs.items[idx]?.track_id
+      if (!currentTrack.value || pointerTrackId !== currentTrack.value.id) return null
+    }
     const next = queue.value[idx + 1]
     if (next) return next
     return repeatMode.value === 'all' ? (queue.value[0] ?? null) : null
@@ -1033,8 +1064,18 @@ export const usePlayerStore = defineStore('player', () => {
     pendingMode = 'gapless'
     pendingPlan = null
 
+    if (loadingTrackGeneration !== null) {
+      e.scheduler?.setSmartTransitionPoint(null)
+      e.scheduler?.setMode('gapless')
+      return
+    }
+
     const cur = currentTrack.value
-    if (!cur || cur.isStream) { e.scheduler?.setSmartTransitionPoint(null); return }
+    if (!cur || cur.isStream) {
+      e.scheduler?.setSmartTransitionPoint(null)
+      e.scheduler?.setMode('gapless')
+      return
+    }
 
     const next = peekNextTrack()
     pendingNext = next
@@ -1042,6 +1083,7 @@ export const usePlayerStore = defineStore('player', () => {
     if (preloadingTrackId !== next?.id) preloadingTrackId = null
     if (!next) {
       e.scheduler?.setSmartTransitionPoint(null)
+      e.scheduler?.setMode('gapless')
       alog('xfade', `arm: no next track (end of queue, repeat ${repeatMode.value})`)
       return
     }
@@ -1144,6 +1186,7 @@ export const usePlayerStore = defineStore('player', () => {
 
   // Arm immediately from known data, then fetch any missing analysis and re-arm.
   function prepareTransition() {
+    if (loadingTrackGeneration !== null) return
     // A short queue begins its recommendation request while there is still
     // plenty of playback time left, so gapless/crossfade can preload the
     // generated next track exactly like an ordinary queued track.
@@ -1163,7 +1206,8 @@ export const usePlayerStore = defineStore('player', () => {
   // The outgoing deck keeps playing (and fading) through to its real end during
   // the overlap, so nothing is clipped. Gapless is NOT handled here: pausing the
   // outgoing deck early would lop off its tail; it swaps on `ended` instead (see
-  // handleEnded). Falls back to a cold play if the pending deck wasn't ready.
+  // handleEnded). A late pending deck also falls back at natural EOF so the
+  // outgoing tail is never clipped by a cold load at the smart boundary.
   async function handleTransition() {
     if (transitioning) return
     if (pendingMode !== 'crossfade') return // gapless handled on `ended`
@@ -1175,25 +1219,26 @@ export const usePlayerStore = defineStore('player', () => {
 
     transitioning = true
     const preloaded = prefetchedTrackId === next.id
-    alog('xfade', `CROSSFADE → "${next.title}"${preloaded ? ' (preloaded ✓)' : ' (cold fallback — pending not ready)'}`)
+    if (!preloaded) {
+      // A cold load at the smart boundary would cut off the outgoing tail—the
+      // exact opposite of a graceful fallback. Leave it playing to natural EOF;
+      // handleEnded will use the pending deck if it becomes ready in time, or
+      // perform the cold load only after the final sample.
+      alog('xfade', `crossfade deferred for "${next.title}" — pending deck not ready; preserving track tail`)
+      pendingMode = 'gapless'
+      pendingPlan = null
+      transitioning = false
+      return
+    }
+    alog('xfade', `CROSSFADE → "${next.title}" (preloaded ✓)`)
     try {
       // The outgoing track is at ≈completion (it plays through the fade to its
       // real end). Scrobble it now — its deck `ended` won't fire post-swap.
       completeTrack(cur)
 
-      if (preloaded) {
-        // 'timed' routes the pending deck through the signal chain so EQ/limiter
-        // apply during the overlap.
-        await e.transition('timed', pendingPlan ?? undefined)
-      } else {
-        const playUrl = await resolveDeckUrl(next)
-        if (!playUrl) { transitioning = false; return }
-        // A manual play() (or another transition) superseded us while the
-        // cache lookup was in flight — bail rather than clobber it.
-        if (currentTrack.value !== cur) { transitioning = false; return }
-        applyActiveNorm(e, next)
-        await e.play(playUrl)
-      }
+      // 'timed' routes the pending deck through the signal chain so EQ/limiter
+      // apply during the overlap.
+      await e.transition('timed', pendingPlan ?? undefined)
       advanceCurrentTo(next)
     } catch (err) {
       alog('xfade', 'crossfade threw — falling back to plain skip', err)
@@ -1481,18 +1526,47 @@ export const usePlayerStore = defineStore('player', () => {
   // play(track): an in-queue track becomes a jump; anything else becomes
   // a one-track queue. jumpTo()/playContext() pass skipQueueSync — they
   // already positioned the pointer precisely.
-  function syncQueuePointer(track: Track) {
+  async function syncQueuePointer(track: Track) {
     if (localMode.value || track.isStream || track.id <= 0) return
     const item = qs.items.find((i) => i.track_id === track.id)
-    if (item) {
-      if (item.item_id !== qs.currentItemID) void qs.jump(item.item_id).catch(() => {})
-    } else {
-      const source: QueueSourceInput = { kind: 'tracks', track_ids: [track.id] }
-      resetSimilarAutoplayContext(source)
-      void qs.replace(source, track.id, false, queueOutputID())
-        .then((view) => resetSimilarAutoplayContext(source, view.items))
-        .catch(() => { /* view reconciles via WS */ })
+    try {
+      if (item) {
+        if (item.item_id !== qs.currentItemID) await qs.jump(item.item_id)
+      } else {
+        const source: QueueSourceInput = { kind: 'tracks', track_ids: [track.id] }
+        resetSimilarAutoplayContext(source)
+        const view = await qs.replace(source, track.id, false, queueOutputID())
+        resetSimilarAutoplayContext(source, view.items)
+      }
+    } catch {
+      // Playback may continue independently, but peekNextTrack's pointer
+      // identity guard keeps transitions disabled until WS/API reconciliation.
     }
+  }
+
+  function invalidateManualTransition() {
+    transitioning = false
+    pendingNext = null
+    pendingMode = 'gapless'
+    pendingPlan = null
+    prefetchedTrackId = null
+    preloadingTrackId = null
+    nativePreloadGeneration++
+    nativePreloadRetryTrackId = null
+    if (nativePreloadRetryTimer) clearTimeout(nativePreloadRetryTimer)
+    nativePreloadRetryTimer = null
+
+    if (playbackBackend.value === 'native' && nativeAudioBackend.value) {
+      // The command captures the old renderer session synchronously. Let it
+      // stop in parallel with analysis/grant resolution for the replacement.
+      void nativeAudioBackend.value.stop().catch(() => {})
+    } else if (engineWired.value) {
+      ensureEngine().cancelPendingTransition()
+    }
+  }
+
+  function settleTrackLoad(generation: number) {
+    if (loadingTrackGeneration === generation) loadingTrackGeneration = null
   }
 
   async function play(track?: Track, opts?: {
@@ -1502,22 +1576,23 @@ export const usePlayerStore = defineStore('player', () => {
     // Remote output: the queue/track state stays client-side (Phase 2),
     // but the audio path is an API call — never touch the local engine.
     if (useCastStore().engaged) {
-      if (track && !opts?.skipQueueSync) syncQueuePointer(track)
+      if (track && !opts?.skipQueueSync) await syncQueuePointer(track)
       await playViaCast(track)
       return
     }
     if (track) {
-      if (!opts?.skipQueueSync) syncQueuePointer(track)
-      // Rendering locally makes this tab the active output.
-      if (!localMode.value && !qs.isActiveOutput) void qs.claim()
       // Never play a track whose file was removed from disk.
       if (track.available === false) return
-      // Manual play invalidates any armed transition / preloaded pending deck.
-      transitioning = false
-      prefetchedTrackId = null
-      preloadingTrackId = null
-      currentTrack.value = track
       const gen = ++playGeneration
+      loadingTrackGeneration = gen
+      invalidateManualTransition()
+      // Preserve browser autoplay activation before queue/API work yields.
+      void resumeContext()
+      if (!opts?.skipQueueSync) await syncQueuePointer(track)
+      if (gen !== playGeneration) return
+      // Rendering locally makes this tab the active output.
+      if (!localMode.value && !qs.isActiveOutput) void qs.claim()
+      currentTrack.value = track
       const startPositionSeconds = Math.max(0, Math.min(
         opts?.startPositionSeconds ?? 0,
         track.duration > 0 ? track.duration : Number.POSITIVE_INFINITY,
@@ -1529,10 +1604,6 @@ export const usePlayerStore = defineStore('player', () => {
       trackStartedAtUnix = 0
       if (track.duration && Number.isFinite(track.duration)) duration.value = track.duration
       alog('player', `play "${track.title}" #${track.id}${track.isStream ? ' (stream)' : ''}`)
-      // Resume the AudioContext synchronously on the user gesture, BEFORE the
-      // awaited fetch below — autoplay policy needs resume() within the gesture's
-      // activation window, and a local fetch sits comfortably inside it.
-      void resumeContext()
       // Block on analysis so the gain is right from the FIRST sample. Without
       // this, album/auto replay gain (which can differ a lot from track gain)
       // would apply a beat late after the async fetch and audibly jump. Auto-
@@ -1543,7 +1614,9 @@ export const usePlayerStore = defineStore('player', () => {
       if (gen !== playGeneration) return
       if (!track.isStream && await playNativeTrack(track, startPositionSeconds)) {
         if (gen !== playGeneration) return
-        beginTrack(track)
+        settleTrackLoad(gen)
+        // beginTrack + transition preloading are driven by Rust's authoritative
+        // TrackStarted event, not the earlier load acknowledgement.
         prepareTransition()
         return
       }
@@ -1552,20 +1625,26 @@ export const usePlayerStore = defineStore('player', () => {
       const e = ensureEngine()
       playbackBackend.value = 'browser'
       const networkUrl = resolveStreamUrl(track)
-      if (!networkUrl) return
+      if (!networkUrl) { settleTrackLoad(gen); return }
       applyActiveNorm(e, track)
       // Cache lookup (resolvePlayable never does network I/O itself, only a
       // fast Cache.match) — check staleness again after it, same reasoning.
-      const playUrl = track.isStream ? networkUrl : await prefetchManager.resolvePlayable(track)
+      const playUrl = track.isStream
+        ? networkUrl
+        : await prefetchManager.resolvePlayable(track).catch(() => undefined)
       if (gen !== playGeneration) return
       try {
         await e.play(playUrl || networkUrl, startPositionSeconds)
       } catch {
-        if (gen === playGeneration) playing.value = false
+        if (gen === playGeneration) {
+          settleTrackLoad(gen)
+          playing.value = false
+        }
         return
       }
       if (gen !== playGeneration) return
       playing.value = true
+      settleTrackLoad(gen)
       beginTrack(track)
       // Preload the next track onto the pending deck for a gap-free hand-off.
       prepareTransition()
@@ -1995,7 +2074,11 @@ export const usePlayerStore = defineStore('player', () => {
     if (!localMode.value) {
       const item = qs.items[index]
       if (!item) return
-      void qs.jump(item.item_id).catch(() => {})
+      try {
+        await qs.jump(item.item_id)
+      } catch {
+        return
+      }
       await play(itemToTrack(item), { skipQueueSync: true })
       return
     }

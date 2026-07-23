@@ -203,6 +203,11 @@ export function createDirectEngine() {
     await waitCanPlayThrough(pending)
   }
 
+  function cancelPendingTransition() {
+    resetSlot(pending)
+    pendingNormGain = 1
+  }
+
   // ALWAYS a gapless swap regardless of `mode` — there's no Web Audio graph
   // to run gain-automation crossfade curves on, so 'timed'/'smart' downgrade
   // to gapless here (still click-free: the pending element is fully
@@ -264,7 +269,7 @@ export function createDirectEngine() {
     kind: 'browser' as const,
     isPlaying, currentTime, duration, volume,
     play, pause, stop, resume, seek, setVolume,
-    loadNext, transition, setOnTransitionPoint, setOnEnded, setOnError,
+    loadNext, transition, cancelPendingTransition, setOnTransitionPoint, setOnEnded, setOnError,
     dispose,
     setActiveNormalization, setPendingNormalization,
     resetActiveNormalization, resetPendingNormalization,

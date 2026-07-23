@@ -121,4 +121,18 @@ describe('browser audio master output', () => {
     expect(decks.pending.transitionGainNode.gain.value).toBe(1)
     decks.dispose()
   })
+
+  test('manual replacement cancels the pending deck without stopping the audible deck', async () => {
+    const decks = new DeckManager(new FakeAudioContext())
+    await decks.loadAndPlay('/api/music/tracks/1/stream')
+    await decks.loadNext('/api/music/tracks/2/stream')
+    await decks.pending.play()
+
+    decks.prepareForReplacement()
+
+    expect(decks.active.paused).toBeFalse()
+    expect(decks.pending.paused).toBeTrue()
+    expect(decks.pending.transitionGainNode.gain.value).toBe(1)
+    decks.dispose()
+  })
 })

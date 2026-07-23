@@ -138,6 +138,11 @@ function createEngine() {
     await deckManager.loadNext(url)
   }
 
+  function cancelPendingTransition() {
+    scheduler.reset()
+    deckManager.prepareForReplacement()
+  }
+
   async function transition(mode: CrossfadeMode | 'gapless', plan?: TransitionPlan) {
     if (mode !== 'gapless') {
       // Route the pending deck through the chain so EQ/limiter apply during
@@ -191,7 +196,7 @@ function createEngine() {
     kind: 'browser' as const,
     isPlaying, currentTime, duration, volume,
     play, pause, stop, resume, seek, setVolume,
-    loadNext, transition, setOnTransitionPoint, setOnEnded, setOnError,
+    loadNext, transition, cancelPendingTransition, setOnTransitionPoint, setOnEnded, setOnError,
     dispose,
     normalization, preamp, equalizer, postgain, crossfeed, limiter,
     signalChain, analyserBridge, scheduler,
@@ -223,6 +228,7 @@ type EngineStub = {
   setVolume: (v: number) => void
   loadNext: (url: string) => Promise<void>
   transition: (mode: CrossfadeMode | 'gapless', plan?: TransitionPlan) => Promise<void>
+  cancelPendingTransition: () => void
   setOnTransitionPoint: (cb: () => void) => void
   setOnEnded: (cb: () => void) => void
   setOnError: (cb: (err: Error) => void) => void
@@ -253,6 +259,7 @@ const serverStub: EngineStub = {
   setVolume: () => {},
   loadNext: async () => {},
   transition: async () => {},
+  cancelPendingTransition: () => {},
   setOnTransitionPoint: () => {},
   setOnEnded: () => {},
   setOnError: () => {},

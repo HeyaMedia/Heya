@@ -57,6 +57,27 @@ export class DeckManager {
     await this.pendingDeck.load(url)
   }
 
+  // A manual track selection supersedes both a buffered next deck and an
+  // overlap already in progress. Keep the outgoing deck audible until the
+  // replacement is ready, but make it impossible for the old timer/pending
+  // element to swap itself back in while the new track is loading.
+  prepareForReplacement() {
+    if (this.transitionTimer) {
+      clearTimeout(this.transitionTimer)
+      this.transitionTimer = null
+    }
+    this.transitioning = false
+    this.transitionResolve?.()
+    this.transitionResolve = null
+
+    const now = this.ctx.currentTime
+    this.activeDeck.transitionGainNode.gain.cancelScheduledValues(now)
+    this.activeDeck.transitionGainNode.gain.setValueAtTime(1, now)
+    this.pendingDeck.transitionGainNode.gain.cancelScheduledValues(now)
+    this.pendingDeck.transitionGainNode.gain.setValueAtTime(1, now)
+    this.pendingDeck.reset()
+  }
+
   async transition(mode: CrossfadeMode | 'gapless', plan?: TransitionPlan): Promise<void> {
     if (mode === 'gapless') {
       alog('deck', 'gapless: pause active + swap to preloaded pending deck')
