@@ -12,9 +12,10 @@ func TestAppRuntimeModeOwnership(t *testing.T) {
 		mode            appRuntimeMode
 		executesWorkers bool
 		ownsCoordinator bool
+		autoMigrates    bool
 	}{
 		{name: "api", mode: appRuntimeAPI},
-		{name: "worker coordinator", mode: appRuntimeWorker, executesWorkers: true, ownsCoordinator: true},
+		{name: "worker coordinator", mode: appRuntimeWorker, executesWorkers: true, ownsCoordinator: true, autoMigrates: true},
 		{name: "finite queue processor", mode: appRuntimeQueueProcessor, executesWorkers: true},
 		{name: "command", mode: appRuntimeCommand},
 	}
@@ -26,6 +27,9 @@ func TestAppRuntimeModeOwnership(t *testing.T) {
 			}
 			if got := tt.mode.ownsCoordinatorLease(); got != tt.ownsCoordinator {
 				t.Errorf("ownsCoordinatorLease() = %v, want %v", got, tt.ownsCoordinator)
+			}
+			if got := tt.mode.autoMigrates(); got != tt.autoMigrates {
+				t.Errorf("autoMigrates() = %v, want %v", got, tt.autoMigrates)
 			}
 		})
 	}

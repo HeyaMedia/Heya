@@ -409,6 +409,10 @@ func (m appRuntimeMode) ownsCoordinatorLease() bool {
 	return m == appRuntimeWorker
 }
 
+func (m appRuntimeMode) autoMigrates() bool {
+	return m == appRuntimeWorker
+}
+
 // New constructs the API runtime. Its River client can insert and manage jobs
 // but owns no queues, worker goroutines, or River maintenance services. Queue
 // execution belongs to NewWorker and NewQueueProcessor.
@@ -442,19 +446,13 @@ func NewCommand(ctx context.Context, cfg *config.Config) (*App, error) {
 
 func newApp(ctx context.Context, cfg *config.Config, runtimeMode appRuntimeMode) (*App, error) {
 	// Passive mode is a read-mostly guest on someone else's DB (typically a
-	// dev box pointed at production). Skip AutoMigrate so we never mutate the
-	// target's schema to match this binary's branch — if the schemas differ,
-	// failing local queries are a far safer outcome than altering prod.
+	// dev box pointed at production), so it never mutates schema.
 	//
-	// Worker migrations deliberately wait until after the coordinator lease is
-	// held. Otherwise a second worker that will lose the lease can still mutate
-	// the schema before discovering that it is not the coordinator. API and
-	// command runtimes keep their historical migrate-before-connect ordering.
-	if !cfg.PassiveMode.Value && !runtimeMode.ownsCoordinatorLease() {
-		if err := AutoMigrate(cfg.DatabaseURL.Value); err != nil {
-			return nil, err
-		}
-	} else if cfg.PassiveMode.Value {
+	// Automatic migrations belong exclusively to the coordinator worker.
+	// API startup must remain health-check responsive while a large migration
+	// runs, and one-shot command/queue runtimes must not race deployment-owned
+	// schema work. Operators can still use `heya migrate up` explicitly.
+	if cfg.PassiveMode.Value {
 		log.Warn().Msg("passive mode: skipping auto-migrate; this binary will NOT alter the target schema")
 	}
 
@@ -536,7 +534,7 @@ func newApp(ctx context.Context, cfg *config.Config, runtimeMode appRuntimeMode)
 			return nil, err
 		}
 		log.Info().Msg("worker coordinator lease acquired")
-		if !cfg.PassiveMode.Value {
+		if !cfg.PassiveMode.Value && runtimeMode.autoMigrates() {
 			if err := AutoMigrate(cfg.DatabaseURL.Value); err != nil {
 				return nil, err
 			}
