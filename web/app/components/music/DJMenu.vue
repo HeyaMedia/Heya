@@ -106,6 +106,12 @@ async function choose(mode: DJMode) {
 <style>
 /* AppMenu portals both its trigger internals and menu surface across component
    boundaries, so this deliberately unscoped block owns the complete DJ unit. */
+/* AppSheet lives at z-index 400. Reka places AppMenu's popper wrapper at the
+   ordinary surface layer (200), which makes a DJ menu opened from the phone
+   playcard paint underneath that sheet. Lift only DJ menus above sheets while
+   leaving ordinary menus and higher dialogs/toasts in their existing layers. */
+[data-reka-popper-content-wrapper]:has(.dj-menu) { z-index: 500 !important; }
+
 .dj-trigger {
   position: relative;
   color: var(--fg-2);

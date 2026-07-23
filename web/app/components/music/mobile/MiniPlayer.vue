@@ -30,7 +30,12 @@
       </div>
     </div>
 
-    <DJMenu variant="mini" />
+    <!-- The bar's own click expands Now Playing. Keep the DJ trigger as an
+         independent control so opening its portalled menu does not also open
+         the full-screen playcard underneath it. -->
+    <div class="mp-dj" @click.stop>
+      <DJMenu variant="mini" />
+    </div>
 
     <div class="mp-controls">
       <button
@@ -157,11 +162,12 @@ onScopeDispose(() => {
 
 .mp-art,
 .mp-info,
-.mini-player :deep(.dj-trigger),
+.mp-dj,
 .mp-controls {
   position: relative;
   z-index: 2;
 }
+.mp-dj { display: inline-flex; flex-shrink: 0; }
 .mini-player :deep(.dj-trigger) { flex-shrink: 0; }
 
 .mp-ultrablur { z-index: 0; }
