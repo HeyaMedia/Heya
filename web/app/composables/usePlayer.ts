@@ -936,7 +936,7 @@ export const usePlayerStore = defineStore('player', () => {
     // Normally the Rust scheduler starts a preloaded deck before this path.
     // Reaching EOF means preload was late or failed, so replace the renderer
     // session with an explicit cold load.
-    await play(next)
+    await playQueueSuccessor(next, 'ended')
   }
 
   function applyActiveNorm(e: ReturnType<typeof useAudioEngine>, track: Track | null) {
@@ -1277,6 +1277,19 @@ export const usePlayerStore = defineStore('player', () => {
     const from = qs.currentItemID
     if (!from) return
     void qs.advance(from, reason).catch(() => { /* WS view reconciles */ })
+  }
+
+  // Start a known forward queue successor without letting play(track) turn
+  // the transition into /queue/jump. Jumping updates the pointer but bypasses
+  // the track-boundary work that refills DJs. The renderer stays responsive by
+  // reporting fire-and-forget, matching the preloaded deck-swap path above.
+  async function playQueueSuccessor(next: Track, reason: 'ended' | 'skip') {
+    if (localMode.value) {
+      await play(next)
+      return
+    }
+    reportAdvance(reason)
+    await play(next, { skipQueueSync: true })
   }
 
   // --- Endless similar autoplay -------------------------------------------
@@ -1924,7 +1937,7 @@ export const usePlayerStore = defineStore('player', () => {
   async function skipToNextInternal() {
     let next = forwardNext()
     if (!next && await ensureSimilarAutoplayQueue(true)) next = forwardNext()
-    if (next) await play(next)
+    if (next) await playQueueSuccessor(next, 'skip')
     else playing.value = false
   }
 
@@ -1935,11 +1948,11 @@ export const usePlayerStore = defineStore('player', () => {
     if (!next && await ensureSimilarAutoplayQueue(true)) next = forwardNext()
     if (!next) { playing.value = false; return }
     if (useCastStore().isClientDevice) {
-      await play(next)
+      await playQueueSuccessor(next, 'skip')
       return
     }
     if (playbackBackend.value === 'native') {
-      await play(next)
+      await playQueueSuccessor(next, 'skip')
       return
     }
     if (playing.value && !transitioning && prefetchedTrackId === next.id && !next.isStream) {
@@ -1956,7 +1969,7 @@ export const usePlayerStore = defineStore('player', () => {
         transitioning = false
       }
     }
-    await play(next)
+    await playQueueSuccessor(next, 'skip')
   }
 
   async function prevTrack() {
@@ -2332,7 +2345,7 @@ export const usePlayerStore = defineStore('player', () => {
       return
     }
     alog('player', `cast advance → "${next.title}"`)
-    await play(next)
+    await playQueueSuccessor(next, 'ended')
   }
 
   return {
