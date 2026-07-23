@@ -49,6 +49,7 @@ export interface QueueViewPayload {
   shuffled: boolean
   dj_mode: DJMode
   active_output?: string
+  source?: QueueSourceInput
   items: QueueItem[]
   window_start_index: number
 }
@@ -94,6 +95,7 @@ export const useQueueStore = defineStore('playQueue', () => {
   const shuffled = ref(false)
   const djMode = ref<DJMode>('off')
   const activeOutput = ref('')
+  const source = ref<QueueSourceInput | null>(null)
   const loaded = ref(false)
 
   const outputID = tabOutputID()
@@ -134,6 +136,7 @@ export const useQueueStore = defineStore('playQueue', () => {
     shuffled.value = v.shuffled
     djMode.value = v.dj_mode || 'off'
     activeOutput.value = v.active_output ?? ''
+    source.value = v.source ?? null
     loaded.value = true
   }
 
@@ -267,6 +270,7 @@ export const useQueueStore = defineStore('playQueue', () => {
     currentIndex.value = -1
     playing.value = false
     djMode.value = 'off'
+    source.value = null
     try {
       await queueAPI('/api/me/queue', { method: 'DELETE' })
     } catch { /* already gone */ }
@@ -323,7 +327,7 @@ export const useQueueStore = defineStore('playQueue', () => {
 
   return {
     version, items, windowStart, total, currentItemID, currentIndex,
-    positionSeconds, playing, repeatMode, shuffled, djMode, activeOutput, loaded,
+    positionSeconds, playing, repeatMode, shuffled, djMode, activeOutput, source, loaded,
     outputID, targetDeviceID, isActiveOutput, currentWindowIndex,
     refetch, replace, enqueue, removeItem, moveItem, jump, advance,
     setShuffle, setRepeat, setDJMode, clearUpcoming, clearAll, claim, heartbeat,

@@ -9,6 +9,13 @@ export const MIN_TARGET_LUFS = -23
 export const MAX_TARGET_LUFS = -8
 const MAX_GAIN_DB = 12
 
+export type ReplayGainMode = 'off' | 'track' | 'album' | 'auto'
+
+export interface LoudnessMeasurement {
+  lufs: number | null
+  peak: number | null
+}
+
 function clampGain(db: number): number {
   return Math.max(-MAX_GAIN_DB, Math.min(MAX_GAIN_DB, db))
 }
@@ -18,6 +25,28 @@ function dbToLinear(db: number): number { return 10 ** (db / 20) }
 export function clampTargetLufs(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_TARGET_LUFS
   return Math.max(MIN_TARGET_LUFS, Math.min(MAX_TARGET_LUFS, value))
+}
+
+// Pick the measurement used for normalization. "Auto" preserves an album's
+// intended track-to-track dynamics only when playback actually originated
+// from that album; playlists, mixes, DJ sessions and ad-hoc queues use each
+// track's own measurement so unrelated masters land at a consistent level.
+export function selectReplayGainLoudness(
+  mode: ReplayGainMode,
+  track: LoudnessMeasurement,
+  album: LoudnessMeasurement,
+  albumContext: boolean,
+): { lufs: number; peak: number } | null {
+  if (mode === 'off') return null
+
+  const useAlbum = mode === 'album' || (mode === 'auto' && albumContext)
+  if (useAlbum && album.lufs != null && album.peak != null) {
+    return { lufs: album.lufs, peak: album.peak }
+  }
+  if (track.lufs != null && track.peak != null) {
+    return { lufs: track.lufs, peak: track.peak }
+  }
+  return null
 }
 
 // Pull a per-track linear gain from integrated LUFS + true-peak. Backs off

@@ -8,7 +8,7 @@ import type { BoundaryHints, TransitionPlan } from '~/engine/crossfade/strategy'
 import { TimeBasedCrossfade } from '~/engine/crossfade/timeBased'
 import { alog } from '~/engine/debug'
 import { prefetchManager } from '~/engine/prefetch'
-import { computeNormalizationGain } from '~/engine/dsp/normalization'
+import { computeNormalizationGain, selectReplayGainLoudness } from '~/engine/dsp/normalization'
 import type { NativeAudioPlaybackBackend } from '~/composables/useNativeAudioPlaybackBackend'
 import type { AudioPlaybackClockSource } from '~/types/audio-playback'
 import type {
@@ -541,9 +541,9 @@ export const usePlayerStore = defineStore('player', () => {
   //   track  => each track's own EBU R128 gain toward the configured LUFS target
   //   album  => the album's gain applied to every track, preserving the
   //             mastered inter-track dynamics (loud songs stay louder)
-  //   auto   => track gain when shuffled, album gain otherwise
-  // The decision is made per track-load (shuffling mid-track doesn't retro-
-  // actively re-level the current track, which would jump the volume).
+  //   auto   => album gain for an unshuffled album queue, track gain elsewhere
+  // The decision is made per track-load. A DJ continuation from an album queue
+  // switches to track gain once it leaves that album.
   function playbackOf(track: Track): PlaybackData {
     const cached = playbackDataCache.get(track.id)
     if (cached) return cached
@@ -570,16 +570,17 @@ export const usePlayerStore = defineStore('player', () => {
   // loudness hasn't been computed for the record yet.
   function effectiveLoudness(track: Track): { lufs: number; peak: number } | null {
     const mode = settings.replayGain.value.mode
-    if (mode === 'off') return null
     const d = playbackOf(track)
-    const useAlbum = mode === 'album' || (mode === 'auto' && !shuffled.value)
-    if (useAlbum && d.album_lufs != null && d.album_peak != null) {
-      return { lufs: d.album_lufs, peak: d.album_peak }
-    }
-    if (d.integrated_lufs != null && d.true_peak_db != null) {
-      return { lufs: d.integrated_lufs, peak: d.true_peak_db }
-    }
-    return null
+    const albumContext = !localMode.value
+      && !shuffled.value
+      && qs.source?.kind === 'album'
+      && qs.source.id === track.album_id
+    return selectReplayGainLoudness(
+      mode,
+      { lufs: d.integrated_lufs, peak: d.true_peak_db },
+      { lufs: d.album_lufs, peak: d.album_peak },
+      albumContext,
+    )
   }
 
   function nativeProcessingSettings(): NativeAudioProcessingSettings {
