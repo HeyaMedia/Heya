@@ -25,8 +25,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { arch: amd64, platform: linux/amd64, runner: ubuntu-latest }
-          - { arch: arm64, platform: linux/arm64, runner: ubuntu-24.04-arm }
+          - { arch: amd64, platform: linux/amd64, runner: blacksmith-8vcpu-ubuntu-2404 }
+          - { arch: arm64, platform: linux/arm64, runner: blacksmith-8vcpu-ubuntu-2404-arm }
     steps:
       - uses: actions/checkout@v7
 
@@ -72,7 +72,7 @@ jobs:
   merge:
     name: cpu runtime manifest
     needs: cpu
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       image: ${{ needs.cpu.outputs.image }}
     steps:
@@ -108,7 +108,7 @@ jobs:
   variants:
     name: ${{ matrix.variant }} runtime
     needs: merge
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     strategy:
       fail-fast: false
       matrix:

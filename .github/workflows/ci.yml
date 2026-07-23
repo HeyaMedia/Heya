@@ -19,7 +19,7 @@ jobs:
   # ────────────────────────────────────────────────────────────────
   frontend:
     name: Frontend (TypeScript + Vue + audit)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v7
 
@@ -88,7 +88,7 @@ jobs:
   # ────────────────────────────────────────────────────────────────
   go-static:
     name: Go (lint + build + sqlc drift)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v7
         with:
@@ -144,7 +144,7 @@ jobs:
   # ────────────────────────────────────────────────────────────────
   go-test:
     name: Go (test -race)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     services:
       postgres:
         # pgvector image, not stock postgres:17 — migration 00015_track_facets
@@ -197,7 +197,7 @@ jobs:
   # ────────────────────────────────────────────────────────────────
   security:
     name: Security (govulncheck + OSV)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v7
 

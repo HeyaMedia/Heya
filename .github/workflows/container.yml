@@ -13,8 +13,8 @@
 #
 # The amd64 app bundle (Heya + pinned agent CLIs) is built once, uploaded as an
 # artifact, and then packaged in parallel onto the CPU/CUDA/OpenVINO runtime
-# images. Arm64 stays native on the GitHub-hosted ubuntu-24.04-arm runner and
-# builds the full app image there, NO QEMU. CPU digests are merged into one
+# images. Arm64 stays native on a Blacksmith ARM runner and builds the full app
+# image there, NO QEMU. CPU digests are merged into one
 # multi-arch manifest.
 # Auth: GITHUB_TOKEN — no manual secrets needed.
 
@@ -35,7 +35,7 @@ concurrency:
 jobs:
   app-amd64:
     name: app amd64 artifact
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     outputs:
       image: ${{ steps.img.outputs.image }}
       runtime_image: ${{ steps.img.outputs.runtime_image }}
@@ -79,7 +79,7 @@ jobs:
   base-amd64:
     name: base amd64
     needs: app-amd64
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v7
 
@@ -141,7 +141,7 @@ jobs:
 
   base-arm64:
     name: base arm64
-    runs-on: ubuntu-24.04-arm
+    runs-on: blacksmith-8vcpu-ubuntu-2404-arm
     outputs:
       image: ${{ steps.img.outputs.image }}
       runtime_image: ${{ steps.img.outputs.runtime_image }}
@@ -204,7 +204,7 @@ jobs:
   merge:
     name: base manifest
     needs: [app-amd64, base-amd64, base-arm64]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       image: ${{ needs.app-amd64.outputs.image }}
       runtime_image: ${{ needs.app-amd64.outputs.runtime_image }}
@@ -262,7 +262,7 @@ jobs:
   variants:
     name: ${{ matrix.variant }} (amd64)
     needs: app-amd64
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     strategy:
       fail-fast: false
       matrix:
@@ -330,10 +330,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { variant: cpu, arch: amd64, platform: linux/amd64, runner: ubuntu-latest, base_suffix: '' }
-          - { variant: cpu, arch: arm64, platform: linux/arm64, runner: ubuntu-24.04-arm, base_suffix: '' }
-          - { variant: cuda, arch: amd64, platform: linux/amd64, runner: ubuntu-latest, base_suffix: '-cuda' }
-          - { variant: openvino, arch: amd64, platform: linux/amd64, runner: ubuntu-latest, base_suffix: '-openvino' }
+          - { variant: cpu, arch: amd64, platform: linux/amd64, runner: blacksmith-4vcpu-ubuntu-2404, base_suffix: '' }
+          - { variant: cpu, arch: arm64, platform: linux/arm64, runner: blacksmith-4vcpu-ubuntu-2404-arm, base_suffix: '' }
+          - { variant: cuda, arch: amd64, platform: linux/amd64, runner: blacksmith-4vcpu-ubuntu-2404, base_suffix: '-cuda' }
+          - { variant: openvino, arch: amd64, platform: linux/amd64, runner: blacksmith-4vcpu-ubuntu-2404, base_suffix: '-openvino' }
     steps:
       - uses: actions/checkout@v7
 
@@ -380,7 +380,7 @@ jobs:
   aio-publish:
     name: ${{ matrix.variant }} aio manifest
     needs: [merge, aio-build]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     strategy:
       fail-fast: false
       matrix:
