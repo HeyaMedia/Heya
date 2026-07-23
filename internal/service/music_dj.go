@@ -39,19 +39,16 @@ var djModes = map[string]bool{
 
 func djModeExtendsFromRunway(mode string) bool {
 	// Flow explicitly continues from the last recommendation already waiting
-	// in the queue. Echo has a one-track runway, so this also makes its nearest
-	// neighbour chain explicit even though the anchor is normally the current
-	// item at a playback boundary.
+	// in the queue. Echo does the same so each refill continues its nearest-
+	// neighbour chain from the furthest track it has already planned.
 	return mode == DJModeEcho || mode == DJModeFlow
 }
 
 func djModeRunway(mode string) int {
 	switch mode {
-	case DJModeEcho:
-		return 1
 	case DJModeEncore:
 		return 1
-	case DJModeFlow, DJModeSpotlight, DJModeTimewarp:
+	case DJModeEcho, DJModeFlow, DJModeSpotlight, DJModeTimewarp:
 		return djContinuousRunway
 	default:
 		return 0
@@ -102,6 +99,12 @@ func planDJQueue(mode string, session int64, current sqlc.PlayQueueItem, nextIte
 		return djQueuePlan{}
 	}
 	targetRunway := djModeRunway(mode)
+	if mode == DJModeEncore && !hasNextUser {
+		// Encore only inserts one bridge before a listener-owned track. Once
+		// that queue runs out it becomes continuous, so keep a second track in
+		// reserve rather than letting playback sit on a bare tail.
+		targetRunway = djContinuousRunway
+	}
 	if targetRunway == 0 {
 		return djQueuePlan{}
 	}

@@ -182,12 +182,14 @@ FE advance-ownership machinery from cast Phase 2.
 ## Queue DJs
 
 DJs are persisted queue-insertion strategies, shared by every controller of
-the same device queue. Echo continuously follows one nearest musical neighbour.
+the same device queue. Echo keeps two nearest musical neighbours ready and
+continuously refills that rolling runway from its furthest planned track.
 Flow inserts two recommendations and yields to the next listener-owned track,
 extending from its own tail only when that queue runs out. Voyage inserts three
 sonic steps toward the next listener track, or toward relaxed music when there
 is no destination; adding a track replans that path immediately. Encore inserts
-one same-artist track before yielding, while Spotlight takes over with
+one same-artist track before yielding, then keeps two ready once the listener
+queue is empty. Spotlight takes over with
 same-artist tracks ranked by sonic proximity. Timewarp takes over within a
 roughly two-year window and prioritizes overlapping genres/styles.
 

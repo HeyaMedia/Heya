@@ -337,12 +337,14 @@ func TestQueueDJOwnsAndCleansOnlyGeneratedTracks(t *testing.T) {
 	view, err = app.SetQueueDJ(ctx, userID, "dj-test", DJModeEncore)
 	require.NoError(t, err)
 	require.Equal(t, DJModeEncore, view.DJMode)
-	require.EqualValues(t, 2, view.Total)
+	require.EqualValues(t, 3, view.Total)
 	require.False(t, view.Items[0].DJGenerated)
 	require.True(t, view.Items[1].DJGenerated)
+	require.True(t, view.Items[2].DJGenerated)
 	require.Equal(t, DJModeEncore, view.Items[1].DJMode)
+	require.Equal(t, DJModeEncore, view.Items[2].DJMode)
 
-	// Turning it off removes the future generated item but not the user's
+	// Turning it off removes the future generated items but not the user's
 	// current item. The queue remains playable at the same pointer.
 	current := view.CurrentItemID
 	view, err = app.SetQueueDJ(ctx, userID, "dj-test", DJModeOff)
@@ -370,18 +372,23 @@ func TestDJQueueSchedulingPolicies(t *testing.T) {
 		need        int
 		targetTrack int64
 	}{
-		{"echo takes over past a user track", DJModeEcho, generated, []sqlc.PlayQueueItem{userNext}, &userNext, true, 1, 0},
+		{"echo takes over past a user track", DJModeEcho, generated, []sqlc.PlayQueueItem{userNext}, &userNext, true, 2, 0},
+		{"echo refills its rolling runway", DJModeEcho, generated, []sqlc.PlayQueueItem{generatedNext}, nil, true, 1, 0},
 		{"flow adds two after a user track", DJModeFlow, userCurrent, []sqlc.PlayQueueItem{userNext}, &userNext, true, 2, 0},
 		{"flow yields after its pair", DJModeFlow, generated, []sqlc.PlayQueueItem{generatedNext, userNext}, &userNext, false, 0, 0},
 		{"flow extends its own tail", DJModeFlow, generated, nil, nil, true, 2, 0},
+		{"flow refills its rolling runway", DJModeFlow, generated, []sqlc.PlayQueueItem{generatedNext}, nil, true, 1, 0},
 		{"voyage targets the next user track", DJModeVoyage, userCurrent, []sqlc.PlayQueueItem{userNext}, &userNext, true, 3, userNext.TrackID},
 		{"voyage waits for its path", DJModeVoyage, generated, []sqlc.PlayQueueItem{generatedNext, userNext}, &userNext, false, 0, 0},
 		{"voyage heads toward chill at the tail", DJModeVoyage, generated, nil, nil, true, 3, 0},
 		{"encore adds one after a user track", DJModeEncore, userCurrent, []sqlc.PlayQueueItem{userNext}, &userNext, true, 1, 0},
 		{"encore yields to the listener queue", DJModeEncore, generated, []sqlc.PlayQueueItem{userNext}, &userNext, false, 0, 0},
-		{"encore extends when the queue ends", DJModeEncore, generated, nil, nil, true, 1, 0},
+		{"encore keeps two ready when the queue ends", DJModeEncore, generated, nil, nil, true, 2, 0},
+		{"encore refills its empty-queue runway", DJModeEncore, generated, []sqlc.PlayQueueItem{generatedNext}, nil, true, 1, 0},
 		{"spotlight keeps control", DJModeSpotlight, generated, []sqlc.PlayQueueItem{userNext}, &userNext, true, 2, 0},
+		{"spotlight refills its rolling runway", DJModeSpotlight, generated, []sqlc.PlayQueueItem{generatedNext}, nil, true, 1, 0},
 		{"timewarp keeps control", DJModeTimewarp, generated, []sqlc.PlayQueueItem{userNext}, &userNext, true, 2, 0},
+		{"timewarp refills its rolling runway", DJModeTimewarp, generated, []sqlc.PlayQueueItem{generatedNext}, nil, true, 1, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -401,9 +408,10 @@ func TestQueueEchoChainsFromEachGeneratedTrackWithoutRepeating(t *testing.T) {
 	neighborA := setupQueueFixture(t, pool, userID, "dj-echo-a", 1)
 	neighborB := setupQueueFixture(t, pool, userID, "dj-echo-b", 1)
 	neighborC := setupQueueFixture(t, pool, userID, "dj-echo-c", 1)
+	neighborD := setupQueueFixture(t, pool, userID, "dj-echo-d", 1)
 	ctx := context.Background()
 
-	// Four distinct artists on a gently curving line in embedding space.
+	// Five distinct artists on a gently curving line in embedding space.
 	// Each generated track should therefore seed the next nearest unplayed
 	// artist, while the queue-wide exclusion set prevents walking backwards.
 	tracks := []struct {
@@ -415,6 +423,7 @@ func TestQueueEchoChainsFromEachGeneratedTrackWithoutRepeating(t *testing.T) {
 		{neighborA.trackIDs[0], 0.995, 0.10},
 		{neighborB.trackIDs[0], 0.980, 0.20},
 		{neighborC.trackIDs[0], 0.955, 0.30},
+		{neighborD.trackIDs[0], 0.920, 0.40},
 	}
 	for _, track := range tracks {
 		vector := make([]float32, 512)
@@ -431,21 +440,27 @@ func TestQueueEchoChainsFromEachGeneratedTrackWithoutRepeating(t *testing.T) {
 	require.NoError(t, err)
 	view, err := app.SetQueueDJ(ctx, userID, "dj-echo-test", DJModeEcho)
 	require.NoError(t, err)
-	require.EqualValues(t, 2, view.Total, "Echo keeps exactly one recommendation ready")
+	require.EqualValues(t, 3, view.Total, "Echo immediately keeps two recommendations ready")
 	require.Equal(t, neighborA.trackIDs[0], view.Items[1].TrackID)
 	require.True(t, view.Items[1].DJGenerated)
+	require.Equal(t, neighborB.trackIDs[0], view.Items[2].TrackID)
+	require.True(t, view.Items[2].DJGenerated)
 
-	view, err = app.AdvanceQueue(ctx, userID, "dj-echo-test", view.CurrentItemID, "ended")
+	// Skipping consumes the same rolling slot as natural completion and must
+	// immediately restore the two-track runway.
+	view, err = app.AdvanceQueue(ctx, userID, "dj-echo-test", view.CurrentItemID, "skip")
 	require.NoError(t, err)
 	require.Equal(t, neighborA.trackIDs[0], view.Items[view.CurrentIndex].TrackID)
-	require.EqualValues(t, 3, view.Total)
+	require.EqualValues(t, 4, view.Total)
 	require.Equal(t, neighborB.trackIDs[0], view.Items[int(view.CurrentIndex)+1].TrackID)
+	require.Equal(t, neighborC.trackIDs[0], view.Items[int(view.CurrentIndex)+2].TrackID)
 
 	view, err = app.AdvanceQueue(ctx, userID, "dj-echo-test", view.CurrentItemID, "ended")
 	require.NoError(t, err)
 	require.Equal(t, neighborB.trackIDs[0], view.Items[view.CurrentIndex].TrackID)
-	require.EqualValues(t, 4, view.Total)
+	require.EqualValues(t, 5, view.Total)
 	require.Equal(t, neighborC.trackIDs[0], view.Items[int(view.CurrentIndex)+1].TrackID)
+	require.Equal(t, neighborD.trackIDs[0], view.Items[int(view.CurrentIndex)+2].TrackID)
 
 	seen := map[int64]bool{}
 	for _, item := range view.Items {
@@ -589,13 +604,14 @@ func TestQueueEncoreYieldsToListenerOwnedTrack(t *testing.T) {
 	require.True(t, view.Items[view.CurrentIndex].DJGenerated)
 	require.EqualValues(t, 3, view.Total)
 
-	// The next user-owned track becomes a fresh anchor and receives exactly
-	// one Encore contribution of its own.
+	// The next user-owned track becomes a fresh anchor. With no listener-owned
+	// track behind it, Encore switches to its two-track continuous buffer.
 	view, err = app.AdvanceQueue(ctx, userID, "dj-test", view.CurrentItemID, "ended")
 	require.NoError(t, err)
 	require.False(t, view.Items[view.CurrentIndex].DJGenerated)
-	require.EqualValues(t, 4, view.Total)
+	require.EqualValues(t, 5, view.Total)
 	require.True(t, view.Items[int(view.CurrentIndex)+1].DJGenerated)
+	require.True(t, view.Items[int(view.CurrentIndex)+2].DJGenerated)
 }
 
 func TestQueueIncrementalDJMaintainsRunwayAndPreservesPlayingGeneratedItem(t *testing.T) {
