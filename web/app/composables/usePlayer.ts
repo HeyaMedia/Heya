@@ -89,6 +89,10 @@ let playGeneration = 0
 // analysis and the renderer load. Queue/analysis watchers must not arm a
 // scheduler against the old audible deck using the new track's boundaries.
 let loadingTrackGeneration: number | null = null
+// A seek made while play(track) is preparing belongs to that replacement
+// track, not to the old renderer that may still be shutting down. Retain only
+// the newest target and carry it into (or apply it just after) the new load.
+let pendingTrackLoadSeek: { generation: number, positionSeconds: number } | null = null
 // Set by stopCasting(): the local engine has nothing loaded (or something
 // stale), so the next resume must cold-load the track and seek to where the
 // cast session left off instead of resuming a dead deck.
@@ -1561,6 +1565,34 @@ export const usePlayerStore = defineStore('player', () => {
 
   function settleTrackLoad(generation: number) {
     if (loadingTrackGeneration === generation) loadingTrackGeneration = null
+    if (pendingTrackLoadSeek?.generation === generation) pendingTrackLoadSeek = null
+  }
+
+  function trackLoadSeekPosition(generation: number, fallback: number): number {
+    return pendingTrackLoadSeek?.generation === generation
+      ? pendingTrackLoadSeek.positionSeconds
+      : fallback
+  }
+
+  async function applyPendingNativeTrackLoadSeek(generation: number, initialPosition: number) {
+    let appliedPosition = initialPosition
+    while (generation === playGeneration) {
+      const target = trackLoadSeekPosition(generation, appliedPosition)
+      if (Math.abs(target - appliedPosition) <= 0.001) return
+      const backend = nativeAudioBackend.value
+      if (!backend) return
+      try {
+        await backend.seek(target)
+      } catch (error) {
+        alog('player', 'native audio deferred seek was rejected', error)
+        return
+      }
+      appliedPosition = target
+      acceptLocalPosition(backend.state.positionSeconds)
+      // A drag can publish another target while the native bridge is
+      // reconciling this one. Loop once more and coalesce onto the newest
+      // retained value before declaring the track load settled.
+    }
   }
 
   async function play(track?: Track, opts?: {
@@ -1579,6 +1611,11 @@ export const usePlayerStore = defineStore('player', () => {
       if (track.available === false) return
       const gen = ++playGeneration
       loadingTrackGeneration = gen
+      const requestedStartPosition = Math.max(0, Math.min(
+        opts?.startPositionSeconds ?? 0,
+        track.duration > 0 ? track.duration : Number.POSITIVE_INFINITY,
+      ))
+      pendingTrackLoadSeek = { generation: gen, positionSeconds: requestedStartPosition }
       invalidateManualTransition()
       // Preserve browser autoplay activation before queue/API work yields.
       void resumeContext()
@@ -1587,10 +1624,7 @@ export const usePlayerStore = defineStore('player', () => {
       // Rendering locally makes this tab the active output.
       if (!localMode.value && !qs.isActiveOutput) void qs.claim()
       currentTrack.value = track
-      const startPositionSeconds = Math.max(0, Math.min(
-        opts?.startPositionSeconds ?? 0,
-        track.duration > 0 ? track.duration : Number.POSITIVE_INFINITY,
-      ))
+      const startPositionSeconds = trackLoadSeekPosition(gen, requestedStartPosition)
       position.value = startPositionSeconds
       scrobbledTrackId.value = null
       listenedSeconds = 0
@@ -1630,7 +1664,10 @@ export const usePlayerStore = defineStore('player', () => {
       // A newer play() superseded us during the fetch — bail rather than load a
       // stale track onto the active deck.
       if (gen !== playGeneration) return
-      if (!track.isStream && await playNativeTrack(track, startPositionSeconds)) {
+      const nativeStartPosition = trackLoadSeekPosition(gen, startPositionSeconds)
+      if (!track.isStream && await playNativeTrack(track, nativeStartPosition)) {
+        if (gen !== playGeneration) return
+        await applyPendingNativeTrackLoadSeek(gen, nativeStartPosition)
         if (gen !== playGeneration) return
         settleTrackLoad(gen)
         // beginTrack + transition preloading are driven by Rust's authoritative
@@ -1651,8 +1688,9 @@ export const usePlayerStore = defineStore('player', () => {
         ? networkUrl
         : await prefetchManager.resolvePlayable(track).catch(() => undefined)
       if (gen !== playGeneration) return
+      const browserStartPosition = trackLoadSeekPosition(gen, startPositionSeconds)
       try {
-        await e.play(playUrl || networkUrl, startPositionSeconds)
+        await e.play(playUrl || networkUrl, browserStartPosition)
       } catch {
         if (gen === playGeneration) {
           settleTrackLoad(gen)
@@ -1661,6 +1699,8 @@ export const usePlayerStore = defineStore('player', () => {
         return
       }
       if (gen !== playGeneration) return
+      const latestPosition = trackLoadSeekPosition(gen, browserStartPosition)
+      if (Math.abs(latestPosition - browserStartPosition) > 0.001) e.seek(latestPosition)
       playing.value = true
       settleTrackLoad(gen)
       beginTrack(track)
@@ -1807,11 +1847,24 @@ export const usePlayerStore = defineStore('player', () => {
   function seek(pct: number) {
     const target = Math.max(0, Math.min(1, pct)) * (duration.value || 0)
     alog('player', `seek ${target.toFixed(2)}s via ${playbackBackend.value}`)
+    const loadingGeneration = loadingTrackGeneration
+    if (loadingGeneration !== null) {
+      pendingTrackLoadSeek = { generation: loadingGeneration, positionSeconds: target }
+    }
     if (useCastStore().engaged) {
       // While paused between tracks (no session) this still moves the
       // frozen position — the next re-cast starts from it.
       void useCastStore().seekTo(target).catch(() => { /* WS restores truth */ })
     } else if (playbackBackend.value === 'native' && nativeAudioBackend.value) {
+      // The visible track can change before its replacement native session is
+      // installed. Sending this command now would seek the old renderer that
+      // invalidateManualTransition() is stopping; play() applies the retained
+      // target to the new session instead.
+      if (loadingGeneration !== null) {
+        position.value = target
+        lastTickTime = target
+        return
+      }
       void nativeAudioBackend.value.seek(target).catch((error) => {
         alog('player', 'native audio seek was rejected', error)
       })
@@ -2228,6 +2281,9 @@ export const usePlayerStore = defineStore('player', () => {
   // — the next play targets it again). Engaged-only: a tab merely watching
   // someone else's cast must not kill it by clearing its own local queue.
   function stop() {
+    playGeneration++
+    loadingTrackGeneration = null
+    pendingTrackLoadSeek = null
     if (useCastStore().engaged) void useCastStore().stopSession()
     if (!localMode.value) void qs.clearAll() // explicit gesture — labeled "stop & clear queue"
     localHandoff = null
