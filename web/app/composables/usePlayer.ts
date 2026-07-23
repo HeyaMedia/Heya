@@ -128,7 +128,7 @@ type EngineWithScheduler = ReturnType<typeof useAudioEngine> & {
 }
 
 // Per-track playback analysis (loudness + structural boundaries) the player
-// pulls from /api/music/tracks/{id} on demand and caches for the session. This
+// pulls from the explicit playback-preparation endpoint and caches for the session. This
 // is the single source of truth for normalization + smart-crossfade timing —
 // list endpoints thread loudness inconsistently and never carry boundaries, so
 // the player fetches it itself rather than depending on every list site. The
@@ -161,7 +161,6 @@ interface SimilarAutoplayResponse {
   tracks?: Array<{ track_id: number }>
 }
 const playbackDataCache = new Map<number, PlaybackData | null>()
-const playbackAnalysisRetries = new Map<number, number>()
 
 function toNum(v: unknown): number | null {
   if (v == null) return null
@@ -169,34 +168,34 @@ function toNum(v: unknown): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-// Fetch the primary file's loudness + boundaries + album loudness for a track.
-// $heya is grabbed before the first await (the useNuxtApp-after-await hang trap).
-// Returns null on any failure (un-analyzed track, 404) so callers fall back.
+// Prepare only the track entering playback (or its immediate preload), then
+// fetch the primary file's loudness + boundaries + album loudness. A failed
+// loudness calculation rejects playback instead of silently rendering at unity
+// gain beside normalized tracks.
 async function fetchTrackPlayback(trackId: number): Promise<PlaybackData | null> {
   if (trackId <= 0) return null
-  try {
-    const { $heya } = useNuxtApp()
-    const detail = (await $heya('/api/music/tracks/{id}', { path: { id: trackId } })) as Record<string, unknown> & { files?: Array<Record<string, unknown>> }
-    const f = detail.files?.[0] ?? {}
-    return {
-      integrated_lufs: toNum(f.integrated_lufs),
-      true_peak_db: toNum(f.true_peak_db),
-      album_lufs: toNum(detail.album_integrated_lufs),
-      album_peak: toNum(detail.album_true_peak_db),
-      fade_start_ms: toNum(f.fade_start_ms),
-      outro_start_ms: toNum(f.outro_start_ms),
-      silence_start_ms: toNum(f.silence_start_ms),
-      intro_end_ms: toNum(f.intro_end_ms),
-      boundaries_ready: f.boundaries_analyzed_at != null,
-      library_file_id: toNum(f.library_file_id),
-      format: typeof f.format === 'string' ? f.format : null,
-      bitrate_kbps: toNum(f.bitrate_kbps),
-      sample_rate_hz: toNum(f.sample_rate_hz),
-      bit_depth: toNum(f.bit_depth),
-      channels: toNum(f.channels),
-    }
-  } catch {
-    return null
+  const { $heya } = useNuxtApp()
+  const detail = (await $heya('/api/music/tracks/{id}/playback/prepare', {
+    method: 'POST',
+    path: { id: trackId },
+  })) as Record<string, unknown> & { files?: Array<Record<string, unknown>> }
+  const f = detail.files?.[0] ?? {}
+  return {
+    integrated_lufs: toNum(f.integrated_lufs),
+    true_peak_db: toNum(f.true_peak_db),
+    album_lufs: toNum(detail.album_integrated_lufs),
+    album_peak: toNum(detail.album_true_peak_db),
+    fade_start_ms: toNum(f.fade_start_ms),
+    outro_start_ms: toNum(f.outro_start_ms),
+    silence_start_ms: toNum(f.silence_start_ms),
+    intro_end_ms: toNum(f.intro_end_ms),
+    boundaries_ready: f.boundaries_analyzed_at != null,
+    library_file_id: toNum(f.library_file_id),
+    format: typeof f.format === 'string' ? f.format : null,
+    bitrate_kbps: toNum(f.bitrate_kbps),
+    sample_rate_hz: toNum(f.sample_rate_hz),
+    bit_depth: toNum(f.bit_depth),
+    channels: toNum(f.channels),
   }
 }
 
@@ -969,33 +968,11 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   // Fetch + cache analysis for a track if we haven't yet. Returns true when it
-  // actually fetched (so callers can re-arm with the new data). Cached null
-  // (un-analyzed) still counts as "known" — we don't refetch.
+  // actually fetched so transition callers can re-arm with the new data.
   async function ensurePlaybackData(trackId: number): Promise<boolean> {
     if (trackId <= 0 || playbackDataCache.has(trackId)) return false
     const data = await fetchTrackPlayback(trackId)
     playbackDataCache.set(trackId, data)
-    // Loudness was blocking, but boundaries are intentionally filled behind
-    // playback. Re-fetch briefly until they land, then re-arm smart crossfade
-    // with the hot-added transition points.
-    if (data && !data.boundaries_ready) {
-      const attempt = playbackAnalysisRetries.get(trackId) ?? 0
-      if (attempt < 5) {
-        playbackAnalysisRetries.set(trackId, attempt + 1)
-        setTimeout(() => {
-          playbackDataCache.delete(trackId)
-          if (playbackBackend.value === 'native') {
-            void ensurePlaybackData(trackId)
-              .then(() => syncNativeTrackAnalysis(trackId))
-              .catch(() => {})
-          } else {
-            void ensureAnalysisAndArm()
-          }
-        }, 1000)
-      }
-    } else if (data?.boundaries_ready) {
-      playbackAnalysisRetries.delete(trackId)
-    }
     return true
   }
 
@@ -1132,12 +1109,13 @@ export const usePlayerStore = defineStore('player', () => {
     }
     alog('xfade', `arm: next "${next.title}" → ${pendingMode === 'gapless' ? 'gapless' : mode}${suppressed ? ' (album-aware → gapless)' : ''}${pendingPlan ? ` start=${pendingPlan.startTimeSeconds.toFixed(1)}s dur=${pendingPlan.durationSeconds.toFixed(1)}s` : ''}`)
 
-    // Buffer the next track onto the pending deck (streams excepted) and level
-    // it. applyPendingNorm runs on EVERY arm — not just the first preload — so
-    // the re-arm after the async /files fetch actually applies the now-known
-    // loudness to the pending deck before a crossfade swaps it in. (Buffering
-    // the deck only needs to happen once, hence its own guard.)
+    // Buffer the next track onto the pending deck (streams excepted) only after
+    // explicit playback preparation has supplied its loudness. This makes the
+    // first preload arm a no-op; ensureAnalysisAndArm re-arms as soon as the
+    // blocking request completes. The pending deck can therefore never become
+    // audible at unity gain while its normalization is still being calculated.
     if (!next.isStream) {
+      if (!playbackDataCache.has(next.id)) return
       applyPendingNorm(e, next)
       const url = resolveStreamUrl(next)
       if (url && prefetchedTrackId !== next.id && preloadingTrackId !== next.id) {
@@ -1200,7 +1178,9 @@ export const usePlayerStore = defineStore('player', () => {
       return
     }
     armSync()
-    void ensureAnalysisAndArm()
+    void ensureAnalysisAndArm().catch((error) => {
+      alog('xfade', 'next-track playback preparation failed — preserving current track', error)
+    })
   }
 
   // Fired by the scheduler `crossfadeDuration` before the end — CROSSFADE ONLY.
@@ -1622,7 +1602,31 @@ export const usePlayerStore = defineStore('player', () => {
       // this, album/auto replay gain (which can differ a lot from track gain)
       // would apply a beat late after the async fetch and audibly jump. Auto-
       // advance doesn't need it — the pending deck is fetched + leveled ahead.
-      if (track.id > 0 && !track.isStream) await ensurePlaybackData(track.id)
+      if (track.id > 0 && !track.isStream) {
+        const { toast, dismiss } = useToast()
+        let preparationToastId: number | null = null
+        const preparationNotice = setTimeout(() => {
+          if (gen !== playGeneration) return
+          preparationToastId = toast.info(`Generating loudness for "${track.title}" before playback…`, {
+            icon: 'eq',
+            duration: 5 * 60 * 1000,
+          })
+        }, 300)
+        try {
+          await ensurePlaybackData(track.id)
+        } catch (error) {
+          clearTimeout(preparationNotice)
+          if (preparationToastId != null) dismiss(preparationToastId)
+          if (gen !== playGeneration) return
+          settleTrackLoad(gen)
+          playing.value = false
+          alog('player', `playback preparation failed for "${track.title}"`, error)
+          toast.err(`Could not analyze "${track.title}" for normalized playback`)
+          return
+        }
+        clearTimeout(preparationNotice)
+        if (preparationToastId != null) dismiss(preparationToastId)
+      }
       // A newer play() superseded us during the fetch — bail rather than load a
       // stale track onto the active deck.
       if (gen !== playGeneration) return

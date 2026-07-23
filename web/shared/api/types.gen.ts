@@ -18150,6 +18150,36 @@ export type MixToTracksResponses = {
 
 export type MixToTracksResponse = MixToTracksResponses[keyof MixToTracksResponses];
 
+export type PrepareMusicTrackPlaybackData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/music/tracks/{id}/playback/prepare';
+};
+
+export type PrepareMusicTrackPlaybackErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type PrepareMusicTrackPlaybackError = PrepareMusicTrackPlaybackErrors[keyof PrepareMusicTrackPlaybackErrors];
+
+export type PrepareMusicTrackPlaybackResponses = {
+    /**
+     * OK
+     */
+    200: MusicTrackDetail;
+};
+
+export type PrepareMusicTrackPlaybackResponse = PrepareMusicTrackPlaybackResponses[keyof PrepareMusicTrackPlaybackResponses];
+
 export type SonicSimilarTracksData = {
     body?: never;
     path: {

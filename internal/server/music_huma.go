@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/jackc/pgx/v5"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/karbowiak/heya/internal/service"
@@ -380,6 +381,21 @@ func registerMusicRoutes(api huma.API, app *service.App) {
 			}
 			// Loudness/boundaries can be populated on demand; don't let a stale
 			// pre-analysis response hide newly persisted playback data.
+			return noStoreJSON(detail), nil
+		})
+
+	// Explicit playback preparation is the only request path that may block on
+	// missing loudness. Keeping it separate prevents track pages, info dialogs,
+	// remote mirrors and quality menus from accidentally starting analysis.
+	huma.Register(api, secured(op(http.MethodPost, "/api/music/tracks/{id}/playback/prepare", "prepare-music-track-playback", "Prepare one track for normalized playback", "Music")),
+		func(ctx context.Context, in *IDPath) (*JSONOutput[*service.MusicTrackDetail], error) {
+			detail, err := app.PrepareMusicTrackPlayback(ctx, in.ID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, huma.Error404NotFound("track not found")
+			}
+			if err != nil {
+				return nil, huma.Error500InternalServerError("track loudness analysis failed")
+			}
 			return noStoreJSON(detail), nil
 		})
 

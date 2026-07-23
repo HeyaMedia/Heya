@@ -42500,6 +42500,66 @@
         ]
       }
     },
+    "/api/music/tracks/{id}/playback/prepare": {
+      "post": {
+        "operationId": "prepare-music-track-playback",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MusicTrackDetail"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Prepare one track for normalized playback",
+        "tags": [
+          "Music"
+        ]
+      }
+    },
     "/api/music/tracks/{id}/sonic-similar": {
       "get": {
         "operationId": "sonic-similar-tracks",

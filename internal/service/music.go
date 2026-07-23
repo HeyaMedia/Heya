@@ -124,6 +124,30 @@ func (a *App) GetMusicTrackDetail(ctx context.Context, trackID int64) (*MusicTra
 	return &MusicTrackDetail{GetTrackDetailByIDRow: row, Files: redactTrackFilePaths(files)}, nil
 }
 
+// PrepareMusicTrackPlayback returns the ordinary track detail, but first
+// guarantees that the primary file has the loudness measurement needed before
+// its first sample is rendered. This is deliberately separate from the general
+// detail read: opening a track page or info dialog must not start a full-file
+// analysis. The player calls this only for the active track and its immediate
+// preload; scheduled tasks remain responsible for bulk library backfills.
+func (a *App) PrepareMusicTrackPlayback(ctx context.Context, trackID int64) (*MusicTrackDetail, error) {
+	detail, err := a.GetMusicTrackDetail(ctx, trackID)
+	if err != nil || len(detail.Files) == 0 {
+		return detail, err
+	}
+
+	primary := detail.Files[0]
+	if !primary.IntegratedLufs.Valid || !primary.TruePeakDb.Valid {
+		if err := a.mediaAnalysis.EnsureTrackLoudness(ctx, primary.ID); err != nil {
+			return nil, fmt.Errorf("prepare track %d loudness: %w", trackID, err)
+		}
+		// Return the values written by EnsureTrackLoudness, not the stale row
+		// fetched before analysis began.
+		return a.GetMusicTrackDetail(ctx, trackID)
+	}
+	return detail, nil
+}
+
 func redactMusicTrackDetailPaths(row sqlc.GetTrackDetailByIDRow) sqlc.GetTrackDetailByIDRow {
 	row.FilePath = secrettext.Redact(row.FilePath)
 	row.LyricsPath = secrettext.Redact(row.LyricsPath)
