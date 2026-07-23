@@ -78,6 +78,9 @@ func collectSonicAnalysisStatus(ctx context.Context, app *service.App) map[strin
 			"refs":             st.Refs,
 			"idle_timeout_sec": st.IdleTimeoutSec,
 			"total_borrows":    st.TotalBorrows,
+			"preprocess_ahead": st.PreprocessAhead,
+			"gpu_workers":      st.GPUWorkers,
+			"pipeline_workers": st.PipelineWorkers,
 			"source":           holderSource,
 		}
 		if st.LoadedAt != nil {
