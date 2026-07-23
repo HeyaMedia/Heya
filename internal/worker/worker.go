@@ -323,9 +323,12 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 			"detect_segments_season": {MaxWorkers: queueWorkers(cfg, "detect_segments_season", 1)}, // cross-episode chromaprint matching — heaviest of the two
 			"detect_segments_movie":  {MaxWorkers: queueWorkers(cfg, "detect_segments_movie", 1)},  // ffmpeg blackdetect over the tail window
 
-			"trickplay":      {MaxWorkers: queueWorkers(cfg, "trickplay", 1)},      // ffmpeg sprites
-			"thumbnails":     {MaxWorkers: queueWorkers(cfg, "thumbnails", 1)},     // ffmpeg thumbnail extraction
-			"sonic_analysis": {MaxWorkers: queueWorkers(cfg, "sonic_analysis", 1)}, // full model bundle (Discogs heads + EffNet base + classifier heads + CLAP audio) held by AnalyzerHolder singleton; ~hundreds of MB resident
+			"trickplay":  {MaxWorkers: queueWorkers(cfg, "trickplay", 1)},  // ffmpeg sprites
+			"thumbnails": {MaxWorkers: queueWorkers(cfg, "thumbnails", 1)}, // ffmpeg thumbnail extraction
+			// Width is owned by Sonic Analysis settings rather than the generic
+			// Jobs controls. It equals CPU-prep lanes + GPU lanes so every
+			// pipeline slot can be fed without surplus River jobs blocking.
+			"sonic_analysis": {MaxWorkers: sonicPipelineWorkers(cfg)},
 			"transcode":      {MaxWorkers: queueWorkers(cfg, "transcode", 1)},
 
 			// Sonic centroid refreshes (cheap; own queue so they don't
@@ -431,6 +434,13 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 		return nil, fmt.Errorf("river client: %w", err)
 	}
 	return client, nil
+}
+
+func sonicPipelineWorkers(cfg Config) int {
+	if cfg.SonicHolder == nil {
+		return 1
+	}
+	return cfg.SonicHolder.PipelineWorkers()
 }
 
 func queueWorkers(cfg Config, kind string, fallback int) int {

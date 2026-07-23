@@ -20,10 +20,9 @@ import (
 // encoder lives outside this Holder, in TextSearcher, since it serves
 // a different surface (text-prompt → similar-tracks search).
 //
-// Concurrency model: the production caller (analyze_track_facets
-// worker, on the sonic_analysis queue with MaxWorkers=1) only ever
-// holds one lease at a time. The refcount + idleStop machinery
-// generalises if that ever changes, but the hot path stays simple.
+// Concurrent callers share the same model bundle. One borrower performs a
+// cold load while later borrowers wait on loadDone; once ready, the Analyzer's
+// bounded CPU/GPU lanes coordinate the per-track pipeline.
 type Holder struct {
 	cfg         Config
 	idleTimeout time.Duration
@@ -32,6 +31,7 @@ type Holder struct {
 	closed          bool
 	pendingCfg      *Config // Reconfigure arrived while leased; applied when refs drop to 0
 	analyzer        *Analyzer
+	loadDone        chan struct{}
 	refs            int
 	idleStop        chan struct{}
 	loadedAt        time.Time // when the resident model finished loading; zero when not Ready
@@ -43,14 +43,17 @@ type Holder struct {
 // Status is a read-only snapshot of the Holder's runtime state, for
 // the /api/sonic/status diagnostic endpoint and the dashboard TUI.
 type Status struct {
-	State          AnalyzerState `json:"state"`
-	Accelerator    Accelerator   `json:"accelerator"`
-	Refs           int           `json:"refs"`
-	LoadedAt       *time.Time    `json:"loaded_at,omitempty"`
-	IdleUnloadAt   *time.Time    `json:"idle_unload_at,omitempty"`
-	LastBorrowAt   *time.Time    `json:"last_borrow_at,omitempty"`
-	IdleTimeoutSec int           `json:"idle_timeout_sec"`
-	TotalBorrows   int64         `json:"total_borrows"`
+	State           AnalyzerState `json:"state"`
+	Accelerator     Accelerator   `json:"accelerator"`
+	Refs            int           `json:"refs"`
+	LoadedAt        *time.Time    `json:"loaded_at,omitempty"`
+	IdleUnloadAt    *time.Time    `json:"idle_unload_at,omitempty"`
+	LastBorrowAt    *time.Time    `json:"last_borrow_at,omitempty"`
+	IdleTimeoutSec  int           `json:"idle_timeout_sec"`
+	TotalBorrows    int64         `json:"total_borrows"`
+	PreprocessAhead int           `json:"preprocess_ahead"`
+	GPUWorkers      int           `json:"gpu_workers"`
+	PipelineWorkers int           `json:"pipeline_workers"`
 	// PendingAccelerator is set while a mid-batch Reconfigure waits for the
 	// current leases to drain; Accelerator still shows what's running now.
 	PendingAccelerator *Accelerator `json:"pending_accelerator,omitempty"`
@@ -62,10 +65,13 @@ func (h *Holder) Status() Status {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	st := Status{
-		Accelerator:    h.cfg.Accelerator,
-		Refs:           h.refs,
-		IdleTimeoutSec: int(h.idleTimeout / time.Second),
-		TotalBorrows:   h.lifetimeBorrows,
+		Accelerator:     h.cfg.Accelerator,
+		Refs:            h.refs,
+		IdleTimeoutSec:  int(h.idleTimeout / time.Second),
+		TotalBorrows:    h.lifetimeBorrows,
+		PreprocessAhead: h.cfg.PreprocessAhead,
+		GPUWorkers:      h.cfg.GPUWorkers,
+		PipelineWorkers: h.cfg.PreprocessAhead + h.cfg.GPUWorkers,
 	}
 	if h.pendingCfg != nil {
 		acc := h.pendingCfg.Accelerator
@@ -96,7 +102,15 @@ func (h *Holder) Status() Status {
 // short-lived CLI invocations); production passes 5 * time.Minute so
 // the GPU memory comes back when the analysis batch finishes.
 func NewHolder(cfg Config, idleTimeout time.Duration) *Holder {
-	return &Holder{cfg: cfg, idleTimeout: idleTimeout}
+	return &Holder{cfg: cfg.normalize(), idleTimeout: idleTimeout}
+}
+
+// PipelineWorkers is the River queue width required to feed this holder's
+// configured preprocessing and GPU lanes.
+func (h *Holder) PipelineWorkers() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.cfg.PreprocessAhead + h.cfg.GPUWorkers
 }
 
 // Lease wraps a borrowed Analyzer. Callers must Close the lease in a
@@ -120,36 +134,85 @@ func (l *Lease) Close() {
 // idle-unloads are cancelled. The ctx is forwarded to Analyzer.Load,
 // so cancelling it aborts a cold-load mid-flight.
 func (h *Holder) Borrow(ctx context.Context) (*Lease, error) {
-	h.mu.Lock()
-	if h.closed {
-		h.mu.Unlock()
-		return nil, ErrHolderClosed
+	for {
+		h.mu.Lock()
+		if h.closed {
+			h.mu.Unlock()
+			return nil, ErrHolderClosed
+		}
+		if h.idleStop != nil {
+			close(h.idleStop)
+			h.idleStop = nil
+		}
+		h.idleUnloadAt = time.Time{}
+		if h.analyzer == nil {
+			h.analyzer = NewAnalyzer(h.cfg)
+		}
+		a := h.analyzer
+
+		switch a.State() {
+		case StateReady:
+			h.recordBorrowLocked()
+			h.mu.Unlock()
+			return &Lease{holder: h, Analyzer: a}, nil
+
+		case StateUnloaded:
+			if done := h.loadDone; done != nil {
+				h.mu.Unlock()
+				select {
+				case <-done:
+					continue
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+			}
+			// Reserve one lease before dropping the lock so Close/Reconfigure
+			// cannot destroy or replace the analyzer during its cold load.
+			done := make(chan struct{})
+			h.loadDone = done
+			h.recordBorrowLocked()
+			h.mu.Unlock()
+
+			err := a.Load(ctx)
+			h.mu.Lock()
+			if err == nil {
+				h.loadedAt = time.Now()
+			}
+			if h.loadDone == done {
+				close(done)
+				h.loadDone = nil
+			}
+			h.mu.Unlock()
+			if err != nil {
+				h.release()
+				return nil, err
+			}
+			return &Lease{holder: h, Analyzer: a}, nil
+
+		case StateLoading:
+			done := h.loadDone
+			h.mu.Unlock()
+			if done == nil {
+				return nil, errors.New("sonicanalysis: analyzer loading without holder coordination")
+			}
+			select {
+			case <-done:
+				continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+
+		case StateUnloading:
+			h.mu.Unlock()
+			return nil, errors.New("sonicanalysis: analyzer is unloading")
+		}
 	}
-	if h.idleStop != nil {
-		close(h.idleStop)
-		h.idleStop = nil
-	}
-	h.idleUnloadAt = time.Time{}
-	if h.analyzer == nil {
-		h.analyzer = NewAnalyzer(h.cfg)
-	}
-	needLoad := h.analyzer.State() != StateReady
+}
+
+func (h *Holder) recordBorrowLocked() {
 	h.refs++
 	h.lastBorrowAt = time.Now()
 	h.lifetimeBorrows++
-	a := h.analyzer
-	h.mu.Unlock()
-
-	if needLoad {
-		if err := a.Load(ctx); err != nil {
-			h.release()
-			return nil, err
-		}
-		h.mu.Lock()
-		h.loadedAt = time.Now()
-		h.mu.Unlock()
-	}
-	return &Lease{holder: h, Analyzer: a}, nil
 }
 
 // Reconfigure swaps the underlying config (typically the accelerator).
@@ -179,6 +242,7 @@ func (h *Holder) Reconfigure(cfg Config) error {
 // idle-unload timer) and installs cfg for the next Borrow. Caller must
 // hold h.mu and have ensured refs == 0.
 func (h *Holder) applyConfigLocked(cfg Config) {
+	cfg = cfg.normalize()
 	if h.idleStop != nil {
 		close(h.idleStop)
 		h.idleStop = nil

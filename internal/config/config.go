@@ -282,7 +282,6 @@ var DefaultJobWorkerCounts = map[string]int{
 	"detect_segments_movie":     1,
 	"trickplay":                 1,
 	"thumbnails":                1,
-	"sonic_analysis":            1,
 	"transcode":                 1,
 	"artist_centroid":           1,
 	"album_centroid":            1,

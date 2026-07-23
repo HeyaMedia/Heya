@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Reconfigure with no leases outstanding applies immediately.
@@ -142,4 +143,52 @@ func TestLeaseCloseIsConcurrentSafe(t *testing.T) {
 	if h.refs != 0 {
 		t.Fatalf("refs after concurrent Lease.Close = %d, want 0", h.refs)
 	}
+}
+
+func TestHolderBorrowWaitsForColdLoadOwner(t *testing.T) {
+	h := NewHolder(Config{Accelerator: AccelCPU}, 0)
+	a := NewAnalyzer(h.cfg)
+	a.state.Store(int32(StateLoading))
+	done := make(chan struct{})
+	h.analyzer = a
+	h.loadDone = done
+
+	result := make(chan struct {
+		lease *Lease
+		err   error
+	}, 1)
+	go func() {
+		lease, err := h.Borrow(context.Background())
+		result <- struct {
+			lease *Lease
+			err   error
+		}{lease: lease, err: err}
+	}()
+
+	select {
+	case got := <-result:
+		t.Fatalf("Borrow returned before cold load completed: %v", got.err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	h.mu.Lock()
+	a.state.Store(int32(StateReady))
+	close(done)
+	h.loadDone = nil
+	h.mu.Unlock()
+
+	select {
+	case got := <-result:
+		if got.err != nil {
+			t.Fatalf("Borrow after cold load: %v", got.err)
+		}
+		if got.lease == nil || got.lease.Analyzer != a {
+			t.Fatal("Borrow did not return the loaded shared analyzer")
+		}
+		got.lease.Close()
+	case <-time.After(time.Second):
+		t.Fatal("Borrow remained blocked after cold load completed")
+	}
+
+	h.Close()
 }

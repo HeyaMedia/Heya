@@ -23,13 +23,39 @@ func TestSetSonicAnalysisSettingsPreservesEnvLockedDBFields(t *testing.T) {
 	require.NoError(t, app.SetSystemSetting(ctx, sonicSettingsKey, []byte(`{"enabled":false,"accelerator":"cpu"}`)))
 
 	require.NoError(t, app.SetSonicAnalysisSettings(ctx, SonicAnalysisSettings{
-		Enabled:     true,
-		Accelerator: "directml",
+		Enabled:         true,
+		Accelerator:     "directml",
+		PreprocessAhead: 10,
+		GPUWorkers:      2,
 	}))
 
 	persisted := app.sonicAnalysisSettingsFromDB(ctx)
 	assert.False(t, persisted.Enabled, "env-locked enabled should keep its DB value")
 	assert.Equal(t, "directml", persisted.Accelerator, "unlocked accelerator should persist")
+	assert.Equal(t, 10, persisted.PreprocessAhead)
+	assert.Equal(t, 2, persisted.GPUWorkers)
+}
+
+func TestSonicSettingsLegacyBlobGetsPipelineDefaults(t *testing.T) {
+	got, err := readSonicAnalysisSettings(context.Background(), func(context.Context, string) (json.RawMessage, error) {
+		return json.RawMessage(`{"enabled":true,"accelerator":"openvino"}`), nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, sonicanalysis.DefaultPreprocessAhead, got.PreprocessAhead)
+	assert.Equal(t, sonicanalysis.DefaultGPUWorkers, got.GPUWorkers)
+}
+
+func TestSonicPipelineSettingsValidation(t *testing.T) {
+	defaults := DefaultSonicAnalysisSettings()
+	require.NoError(t, validateSonicPipelineSettings(defaults))
+
+	invalid := defaults
+	invalid.PreprocessAhead = sonicanalysis.MaxPreprocessAhead + 1
+	require.Error(t, validateSonicPipelineSettings(invalid))
+
+	invalid = defaults
+	invalid.GPUWorkers = 0
+	require.Error(t, validateSonicPipelineSettings(invalid))
 }
 
 func TestStrictSonicSettingsReadDoesNotTurnDatabaseFailureIntoDefaults(t *testing.T) {
@@ -60,5 +86,8 @@ func TestWorkerSonicHolderReconcilesPersistedAccelerator(t *testing.T) {
 	}
 
 	require.NoError(t, app.reconcileSonicHolderSettings(ctx))
-	assert.Equal(t, sonicanalysis.AccelCPU, holder.Status().Accelerator)
+	status := holder.Status()
+	assert.Equal(t, sonicanalysis.AccelCPU, status.Accelerator)
+	assert.Equal(t, sonicanalysis.DefaultPreprocessAhead, status.PreprocessAhead)
+	assert.Equal(t, sonicanalysis.DefaultGPUWorkers, status.GPUWorkers)
 }

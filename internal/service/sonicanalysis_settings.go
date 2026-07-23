@@ -12,10 +12,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/sonicanalysis"
 )
 
-// Env vars that overlay the two UI-tunable sonic-analysis fields. When set,
-// they win over the DB blob and lock the corresponding control in the UI.
+// Env vars that overlay the enablement and accelerator fields. When set, they
+// win over the DB blob and lock the corresponding control in the UI. Pipeline
+// concurrency is DB-owned so it can always be tuned from the admin surface.
 const (
 	sonicEnvEnabled     = "HEYA_SONIC_ENABLED"
 	sonicEnvAccelerator = "HEYA_SONIC_ACCELERATOR"
@@ -77,8 +79,10 @@ func (a *App) SonicEnvLock() (enabledVar, acceleratorVar string) {
 // not user-tunable. The dynamic-batch accelerator is chosen
 // internally based on the primary Accelerator (see Config.dynamicAccelerator).
 type SonicAnalysisSettings struct {
-	Enabled     bool   `json:"enabled"`
-	Accelerator string `json:"accelerator"` // auto|cpu|coreml|cuda|openvino|directml
+	Enabled         bool   `json:"enabled"`
+	Accelerator     string `json:"accelerator"` // auto|cpu|coreml|cuda|openvino|directml
+	PreprocessAhead int    `json:"preprocess_ahead" minimum:"1" maximum:"32" doc:"Maximum tracks concurrently preparing or waiting for inference"`
+	GPUWorkers      int    `json:"gpu_workers" minimum:"1" maximum:"8" doc:"Maximum tracks concurrently traversing the shared GPU model bundle"`
 }
 
 // DefaultSonicAnalysisSettings returns the fallback applied when no
@@ -86,8 +90,10 @@ type SonicAnalysisSettings struct {
 // seed one).
 func DefaultSonicAnalysisSettings() SonicAnalysisSettings {
 	return SonicAnalysisSettings{
-		Enabled:     false,
-		Accelerator: "auto",
+		Enabled:         false,
+		Accelerator:     "auto",
+		PreprocessAhead: sonicanalysis.DefaultPreprocessAhead,
+		GPUWorkers:      sonicanalysis.DefaultGPUWorkers,
 	}
 }
 
@@ -164,7 +170,18 @@ func readSonicAnalysisSettings(ctx context.Context, get sonicSettingGetter) (Son
 	if persisted.Accelerator == "" {
 		persisted.Accelerator = s.Accelerator
 	}
+	// Old settings blobs predate the split pipeline controls. Preserve
+	// backward compatibility by filling only absent/zero persisted values.
+	if persisted.PreprocessAhead == 0 {
+		persisted.PreprocessAhead = s.PreprocessAhead
+	}
+	if persisted.GPUWorkers == 0 {
+		persisted.GPUWorkers = s.GPUWorkers
+	}
 	if err := validateSonicAccelerator(persisted.Accelerator); err != nil {
+		return s, err
+	}
+	if err := validateSonicPipelineSettings(persisted); err != nil {
 		return s, err
 	}
 	return persisted, nil
@@ -179,6 +196,16 @@ func validateSonicAccelerator(accelerator string) error {
 	}
 }
 
+func validateSonicPipelineSettings(s SonicAnalysisSettings) error {
+	if s.PreprocessAhead < 1 || s.PreprocessAhead > sonicanalysis.MaxPreprocessAhead {
+		return fmt.Errorf("preprocess_ahead must be between 1 and %d", sonicanalysis.MaxPreprocessAhead)
+	}
+	if s.GPUWorkers < 1 || s.GPUWorkers > sonicanalysis.MaxGPUWorkers {
+		return fmt.Errorf("gpu_workers must be between 1 and %d", sonicanalysis.MaxGPUWorkers)
+	}
+	return nil
+}
+
 // SetSonicAnalysisSettings persists the new settings. When the
 // caller flips Enabled false→true, this also kicks off a background
 // model fetch immediately (no server restart needed). Active loaded
@@ -186,6 +213,9 @@ func validateSonicAccelerator(accelerator string) error {
 // destroying a running batch.
 func (a *App) SetSonicAnalysisSettings(ctx context.Context, s SonicAnalysisSettings) error {
 	if err := validateSonicAccelerator(s.Accelerator); err != nil {
+		return err
+	}
+	if err := validateSonicPipelineSettings(s); err != nil {
 		return err
 	}
 	if v, ok := sonicEnabledFromEnv(); ok && v != s.Enabled {
@@ -199,7 +229,12 @@ func (a *App) SetSonicAnalysisSettings(ctx context.Context, s SonicAnalysisSetti
 	// Persist only the DB-owned fields. When env locks one, ignore whatever
 	// the caller sent for it — the field stays untouched on disk so removing
 	// the env var later reveals the previously-saved DB value.
-	persistable := SonicAnalysisSettings{Enabled: s.Enabled, Accelerator: s.Accelerator}
+	persistable := SonicAnalysisSettings{
+		Enabled:         s.Enabled,
+		Accelerator:     s.Accelerator,
+		PreprocessAhead: s.PreprocessAhead,
+		GPUWorkers:      s.GPUWorkers,
+	}
 	if _, ok := sonicEnabledFromEnv(); ok {
 		persistable.Enabled = persisted.Enabled
 	}

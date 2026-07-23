@@ -2,6 +2,7 @@ package sonicanalysis
 
 import (
 	"fmt"
+	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
 )
@@ -29,6 +30,7 @@ const (
 type effnetBaseSession struct {
 	session *ort.DynamicAdvancedSession
 	usedEP  string
+	mu      sync.Mutex
 }
 
 func newEffnetBaseSession(modelPath string, accel Accelerator) (*effnetBaseSession, error) {
@@ -63,6 +65,9 @@ func (e *effnetBaseSession) Close() {
 // one go (dynamic batch), returns flat (nPatches, 400) genre probs
 // and (nPatches, 1280) embeddings.
 func (e *effnetBaseSession) Run(patches []float32, nPatches int) (genre, embed []float32, err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	wantLen := nPatches * discogsTimeFrames * discogsMelBands
 	if len(patches) != wantLen {
 		return nil, nil, fmt.Errorf("expected %d input floats, got %d", wantLen, len(patches))

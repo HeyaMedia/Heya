@@ -86,9 +86,12 @@ func registerAdminRoutes(api huma.API, app *service.App, buf *logbuf.RingBuffer)
 		func(ctx context.Context, in *struct {
 			Body service.SonicAnalysisSettings
 		}) (*JSONOutput[sonicSaveBody], error) {
+			previous := app.SonicAnalysisSettings(ctx)
 			if err := app.SetSonicAnalysisSettings(ctx, in.Body); err != nil {
 				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
 			}
+			restartRequired := previous.PreprocessAhead != in.Body.PreprocessAhead ||
+				previous.GPUWorkers != in.Body.GPUWorkers
 			applied := true
 			if err := app.ReconfigureSonicAnalysisAnalyzer(ctx); err != nil {
 				if errors.Is(err, service.ErrSonicBusy) {
@@ -97,7 +100,11 @@ func registerAdminRoutes(api huma.API, app *service.App, buf *logbuf.RingBuffer)
 					return nil, huma.Error500InternalServerError(err.Error())
 				}
 			}
-			return &JSONOutput[sonicSaveBody]{Body: sonicSaveBody{Status: "saved", Applied: applied}}, nil
+			return &JSONOutput[sonicSaveBody]{Body: sonicSaveBody{
+				Status:          "saved",
+				Applied:         applied,
+				RestartRequired: restartRequired,
+			}}, nil
 		})
 
 	huma.Register(api, adminSecured(op(http.MethodPost, "/api/admin/sonicanalysis/fetch", "trigger-sonic-fetch", "Kick off the model fetcher", "Admin")),
@@ -182,6 +189,7 @@ type systemSettingBody struct {
 }
 
 type sonicSaveBody struct {
-	Status  string `json:"status"`
-	Applied bool   `json:"applied" doc:"Whether the new settings were live-applied or queued for next idle window"`
+	Status          string `json:"status"`
+	Applied         bool   `json:"applied" doc:"Whether live-applicable settings were applied or queued for the next idle window"`
+	RestartRequired bool   `json:"restart_required" doc:"Whether pipeline concurrency changed and needs a worker restart"`
 }

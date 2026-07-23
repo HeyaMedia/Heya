@@ -48,6 +48,7 @@ user-targeted live events are currently process-local.`,
 		if err != nil {
 			return err
 		}
+		app.ConfigureProcessControl(service.ProcessRoleWorker, stop)
 		defer app.Close()
 		app.StartWorkerLogRelay(workerCtx, logRing)
 
@@ -83,6 +84,7 @@ user-targeted live events are currently process-local.`,
 		}
 		app.StartWorkerRuntimeHeartbeat(workerCtx)
 		app.StartSonicRuntimeHeartbeat(workerCtx)
+		app.StartProcessRestartWatcher(workerCtx)
 		log.Info().Msg("dedicated River worker started")
 
 		// Watch discovery may be slow on a large or unavailable mounted share. It is

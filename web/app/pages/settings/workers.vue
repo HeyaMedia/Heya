@@ -10,6 +10,10 @@ const loading = computed(() => workersData.isLoading.value && !data.value)
 const activeJobs = computed(() => data.value?.active_jobs ?? [])
 const recentJobs = computed(() => data.value?.recent_jobs ?? [])
 const telemetryAvailable = computed(() => (status.value?.num_cpu ?? 0) > 0)
+const restarting = ref<'server' | 'worker' | 'all' | null>(null)
+const controlFlash = ref<{ kind: 'ok' | 'warn' | 'err'; text: string } | null>(null)
+const { $heya } = useNuxtApp()
+const { confirm } = useConfirm()
 let timer: ReturnType<typeof setInterval> | null = null
 
 const queueCounts = computed(() => Object.fromEntries((data.value?.queue_summary ?? []).map(row => [row.state, row.count])))
@@ -42,6 +46,38 @@ function jobTone(state: string): 'ok' | 'warn' | 'error' | 'idle' {
   return 'error'
 }
 
+async function restartProcess(target: 'server' | 'worker' | 'all') {
+  const label = target === 'all' ? 'server and worker' : target
+  const approved = await confirm({
+    title: `Restart ${label}?`,
+    message: target === 'server'
+      ? 'The web connection will briefly drop while the process supervisor brings the server back.'
+      : target === 'worker'
+        ? 'Active jobs will stop gracefully and resume after the process supervisor brings the worker back.'
+        : 'The web connection will briefly drop, and active jobs will resume after both supervised processes return.',
+    destructive: true,
+    confirmLabel: `Restart ${label}`,
+  })
+  if (!approved) return
+
+  restarting.value = target
+  controlFlash.value = null
+  try {
+    await $heya('/api/admin/processes/restart', {
+      method: 'POST',
+      body: { target } as any,
+    })
+    controlFlash.value = {
+      kind: 'ok',
+      text: `Restart requested for ${label}. The external process supervisor will bring ${target === 'all' ? 'them' : 'it'} back.`,
+    }
+  } catch (e: any) {
+    controlFlash.value = { kind: 'err', text: e?.data?.detail ?? e?.message ?? 'Restart request failed.' }
+  } finally {
+    restarting.value = null
+  }
+}
+
 onMounted(() => { timer = setInterval(() => { void workersData.refetch() }, 3000) })
 onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 </script>
@@ -65,6 +101,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
       <div v-if="data.error" class="error-state"><Icon name="warning" :size="14" /> {{ data.error }}</div>
       <div v-else-if="data.online && !telemetryAvailable" class="notice-state"><Icon name="info" :size="14" /> The worker is online but still publishing the legacy heartbeat. Restart it after this upgrade to expose CPU, memory, and log-source telemetry.</div>
       <div v-else-if="!data.online" class="error-state"><Icon name="warning" :size="14" /> The worker heartbeat is missing or stale.</div>
+      <SettingsFlash :flash="controlFlash" />
       <div class="tiles">
         <MetricTile label="Worker CPU" :value="telemetryAvailable ? fmtPct(status.cpu_percent) : 'Waiting'" icon="cpu" :tone="telemetryAvailable && status.cpu_percent >= 100 ? 'warn' : telemetryAvailable ? 'good' : 'neutral'" sub="one logical core = 100%" />
         <MetricTile label="Heap in use" :value="telemetryAvailable ? fmtBytes(status.heap_inuse_bytes) : 'Waiting'" icon="hard-drives" :sub="telemetryAvailable ? `${status.goroutines} goroutines` : 'extended heartbeat pending'" />
@@ -113,6 +150,30 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
         </div>
       </SettingsSection>
 
+      <SettingsSection
+        title="Process controls"
+        icon="power"
+        description="Request a graceful shutdown; Kubernetes, Docker Compose, or the all-in-one supervisor is responsible for starting the process again."
+      >
+        <div class="process-controls">
+          <button class="sv2-btn danger" :disabled="restarting !== null" @click="restartProcess('worker')">
+            <Icon v-if="restarting === 'worker'" name="spinner" :size="13" />
+            <Icon v-else name="refresh" :size="13" />
+            Restart worker
+          </button>
+          <button class="sv2-btn danger" :disabled="restarting !== null" @click="restartProcess('server')">
+            <Icon v-if="restarting === 'server'" name="spinner" :size="13" />
+            <Icon v-else name="refresh" :size="13" />
+            Restart server
+          </button>
+          <button class="sv2-btn danger" :disabled="restarting !== null" @click="restartProcess('all')">
+            <Icon v-if="restarting === 'all'" name="spinner" :size="13" />
+            <Icon v-else name="power" :size="13" />
+            Restart both
+          </button>
+        </div>
+      </SettingsSection>
+
       <SettingsSection title="Recent job activity" icon="clipboard" description="Newest worker-owned jobs, including completed, retryable, cancelled, and discarded outcomes.">
         <div v-if="!recentJobs.length" class="empty-state">No recent job activity is available.</div>
         <div v-else class="job-table">
@@ -143,6 +204,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 .watcher-row { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; padding: 8px 11px; border-bottom: 1px solid var(--hair); color: var(--fg-3); font-size: 11px; }
 .watcher-row:last-child { border-bottom: 0; }
 .watcher-row code { overflow: hidden; color: var(--fg-1); font-family: var(--font-mono); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+.process-controls { display: flex; flex-wrap: wrap; gap: 8px; }
 .job-table { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r-md); }
 .job-row { display: grid; grid-template-columns: minmax(220px, 1fr) 100px minmax(130px, .6fr) 70px 85px; gap: 10px; min-width: 690px; min-height: 42px; padding: 7px 11px; align-items: center; border-bottom: 1px solid var(--hair); font-size: 11px; }
 .job-row:last-child { border-bottom: 0; }

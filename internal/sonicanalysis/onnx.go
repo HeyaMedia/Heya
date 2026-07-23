@@ -281,6 +281,7 @@ type discogsSession struct {
 	input   *ort.Tensor[float32]
 	output  *ort.Tensor[float32]
 	usedEP  string
+	mu      sync.Mutex
 }
 
 // buildSessionOptions wires the requested execution provider onto a
@@ -525,6 +526,9 @@ func (b *discogsHeadBank) Heads() []string {
 // (batchSize, embedDim) output. patches must be exactly
 // batchSize*timeFrames*melBands floats laid out row-major.
 func (d *discogsSession) InferBatch(patches []float32) ([]float32, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	wantLen := discogsBatchSize * discogsTimeFrames * discogsMelBands
 	if len(patches) != wantLen {
 		return nil, fmt.Errorf("expected %d input floats, got %d", wantLen, len(patches))

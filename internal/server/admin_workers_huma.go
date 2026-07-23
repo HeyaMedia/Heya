@@ -25,6 +25,19 @@ func registerAdminWorkerRoutes(api huma.API, app *service.App) {
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[adminWorkersBody], error) {
 			return noStoreJSON(collectAdminWorkers(ctx, app)), nil
 		})
+
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/admin/processes/restart", "admin-restart-processes", "Gracefully restart the server, worker, or both", "Admin")),
+		func(ctx context.Context, in *struct {
+			Body struct {
+				Target string `json:"target" enum:"server,worker,all" doc:"Process target supervised by Kubernetes, Compose, or AIO supervisord"`
+			}
+		}) (*JSONOutput[service.ProcessRestartResult], error) {
+			result, err := app.RequestProcessRestart(ctx, in.Body.Target)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusServiceUnavailable)
+			}
+			return noStoreJSON(result), nil
+		})
 }
 
 func collectAdminWorkers(ctx context.Context, app *service.App) adminWorkersBody {

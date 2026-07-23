@@ -82,6 +82,7 @@ var serveCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		app.ConfigureProcessControl(service.ProcessRoleServer, stop)
 		// During partially-completed setup there may not yet be a later App
 		// cleanup defer ordered ahead of network-manager cleanup.
 		appCloseFallback := true

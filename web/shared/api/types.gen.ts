@@ -267,6 +267,17 @@ export type AdminResetUserPasswordRequest = {
     new_password: string;
 };
 
+export type AdminRestartProcessesRequest = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    /**
+     * Process target supervised by Kubernetes, Compose, or AIO supervisord
+     */
+    target: 'server' | 'worker' | 'all';
+};
+
 export type AdminSetLogLevelRequest = {
     /**
      * A URL to the JSON Schema for this object.
@@ -4302,6 +4313,16 @@ export type ProbeBody = {
     challenge: string;
 };
 
+export type ProcessRestartResult = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    request_id?: string;
+    status: string;
+    target: string;
+};
+
 export type ProtocolStats = {
     http1: number;
     http2: number;
@@ -5500,6 +5521,14 @@ export type SonicAnalysisSettings = {
     readonly $schema?: string;
     accelerator: string;
     enabled: boolean;
+    /**
+     * Maximum tracks concurrently traversing the shared GPU model bundle
+     */
+    gpu_workers: number;
+    /**
+     * Maximum tracks concurrently preparing or waiting for inference
+     */
+    preprocess_ahead: number;
 };
 
 export type SonicSaveBody = {
@@ -5508,9 +5537,13 @@ export type SonicSaveBody = {
      */
     readonly $schema?: string;
     /**
-     * Whether the new settings were live-applied or queued for next idle window
+     * Whether live-applicable settings were applied or queued for the next idle window
      */
     applied: boolean;
+    /**
+     * Whether pipeline concurrency changed and needs a worker restart
+     */
+    restart_required: boolean;
     status: string;
 };
 
@@ -6703,6 +6736,13 @@ export type AdminCreateUserRequestWritable = {
 
 export type AdminResetUserPasswordRequestWritable = {
     new_password: string;
+};
+
+export type AdminRestartProcessesRequestWritable = {
+    /**
+     * Process target supervised by Kubernetes, Compose, or AIO supervisord
+     */
+    target: 'server' | 'worker' | 'all';
 };
 
 export type AdminSetLogLevelRequestWritable = {
@@ -7939,6 +7979,12 @@ export type ProbeBodyWritable = {
     challenge: string;
 };
 
+export type ProcessRestartResultWritable = {
+    request_id?: string;
+    status: string;
+    target: string;
+};
+
 export type QueueAdvanceRequestWritable = {
     /**
      * The item this renderer just finished/skipped — makes double-fires no-ops
@@ -8416,13 +8462,25 @@ export type SetSystemSettingRequestWritable = {
 export type SonicAnalysisSettingsWritable = {
     accelerator: string;
     enabled: boolean;
+    /**
+     * Maximum tracks concurrently traversing the shared GPU model bundle
+     */
+    gpu_workers: number;
+    /**
+     * Maximum tracks concurrently preparing or waiting for inference
+     */
+    preprocess_ahead: number;
 };
 
 export type SonicSaveBodyWritable = {
     /**
-     * Whether the new settings were live-applied or queued for next idle window
+     * Whether live-applicable settings were applied or queued for the next idle window
      */
     applied: boolean;
+    /**
+     * Whether pipeline concurrency changed and needs a worker restart
+     */
+    restart_required: boolean;
     status: string;
 };
 
@@ -9104,6 +9162,31 @@ export type AdminNetworkStatusResponses = {
 };
 
 export type AdminNetworkStatusResponse = AdminNetworkStatusResponses[keyof AdminNetworkStatusResponses];
+
+export type AdminRestartProcessesData = {
+    body: AdminRestartProcessesRequestWritable;
+    path?: never;
+    query?: never;
+    url: '/api/admin/processes/restart';
+};
+
+export type AdminRestartProcessesErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type AdminRestartProcessesError = AdminRestartProcessesErrors[keyof AdminRestartProcessesErrors];
+
+export type AdminRestartProcessesResponses = {
+    /**
+     * OK
+     */
+    200: ProcessRestartResult;
+};
+
+export type AdminRestartProcessesResponse = AdminRestartProcessesResponses[keyof AdminRestartProcessesResponses];
 
 export type RecommendationsMlBackfillData = {
     body?: never;

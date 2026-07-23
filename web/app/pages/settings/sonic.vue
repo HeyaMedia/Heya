@@ -13,8 +13,12 @@ const settings = ref<SonicSettings | null>(null)
 const saving = ref(false)
 const fetching = ref(false)
 const enableSaving = ref(false)
+const restartRequired = ref(false)
+const restartingWorker = ref(false)
 const { flash } = useFlash()
+const { confirm } = useConfirm()
 const manifestOpen = ref(false)
+const pipelineWorkers = computed(() => (settings.value?.preprocess_ahead ?? 0) + (settings.value?.gpu_workers ?? 0))
 
 const fetcherState = computed(() => status.value?.fetcher?.state ?? 'unknown')
 const missingCount = computed(() => status.value?.fetcher?.missing_count ?? 0)
@@ -28,6 +32,12 @@ const presentSizeMB = computed(() => {
 })
 const coverage = computed(() => status.value?.coverage ?? { analyzed: 0, pending: 0 })
 const holder = computed(() => status.value?.holder)
+const pipelineMismatch = computed(() => {
+  if (!settings.value || !holder.value || holder.value.source !== 'worker') return false
+  return holder.value.preprocess_ahead !== settings.value.preprocess_ahead ||
+    holder.value.gpu_workers !== settings.value.gpu_workers
+})
+const needsWorkerRestart = computed(() => restartRequired.value || pipelineMismatch.value)
 const fetchProgress = computed(() => status.value?.fetcher?.progress)
 const lastError = computed(() => status.value?.fetcher?.last_error)
 
@@ -115,7 +125,7 @@ async function loadSettings() {
     await settingsData.refetch()
     if (settingsData.data.value) settings.value = structuredClone(settingsData.data.value)
   } catch {
-    settings.value = { enabled: false, accelerator: 'auto' }
+    settings.value = { enabled: false, accelerator: 'auto', preprocess_ahead: 4, gpu_workers: 1 }
   }
 }
 
@@ -147,15 +157,41 @@ async function save() {
     const res = await $heya('/api/admin/sonicanalysis/settings', {
       method: 'PUT',
       body: settings.value as any,
-    }) as { status: string; applied: boolean }
+    }) as { status: string; applied: boolean; restart_required: boolean }
+    restartRequired.value = res.restart_required
     flash.value = {
-      kind: res.applied ? 'ok' : 'warn',
-      text: res.applied ? 'Saved and applied.' : 'Saved — analyzer is busy; will apply at next idle.',
+      kind: res.restart_required || !res.applied ? 'warn' : 'ok',
+      text: res.restart_required
+        ? 'Saved — restart the worker to apply the new pipeline concurrency.'
+        : res.applied ? 'Saved and applied.' : 'Saved — analyzer is busy; will apply at next idle.',
     }
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.data?.error ?? 'Save failed.' }
   } finally {
     saving.value = false
+  }
+}
+
+async function restartWorker() {
+  const approved = await confirm({
+    title: 'Restart the worker?',
+    message: 'Active jobs will stop gracefully and resume after the process supervisor brings the worker back.',
+    destructive: true,
+    confirmLabel: 'Restart worker',
+  })
+  if (!approved) return
+  restartingWorker.value = true
+  try {
+    await $heya('/api/admin/processes/restart', {
+      method: 'POST',
+      body: { target: 'worker' } as any,
+    })
+    restartRequired.value = false
+    flash.value = { kind: 'ok', text: 'Worker restart requested. It should return within a few seconds.' }
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.data?.detail ?? e?.message ?? 'Worker restart failed.' }
+  } finally {
+    restartingWorker.value = false
   }
 }
 
@@ -333,6 +369,9 @@ onBeforeUnmount(() => {
         <KVTable :rows="[
           { key: 'State',           value: holderLabel },
           { key: 'Accelerator',     value: holder?.accelerator ?? '—', mono: true },
+          { key: 'CPU prep lanes',  value: holder?.preprocess_ahead ?? '—' },
+          { key: 'GPU lanes',       value: holder?.gpu_workers ?? '—' },
+          { key: 'Queue workers',   value: holder?.pipeline_workers ?? '—' },
           { key: 'Active leases',   value: holder?.refs ?? 0 },
           { key: 'Loaded',          value: holder?.loaded_at ? `${relTime(holder.loaded_at)} ago` : '' },
           { key: 'Idle unload',     value: holder?.idle_unload_at ? `in ${relTimeFuture(holder.idle_unload_at)}` : '' },
@@ -366,7 +405,58 @@ onBeforeUnmount(() => {
           </div>
         </SettingsField>
 
+        <div class="pipeline-grid">
+          <SettingsField
+            label="CPU preparation ahead"
+            description="Tracks allowed to decode, resample, build spectrograms, detect BPM/key, and wait ready for inference. More keeps the GPU fed but uses more CPU and RAM."
+            v-slot="{ fieldId }"
+          >
+            <input
+              v-if="settings"
+              :id="fieldId"
+              v-model.number="settings.preprocess_ahead"
+              class="sv2-number"
+              type="number"
+              min="1"
+              max="32"
+              step="1"
+            >
+          </SettingsField>
+
+          <SettingsField
+            label="GPU inference lanes"
+            description="Tracks traversing the shared model bundle concurrently. Start at 1; try 2 if the GPU still has idle gaps. Models are shared rather than duplicated in VRAM."
+            v-slot="{ fieldId }"
+          >
+            <input
+              v-if="settings"
+              :id="fieldId"
+              v-model.number="settings.gpu_workers"
+              class="sv2-number"
+              type="number"
+              min="1"
+              max="8"
+              step="1"
+            >
+          </SettingsField>
+        </div>
+
+        <div class="pipeline-summary">
+          <Icon name="info" :size="13" />
+          River will start {{ pipelineWorkers }} sonic workers: {{ settings?.preprocess_ahead }} CPU-prep slots + {{ settings?.gpu_workers }} GPU slots. Concurrency changes apply after a worker restart.
+        </div>
+
         <div class="save-bar">
+          <button
+            v-if="needsWorkerRestart"
+            class="sv2-btn danger"
+            :disabled="restartingWorker"
+            @click="restartWorker"
+          >
+            <Icon v-if="restartingWorker" name="spinner" :size="13" />
+            <Icon v-else name="refresh" :size="13" />
+            {{ restartingWorker ? 'Restarting…' : 'Restart worker' }}
+          </button>
           <span class="save-spacer" />
           <button class="sv2-btn primary" :disabled="saving" @click="save">
             <Icon v-if="saving" name="spinner" :size="13" />
@@ -519,6 +609,37 @@ onBeforeUnmount(() => {
 }
 .sv2-select:focus { border-color: var(--gold); }
 .sv2-select:disabled { opacity: 0.5; cursor: not-allowed; }
+.sv2-number {
+  width: 92px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  outline: none;
+  background: var(--bg-0);
+  color: var(--fg-0);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.sv2-number:focus { border-color: var(--gold); }
+
+.pipeline-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.pipeline-summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  color: var(--fg-3);
+  font-size: 11px;
+  line-height: 1.45;
+}
 
 .accel-hint {
   margin-top: 6px;
@@ -549,6 +670,7 @@ onBeforeUnmount(() => {
 @media (max-width: 720px) {
   .sv2-select { min-width: 0; width: 100%; }
   .enable-card { flex-wrap: wrap; }
+  .pipeline-grid { grid-template-columns: 1fr; }
 
   /* minmax(180px) only fits 1 column at 390px — force 2. */
   .tiles, .cov-row { grid-template-columns: repeat(2, 1fr); }

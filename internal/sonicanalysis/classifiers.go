@@ -3,6 +3,7 @@ package sonicanalysis
 import (
 	"fmt"
 	"path/filepath"
+	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
 )
@@ -54,6 +55,7 @@ var classifierHeadSpecs = []headSpec{
 type classifierHead struct {
 	spec    headSpec
 	session *ort.DynamicAdvancedSession
+	mu      sync.Mutex
 }
 
 type classifierBank struct {
@@ -117,13 +119,16 @@ func (c *classifierBank) Tag(embeddings []float32, nPatches int) (MoodScores, er
 	outShape := ort.NewShape(int64(nPatches), int64(headOutDim))
 	out := make(MoodScores, len(c.heads))
 	for _, h := range c.heads {
+		h.mu.Lock()
 		outputTensor, err := ort.NewEmptyTensor[float32](outShape)
 		if err != nil {
+			h.mu.Unlock()
 			return nil, err
 		}
 		err = h.session.Run([]ort.Value{inputTensor}, []ort.Value{outputTensor})
 		if err != nil {
 			_ = outputTensor.Destroy()
+			h.mu.Unlock()
 			return nil, fmt.Errorf("head %s: %w", h.spec.Name, err)
 		}
 		probs := outputTensor.GetData()
@@ -132,6 +137,7 @@ func (c *classifierBank) Tag(embeddings []float32, nPatches int) (MoodScores, er
 			sum += float64(probs[p*headOutDim+h.spec.PosIndex])
 		}
 		_ = outputTensor.Destroy()
+		h.mu.Unlock()
 		out[MoodTagName(h.spec.Name)] = float32(sum / float64(nPatches))
 	}
 	return out, nil

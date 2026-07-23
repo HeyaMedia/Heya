@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -31,6 +32,17 @@ const AnalyzerVersion int32 = 1
 // pending count and items list show only tracks we'd actually
 // analyze.
 const MaxAnalysisDurationSeconds int32 = 900
+
+const (
+	// DefaultPreprocessAhead keeps enough CPU-prepared tracks queued to cover
+	// the decode/DSP gaps visible between short GPU inference bursts without
+	// monopolising a smaller host. The Sonic settings page can raise this on
+	// machines with more CPU and RAM.
+	DefaultPreprocessAhead = 4
+	DefaultGPUWorkers      = 1
+	MaxPreprocessAhead     = 32
+	MaxGPUWorkers          = 8
+)
 
 // AnalyzerState is the lifecycle phase of an Analyzer. Stored as
 // int32 in atomic.Int32 for cheap concurrent state checks.
@@ -74,13 +86,27 @@ var ErrAnalyzerNotReady = errors.New("sonicanalysis: analyzer not in ready state
 // caller picks CoreML, we silently use CPU for the dynamic-batch
 // sessions.
 type Config struct {
-	ModelsDir   string
-	Accelerator Accelerator
+	ModelsDir       string
+	Accelerator     Accelerator
+	PreprocessAhead int
+	GPUWorkers      int
 }
 
 func (c Config) normalize() Config {
 	if c.Accelerator == "" {
 		c.Accelerator = AccelAuto
+	}
+	if c.PreprocessAhead <= 0 {
+		c.PreprocessAhead = DefaultPreprocessAhead
+	}
+	if c.PreprocessAhead > MaxPreprocessAhead {
+		c.PreprocessAhead = MaxPreprocessAhead
+	}
+	if c.GPUWorkers <= 0 {
+		c.GPUWorkers = DefaultGPUWorkers
+	}
+	if c.GPUWorkers > MaxGPUWorkers {
+		c.GPUWorkers = MaxGPUWorkers
 	}
 	return c
 }
@@ -124,23 +150,44 @@ func (b *modelBundle) close() {
 	}
 }
 
-// Analyzer owns one set of loaded models and runs the per-track
-// pipeline. Load/Unload toggle which ONNX sessions are alive; Analyze
-// requires Ready state.
-//
-// Not safe for concurrent Analyze calls — the scheduler runs one
-// track at a time anyway. State transitions ARE concurrent-safe
-// (atomic.Int32) so a status endpoint can read state freely.
+// Analyzer owns one set of loaded models and runs the per-track pipeline.
+// CPU preprocessing and GPU inference have independent bounded lanes:
+// PreprocessAhead tracks may prepare in parallel and wait behind GPUWorkers
+// inference lanes. All callers share this one model bundle; per-session locks
+// protect ONNX sessions and their reusable tensors.
 type Analyzer struct {
-	cfg    Config
-	bundle *modelBundle
-	state  atomic.Int32
+	cfg             Config
+	bundle          *modelBundle
+	state           atomic.Int32
+	pipelineSlots   chan struct{}
+	preprocessSlots chan struct{}
+	gpuSlots        chan struct{}
+	configMu        sync.RWMutex
 }
 
 // NewAnalyzer constructs an Analyzer with no models loaded. Use
 // Load() to actually open the ONNX sessions.
 func NewAnalyzer(cfg Config) *Analyzer {
-	return &Analyzer{cfg: cfg.normalize()}
+	a := &Analyzer{}
+	a.applyConfig(cfg.normalize())
+	return a
+}
+
+func (a *Analyzer) applyConfig(cfg Config) {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+	a.cfg = cfg
+	a.pipelineSlots = make(chan struct{}, cfg.PreprocessAhead+cfg.GPUWorkers)
+	a.preprocessSlots = make(chan struct{}, cfg.PreprocessAhead)
+	a.gpuSlots = make(chan struct{}, cfg.GPUWorkers)
+}
+
+// PipelineWorkers is the River queue width needed to keep every configured
+// CPU/GPU lane occupied without starting surplus jobs that merely wait.
+func (a *Analyzer) PipelineWorkers() int {
+	a.configMu.RLock()
+	defer a.configMu.RUnlock()
+	return a.cfg.PreprocessAhead + a.cfg.GPUWorkers
 }
 
 // State returns the Analyzer's current lifecycle state.
@@ -160,7 +207,7 @@ func (a *Analyzer) Reconfigure(cfg Config) error {
 	if !a.state.CompareAndSwap(int32(StateUnloaded), int32(StateLoading)) {
 		return ErrAnalyzerBusy
 	}
-	a.cfg = cfg.normalize()
+	a.applyConfig(cfg.normalize())
 	a.state.Store(int32(StateUnloaded))
 	return nil
 }
@@ -281,6 +328,16 @@ type AnalyzeOptions struct {
 	SkipWaveform bool
 }
 
+type preparedAnalysis struct {
+	patches       []float32
+	nPatches      int
+	bpm           float64
+	bpmConfidence float64
+	key           *KeyResult
+	clapMel       []float32
+	waveform      []float32
+}
+
 // AnalyzeWithProgress runs the full per-track pipeline, calling
 // `progress` at the top of each stage. Returns ErrAnalyzerNotReady if
 // state != Ready.
@@ -295,76 +352,69 @@ func (a *Analyzer) AnalyzeWithProgressOptions(ctx context.Context, audioPath str
 		return nil, ErrAnalyzerNotReady
 	}
 	start := time.Now()
+	a.configMu.RLock()
+	pipelineSlots := a.pipelineSlots
+	preprocessSlots := a.preprocessSlots
+	gpuSlots := a.gpuSlots
+	a.configMu.RUnlock()
+
+	if err := acquireAnalysisSlot(ctx, pipelineSlots); err != nil {
+		return nil, err
+	}
+	defer releaseAnalysisSlot(pipelineSlots)
+
 	emit := func(s AnalyzeStage) {
 		if progress != nil {
 			progress(s)
 		}
 	}
 
-	// Stage 1: 16 kHz decode + mel-spec — shared by Discogs heads,
-	// base EffNet, classifiers, BPM, key.
-	emit(StageDecode16k)
-	pcm16, err := decodePCM(ctx, audioPath, melSampleRate)
+	if err := acquireAnalysisSlot(ctx, preprocessSlots); err != nil {
+		return nil, err
+	}
+	prepared, err := prepareAnalysis(ctx, audioPath, emit, opts)
+	releaseAnalysisSlot(preprocessSlots)
 	if err != nil {
-		return nil, fmt.Errorf("decode 16k: %w", err)
-	}
-	spec, nFrames := melSpec(pcm16)
-	patches, nPatches := slicePatches(spec, nFrames)
-	if nPatches == 0 {
-		return nil, fmt.Errorf("audio shorter than one analysis patch (~2 s)")
+		return nil, err
 	}
 
-	// Stage 2: Discogs specialized heads (track / artist / release).
-	emit(StageDiscogsHeads)
-	heads := map[string][]float32{}
-	for _, h := range a.bundle.heads.Heads() {
-		sess := a.bundle.heads.sessions[h]
-		patchEmbeds, runErr := runBatched(sess, patches, nPatches)
-		if runErr != nil {
-			return nil, fmt.Errorf("%s head: %w", h, runErr)
-		}
-		heads[h] = meanPool(patchEmbeds, nPatches, discogsEmbedDim)
+	if err := acquireAnalysisSlot(ctx, gpuSlots); err != nil {
+		return nil, err
 	}
-
-	// Stage 3: base EffNet — gives genre softmax + 1280-dim embeddings
-	// for the classifier heads.
-	emit(StageEffnetBase)
-	genre, embed, err := a.bundle.base.Run(patches, nPatches)
+	facets, err := a.inferPrepared(prepared, emit)
+	releaseAnalysisSlot(gpuSlots)
 	if err != nil {
-		return nil, fmt.Errorf("effnet base: %w", err)
+		return nil, err
 	}
-	topGenres := topGenresFromSoftmax(genre, nPatches, 5)
+	facets.ElapsedMs = int(time.Since(start).Milliseconds())
+	return facets, nil
+}
 
-	emit(StageClassifierHeads)
-	moodTags, err := a.bundle.classifiers.Tag(embed, nPatches)
+func acquireAnalysisSlot(ctx context.Context, slots chan struct{}) error {
+	select {
+	case slots <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func releaseAnalysisSlot(slots chan struct{}) {
+	<-slots
+}
+
+func prepareAnalysis(ctx context.Context, audioPath string, emit func(AnalyzeStage), opts AnalyzeOptions) (*preparedAnalysis, error) {
+	// All CPU work happens before the GPU lane. Only compact model inputs are
+	// retained while waiting, not the full 16/48 kHz PCM buffers.
+	patches, nPatches, bpm, bpmConf, keyRes, err := prepareDiscogsInput(ctx, audioPath, emit)
 	if err != nil {
-		return nil, fmt.Errorf("classifier heads: %w", err)
+		return nil, err
 	}
-
-	// Stage 4: BPM + key share the same 16 kHz PCM (no second decode).
-	emit(StageBPMKey)
-	bpm, bpmConf, _ := detectBPMFromPCM(pcm16)
-	keyRes, _ := detectKeyFromPCM(pcm16)
-
-	// Stage 5: CLAP audio — needs its own 48 kHz decode.
-	emit(StageDecode48k)
-	pcm48, err := decodePCM(ctx, audioPath, clapSampleRate)
+	clapMel, err := prepareCLAPInput(ctx, audioPath, emit)
 	if err != nil {
-		return nil, fmt.Errorf("decode 48k: %w", err)
-	}
-	clapMel := clapMelSpec(pcm48)
-	emit(StageClapAudio)
-	clapEmbed, err := a.bundle.clapAudio.Embed(clapMel)
-	if err != nil {
-		return nil, fmt.Errorf("clap audio embed: %w", err)
+		return nil, err
 	}
 
-	// Stage 6: waveform — decode at 8 kHz fresh (cheap).
-	//
-	// Loudness used to be its own stage here; it now lives exclusively
-	// in the track_files pipeline (ScanTrackLoudnessWorker) which runs
-	// at probe time and is what the audio engine consumes for replay
-	// gain. Skipping the duplicate ebur128 call saves ~1-2s per track.
 	var waveform []float32
 	if !opts.SkipWaveform {
 		emit(StageWaveform)
@@ -374,21 +424,94 @@ func (a *Analyzer) AnalyzeWithProgressOptions(ctx context.Context, audioPath str
 		}
 	}
 
+	return &preparedAnalysis{
+		patches:       patches,
+		nPatches:      nPatches,
+		bpm:           bpm,
+		bpmConfidence: bpmConf,
+		key:           keyRes,
+		clapMel:       clapMel,
+		waveform:      waveform,
+	}, nil
+}
+
+// prepareDiscogsInput scopes the full 16 kHz PCM and spectrogram to this
+// function. A queued track retains only the compact model patches and scalar
+// BPM/key results.
+func prepareDiscogsInput(ctx context.Context, audioPath string, emit func(AnalyzeStage)) ([]float32, int, float64, float64, *KeyResult, error) {
+	emit(StageDecode16k)
+	pcm16, err := decodePCM(ctx, audioPath, melSampleRate)
+	if err != nil {
+		return nil, 0, 0, 0, nil, fmt.Errorf("decode 16k: %w", err)
+	}
+	spec, nFrames := melSpec(pcm16)
+	patches, nPatches := slicePatches(spec, nFrames)
+	if nPatches == 0 {
+		return nil, 0, 0, 0, nil, fmt.Errorf("audio shorter than one analysis patch (~2 s)")
+	}
+
+	emit(StageBPMKey)
+	bpm, bpmConf, _ := detectBPMFromPCM(pcm16)
+	keyRes, _ := detectKeyFromPCM(pcm16)
+	return patches, nPatches, bpm, bpmConf, keyRes, nil
+}
+
+// prepareCLAPInput likewise drops the much larger 48 kHz PCM before a track
+// can wait for a GPU lane.
+func prepareCLAPInput(ctx context.Context, audioPath string, emit func(AnalyzeStage)) ([]float32, error) {
+	emit(StageDecode48k)
+	pcm48, err := decodePCM(ctx, audioPath, clapSampleRate)
+	if err != nil {
+		return nil, fmt.Errorf("decode 48k: %w", err)
+	}
+	return clapMelSpec(pcm48), nil
+}
+
+func (a *Analyzer) inferPrepared(prepared *preparedAnalysis, emit func(AnalyzeStage)) (*Facets, error) {
+	emit(StageDiscogsHeads)
+	heads := map[string][]float32{}
+	for _, h := range a.bundle.heads.Heads() {
+		sess := a.bundle.heads.sessions[h]
+		patchEmbeds, runErr := runBatched(sess, prepared.patches, prepared.nPatches)
+		if runErr != nil {
+			return nil, fmt.Errorf("%s head: %w", h, runErr)
+		}
+		heads[h] = meanPool(patchEmbeds, prepared.nPatches, discogsEmbedDim)
+	}
+
+	emit(StageEffnetBase)
+	genre, embed, err := a.bundle.base.Run(prepared.patches, prepared.nPatches)
+	if err != nil {
+		return nil, fmt.Errorf("effnet base: %w", err)
+	}
+	topGenres := topGenresFromSoftmax(genre, prepared.nPatches, 5)
+
+	emit(StageClassifierHeads)
+	moodTags, err := a.bundle.classifiers.Tag(embed, prepared.nPatches)
+	if err != nil {
+		return nil, fmt.Errorf("classifier heads: %w", err)
+	}
+
+	emit(StageClapAudio)
+	clapEmbed, err := a.bundle.clapAudio.Embed(prepared.clapMel)
+	if err != nil {
+		return nil, fmt.Errorf("clap audio embed: %w", err)
+	}
+
 	f := &Facets{
 		TrackEmbed:    heads[HeadTrack],
 		ArtistEmbed:   heads[HeadArtist],
 		ReleaseEmbed:  heads[HeadRelease],
 		TextEmbed:     clapEmbed,
-		BPM:           bpm,
-		BPMConfidence: bpmConf,
+		BPM:           prepared.bpm,
+		BPMConfidence: prepared.bpmConfidence,
 		TopGenres:     topGenres,
 		MoodTags:      moodTags,
-		Waveform:      waveform,
-		ElapsedMs:     int(time.Since(start).Milliseconds()),
+		Waveform:      prepared.waveform,
 	}
-	if keyRes != nil {
-		f.Key = keyRes.Key
-		f.KeyClarity = keyRes.Clarity
+	if prepared.key != nil {
+		f.Key = prepared.key.Key
+		f.KeyClarity = prepared.key.Clarity
 	}
 	return f, nil
 }

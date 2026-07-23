@@ -50,7 +50,20 @@ export type SonicManifestFile = { name: string, present: boolean, expected_size:
 // source tells which process's Holder the snapshot came from: 'worker' is the
 // dedicated worker's published heartbeat (the one that actually loads the
 // model); 'local' is the API process's own instance (dev/CLI fallback).
-export type SonicHolder = { state: string, accelerator?: string, refs?: number, idle_timeout_sec?: number, total_borrows?: number, loaded_at?: string, idle_unload_at?: string, last_borrow_at?: string, source?: 'worker' | 'local' }
+export type SonicHolder = {
+  state: string
+  accelerator?: string
+  refs?: number
+  idle_timeout_sec?: number
+  total_borrows?: number
+  loaded_at?: string
+  idle_unload_at?: string
+  last_borrow_at?: string
+  preprocess_ahead?: number
+  gpu_workers?: number
+  pipeline_workers?: number
+  source?: 'worker' | 'local'
+}
 export type SonicThroughputBucket = { hour: string, count: number }
 export type SonicThroughput = { last_hour: number, last_24h: number, buckets: SonicThroughputBucket[] }
 export type SonicStatus = {
@@ -75,7 +88,12 @@ export type SonicStatus = {
   current_item?: string
   current_stage?: string
 }
-export type SonicSettings = { enabled: boolean, accelerator: string }
+export type SonicSettings = {
+  enabled: boolean
+  accelerator: string
+  preprocess_ahead: number
+  gpu_workers: number
+}
 
 export const sonicStatusQuery = defineQueryOptions(() => ({
   key: ['admin', 'intelligence', 'sonic', 'status'],

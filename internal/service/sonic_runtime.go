@@ -153,7 +153,9 @@ func (a *App) reconcileSonicHolderSettings(ctx context.Context) error {
 		return errors.New("sonic-analysis runtime has no application config")
 	}
 	return a.sonicHolder.Reconfigure(sonicanalysis.Config{
-		ModelsDir:   cfg.DataDir.Value + "/models",
-		Accelerator: desired,
+		ModelsDir:       cfg.DataDir.Value + "/models",
+		Accelerator:     desired,
+		PreprocessAhead: status.PreprocessAhead,
+		GPUWorkers:      status.GPUWorkers,
 	})
 }

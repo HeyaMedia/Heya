@@ -3,6 +3,7 @@ package sonicanalysis
 import (
 	"fmt"
 	"math"
+	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
 )
@@ -23,6 +24,7 @@ type clapAudioSession struct {
 	input   *ort.Tensor[float32]
 	output  *ort.Tensor[float32]
 	usedEP  string
+	mu      sync.Mutex
 }
 
 func newClapAudioSession(modelPath string, accel Accelerator) (*clapAudioSession, error) {
@@ -78,6 +80,9 @@ func (c *clapAudioSession) Close() {
 // into the input tensor, runs the audio encoder, and returns a copy
 // of the L2-normalized 512-dim output vector.
 func (c *clapAudioSession) Embed(melSpec []float32) ([]float32, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	want := clapNumFrames * clapNumBands
 	if len(melSpec) != want {
 		return nil, fmt.Errorf("expected %d input floats, got %d", want, len(melSpec))

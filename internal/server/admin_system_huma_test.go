@@ -83,6 +83,7 @@ var adminRoutes = []struct {
 	{"security", http.MethodGet, "/api/admin/security", nil},
 	{"diagnostics", http.MethodGet, "/api/admin/diagnostics", nil},
 	{"workers", http.MethodGet, "/api/admin/workers", nil},
+	{"processes/restart", http.MethodPost, "/api/admin/processes/restart", map[string]any{"target": "worker"}},
 	{"storage", http.MethodGet, "/api/admin/storage", nil},
 	{"storage/scan", http.MethodPost, "/api/admin/storage/scan", map[string]any{"library_id": 0}},
 	{"db", http.MethodGet, "/api/admin/db", nil},
@@ -189,6 +190,14 @@ func TestAdminLogLevelEnumValidation(t *testing.T) {
 		assert.Equal(t, http.StatusUnprocessableEntity, code,
 			"level enum should reject empty string")
 	})
+}
+
+func TestAdminRestartTargetEnumValidation(t *testing.T) {
+	api := authedAPI(t)
+	code := fire(api, http.MethodPost, "/api/admin/processes/restart",
+		map[string]any{"target": "database"},
+		"Authorization: Bearer admin-token")
+	assert.Equal(t, http.StatusUnprocessableEntity, code)
 }
 
 func TestAdminCreateUserValidation(t *testing.T) {

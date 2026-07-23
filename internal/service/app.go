@@ -136,6 +136,14 @@ type App struct {
 	backgroundWG     sync.WaitGroup
 	closeOnce        sync.Once
 
+	// Process control is installed by the long-lived serve/worker commands.
+	// The service layer can then turn an authenticated admin restart request
+	// into the same graceful cancellation path used by SIGTERM.
+	processControlMu sync.RWMutex
+	processRole      ProcessRole
+	processRestart   context.CancelFunc
+	restartOnce      sync.Once
+
 	// Wall-clock start time, captured once in New. Drives the uptime metric
 	// surfaced via /api/admin/system.
 	startedAt time.Time
@@ -611,8 +619,10 @@ func newApp(ctx context.Context, cfg *config.Config, runtimeMode appRuntimeMode)
 	// ignore a persisted accelerator choice.
 	bootSettings := effectiveSonicAnalysisSettingsFromDB(ctx, db)
 	saCfg := sonicanalysis.Config{
-		ModelsDir:   modelsDir,
-		Accelerator: sonicanalysis.Accelerator(bootSettings.Accelerator),
+		ModelsDir:       modelsDir,
+		Accelerator:     sonicanalysis.Accelerator(bootSettings.Accelerator),
+		PreprocessAhead: bootSettings.PreprocessAhead,
+		GPUWorkers:      bootSettings.GPUWorkers,
 	}
 	sonicHolder = sonicanalysis.NewHolder(saCfg, 5*time.Minute)
 
@@ -914,8 +924,10 @@ func (a *App) ReconfigureSonicAnalysisAnalyzer(ctx context.Context) error {
 	settings := a.SonicAnalysisSettings(ctx)
 	modelsDir := a.config.DataDir.Value + "/models"
 	saCfg := sonicanalysis.Config{
-		ModelsDir:   modelsDir,
-		Accelerator: sonicanalysis.Accelerator(settings.Accelerator),
+		ModelsDir:       modelsDir,
+		Accelerator:     sonicanalysis.Accelerator(settings.Accelerator),
+		PreprocessAhead: settings.PreprocessAhead,
+		GPUWorkers:      settings.GPUWorkers,
 	}
 	busy := false
 	if a.sonicHolder != nil {

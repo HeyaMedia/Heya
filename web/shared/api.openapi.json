@@ -793,6 +793,33 @@
         ],
         "type": "object"
       },
+      "Admin-restart-processesRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Admin-restart-processesRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "target": {
+            "description": "Process target supervised by Kubernetes, Compose, or AIO supervisord",
+            "enum": [
+              "server",
+              "worker",
+              "all"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
       "Admin-set-log-levelRequest": {
         "additionalProperties": false,
         "properties": {
@@ -15692,6 +15719,34 @@
         ],
         "type": "object"
       },
+      "ProcessRestartResult": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ProcessRestartResult.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "target"
+        ],
+        "type": "object"
+      },
       "ProtocolStats": {
         "additionalProperties": false,
         "properties": {
@@ -19582,11 +19637,27 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "gpu_workers": {
+            "description": "Maximum tracks concurrently traversing the shared GPU model bundle",
+            "format": "int64",
+            "maximum": 8,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "preprocess_ahead": {
+            "description": "Maximum tracks concurrently preparing or waiting for inference",
+            "format": "int64",
+            "maximum": 32,
+            "minimum": 1,
+            "type": "integer"
           }
         },
         "required": [
           "enabled",
-          "accelerator"
+          "accelerator",
+          "preprocess_ahead",
+          "gpu_workers"
         ],
         "type": "object"
       },
@@ -19603,7 +19674,11 @@
             "type": "string"
           },
           "applied": {
-            "description": "Whether the new settings were live-applied or queued for next idle window",
+            "description": "Whether live-applicable settings were applied or queued for the next idle window",
+            "type": "boolean"
+          },
+          "restart_required": {
+            "description": "Whether pipeline concurrency changed and needs a worker restart",
             "type": "boolean"
           },
           "status": {
@@ -19612,7 +19687,8 @@
         },
         "required": [
           "status",
-          "applied"
+          "applied",
+          "restart_required"
         ],
         "type": "object"
       },
@@ -23692,6 +23768,59 @@
           }
         ],
         "summary": "Unified Caddy, UPnP, Tailscale and host network status",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/admin/processes/restart": {
+      "post": {
+        "operationId": "admin-restart-processes",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Admin-restart-processesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessRestartResult"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Gracefully restart the server, worker, or both",
         "tags": [
           "Admin"
         ]
