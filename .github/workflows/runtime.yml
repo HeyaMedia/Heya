@@ -35,7 +35,7 @@ jobs:
         run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}-runtime" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Log in to GHCR
         uses: docker/login-action@v4
@@ -46,14 +46,12 @@ jobs:
 
       - name: Build + push runtime by digest
         id: build
-        uses: docker/build-push-action@v7
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           file: .docker/Dockerfile.cpu
           platforms: ${{ matrix.platform }}
           outputs: type=image,name=${{ steps.img.outputs.image }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=runtime-cpu-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=runtime-cpu-${{ matrix.arch }}
 
       - name: Export digest
         run: |
@@ -125,7 +123,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Log in to GHCR
         uses: docker/login-action@v4
@@ -135,7 +133,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build + push ${{ matrix.variant }} runtime
-        uses: docker/build-push-action@v7
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           file: ${{ matrix.file }}
@@ -146,5 +144,3 @@ jobs:
           tags: |
             ${{ needs.merge.outputs.image }}:${{ matrix.latest_tag }}
             ${{ needs.merge.outputs.image }}:${{ matrix.version_tag }}
-          cache-from: type=gha,scope=runtime-${{ matrix.variant }}
-          cache-to: type=gha,mode=max,scope=runtime-${{ matrix.variant }}

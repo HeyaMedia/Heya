@@ -50,13 +50,13 @@ jobs:
           echo "runtime_image=${image}-runtime" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: useblacksmith/setup-docker-builder@v1
 
       # Build Nuxt + Go and fetch the pinned agent CLIs once for amd64. The tiny
       # package jobs below put this same bundle onto CPU/CUDA/OpenVINO runtimes
       # without rebuilding frontend/backend or downloading the CLIs three times.
       - name: Build amd64 app bundle
-        uses: docker/build-push-action@v7
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           file: .docker/Dockerfile
@@ -65,8 +65,6 @@ jobs:
           build-args: |
             VERSION=${{ github.ref_name }}
           outputs: type=local,dest=${{ runner.temp }}/heya-amd64
-          cache-from: type=gha,scope=app-amd64
-          cache-to: type=gha,mode=max,scope=app-amd64
 
       - name: Upload amd64 app bundle
         uses: actions/upload-artifact@v7
@@ -98,7 +96,7 @@ jobs:
             "${{ runner.temp }}/package-amd64/agent-clis/codex/bin/codex"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: useblacksmith/setup-docker-builder@v1
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
@@ -115,7 +113,7 @@ jobs:
 
       - name: Build + push by digest
         id: build
-        uses: docker/build-push-action@v7
+        uses: useblacksmith/build-push-action@v2
         with:
           context: ${{ runner.temp }}/package-amd64
           file: ${{ runner.temp }}/package-amd64/Dockerfile
@@ -156,7 +154,7 @@ jobs:
           echo "runtime_image=${image}-runtime" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: useblacksmith/setup-docker-builder@v1
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
@@ -174,7 +172,7 @@ jobs:
       # independent from amd64 artifacts and avoids QEMU/CGO surprises.
       - name: Build + push by digest
         id: build
-        uses: docker/build-push-action@v7
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           file: .docker/Dockerfile
@@ -184,8 +182,6 @@ jobs:
             VERSION=${{ github.ref_name }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ steps.img.outputs.image }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=base-arm64
-          cache-to: type=gha,mode=max,scope=base-arm64
 
       - name: Export digest
         run: |
@@ -284,7 +280,7 @@ jobs:
             "${{ runner.temp }}/package-${{ matrix.variant }}/agent-clis/codex/bin/codex"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: useblacksmith/setup-docker-builder@v1
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
@@ -311,7 +307,7 @@ jobs:
       # Package the prebuilt amd64 app bundle onto the prebuilt GPU runtime —
       # amd64 only because CUDA/OpenVINO runtime images are x86_64.
       - name: Build and push ${{ matrix.variant }}
-        uses: docker/build-push-action@v7
+        uses: useblacksmith/build-push-action@v2
         with:
           context: ${{ runner.temp }}/package-${{ matrix.variant }}
           file: ${{ runner.temp }}/package-${{ matrix.variant }}/Dockerfile
@@ -338,7 +334,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Log in to GHCR
         uses: docker/login-action@v4
@@ -352,7 +348,7 @@ jobs:
       # neither Heya nor any CPU/GPU runtime is rebuilt.
       - name: Build + push aio by digest
         id: build
-        uses: docker/build-push-action@v7
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           file: .docker/Dockerfile.aio
@@ -360,8 +356,6 @@ jobs:
           build-args: |
             BASE_IMAGE=${{ needs.merge.outputs.image }}:${{ needs.merge.outputs.version }}${{ matrix.base_suffix }}
           outputs: type=image,name=${{ needs.merge.outputs.image }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=aio-${{ matrix.variant }}-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=aio-${{ matrix.variant }}-${{ matrix.arch }}
 
       - name: Export digest
         run: |
