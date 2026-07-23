@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,6 +21,20 @@ import (
 // this constant. Not user-tunable — the model's behaviour is
 // determined by the code, not by configuration.
 const AnalyzerVersion int32 = 1
+
+// CurrentCLAPWindows is the persisted coverage level of the CLAP audio
+// embedding. Version 1 rows used only the center ten seconds. Current rows
+// mean-pool deterministic windows centered at 20%, 50%, and 80%.
+const CurrentCLAPWindows int16 = 3
+
+// CLAPEmbeddingDimensions is exported for persistence adapters that need to
+// validate legacy pgvector values before attempting an incremental upgrade.
+const CLAPEmbeddingDimensions = clapEmbedDim
+
+var (
+	clapTrackPositions      = []float64{0.2, 0.5, 0.8}
+	clapAdditionalPositions = []float64{0.2, 0.8}
+)
 
 // MaxAnalysisDurationSeconds caps which tracks the sonic-analysis
 // pipeline will pick up. Tracks longer than this (DJ sets, podcasts,
@@ -126,11 +141,18 @@ func (c Config) dynamicAccelerator() Accelerator {
 // lifetime. Owned exclusively by the Analyzer; never shared across
 // instances.
 type modelBundle struct {
-	heads       *discogsHeadBank
-	base        *effnetBaseSession
-	classifiers *classifierBank
-	clapAudio   *clapAudioSession
+	heads              *discogsHeadBank
+	base               *effnetBaseSession
+	classifiers        *classifierBank
+	clapAudio          *clapAudioSession
+	serializeInference bool
 }
+
+// OpenVINO's execution provider crashed inside ONNX Runtime when separate
+// sessions inferred concurrently. This lock is package-wide—not analyzer
+// scoped—because the independently-lived CLAP text search session must not
+// overlap the scheduled audio analyzer either.
+var openVINOInferenceMu sync.Mutex
 
 func (b *modelBundle) close() {
 	if b == nil {
@@ -277,6 +299,13 @@ func (a *Analyzer) loadBundle(ctx context.Context) (*modelBundle, error) {
 		return nil, fmt.Errorf("clap audio: %w", err)
 	}
 	bundle.clapAudio = clap
+	bundle.serializeInference = strings.Contains(heads.usedEP, "openvino") ||
+		strings.Contains(base.usedEP, "openvino") ||
+		strings.Contains(classifiers.usedEP, "openvino") ||
+		strings.Contains(clap.usedEP, "openvino")
+	if bundle.serializeInference {
+		log.Info().Msg("sonicanalysis: OpenVINO detected; serializing model inference for runtime safety")
+	}
 
 	return bundle, nil
 }
@@ -325,7 +354,8 @@ func (a *Analyzer) Analyze(ctx context.Context, audioPath string) (*Facets, erro
 // AnalyzeOptions lets callers omit independently persisted cheap artifacts.
 // The model stages still run normally; this only avoids a redundant decode.
 type AnalyzeOptions struct {
-	SkipWaveform bool
+	SkipWaveform   bool
+	SkipBoundaries bool
 }
 
 type preparedAnalysis struct {
@@ -334,8 +364,47 @@ type preparedAnalysis struct {
 	bpm           float64
 	bpmConfidence float64
 	key           *KeyResult
-	clapMel       []float32
+	clapMels      [][]float32
 	waveform      []float32
+	boundaries    *Boundaries
+}
+
+// asyncPreparation lets the two model-input builders unblock GPU inference
+// while independent BPM/key/envelope work is still finishing on the shared
+// 16 kHz PCM.
+type asyncPreparation struct {
+	prepared  *preparedAnalysis
+	modelDone chan struct{}
+	allDone   chan struct{}
+
+	errMu sync.Mutex
+	err   error
+}
+
+func (p *asyncPreparation) recordError(err error) {
+	if err == nil {
+		return
+	}
+	p.errMu.Lock()
+	if p.err == nil {
+		p.err = err
+	}
+	p.errMu.Unlock()
+}
+
+func (p *asyncPreparation) currentError() error {
+	p.errMu.Lock()
+	defer p.errMu.Unlock()
+	return p.err
+}
+
+func (p *asyncPreparation) wait(ctx context.Context, done <-chan struct{}) error {
+	select {
+	case <-done:
+		return p.currentError()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // AnalyzeWithProgress runs the full per-track pipeline, calling
@@ -372,19 +441,41 @@ func (a *Analyzer) AnalyzeWithProgressOptions(ctx context.Context, audioPath str
 	if err := acquireAnalysisSlot(ctx, preprocessSlots); err != nil {
 		return nil, err
 	}
-	prepared, err := prepareAnalysis(ctx, audioPath, emit, opts)
-	releaseAnalysisSlot(preprocessSlots)
+	preparation, err := startAnalysisPreparation(ctx, audioPath, emit, opts)
 	if err != nil {
+		releaseAnalysisSlot(preprocessSlots)
+		return nil, err
+	}
+	preprocessReleased := make(chan struct{})
+	go func() {
+		<-preparation.allDone
+		releaseAnalysisSlot(preprocessSlots)
+		close(preprocessReleased)
+	}()
+	defer func() { <-preprocessReleased }()
+
+	if err := preparation.wait(ctx, preparation.modelDone); err != nil {
 		return nil, err
 	}
 
 	if err := acquireAnalysisSlot(ctx, gpuSlots); err != nil {
 		return nil, err
 	}
-	facets, err := a.inferPrepared(prepared, emit)
+	facets, err := a.inferPrepared(preparation.prepared, emit)
 	releaseAnalysisSlot(gpuSlots)
 	if err != nil {
 		return nil, err
+	}
+	if err := preparation.wait(ctx, preparation.allDone); err != nil {
+		return nil, err
+	}
+	facets.BPM = preparation.prepared.bpm
+	facets.BPMConfidence = preparation.prepared.bpmConfidence
+	facets.Waveform = preparation.prepared.waveform
+	facets.Boundaries = preparation.prepared.boundaries
+	if preparation.prepared.key != nil {
+		facets.Key = preparation.prepared.key.Key
+		facets.KeyClarity = preparation.prepared.key.Clarity
 	}
 	facets.ElapsedMs = int(time.Since(start).Milliseconds())
 	return facets, nil
@@ -403,71 +494,94 @@ func releaseAnalysisSlot(slots chan struct{}) {
 	<-slots
 }
 
-func prepareAnalysis(ctx context.Context, audioPath string, emit func(AnalyzeStage), opts AnalyzeOptions) (*preparedAnalysis, error) {
-	// All CPU work happens before the GPU lane. Only compact model inputs are
-	// retained while waiting, not the full 16/48 kHz PCM buffers.
-	patches, nPatches, bpm, bpmConf, keyRes, err := prepareDiscogsInput(ctx, audioPath, emit)
-	if err != nil {
-		return nil, err
-	}
-	clapMel, err := prepareCLAPInput(ctx, audioPath, emit)
-	if err != nil {
-		return nil, err
-	}
-
-	var waveform []float32
-	if !opts.SkipWaveform {
-		emit(StageWaveform)
-		waveform, err = ComputeWaveform(ctx, audioPath)
-		if err != nil {
-			return nil, fmt.Errorf("waveform: %w", err)
-		}
-	}
-
-	return &preparedAnalysis{
-		patches:       patches,
-		nPatches:      nPatches,
-		bpm:           bpm,
-		bpmConfidence: bpmConf,
-		key:           keyRes,
-		clapMel:       clapMel,
-		waveform:      waveform,
-	}, nil
-}
-
-// prepareDiscogsInput scopes the full 16 kHz PCM and spectrogram to this
-// function. A queued track retains only the compact model patches and scalar
-// BPM/key results.
-func prepareDiscogsInput(ctx context.Context, audioPath string, emit func(AnalyzeStage)) ([]float32, int, float64, float64, *KeyResult, error) {
+func startAnalysisPreparation(ctx context.Context, audioPath string, emit func(AnalyzeStage), opts AnalyzeOptions) (*asyncPreparation, error) {
 	emit(StageDecode16k)
-	pcm16, err := decodePCM(ctx, audioPath, melSampleRate)
-	if err != nil {
-		return nil, 0, 0, 0, nil, fmt.Errorf("decode 16k: %w", err)
-	}
-	spec, nFrames := melSpec(pcm16)
-	patches, nPatches := slicePatches(spec, nFrames)
-	if nPatches == 0 {
-		return nil, 0, 0, 0, nil, fmt.Errorf("audio shorter than one analysis patch (~2 s)")
-	}
-
-	emit(StageBPMKey)
-	bpm, bpmConf, _ := detectBPMFromPCM(pcm16)
-	keyRes, _ := detectKeyFromPCM(pcm16)
-	return patches, nPatches, bpm, bpmConf, keyRes, nil
-}
-
-// prepareCLAPInput likewise drops the much larger 48 kHz PCM before a track
-// can wait for a GPU lane.
-func prepareCLAPInput(ctx context.Context, audioPath string, emit func(AnalyzeStage)) ([]float32, error) {
 	emit(StageDecode48k)
-	pcm48, err := decodePCM(ctx, audioPath, clapSampleRate)
+	decoded, err := decodeAnalysisAudio(ctx, audioPath, clapTrackPositions, true)
 	if err != nil {
-		return nil, fmt.Errorf("decode 48k: %w", err)
+		return nil, fmt.Errorf("shared audio decode: %w", err)
 	}
-	return clapMelSpec(pcm48), nil
+	emit(StageBPMKey)
+	if !opts.SkipWaveform || !opts.SkipBoundaries {
+		emit(StageWaveform)
+	}
+
+	preparation := &asyncPreparation{
+		prepared:  &preparedAnalysis{},
+		modelDone: make(chan struct{}),
+		allDone:   make(chan struct{}),
+	}
+	var modelWG sync.WaitGroup
+	var allWG sync.WaitGroup
+	startTask := func(modelInput bool, fn func() error) {
+		allWG.Add(1)
+		if modelInput {
+			modelWG.Add(1)
+		}
+		go func() {
+			defer allWG.Done()
+			if modelInput {
+				defer modelWG.Done()
+			}
+			preparation.recordError(fn())
+		}()
+	}
+
+	startTask(true, func() error {
+		spec, nFrames := melSpec(decoded.PCM16)
+		patches, nPatches := slicePatches(spec, nFrames)
+		if nPatches == 0 {
+			return fmt.Errorf("audio shorter than one analysis patch (~2 s)")
+		}
+		preparation.prepared.patches = patches
+		preparation.prepared.nPatches = nPatches
+		return nil
+	})
+	startTask(true, func() error {
+		preparation.prepared.clapMels = prepareCLAPMels(decoded.CLAPClips)
+		return nil
+	})
+	startTask(false, func() error {
+		preparation.prepared.bpm, preparation.prepared.bpmConfidence, _ = detectBPMFromPCM(decoded.PCM16)
+		return nil
+	})
+	startTask(false, func() error {
+		preparation.prepared.key, _ = detectKeyFromPCM(decoded.PCM16)
+		return nil
+	})
+	if !opts.SkipWaveform || !opts.SkipBoundaries {
+		startTask(false, func() error {
+			if !opts.SkipWaveform {
+				waveform, waveformErr := waveformFromPCM(decoded.PCM16, waveformDefaultN)
+				if waveformErr != nil {
+					return fmt.Errorf("waveform: %w", waveformErr)
+				}
+				preparation.prepared.waveform = waveform
+			}
+			if !opts.SkipBoundaries {
+				preparation.prepared.boundaries = boundariesFromPCM(decoded.PCM16, melSampleRate)
+			}
+			return nil
+		})
+	}
+
+	go func() {
+		modelWG.Wait()
+		close(preparation.modelDone)
+	}()
+	go func() {
+		allWG.Wait()
+		close(preparation.allDone)
+	}()
+	return preparation, nil
 }
 
 func (a *Analyzer) inferPrepared(prepared *preparedAnalysis, emit func(AnalyzeStage)) (*Facets, error) {
+	if a.bundle.serializeInference {
+		openVINOInferenceMu.Lock()
+		defer openVINOInferenceMu.Unlock()
+	}
+
 	emit(StageDiscogsHeads)
 	heads := map[string][]float32{}
 	for _, h := range a.bundle.heads.Heads() {
@@ -493,27 +607,136 @@ func (a *Analyzer) inferPrepared(prepared *preparedAnalysis, emit func(AnalyzeSt
 	}
 
 	emit(StageClapAudio)
-	clapEmbed, err := a.bundle.clapAudio.Embed(prepared.clapMel)
+	clapEmbeds := make([][]float32, 0, len(prepared.clapMels))
+	for i, mel := range prepared.clapMels {
+		clapEmbed, embedErr := a.bundle.clapAudio.Embed(mel)
+		if embedErr != nil {
+			return nil, fmt.Errorf("clap audio window %d: %w", i+1, embedErr)
+		}
+		clapEmbeds = append(clapEmbeds, clapEmbed)
+	}
+	clapEmbed, err := meanCLAPEmbeddings(clapEmbeds)
 	if err != nil {
-		return nil, fmt.Errorf("clap audio embed: %w", err)
+		return nil, err
 	}
 
-	f := &Facets{
-		TrackEmbed:    heads[HeadTrack],
-		ArtistEmbed:   heads[HeadArtist],
-		ReleaseEmbed:  heads[HeadRelease],
-		TextEmbed:     clapEmbed,
-		BPM:           prepared.bpm,
-		BPMConfidence: prepared.bpmConfidence,
-		TopGenres:     topGenres,
-		MoodTags:      moodTags,
-		Waveform:      prepared.waveform,
+	return &Facets{
+		TrackEmbed:   heads[HeadTrack],
+		ArtistEmbed:  heads[HeadArtist],
+		ReleaseEmbed: heads[HeadRelease],
+		TextEmbed:    clapEmbed,
+		TopGenres:    topGenres,
+		MoodTags:     moodTags,
+	}, nil
+}
+
+// AugmentCLAPWithProgress upgrades a legacy center-only embedding by adding
+// deterministic windows at 20% and 80%. It exercises only the CLAP path; the
+// existing Discogs/BPM/key facets remain untouched.
+func (a *Analyzer) AugmentCLAPWithProgress(
+	ctx context.Context,
+	audioPath string,
+	existingCenter []float32,
+	progress ProgressFunc,
+) ([]float32, error) {
+	if a.State() != StateReady {
+		return nil, ErrAnalyzerNotReady
 	}
-	if prepared.key != nil {
-		f.Key = prepared.key.Key
-		f.KeyClarity = prepared.key.Clarity
+	if len(existingCenter) != clapEmbedDim {
+		return nil, fmt.Errorf("legacy CLAP embedding has %d dimensions, want %d", len(existingCenter), clapEmbedDim)
 	}
-	return f, nil
+	center := append([]float32(nil), existingCenter...)
+	l2Normalize(center)
+
+	a.configMu.RLock()
+	pipelineSlots := a.pipelineSlots
+	preprocessSlots := a.preprocessSlots
+	gpuSlots := a.gpuSlots
+	a.configMu.RUnlock()
+	if err := acquireAnalysisSlot(ctx, pipelineSlots); err != nil {
+		return nil, err
+	}
+	defer releaseAnalysisSlot(pipelineSlots)
+	if err := acquireAnalysisSlot(ctx, preprocessSlots); err != nil {
+		return nil, err
+	}
+
+	if progress != nil {
+		progress(StageDecode48k)
+	}
+	decoded, err := decodeAnalysisAudio(ctx, audioPath, clapAdditionalPositions, false)
+	if err == nil {
+		mels := prepareCLAPMels(decoded.CLAPClips)
+		releaseAnalysisSlot(preprocessSlots)
+		if err = acquireAnalysisSlot(ctx, gpuSlots); err == nil {
+			if a.bundle.serializeInference {
+				openVINOInferenceMu.Lock()
+			}
+			if progress != nil {
+				progress(StageClapAudio)
+			}
+			embeds := make([][]float32, 0, len(mels)+1)
+			embeds = append(embeds, center)
+			for i, mel := range mels {
+				var embed []float32
+				embed, err = a.bundle.clapAudio.Embed(mel)
+				if err != nil {
+					err = fmt.Errorf("clap audio window %d: %w", i+1, err)
+					break
+				}
+				embeds = append(embeds, embed)
+			}
+			if a.bundle.serializeInference {
+				openVINOInferenceMu.Unlock()
+			}
+			releaseAnalysisSlot(gpuSlots)
+			if err == nil {
+				return meanCLAPEmbeddings(embeds)
+			}
+		}
+	} else {
+		releaseAnalysisSlot(preprocessSlots)
+	}
+	return nil, err
+}
+
+func prepareCLAPMels(clips [][]float32) [][]float32 {
+	out := make([][]float32, len(clips))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	workers := min(2, len(clips))
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				out[i] = clapMelSpec(clips[i])
+			}
+		}()
+	}
+	for i := range clips {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	return out
+}
+
+func meanCLAPEmbeddings(embeds [][]float32) ([]float32, error) {
+	if len(embeds) == 0 {
+		return nil, fmt.Errorf("no CLAP embeddings to aggregate")
+	}
+	out := make([]float32, clapEmbedDim)
+	for i, embed := range embeds {
+		if len(embed) != clapEmbedDim {
+			return nil, fmt.Errorf("CLAP embedding %d has %d dimensions, want %d", i, len(embed), clapEmbedDim)
+		}
+		for j, value := range embed {
+			out[j] += value
+		}
+	}
+	l2Normalize(out)
+	return out, nil
 }
 
 // topGenresFromSoftmax mean-pools per-patch softmaxes and returns

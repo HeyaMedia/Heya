@@ -61,6 +61,15 @@ const modelSub = computed(() => {
 })
 
 const coverage = computed(() => sonic.value?.coverage ?? { analyzed: 0, pending: 0 })
+const coverageSub = computed(() => {
+  const parts = [
+    `${coverage.value.analyzed.toLocaleString()} analyzed`,
+    `${coverage.value.pending.toLocaleString()} pending`,
+  ]
+  const cleanup = coverage.value.clap_cleanup_pending ?? 0
+  if (cleanup > 0) parts.push(`${cleanup.toLocaleString()} CLAP cleanup`)
+  return parts.join(' · ')
+})
 const coveragePct = computed(() => {
   const total = coverage.value.analyzed + coverage.value.pending
   if (!total) return null
@@ -179,7 +188,7 @@ onBeforeUnmount(() => {
           :value="coveragePct != null ? `${coveragePct}%` : '—'"
           icon="chart-bar"
           :tone="coveragePct === 100 ? 'good' : 'neutral'"
-          :sub="`${coverage.analyzed.toLocaleString()} analyzed · ${coverage.pending.toLocaleString()} pending`"
+          :sub="coverageSub"
         />
         <MetricTile
           label="Analyzed (24h)"

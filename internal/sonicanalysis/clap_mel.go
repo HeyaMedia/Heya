@@ -35,6 +35,11 @@ const (
 	clapNumFrames  = 1001   // 1 + clipLen / hopLength
 )
 
+var (
+	clapHannWindow = hannPeriodic(clapNFFT)
+	clapFilterBank = melFilterBank(clapNumBands, clapNFFT, clapSampleRate, clapLowHz, clapHighHz)
+)
+
 // hannPeriodic builds a length-N periodic Hann window:
 //
 //	w[n] = 0.5 - 0.5 * cos(2π n / N)
@@ -79,8 +84,6 @@ func clapPrepareSamples(pcm []float32) []float32 {
 // the audio_model `input_features` tensor.
 func clapMelSpec(pcm []float32) []float32 {
 	samples := clapPrepareSamples(pcm)
-	window := hannPeriodic(clapNFFT)
-	bank := melFilterBank(clapNumBands, clapNFFT, clapSampleRate, clapLowHz, clapHighHz)
 	fft := fourier.NewFFT(clapNFFT)
 	nFftBins := clapNFFT/2 + 1
 
@@ -106,7 +109,7 @@ func clapMelSpec(pcm []float32) []float32 {
 	for f := 0; f < clapNumFrames; f++ {
 		start := f * clapHopLength
 		for i := 0; i < clapNFFT; i++ {
-			frame[i] = padded[start+i] * window[i]
+			frame[i] = padded[start+i] * clapHannWindow[i]
 		}
 		fft.Coefficients(complexBuf, frame)
 		for k := range complexBuf {
@@ -117,7 +120,7 @@ func clapMelSpec(pcm []float32) []float32 {
 		melOff := f * clapNumBands
 		for b := 0; b < clapNumBands; b++ {
 			var sum float64
-			row := bank[b]
+			row := clapFilterBank[b]
 			for k := range row {
 				sum += powerBuf[k] * row[k]
 			}

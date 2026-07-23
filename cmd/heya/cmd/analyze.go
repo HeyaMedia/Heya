@@ -62,13 +62,18 @@ var analyzeStatusCmd = &cobra.Command{
 		settings := app.SonicAnalysisSettings(ctx)
 		version := sonicanalysis.AnalyzerVersion
 
-		pending, err := q.CountPendingAnalysis(ctx, sqlc.CountPendingAnalysisParams{
+		pending, err := q.CountPendingFullAnalysis(ctx, sqlc.CountPendingFullAnalysisParams{
 			MaxDurationSeconds: sonicanalysis.MaxAnalysisDurationSeconds,
 			AnalyzerVersion:    version,
 		})
 		if err != nil {
 			return fmt.Errorf("count pending: %w", err)
 		}
+		clapCleanupPending, _ := q.CountPendingCLAPCleanup(ctx, sqlc.CountPendingCLAPCleanupParams{
+			MaxDurationSeconds: sonicanalysis.MaxAnalysisDurationSeconds,
+			AnalyzerVersion:    version,
+			ClapWindows:        sonicanalysis.CurrentCLAPWindows,
+		})
 		analyzed, _ := q.CountAnalyzedTracks(ctx, version)
 
 		fmt.Printf("enabled                       : %v\n", settings.Enabled)
@@ -77,6 +82,7 @@ var analyzeStatusCmd = &cobra.Command{
 		fmt.Printf("analyzer_version              : %d\n", version)
 		fmt.Printf("tracks analyzed (this version): %d\n", analyzed)
 		fmt.Printf("tracks pending analysis       : %d\n", pending)
+		fmt.Printf("tracks pending CLAP cleanup   : %d\n", clapCleanupPending)
 
 		fetcher := sonicanalysis.NewModelFetcher(modelsDir(), "")
 		fmt.Printf("models on disk                : %v\n", fetcher.AllPresent())
@@ -154,6 +160,7 @@ already fanned out into River.`,
 		total, _ := q.CountPendingAnalysis(ctx, sqlc.CountPendingAnalysisParams{
 			MaxDurationSeconds: sonicanalysis.MaxAnalysisDurationSeconds,
 			AnalyzerVersion:    sonicanalysis.AnalyzerVersion,
+			ClapWindows:        sonicanalysis.CurrentCLAPWindows,
 		})
 		if total == 0 {
 			fmt.Println("nothing to analyze.")
@@ -175,6 +182,7 @@ already fanned out into River.`,
 			next, err := q.NextTrackForAnalysis(ctx, sqlc.NextTrackForAnalysisParams{
 				MaxDurationSeconds: sonicanalysis.MaxAnalysisDurationSeconds,
 				AnalyzerVersion:    currentVersion,
+				ClapWindows:        sonicanalysis.CurrentCLAPWindows,
 			})
 			if errors.Is(err, pgx.ErrNoRows) {
 				break
@@ -182,24 +190,82 @@ already fanned out into River.`,
 			if err != nil {
 				return fmt.Errorf("next track: %w", err)
 			}
-			facets, analyzeErr := analyzer.Analyze(ctx, next.FilePath)
+			row, err := q.GetTrackForAnalysis(ctx, next.ID)
+			if err != nil {
+				return fmt.Errorf("load track %d for analysis: %w", next.ID, err)
+			}
+
+			if row.AnalyzerVersion >= currentVersion && row.ClapWindows == 1 && row.TextEmbeddingText != "" {
+				var center pgvector.Vector
+				if parseErr := center.Parse(row.TextEmbeddingText); parseErr == nil && len(center.Slice()) == sonicanalysis.CLAPEmbeddingDimensions {
+					embedding, augmentErr := analyzer.AugmentCLAPWithProgress(
+						ctx,
+						row.FilePath,
+						center.Slice(),
+						nil,
+					)
+					if augmentErr != nil {
+						log.Warn().Err(augmentErr).Int64("track_id", row.ID).Msg("CLAP augmentation failed")
+						failed++
+						continue
+					}
+					if err := q.UpdateTrackCLAPEmbedding(ctx, sqlc.UpdateTrackCLAPEmbeddingParams{
+						TrackID:       row.ID,
+						TextEmbedding: pgvector.NewVector(embedding),
+						ClapWindows:   sonicanalysis.CurrentCLAPWindows,
+					}); err != nil {
+						log.Warn().Err(err).Int64("track_id", row.ID).Msg("persist CLAP augmentation failed")
+						failed++
+						continue
+					}
+					affectedArtists[row.ArtistID] = struct{}{}
+					affectedAlbums[row.AlbumID] = struct{}{}
+					processed++
+					if once {
+						break
+					}
+					continue
+				}
+				log.Warn().Int64("track_id", row.ID).Msg("legacy CLAP embedding is invalid; running full analysis")
+			}
+
+			existingWaveform, _ := q.GetTrackWaveform(ctx, row.ID)
+			facets, analyzeErr := analyzer.AnalyzeWithProgressOptions(ctx, row.FilePath, nil, sonicanalysis.AnalyzeOptions{
+				SkipWaveform:   len(existingWaveform) > 0,
+				SkipBoundaries: row.BoundariesAnalyzedAt.Valid,
+			})
 			if analyzeErr != nil {
-				log.Warn().Err(analyzeErr).Int64("track_id", next.ID).Msg("analyze failed")
+				log.Warn().Err(analyzeErr).Int64("track_id", row.ID).Msg("analyze failed")
 				// Stub-write so we don't re-pick this track.
-				_ = q.UpsertTrackFacets(ctx, sqlc.UpsertTrackFacetsParams{
-					TrackID:         next.ID,
+				_ = q.UpsertTrackFacetsStub(ctx, sqlc.UpsertTrackFacetsStubParams{
+					TrackID:         row.ID,
 					AnalyzerVersion: currentVersion,
+					ClapWindows:     sonicanalysis.CurrentCLAPWindows,
 				})
 				failed++
 				continue
 			}
-			if err := persistCLIFacets(ctx, q, next.ID, facets, currentVersion); err != nil {
-				log.Warn().Err(err).Int64("track_id", next.ID).Msg("persist failed")
+			if len(existingWaveform) > 0 {
+				facets.Waveform = existingWaveform
+			}
+			if err := persistCLIFacets(ctx, q, row.ID, facets, currentVersion); err != nil {
+				log.Warn().Err(err).Int64("track_id", row.ID).Msg("persist failed")
 				failed++
 				continue
 			}
-			affectedArtists[next.ArtistID] = struct{}{}
-			affectedAlbums[next.AlbumID] = struct{}{}
+			if facets.Boundaries != nil && row.TrackFileID > 0 {
+				if err := q.UpdateTrackFileBoundaries(ctx, sqlc.UpdateTrackFileBoundariesParams{
+					ID:             row.TrackFileID,
+					IntroEndMs:     cliBoundaryInt4(facets.Boundaries.IntroEndMs),
+					OutroStartMs:   cliBoundaryInt4(facets.Boundaries.OutroStartMs),
+					FadeStartMs:    cliBoundaryInt4(facets.Boundaries.FadeStartMs),
+					SilenceStartMs: cliBoundaryInt4(facets.Boundaries.SilenceStartMs),
+				}); err != nil {
+					log.Warn().Err(err).Int64("track_id", row.ID).Msg("persist boundaries failed")
+				}
+			}
+			affectedArtists[row.ArtistID] = struct{}{}
+			affectedAlbums[row.AlbumID] = struct{}{}
 			processed++
 			if once {
 				break
@@ -246,7 +312,12 @@ func persistCLIFacets(ctx context.Context, q *sqlc.Queries, trackID int64, f *so
 		MoodTags:         moodTagsJSON,
 		Waveform:         f.Waveform,
 		AnalyzerVersion:  currentVersion,
+		ClapWindows:      sonicanalysis.CurrentCLAPWindows,
 	})
+}
+
+func cliBoundaryInt4(value int) pgtype.Int4 {
+	return pgtype.Int4{Int32: int32(value), Valid: true}
 }
 
 var analyzeResetCmd = &cobra.Command{

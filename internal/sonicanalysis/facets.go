@@ -34,7 +34,8 @@ type Facets struct {
 	TopGenres []GenreScore
 	MoodTags  MoodScores
 
-	Waveform []float32 // 2000 peaks [0..1]
+	Waveform   []float32 // 2000 peaks [0..1]
+	Boundaries *Boundaries
 
 	ElapsedMs int // wall-clock for one Analyze call
 }

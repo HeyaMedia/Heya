@@ -1244,6 +1244,7 @@ type TrackFacet struct {
 	Waveform         []float32          `json:"waveform"`
 	AnalyzedAt       pgtype.Timestamptz `json:"analyzed_at"`
 	AnalyzerVersion  int32              `json:"analyzer_version"`
+	ClapWindows      int16              `json:"clap_windows"`
 }
 
 type TrackFile struct {

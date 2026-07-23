@@ -31,6 +31,12 @@ const presentSizeMB = computed(() => {
   return sum / 1024 / 1024
 })
 const coverage = computed(() => status.value?.coverage ?? { analyzed: 0, pending: 0 })
+const coverageSub = computed(() => {
+  const parts = [`${coverage.value.pending} pending`]
+  const cleanup = coverage.value.clap_cleanup_pending ?? 0
+  if (cleanup > 0) parts.push(`${cleanup} CLAP cleanup`)
+  return parts.join(' · ')
+})
 const holder = computed(() => status.value?.holder)
 const pipelineMismatch = computed(() => {
   if (!settings.value || !holder.value || holder.value.source !== 'worker') return false
@@ -299,7 +305,7 @@ onBeforeUnmount(() => {
           label="Coverage"
           :value="`${coverage.analyzed}`"
           icon="check"
-          :sub="`${coverage.pending} pending`"
+          :sub="coverageSub"
           :tone="coverage.pending === 0 ? 'good' : 'warn'"
         />
       </div>
@@ -479,7 +485,9 @@ onBeforeUnmount(() => {
         </div>
         <p class="cov-note">
           The Tasks page owns the daily time window and max runtime for the
-          analyzer task.
+          analyzer task. {{ (coverage.clap_cleanup_pending ?? 0) > 0
+            ? `${coverage.clap_cleanup_pending} existing tracks will receive their extra CLAP windows after full analysis catches up.`
+            : '' }}
         </p>
       </SettingsSection>
     </template>

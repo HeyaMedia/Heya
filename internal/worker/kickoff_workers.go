@@ -3543,6 +3543,7 @@ func (w *KickoffSonicAnalysisWorker) Work(ctx context.Context, job *river.Job[Ki
 			AfterID:            st.TrackCursor,
 			MaxDurationSeconds: sonicanalysis.MaxAnalysisDurationSeconds,
 			AnalyzerVersion:    sonicanalysis.AnalyzerVersion,
+			ClapWindows:        sonicanalysis.CurrentCLAPWindows,
 			LimitCount:         int32(want),
 		})
 		if err != nil {

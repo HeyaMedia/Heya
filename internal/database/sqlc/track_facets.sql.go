@@ -14,7 +14,9 @@ import (
 )
 
 const countAnalyzedTracks = `-- name: CountAnalyzedTracks :one
-SELECT count(*)::int FROM track_facets WHERE analyzer_version >= $1
+SELECT count(*)::int
+FROM track_facets
+WHERE analyzer_version >= $1
 `
 
 func (q *Queries) CountAnalyzedTracks(ctx context.Context, analyzerVersion int32) (int32, error) {
@@ -39,18 +41,91 @@ WHERE t.duration <= $1::int
     WHERE tfile.track_id = t.id
       AND tfile.duration > $1::int
   )
-  AND (tf.track_id IS NULL OR tf.analyzer_version < $2::int)
+  AND (
+    tf.track_id IS NULL
+    OR tf.analyzer_version < $2::int
+    OR tf.clap_windows < $3::smallint
+  )
 `
 
 type CountPendingAnalysisParams struct {
 	MaxDurationSeconds int32 `json:"max_duration_seconds"`
 	AnalyzerVersion    int32 `json:"analyzer_version"`
+	ClapWindows        int16 `json:"clap_windows"`
 }
 
-// Mirrors NextTrackForAnalysis' eligibility filter so the Tasks UI counter
-// agrees with what the scheduler will actually pick up.
+// Mirrors NextTrackForAnalysis' eligibility filter so the CLI run loop can
+// see the complete full-analysis + CLAP-cleanup backlog.
 func (q *Queries) CountPendingAnalysis(ctx context.Context, arg CountPendingAnalysisParams) (int32, error) {
-	row := q.db.QueryRow(ctx, countPendingAnalysis, arg.MaxDurationSeconds, arg.AnalyzerVersion)
+	row := q.db.QueryRow(ctx, countPendingAnalysis, arg.MaxDurationSeconds, arg.AnalyzerVersion, arg.ClapWindows)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countPendingCLAPCleanup = `-- name: CountPendingCLAPCleanup :one
+SELECT count(*)::int FROM tracks t
+JOIN track_facets tf ON tf.track_id = t.id
+WHERE t.duration <= $1::int
+  AND EXISTS (
+    SELECT 1
+    FROM track_files tfile
+    JOIN library_files lf ON lf.id = tfile.library_file_id
+    WHERE tfile.track_id = t.id AND lf.deleted_at IS NULL
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM track_files tfile
+    WHERE tfile.track_id = t.id
+      AND tfile.duration > $1::int
+  )
+  AND tf.analyzer_version >= $2::int
+  AND tf.clap_windows < $3::smallint
+`
+
+type CountPendingCLAPCleanupParams struct {
+	MaxDurationSeconds int32 `json:"max_duration_seconds"`
+	AnalyzerVersion    int32 `json:"analyzer_version"`
+	ClapWindows        int16 `json:"clap_windows"`
+}
+
+func (q *Queries) CountPendingCLAPCleanup(ctx context.Context, arg CountPendingCLAPCleanupParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countPendingCLAPCleanup, arg.MaxDurationSeconds, arg.AnalyzerVersion, arg.ClapWindows)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countPendingFullAnalysis = `-- name: CountPendingFullAnalysis :one
+SELECT count(*)::int FROM tracks t
+LEFT JOIN track_facets tf ON tf.track_id = t.id
+WHERE t.duration <= $1::int
+  AND EXISTS (
+    SELECT 1
+    FROM track_files tfile
+    JOIN library_files lf ON lf.id = tfile.library_file_id
+    WHERE tfile.track_id = t.id AND lf.deleted_at IS NULL
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM track_files tfile
+    WHERE tfile.track_id = t.id
+      AND tfile.duration > $1::int
+  )
+  AND (
+    tf.track_id IS NULL
+    OR tf.analyzer_version < $2::int
+  )
+`
+
+type CountPendingFullAnalysisParams struct {
+	MaxDurationSeconds int32 `json:"max_duration_seconds"`
+	AnalyzerVersion    int32 `json:"analyzer_version"`
+}
+
+// Core coverage intentionally excludes the deferred CLAP-window cleanup so
+// adding a better semantic embedding does not make already-analyzed tracks
+// appear to lose all of their Discogs/DSP coverage.
+func (q *Queries) CountPendingFullAnalysis(ctx context.Context, arg CountPendingFullAnalysisParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countPendingFullAnalysis, arg.MaxDurationSeconds, arg.AnalyzerVersion)
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -305,7 +380,7 @@ func (q *Queries) GetArtistCentroid(ctx context.Context, artistID int64) (Artist
 }
 
 const getTrackFacets = `-- name: GetTrackFacets :one
-SELECT track_id, track_embedding, artist_embedding, release_embedding, text_embedding, bpm, bpm_confidence, key_root, key_mode, key_clarity, top_genres, mood_tags, waveform, analyzed_at, analyzer_version FROM track_facets
+SELECT track_id, track_embedding, artist_embedding, release_embedding, text_embedding, bpm, bpm_confidence, key_root, key_mode, key_clarity, top_genres, mood_tags, waveform, analyzed_at, analyzer_version, clap_windows FROM track_facets
 WHERE track_id = $1
   AND track_embedding IS NOT NULL
 `
@@ -329,18 +404,29 @@ func (q *Queries) GetTrackFacets(ctx context.Context, trackID int64) (TrackFacet
 		&i.Waveform,
 		&i.AnalyzedAt,
 		&i.AnalyzerVersion,
+		&i.ClapWindows,
 	)
 	return i, err
 }
 
 const getTrackForAnalysis = `-- name: GetTrackForAnalysis :one
 SELECT t.id, t.title, t.album_id, a.artist_id, ar.name AS artist_name,
-       COALESCE(primary_file.file_path, '')::text AS file_path
+       COALESCE(primary_file.file_path, '')::text AS file_path,
+       COALESCE(primary_file.track_file_id, 0)::bigint AS track_file_id,
+       COALESCE(primary_file.duration, t.duration, 0)::int AS duration,
+       COALESCE(tf.analyzer_version, 0)::int AS analyzer_version,
+       COALESCE(tf.clap_windows, 0)::smallint AS clap_windows,
+       COALESCE(tf.text_embedding::text, '')::text AS text_embedding_text,
+       primary_file.boundaries_analyzed_at
 FROM tracks t
 JOIN albums  a  ON a.id = t.album_id
 JOIN artists ar ON ar.id = a.artist_id
+LEFT JOIN track_facets tf ON tf.track_id = t.id
 LEFT JOIN LATERAL (
-  SELECT lf.path::text AS file_path
+  SELECT lf.path::text AS file_path,
+         tfile.id AS track_file_id,
+         tfile.duration,
+         tfile.boundaries_analyzed_at
   FROM track_files tfile
   JOIN library_files lf ON lf.id = tfile.library_file_id
   WHERE tfile.track_id = t.id AND lf.deleted_at IS NULL
@@ -351,12 +437,18 @@ WHERE t.id = $1
 `
 
 type GetTrackForAnalysisRow struct {
-	ID         int64  `json:"id"`
-	Title      string `json:"title"`
-	AlbumID    int64  `json:"album_id"`
-	ArtistID   int64  `json:"artist_id"`
-	ArtistName string `json:"artist_name"`
-	FilePath   string `json:"file_path"`
+	ID                   int64              `json:"id"`
+	Title                string             `json:"title"`
+	AlbumID              int64              `json:"album_id"`
+	ArtistID             int64              `json:"artist_id"`
+	ArtistName           string             `json:"artist_name"`
+	FilePath             string             `json:"file_path"`
+	TrackFileID          int64              `json:"track_file_id"`
+	Duration             int32              `json:"duration"`
+	AnalyzerVersion      int32              `json:"analyzer_version"`
+	ClapWindows          int16              `json:"clap_windows"`
+	TextEmbeddingText    string             `json:"text_embedding_text"`
+	BoundariesAnalyzedAt pgtype.Timestamptz `json:"boundaries_analyzed_at"`
 }
 
 // Resolve a specific track for the analyze_track_facets River worker.
@@ -373,6 +465,12 @@ func (q *Queries) GetTrackForAnalysis(ctx context.Context, id int64) (GetTrackFo
 		&i.ArtistID,
 		&i.ArtistName,
 		&i.FilePath,
+		&i.TrackFileID,
+		&i.Duration,
+		&i.AnalyzerVersion,
+		&i.ClapWindows,
+		&i.TextEmbeddingText,
+		&i.BoundariesAnalyzedAt,
 	)
 	return i, err
 }
@@ -494,15 +592,45 @@ WHERE t.id > $1::bigint
     WHERE tfile.track_id = t.id
       AND tfile.duration > $2::int
   )
-  AND (tf.track_id IS NULL OR tf.analyzer_version < $3::int)
+  AND (
+    tf.track_id IS NULL
+    OR tf.analyzer_version < $3::int
+    OR (
+      tf.clap_windows < $4::smallint
+      AND NOT EXISTS (
+        SELECT 1
+        FROM tracks full_track
+        LEFT JOIN track_facets full_facets ON full_facets.track_id = full_track.id
+        WHERE full_track.duration <= $2::int
+          AND EXISTS (
+            SELECT 1
+            FROM track_files full_file
+            JOIN library_files full_library_file ON full_library_file.id = full_file.library_file_id
+            WHERE full_file.track_id = full_track.id
+              AND full_library_file.deleted_at IS NULL
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM track_files long_file
+            WHERE long_file.track_id = full_track.id
+              AND long_file.duration > $2::int
+          )
+          AND (
+            full_facets.track_id IS NULL
+            OR full_facets.analyzer_version < $3::int
+          )
+      )
+    )
+  )
 ORDER BY t.id ASC
-LIMIT $4::int
+LIMIT $5::int
 `
 
 type ListPendingAnalysisTracksParams struct {
 	AfterID            int64 `json:"after_id"`
 	MaxDurationSeconds int32 `json:"max_duration_seconds"`
 	AnalyzerVersion    int32 `json:"analyzer_version"`
+	ClapWindows        int16 `json:"clap_windows"`
 	LimitCount         int32 `json:"limit_count"`
 }
 
@@ -510,12 +638,16 @@ type ListPendingAnalysisTracksParams struct {
 // track IDs (above the pump's after_id cursor) whose facets row is missing
 // or older than the requested analyzer_version. Mirrors
 // NextTrackForAnalysis' eligibility filter so the kickoff doesn't enqueue
-// jobs the worker would just skip.
+// jobs the worker would just skip. CLAP-only upgrades are gated until no
+// eligible track needs full analysis anywhere in the library. This global
+// gate deliberately preserves the monotonic ID cursor: after the full pass
+// drains, the pump resets its cursor once and begins the cleanup pass.
 func (q *Queries) ListPendingAnalysisTracks(ctx context.Context, arg ListPendingAnalysisTracksParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listPendingAnalysisTracks,
 		arg.AfterID,
 		arg.MaxDurationSeconds,
 		arg.AnalyzerVersion,
+		arg.ClapWindows,
 		arg.LimitCount,
 	)
 	if err != nil {
@@ -1068,14 +1200,26 @@ WHERE t.duration <= $1::int
     WHERE tfile.track_id = t.id
       AND tfile.duration > $1::int
   )
-  AND (tf.track_id IS NULL OR tf.analyzer_version < $2::int)
-ORDER BY t.id ASC
+  AND (
+    tf.track_id IS NULL
+    OR tf.analyzer_version < $2::int
+    OR tf.clap_windows < $3::smallint
+  )
+ORDER BY
+  CASE
+    WHEN tf.track_id IS NULL
+      OR tf.analyzer_version < $2::int
+    THEN 0
+    ELSE 1
+  END,
+  t.id ASC
 LIMIT 1
 `
 
 type NextTrackForAnalysisParams struct {
 	MaxDurationSeconds int32 `json:"max_duration_seconds"`
 	AnalyzerVersion    int32 `json:"analyzer_version"`
+	ClapWindows        int16 `json:"clap_windows"`
 }
 
 type NextTrackForAnalysisRow struct {
@@ -1097,9 +1241,10 @@ type NextTrackForAnalysisRow struct {
 // skip. duration=0 means "unknown" and passes — we only reject on positive
 // evidence the track is over the cap, so missing metadata never silently
 // kills a song-length track.
-// Deterministic order (id ASC) so the scheduler resumes predictably.
+// Full analysis comes before CLAP-only coverage upgrades. The CLI has no
+// cursor, so a simple priority sort is sufficient here.
 func (q *Queries) NextTrackForAnalysis(ctx context.Context, arg NextTrackForAnalysisParams) (NextTrackForAnalysisRow, error) {
-	row := q.db.QueryRow(ctx, nextTrackForAnalysis, arg.MaxDurationSeconds, arg.AnalyzerVersion)
+	row := q.db.QueryRow(ctx, nextTrackForAnalysis, arg.MaxDurationSeconds, arg.AnalyzerVersion, arg.ClapWindows)
 	var i NextTrackForAnalysisRow
 	err := row.Scan(
 		&i.ID,
@@ -1824,6 +1969,27 @@ func (q *Queries) TopArtistsByTempoBands(ctx context.Context, arg TopArtistsByTe
 	return items, nil
 }
 
+const updateTrackCLAPEmbedding = `-- name: UpdateTrackCLAPEmbedding :exec
+UPDATE track_facets
+SET text_embedding = $2,
+    clap_windows   = $3,
+    analyzed_at    = now()
+WHERE track_id = $1
+`
+
+type UpdateTrackCLAPEmbeddingParams struct {
+	TrackID       int64           `json:"track_id"`
+	TextEmbedding pgvector.Vector `json:"text_embedding"`
+	ClapWindows   int16           `json:"clap_windows"`
+}
+
+// Upgrade a legacy center-only CLAP embedding without rerunning the unrelated
+// Discogs/BPM/key pipeline.
+func (q *Queries) UpdateTrackCLAPEmbedding(ctx context.Context, arg UpdateTrackCLAPEmbeddingParams) error {
+	_, err := q.db.Exec(ctx, updateTrackCLAPEmbedding, arg.TrackID, arg.TextEmbedding, arg.ClapWindows)
+	return err
+}
+
 const upsertTrackFacets = `-- name: UpsertTrackFacets :exec
 INSERT INTO track_facets (
     track_id,
@@ -1832,7 +1998,8 @@ INSERT INTO track_facets (
     key_root, key_mode, key_clarity,
     top_genres, mood_tags,
     waveform,
-    analyzer_version
+    analyzer_version,
+    clap_windows
 ) VALUES (
     $1,
     $2, $3, $4, $5,
@@ -1840,7 +2007,8 @@ INSERT INTO track_facets (
     $8, $9, $10,
     $11, $12,
     $13,
-    $14
+    $14,
+    $15
 )
 ON CONFLICT (track_id) DO UPDATE SET
     track_embedding   = EXCLUDED.track_embedding,
@@ -1861,7 +2029,8 @@ ON CONFLICT (track_id) DO UPDATE SET
                           ELSE EXCLUDED.waveform
                         END,
     analyzed_at       = now(),
-    analyzer_version  = EXCLUDED.analyzer_version
+    analyzer_version  = EXCLUDED.analyzer_version,
+    clap_windows      = EXCLUDED.clap_windows
 `
 
 type UpsertTrackFacetsParams struct {
@@ -1879,6 +2048,7 @@ type UpsertTrackFacetsParams struct {
 	MoodTags         []byte          `json:"mood_tags"`
 	Waveform         []float32       `json:"waveform"`
 	AnalyzerVersion  int32           `json:"analyzer_version"`
+	ClapWindows      int16           `json:"clap_windows"`
 }
 
 // Atomic write of all per-track facets after a successful Analyze() call.
@@ -1902,21 +2072,24 @@ func (q *Queries) UpsertTrackFacets(ctx context.Context, arg UpsertTrackFacetsPa
 		arg.MoodTags,
 		arg.Waveform,
 		arg.AnalyzerVersion,
+		arg.ClapWindows,
 	)
 	return err
 }
 
 const upsertTrackFacetsStub = `-- name: UpsertTrackFacetsStub :exec
-INSERT INTO track_facets (track_id, analyzer_version)
-VALUES ($1, $2)
+INSERT INTO track_facets (track_id, analyzer_version, clap_windows)
+VALUES ($1, $2, $3)
 ON CONFLICT (track_id) DO UPDATE SET
     analyzed_at      = now(),
-    analyzer_version = EXCLUDED.analyzer_version
+    analyzer_version = EXCLUDED.analyzer_version,
+    clap_windows     = EXCLUDED.clap_windows
 `
 
 type UpsertTrackFacetsStubParams struct {
 	TrackID         int64 `json:"track_id"`
 	AnalyzerVersion int32 `json:"analyzer_version"`
+	ClapWindows     int16 `json:"clap_windows"`
 }
 
 // Failure marker: a permanently-broken track (decode error, unreadable file)
@@ -1928,7 +2101,7 @@ type UpsertTrackFacetsStubParams struct {
 // a previous successful version are deliberately kept (still useful for
 // similarity) — only the version/timestamp advance.
 func (q *Queries) UpsertTrackFacetsStub(ctx context.Context, arg UpsertTrackFacetsStubParams) error {
-	_, err := q.db.Exec(ctx, upsertTrackFacetsStub, arg.TrackID, arg.AnalyzerVersion)
+	_, err := q.db.Exec(ctx, upsertTrackFacetsStub, arg.TrackID, arg.AnalyzerVersion, arg.ClapWindows)
 	return err
 }
 

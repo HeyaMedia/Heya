@@ -88,10 +88,43 @@ func (w *AnalyzeTrackFacetsWorker) Work(ctx context.Context, job *river.Job[Anal
 	stageHook := func(stage sonicanalysis.AnalyzeStage) {
 		w.Progress.SetStage(AnalyzeTrackFacetsArgs{}.Kind(), job.Args.ScheduledTaskID, label, string(stage))
 	}
+
+	// Rows produced by the original analyzer already contain the center CLAP
+	// view and every non-CLAP facet. Upgrade those by decoding/inferencing only
+	// the missing 20% and 80% views, then fold all three together.
+	if row.AnalyzerVersion >= currentVersion && row.ClapWindows == 1 && row.TextEmbeddingText != "" {
+		var center pgvector.Vector
+		if parseErr := center.Parse(row.TextEmbeddingText); parseErr == nil && len(center.Slice()) == sonicanalysis.CLAPEmbeddingDimensions {
+			embedding, augmentErr := lease.Analyzer.AugmentCLAPWithProgress(
+				ctx,
+				row.FilePath,
+				center.Slice(),
+				stageHook,
+			)
+			if augmentErr != nil {
+				return fmt.Errorf("augment CLAP embedding: %w", augmentErr)
+			}
+			if err := q.UpdateTrackCLAPEmbedding(ctx, sqlc.UpdateTrackCLAPEmbeddingParams{
+				TrackID:       row.ID,
+				TextEmbedding: pgvector.NewVector(embedding),
+				ClapWindows:   sonicanalysis.CurrentCLAPWindows,
+			}); err != nil {
+				return fmt.Errorf("persist augmented CLAP embedding: %w", err)
+			}
+			enqueueFacetCentroidRefreshes(ctx, job, row.ArtistID, row.AlbumID)
+			return nil
+		}
+		// A malformed legacy vector is not reusable. Fall through to a complete
+		// analysis so the row repairs itself rather than being marked upgraded.
+		log.Warn().
+			Int64("track_id", row.ID).
+			Msg("analyze_track_facets: legacy CLAP embedding is invalid; running full analysis")
+	}
+
+	existingWaveform, _ := q.GetTrackWaveform(ctx, row.ID)
 	facets, analyzeErr := lease.Analyzer.AnalyzeWithProgressOptions(ctx, row.FilePath, stageHook, sonicanalysis.AnalyzeOptions{
-		// Re-check after the expensive model stages below. An on-demand
-		// waveform may land while those are running.
-		SkipWaveform: true,
+		SkipWaveform:   len(existingWaveform) > 0,
+		SkipBoundaries: row.BoundariesAnalyzedAt.Valid,
 	})
 	if analyzeErr != nil {
 		// Persist a stub row so a permanently-broken track (decode
@@ -110,6 +143,7 @@ func (w *AnalyzeTrackFacetsWorker) Work(ctx context.Context, job *river.Job[Anal
 			if stubErr := q.UpsertTrackFacetsStub(ctx, sqlc.UpsertTrackFacetsStubParams{
 				TrackID:         row.ID,
 				AnalyzerVersion: currentVersion,
+				ClapWindows:     sonicanalysis.CurrentCLAPWindows,
 			}); stubErr != nil {
 				log.Warn().Err(stubErr).Int64("track_id", row.ID).Msg("analyze_track_facets: stub write failed")
 			}
@@ -117,36 +151,51 @@ func (w *AnalyzeTrackFacetsWorker) Work(ctx context.Context, job *river.Job[Anal
 		return analyzeErr
 	}
 
-	if existingWaveform, _ := q.GetTrackWaveform(ctx, row.ID); len(existingWaveform) > 0 {
+	if len(existingWaveform) > 0 {
 		facets.Waveform = existingWaveform
-	} else {
-		stageHook(sonicanalysis.StageWaveform)
-		waveform, waveformErr := sonicanalysis.ComputeWaveform(ctx, row.FilePath)
-		if waveformErr != nil {
-			return fmt.Errorf("waveform: %w", waveformErr)
-		}
-		facets.Waveform = waveform
 	}
 
 	if err := persistTrackFacets(ctx, q, row.ID, facets, currentVersion); err != nil {
 		return fmt.Errorf("persist facets: %w", err)
 	}
 
+	// The shared 16 kHz decode already produced the smart-crossfade envelope.
+	// Persist it for the selected source file and let the loudness worker skip
+	// its otherwise-separate 8 kHz boundary decode. Facets are already durable,
+	// so a transient boundary write must not cause an expensive model retry.
+	if facets.Boundaries != nil && row.TrackFileID > 0 {
+		if err := q.UpdateTrackFileBoundaries(ctx, sqlc.UpdateTrackFileBoundariesParams{
+			ID:             row.TrackFileID,
+			IntroEndMs:     boundaryInt4(facets.Boundaries.IntroEndMs),
+			OutroStartMs:   boundaryInt4(facets.Boundaries.OutroStartMs),
+			FadeStartMs:    boundaryInt4(facets.Boundaries.FadeStartMs),
+			SilenceStartMs: boundaryInt4(facets.Boundaries.SilenceStartMs),
+		}); err != nil {
+			log.Warn().Err(err).
+				Int64("track_id", row.ID).
+				Int64("track_file_id", row.TrackFileID).
+				Msg("analyze_track_facets: boundary write failed")
+		}
+	}
+
+	enqueueFacetCentroidRefreshes(ctx, job, row.ArtistID, row.AlbumID)
+	return nil
+}
+
+func enqueueFacetCentroidRefreshes(ctx context.Context, job *river.Job[AnalyzeTrackFacetsArgs], artistID, albumID int64) {
 	// Debounced centroid refresh. UniqueByArgs on the centroid jobs
 	// means rapid back-to-back track completions for the same artist/
 	// album collapse to a single refresh.
 	client := river.ClientFromContext[pgx.Tx](ctx)
 	if client != nil {
 		source := scheduledJobSource(job.Metadata)
-		if _, err := client.Insert(ctx, RefreshArtistCentroidArgs{ArtistID: row.ArtistID, ScheduledTaskID: job.Args.ScheduledTaskID}, scheduledJobInsertOpts(source)); err != nil {
-			log.Warn().Err(err).Int64("artist_id", row.ArtistID).Msg("analyze_track_facets: enqueue artist centroid refresh failed")
+		if _, err := client.Insert(ctx, RefreshArtistCentroidArgs{ArtistID: artistID, ScheduledTaskID: job.Args.ScheduledTaskID}, scheduledJobInsertOpts(source)); err != nil {
+			log.Warn().Err(err).Int64("artist_id", artistID).Msg("analyze_track_facets: enqueue artist centroid refresh failed")
 		}
-		if _, err := client.Insert(ctx, RefreshAlbumCentroidArgs{AlbumID: row.AlbumID, ScheduledTaskID: job.Args.ScheduledTaskID}, scheduledJobInsertOpts(source)); err != nil {
-			log.Warn().Err(err).Int64("album_id", row.AlbumID).Msg("analyze_track_facets: enqueue album centroid refresh failed")
+		if _, err := client.Insert(ctx, RefreshAlbumCentroidArgs{AlbumID: albumID, ScheduledTaskID: job.Args.ScheduledTaskID}, scheduledJobInsertOpts(source)); err != nil {
+			log.Warn().Err(err).Int64("album_id", albumID).Msg("analyze_track_facets: enqueue album centroid refresh failed")
 		}
 	}
-
-	return nil
 }
 
 func persistTrackFacets(ctx context.Context, q *sqlc.Queries, trackID int64, f *sonicanalysis.Facets, currentVersion int32) error {
@@ -173,7 +222,12 @@ func persistTrackFacets(ctx context.Context, q *sqlc.Queries, trackID int64, f *
 		MoodTags:         moodTagsJSON,
 		Waveform:         f.Waveform,
 		AnalyzerVersion:  currentVersion,
+		ClapWindows:      sonicanalysis.CurrentCLAPWindows,
 	})
+}
+
+func boundaryInt4(value int) pgtype.Int4 {
+	return pgtype.Int4{Int32: int32(value), Valid: true}
 }
 
 // RefreshArtistCentroidArgs recomputes one artist's sonic + text

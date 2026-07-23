@@ -202,15 +202,32 @@ func (a *App) QueryTaskStats(ctx context.Context) map[string]TaskStats {
 	// real 1h file_files.duration would sneak through.
 	var facetsTotal, facetsDone int
 	row = a.db.QueryRow(ctx, `
-		SELECT
-			(SELECT count(*) FROM tracks t
-			 JOIN track_files tf ON tf.track_id = t.id
-			 WHERE t.duration <= $1 AND tf.duration <= $1),
-			(SELECT count(*) FROM track_facets tfa
-			 JOIN tracks t ON t.id = tfa.track_id
-			 JOIN track_files tf ON tf.track_id = t.id
-			 WHERE t.duration <= $1 AND tf.duration <= $1)
-	`, sonicanalysis.MaxAnalysisDurationSeconds)
+		WITH eligible AS (
+			SELECT t.id
+			FROM tracks t
+			WHERE t.duration <= $1
+			  AND EXISTS (
+				SELECT 1
+				FROM track_files tf
+				JOIN library_files lf ON lf.id = tf.library_file_id
+				WHERE tf.track_id = t.id AND lf.deleted_at IS NULL
+			  )
+			  AND NOT EXISTS (
+				SELECT 1 FROM track_files tf
+				WHERE tf.track_id = t.id AND tf.duration > $1
+			  )
+		)
+		SELECT count(*),
+		       count(*) FILTER (WHERE EXISTS (
+				SELECT 1 FROM track_facets tfa
+				WHERE tfa.track_id = eligible.id
+				  AND tfa.analyzer_version >= $2
+		       ))
+		FROM eligible
+	`,
+		sonicanalysis.MaxAnalysisDurationSeconds,
+		sonicanalysis.AnalyzerVersion,
+	)
 	if row.Scan(&facetsTotal, &facetsDone) == nil {
 		stats["analyze_music_facets"] = TaskStats{
 			Complete: facetsDone,
@@ -919,45 +936,79 @@ func (a *App) QueryDetectionItems(ctx context.Context, status string, limit, off
 }
 
 // QueryFacetsItems returns tracks paginated by sonic-analysis state. A track
-// is "complete" when its track_facets row exists. Mirrors the scheduler's
-// NextTrackForAnalysis duration filter so the modal only lists tracks we'd
-// actually analyze — anything longer than MaxAnalysisDurationSeconds is
-// invisible to both the count and the listing.
+// is "complete" when its core facets match the current analyzer version.
+// Deferred CLAP-window cleanup is reported separately by the Sonic status
+// endpoint and does not erase existing analysis coverage. Mirrors the
+// scheduler's duration filter so the modal only lists tracks we'd actually
+// analyze.
 func (a *App) QueryFacetsItems(ctx context.Context, status string, limit, offset int) (*TaskItemsResult, error) {
 	maxDuration := sonicanalysis.MaxAnalysisDurationSeconds
 
 	var total, complete int
 	err := a.db.QueryRow(ctx, `
-		SELECT
-			(SELECT count(*) FROM tracks t
-			 JOIN track_files tf ON tf.track_id = t.id
-			 WHERE t.duration <= $1 AND tf.duration <= $1),
-			(SELECT count(*) FROM track_facets tfa
-			 JOIN tracks t ON t.id = tfa.track_id
-			 JOIN track_files tf ON tf.track_id = t.id
-			 WHERE t.duration <= $1 AND tf.duration <= $1)
-	`, maxDuration).Scan(&total, &complete)
+		WITH eligible AS (
+			SELECT t.id
+			FROM tracks t
+			WHERE t.duration <= $1
+			  AND EXISTS (
+				SELECT 1
+				FROM track_files tf
+				JOIN library_files lf ON lf.id = tf.library_file_id
+				WHERE tf.track_id = t.id AND lf.deleted_at IS NULL
+			  )
+			  AND NOT EXISTS (
+				SELECT 1 FROM track_files tf
+				WHERE tf.track_id = t.id AND tf.duration > $1
+			  )
+		)
+		SELECT count(*),
+		       count(*) FILTER (WHERE EXISTS (
+				SELECT 1 FROM track_facets tfa
+				WHERE tfa.track_id = eligible.id
+				  AND tfa.analyzer_version >= $2
+		       ))
+		FROM eligible
+	`,
+		maxDuration,
+		sonicanalysis.AnalyzerVersion,
+	).Scan(&total, &complete)
 	if err != nil {
 		return nil, err
 	}
 
-	statusFilter := "WHERE t.duration <= $3 AND tf.duration <= $3"
+	statusFilter := `
+		WHERE t.duration <= $3
+		  AND EXISTS (
+			SELECT 1
+			FROM track_files tf
+			JOIN library_files lf ON lf.id = tf.library_file_id
+			WHERE tf.track_id = t.id AND lf.deleted_at IS NULL
+		  )
+		  AND NOT EXISTS (
+			SELECT 1 FROM track_files tf
+			WHERE tf.track_id = t.id AND tf.duration > $3
+		  )`
+	completeExpr := "COALESCE(tfa.analyzer_version >= $4, false)"
 	switch status {
 	case "complete":
-		statusFilter += " AND tfa.track_id IS NOT NULL"
+		statusFilter += " AND " + completeExpr
 	case "pending":
-		statusFilter += " AND tfa.track_id IS NULL"
+		statusFilter += " AND NOT " + completeExpr
 	}
 
 	rows, err := a.db.Query(ctx, `
-		SELECT t.id, t.title, tfa.track_id IS NOT NULL AS analyzed
+		SELECT t.id, t.title, `+completeExpr+` AS analyzed
 		FROM tracks t
-		JOIN track_files tf ON tf.track_id = t.id
 		LEFT JOIN track_facets tfa ON tfa.track_id = t.id
 		`+statusFilter+`
-		ORDER BY (tfa.track_id IS NULL) DESC, t.title ASC
+		ORDER BY (`+completeExpr+`) ASC, t.title ASC
 		LIMIT $1 OFFSET $2
-	`, limit, offset, maxDuration)
+	`,
+		limit,
+		offset,
+		maxDuration,
+		sonicanalysis.AnalyzerVersion,
+	)
 	if err != nil {
 		return nil, err
 	}

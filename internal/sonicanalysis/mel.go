@@ -29,6 +29,11 @@ const (
 	melLogShift   = 1.0
 )
 
+var (
+	discogsHannWindow = hannWindow(melFrameSize)
+	discogsMelBank    = melFilterBank(melNumBands, melFrameSize, melSampleRate, melLowHz, melHighHz)
+)
+
 // slaneyHzToMel returns the Slaney-Auditory-Toolbox mel value for a
 // frequency in Hz. Linear 0..1000 Hz (slope 3/200), log above 1000 Hz
 // with logStep = ln(6.4)/27.
@@ -120,8 +125,6 @@ func melFilterBank(nBands, fftSize, sampleRate int, lowHz, highHz float64) [][]f
 // frame count.
 func melSpec(pcm []float32) (spec []float32, nFrames int) {
 	frame := make([]float64, melFrameSize)
-	window := hannWindow(melFrameSize)
-	bank := melFilterBank(melNumBands, melFrameSize, melSampleRate, melLowHz, melHighHz)
 	fft := fourier.NewFFT(melFrameSize)
 	complexBuf := make([]complex128, melFrameSize/2+1)
 	powerBuf := make([]float64, melFrameSize/2+1)
@@ -150,7 +153,7 @@ func melSpec(pcm []float32) (spec []float32, nFrames int) {
 			if srcIdx < 0 || srcIdx >= nSamples {
 				frame[i] = 0
 			} else {
-				frame[i] = float64(pcm[srcIdx]) * window[i]
+				frame[i] = float64(pcm[srcIdx]) * discogsHannWindow[i]
 			}
 		}
 		fft.Coefficients(complexBuf, frame)
@@ -162,7 +165,7 @@ func melSpec(pcm []float32) (spec []float32, nFrames int) {
 		base := f * melNumBands
 		for b := 0; b < melNumBands; b++ {
 			var sum float64
-			row := bank[b]
+			row := discogsMelBank[b]
 			for k := range row {
 				sum += powerBuf[k] * row[k]
 			}

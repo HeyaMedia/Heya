@@ -2,6 +2,7 @@ package sonicanalysis
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/sugarme/tokenizer"
 	"github.com/sugarme/tokenizer/pretrained"
@@ -94,6 +95,10 @@ func (t *clapTextSession) Embed(text string) ([]float32, error) {
 	}
 	defer func() { _ = outputTensor.Destroy() }()
 
+	if strings.Contains(t.usedEP, "openvino") {
+		openVINOInferenceMu.Lock()
+		defer openVINOInferenceMu.Unlock()
+	}
 	if err := t.session.Run(
 		[]ort.Value{inputTensor},
 		[]ort.Value{outputTensor},

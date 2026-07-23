@@ -11,7 +11,8 @@ INSERT INTO track_facets (
     key_root, key_mode, key_clarity,
     top_genres, mood_tags,
     waveform,
-    analyzer_version
+    analyzer_version,
+    clap_windows
 ) VALUES (
     $1,
     $2, $3, $4, $5,
@@ -19,7 +20,8 @@ INSERT INTO track_facets (
     $8, $9, $10,
     $11, $12,
     $13,
-    $14
+    $14,
+    $15
 )
 ON CONFLICT (track_id) DO UPDATE SET
     track_embedding   = EXCLUDED.track_embedding,
@@ -40,7 +42,8 @@ ON CONFLICT (track_id) DO UPDATE SET
                           ELSE EXCLUDED.waveform
                         END,
     analyzed_at       = now(),
-    analyzer_version  = EXCLUDED.analyzer_version;
+    analyzer_version  = EXCLUDED.analyzer_version,
+    clap_windows      = EXCLUDED.clap_windows;
 
 -- name: UpsertTrackFacetsStub :exec
 -- Failure marker: a permanently-broken track (decode error, unreadable file)
@@ -51,11 +54,21 @@ ON CONFLICT (track_id) DO UPDATE SET
 -- always errored and broken tracks churned forever. Existing embeddings from
 -- a previous successful version are deliberately kept (still useful for
 -- similarity) — only the version/timestamp advance.
-INSERT INTO track_facets (track_id, analyzer_version)
-VALUES ($1, $2)
+INSERT INTO track_facets (track_id, analyzer_version, clap_windows)
+VALUES ($1, $2, $3)
 ON CONFLICT (track_id) DO UPDATE SET
     analyzed_at      = now(),
-    analyzer_version = EXCLUDED.analyzer_version;
+    analyzer_version = EXCLUDED.analyzer_version,
+    clap_windows     = EXCLUDED.clap_windows;
+
+-- name: UpdateTrackCLAPEmbedding :exec
+-- Upgrade a legacy center-only CLAP embedding without rerunning the unrelated
+-- Discogs/BPM/key pipeline.
+UPDATE track_facets
+SET text_embedding = $2,
+    clap_windows   = $3,
+    analyzed_at    = now()
+WHERE track_id = $1;
 
 -- name: GetTrackFacets :one
 SELECT * FROM track_facets
@@ -86,7 +99,8 @@ ON CONFLICT (track_id) DO UPDATE SET
 -- skip. duration=0 means "unknown" and passes — we only reject on positive
 -- evidence the track is over the cap, so missing metadata never silently
 -- kills a song-length track.
--- Deterministic order (id ASC) so the scheduler resumes predictably.
+-- Full analysis comes before CLAP-only coverage upgrades. The CLI has no
+-- cursor, so a simple priority sort is sufficient here.
 SELECT t.id, t.title, t.album_id, a.artist_id, primary_file.file_path
 FROM tracks t
 JOIN albums a ON a.id = t.album_id
@@ -105,8 +119,19 @@ WHERE t.duration <= sqlc.arg(max_duration_seconds)::int
     WHERE tfile.track_id = t.id
       AND tfile.duration > sqlc.arg(max_duration_seconds)::int
   )
-  AND (tf.track_id IS NULL OR tf.analyzer_version < sqlc.arg(analyzer_version)::int)
-ORDER BY t.id ASC
+  AND (
+    tf.track_id IS NULL
+    OR tf.analyzer_version < sqlc.arg(analyzer_version)::int
+    OR tf.clap_windows < sqlc.arg(clap_windows)::smallint
+  )
+ORDER BY
+  CASE
+    WHEN tf.track_id IS NULL
+      OR tf.analyzer_version < sqlc.arg(analyzer_version)::int
+    THEN 0
+    ELSE 1
+  END,
+  t.id ASC
 LIMIT 1;
 
 -- name: GetTrackForAnalysis :one
@@ -115,12 +140,22 @@ LIMIT 1;
 -- the progress label can read "Artist - Track" instead of a bare title.
 -- A missing live file produces an empty path and the worker exits cleanly.
 SELECT t.id, t.title, t.album_id, a.artist_id, ar.name AS artist_name,
-       COALESCE(primary_file.file_path, '')::text AS file_path
+       COALESCE(primary_file.file_path, '')::text AS file_path,
+       COALESCE(primary_file.track_file_id, 0)::bigint AS track_file_id,
+       COALESCE(primary_file.duration, t.duration, 0)::int AS duration,
+       COALESCE(tf.analyzer_version, 0)::int AS analyzer_version,
+       COALESCE(tf.clap_windows, 0)::smallint AS clap_windows,
+       COALESCE(tf.text_embedding::text, '')::text AS text_embedding_text,
+       primary_file.boundaries_analyzed_at
 FROM tracks t
 JOIN albums  a  ON a.id = t.album_id
 JOIN artists ar ON ar.id = a.artist_id
+LEFT JOIN track_facets tf ON tf.track_id = t.id
 LEFT JOIN LATERAL (
-  SELECT lf.path::text AS file_path
+  SELECT lf.path::text AS file_path,
+         tfile.id AS track_file_id,
+         tfile.duration,
+         tfile.boundaries_analyzed_at
   FROM track_files tfile
   JOIN library_files lf ON lf.id = tfile.library_file_id
   WHERE tfile.track_id = t.id AND lf.deleted_at IS NULL
@@ -134,7 +169,10 @@ WHERE t.id = $1;
 -- track IDs (above the pump's after_id cursor) whose facets row is missing
 -- or older than the requested analyzer_version. Mirrors
 -- NextTrackForAnalysis' eligibility filter so the kickoff doesn't enqueue
--- jobs the worker would just skip.
+-- jobs the worker would just skip. CLAP-only upgrades are gated until no
+-- eligible track needs full analysis anywhere in the library. This global
+-- gate deliberately preserves the monotonic ID cursor: after the full pass
+-- drains, the pump resets its cursor once and begins the cleanup pass.
 SELECT t.id
 FROM tracks t
 LEFT JOIN track_facets tf ON tf.track_id = t.id
@@ -151,13 +189,42 @@ WHERE t.id > sqlc.arg(after_id)::bigint
     WHERE tfile.track_id = t.id
       AND tfile.duration > sqlc.arg(max_duration_seconds)::int
   )
-  AND (tf.track_id IS NULL OR tf.analyzer_version < sqlc.arg(analyzer_version)::int)
+  AND (
+    tf.track_id IS NULL
+    OR tf.analyzer_version < sqlc.arg(analyzer_version)::int
+    OR (
+      tf.clap_windows < sqlc.arg(clap_windows)::smallint
+      AND NOT EXISTS (
+        SELECT 1
+        FROM tracks full_track
+        LEFT JOIN track_facets full_facets ON full_facets.track_id = full_track.id
+        WHERE full_track.duration <= sqlc.arg(max_duration_seconds)::int
+          AND EXISTS (
+            SELECT 1
+            FROM track_files full_file
+            JOIN library_files full_library_file ON full_library_file.id = full_file.library_file_id
+            WHERE full_file.track_id = full_track.id
+              AND full_library_file.deleted_at IS NULL
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM track_files long_file
+            WHERE long_file.track_id = full_track.id
+              AND long_file.duration > sqlc.arg(max_duration_seconds)::int
+          )
+          AND (
+            full_facets.track_id IS NULL
+            OR full_facets.analyzer_version < sqlc.arg(analyzer_version)::int
+          )
+      )
+    )
+  )
 ORDER BY t.id ASC
 LIMIT sqlc.arg(limit_count)::int;
 
 -- name: CountPendingAnalysis :one
--- Mirrors NextTrackForAnalysis' eligibility filter so the Tasks UI counter
--- agrees with what the scheduler will actually pick up.
+-- Mirrors NextTrackForAnalysis' eligibility filter so the CLI run loop can
+-- see the complete full-analysis + CLAP-cleanup backlog.
 SELECT count(*)::int FROM tracks t
 LEFT JOIN track_facets tf ON tf.track_id = t.id
 WHERE t.duration <= sqlc.arg(max_duration_seconds)::int
@@ -172,10 +239,57 @@ WHERE t.duration <= sqlc.arg(max_duration_seconds)::int
     WHERE tfile.track_id = t.id
       AND tfile.duration > sqlc.arg(max_duration_seconds)::int
   )
-  AND (tf.track_id IS NULL OR tf.analyzer_version < sqlc.arg(analyzer_version)::int);
+  AND (
+    tf.track_id IS NULL
+    OR tf.analyzer_version < sqlc.arg(analyzer_version)::int
+    OR tf.clap_windows < sqlc.arg(clap_windows)::smallint
+  );
+
+-- name: CountPendingFullAnalysis :one
+-- Core coverage intentionally excludes the deferred CLAP-window cleanup so
+-- adding a better semantic embedding does not make already-analyzed tracks
+-- appear to lose all of their Discogs/DSP coverage.
+SELECT count(*)::int FROM tracks t
+LEFT JOIN track_facets tf ON tf.track_id = t.id
+WHERE t.duration <= sqlc.arg(max_duration_seconds)::int
+  AND EXISTS (
+    SELECT 1
+    FROM track_files tfile
+    JOIN library_files lf ON lf.id = tfile.library_file_id
+    WHERE tfile.track_id = t.id AND lf.deleted_at IS NULL
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM track_files tfile
+    WHERE tfile.track_id = t.id
+      AND tfile.duration > sqlc.arg(max_duration_seconds)::int
+  )
+  AND (
+    tf.track_id IS NULL
+    OR tf.analyzer_version < sqlc.arg(analyzer_version)::int
+  );
+
+-- name: CountPendingCLAPCleanup :one
+SELECT count(*)::int FROM tracks t
+JOIN track_facets tf ON tf.track_id = t.id
+WHERE t.duration <= sqlc.arg(max_duration_seconds)::int
+  AND EXISTS (
+    SELECT 1
+    FROM track_files tfile
+    JOIN library_files lf ON lf.id = tfile.library_file_id
+    WHERE tfile.track_id = t.id AND lf.deleted_at IS NULL
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM track_files tfile
+    WHERE tfile.track_id = t.id
+      AND tfile.duration > sqlc.arg(max_duration_seconds)::int
+  )
+  AND tf.analyzer_version >= sqlc.arg(analyzer_version)::int
+  AND tf.clap_windows < sqlc.arg(clap_windows)::smallint;
 
 -- name: CountAnalyzedTracks :one
-SELECT count(*)::int FROM track_facets WHERE analyzer_version >= $1;
+SELECT count(*)::int
+FROM track_facets
+WHERE analyzer_version >= $1;
 
 -- name: ResetTrackFacetsVersionForTrack :exec
 -- A track's backing file changed in place: its facets were computed from the

@@ -47,7 +47,7 @@ Deferred to `future.md`:
 | Centroid maintenance | **End-of-batch refresh** (not per-track incremental) |
 | Time window enforcement | In-flight track finishes; **no new track after `end_hour`** |
 | Music import → analysis | **Always scheduled**, never run immediately |
-| Concurrency | **One track at a time**, sequential |
+| Concurrency | **Configurable CPU preparation-ahead and GPU lanes**; OpenVINO inference is serialized in-process because concurrent sessions crash its execution provider |
 | Key schema | **Smallints** (0=C, 0=major) + Go enum types (`PitchClass`, `KeyMode`) |
 | Migration strategy | **New numbered migration**, additive only, no edits to existing |
 | Progress UI | **Existing WebSocket eventhub** (same path trickplay uses) |
@@ -61,20 +61,22 @@ loudness):
 
 | Per-track cost | Time |
 |---|---|
-| ffmpeg PCM decode (16 kHz) | ~300 ms |
-| ffmpeg PCM decode (48 kHz, CLAP) | ~400 ms |
+| ffmpeg shared 16/48 kHz decode | ~400 ms |
 | Mel-spec preprocessing (96 bands @ 16 kHz) | ~600 ms |
-| CLAP-specific mel-spec (64 bands @ 48 kHz, 10 s) | ~200 ms |
+| CLAP-specific mel-spec (64 bands @ 48 kHz, 3 × 10 s) | ~600 ms |
 | Discogs track_embeddings inference (CoreML) | ~50 ms total |
 | Discogs artist_embeddings inference (CoreML) | ~50 ms total |
 | Discogs release_embeddings inference (CoreML) | ~50 ms total |
 | Base EffNet + 9 classifier heads (CPU, dynamic batch) | ~1.9 s total |
-| CLAP audio encoder | ~800 ms |
+| CLAP audio encoder (3 windows) | ~2.4 s |
 | BPM (onset+autocorr) | ~1.1 s |
 | Key (chromagram + K-S) | ~0.8 s |
 | Loudness (ffmpeg ebur128) | ~1.3 s |
-| Waveform (8 kHz decode + bucket) | ~0.7 s |
-| **Total per track (sequential)** | **~8-10 s** |
+| Waveform + boundaries (shared 16 kHz PCM) | ~0.1 s |
+
+The table records the original PoC ballpark. The production pipeline overlaps
+the CPU stages, prepares tracks ahead of inference, and shares one source
+decode, so these rows must not be summed to predict current wall time.
 
 CoreML graph-compile cost (paid on first Analyzer.Load):
 
@@ -117,7 +119,8 @@ CREATE TABLE track_facets (
     track_embedding   vector(512),   -- discogs_track_embeddings
     artist_embedding  vector(512),   -- discogs_artist_embeddings
     release_embedding vector(512),   -- discogs_release_embeddings
-    text_embedding    vector(512),   -- CLAP audio (shared space with CLAP text)
+    text_embedding    vector(512),   -- normalized mean of CLAP 20/50/80% windows
+    clap_windows      smallint,      -- persisted coverage; current value is 3
 
     -- DSP-derived facets
     bpm                real,         -- 50..200, NULL if no clear beat
@@ -754,7 +757,10 @@ layout):
    - Periodic Hann (denominator N)
    - center=True with reflect padding
    - `10·log10(max(S, 1e-10))` dB compression
-   - Always 10 s clip (480000 samples); shorter → cyclic repeat-pad
+   - Three deterministic 10 s views centered at 20%, 50%, and 80%;
+     shorter views use cyclic repeat-padding
+   - Each view is normalized, then the three embeddings are mean-pooled and
+     normalized again
    - Output shape `(1, 1, 1001, 64)` for the ONNX input
 
 3. **CoreML EP selection per-model.** Fixed-batch models

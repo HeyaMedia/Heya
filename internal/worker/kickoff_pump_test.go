@@ -259,6 +259,7 @@ func TestListPendingAnalysisTracksCursor(t *testing.T) {
 			AfterID:            after,
 			MaxDurationSeconds: sonicanalysis.MaxAnalysisDurationSeconds,
 			AnalyzerVersion:    sonicanalysis.AnalyzerVersion,
+			ClapWindows:        sonicanalysis.CurrentCLAPWindows,
 			LimitCount:         100,
 		})
 		require.NoError(t, err)
@@ -269,12 +270,30 @@ func TestListPendingAnalysisTracksCursor(t *testing.T) {
 	assert.Equal(t, []int64{track2}, list(track1))
 	assert.Empty(t, list(track2))
 
+	// CLAP-only cleanup is deliberately held behind every full-analysis item.
+	// Mark the lower-ID track as current except for its window coverage; the
+	// sweep must still return only the missing higher-ID track first.
+	require.NoError(t, qtx.UpsertTrackFacetsStub(ctx, sqlc.UpsertTrackFacetsStubParams{
+		TrackID: track1, AnalyzerVersion: sonicanalysis.AnalyzerVersion,
+		ClapWindows: 1,
+	}))
+	assert.Equal(t, []int64{track2}, list(baseTrackID))
+
+	// This shared integration database has other pending tracks, so completing
+	// our full item still leaves the global cleanup gate closed.
+	require.NoError(t, qtx.UpsertTrackFacetsStub(ctx, sqlc.UpsertTrackFacetsStubParams{
+		TrackID: track2, AnalyzerVersion: sonicanalysis.AnalyzerVersion,
+		ClapWindows: sonicanalysis.CurrentCLAPWindows,
+	}))
+	assert.Empty(t, list(baseTrackID))
+
 	// A stub facets row at the current analyzer version (what the worker
 	// writes when analysis fails permanently) hides the track from the sweep.
 	require.NoError(t, qtx.UpsertTrackFacetsStub(ctx, sqlc.UpsertTrackFacetsStubParams{
 		TrackID: track1, AnalyzerVersion: sonicanalysis.AnalyzerVersion,
+		ClapWindows: sonicanalysis.CurrentCLAPWindows,
 	}))
-	assert.Equal(t, []int64{track2}, list(baseTrackID))
+	assert.Empty(t, list(baseTrackID))
 }
 
 func maxTableID(t *testing.T, ctx context.Context, tx pgx.Tx, table string) int64 {

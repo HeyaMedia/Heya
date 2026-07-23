@@ -102,18 +102,24 @@ func collectSonicAnalysisStatus(ctx context.Context, app *service.App) map[strin
 			"ready": ts.Ready(),
 		}
 	}
-	// Library coverage — tracks analyzed at the current AnalyzerVersion
-	// vs tracks still pending. Mirrors the count surfaced on the Tasks
-	// page so the two views agree.
+	// Core library coverage stays tied to AnalyzerVersion. The deferred
+	// three-window CLAP upgrade is reported separately so existing Discogs/DSP
+	// coverage does not visually reset to zero during cleanup.
 	q := sqlc.New(app.DBPool())
 	analyzed, _ := q.CountAnalyzedTracks(ctx, sonicanalysis.AnalyzerVersion)
-	pending, _ := q.CountPendingAnalysis(ctx, sqlc.CountPendingAnalysisParams{
+	pending, _ := q.CountPendingFullAnalysis(ctx, sqlc.CountPendingFullAnalysisParams{
 		MaxDurationSeconds: sonicanalysis.MaxAnalysisDurationSeconds,
 		AnalyzerVersion:    sonicanalysis.AnalyzerVersion,
 	})
+	clapCleanupPending, _ := q.CountPendingCLAPCleanup(ctx, sqlc.CountPendingCLAPCleanupParams{
+		MaxDurationSeconds: sonicanalysis.MaxAnalysisDurationSeconds,
+		AnalyzerVersion:    sonicanalysis.AnalyzerVersion,
+		ClapWindows:        sonicanalysis.CurrentCLAPWindows,
+	})
 	out["coverage"] = map[string]any{
-		"analyzed": analyzed,
-		"pending":  pending,
+		"analyzed":             analyzed,
+		"pending":              pending,
+		"clap_cleanup_pending": clapCleanupPending,
 	}
 	// Hourly throughput over the trailing 24h for the dashboard graph.
 	// The query returns sparse buckets; fill the gaps so the frontend

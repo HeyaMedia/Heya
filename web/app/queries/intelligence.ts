@@ -82,7 +82,7 @@ export type SonicStatus = {
   text_searcher?: { ready?: boolean }
   accelerators?: AcceleratorAvailability[]
   analyzer_version?: number
-  coverage?: { analyzed: number, pending: number }
+  coverage?: { analyzed: number, pending: number, clap_cleanup_pending?: number }
   throughput?: SonicThroughput
   worker_online?: boolean
   current_item?: string
