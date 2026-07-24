@@ -844,35 +844,37 @@ func (q *Queries) ListRecentUserPlaylists(ctx context.Context, arg ListRecentUse
 
 const listRecentlyPlayedArtists = `-- name: ListRecentlyPlayedArtists :many
 
-WITH artist_plays AS (
-    SELECT DISTINCT ON (a.id)
-           a.id                 AS artist_id,
-           a.name               AS artist_name,
-           mi.id                AS media_item_id,
-           mi.public_id         AS media_item_public_id,
-           mi.slug              AS artist_slug,
-           mi.poster_path       AS poster_path,
-           pe.played_at         AS last_played_at,
-           (SELECT count(*) FROM albums al WHERE al.artist_id = a.id) AS album_count,
-           (SELECT count(*) FROM tracks t JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count,
-           EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = a.media_item_id AND lf.deleted_at IS NULL) AS available
+WITH recent_artist_ids AS (
+    SELECT al.artist_id,
+           max(pe.played_at)::timestamptz AS last_played_at
     FROM play_events pe
     JOIN tracks      t  ON t.id  = pe.track_id
     JOIN albums      al ON al.id = t.album_id
-    JOIN artists     a  ON a.id  = al.artist_id
-    JOIN media_item_cards mi ON mi.id = a.media_item_id
-    WHERE pe.user_id = $3
-    ORDER BY a.id, pe.played_at DESC
+    WHERE pe.user_id = $1
+    GROUP BY al.artist_id
+    ORDER BY last_played_at DESC, al.artist_id DESC
+    LIMIT $3 OFFSET $2
 )
-SELECT artist_id, artist_name, media_item_id, media_item_public_id, artist_slug, poster_path, last_played_at, album_count, track_count, available FROM artist_plays
-ORDER BY last_played_at DESC
-LIMIT $2 OFFSET $1
+SELECT a.id                 AS artist_id,
+       a.name               AS artist_name,
+       mi.id                AS media_item_id,
+       mi.public_id         AS media_item_public_id,
+       mi.slug              AS artist_slug,
+       mi.poster_path       AS poster_path,
+       recent.last_played_at,
+       (SELECT count(*) FROM albums al WHERE al.artist_id = a.id) AS album_count,
+       (SELECT count(*) FROM tracks t JOIN albums al ON al.id = t.album_id WHERE al.artist_id = a.id) AS track_count,
+       EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = a.media_item_id AND lf.deleted_at IS NULL) AS available
+FROM recent_artist_ids recent
+JOIN artists a ON a.id = recent.artist_id
+JOIN media_item_cards mi ON mi.id = a.media_item_id
+ORDER BY recent.last_played_at DESC, a.id DESC
 `
 
 type ListRecentlyPlayedArtistsParams struct {
+	UserID int64 `json:"user_id"`
 	Off    int32 `json:"off"`
 	Lim    int32 `json:"lim"`
-	UserID int64 `json:"user_id"`
 }
 
 type ListRecentlyPlayedArtistsRow struct {
@@ -895,11 +897,13 @@ type ListRecentlyPlayedArtistsRow struct {
 //
 // All artist/album/track row shapes mirror ListMusicAlbums / ListMusicArtists
 // so the FE can keep one row component per kind across the page.
-// DISTINCT ON collapses repeats so a user who looped one artist's whole
-// discography still sees diversity. last_played_at is the max(played_at)
-// over any of that artist's tracks.
+// Aggregate and page the play history before decorating artist rows. The
+// previous DISTINCT ON shape evaluated album_count, track_count, and
+// availability once per PLAY EVENT, then discarded all but one event per
+// artist (20s on a 66k-event production history). This shape scans history
+// once and runs those probes only for the 40 artists on the requested page.
 func (q *Queries) ListRecentlyPlayedArtists(ctx context.Context, arg ListRecentlyPlayedArtistsParams) ([]ListRecentlyPlayedArtistsRow, error) {
-	rows, err := q.db.Query(ctx, listRecentlyPlayedArtists, arg.Off, arg.Lim, arg.UserID)
+	rows, err := q.db.Query(ctx, listRecentlyPlayedArtists, arg.UserID, arg.Off, arg.Lim)
 	if err != nil {
 		return nil, err
 	}

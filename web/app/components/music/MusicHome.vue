@@ -98,6 +98,7 @@
           :subtitle="`${al.artist_name}${al.year ? ' · ' + al.year : ''}`"
           :hearted="(albumRatingValues.get(al.id) ?? 0) >= 9"
           :badge-tl="al.album_type && al.album_type !== 'album' ? al.album_type : ''"
+          :badge-br="timeAgoShort(al.added_at)"
           :missing="al.available === false"
           @play="playAlbum(al)"
         />

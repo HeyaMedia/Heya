@@ -568,13 +568,9 @@ func (a *App) seedArtistCatalogTracks(ctx context.Context, userID int64, artistI
 		  AND `+musicVetoFilter+`
 		  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id
 		              WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
-		ORDER BY COALESCE((
-			SELECT MIN(CASE WHEN att.provider_rank > 0 THEN att.provider_rank ELSE att.rank END)
-			FROM artist_top_tracks att
-			WHERE att.artist_id = ar.id
-			  AND ((att.mbid <> '' AND att.mbid = t.recording_mbid)
-			       OR lower(att.title) = lower(t.title))
-		), 10000), (al.popularity + ar.popularity) DESC, (al.playcount + ar.playcount) DESC
+		ORDER BY `+musicProviderChartRankExpr+`,
+		         (al.popularity + ar.popularity) DESC,
+		         (al.playcount + ar.playcount) DESC
 		LIMIT $3`, userID, artistIDs, fetch)
 }
 
@@ -987,13 +983,7 @@ func (a *App) externalMusicCandidates(ctx context.Context, userID int64, artistI
 			       al.id AS album_id, al.title AS album_title, al.slug AS album_slug,
 			       al.cover_path AS album_cover_path, al.year AS album_year,
 			       ar.id AS artist_id, ar.name AS artist_name, mi.slug AS artist_slug,
-			       COALESCE((
-					SELECT MIN(CASE WHEN att.provider_rank > 0 THEN att.provider_rank ELSE att.rank END)
-					FROM artist_top_tracks att
-					WHERE att.artist_id = ar.id
-					  AND ((att.mbid <> '' AND att.mbid = t.recording_mbid)
-					       OR lower(att.title) = lower(t.title))
-			       ), 10000)::int AS chart_rank
+			       `+musicProviderChartRankExpr+`::int AS chart_rank
 			FROM tracks t
 			JOIN albums al ON al.id = t.album_id
 			JOIN artists ar ON ar.id = al.artist_id
@@ -1043,13 +1033,9 @@ func (a *App) popularMusicCandidates(ctx context.Context, userID int64, limit in
 	WHERE `+musicVetoFilter+`
 	  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id
 	              WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
-	ORDER BY COALESCE((
-		SELECT MIN(CASE WHEN att.provider_rank > 0 THEN att.provider_rank ELSE att.rank END)
-		FROM artist_top_tracks att
-		WHERE att.artist_id = ar.id
-		  AND ((att.mbid <> '' AND att.mbid = t.recording_mbid)
-		       OR lower(att.title) = lower(t.title))
-	), 10000), (al.popularity + ar.popularity) DESC, (al.playcount + ar.playcount) DESC
+	ORDER BY `+musicProviderChartRankExpr+`,
+	         (al.popularity + ar.popularity) DESC,
+	         (al.playcount + ar.playcount) DESC
 	LIMIT $2`, userID, limit)
 }
 
@@ -1058,29 +1044,92 @@ func (a *App) musicCandidateStates(ctx context.Context, userID int64, ids []int6
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := a.db.Query(ctx, `WITH `+musicAffinityCTE+`,
-		known_artists AS (
-			SELECT DISTINCT al.artist_id
-			FROM aff
-			JOIN tracks t ON t.id = aff.track_id
+	// Candidate state used to prepend the full musicAffinityCTE, including
+	// the decayed POWER() calculation for every historical play, merely to
+	// score the few hundred tracks in the recommendation pool. Restrict the
+	// expensive affinity math to candidate IDs. known_artists still observes
+	// the user's complete history, but only needs a cheap distinct artist set
+	// rather than per-event decay scores.
+	rows, err := a.db.Query(ctx, `
+		WITH candidate_tracks AS MATERIALIZED (
+			SELECT t.id AS track_id, t.album_id, al.artist_id
+			FROM tracks t
 			JOIN albums al ON al.id = t.album_id
-			WHERE aff.score > 0
+			WHERE t.id = ANY($2::bigint[])
+		),
+		play_aff AS (
+			SELECT pe.track_id,
+			       LEAST(2.0, SUM(0.25
+			           * POWER(0.5, EXTRACT(EPOCH FROM (now() - pe.played_at)) / 2592000.0)))::float8 AS score,
+			       max(pe.played_at)::timestamptz AS last_played_at
+			FROM play_events pe
+			WHERE pe.user_id = $1
+			  AND pe.completed
+			  AND pe.track_id = ANY($2::bigint[])
+			GROUP BY pe.track_id
+		),
+		rate_aff AS (
+			SELECT utr.track_id,
+			       CASE WHEN utr.rating >= 9 THEN 8.0
+			            WHEN utr.rating >= 6 THEN 4.0
+			            WHEN utr.rating <= 3 THEN 0.0
+			            ELSE 0.75 END::float8 AS score
+			FROM user_track_ratings utr
+			WHERE utr.user_id = $1
+			  AND utr.track_id = ANY($2::bigint[])
+		),
+		album_aff AS (
+			SELECT candidate.track_id,
+			       CASE WHEN rating.rating >= 9 THEN 3.0
+			            WHEN rating.rating >= 6 THEN 1.5
+			            WHEN rating.rating <= 3 THEN 0.0
+			            ELSE 0.25 END::float8 AS score
+			FROM candidate_tracks candidate
+			JOIN user_album_ratings rating
+			  ON rating.album_id = candidate.album_id
+			 AND rating.user_id = $1
+		),
+		aff AS (
+			SELECT track_id, SUM(score)::float8 AS score
+			FROM (
+				SELECT track_id, score FROM play_aff
+				UNION ALL SELECT track_id, score FROM rate_aff
+				UNION ALL SELECT track_id, score FROM album_aff
+			) signal
+			GROUP BY track_id
+		),
+		known_artists AS (
+			SELECT DISTINCT played_album.artist_id
+			FROM play_events played
+			JOIN tracks played_track ON played_track.id = played.track_id
+			JOIN albums played_album ON played_album.id = played_track.album_id
+			WHERE played.user_id = $1 AND played.completed
 			UNION
-			SELECT artist_id FROM user_artist_ratings WHERE user_id = $1 AND rating > 3
+			SELECT DISTINCT rated_album.artist_id
+			FROM user_track_ratings rating
+			JOIN tracks rated_track ON rated_track.id = rating.track_id
+			JOIN albums rated_album ON rated_album.id = rated_track.album_id
+			WHERE rating.user_id = $1 AND rating.rating > 3
 			UNION
-			SELECT DISTINCT al.artist_id
-			FROM user_album_ratings uar
-			JOIN albums al ON al.id = uar.album_id
-			WHERE uar.user_id = $1 AND uar.rating > 3
+			SELECT album.artist_id
+			FROM user_album_ratings rating
+			JOIN albums album ON album.id = rating.album_id
+			WHERE rating.user_id = $1 AND rating.rating > 3
+			UNION
+			SELECT rating.artist_id
+			FROM user_artist_ratings rating
+			WHERE rating.user_id = $1 AND rating.rating > 3
 		)
-		SELECT t.id, COALESCE(aff.score, 0)::float8,
-		       EXISTS (SELECT 1 FROM play_events pe WHERE pe.user_id = $1 AND pe.track_id = t.id AND pe.completed),
-		       EXISTS (SELECT 1 FROM known_artists ka WHERE ka.artist_id = al.artist_id),
-		       (SELECT max(pe.played_at) FROM play_events pe WHERE pe.user_id = $1 AND pe.track_id = t.id AND pe.completed)
-		FROM tracks t
-		JOIN albums al ON al.id = t.album_id
-		LEFT JOIN aff ON aff.track_id = t.id
-		WHERE t.id = ANY($2::bigint[])`, userID, ids)
+		SELECT candidate.track_id,
+		       COALESCE(aff.score, 0)::float8,
+		       play_aff.track_id IS NOT NULL AS track_known,
+		       known.artist_id IS NOT NULL AS artist_known,
+		       play_aff.last_played_at
+		FROM candidate_tracks candidate
+		LEFT JOIN aff ON aff.track_id = candidate.track_id
+		LEFT JOIN play_aff ON play_aff.track_id = candidate.track_id
+		LEFT JOIN known_artists known ON known.artist_id = candidate.artist_id`,
+		userID, ids)
 	if err != nil {
 		return nil, err
 	}

@@ -94,6 +94,29 @@ const musicVetoFilter = `NOT EXISTS (
 		SELECT 1 FROM user_artist_ratings veto
 		WHERE veto.user_id = $1 AND veto.artist_id = al.artist_id AND veto.rating <= 3)`
 
+// musicProviderChartRankExpr resolves the best provider rank for the local
+// track aliases t/ar used throughout the recommendation queries. Keep MBID
+// and normalized-title matching as separate scalar probes: combining them
+// with OR made Postgres walk every artist_top_tracks row for every local
+// candidate, whereas migration 00069 gives each exact path its own covering
+// index. LEAST preserves the old "best match wins" semantics when both keys
+// happen to resolve.
+const musicProviderChartRankExpr = `LEAST(
+		COALESCE((
+			SELECT MIN(CASE WHEN att.provider_rank > 0 THEN att.provider_rank ELSE att.rank END)
+			FROM artist_top_tracks att
+			WHERE att.artist_id = ar.id
+			  AND att.mbid <> ''
+			  AND att.mbid = t.recording_mbid
+		), 10000),
+		COALESCE((
+			SELECT MIN(CASE WHEN att.provider_rank > 0 THEN att.provider_rank ELSE att.rank END)
+			FROM artist_top_tracks att
+			WHERE att.artist_id = ar.id
+			  AND lower(att.title) = lower(t.title)
+		), 10000)
+	)`
+
 type tasteMixSeed struct {
 	ArtistID          int64
 	ArtistName        string
