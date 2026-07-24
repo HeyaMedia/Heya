@@ -657,7 +657,7 @@ func MarkScannerEntityFailed(ctx context.Context, db *pgxpool.Pool, entityID, ex
 
 func scannerEntityDrafts(lib sqlc.Library, result Result) []scannerEntityDraft {
 	providerByKey, _ := scanIdentityTargets(result)
-	reviewByKey := scanIdentityReviewStatuses(result)
+	reviewByKey := scanIdentityReviewStatuses(result, MatchThresholdForLibrary(lib))
 	acceptedByKey := scannerAcceptedSearchByKey(lib, result)
 	out := []scannerEntityDraft{}
 	switch {

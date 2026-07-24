@@ -24,10 +24,10 @@ func TestAcceptedCanonicalTVSearchClearsTitleOnlyReview(t *testing.T) {
 		}},
 	}
 
-	if status := scanIdentityReviewStatuses(result)[key]; status != "" {
+	if status := scanIdentityReviewStatuses(result, musicArtistAutoMatchThreshold)[key]; status != "" {
 		t.Fatalf("accepted canonical title-only review status = %q", status)
 	}
-	for _, finding := range scanFindingDrafts(result, nil) {
+	for _, finding := range scanFindingDrafts(result, nil, musicArtistAutoMatchThreshold) {
 		if finding.Key == key && (finding.Code == "title_only_identity" || finding.Code == "search_suspicious") {
 			t.Fatalf("accepted canonical title-only finding = %#v", finding)
 		}

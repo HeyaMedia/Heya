@@ -604,6 +604,11 @@ func mapIdentifierEvidence(items *[]gen.IdentifierEvidence) []metadata.SearchEvi
 
 func discoveryAutoMatchAllowed(recommendation, kind string, query metadata.SearchQuery, evidence []metadata.SearchEvidence) bool {
 	switch recommendation {
+	case "existing_entity", "corroborated_identity":
+		// V2 emits these when the discovery resolved to an already-linked
+		// canonical entity: it is not proposing a match, it is reporting an
+		// existing identity link — stronger than strong_match.
+		return true
 	case "strong_match":
 		return true
 	case "likely_match":
@@ -616,6 +621,14 @@ func discoveryAutoMatchAllowed(recommendation, kind string, query metadata.Searc
 			return discoveryEvidenceIsExact(evidence, "title") && discoveryEvidenceHasCompleteAuthors(evidence)
 		}
 		if discoveryHintCount(query) >= 2 {
+			return true
+		}
+		// Artist searches carry exactly one structured hint (the local release
+		// list), so the ≥2 rule alone made likely_match unreachable for music.
+		// An exact name match plus the release corroboration V2 evaluated are
+		// two independent signals; the scanner's confidence floor and
+		// clear-gap checks still apply on top.
+		if kind == "artist" && len(query.Releases) > 0 && discoveryEvidenceIsExact(evidence, "name") {
 			return true
 		}
 		// Movie filenames commonly provide only a title and year. Treat that

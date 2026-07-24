@@ -87,7 +87,7 @@ func persistScanResultTx(ctx context.Context, q *sqlc.Queries, lib sqlc.Library,
 	// open finding no-ops on the natural key — created_at keeps meaning
 	// "broken since" — and open findings this run stopped drafting are swept
 	// to resolved below.
-	findings := scanFindingDrafts(result, events)
+	findings := scanFindingDrafts(result, events, MatchThresholdForLibrary(lib))
 	identityIDs := make([]int64, 0, len(identityByKey))
 	for _, identity := range identityByKey {
 		identityIDs = append(identityIDs, identity.ID)
@@ -165,7 +165,7 @@ func persistScanResultTx(ctx context.Context, q *sqlc.Queries, lib sqlc.Library,
 
 func persistLocalMediaIdentities(ctx context.Context, q *sqlc.Queries, lib sqlc.Library, scanRunID int64, result Result) (map[string]sqlc.LocalMediaIdentity, error) {
 	providerByKey, mediaItemByKey := scanIdentityTargets(result)
-	reviewByKey := scanIdentityReviewStatuses(result)
+	reviewByKey := scanIdentityReviewStatuses(result, MatchThresholdForLibrary(lib))
 	matcherRevision := searchMatcherRevision(lib.MediaType)
 	out := map[string]sqlc.LocalMediaIdentity{}
 
@@ -629,9 +629,9 @@ func promoteCanonicalIdentityProvider(targets map[string]string, keys []string, 
 	}
 }
 
-func scanIdentityReviewStatuses(result Result) map[string]string {
+func scanIdentityReviewStatuses(result Result, matchThreshold float64) map[string]string {
 	out := map[string]string{}
-	trustedMusicArtists := trustedMusicArtistMatches(result.MusicSearch)
+	trustedMusicArtists := trustedMusicArtistMatches(result, matchThreshold)
 	for _, match := range result.MovieMatches {
 		if len(match.Issues) > 0 {
 			out[match.Key] = "needs_review"
@@ -690,7 +690,7 @@ func scanIdentityReviewStatuses(result Result) map[string]string {
 		if trustedMusicArtists[artist.Key] {
 			continue
 		}
-		if len(artist.Issues) > 0 || musicArtistHasAlbumIssues(artist) {
+		if musicHasActionableIssues(artist.Issues) || musicArtistHasAlbumIssues(artist) {
 			out[artist.Key] = "needs_review"
 		}
 	}
@@ -699,7 +699,7 @@ func scanIdentityReviewStatuses(result Result) map[string]string {
 		if trustedMusicArtists[key] {
 			continue
 		}
-		if len(track.Issues) > 0 {
+		if musicHasActionableIssues(track.Issues) {
 			out[key] = "needs_review"
 		}
 	}
@@ -769,19 +769,54 @@ func scanIdentityReviewStatuses(result Result) map[string]string {
 	return out
 }
 
-func trustedMusicArtistMatches(search []MusicSearchMatch) map[string]bool {
-	trusted := make(map[string]bool, len(search))
-	for _, item := range search {
+// trustedMusicArtistMatches uses the same resolved auto-accept threshold the
+// search acceptance ran with — a hardcoded 0.85 here used to disagree with a
+// lowered per-library MatchThreshold, leaving artists "accepted but
+// untrusted" and their findings spamming despite a successful match.
+// Compilation containers (Various Artists etc.) are trusted by nature: they
+// are never provider-searched, and their tag diversity is inherent.
+func trustedMusicArtistMatches(result Result, threshold float64) map[string]bool {
+	trusted := make(map[string]bool, len(result.MusicSearch))
+	for _, item := range result.MusicSearch {
 		trusted[item.Key] = item.ManualDecision == "accepted" ||
-			(item.Accepted && item.Confidence >= musicArtistAutoMatchThreshold)
+			(item.Accepted && item.Confidence >= threshold)
+	}
+	for _, artist := range result.MusicArtists {
+		if musicCompilationContainerIdentity(artist.Artist) {
+			trusted[artist.Key] = true
+		}
 	}
 	return trusted
 }
 
-func scanFindingDrafts(result Result, events []Event) []scanFindingDraft {
+// musicConsensusTelemetryIssue identifies folder-consensus reconciliation
+// notes: routine tag repair the scanner performed, not identity problems a
+// human should act on. They surface once per album (album issues deduplicate
+// the per-track copies) at info severity; the per-track and artist-level
+// copies were 98.7k of the 119k open findings in the 2026-07 prod audit.
+func musicConsensusTelemetryIssue(issue string) bool {
+	switch issue {
+	case "artist_overridden_by_folder_consensus", "album_overridden_by_folder_consensus",
+		"year_overridden_by_folder_consensus", "tag_outlier_rejected_by_folder_consensus",
+		"nfo_rejected_by_folder_consensus":
+		return true
+	}
+	return false
+}
+
+func musicHasActionableIssues(issues []string) bool {
+	for _, issue := range issues {
+		if !musicConsensusTelemetryIssue(issue) {
+			return true
+		}
+	}
+	return false
+}
+
+func scanFindingDrafts(result Result, events []Event, matchThreshold float64) []scanFindingDraft {
 	var out []scanFindingDraft
 	manualDecisionByKey := scanManualDecisions(result)
-	trustedMusicArtists := trustedMusicArtistMatches(result.MusicSearch)
+	trustedMusicArtists := trustedMusicArtistMatches(result, matchThreshold)
 	safeTVSelectionByKey := make(map[string]bool, len(result.TVSearch))
 	for _, search := range result.TVSearch {
 		if search.Accepted && !tvSearchSelectionLooksSuspicious(search) {
@@ -867,6 +902,9 @@ func scanFindingDrafts(result Result, events []Event) []scanFindingDraft {
 			continue
 		}
 		for _, issue := range artist.Issues {
+			if musicConsensusTelemetryIssue(issue) {
+				continue
+			}
 			out = append(out, scanFindingDraft{Code: "local_identity_issue", Severity: string(SeverityWarn), Key: artist.Key, Message: issue, Data: artist})
 		}
 	}
@@ -875,10 +913,16 @@ func scanFindingDrafts(result Result, events []Event) []scanFindingDraft {
 			continue
 		}
 		for _, issue := range album.Issues {
+			// Consensus telemetry surfaces here once per album at info
+			// severity — its per-track copies are suppressed below.
+			severity := string(SeverityWarn)
+			if musicConsensusTelemetryIssue(issue) {
+				severity = string(SeverityInfo)
+			}
 			// No Data blob: the full album/track plan snapshot duplicated
 			// library_files.parse_result at ~1KB per finding × hundreds of
 			// thousands of findings, and nothing ever rendered it.
-			out = append(out, scanFindingDraft{Code: "music_album_issue", Severity: string(SeverityWarn), Key: musicArtistKey(album.Artist, album.ArtistDisambiguation), Message: musicAlbumIssueMessage(album, issue)})
+			out = append(out, scanFindingDraft{Code: "music_album_issue", Severity: severity, Key: musicArtistKey(album.Artist, album.ArtistDisambiguation), Message: musicAlbumIssueMessage(album, issue)})
 		}
 	}
 	for _, track := range result.MusicTracks {
@@ -886,6 +930,9 @@ func scanFindingDrafts(result Result, events []Event) []scanFindingDraft {
 			continue
 		}
 		for _, issue := range track.Issues {
+			if musicConsensusTelemetryIssue(issue) {
+				continue
+			}
 			out = append(out, scanFindingDraft{Code: "music_track_issue", Severity: string(SeverityWarn), Key: musicArtistKey(track.Artist, track.ArtistDisambiguation), RelPath: track.RelPath, Message: musicTrackIssueMessage(track, issue)})
 		}
 	}
@@ -1001,11 +1048,11 @@ func managedScanFindingCodes(opts Options) []string {
 
 func musicArtistHasAlbumIssues(artist MusicArtistPlan) bool {
 	for _, album := range artist.Albums {
-		if len(album.Issues) > 0 {
+		if musicHasActionableIssues(album.Issues) {
 			return true
 		}
 		for _, track := range album.Tracks {
-			if len(track.Issues) > 0 {
+			if musicHasActionableIssues(track.Issues) {
 				return true
 			}
 		}

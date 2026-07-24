@@ -1235,12 +1235,28 @@ func musicTrackArtistConsensusAllowed(artist string) bool {
 	if musicPrimaryCollaborationArtist(artist) != "" {
 		return false
 	}
+	if musicCompilationContainerIdentity(artist) {
+		return false
+	}
 	switch normalizeMusicKeyPart(artist) {
-	case "various artists", "various", "va", "unknown artist", "unknown", "soundtrack", "original soundtrack":
+	case "unknown artist", "unknown":
 		return false
 	default:
 		return true
 	}
+}
+
+// musicCompilationContainerIdentity reports whether a name denotes a
+// compilation container (Various Artists and friends) rather than a matchable
+// artist. Containers are never searched against the canonical catalog — the
+// query can only end in ambiguity — and their per-track tag diversity is
+// inherent to compilations, not an identity problem to review.
+func musicCompilationContainerIdentity(name string) bool {
+	switch normalizeMusicKeyPart(name) {
+	case "various artists", "various", "va", "soundtrack", "original soundtrack":
+		return true
+	}
+	return false
 }
 
 // replaceMusicArtist keeps a folder disambiguation attached to the artist it

@@ -141,6 +141,17 @@ func SearchMusicArtistsWithFingerprints(ctx context.Context, artists []MusicArti
 	// still writing into.
 fanout:
 	for i, artist := range artists {
+		if musicCompilationContainerIdentity(artist.Artist) {
+			// Compilation containers are not matchable artists: searching
+			// "Various Artists" can only end in ambiguity, and fingerprint
+			// consensus across many performers is definitionally impossible.
+			// The bucket parks as a local-only container instead of churning
+			// the provider and the review queue every scan.
+			emit.Emit(Event{Event: "match.compilation_container", Severity: SeverityInfo, Kind: "music", Data: map[string]any{
+				"key": artist.Key, "artist": artist.Artist,
+			}})
+			continue
+		}
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
@@ -167,6 +178,16 @@ fanout:
 	if runErr != nil {
 		return results, runErr
 	}
+
+	// Compilation containers left their slot empty on purpose — compact so
+	// downstream consumers never see a zero-key placeholder entry.
+	compacted := results[:0]
+	for _, result := range results {
+		if result.Key != "" {
+			compacted = append(compacted, result)
+		}
+	}
+	results = compacted
 
 	accepted := 0
 	for _, result := range results {
@@ -287,6 +308,16 @@ func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider 
 		}
 		if ok {
 			scored = []metadata.SearchResult{converged}
+		}
+	}
+
+	if !musicSearchCanAutoAccept(scored, selectionArtist.Artist, threshold) {
+		corroborated, ok, err := resolveMusicArtistByReleaseOverlap(ctx, artist, selectionArtist, scored, provider, emit)
+		if err != nil {
+			return search, err
+		}
+		if ok {
+			scored = []metadata.SearchResult{corroborated}
 		}
 	}
 
@@ -411,16 +442,18 @@ func musicFingerprintValidationRequired(artist MusicArtistPlan, candidates []met
 	if strings.TrimSpace(artist.ExternalIDs["mbid"]) != "" {
 		return false
 	}
+	issueTriggered := false
 	for _, issue := range artist.Issues {
 		switch issue {
 		case "ambiguous_artist_identity_missing_album_artist_mbid", "untrusted_track_artist_mbid":
-			return true
+			issueTriggered = true
 		}
 	}
 
 	// Two distinct canonical artists with the same normalized spelling are a
 	// namesake collision, not a runner-up spelling variant. Case/stylization
-	// (LISA vs LiSA) may be the only human-visible distinction.
+	// (LISA vs LiSA) may be the only human-visible distinction. Acoustic
+	// evidence is the only thing that can pick between them — always validate.
 	first := -1
 	for i, candidate := range candidates {
 		if candidate.RequiresReview || !musicSearchArtistExact(artist, candidate.Title) {
@@ -431,6 +464,36 @@ func musicFingerprintValidationRequired(artist MusicArtistPlan, candidates []met
 			continue
 		}
 		if !musicSearchSameCanonicalIdentity(candidates[first], candidate) {
+			return true
+		}
+	}
+	if !issueTriggered {
+		return false
+	}
+	// The issue codes mean the LOCAL tags cannot prove which artist this is.
+	// But when discovery resolved the query (name + local release hints) to an
+	// already-linked canonical entity and no distinct-canonical namesake is in
+	// the candidate field, the identity question is settled by canonical
+	// evidence — demanding acoustics on top left such artists permanently
+	// stuck whenever fingerprints were missing or unknown to AcoustID.
+	return !musicSearchDiscoveryResolvedCanonical(artist, candidates)
+}
+
+// musicSearchDiscoveryResolvedCanonical reports whether the scored field is
+// anchored by a canonically-settled identity for exactly this artist name:
+// HeyaMetadata answered with an existing identity link (not a match
+// proposal), or the local discography corroborated a single candidate —
+// either way review-free and carrying the canonical slug.
+func musicSearchDiscoveryResolvedCanonical(artist MusicArtistPlan, candidates []metadata.SearchResult) bool {
+	for _, candidate := range candidates {
+		if candidate.RequiresReview || candidate.HeyaSlug == "" {
+			continue
+		}
+		if !musicSearchArtistExact(artist, candidate.Title) {
+			continue
+		}
+		switch candidate.Recommendation {
+		case "existing_entity", "corroborated_identity", "release_corroborated":
 			return true
 		}
 	}
@@ -1084,6 +1147,121 @@ func musicCandidateRecommendationCanConverge(recommendation string) bool {
 	default:
 		return false
 	}
+}
+
+const (
+	musicReleaseCorroborationCandidateLimit = 3
+	musicReleaseCorroborationMinimumAlbums  = 2
+)
+
+// resolveMusicArtistByReleaseOverlap disambiguates exact-name candidates by
+// the strongest evidence the library actually holds: the discography on disk.
+// Text search alone cannot pick between namesakes (or unproven single hits) —
+// but a candidate whose known releases match ≥2 of the local albums, while
+// every fetched competitor matches none, is corroborated identity evidence:
+// two same-named artists do not share the same album titles. Detail fetches
+// are bounded to the top few distinct exact-name candidates; album matching
+// reuses the exact scorer the fetch stage maps albums with.
+func resolveMusicArtistByReleaseOverlap(ctx context.Context, artist, selection MusicArtistPlan, scored []metadata.SearchResult, provider MusicSearchProvider, emit Emitter) (metadata.SearchResult, bool, error) {
+	if len(artist.Albums) < musicReleaseCorroborationMinimumAlbums {
+		return metadata.SearchResult{}, false, nil
+	}
+	detailProvider, ok := provider.(MusicDetailProvider)
+	if !ok {
+		return metadata.SearchResult{}, false, nil
+	}
+
+	var contenders []metadata.SearchResult
+	for _, candidate := range scored {
+		if !musicSearchArtistExact(selection, candidate.Title) {
+			continue
+		}
+		duplicate := false
+		for _, existing := range contenders {
+			if musicSearchSameCanonicalIdentity(existing, candidate) {
+				duplicate = true
+				break
+			}
+		}
+		if duplicate {
+			continue
+		}
+		contenders = append(contenders, candidate)
+		if len(contenders) == musicReleaseCorroborationCandidateLimit {
+			break
+		}
+	}
+	if len(contenders) == 0 {
+		return metadata.SearchResult{}, false, nil
+	}
+
+	winner := -1
+	var winnerDetail *metadata.MediaDetail
+	winnerOverlap := 0
+	for i, candidate := range contenders {
+		fetchCtx, cancel := context.WithTimeout(ctx, musicMetadataFetchTimeout)
+		detail, err := detailProvider.GetDetail(fetchCtx, candidate.ProviderID, nil)
+		fetchCtxErr := fetchCtx.Err()
+		cancel()
+		if err != nil {
+			if terminal := providerContextTermination(fetchCtxErr, err); terminal != nil {
+				return metadata.SearchResult{}, false, terminal
+			}
+			if _, deferred := metadata.DeferredWorkRetryAfter(err); deferred {
+				return metadata.SearchResult{}, false, err
+			}
+			emit.Emit(Event{Event: "match.release_corroboration_failed", Severity: SeverityInfo, Kind: "music", Message: err.Error(), Data: map[string]any{
+				"key": artist.Key, "provider_id": candidate.ProviderID,
+			}})
+			return metadata.SearchResult{}, false, nil
+		}
+		if detail == nil || len(detail.Albums) == 0 {
+			continue
+		}
+		overlap := 0
+		for _, local := range artist.Albums {
+			if _, _, _, matched := findMusicRemoteAlbum(local, detail.Albums); matched {
+				overlap++
+			}
+		}
+		if overlap == 0 {
+			continue
+		}
+		if winner != -1 {
+			// Two candidates each overlap local releases — the discography
+			// cannot pick a side. Leave the field for human review.
+			return metadata.SearchResult{}, false, nil
+		}
+		if overlap < musicReleaseCorroborationMinimumAlbums {
+			// A single matching title can be coincidence ("Greatest Hits");
+			// it still poisons the zero-overlap requirement for others.
+			winner = -2
+			continue
+		}
+		winner = i
+		winnerDetail = detail
+		winnerOverlap = overlap
+	}
+	if winner < 0 || winnerDetail == nil {
+		return metadata.SearchResult{}, false, nil
+	}
+
+	result := contenders[winner]
+	if canonicalID := strings.TrimSpace(winnerDetail.CanonicalID); canonicalID != "" {
+		result.ProviderID = heyametadata.EncodeEntityProviderID(canonicalID)
+		result.HeyaSlug = canonicalID
+		result.ExternalIDs = cloneStringMap(winnerDetail.ExternalIDs)
+		result.Enriched = true
+	}
+	result.Title = firstNonEmpty(winnerDetail.ArtistName, winnerDetail.Title, result.Title)
+	result.Recommendation = "release_corroborated"
+	result.RequiresReview = false
+	result.Confidence = maxFloat(result.Confidence, 0.95)
+	emit.Emit(Event{Event: "match.release_corroborated", Kind: "music", Data: map[string]any{
+		"key": artist.Key, "artist": artist.Artist, "provider_id": result.ProviderID,
+		"matched_albums": winnerOverlap, "local_albums": len(artist.Albums), "contenders": len(contenders),
+	}})
+	return result, true, nil
 }
 
 // musicReleaseHintIdentifiers keeps exact release/catalog identifiers while

@@ -577,7 +577,7 @@ func TestManualSearchDecisionsSuppressReviewPersistence(t *testing.T) {
 		},
 	}
 
-	statuses := scanIdentityReviewStatuses(result)
+	statuses := scanIdentityReviewStatuses(result, musicArtistAutoMatchThreshold)
 	if got := statuses["title:poker face"]; got != "" {
 		t.Fatalf("manual accepted title-only identity should not remain needs_review, got %q", got)
 	}
@@ -585,7 +585,7 @@ func TestManualSearchDecisionsSuppressReviewPersistence(t *testing.T) {
 		t.Fatalf("manual rejected status: got %q", got)
 	}
 
-	findings := scanFindingDrafts(result, nil)
+	findings := scanFindingDrafts(result, nil, musicArtistAutoMatchThreshold)
 	for _, finding := range findings {
 		if finding.Code == "title_only_identity" || finding.Code == "search_rejected" || finding.Code == "search_suspicious" {
 			t.Fatalf("manual decision should suppress review finding: %#v", finding)

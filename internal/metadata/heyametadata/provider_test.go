@@ -1147,3 +1147,37 @@ func mustMapDocument(t *testing.T, provider *HeyaProvider, raw string) *metadata
 }
 
 func strPointer(value string) *string { return &value }
+
+// V2 emits existing_entity / corroborated_identity when a discovery resolves
+// to an already-linked canonical entity; the switch used to fall through to
+// review-only for both, stranding perfect confidence-1.0 artist matches. The
+// artist-specific likely_match clause mirrors the movie title+year rule:
+// exact name evidence + the release hints V2 evaluated.
+func TestDiscoveryAutoMatchAllowedRecommendations(t *testing.T) {
+	artistQuery := metadata.SearchQuery{Title: "Sample Artist", Releases: []metadata.ReleaseHint{{Title: "First Album"}, {Title: "Second Album"}}}
+	exactName := []metadata.SearchEvidence{{Field: "name", Outcome: "exact"}, {Field: "releases", Outcome: "partial"}}
+	fuzzyName := []metadata.SearchEvidence{{Field: "name", Outcome: "fuzzy"}, {Field: "releases", Outcome: "partial"}}
+
+	cases := []struct {
+		name           string
+		recommendation string
+		kind           string
+		query          metadata.SearchQuery
+		evidence       []metadata.SearchEvidence
+		want           bool
+	}{
+		{"existing_entity resolves review-free", "existing_entity", "artist", artistQuery, nil, true},
+		{"corroborated_identity resolves review-free", "corroborated_identity", "artist", artistQuery, nil, true},
+		{"strong_match unchanged", "strong_match", "artist", artistQuery, nil, true},
+		{"artist likely_match with exact name and releases", "likely_match", "artist", artistQuery, exactName, true},
+		{"artist likely_match without exact name stays review-only", "likely_match", "artist", artistQuery, fuzzyName, false},
+		{"artist likely_match without releases stays review-only", "likely_match", "artist", metadata.SearchQuery{Title: "Sample Artist"}, exactName, false},
+		{"ambiguous stays review-only", "ambiguous", "artist", artistQuery, exactName, false},
+		{"weak_match stays review-only", "weak_match", "artist", artistQuery, exactName, false},
+	}
+	for _, tc := range cases {
+		if got := discoveryAutoMatchAllowed(tc.recommendation, tc.kind, tc.query, tc.evidence); got != tc.want {
+			t.Errorf("%s: discoveryAutoMatchAllowed = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
