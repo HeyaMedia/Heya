@@ -17,6 +17,10 @@ const dashboardWide = computed(() => route.path === '/settings/dashboard' || rou
 
 const currentTitle = computed(() => itemByPath.value.get(route.path)?.item.label ?? 'Settings')
 
+// Same music transport hotkeys as layouts/default.vue — the playbar follows
+// the user into Settings, so its keyboard has to as well.
+useGlobalHotkeys()
+
 // SettingsSidebar's links don't know they're inside a sheet, so close it
 // here on navigation rather than teaching the shared component about its
 // presentation context (same reasoning as music.vue's flat list closing

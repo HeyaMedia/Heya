@@ -68,7 +68,7 @@ const ariaValueText = computed(() => props.valueText ?? `${valueNow.value}%`)
 // percent (the component has no duration, so % is the only unit here). Emits
 // the same 0..1 fraction as a pointer seek.
 //
-// stopPropagation on every consumed key is load-bearing: the music shell mounts
+// stopPropagation on every consumed key is load-bearing: the app layout mounts
 // a WINDOW-level keydown hotkey listener (useGlobalHotkeys) that suppresses only
 // for INPUT/TEXTAREA/SELECT/contenteditable — NOT for a role="slider" div. So
 // without stopping propagation a focused waveform's ←/→ would ALSO fire the

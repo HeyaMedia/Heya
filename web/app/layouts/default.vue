@@ -46,4 +46,10 @@ import { TooltipProvider } from 'reka-ui'
 // Reveal mode (AmbientControls' eye): flips the .bg-reveal class that fades
 // the whole app away so the ambient artwork shows clean.
 const bgCtl = useBackgroundControls()
+
+// Music transport hotkeys (space / arrows / m-s-r-q-l). Mounted at the layout,
+// not in the music shell, because the player it drives is app-wide: the same
+// MobilePlayerHost/DesktopPlayerHost below keep playing on every route. The
+// composable itself yields to typing, open dialogs and the video player.
+useGlobalHotkeys()
 </script>

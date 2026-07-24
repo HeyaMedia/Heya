@@ -1,6 +1,6 @@
 <!--
-  HotkeyHelp — keyboard-shortcut reference, toggled with `?`. Mounted once in the
-  music shell; open state is shared with useGlobalHotkeys via useState.
+  HotkeyHelp — keyboard-shortcut reference, toggled with `?`. Mounted once by
+  DesktopPlayerHost; open state is shared with useGlobalHotkeys via useState.
 -->
 <template>
   <AppDialog

@@ -1526,6 +1526,11 @@ function volIcon() {
 }
 
 useEventListener(window, 'keydown', handleKeydown)
+// Video outranks the music playbar on every key the two share (space, arrows,
+// m/l). The app-wide transport hotkeys stand down while this player is up.
+const videoKeyboardClaim = useVideoKeyboardClaim()
+onMounted(() => { videoKeyboardClaim.value = true })
+onUnmounted(() => { videoKeyboardClaim.value = false })
 watch(controlsPinned, (pinned) => {
   if (pinned) { controlsVisible.value = true; clearHideTimer() }
   else showCtrl()

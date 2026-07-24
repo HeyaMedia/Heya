@@ -40,9 +40,8 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'default' })
 
-// Global transport hotkeys (space / arrows / m-s-r-q-l), active across the
-// music shell. Suppressed while typing.
-useGlobalHotkeys()
+// Transport hotkeys are mounted app-wide by layouts/default.vue — the music
+// shell no longer owns them.
 
 // Ambient background: the whole music shell rides an artist-artwork pool.
 // Child pages that own a specific image (artist/album detail) push their
