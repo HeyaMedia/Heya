@@ -122,6 +122,46 @@ describe('browser audio master output', () => {
     decks.dispose()
   })
 
+  test('keeps the listener volume out of the transport envelope', async () => {
+    const nodes = []
+    const destination = {}
+    const context = {
+      currentTime: 0,
+      createGain: () => {
+        const node = new FakeGainNode()
+        nodes.push(node)
+        return node
+      },
+    }
+    const output = new MasterOutput(context, destination)
+    const [volumeStage, transportStage] = nodes
+
+    output.setVolume(0.4)
+    await output.fadeTransport(0, 0.001)
+
+    expect(volumeStage.destination).toBe(transportStage)
+    expect(transportStage.destination).toBe(destination)
+    expect(volumeStage.gain.value).toBe(0.4)
+    expect(transportStage.gain.value).toBe(0)
+  })
+
+  test('a manual switch keeps the outgoing deck audible until the replacement is ready', async () => {
+    const decks = new DeckManager(new FakeAudioContext())
+    await decks.loadAndPlay('/api/music/tracks/1/stream')
+    const outgoing = decks.active
+
+    const switching = decks.switchTo('/api/music/tracks/2/stream', 0, 0.01)
+    expect(outgoing.paused).toBeFalse()
+
+    await switching
+
+    expect(decks.active).not.toBe(outgoing)
+    expect(decks.active.paused).toBeFalse()
+    expect(decks.active.transitionGainNode.gain.value).toBe(1)
+    expect(outgoing.paused).toBeTrue()
+    decks.dispose()
+  })
+
   test('manual replacement cancels the pending deck without stopping the audible deck', async () => {
     const decks = new DeckManager(new FakeAudioContext())
     await decks.loadAndPlay('/api/music/tracks/1/stream')
@@ -133,6 +173,18 @@ describe('browser audio master output', () => {
     expect(decks.active.paused).toBeFalse()
     expect(decks.pending.paused).toBeTrue()
     expect(decks.pending.transitionGainNode.gain.value).toBe(1)
+    decks.dispose()
+  })
+
+  test('a skip landing mid-fade keeps descending instead of jumping back to full', async () => {
+    const decks = new DeckManager(new FakeAudioContext())
+    await decks.loadAndPlay('/api/music/tracks/1/stream')
+    const outgoing = decks.active
+    outgoing.setTransitionGain(0.4) // where an interrupted fade-out left it
+
+    decks.prepareForReplacement()
+
+    expect(outgoing.transitionGainNode.gain.value).toBe(0.4)
     decks.dispose()
   })
 })

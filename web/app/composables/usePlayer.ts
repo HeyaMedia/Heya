@@ -1554,11 +1554,12 @@ export const usePlayerStore = defineStore('player', () => {
     if (nativePreloadRetryTimer) clearTimeout(nativePreloadRetryTimer)
     nativePreloadRetryTimer = null
 
-    if (playbackBackend.value === 'native' && nativeAudioBackend.value) {
-      // The command captures the old renderer session synchronously. Let it
-      // stop in parallel with analysis/grant resolution for the replacement.
-      void nativeAudioBackend.value.stop().catch(() => {})
-    } else if (engineWired.value) {
+    // Deliberately does NOT stop the outgoing track. Silencing it here — before
+    // analysis and the grant for the replacement have even resolved — is what
+    // turned every manual change into a hard cut followed by a gap. Both
+    // engines keep it audible and fade across once the new track is ready; the
+    // stale next-track deck is retired by the load itself.
+    if (playbackBackend.value !== 'native' && engineWired.value) {
       ensureEngine().cancelPendingTransition()
     }
   }
@@ -1653,6 +1654,15 @@ export const usePlayerStore = defineStore('player', () => {
           if (preparationToastId != null) dismiss(preparationToastId)
           if (gen !== playGeneration) return
           settleTrackLoad(gen)
+          // The outgoing track is still audible — the switch deliberately
+          // leaves it playing until the replacement is ready, and there is no
+          // replacement now. Silence it rather than announcing the failure
+          // over music that the user already asked to leave.
+          if (playbackBackend.value === 'native' && nativeAudioBackend.value) {
+            void nativeAudioBackend.value.stop().catch(() => {})
+          } else if (engineWired.value) {
+            ensureEngine().stop()
+          }
           playing.value = false
           alog('player', `playback preparation failed for "${track.title}"`, error)
           toast.err(`Could not analyze "${track.title}" for normalized playback`)
@@ -1681,7 +1691,11 @@ export const usePlayerStore = defineStore('player', () => {
       playbackBackend.value = 'browser'
       const networkUrl = resolveStreamUrl(track)
       if (!networkUrl) { settleTrackLoad(gen); return }
-      applyActiveNorm(e, track)
+      // The incoming track is levelled as the *pending* one: a switch loads it
+      // onto the pending deck and overlaps, so the outgoing track has to keep
+      // its own gain for the length of the fade. The engine moves this onto
+      // the active deck when it cold-loads there instead.
+      applyPendingNorm(e, track)
       // Cache lookup (resolvePlayable never does network I/O itself, only a
       // fast Cache.match) — check staleness again after it, same reasoning.
       const playUrl = track.isStream
@@ -2093,7 +2107,7 @@ export const usePlayerStore = defineStore('player', () => {
         if (!playUrl) { transitioning = false; playing.value = false; return }
         // Superseded by a manual play() while the cache lookup was in flight.
         if (currentTrack.value !== finished) { transitioning = false; return }
-        applyActiveNorm(e, next)
+        applyPendingNorm(e, next)
         await e.play(playUrl)
       }
       advanceCurrentTo(next)

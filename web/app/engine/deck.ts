@@ -110,23 +110,9 @@ export class Deck {
     this.transitionGainNode.gain.setValueAtTime(value, this.ctx.currentTime)
   }
 
-  // Fast linear fade of the deck gain to silence, resolving when it completes.
-  // Used before a hard source-swap so the cut doesn't click/pop — ramping the
-  // signal smoothly to zero removes the discontinuity a bare pause leaves.
-  fadeOut(seconds: number): Promise<void> {
-    return new Promise((resolve) => {
-      const now = this.ctx.currentTime
-      const g = this.transitionGainNode.gain
-      g.cancelScheduledValues(now)
-      g.setValueAtTime(g.value, now)
-      g.linearRampToValueAtTime(0, now + seconds)
-      setTimeout(resolve, Math.ceil(seconds * 1000))
-    })
-  }
-
-  // Fast linear fade of the deck gain up to `target` — the incoming-track
-  // counterpart to fadeOut, so a freshly-started track eases in instead of
-  // snapping to full level.
+  // Fast linear fade of the deck gain up to `target`, so a track starting from
+  // silence eases in instead of snapping to full level. Track-to-track fades
+  // are the DeckManager's job — it overlaps two decks rather than ramping one.
   fadeIn(target: number, seconds: number) {
     const now = this.ctx.currentTime
     const g = this.transitionGainNode.gain

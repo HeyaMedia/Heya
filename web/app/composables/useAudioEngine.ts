@@ -88,41 +88,96 @@ function createEngine() {
     errorCallback?.(err)
   })
 
-  // Fast fade applied when hot-swapping the active deck's source (a manual
-  // track change), so the hard cut doesn't click. ~60ms is inaudible as a fade
+  // Overlap used when the listener changes track. Long enough to read as a
+  // deliberate fade rather than a cut, short enough that the new track still
+  // feels like an immediate response to the click. Matches the native
+  // engine's skip duck so both backends sound the same.
+  const SWITCH_DUCK_SECONDS = 0.5
+  // Ease-in for a track starting from silence. ~60ms is inaudible as a fade
   // but long enough to ramp cleanly through the discontinuity.
-  const SWITCH_FADE_SECONDS = 0.06
+  const COLD_START_FADE_SECONDS = 0.06
+  // Pause/resume envelope. Short enough that the transport still feels
+  // instant, long enough to remove the click a bare pause leaves.
+  const TRANSPORT_FADE_SECONDS = 0.12
+
+  // The level for the track play()/transition() is about to bring in.
+  // usePlayer sets it before either call; setActiveNormalization adjusts what
+  // is already audible.
+  let pendingNormGain = 1
+
+  // Skipping twice in quick succession cancels the first load from under the
+  // second. Whoever started last owns the decks; earlier attempts unwind
+  // without stopping the track that superseded them.
+  let playGeneration = 0
 
   async function play(url: string, startPositionSeconds = 0) {
-    alog('engine', 'play (cold load on active deck)', shortUrl(url))
+    const generation = ++playGeneration
     await resumeContext()
-    // Jellyfin-style: fade the currently-playing track to silence before the
-    // source swap so the cut is click-free, then fade the new track in.
+
     if (isPlaying.value && !deckManager.active.paused) {
-      await deckManager.active.fadeOut(SWITCH_FADE_SECONDS)
+      alog('engine', 'play (manual switch — duck into the pending deck)', shortUrl(url))
+      // Route the incoming deck through the chain so EQ/limiter apply to it
+      // during the overlap, not just to the track being faded out.
+      signalChain.connectAdditionalSource(deckManager.pending.getOutputNode())
+      try {
+        await deckManager.switchTo(url, startPositionSeconds, SWITCH_DUCK_SECONDS)
+      } catch (error) {
+        // Nothing to fade into. The caller reports this as stopped, so don't
+        // leave the outgoing track playing underneath a failed load — unless a
+        // newer play already took the decks over.
+        if (generation === playGeneration) {
+          deckManager.stopAll()
+          isPlaying.value = false
+          scheduler.reset()
+        }
+        throw error
+      }
+    } else {
+      alog('engine', 'play (cold load on active deck)', shortUrl(url))
+      // The incoming level was set on the pending deck; a cold load lands on
+      // the active one instead.
+      deckManager.setActiveNormalization(pendingNormGain)
+      await deckManager.loadAndPlay(url, startPositionSeconds)
+      deckManager.active.fadeIn(1, COLD_START_FADE_SECONDS)
+      void masterOutput.fadeTransport(1, COLD_START_FADE_SECONDS)
     }
-    await deckManager.loadAndPlay(url, startPositionSeconds)
-    deckManager.active.fadeIn(1, SWITCH_FADE_SECONDS)
+
+    pendingNormGain = 1
     isPlaying.value = true
     scheduler.reset()
   }
 
   function pause() {
-    deckManager.pause()
+    if (!isPlaying.value) {
+      deckManager.pause()
+      scheduleIdleSuspend()
+      return
+    }
     isPlaying.value = false
-    scheduleIdleSuspend()
+    void masterOutput.fadeTransport(0, TRANSPORT_FADE_SECONDS).then(() => {
+      // A resume landed inside the fade and already ramped the transport back
+      // up — don't pause out from under it.
+      if (isPlaying.value) return
+      deckManager.pause()
+      scheduleIdleSuspend()
+    })
   }
 
   function stop() {
     deckManager.stopAll()
+    // Nothing is audible to fade; leave the envelope open for the next start.
+    masterOutput.setTransport(1)
     isPlaying.value = false
     scheduleIdleSuspend()
   }
 
   async function resume() {
     await resumeContext()
+    // The decks start under a closed transport envelope, so the first samples
+    // ramp in instead of snapping to level.
     await deckManager.play()
     isPlaying.value = true
+    void masterOutput.fadeTransport(1, TRANSPORT_FADE_SECONDS)
   }
 
   function seek(time: number) { deckManager.seek(time) }
@@ -150,6 +205,7 @@ function createEngine() {
       signalChain.connectAdditionalSource(deckManager.pending.getOutputNode())
     }
     await deckManager.transition(mode, plan)
+    pendingNormGain = 1
     scheduler.reset()
     isPlaying.value = true
   }
@@ -162,13 +218,17 @@ function createEngine() {
   function setPendingNormalization(integrated: number, truePeak: number, targetLufs?: number) {
     const gain = computeNormalizationGain(integrated, truePeak, targetLufs)
     alog('norm', `pending gain ×${gain.toFixed(3)} (${(20 * Math.log10(gain || 1)).toFixed(1)} dB)`)
+    pendingNormGain = gain
     deckManager.setPendingNormalization(gain)
   }
   function resetActiveNormalization() {
     alog('norm', 'active gain reset (×1.0, no normalization)')
     deckManager.setActiveNormalization(1)
   }
-  function resetPendingNormalization() { deckManager.setPendingNormalization(1) }
+  function resetPendingNormalization() {
+    pendingNormGain = 1
+    deckManager.setPendingNormalization(1)
+  }
 
   function readClock(): AudioPlaybackClockSample {
     const clock = deckManager.readClock()

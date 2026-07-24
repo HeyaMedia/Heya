@@ -71,11 +71,37 @@ export class DeckManager {
     this.transitionResolve = null
 
     const now = this.ctx.currentTime
-    this.activeDeck.transitionGainNode.gain.cancelScheduledValues(now)
-    this.activeDeck.transitionGainNode.gain.setValueAtTime(1, now)
+    // Hold the outgoing deck wherever an interrupted fade left it. The
+    // replacement's own fade-out starts from there, so a skip that lands
+    // during a skip keeps descending instead of jumping back to full.
+    const outgoing = this.activeDeck.transitionGainNode.gain
+    outgoing.cancelScheduledValues(now)
+    outgoing.setValueAtTime(outgoing.value, now)
     this.pendingDeck.transitionGainNode.gain.cancelScheduledValues(now)
     this.pendingDeck.transitionGainNode.gain.setValueAtTime(1, now)
     this.pendingDeck.reset()
+  }
+
+  // A manual track change. The outgoing deck keeps playing while the
+  // replacement buffers on the pending deck, then the two overlap for a short
+  // equal-power duck. Same shape as a crossfade — it just happens the moment
+  // the listener asks for it instead of at the end of a track, and never
+  // silences anything before there is something to fade into.
+  async switchTo(url: string, startPositionSeconds = 0, durationSeconds = 0.5): Promise<void> {
+    this.pendingDeck.setTransitionGain(0)
+    await this.pendingDeck.load(url)
+    if (startPositionSeconds > 0) this.pendingDeck.seek(startPositionSeconds)
+
+    const samples = Math.max(2, Math.round(durationSeconds * 100))
+    // Scale the fade-out to where the outgoing deck actually sits — an earlier
+    // skip may have left it part-way down.
+    const from = this.activeDeck.transitionGainNode.gain.value
+    await this.transition('timed', {
+      startTimeSeconds: 0,
+      durationSeconds,
+      fadeOutCurve: generateFadeOut(samples).map((value) => value * from),
+      fadeInCurve: generateFadeIn(samples),
+    })
   }
 
   async transition(mode: CrossfadeMode | 'gapless', plan?: TransitionPlan): Promise<void> {
@@ -114,6 +140,10 @@ export class DeckManager {
     this.activeDeck.pause()
     this.activeDeck.reset()
     this.swapRoles()
+    // Latch the incoming deck to unity. A fade-in curve's last point sits a
+    // hair under 1 — it samples 0..n-1 across 0..π/2 — and nothing else would
+    // ever put it back.
+    this.activeDeck.setTransitionGain(1)
   }
 
   private cancelTransition() {
