@@ -24,9 +24,9 @@ One DNS-SD service instance:
 
 ```
 <instance>._heya._tcp.local.    PTR  → the instance
-                                SRV  → <host>.local. : <port>
+                                SRV  → heya-<host>.local. : <port>
                                 TXT  → the record below
-<host>.local.                   A/AAAA → the server's addresses
+heya-<host>.local.              A/AAAA → the server's addresses
 ```
 
 The TXT record is the client contract. It is versioned: **a client MUST check
@@ -38,7 +38,7 @@ be added within a version; existing keys will not change meaning.
 | `v` | `1` | Record schema version |
 | `id` | `772e414f…` (32 hex) | Stable per-install id. Key saved-server entries on this — it survives renames, address changes, and LAN↔remote switches |
 | `name` | `knas` | Display name |
-| `ver` | `0.4.96` | Heya build version |
+| `ver` | `v0.4.132` | Heya build version. Carries the leading `v` from the release tag — strip it before comparing versions |
 | `scheme` | `https` | How to talk to the port in the SRV record |
 | `path` | `/` | Base path of the web app |
 | `api` | `/api` | Base path of the JSON API |
@@ -59,7 +59,7 @@ be added within a version; existing keys will not change meaning.
      "product": "heya",
      "id": "772e414f2945d53bd3fe797c2a1b059b",
      "name": "knas",
-     "version": "0.4.96",
+     "version": "v0.4.132",
      "api_base_path": "/api",
      "service_type": "_heya._tcp"
    }
@@ -106,11 +106,38 @@ can use. Two options:
   the published port. Multicast still has to escape the container for this to
   help, so host networking is the reliable answer.
 
-Heya's own production deployment is a Kubernetes pod; it needs one of the
-above before clients on the LAN will see it.
+Heya's own production deployment is a Kubernetes pod and already runs with
+`hostNetwork: true`, so it is discoverable as-is: the serve pod holds the
+node's LAN address and announces under the node's hostname.
+
+**A multi-bridge host publishes dead addresses.** That node enumerates 64
+multicast-capable interfaces, and the announcement carries every non-loopback
+address it finds:
+
+```
+ipv4: 192.168.10.10   ← default route, ordered first, the one clients use
+ipv4: 172.17.0.1      ← docker bridge, unroutable from the LAN
+ipv4: 10.0.0.210      ← CNI, unroutable from the LAN
+```
+
+The ordering means a client connects on the first try, so this is cosmetic
+rather than broken. Pin `HEYA_DISCOVERY_INTERFACES` to the real LAN NIC if you
+want the trailing two gone — a client that ever does fall through to them
+waits out a connect timeout each.
 
 ## Implementation notes
 
+- **Never advertise under the machine's own hostname.** Heya runs its own mDNS
+  responder in-process, and most hosts already run one (mDNSResponder on
+  macOS, avahi on Linux) that owns *and defends* `<hostname>.local`.
+  Publishing our own A records for that name is a conflicting authoritative
+  answer, so RFC 6762 conflict resolution fires and **the OS renames the
+  machine** — `kWorkBookPro` → `kWorkBookPro-2` → `-3`, once per start. This
+  actually happened during development. Records therefore go out under
+  `heya-<host>.local`, which nothing else claims; clients dial the A record's
+  address, not the name, so they never notice. An explicit
+  `HEYA_DISCOVERY_HOST` is used verbatim — name it by hand and you own the
+  consequences. See `TestAdvertisedHostLabelNeverClaimsTheMachinesOwnName`.
 - **Always DNS-SD proxy registration.** `zeroconf.Register` derives the host
   name from `os.Hostname()` and appends `.local.` only when it thinks the
   suffix is missing. On a machine already called `mac.local` that produced

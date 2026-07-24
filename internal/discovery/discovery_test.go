@@ -257,3 +257,44 @@ func TestInterfaceAddressesLeadsWithTheDefaultRoute(t *testing.T) {
 			addresses[0], primary)
 	}
 }
+
+// Publishing A records for the machine's OWN `<hostname>.local` makes the
+// system responder (mDNSResponder / avahi) treat us as a conflicting claim
+// and defend its name by RENAMING the machine — kWorkBookPro → kWorkBookPro-2
+// → -3, once per start. Starting a media server must not rename the user's
+// computer, so the advertised name has to be one nothing else owns.
+func TestAdvertisedHostLabelNeverClaimsTheMachinesOwnName(t *testing.T) {
+	cases := []struct {
+		name       string
+		configured string
+		osHost     string
+		want       string
+	}{
+		{"prefixes the OS hostname", "", "kWorkBookPro.local", "heya-kWorkBookPro"},
+		{"prefixes a bare hostname", "", "knas", "heya-knas"},
+		{"explicit override is used verbatim", "media-box", "knas", "media-box"},
+		{"override is reduced to one label", "media-box.lan", "knas", "media-box"},
+		{"does not stack prefixes", "", "heya-knas", "heya-knas"},
+		{"prefix match is case-insensitive", "", "HEYA-knas", "HEYA-knas"},
+		{"falls back when the OS says nothing", "", "", "heya"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := advertisedHostLabel(tc.configured, tc.osHost)
+			if got != tc.want {
+				t.Fatalf("advertisedHostLabel(%q, %q) = %q, want %q", tc.configured, tc.osHost, got, tc.want)
+			}
+			if tc.configured == "" && tc.osHost != "" && got == hostLabel(tc.osHost) &&
+				!strings.HasPrefix(strings.ToLower(tc.osHost), hostPrefix) {
+				t.Errorf("advertised name %q equals the machine's own name — the OS will rename the machine", got)
+			}
+		})
+	}
+}
+
+func TestAdvertisedHostLabelStaysWithinTheDNSLabelLimit(t *testing.T) {
+	got := advertisedHostLabel("", strings.Repeat("h", 200))
+	if len(got) != 63 {
+		t.Errorf("label is %d bytes, want 63 — an over-long name fails to pack and kills every answer", len(got))
+	}
+}

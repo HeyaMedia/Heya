@@ -342,6 +342,10 @@ const discoveryRows = computed(() => {
   return [
     { key: 'Service', value: `${s.instance}.${s.service_type}.${(s.domain ?? '').replace(/\.$/, '')}`, mono: true, copy: true },
     { key: 'Announced as', value: s.port ? `${s.hostname}:${s.port}` : (s.hostname ?? ''), mono: true, copy: true },
+    // The addresses are the answer to "what will a client actually dial?".
+    // Clients try them in order, so the leading one is the one that matters —
+    // a host with docker/CNI bridges publishes unreachable ones behind it.
+    { key: 'Addresses', value: (s.addresses ?? []).join(', '), mono: true, copy: true },
     { key: 'Interfaces', value: describeDiscoveryInterfaces(s.interfaces ?? []) },
     { key: 'TXT record', value: (s.txt ?? []).join('  '), mono: true, copy: true },
     { key: 'Since', value: s.started_at ?? '' },

@@ -184,11 +184,8 @@ func (m *Manager) Advertise(cfg Config) error {
 		ifaces = selected
 	}
 
-	host := hostLabel(cfg.Host)
-	if host == "" {
-		osHost, _ := os.Hostname()
-		host = hostLabel(osHost)
-	}
+	osHost, _ := os.Hostname()
+	host := advertisedHostLabel(cfg.Host, osHost)
 	if host == "" {
 		err := fmt.Errorf("no hostname could be resolved to advertise under (set HEYA_DISCOVERY_HOST)")
 		m.update(func(s *AdvertisementStatus) {
@@ -488,6 +485,43 @@ func defaultRouteIP() net.IP {
 	return addr.IP
 }
 
+// hostPrefix namespaces the advertised host name so it cannot collide with
+// the one the operating system's own responder owns. See advertisedHostLabel.
+const hostPrefix = "heya-"
+
+// advertisedHostLabel returns the single DNS label to publish A/AAAA records
+// under. It is deliberately NOT the machine's own hostname.
+//
+// Heya runs its own mDNS responder in-process. The system already runs one on
+// most hosts (mDNSResponder on macOS, avahi on Linux) and it owns and
+// *defends* `<hostname>.local`. Publishing our own records for that same name
+// is a conflicting authoritative answer, so RFC 6762 conflict resolution
+// kicks in and the OS renames the machine — `kWorkBookPro` becomes
+// `kWorkBookPro-2`, then `-3`, cumulatively, every time Heya starts. That is
+// a visible change to the user's computer, caused by starting a media server.
+//
+// Prefixing keeps the name ours: nothing else claims `heya-<host>.local`, so
+// there is no conflict and nothing gets renamed. Clients are unaffected —
+// they dial the A record's address, not the name (see Found.URL).
+//
+// An explicit HEYA_DISCOVERY_HOST is used verbatim: an operator who names it
+// by hand owns the consequences, and container deployments need that control.
+func advertisedHostLabel(configured, osHost string) string {
+	if label := hostLabel(configured); label != "" {
+		return label
+	}
+	label := hostLabel(osHost)
+	if label == "" {
+		return strings.TrimSuffix(hostPrefix, "-")
+	}
+	// Already prefixed (a restart re-reading its own advertised name, or a
+	// host genuinely called heya-something) — don't stack another one.
+	if strings.HasPrefix(strings.ToLower(label), hostPrefix) {
+		return label
+	}
+	return truncateLabel(hostPrefix + label)
+}
+
 // hostLabel reduces a hostname to the single label to publish under
 // `.local.`: "mac.local" → "mac", "box.lan" → "box", "knas" → "knas". mDNS
 // has exactly one domain, so anything past the first label is a search-domain
@@ -497,11 +531,15 @@ func hostLabel(host string) string {
 	if host == "" {
 		return ""
 	}
-	label := strings.SplitN(host, ".", 2)[0]
-	// DNS labels max out at 63 bytes; a longer one would be rejected at pack
-	// time, which fails the whole response rather than just the name.
+	return truncateLabel(strings.SplitN(host, ".", 2)[0])
+}
+
+// truncateLabel enforces the 63-byte DNS label limit. An over-long label is
+// rejected at pack time, which fails the whole response rather than just the
+// name — the same silent-nothing-answered failure mode as a bad host suffix.
+func truncateLabel(label string) string {
 	if len(label) > 63 {
-		label = label[:63]
+		return label[:63]
 	}
 	return label
 }
