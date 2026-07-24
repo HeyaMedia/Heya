@@ -18,7 +18,7 @@ ONNX Runtime. Pick the one image that matches your GPU; the base covers
 everyone for transcode and CPU inference.
 
 Regular images use an external Postgres selected by `HEYA_DATABASE_URL`.
-All-in-one images add PostgreSQL 17, pgvector, and supervisord directly on top
+All-in-one images add PostgreSQL 18, pgvector, and supervisord directly on top
 of the corresponding completed regular image. Supervisor runs the database,
 API/ingress, and worker as independent processes. All persistent state lives
 below `/data`; always mount a volume there.
@@ -55,6 +55,37 @@ models, caches, and service state. A named volume such as
 `-v heya-data:/data` works, but a direct host-path mount is strongly recommended:
 it is visible on the host and much easier to inspect, back up, and migrate.
 Whichever form you choose, never run the AIO image without persistent `/data`.
+
+### Automatic PostgreSQL 17 to 18 upgrade
+
+Current AIO images initialize PostgreSQL 18. When an existing `/data/postgres`
+cluster reports PostgreSQL 17, the container keeps Heya stopped and runs
+`pg_upgrade --link` before supervisord starts PostgreSQL, the API, or the
+worker. Both PostgreSQL versions and matching pgvector libraries are present in
+the image for that transition. The target cluster is smoke-tested by loading
+pgvector under PostgreSQL 18, applying the extension updates emitted by
+`pg_upgrade`, and filling only missing optimizer statistics before the linked
+PostgreSQL 17 directory is removed.
+
+`--link` avoids making another full copy of vector tables and HNSW indexes, but
+the linked PostgreSQL 17 directory is **not a backup** and cannot be used after
+PostgreSQL 18 starts. Take a database or volume snapshot before pulling the
+first PostgreSQL 18 AIO image. The database is unavailable during the upgrade;
+`heya serve` and `heya worker` wait with cancellable backoff until PostgreSQL is
+ready instead of crash-looping.
+
+If the container stops before PostgreSQL 18 is activated, the entrypoint
+restores the PostgreSQL 17 directory and retries on its next start. If it stops
+after activation, it keeps PostgreSQL 18 authoritative and resumes target
+verification; it never falls back to a linked PostgreSQL 17 cluster.
+
+The mechanism is target-major driven rather than hard-coded to this pair:
+the image installs the target server plus exactly its previous major, and the
+entrypoint derives the accepted source version as `target - 1`. A future
+PostgreSQL 19 image therefore reuses the same upgrade, recovery, extension, and
+application-wait path for 18 to 19; only the image's target major and published
+tag change. Clusters more than one major behind are rejected without mutation
+and must be stepped through one major-specific image at a time.
 
 The two `HEYA_ADMIN_*` variables create the administrator only when the
 database does not already contain one. Passwords shorter than 15 characters
@@ -103,6 +134,32 @@ base image. Only the API publishes `:8080` TCP+UDP.
 docker compose up -d                    # Postgres + API + worker
 docker compose pull && docker compose up -d # update both Heya roles together
 ```
+
+Compose uses `ghcr.io/heyamedia/heya-postgres:18`, a PostgreSQL 18 + pgvector
+image that performs the same automatic 17 to 18 transition. The repository
+rebuilds and publishes this dependency image independently every Saturday at
+05:00 UTC through the `PostgreSQL Image` workflow; application release tags
+only consume the already-published image and do not rebuild it. The workflow
+also supports manual dispatch, which is how a new major-version image should be
+published before the production rollout. The repository carries its Dockerfile
+as a local build fallback:
+
+```bash
+docker compose build --pull postgres
+docker compose up -d
+```
+
+PostgreSQL 18 changed the official container volume root. Compose now mounts
+`./data/postgres` at `/var/lib/postgresql` and sets
+`PGDATA=/var/lib/postgresql/pgdata`; the host-side location remains
+`./data/postgres/pgdata`, so an existing PostgreSQL 17 cluster is discovered
+without moving files.
+
+For Kubernetes, make the equivalent two changes when swapping the PostgreSQL
+image: mount the existing PVC at `/var/lib/postgresql` and set `PGDATA` to
+`/var/lib/postgresql/pgdata`. With a `Recreate` strategy, the replacement pod
+then upgrades the existing PVC before becoming ready. Use the published
+`ghcr.io/heyamedia/heya-postgres:18` image and snapshot the PVC first.
 
 The compose file carries commented-out blocks for the common extras — admin
 bootstrap, declarative `HEYA_LIBRARY_<N>_*` libraries, media mounts, and

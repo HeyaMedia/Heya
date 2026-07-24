@@ -20,7 +20,7 @@ datastore and coordinates both processes — no Redis or external queue daemon.
          └──────────────────┬──────────────────┘
                             ▼
                   ┌───────────────────┐
-                  │   Postgres 17     │
+                  │   Postgres 18     │
                   │ data + River queue│
                   │ events + heartbeat│
                   └───────────────────┘
@@ -92,7 +92,7 @@ tools/eye/          # Headless-Chrome UI debugger — see docs/eye.md
 data/               # Runtime: posters, backdrops, postgres volume
 docs/               # This directory
 .env.example        # Catalogue of every supported env var (defaults + comments)
-docker-compose.yml  # Postgres 17 on :5440
+docker-compose.yml  # Postgres 18 on :5440
 sqlc.yaml           # Codegen config
 .air.toml           # Hot-reload config for `heya serve --dev-backend` on :3050
 .air.worker.toml    # Independent hot-reload config for `heya worker`

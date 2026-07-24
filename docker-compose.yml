@@ -54,7 +54,13 @@ x-heya-common: &heya-common
 
 services:
   postgres:
-    image: pgvector/pgvector:pg17
+    # Heya's PostgreSQL image is pgvector/pgvector:pg18 plus the PostgreSQL 17
+    # binaries and extension needed for a one-time pg_upgrade --link. Existing
+    # ./data/postgres/pgdata clusters upgrade automatically before readiness.
+    image: ${HEYA_POSTGRES_IMAGE:-ghcr.io/heyamedia/heya-postgres:18}
+    build:
+      context: .
+      dockerfile: .docker/Dockerfile.postgres
     container_name: heya-postgres
     command:
       - postgres
@@ -66,20 +72,19 @@ services:
       POSTGRES_USER: heya
       POSTGRES_PASSWORD: heya
       POSTGRES_DB: heya
-      # Keep the actual cluster in a child directory so the mounted parent can
-      # contain a tracked marker file without making initdb reject PGDATA.
-      PGDATA: /var/lib/postgresql/data/pgdata
+      # PostgreSQL 18 mounts /var/lib/postgresql rather than its old /data
+      # child. The host-side ./data/postgres/pgdata location stays unchanged,
+      # allowing the upgrade image to find an existing PostgreSQL 17 cluster.
+      PGDATA: /var/lib/postgresql/pgdata
     ports:
       # Development access stays available on the host without exposing the
       # database to the LAN/public interfaces.
       - "127.0.0.1:5440:5432"
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U heya -d heya"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
+      - ./data/postgres:/var/lib/postgresql
+    # The image healthcheck remains in its 30-minute start period while an
+    # offline major-version upgrade runs. API and worker startup also retry the
+    # database connection, so neither can race the upgraded cluster.
 
   heya:
     <<: *heya-common

@@ -1,0 +1,108 @@
+name: PostgreSQL Image
+
+on:
+  schedule:
+    # Saturday 05:00 UTC, after the scheduled runtime-image build. PostgreSQL
+    # is an independently maintained dependency image and is not rebuilt as
+    # part of an application release.
+    - cron: '0 5 * * 6'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: postgres-image
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: postgres 18 ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    outputs:
+      image: ${{ steps.img.outputs.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, platform: linux/amd64, runner: blacksmith-4vcpu-ubuntu-2404 }
+          - { arch: arm64, platform: linux/arm64, runner: blacksmith-4vcpu-ubuntu-2404-arm }
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: PostgreSQL image ref
+        id: img
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}-postgres" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: useblacksmith/setup-docker-builder@v1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push PostgreSQL by digest
+        id: build
+        uses: useblacksmith/build-push-action@v2
+        with:
+          context: .
+          file: .docker/Dockerfile.postgres
+          platforms: ${{ matrix.platform }}
+          pull: true
+          outputs: type=image,name=${{ steps.img.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v7
+        with:
+          name: postgres-digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: postgres 18 manifest
+    needs: build
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: postgres-digest-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create + push PostgreSQL manifest
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          image="${{ needs.build.outputs.image }}"
+          refs=()
+          for digest_file in *; do
+            refs+=("${image}@sha256:${digest_file}")
+          done
+          docker buildx imagetools create \
+            -t "${image}:18" \
+            -t "${image}:18-pgvector-0.8.5" \
+            "${refs[@]}"
+
+      - name: Inspect
+        run: docker buildx imagetools inspect "${{ needs.build.outputs.image }}:18"

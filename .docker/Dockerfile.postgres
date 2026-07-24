@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1.7
+#
+# PostgreSQL 18 + pgvector with an automatic, in-place PostgreSQL 17 upgrade.
+# The old server and extension packages remain installed solely so pg_upgrade
+# can read an existing Heya cluster on first boot.
+
+ARG POSTGRES_MAJOR=18
+ARG PGVECTOR_VERSION=0.8.5
+# Existing Compose and production clusters use pgvector's PostgreSQL 17
+# Bookworm image. Stay on Bookworm for the major-version transition so glibc's
+# collation version does not change underneath existing text indexes.
+FROM pgvector/pgvector:${PGVECTOR_VERSION}-pg${POSTGRES_MAJOR}-bookworm
+
+ARG POSTGRES_MAJOR
+
+USER root
+
+# Derive the only supported source major from the target. For the next major
+# transition, changing POSTGRES_MAJOR automatically keeps exactly the binaries
+# pg_upgrade needs and rejects clusters older than one major in the entrypoint.
+RUN previous_major=$((POSTGRES_MAJOR - 1)) && \
+    mkdir -p /etc/postgresql-common && \
+    echo "create_main_cluster = false" > /etc/postgresql-common/createcluster.conf && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        postgresql-${previous_major} \
+        postgresql-${previous_major}-pgvector && \
+    rm -rf /var/lib/apt/lists/* /var/lib/postgresql/${previous_major}
+
+COPY --chmod=0755 .docker/postgres/upgrade-major.sh /usr/local/bin/heya-postgres-upgrade
+COPY --chmod=0755 .docker/postgres/entrypoint.sh /usr/local/bin/heya-postgres-entrypoint
+COPY --chmod=0755 .docker/postgres/healthcheck.sh /usr/local/bin/heya-postgres-healthcheck
+
+ENV HEYA_POSTGRES_TARGET_MAJOR=${POSTGRES_MAJOR}
+
+ENTRYPOINT ["/usr/local/bin/heya-postgres-entrypoint"]
+CMD ["postgres"]
+
+# A linked 17 -> 18 upgrade of a large cluster can legitimately take several
+# minutes. Keep the container in its start period until the target data
+# directory exists, then use the normal readiness check.
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30m --retries=5 \
+    CMD ["/usr/local/bin/heya-postgres-healthcheck"]

@@ -7,24 +7,43 @@
 
 ARG BASE_IMAGE=ghcr.io/heyamedia/heya:latest
 
+ARG POSTGRES_MAJOR=18
+ARG PGVECTOR_VERSION=0.8.5
+FROM pgvector/pgvector:${PGVECTOR_VERSION}-pg${POSTGRES_MAJOR}-trixie AS postgres-upstream
+
 FROM ${BASE_IMAGE}
+
+ARG POSTGRES_MAJOR
 
 USER root
 
 # postgresql-common normally creates a distro-owned "main" cluster during
 # package installation. Disable that: the entrypoint initializes the persisted
-# /data/postgres cluster on first boot instead.
-RUN mkdir -p /etc/postgresql-common && \
+# /data/postgres cluster on first boot instead. PostgreSQL 17 and its matching
+# pgvector library remain installed only to upgrade existing AIO volumes to 18.
+# The Heya runtime is Debian Trixie but does not otherwise need the PGDG repo;
+# copy the repository definition and signing key from pgvector's official
+# PostgreSQL 18 image rather than downloading mutable bootstrap instructions.
+COPY --from=postgres-upstream /usr/local/share/keyrings/postgres.gpg.asc /usr/local/share/keyrings/postgres.gpg.asc
+COPY --from=postgres-upstream /etc/apt/sources.list.d/pgdg.list /etc/apt/sources.list.d/pgdg.list
+
+RUN previous_major=$((POSTGRES_MAJOR - 1)) && \
+    mkdir -p /etc/postgresql-common && \
     echo "create_main_cluster = false" > /etc/postgresql-common/createcluster.conf && \
     install_packages \
-        postgresql-17 \
-        postgresql-17-pgvector \
+        postgresql-${previous_major} \
+        postgresql-${previous_major}-pgvector \
+        postgresql-${POSTGRES_MAJOR} \
+        postgresql-${POSTGRES_MAJOR}-pgvector \
         supervisor && \
-    rm -rf /var/lib/apt/lists/* /var/lib/postgresql/17
+    rm -rf /var/lib/apt/lists/* \
+        /var/lib/postgresql/${previous_major} \
+        /var/lib/postgresql/${POSTGRES_MAJOR}
 
 COPY --chmod=0755 .docker/aio/entrypoint.sh /usr/local/bin/heya-aio-entrypoint
 COPY --chmod=0755 .docker/aio/start-heya.sh /usr/local/bin/heya-aio-start-heya
 COPY --chmod=0755 .docker/aio/start-worker.sh /usr/local/bin/heya-aio-start-worker
+COPY --chmod=0755 .docker/postgres/upgrade-major.sh /usr/local/bin/heya-postgres-upgrade
 COPY .docker/aio/supervisord.conf /etc/supervisor/conf.d/heya-aio.conf
 
 # Both Heya and PostgreSQL persist below the existing /data volume. PostgreSQL
@@ -32,6 +51,7 @@ COPY .docker/aio/supervisord.conf /etc/supervisor/conf.d/heya-aio.conf
 # this convenience image. Use the regular image + external PostgreSQL when the
 # database needs to be reachable by anything else.
 ENV PGDATA=/data/postgres \
+    HEYA_POSTGRES_TARGET_MAJOR=${POSTGRES_MAJOR} \
     POSTGRES_USER=heya \
     POSTGRES_PASSWORD=heya \
     POSTGRES_DB=heya \

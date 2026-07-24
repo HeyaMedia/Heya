@@ -2,9 +2,12 @@ package database_test
 
 import (
 	"context"
+	"errors"
 	"math/big"
 	"os"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database"
@@ -60,6 +63,53 @@ func TestAllHostsLocalSeesPGHOST(t *testing.T) {
 	}
 	if local {
 		t.Errorf("expected non-local via PGHOST, got local (host=%q)", host)
+	}
+}
+
+func TestConnectWithOptionsWaitStopsWithContext(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	var retries atomic.Int32
+	pool, err := database.ConnectWithOptionsWait(
+		ctx,
+		"postgres://heya:heya@127.0.0.1:1/heya?sslmode=disable&connect_timeout=1",
+		database.Options{MaxConns: 1},
+		func(error, time.Duration) {
+			retries.Add(1)
+		},
+	)
+	if pool != nil {
+		pool.Close()
+		t.Fatal("expected no pool for an unavailable database")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context deadline, got %v", err)
+	}
+	if retries.Load() == 0 {
+		t.Fatal("expected at least one connection retry")
+	}
+}
+
+func TestConnectWithOptionsWaitRejectsInvalidURLWithoutRetry(t *testing.T) {
+	var retries atomic.Int32
+	pool, err := database.ConnectWithOptionsWait(
+		context.Background(),
+		"://not-a-postgres-url",
+		database.Options{},
+		func(error, time.Duration) {
+			retries.Add(1)
+		},
+	)
+	if pool != nil {
+		pool.Close()
+		t.Fatal("expected no pool for an invalid URL")
+	}
+	if err == nil {
+		t.Fatal("expected invalid URL error")
+	}
+	if retries.Load() != 0 {
+		t.Fatalf("invalid URL retried %d times; expected fail-fast parsing", retries.Load())
 	}
 }
 

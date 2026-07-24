@@ -34,6 +34,12 @@ var serveCmd = &cobra.Command{
 
 		appCtx, appCancel := context.WithCancel(context.Background())
 		defer appCancel()
+		// service.New may intentionally wait while the database container
+		// performs an offline PostgreSQL major-version upgrade. Keep that wait
+		// cancellable by SIGTERM without tying the successfully-started App
+		// lifetime directly to the signal context.
+		stopStartupSignalBridge := context.AfterFunc(sigCtx, appCancel)
+		defer stopStartupSignalBridge()
 		var appLoops sync.WaitGroup
 		startAppLoop := func(work func()) {
 			appLoops.Add(1)
@@ -82,6 +88,7 @@ var serveCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		stopStartupSignalBridge()
 		app.ConfigureProcessControl(service.ProcessRoleServer, stop)
 		// During partially-completed setup there may not yet be a later App
 		// cleanup defer ordered ahead of network-manager cleanup.

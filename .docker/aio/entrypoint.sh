@@ -9,8 +9,11 @@ fi
 : "${POSTGRES_USER:=heya}"
 : "${POSTGRES_PASSWORD:=heya}"
 : "${POSTGRES_DB:=$POSTGRES_USER}"
+: "${HEYA_POSTGRES_TARGET_MAJOR:=18}"
 
-export PGDATA POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
+export PGDATA POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB HEYA_POSTGRES_TARGET_MAJOR
+
+postgres_bin="/usr/lib/postgresql/${HEYA_POSTGRES_TARGET_MAJOR}/bin"
 
 case "$POSTGRES_USER$POSTGRES_DB" in
     *[!a-zA-Z0-9_-]*)
@@ -30,6 +33,8 @@ esac
 install -d -m 0755 -o postgres -g postgres /run/postgresql
 install -d -m 0700 -o postgres -g postgres "$PGDATA"
 
+/usr/local/bin/heya-postgres-upgrade
+
 if [ ! -s "$PGDATA/PG_VERSION" ]; then
     password_file="$(mktemp)"
     trap 'rm -f "$password_file"' EXIT HUP INT TERM
@@ -37,7 +42,7 @@ if [ ! -s "$PGDATA/PG_VERSION" ]; then
     chown postgres:postgres "$password_file"
     chmod 0600 "$password_file"
 
-    runuser -u postgres -- /usr/lib/postgresql/17/bin/initdb \
+    runuser -u postgres -- "$postgres_bin/initdb" \
         --pgdata="$PGDATA" \
         --username="$POSTGRES_USER" \
         --pwfile="$password_file" \
@@ -70,7 +75,7 @@ fi
 # Finish database creation separately from initdb so an interrupted first boot
 # can safely resume instead of leaving a valid cluster without POSTGRES_DB.
 if [ ! -f "$PGDATA/.heya-aio-initialized" ]; then
-    runuser -u postgres -- /usr/lib/postgresql/17/bin/pg_ctl \
+    runuser -u postgres -- "$postgres_bin/pg_ctl" \
         --pgdata="$PGDATA" \
         --options="-c listen_addresses='' -c unix_socket_directories=/run/postgresql" \
         --wait start
@@ -89,7 +94,7 @@ if [ ! -f "$PGDATA/.heya-aio-initialized" ]; then
             -- "$POSTGRES_DB"
     fi
 
-    runuser -u postgres -- /usr/lib/postgresql/17/bin/pg_ctl \
+    runuser -u postgres -- "$postgres_bin/pg_ctl" \
         --pgdata="$PGDATA" \
         --mode=fast \
         --wait stop

@@ -413,6 +413,10 @@ func (m appRuntimeMode) autoMigrates() bool {
 	return m == appRuntimeWorker
 }
 
+func (m appRuntimeMode) waitsForDatabase() bool {
+	return m == appRuntimeAPI || m == appRuntimeWorker
+}
+
 // New constructs the API runtime. Its River client can insert and manage jobs
 // but owns no queues, worker goroutines, or River maintenance services. Queue
 // execution belongs to NewWorker and NewQueueProcessor.
@@ -459,7 +463,39 @@ func newApp(ctx context.Context, cfg *config.Config, runtimeMode appRuntimeMode)
 	diagnosticCollector := diagnostics.NewCollector()
 	dbOptions := databaseOptionsForRuntime(cfg, runtimeMode)
 	dbOptions.QueryTracer = diagnosticCollector
-	db, err := database.ConnectWithOptions(ctx, cfg.DatabaseURL.Value, dbOptions)
+	var db *pgxpool.Pool
+	var err error
+	if runtimeMode.waitsForDatabase() {
+		var (
+			waitStarted time.Time
+			lastWaitLog time.Time
+		)
+		db, err = database.ConnectWithOptionsWait(
+			ctx,
+			cfg.DatabaseURL.Value,
+			dbOptions,
+			func(connectErr error, retryIn time.Duration) {
+				now := time.Now()
+				if waitStarted.IsZero() {
+					waitStarted = now
+				}
+				if lastWaitLog.IsZero() || now.Sub(lastWaitLog) >= 30*time.Second {
+					log.Warn().
+						Err(connectErr).
+						Dur("retry_in", retryIn).
+						Msg("database unavailable during startup; waiting for PostgreSQL (an automatic major-version upgrade may be in progress)")
+					lastWaitLog = now
+				}
+			},
+		)
+		if err == nil && !waitStarted.IsZero() {
+			log.Info().
+				Dur("waited", time.Since(waitStarted)).
+				Msg("PostgreSQL became available; resuming application startup")
+		}
+	} else {
+		db, err = database.ConnectWithOptions(ctx, cfg.DatabaseURL.Value, dbOptions)
+	}
 	if err != nil {
 		return nil, err
 	}

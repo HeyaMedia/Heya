@@ -304,7 +304,7 @@ every PR:
 | ------------ | ------------------------------------------------------------------------------------------------------------------------- |
 | **frontend** | `bun install --frozen-lockfile` (catches stale `bun.lock`) → `bun run typecheck` → `bun audit` (npm CVE scan)             |
 | **go-static**| `gofmt -l` → `golangci-lint --new-from-rev=origin/main` (PR-diff lint) → `go build ./...` → `sqlc generate` + drift check |
-| **go-test**  | Spins up Postgres 17 service container → applies application + River migrations → `go test -race -count=1 ./...`       |
+| **go-test**  | Spins up Postgres 18 + pgvector → applies application + River migrations → `go test -race -count=1 ./...`              |
 | **security** | `govulncheck ./...` against the Go vuln DB → `osv-scanner` across the whole repo (covers npm + Go via OSV.dev)            |
 
 CI is the tier that can't be bypassed with `--no-verify`. Configure GitHub

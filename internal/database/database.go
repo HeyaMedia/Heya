@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -14,6 +15,8 @@ type Options struct {
 	MinConns    int32
 	QueryTracer pgx.QueryTracer
 }
+
+type RetryCallback func(err error, retryIn time.Duration)
 
 // ResolveHosts returns every host pgx will actually dial for databaseURL, using
 // pgx's own parser. This sees through what a naive net/url parse misses — a
@@ -68,6 +71,62 @@ func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 }
 
 func ConnectWithOptions(ctx context.Context, databaseURL string, opts Options) (*pgxpool.Pool, error) {
+	cfg, err := poolConfig(databaseURL, opts)
+	if err != nil {
+		return nil, err
+	}
+	return connectPool(ctx, cfg)
+}
+
+// ConnectWithOptionsWait is the long-lived runtime startup path. A PostgreSQL
+// major-version upgrade deliberately keeps the server offline, so API and
+// worker processes wait here instead of crash-looping or racing migrations.
+// Parsing is still fail-fast; only connection/readiness failures are retried.
+func ConnectWithOptionsWait(
+	ctx context.Context,
+	databaseURL string,
+	opts Options,
+	onRetry RetryCallback,
+) (*pgxpool.Pool, error) {
+	cfg, err := poolConfig(databaseURL, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	retryDelay := time.Second
+	const maxRetryDelay = 10 * time.Second
+
+	for {
+		pool, connectErr := connectPool(ctx, cfg)
+		if connectErr == nil {
+			return pool, nil
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+
+		if onRetry != nil {
+			onRetry(connectErr, retryDelay)
+		}
+
+		timer := time.NewTimer(retryDelay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+
+		retryDelay *= 2
+		if retryDelay > maxRetryDelay {
+			retryDelay = maxRetryDelay
+		}
+	}
+}
+
+func poolConfig(databaseURL string, opts Options) (*pgxpool.Config, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, err
@@ -100,7 +159,11 @@ func ConnectWithOptions(ctx context.Context, databaseURL string, opts Options) (
 		return nil
 	}
 
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	return cfg, nil
+}
+
+func connectPool(ctx context.Context, cfg *pgxpool.Config) (*pgxpool.Pool, error) {
+	pool, err := pgxpool.NewWithConfig(ctx, cfg.Copy())
 	if err != nil {
 		return nil, err
 	}
