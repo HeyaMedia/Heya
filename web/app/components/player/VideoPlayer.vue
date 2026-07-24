@@ -46,7 +46,12 @@ const nativeSurfaceSelected = computed(() => nativeBackend.value?.activeVideoSur
 // Keep WebKit visually opaque until libmpv has actually swapped a real frame.
 // A load response only proves that the native surface was attached; making the
 // page transparent at that point exposes the desktop during decoder startup.
-const nativeSurfaceActive = computed(() => nativeSurfaceSelected.value && nativeBackend.value?.nativeState.videoSurfaceReady)
+// The same applies at the other end: a terminated session (EOF into Up Next,
+// a stop, a crash) takes the embedded surface with it, so the page has to
+// paint again or the whole window turns into a hole onto the desktop.
+const nativeSurfaceActive = computed(() => nativeSurfaceSelected.value
+  && !!nativeBackend.value?.nativeState.videoSurfaceReady
+  && !nativeBackend.value?.nativeState.terminationReason)
 const VIDEO_OUTPUT_PREFERENCE_KEY = 'heya.video.playback-output'
 function storedVideoOutputPreference(): 'native' | 'browser' {
   if (!import.meta.client) return 'native'
