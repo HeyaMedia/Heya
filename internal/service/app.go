@@ -17,6 +17,7 @@ import (
 	"github.com/karbowiak/heya/internal/database"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/diagnostics"
+	"github.com/karbowiak/heya/internal/discovery"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/generatedwrite"
 	"github.com/karbowiak/heya/internal/imagegen"
@@ -85,9 +86,11 @@ type App struct {
 	networkMu                 sync.RWMutex
 	tailscale                 tailscale.Manager
 	remote                    *remote.Manager
+	discovery                 *discovery.Manager
 	ingress                   *ingress.Manager
 	tailscaleSettingsMu       sync.Mutex
 	remoteSettingsMu          sync.Mutex
+	discoverySettingsMu       sync.Mutex
 	tailscaleTransition       backgroundTransition
 	remoteTransition          backgroundTransition
 	textSearcher              *sonicanalysis.TextSearcher
@@ -855,6 +858,10 @@ func newApp(ctx context.Context, cfg *config.Config, runtimeMode appRuntimeMode)
 		// Same reasoning as tailscale: a borrowed prod DB's remote.enabled
 		// must not map ports / issue certs from a dev checkout.
 		app.LoadRemoteFromDB(ctx)
+		// And a borrowed prod DB's discovery.name must not be republished
+		// from a dev box — two servers claiming one DNS-SD instance name.
+		// Passive dev still advertises, under the local hostname.
+		app.LoadDiscoveryFromDB(ctx)
 	}
 	// Env bootstrap. Order: admin first (libraries.created_by FK requires
 	// at least one user). Failures here are logged and continue — a misformed

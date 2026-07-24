@@ -131,6 +131,21 @@ it to grey out env-locked fields.
 Run while `heya serve` is **not** running — both would race for the
 state dir. See [tailscale.md](./tailscale.md) for the full integration.
 
+## LAN discovery
+
+| Command                             | What it does                                              |
+| ----------------------------------- | --------------------------------------------------------- |
+| `heya discovery status [--json]`    | What this server is advertising (instance, host, TXT)     |
+| `heya discovery enable` / `disable` | Toggle the mDNS announcement                              |
+| `heya discovery name <name>`        | Set the name clients display (omit the argument to restore the hostname) |
+| `heya discovery browse [--wait 6s]` | Browse the network for Heya servers — what a client sees  |
+
+`browse` is the one that matters when something is wrong: it runs a real
+multicast query from *this* machine, so it proves reachability in a way
+`status` (a view from inside the server) cannot. It needs no running server
+and no API token. Aliased as `heya mdns`. See
+[discovery.md](./discovery.md).
+
 ## Local API client
 
 `heya api <method> <path> [body]` issues an authenticated request to the

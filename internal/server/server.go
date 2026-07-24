@@ -108,6 +108,7 @@ func BuildAPI(mux *http.ServeMux, app *service.App, cfg *config.Config, opts ...
 	registerAdminDoctorRoutes(api, app, o.logBuf)
 	registerTailscaleRoutes(api, app, cfg)
 	registerRemoteRoutes(api, app, cfg)
+	registerDiscoveryRoutes(api, app)
 	registerAIRoutes(api, app)
 	registerJellyfinConfigRoutes(api, app)
 	registerSubsonicRoutes(api, app)

@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/karbowiak/heya/internal/discovery"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/ingress"
 	"github.com/karbowiak/heya/internal/logbuf"
@@ -128,6 +129,20 @@ var serveCmd = &cobra.Command{
 		}
 		defer func() { _ = ingressManager.Close() }()
 
+		// LAN discovery (mDNS/DNS-SD). Constructed before the network control
+		// planes so the remote status hook below can reference it, published
+		// after them so the first TXT record carries the remote URL when
+		// there is one. Unlike tailscale/remote this is NOT production-only:
+		// it opens no port and grants no access, and pointing a real
+		// HeyaClient/HeyaTV at the dev backend is the point of having it.
+		discoveryLogger := log.With().Str("subsystem", "discovery").Logger()
+		discoveryMgr := discovery.NewManager(
+			discoveryLogger,
+			func(st discovery.AdvertisementStatus) { app.EventHub().Emit(eventhub.EventDiscovery, st) },
+		)
+		app.SetDiscovery(discoveryMgr)
+		defer func() { _ = discoveryMgr.Close() }()
+
 		// Wire the network control planes into Caddy: Tailscale supplies tsnet
 		// listeners/certificates; remote supplies UPnP, DNS, certificates and
 		// outside-in checks. Both are PRODUCTION-ONLY — under
@@ -158,9 +173,29 @@ var serveCmd = &cobra.Command{
 			}
 
 			remoteLogger := log.With().Str("subsystem", "remote").Logger()
+			// The mDNS TXT record carries the public remote URL so a client
+			// provisioned on the LAN also knows how to reach this server from
+			// outside. That URL only exists once remote access finishes its
+			// background bring-up, so re-publish when it changes — gated on an
+			// actual change, since remote emits on every phase transition.
+			// remote emits from several goroutines (Enable, maintenance loop),
+			// so the last-seen value needs its own lock.
+			var remoteURLMu sync.Mutex
+			var lastRemoteURL string
 			remoteMgr := remote.NewManager(
 				remoteLogger,
-				func(st remote.RemoteStatus) { app.EventHub().Emit(eventhub.EventRemote, st) },
+				func(st remote.RemoteStatus) {
+					app.EventHub().Emit(eventhub.EventRemote, st)
+					remoteURLMu.Lock()
+					changed := st.RemoteURL != lastRemoteURL
+					lastRemoteURL = st.RemoteURL
+					remoteURLMu.Unlock()
+					if changed {
+						if err := app.ApplyDiscoveryRuntime(appCtx); err != nil {
+							discoveryLogger.Debug().Err(err).Msg("could not refresh the mDNS record after a remote URL change")
+						}
+					}
+				},
 				func(ctx context.Context, remoteCfg remote.IngressConfig) error {
 					return ingressManager.SetRemote(ctx, ingress.RemoteConfig{
 						Port: remoteCfg.Port, Names: remoteCfg.Names, DefaultSNI: remoteCfg.DefaultSNI,
@@ -178,6 +213,17 @@ var serveCmd = &cobra.Command{
 				}
 			}
 		}
+		// Publish the LAN advertisement now that the host listener is up (its
+		// TLS flag decides the advertised scheme) and remote access has been
+		// handed its config. A failure here is never fatal: not being findable
+		// on the LAN is a degraded convenience, not a broken server — clients
+		// can still be pointed at the URL by hand.
+		if app.ConfigSnapshot().Discovery.Enabled.Value {
+			if err := app.ApplyDiscoveryRuntime(appCtx); err != nil {
+				discoveryLogger.Warn().Err(err).Msg("LAN discovery could not start; clients must be pointed at this server manually")
+			}
+		}
+
 		// Registered after ingress/network defers so App cancellation + joins run
 		// first on unwind. The fallback above covers every earlier return path.
 		defer app.Close()
@@ -237,6 +283,13 @@ var serveCmd = &cobra.Command{
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			// Withdraw the mDNS record first: the goodbye packets are cheap
+			// and make clients drop this server immediately instead of
+			// offering a dead entry until the TTL expires. Idempotent, so the
+			// deferred Close above is harmless.
+			if err := discoveryMgr.Close(); err != nil {
+				log.Warn().Err(err).Msg("LAN discovery shutdown error")
+			}
 			// The UPnP mapping is left in place on restart; only explicit
 			// Disable unmaps it. The Caddy remote listener is still detached.
 			if rm := app.Remote(); rm != nil {

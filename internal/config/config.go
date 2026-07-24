@@ -81,6 +81,7 @@ type Config struct {
 	TranscodeCacheMaxGB       Field[int]
 	Tailscale                 TailscaleConfig
 	Remote                    RemoteConfig
+	Discovery                 DiscoveryConfig
 	Jellyfin                  JellyfinConfig
 	Subsonic                  SubsonicConfig
 	Cast                      CastConfig
@@ -136,6 +137,35 @@ type CastConfig struct {
 	// containers behind a CNI, receivers on another VLAN, no mDNS
 	// reflector on the router.
 	Devices Field[string]
+}
+
+// DiscoveryConfig gates the mDNS / DNS-SD advertisement (internal/discovery)
+// that lets HeyaClient and HeyaTV find this server on the LAN without a typed
+// URL. Default on: it opens no port and grants no access — it publishes a
+// name, a port and a TXT record on the local multicast group, and every
+// endpoint a client then calls is authenticated exactly as before.
+//
+// Enabled and Name are UI-editable (env > db > default). Port, Host,
+// Addresses and Interfaces are boot-time only — they exist for container and
+// multi-NIC deployments where the process can't infer what the LAN should
+// see, which is not a thing to fiddle with from a settings page.
+type DiscoveryConfig struct {
+	Enabled Field[bool]
+	// Name is the service instance name clients display. Empty resolves to
+	// the system hostname at advertise time.
+	Name Field[string]
+	// Port is the LAN port advertised in the SRV record. 0 = the port this
+	// server actually binds (HEYA_PORT). Set it when a reverse proxy or a
+	// container port map means clients must connect somewhere else.
+	Port Field[int]
+	// Host overrides the advertised hostname; Addresses lists the literal IPs
+	// to publish. Setting either switches to DNS-SD proxy mode — required
+	// when Heya runs in a container/pod whose own IP the LAN cannot route.
+	Host      Field[string]
+	Addresses Field[string]
+	// Interfaces is a comma-separated NIC allowlist. Empty = every
+	// multicast-capable interface.
+	Interfaces Field[string]
 }
 
 type JobsConfig struct {
@@ -226,6 +256,14 @@ func Load() *Config {
 			Enabled: envBool("HEYA_CAST_ENABLED", true),
 			BaseURL: envString("HEYA_CAST_BASE_URL", ""),
 			Devices: envString("HEYA_CAST_DEVICES", ""),
+		},
+		Discovery: DiscoveryConfig{
+			Enabled:    envBool("HEYA_DISCOVERY_ENABLED", true),
+			Name:       envString("HEYA_DISCOVERY_NAME", ""),
+			Port:       envInt("HEYA_DISCOVERY_PORT", 0),
+			Host:       envString("HEYA_DISCOVERY_HOST", ""),
+			Addresses:  envString("HEYA_DISCOVERY_ADDRESSES", ""),
+			Interfaces: envString("HEYA_DISCOVERY_INTERFACES", ""),
 		},
 		Jobs: JobsConfig{
 			Workers: loadJobWorkerFields(),
@@ -437,6 +475,12 @@ var sourceFields = []sourceField{
 	{"remote.dns_token", func(c *Config) SourceEntry { return c.Remote.DNSToken.Entry() }},
 	{"remote.domain", func(c *Config) SourceEntry { return c.Remote.Domain.Entry() }},
 	{"remote.subdomain", func(c *Config) SourceEntry { return c.Remote.Subdomain.Entry() }},
+	{"discovery.enabled", func(c *Config) SourceEntry { return c.Discovery.Enabled.Entry() }},
+	{"discovery.name", func(c *Config) SourceEntry { return c.Discovery.Name.Entry() }},
+	{"discovery.port", func(c *Config) SourceEntry { return c.Discovery.Port.Entry() }},
+	{"discovery.host", func(c *Config) SourceEntry { return c.Discovery.Host.Entry() }},
+	{"discovery.addresses", func(c *Config) SourceEntry { return c.Discovery.Addresses.Entry() }},
+	{"discovery.interfaces", func(c *Config) SourceEntry { return c.Discovery.Interfaces.Entry() }},
 }
 
 // Sources returns the flat key→provenance map for the infra layer. The

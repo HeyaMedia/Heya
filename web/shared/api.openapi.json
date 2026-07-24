@@ -1971,6 +1971,73 @@
         ],
         "type": "object"
       },
+      "AdvertisementStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "addresses": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "advertising": {
+            "type": "boolean"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "instance": {
+            "type": "string"
+          },
+          "interfaces": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "port": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "service_type": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "txt": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "enabled",
+          "advertising",
+          "service_type",
+          "domain"
+        ],
+        "type": "object"
+      },
       "AiCatalogBody": {
         "additionalProperties": false,
         "properties": {
@@ -4571,6 +4638,98 @@
         },
         "required": [
           "items"
+        ],
+        "type": "object"
+      },
+      "DiscoveryConfigPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/DiscoveryConfigPayload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Name clients display; empty uses the system hostname",
+            "maxLength": 63,
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "DiscoveryConfigView": {
+        "additionalProperties": false,
+        "properties": {
+          "addresses": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "interfaces": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "port": {
+            "description": "Advertised port; 0 means the port this server binds",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "enabled",
+          "name",
+          "display_name",
+          "port"
+        ],
+        "type": "object"
+      },
+      "DiscoveryStatusBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/DiscoveryStatusBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "config": {
+            "$ref": "#/components/schemas/DiscoveryConfigView"
+          },
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AdvertisementStatus"
+          }
+        },
+        "required": [
+          "available",
+          "config"
         ],
         "type": "object"
       },
@@ -18934,6 +19093,64 @@
         ],
         "type": "object"
       },
+      "ServerInfoBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ServerInfoBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "api_base_path": {
+            "examples": [
+              "/api"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "Stable per-install id; key saved-server entries on this",
+            "type": "string"
+          },
+          "name": {
+            "description": "Display name for the server",
+            "type": "string"
+          },
+          "product": {
+            "description": "Always 'heya' — lets a client reject a foreign service on the same port",
+            "examples": [
+              "heya"
+            ],
+            "type": "string"
+          },
+          "service_type": {
+            "description": "DNS-SD service type this server advertises",
+            "examples": [
+              "_heya._tcp"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "description": "Build version",
+            "examples": [
+              "dev"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "product",
+          "id",
+          "name",
+          "version",
+          "api_base_path",
+          "service_type"
+        ],
+        "type": "object"
+      },
       "Session": {
         "additionalProperties": false,
         "properties": {
@@ -27261,6 +27478,102 @@
         "summary": "Reachability check challenge echo",
         "tags": [
           "Remote"
+        ]
+      }
+    },
+    "/api/discovery/config": {
+      "put": {
+        "operationId": "set-discovery-config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscoveryConfigPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscoveryStatusBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Apply LAN discovery config",
+        "tags": [
+          "Discovery"
+        ]
+      }
+    },
+    "/api/discovery/status": {
+      "get": {
+        "operationId": "discovery-status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscoveryStatusBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "LAN discovery (mDNS) status",
+        "tags": [
+          "Discovery"
         ]
       }
     },
@@ -45009,6 +45322,44 @@
         "summary": "Natural-language 'find me something like…' search",
         "tags": [
           "Discover"
+        ]
+      }
+    },
+    "/api/server/info": {
+      "get": {
+        "operationId": "server-info",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerInfoBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Public server identity for client discovery",
+        "tags": [
+          "Discovery"
         ]
       }
     },

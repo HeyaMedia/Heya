@@ -45,6 +45,10 @@ const (
 	// internal/remote on every phase/DNS/cert transition. Broadcast:
 	// remote access is server-global state, admin UI only.
 	EventRemote EventType = "remote.status"
+	// LAN discovery (mDNS/DNS-SD advertisement) state — fired by
+	// internal/discovery whenever the advertisement is published, withdrawn
+	// or fails. Server-global state, admin UI only.
+	EventDiscovery EventType = "discovery.status"
 	// Radio ICY metadata — fired by the radio stream proxy each time an
 	// upstream station sends a fresh `StreamTitle=...` block. FE consumers
 	// (Playbar / QueueRow) overlay these on the "Now Playing" card while a
@@ -94,7 +98,8 @@ func VisibilityFor(t EventType) EventVisibility {
 		EventScannerEvent,
 		EventTaskProgress,
 		EventTailscale,
-		EventRemote:
+		EventRemote,
+		EventDiscovery:
 		return VisibilityAdmin
 	case EventMediaWatched,
 		EventRadioICY,

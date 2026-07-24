@@ -16,6 +16,7 @@ For deeper context, see `docs/`:
 | [docs/eye.md](docs/eye.md)                   | Heya Eye — headless-Chrome UI debugger            |
 | [docs/jellyfin.md](docs/jellyfin.md)         | Jellyfin-compatible API — arch, coverage, testing |
 | [docs/remote-access.md](docs/remote-access.md) | Direct remote access — UPnP, ACME DNS-01 certs, heya.media reachability probe |
+| [docs/discovery.md](docs/discovery.md)       | LAN discovery — mDNS/DNS-SD advertisement + the client TXT contract |
 | [docs/subsonic.md](docs/subsonic.md)         | Subsonic/OpenSubsonic-compatible API — auth story, coverage, client setup |
 | [docs/cli.md](docs/cli.md)                   | Full CLI reference                                |
 | [docs/tailscale.md](docs/tailscale.md)       | tsnet integration                                 |

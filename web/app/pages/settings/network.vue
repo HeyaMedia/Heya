@@ -19,6 +19,12 @@ const {
   subscribeToEvents: subscribeRemote,
 } = useRemoteAccess()
 
+const {
+  available: discoveryAvailable, cfg: discoveryCfg, status: discoveryStatus, message: discoveryMessage,
+  refresh: refreshDiscovery, saveConfig: saveDiscovery,
+  subscribeToEvents: subscribeDiscovery,
+} = useDiscovery()
+
 const networkData = useQuery(adminNetworkStatusQuery())
 const network = computed(() => networkData.data.value ?? null)
 const listeners = computed(() => network.value?.ingress.listeners ?? [])
@@ -39,8 +45,12 @@ const rawError = ref('')
 const { flash } = useFlash()
 const { toast } = useToast()
 
+const discoverySaving = ref(false)
+const discoveryNameDraft = ref('')
+
 let unsubscribe: (() => void) | null = null
 let unsubscribeRemote: (() => void) | null = null
+let unsubscribeDiscovery: (() => void) | null = null
 
 async function loadNetwork() {
   try { await networkData.refetch() } catch {}
@@ -306,6 +316,62 @@ const remoteRows = computed(() => {
   ]
 })
 
+const discoveryBadge = computed((): { state: 'ok' | 'warn' | 'error' | 'idle', label: string } => {
+  const s = discoveryStatus.value
+  if (!s) return { state: 'idle', label: 'unknown' }
+  if (s.last_error) return { state: 'error', label: 'failed' }
+  if (!s.advertising) return { state: 'warn', label: 'not advertising' }
+  return { state: 'ok', label: 'advertising' }
+})
+
+// A host with VM bridges and tunnels routinely has thirty interfaces, and
+// dumping all of them buries the row. The names only carry information when
+// someone narrowed the list on purpose (HEYA_DISCOVERY_INTERFACES).
+function describeDiscoveryInterfaces(names: string[]) {
+  if (!names.length) return 'none'
+  if (names.length <= 4) return names.join(', ')
+  return `${names.length} interfaces — every multicast-capable one`
+}
+
+const discoveryRows = computed(() => {
+  const s = discoveryStatus.value
+  if (!s?.advertising) return []
+  // The TXT record is what a client actually parses, so show it verbatim
+  // rather than a prettied summary — it is the thing you compare against
+  // when a client picks the wrong URL.
+  return [
+    { key: 'Service', value: `${s.instance}.${s.service_type}.${(s.domain ?? '').replace(/\.$/, '')}`, mono: true, copy: true },
+    { key: 'Announced as', value: s.port ? `${s.hostname}:${s.port}` : (s.hostname ?? ''), mono: true, copy: true },
+    { key: 'Interfaces', value: describeDiscoveryInterfaces(s.interfaces ?? []) },
+    { key: 'TXT record', value: (s.txt ?? []).join('  '), mono: true, copy: true },
+    { key: 'Since', value: s.started_at ?? '' },
+  ]
+})
+
+async function onDiscoveryToggle(on: boolean) {
+  discoverySaving.value = true
+  try {
+    await saveDiscovery({ enabled: on })
+    flash.value = { kind: 'ok', text: on ? 'Heya is announcing itself on this network.' : 'LAN discovery disabled.' }
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.message ?? 'Toggle failed.' }
+  } finally { discoverySaving.value = false }
+}
+
+async function saveDiscoveryName() {
+  const next = discoveryNameDraft.value.trim()
+  if (next === (discoveryCfg.value?.name ?? '')) return
+  discoverySaving.value = true
+  try {
+    await saveDiscovery({ name: next })
+    discoveryNameDraft.value = discoveryCfg.value?.name ?? ''
+    flash.value = { kind: 'ok', text: 'Name saved — re-announced to the network.' }
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.message ?? 'Save failed.' }
+    discoveryNameDraft.value = discoveryCfg.value?.name ?? ''
+  } finally { discoverySaving.value = false }
+}
+
 const dnsDirty = computed(() => {
   const c = remoteCfg.value
   if (!c) return false
@@ -396,16 +462,19 @@ function listenerIcon(kind: string): string {
 }
 
 onMounted(async () => {
-  await Promise.all([refreshTS(), refreshRemote(), loadNetwork(), ensureSources()])
+  await Promise.all([refreshTS(), refreshRemote(), refreshDiscovery(), loadNetwork(), ensureSources()])
   hostnameDraft.value = cfg.value?.hostname ?? 'heya'
+  discoveryNameDraft.value = discoveryCfg.value?.name ?? ''
   seedRemoteDrafts()
   unsubscribe = subscribeToEvents()
   unsubscribeRemote = subscribeRemote()
+  unsubscribeDiscovery = subscribeDiscovery()
   networkTimer = setInterval(loadNetwork, 5000)
 })
 onBeforeUnmount(() => {
   unsubscribe?.()
   unsubscribeRemote?.()
+  unsubscribeDiscovery?.()
   if (networkTimer) clearInterval(networkTimer)
 })
 
@@ -517,6 +586,47 @@ watch(cfg, (next) => {
         </summary>
         <div class="interface-table"><KVTable :rows="interfaceRows" /></div>
       </details>
+    </SettingsSection>
+
+    <SettingsSection title="LAN discovery" icon="radio"
+      :description="discoveryCfg?.enabled ? 'Heya announces itself over mDNS so HeyaClient and HeyaTV find this server on the network without a typed URL.' : 'Off — clients on this network must be pointed at Heya’s address by hand.'"
+      :lockedBy="isLocked('discovery.enabled') ? lockTooltip('discovery.enabled') : undefined">
+      <template #actions>
+        <StatusBadge v-if="discoveryAvailable && discoveryCfg?.enabled" :state="discoveryBadge.state">{{ discoveryBadge.label }}</StatusBadge>
+        <AppSwitch
+          :model-value="discoveryCfg?.enabled ?? false"
+          size="md"
+          aria-label="Enable LAN discovery"
+          :disabled="discoverySaving || !discoveryAvailable || isLocked('discovery.enabled')"
+          @update:model-value="onDiscoveryToggle"
+        />
+      </template>
+
+      <p v-if="!discoveryAvailable" class="hint">{{ discoveryMessage || 'LAN discovery is unavailable in this run mode.' }}</p>
+
+      <template v-else-if="discoveryCfg?.enabled">
+        <div v-if="discoveryStatus?.last_error" class="remote-detail error">{{ discoveryStatus.last_error }}</div>
+        <p v-else-if="!discoveryStatus?.advertising" class="hint">
+          Enabled, but nothing is on the wire yet — the announcement is published by the server process at startup.
+        </p>
+
+        <KVTable v-if="discoveryStatus?.advertising" :rows="discoveryRows" />
+
+        <SettingsField label="Name"
+          description="What clients show in their server list. Leave empty to use this machine’s hostname. Must be unique on the network."
+          :lockedBy="isLocked('discovery.name') ? lockTooltip('discovery.name') : undefined"
+          v-slot="{ fieldId }">
+          <input :id="fieldId" v-model="discoveryNameDraft" class="sv2-input" maxlength="63"
+            :placeholder="discoveryCfg?.display_name || 'hostname'"
+            :disabled="discoverySaving || isLocked('discovery.name')"
+            @blur="saveDiscoveryName" @keyup.enter="saveDiscoveryName" />
+        </SettingsField>
+
+        <p class="hint">
+          mDNS is confined to this network segment: it does not cross subnets, most VPNs, or a container without
+          host networking. Verify what a client sees with <code class="mono">heya discovery browse</code>.
+        </p>
+      </template>
     </SettingsSection>
 
     <SettingsSection title="Remote access" icon="globe"

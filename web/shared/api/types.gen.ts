@@ -597,6 +597,21 @@ export type AdminWorkersBody = {
     status: WorkerRuntimeStatus;
 };
 
+export type AdvertisementStatus = {
+    addresses?: Array<string> | null;
+    advertising: boolean;
+    domain: string;
+    enabled: boolean;
+    hostname?: string;
+    instance?: string;
+    interfaces?: Array<string> | null;
+    last_error?: string;
+    port?: number;
+    service_type: string;
+    started_at?: string;
+    txt?: Array<string> | null;
+};
+
 export type AiCatalogBody = {
     /**
      * A URL to the JSON Schema for this object.
@@ -1393,6 +1408,42 @@ export type DevicesBody = {
      */
     readonly $schema?: string;
     items: Array<Device> | null;
+};
+
+export type DiscoveryConfigPayload = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    enabled: boolean;
+    /**
+     * Name clients display; empty uses the system hostname
+     */
+    name?: string;
+};
+
+export type DiscoveryConfigView = {
+    addresses?: string;
+    display_name: string;
+    enabled: boolean;
+    host?: string;
+    interfaces?: string;
+    name: string;
+    /**
+     * Advertised port; 0 means the port this server binds
+     */
+    port: number;
+};
+
+export type DiscoveryStatusBody = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    available: boolean;
+    config: DiscoveryConfigView;
+    message?: string;
+    status?: AdvertisementStatus;
 };
 
 export type DoctorAppSection = {
@@ -5323,6 +5374,34 @@ export type SemanticSearchResult = {
     ml_ready: boolean;
 };
 
+export type ServerInfoBody = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    api_base_path: string;
+    /**
+     * Stable per-install id; key saved-server entries on this
+     */
+    id: string;
+    /**
+     * Display name for the server
+     */
+    name: string;
+    /**
+     * Always 'heya' — lets a client reject a foreign service on the same port
+     */
+    product: string;
+    /**
+     * DNS-SD service type this server advertises
+     */
+    service_type: string;
+    /**
+     * Build version
+     */
+    version: string;
+};
+
 export type Session = {
     album_title?: string;
     artist_name?: string;
@@ -7297,6 +7376,21 @@ export type DevicesBodyWritable = {
     items: Array<Device> | null;
 };
 
+export type DiscoveryConfigPayloadWritable = {
+    enabled: boolean;
+    /**
+     * Name clients display; empty uses the system hostname
+     */
+    name?: string;
+};
+
+export type DiscoveryStatusBodyWritable = {
+    available: boolean;
+    config: DiscoveryConfigView;
+    message?: string;
+    status?: AdvertisementStatus;
+};
+
 export type DoctorReportWritable = {
     app: DoctorAppSection;
     config: DoctorConfigSection;
@@ -8420,6 +8514,30 @@ export type SecurityStatusWritable = {
 export type SemanticSearchResultWritable = {
     items: Array<ForYouItem> | null;
     ml_ready: boolean;
+};
+
+export type ServerInfoBodyWritable = {
+    api_base_path: string;
+    /**
+     * Stable per-install id; key saved-server entries on this
+     */
+    id: string;
+    /**
+     * Display name for the server
+     */
+    name: string;
+    /**
+     * Always 'heya' — lets a client reject a foreign service on the same port
+     */
+    product: string;
+    /**
+     * DNS-SD service type this server advertises
+     */
+    service_type: string;
+    /**
+     * Build version
+     */
+    version: string;
 };
 
 export type SessionCommandInputWritable = {
@@ -11042,6 +11160,56 @@ export type ConnectivityProbeResponses = {
 };
 
 export type ConnectivityProbeResponse = ConnectivityProbeResponses[keyof ConnectivityProbeResponses];
+
+export type SetDiscoveryConfigData = {
+    body: DiscoveryConfigPayloadWritable;
+    path?: never;
+    query?: never;
+    url: '/api/discovery/config';
+};
+
+export type SetDiscoveryConfigErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type SetDiscoveryConfigError = SetDiscoveryConfigErrors[keyof SetDiscoveryConfigErrors];
+
+export type SetDiscoveryConfigResponses = {
+    /**
+     * OK
+     */
+    200: DiscoveryStatusBody;
+};
+
+export type SetDiscoveryConfigResponse = SetDiscoveryConfigResponses[keyof SetDiscoveryConfigResponses];
+
+export type DiscoveryStatusData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/discovery/status';
+};
+
+export type DiscoveryStatusErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type DiscoveryStatusError = DiscoveryStatusErrors[keyof DiscoveryStatusErrors];
+
+export type DiscoveryStatusResponses = {
+    /**
+     * OK
+     */
+    200: DiscoveryStatusBody;
+};
+
+export type DiscoveryStatusResponse = DiscoveryStatusResponses[keyof DiscoveryStatusResponses];
 
 export type ApiDocsData = {
     body?: never;
@@ -19353,6 +19521,31 @@ export type SemanticSearchResponses = {
 };
 
 export type SemanticSearchResponse = SemanticSearchResponses[keyof SemanticSearchResponses];
+
+export type ServerInfoData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/server/info';
+};
+
+export type ServerInfoErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ServerInfoError = ServerInfoErrors[keyof ServerInfoErrors];
+
+export type ServerInfoResponses = {
+    /**
+     * OK
+     */
+    200: ServerInfoBody;
+};
+
+export type ServerInfoResponse = ServerInfoResponses[keyof ServerInfoResponses];
 
 export type ListActiveSessionsData = {
     body?: never;
