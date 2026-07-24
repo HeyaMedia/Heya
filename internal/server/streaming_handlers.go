@@ -264,7 +264,14 @@ func writeHLSSegmentError(w http.ResponseWriter, err error) {
 	case errors.Is(err, transcoder.ErrInvalidSegment):
 		writeError(w, http.StatusNotFound, "segment not found")
 	case errors.Is(err, transcoder.ErrTranscodeSessionClosed):
-		writeError(w, http.StatusGone, "transcode session closed")
+		// Transient, not terminal: the session was evicted or the server is
+		// shutting down, and the very next request rebuilds it from this URL.
+		// It must not be a 4xx — hls.js's retryForHttpStatus refuses to retry
+		// any 4xx, and the Jellyfin clients that matter (Infuse, Findroid, JMP)
+		// behave the same way, so a 410 here reads as "this stream is over" and
+		// dead-ends playback across every client at once.
+		w.Header().Set("Retry-After", "2")
+		writeError(w, http.StatusServiceUnavailable, "transcode session restarting")
 	case errors.Is(err, transcoder.ErrTranscodeFailed):
 		w.Header().Set("Retry-After", "2")
 		writeError(w, http.StatusServiceUnavailable, "segment transcode failed")

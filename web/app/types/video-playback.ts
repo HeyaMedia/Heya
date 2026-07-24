@@ -14,6 +14,13 @@ export interface VideoPlaybackState {
   fullscreen: boolean
   error: string | null
 
+  // True while the backend is nursing a stream back after a transient load
+  // failure (server restart, dropped tunnel, evicted transcode session).
+  // Distinct from `error`: playback is expected to resume on its own, so the
+  // UI should show progress rather than a dead-end. Backends that cannot
+  // recover in-place simply never set it.
+  reconnecting?: boolean
+
   // Monotonic counter for user-visible seeks. Consumers can react to seeks
   // without treating every position update as a seek.
   seekRevision: number

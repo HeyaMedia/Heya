@@ -430,8 +430,12 @@ func TestSessionManagerLeaseProtectsLiveOutputWithEmptySnapshot(t *testing.T) {
 	assert.FileExists(t, filepath.Join(session.OutputDir, "seg_0.m4s"))
 
 	manager.Close()
-	_, err := os.Stat(session.OutputDir)
-	assert.True(t, os.IsNotExist(err), "Close stops/removes the session before releasing its lease")
+	// Shutdown keeps the segments: the player that owns this session is still
+	// watching and will ask for the next one as soon as the server is back, at
+	// which point the rebuilt session adopts what is already here. The lease is
+	// still released, so the LRU cap can reclaim it if nobody ever returns.
+	assert.FileExists(t, filepath.Join(session.OutputDir, "seg_0.m4s"),
+		"Close retains a live session's segments for restart resume")
 	cache.mu.RLock()
 	assert.Empty(t, cache.pins)
 	cache.mu.RUnlock()

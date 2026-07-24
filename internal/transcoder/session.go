@@ -907,7 +907,11 @@ func (m *SessionManager) Close() {
 		// ownership fully closed.
 		m.createWG.Wait()
 
-		m.disposeDetachedSessions(sessions)
+		// Keep the segments. Everything still in the map at shutdown belongs to
+		// a player that is, as far as this process knows, still watching — and
+		// it will come back asking for the next segment as soon as the server
+		// is listening again.
+		m.disposeSessions(sessions, false)
 	})
 }
 
@@ -1080,6 +1084,15 @@ func (m *SessionManager) createSession(ctx context.Context, fileID int64, key, f
 	lease, reserveErr := m.cache.reserveSegmentDir(key)
 	session.OutputDir = lease.Path()
 	session.cacheLease = lease
+	// Adopt (or discard) whatever a previous process left behind, before the
+	// session is reachable. This is the restart-survival path: a player whose
+	// server bounced re-requests a segment, that request rebuilds the session,
+	// and adoption hands it back the segments it already had. It runs under
+	// m.mu deliberately — the alternative is a window where a head can spawn
+	// against a directory that is about to be purged.
+	adopted := session.adoptCachedSegments(
+		resumeFingerprint(filePath, segExt, ends, opts),
+	)
 	m.sessions[key] = session
 	m.mu.Unlock()
 
@@ -1095,6 +1108,7 @@ func (m *SessionManager) createSession(ctx context.Context, fileID int64, key, f
 		Str("key", key).
 		Str("file", vfs.RedactPath(filePath)).
 		Int("total_segs", totalSegs).
+		Int("adopted_segs", adopted).
 		Float64("duration", duration).
 		Bool("fmp4", opts.UseFMP4).
 		Bool("keyframes", kf != nil).
@@ -1108,6 +1122,25 @@ func (m *SessionManager) createSession(ctx context.Context, fileID int64, key, f
 // atomic with createSession publication: a client can retry an evicted sid
 // while Kill waits, recreating the exact key-derived cache path.
 func (m *SessionManager) disposeDetachedSessions(detached []*TranscodeSession) {
+	m.disposeSessions(detached, true)
+}
+
+// disposeSessions stops each session's encoder and releases its cache lease.
+// removeOutput distinguishes the two reasons a session ends:
+//
+//   - The session is genuinely over — evicted by another viewer, or idle past
+//     the cleanup threshold. Nobody will ask for those segments again, so the
+//     directory is dead weight and gets removed.
+//
+//   - The process is going down while a player is still watching. Those
+//     segments are exactly what the player will ask for the moment the server
+//     comes back, and the sidecar manifest next to them lets the rebuilt
+//     session prove they are still valid. Deleting them here is what used to
+//     make a restart cost a full re-encode from the player's position.
+//
+// The lease is released either way: retained output has to stay reclaimable
+// by the LRU cap, or an unlucky crash loop would pin the cache forever.
+func (m *SessionManager) disposeSessions(detached []*TranscodeSession, removeOutput bool) {
 	for _, session := range detached {
 		session.Kill()
 	}
@@ -1117,9 +1150,11 @@ func (m *SessionManager) disposeDetachedSessions(detached []*TranscodeSession) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, session := range detached {
-		current, recreated := m.sessions[session.Key]
-		if !recreated || current.OutputDir != session.OutputDir {
-			_ = os.RemoveAll(session.OutputDir)
+		if removeOutput {
+			current, recreated := m.sessions[session.Key]
+			if !recreated || current.OutputDir != session.OutputDir {
+				_ = os.RemoveAll(session.OutputDir)
+			}
 		}
 		// A same-key replacement has its own incremented cache pin, so releasing
 		// this exact old lease cannot expose the replacement to LRU eviction.

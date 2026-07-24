@@ -2,6 +2,50 @@ import type HlsType from 'hls.js'
 import type { VideoPlaybackDiagnostics, VideoPlaybackState } from '~/types/video-playback'
 import { isBearerAuthToken } from '~/composables/useAuth'
 
+// HTTP outcomes that mean "the server is bouncing or forgot this session",
+// not "this stream is dead". hls.js refuses to retry any of these on its own:
+// its built-in retryForHttpStatus() skips every 4xx *and* status 0 (an XHR
+// that never got a response — exactly what a restarting API looks like while
+// the browser is still online). Heya's segment endpoint rebuilds a missing
+// session from the segment URL alone, so the retry is what brings the stream
+// back; without it a 10-second restart permanently dead-ends playback.
+const RESUMABLE_LOAD_STATUS = new Set([0, 404, 410, 500, 502, 503, 504])
+
+// How long we keep nursing a broken load before surfacing an error. The
+// backoff below tops out at 15s, so eight attempts ride out roughly two
+// minutes of downtime — comfortably longer than an air rebuild or a pod roll.
+const MAX_RECONNECT_ATTEMPTS = 8
+
+function retryThroughRestart(
+  retryConfig: { maxNumRetry: number } | null | undefined,
+  retryCount: number,
+  isTimeout: boolean,
+  loaderResponse: { code?: number } | undefined,
+  hlsDefault: boolean,
+): boolean {
+  if (hlsDefault) return true
+  if (!retryConfig || retryCount >= retryConfig.maxNumRetry) return false
+  return isTimeout || RESUMABLE_LOAD_STATUS.has(loaderResponse?.code ?? 0)
+}
+
+// Load policies that survive a server restart. Values mirror hls.js's own
+// defaults apart from a bigger error budget and the shouldRetry override.
+function resumableLoadPolicy(maxTimeToFirstByteMs: number, maxLoadTimeMs: number, maxNumRetry: number) {
+  return {
+    default: {
+      maxTimeToFirstByteMs,
+      maxLoadTimeMs,
+      timeoutRetry: { maxNumRetry: 4, retryDelayMs: 0, maxRetryDelayMs: 0 },
+      errorRetry: {
+        maxNumRetry,
+        retryDelayMs: 1000,
+        maxRetryDelayMs: 15000,
+        shouldRetry: retryThroughRestart,
+      },
+    },
+  }
+}
+
 export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
   let hls: HlsType | null = null
   let sourceGeneration = 0
@@ -19,6 +63,7 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
     muted: false,
     fullscreen: false,
     error: null,
+    reconnecting: false,
     seekRevision: 0,
   })
 
@@ -80,9 +125,55 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
     const v = videoRef.value
     const e = v?.error
     if (!e) return
+    // A reconnect in flight owns the error surface. MSE routinely reports a
+    // network error on the element the moment hls.js stops feeding it, and
+    // letting that win would swap the spinner for a dead-end error card while
+    // we are already recovering.
+    if (state.reconnecting) return
     const codes: Record<number, string> = { 1: 'Aborted', 2: 'Network error', 3: 'Decode error', 4: 'Source not supported' }
     state.error = `${codes[e.code] || 'Error'}${e.message ? ` — ${e.message}` : ''}`
   })
+
+  // Reconnect bookkeeping. hls.js gives up permanently once a load error is
+  // marked fatal, so recovery has to be driven from here: startLoad() rebuilds
+  // the pipeline from the current position, and the server rebuilds the
+  // transcode session from the segment URL it receives.
+  let reconnectAttempt = 0
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let mediaRecoveryAttempt = 0
+
+  function cancelReconnect() {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    reconnectAttempt = 0
+    mediaRecoveryAttempt = 0
+    state.reconnecting = false
+  }
+
+  function scheduleReconnect(generation: number, detail: string) {
+    if (reconnectTimer) return
+    if (reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
+      state.reconnecting = false
+      state.error = `HLS: ${detail}`
+      return
+    }
+    const delay = Math.min(1000 * 2 ** reconnectAttempt, 15000)
+    reconnectAttempt++
+    state.reconnecting = true
+    state.buffering = true
+    state.error = null
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null
+      if (generation !== sourceGeneration || !hls) return
+      // Resume where the element actually sits. -1 lets hls.js pick (a fresh
+      // load that never reached playback has no meaningful position yet).
+      const resumeAt = videoRef.value?.currentTime ?? 0
+      hls.startLoad(resumeAt > 0 ? resumeAt : -1)
+      videoRef.value?.play().catch(() => {})
+    }, delay)
+  }
 
   async function loadSource(src: string, token?: string) {
     const generation = ++sourceGeneration
@@ -129,11 +220,12 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
       hls = new Hls({
         maxBufferLength: 30,
         maxMaxBufferLength: 60,
-        fragLoadingMaxRetry: 10,
-        fragLoadingRetryDelay: 1500,
-        fragLoadingMaxRetryTimeout: 30000,
-        levelLoadingMaxRetry: 6,
-        levelLoadingRetryDelay: 1000,
+        // Explicit policies rather than the deprecated *LoadingMaxRetry knobs:
+        // only the policy form accepts shouldRetry, and shouldRetry is the
+        // whole point — see RESUMABLE_LOAD_STATUS.
+        fragLoadPolicy: resumableLoadPolicy(10000, 120000, 10),
+        playlistLoadPolicy: resumableLoadPolicy(10000, 20000, 8),
+        manifestLoadPolicy: resumableLoadPolicy(Infinity, 20000, 8),
         startPosition: 0,
         xhrSetup(xhr: XMLHttpRequest, url: string) {
           if (isBearerAuthToken(token)) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
@@ -145,10 +237,26 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return
         if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-          hls!.recoverMediaError()
-        } else {
-          state.error = `HLS: ${data.type} - ${data.details}`
+          // recoverMediaError alone loops forever on a codec the decoder will
+          // never accept. Escalate: plain recover, then an audio-codec swap,
+          // then admit defeat.
+          mediaRecoveryAttempt++
+          if (mediaRecoveryAttempt === 1) {
+            hls!.recoverMediaError()
+          } else if (mediaRecoveryAttempt === 2) {
+            hls!.swapAudioCodec()
+            hls!.recoverMediaError()
+          } else {
+            state.reconnecting = false
+            state.error = `HLS: ${data.type} - ${data.details}`
+          }
+          return
         }
+        // Everything else that reaches "fatal" is a load that ran out of
+        // retries — a restarting server, a dropped tunnel, an evicted session.
+        // None of those are terminal for the stream itself, so keep nursing it
+        // instead of tearing the player down and making the user hit play again.
+        scheduleReconnect(generation, `${data.type} - ${data.details}`)
       })
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         videoRef.value?.play().catch(() => {})
@@ -157,6 +265,10 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
       // Bandwidth telemetry. hls.js fires FRAG_LOADED for every segment with
       // detailed timing & size info; we EWMA it to smooth over bursts.
       hls.on(Hls.Events.FRAG_LOADED, (_event, data) => {
+        // A segment arrived, so whatever we were reconnecting through is over.
+        // Reset the budget too: the next outage gets a full set of attempts.
+        if (state.reconnecting || reconnectAttempt > 0) cancelReconnect()
+
         const bytes = data.frag?.stats?.loaded ?? 0
         const loading = data.frag?.stats?.loading
         const ms = loading ? Math.max(1, loading.end - loading.start) : 0
@@ -182,6 +294,7 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
   }
 
   function clearHLS() {
+    cancelReconnect()
     if (hls) { hls.destroy(); hls = null }
   }
 

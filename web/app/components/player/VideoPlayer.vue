@@ -1584,6 +1584,15 @@ onUnmounted(() => {
     <template v-else>
       <video ref="videoEl" :inert="resumeOpen" @click="onVideoClick" @dblclick.stop.prevent="onVideoDoubleClick" />
 
+      <!-- The stream dropped but the backend is nursing it back (server
+           restart, dropped tunnel). Deliberately an overlay rather than the
+           error card above: playback resumes on its own, and swapping the
+           video out would throw away the buffer we are about to reuse. -->
+      <div v-if="state.reconnecting" class="reconnect-banner" role="status" aria-live="polite">
+        <div class="spinner sm" aria-hidden="true" />
+        <span>Reconnecting to the server…</span>
+      </div>
+
       <div v-if="videoCastMode" class="cast-remote-overlay" aria-live="polite">
         <Icon :name="castConnecting ? 'loading' : 'cast'" :size="34" :class="{ 'cast-remote-spin': castConnecting }" />
         <div class="cast-remote-title">{{ remoteEnded ? 'Playback finished' : `Playing on ${cast.deviceName || 'Chromecast'}` }}</div>
@@ -1974,6 +1983,27 @@ video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: con
 .cast-remote-sub { max-width: min(70vw, 640px); color: var(--fg-3); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .p-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: rgba(255,255,255,0.5); font-size: 14px; gap: 8px; z-index: 20; }
 .spinner { width: 28px; height: 28px; border: 2px solid rgba(255,255,255,0.1); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
+.spinner.sm { width: 14px; height: 14px; border-width: 2px; }
+
+/* Reconnect banner — sits above the video without replacing it, so the
+   buffered frame stays on screen while the stream comes back. */
+.reconnect-banner {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid rgb(var(--ink) / 0.14);
+  background: rgb(var(--ink) / 0.62);
+  color: var(--fg-1);
+  font-size: 13px;
+  pointer-events: none;
+}
 
 /* Resume overlay — full-surface dimmer with a centered card. Mounts only
    while resumeOpen is true; the video element is paused while it's up. */
