@@ -85,6 +85,12 @@ type musicTasteProfile struct {
 // a ranked artist list. Explicit reactions dominate in musicAffinityCTE;
 // completed listens can only add a small bounded amount.
 func (a *App) musicTasteProfile(ctx context.Context, userID int64, artistLimit int) (musicTasteProfile, error) {
+	// Refresh the materialized play affinity before any musicAffinityCTE query
+	// below (tasteMixSeeds and both centroid scans read it). Covers the library
+	// radio / For You station path as well as the mixes slate.
+	if err := a.ensureUserPlayAffinity(ctx, userID); err != nil {
+		return musicTasteProfile{}, fmt.Errorf("play affinity: %w", err)
+	}
 	seeds, err := a.tasteMixSeeds(ctx, userID, artistLimit)
 	if err != nil {
 		return musicTasteProfile{}, err

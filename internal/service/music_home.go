@@ -79,6 +79,13 @@ func (a *App) GenerateMixesForUser(ctx context.Context, userID int64, maxMixes, 
 		tracksPerMix = 30
 	}
 
+	// Materialize the recency-decayed play affinity once up front; every
+	// archetype generator below reads it through musicAffinityCTE instead of
+	// rescanning play_events ~11 times per slate.
+	if err := a.ensureUserPlayAffinity(ctx, userID); err != nil {
+		log.Warn().Err(err).Int64("user_id", userID).Msg("play-affinity refresh failed — mixes may be thin")
+	}
+
 	// The shared recommendation core produces the non-artist archetypes first:
 	// For You, discovery, rediscovery, and deep cuts. These blend sonic KNN,
 	// explicit taste, completion signals, provider charts, and the external

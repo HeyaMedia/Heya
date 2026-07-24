@@ -19,10 +19,12 @@ func recommendationCandidate(trackID, artistID int64, title string, score float6
 }
 
 func TestMusicAffinityIgnoresSkipsAndKeepsCompletionWeak(t *testing.T) {
-	if strings.Contains(musicAffinityCTE, "listened_seconds") {
+	// The play-decay computation moved into the materialized cache refresh
+	// (userPlayAffinityRefreshSQL); the invariants still hold there.
+	if strings.Contains(userPlayAffinityRefreshSQL, "listened_seconds") {
 		t.Fatal("affinity must not infer taste from skip/listen position")
 	}
-	if !strings.Contains(musicAffinityCTE, "pe.completed") || !strings.Contains(musicAffinityCTE, "LEAST(2.0") {
+	if !strings.Contains(userPlayAffinityRefreshSQL, "pe.completed") || !strings.Contains(userPlayAffinityRefreshSQL, "LEAST(2.0") {
 		t.Fatal("completed plays must be the only bounded implicit signal")
 	}
 	for _, table := range []string{"user_track_ratings", "user_album_ratings", "user_artist_ratings"} {

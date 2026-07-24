@@ -86,30 +86,34 @@ func genreMembershipSQL(paramIndex int) string {
 // re-deriving it from the per-genre rows (a 3-genre track would otherwise
 // be triple-counted).
 func (a *App) userGenreAffinity(ctx context.Context, userID int64) ([]userGenreAffinity, int, error) {
+	// track_genre unnests genres only for the user's affinity-scored tracks
+	// (a few hundred) rather than the whole ~416k-track library first and then
+	// intersecting — the library-wide unnest was ~3s of the cold mixes load.
 	rows, err := a.db.Query(ctx, `WITH `+musicAffinityCTE+`,
+		scored AS (
+			SELECT track_id FROM aff WHERE score > 0
+		),
 		track_genre AS (
-			SELECT t.id AS track_id, genre_name::text AS genre, 1.0::float8 AS weight
-			FROM tracks t
+			SELECT s.track_id, genre_name::text AS genre, 1.0::float8 AS weight
+			FROM scored s
+			JOIN tracks t ON t.id = s.track_id
 			JOIN albums al ON al.id = t.album_id
 			CROSS JOIN LATERAL unnest(al.genres) AS genre_name
 			WHERE genre_name <> ''
 			UNION ALL
-			SELECT tf.track_id, (elem->>'name')::text AS genre, COALESCE((elem->>'score')::float8, 0) AS weight
-			FROM track_facets tf
+			SELECT s.track_id, (elem->>'name')::text AS genre, COALESCE((elem->>'score')::float8, 0) AS weight
+			FROM scored s
+			JOIN track_facets tf ON tf.track_id = s.track_id
 			CROSS JOIN LATERAL jsonb_array_elements(COALESCE(tf.top_genres, '[]'::jsonb)) AS elem
 			WHERE COALESCE((elem->>'name')::text, '') <> ''
 		),
 		genre_track_count AS (
-			SELECT count(DISTINCT aff.track_id) AS n
-			FROM aff
-			JOIN track_genre tg ON tg.track_id = aff.track_id
-			WHERE aff.score > 0
+			SELECT count(DISTINCT track_id) AS n FROM track_genre
 		)
 		SELECT tg.genre, SUM(tg.weight * aff.score)::float8 AS score,
 		       (SELECT n FROM genre_track_count) AS total_tracks
-		FROM aff
-		JOIN track_genre tg ON tg.track_id = aff.track_id
-		WHERE aff.score > 0
+		FROM track_genre tg
+		JOIN aff ON aff.track_id = tg.track_id
 		GROUP BY tg.genre
 		ORDER BY score DESC`, userID)
 	if err != nil {

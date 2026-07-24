@@ -36,12 +36,13 @@ import (
 // shared WITH-clause so seed selection and per-artist queries stay in sync.
 const musicAffinityCTE = `
 	play_aff AS (
-		SELECT pe.track_id,
-		       LEAST(2.0, SUM(0.25
-		           * POWER(0.5, EXTRACT(EPOCH FROM (now() - pe.played_at)) / 2592000.0))) AS score
-		FROM play_events pe
-		WHERE pe.user_id = $1 AND pe.completed
-		GROUP BY pe.track_id
+		-- Materialized by ensureUserPlayAffinity — see music_affinity_cache.go.
+		-- Every caller of this CTE must have refreshed the cache for $1 first
+		-- (GenerateMixesForUser and musicTasteProfile do). Kept as a CTE named
+		-- play_aff so consumers that reference it directly stay unchanged.
+		SELECT track_id, score
+		FROM user_play_affinity
+		WHERE user_id = $1
 	),
 	rate_aff AS (
 		SELECT utr.track_id,

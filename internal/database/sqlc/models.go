@@ -1407,6 +1407,17 @@ type UserMusicService struct {
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
+type UserPlayAffinity struct {
+	UserID  int64   `json:"user_id"`
+	TrackID int64   `json:"track_id"`
+	Score   float64 `json:"score"`
+}
+
+type UserPlayAffinityState struct {
+	UserID      int64              `json:"user_id"`
+	RefreshedAt pgtype.Timestamptz `json:"refreshed_at"`
+}
+
 type UserPlaybackPreference struct {
 	ID               int64              `json:"id"`
 	UserID           int64              `json:"user_id"`
