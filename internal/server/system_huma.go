@@ -84,6 +84,7 @@ func collectHealthComponents(ctx context.Context, app *service.App) []healthComp
 		dbComponent(ctx, app),
 		workerComponent(ctx, app),
 		transcoderComponent(app),
+		metadataComponent(app),
 	}
 	// Tailscale only reported when enabled — keeps the response clean for
 	// the common no-tsnet case.
@@ -122,6 +123,23 @@ func transcoderComponent(app *service.App) healthComponent {
 		return healthComponent{Name: "transcoder", OK: true, Message: "disabled (ffmpeg not available)"}
 	}
 	return healthComponent{Name: "transcoder", OK: true}
+}
+
+func metadataComponent(app *service.App) healthComponent {
+	// Read the cached probe rather than dialling the provider here — a remote
+	// round-trip does not belong in a readiness handler. The background
+	// watcher in service keeps this within a probe interval of the truth.
+	status := app.MetadataStatus()
+	if status.CheckedAt.IsZero() {
+		return healthComponent{Name: "metadata", OK: true, Message: "not checked"}
+	}
+	if !status.Available {
+		// Reported as a failing component, not a failing server: the API stays
+		// up and everything local keeps serving. What is degraded is
+		// enrichment and the matching of newly scanned files.
+		return healthComponent{Name: "metadata", OK: false, Message: status.LastError}
+	}
+	return healthComponent{Name: "metadata", OK: true}
 }
 
 func tailscaleComponent(app *service.App) healthComponent {

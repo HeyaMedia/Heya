@@ -80,6 +80,8 @@ type App struct {
 	hub                       *eventhub.Hub
 	relayPublisher            *eventhub.RelayPublisher
 	scheduler                 *scheduler.Trigger
+	metadataMu                sync.RWMutex
+	metadataStatus            MetadataStatus
 	networkMu                 sync.RWMutex
 	tailscale                 tailscale.Manager
 	remote                    *remote.Manager
@@ -596,16 +598,26 @@ func newApp(ctx context.Context, cfg *config.Config, runtimeMode appRuntimeMode)
 	if err != nil {
 		return nil, err
 	}
-	// Long-lived API and worker runtimes depend on canonical metadata being
-	// available at startup. One-shot commands should only fail if the specific
-	// operation they run actually needs that provider; user/list/doctor-style
+	// Long-lived API and worker runtimes want canonical metadata, but they do
+	// not need it to serve: the library, playback and transcoding are entirely
+	// local, and enrichment/matching already retry. Refusing to boot on an
+	// unreachable remote meant an outage over there took every server here
+	// down with it — including servers whose users only wanted to play files
+	// they already own. Probe once for the startup log, then hand the signal
+	// to watchMetadataAvailability and the readiness endpoint.
+	//
+	// One-shot commands skip the probe entirely; user/list/doctor-style
 	// commands must not be held hostage by an unrelated remote health check.
-	if !cfg.PassiveMode.Value && runtimeMode != appRuntimeCommand {
-		readyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	var metadataStatus MetadataStatus
+	probesMetadata := !cfg.PassiveMode.Value && runtimeMode != appRuntimeCommand
+	if probesMetadata {
+		readyCtx, cancel := context.WithTimeout(ctx, metadataProbeTimeout)
 		readyErr := hm.Ready(readyCtx)
 		cancel()
+		metadataStatus = newMetadataStatus(readyErr)
 		if readyErr != nil {
-			return nil, fmt.Errorf("HeyaMetadata is not ready: %w", readyErr)
+			log.Warn().Err(readyErr).Str("url", cfg.HeyaMetadataURL.Value).
+				Msg("canonical metadata provider is not ready; starting anyway with enrichment and matching degraded")
 		}
 	}
 	heya := heyametadata.NewHeyaProvider(hm, db).WithProviderCredentials(heyametadata.ProviderCredentials{
@@ -779,6 +791,7 @@ func newApp(ctx context.Context, cfg *config.Config, runtimeMode appRuntimeMode)
 		securityEvents:   securityevents.New(200),
 		coordinatorLease: coordinator,
 		matcher:          m,
+		metadataStatus:   metadataStatus,
 		downloader:       dl,
 		river:            riverClient,
 		watcher:          wm,
@@ -858,6 +871,12 @@ func newApp(ctx context.Context, cfg *config.Config, runtimeMode appRuntimeMode)
 		}
 	}
 	app.ReportUnsupportedLibraryPaths(ctx)
+
+	// Keeps the readiness endpoint honest about a provider that went away or
+	// came back, now that neither event is a startup failure.
+	if probesMetadata {
+		app.watchMetadataAvailability(lifetimeCtx, hm.Ready)
+	}
 
 	startupComplete = true
 	return app, nil
