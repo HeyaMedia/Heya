@@ -337,27 +337,48 @@ func (a *App) generateDJTracks(ctx context.Context, userID int64, snap djSnapsho
 }
 
 func (a *App) echoDJCandidates(ctx context.Context, userID, seedTrackID int64, exclude []int64, limit int) ([]int64, error) {
+	// Resolve the seed's embedding and artist up front with a cheap primary-key
+	// lookup, then bind the vector as a parameter in the neighbour search. The
+	// previous form pulled the seed embedding through a CTE join, which made the
+	// `<=>` ORDER BY a correlated expression rather than a comparison against a
+	// constant — pgvector cannot serve that from the HNSW index, so the planner
+	// fell back to distance-scoring and sorting every analysed track in the
+	// library (~22s on prod). With the vector bound, the same query walks
+	// track_facets_track_emb_hnsw in distance order and stops at LIMIT (~50ms).
+	var seedEmbedding pgvector.Vector
+	var seedArtistID int64
+	err := a.db.QueryRow(ctx, `
+		SELECT tf.track_embedding, al.artist_id
+		FROM track_facets tf
+		JOIN tracks t ON t.id = tf.track_id
+		JOIN albums al ON al.id = t.album_id
+		WHERE tf.track_id = $1 AND tf.track_embedding IS NOT NULL`, seedTrackID).Scan(&seedEmbedding, &seedArtistID)
+	if err != nil {
+		// An unanalysed (or missing) seed still gets a useful Echo from the
+		// metadata/provider fallbacks in the shared radio engine.
+		if errors.Is(err, pgx.ErrNoRows) {
+			return a.flowDJCandidates(ctx, userID, seedTrackID, exclude, limit)
+		}
+		return nil, err
+	}
+	if len(seedEmbedding.Slice()) == 0 {
+		return a.flowDJCandidates(ctx, userID, seedTrackID, exclude, limit)
+	}
+
 	rows, err := a.db.Query(ctx, `
-		WITH seed AS (
-			SELECT facets.track_embedding, album.artist_id
-			FROM track_facets facets
-			JOIN tracks track ON track.id = facets.track_id
-			JOIN albums album ON album.id = track.album_id
-			WHERE facets.track_id = $2 AND facets.track_embedding IS NOT NULL
-		)
 		SELECT track.id
-		FROM seed
-		JOIN track_facets facets ON facets.track_embedding IS NOT NULL
+		FROM track_facets facets
 		JOIN tracks track ON track.id = facets.track_id
 		JOIN albums album ON album.id = track.album_id
 		LEFT JOIN user_track_ratings rating ON rating.user_id = $1 AND rating.track_id = track.id
-		WHERE album.artist_id <> seed.artist_id
+		WHERE facets.track_embedding IS NOT NULL
+		  AND album.artist_id <> $5
 		  AND NOT (track.id = ANY($3::bigint[]))
 		  AND (rating.rating IS NULL OR rating.rating > 3)
 		  AND EXISTS (SELECT 1 FROM track_files file JOIN library_files library_file ON library_file.id = file.library_file_id
 		              WHERE file.track_id = track.id AND library_file.deleted_at IS NULL)
-		ORDER BY facets.track_embedding <=> seed.track_embedding
-		LIMIT $4`, userID, seedTrackID, exclude, limit)
+		ORDER BY facets.track_embedding <=> $2
+		LIMIT $4`, userID, seedEmbedding, exclude, limit, seedArtistID)
 	if err != nil {
 		return nil, err
 	}
@@ -366,8 +387,8 @@ func (a *App) echoDJCandidates(ctx context.Context, userID, seedTrackID int64, e
 	if err != nil || len(ids) > 0 {
 		return ids, err
 	}
-	// An unanalysed seed still gets a useful Echo from the metadata/provider
-	// fallbacks in the shared radio engine.
+	// Nearest-neighbour search came back empty (heavily excluded runway, all
+	// same-artist, etc.) — fall back to the shared radio engine.
 	return a.flowDJCandidates(ctx, userID, seedTrackID, exclude, limit)
 }
 
@@ -448,48 +469,86 @@ func (a *App) spotlightDJCandidates(ctx context.Context, userID, seedTrackID int
 }
 
 func (a *App) timewarpDJCandidates(ctx context.Context, userID, seedTrackID int64, exclude []int64, session int64, limit int) ([]int64, error) {
-	rows, err := a.db.Query(ctx, `
-	WITH seed AS (
-			SELECT CASE WHEN album.year ~ '[0-9]{4}' THEN substring(album.year FROM '[0-9]{4}')::int ELSE NULL END AS year,
-			       album.genres,
-			       facets.track_embedding
-			FROM tracks track JOIN albums album ON album.id = track.album_id
-			LEFT JOIN track_facets facets ON facets.track_id = track.id
-			WHERE track.id = $2
-		)
+	_ = session // sonic ordering replaces the old per-session md5 tiebreak
+	// Resolve the seed's era and sonic embedding with a cheap primary-key
+	// lookup, then bind the vector into an era-filtered nearest-neighbour
+	// search. The previous query distance-scored and sorted every analysed
+	// track in the ±2yr window (~84k rows, ~7s on prod) because the seed vector
+	// was a correlated CTE column pgvector's HNSW index cannot serve; here the
+	// bound vector drives the index and the era is a hard filter.
+	var seedEmbedding pgvector.Vector
+	var seedYear *int32
+	err := a.db.QueryRow(ctx, `
+		SELECT tf.track_embedding,
+		       CASE WHEN al.year ~ '^[0-9]{4}' THEN (substring(al.year FROM 1 FOR 4))::int END
+		FROM tracks t
+		JOIN albums al ON al.id = t.album_id
+		LEFT JOIN track_facets tf ON tf.track_id = t.id
+		WHERE t.id = $1`, seedTrackID).Scan(&seedEmbedding, &seedYear)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	// Missing/invalid year or an unanalysed seed: Flow is a more honest fallback
+	// than pretending a global random track belongs to the same era.
+	if err != nil || seedYear == nil || len(seedEmbedding.Slice()) == 0 {
+		return a.flowDJCandidates(ctx, userID, seedTrackID, exclude, limit)
+	}
+
+	ids, err := a.eraNeighborTrackIDs(ctx, userID, seedEmbedding, int(*seedYear), exclude, limit)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) > 0 {
+		return ids, nil
+	}
+	return a.flowDJCandidates(ctx, userID, seedTrackID, exclude, limit)
+}
+
+// eraNeighborTrackIDs returns playable, non-excluded tracks whose album year is
+// within ±2 of seedYear, ordered by sonic distance to seedEmbedding. The seed
+// vector is bound as a parameter so track_facets_track_emb_hnsw drives the
+// scan. Because the era filter rejects ~80% of the library, a fixed-ef HNSW
+// scan would return far fewer than `limit`, so the search runs with iterative
+// index scan (relaxed order — fine for a DJ runway) inside a short read-only
+// transaction that scopes the GUCs.
+func (a *App) eraNeighborTrackIDs(ctx context.Context, userID int64, seedEmbedding pgvector.Vector, seedYear int, exclude []int64, limit int) ([]int64, error) {
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SET LOCAL hnsw.iterative_scan = relaxed_order`); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `SET LOCAL hnsw.ef_search = 100`); err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, `
 		SELECT track.id
-		FROM seed
-		JOIN albums album ON seed.year IS NOT NULL
-		JOIN tracks track ON track.album_id = album.id
-		LEFT JOIN track_facets facets ON facets.track_id = track.id
+		FROM track_facets facets
+		JOIN tracks track ON track.id = facets.track_id
+		JOIN albums album ON album.id = track.album_id
 		LEFT JOIN user_track_ratings rating ON rating.user_id = $1 AND rating.track_id = track.id
-		WHERE CASE WHEN album.year ~ '[0-9]{4}' THEN substring(album.year FROM '[0-9]{4}')::int ELSE NULL END
-		      BETWEEN seed.year - 2 AND seed.year + 2
+		WHERE facets.track_embedding IS NOT NULL
+		  AND album.year ~ '^[0-9]{4}'
+		  AND (substring(album.year FROM 1 FOR 4))::int BETWEEN $5 AND $6
 		  AND lower(album.album_type) NOT LIKE '%compilation%'
 		  AND NOT ('compilation' = ANY(album.secondary_types))
 		  AND NOT (track.id = ANY($3::bigint[]))
 		  AND (rating.rating IS NULL OR rating.rating > 3)
 		  AND EXISTS (SELECT 1 FROM track_files file JOIN library_files library_file ON library_file.id = file.library_file_id
 		              WHERE file.track_id = track.id AND library_file.deleted_at IS NULL)
-		ORDER BY (album.genres && seed.genres) DESC,
-		         CASE
-		           WHEN seed.track_embedding IS NOT NULL AND facets.track_embedding IS NOT NULL
-		           THEN facets.track_embedding <=> seed.track_embedding
-		         END NULLS LAST,
-		         abs((substring(album.year FROM '[0-9]{4}')::int) - seed.year),
-		         md5(track.id::text || ':' || ($4::bigint)::text)
-		LIMIT $5`, userID, seedTrackID, exclude, session, limit)
+		ORDER BY facets.track_embedding <=> $2
+		LIMIT $4`, userID, seedEmbedding, exclude, limit, seedYear-2, seedYear+2)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	ids, err := scanInt64Rows(rows)
-	if err != nil || len(ids) > 0 {
-		return ids, err
+	rows.Close()
+	if err != nil {
+		return nil, err
 	}
-	// Missing/invalid year: Flow is a more honest fallback than pretending a
-	// global random track belongs to the same era.
-	return a.flowDJCandidates(ctx, userID, seedTrackID, exclude, limit)
+	return ids, tx.Commit(ctx)
 }
 
 func (a *App) chillDJTarget(ctx context.Context, userID, seedTrackID int64, exclude []int64) (int64, error) {

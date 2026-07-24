@@ -1169,13 +1169,6 @@ func int8Ptr(value pgtype.Int8) *int64 {
 	return &v
 }
 
-func textValue(value pgtype.Text) string {
-	if !value.Valid {
-		return ""
-	}
-	return value.String
-}
-
 func numericPtr(value pgtype.Numeric) *float64 {
 	if !value.Valid {
 		return nil

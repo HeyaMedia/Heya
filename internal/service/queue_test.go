@@ -548,36 +548,63 @@ func TestSpotlightRanksSameArtistTracksBySonicProximity(t *testing.T) {
 	require.Equal(t, f.trackIDs[1], ids[0])
 }
 
-func TestTimewarpPrioritizesGenreWithinTheEra(t *testing.T) {
+func TestTimewarpRanksEraTracksBySonicProximity(t *testing.T) {
 	pool := testutil.SetupDB(t)
 	app := &App{db: pool}
 	userID := testutil.TestUserID(t, pool)
 	seed := setupQueueFixture(t, pool, userID, "dj-timewarp-seed", 1)
-	overlap := setupQueueFixture(t, pool, userID, "dj-timewarp-overlap", 1)
-	other := setupQueueFixture(t, pool, userID, "dj-timewarp-other", 1)
+	near := setupQueueFixture(t, pool, userID, "dj-timewarp-near", 1)
+	far := setupQueueFixture(t, pool, userID, "dj-timewarp-far", 1)
+	outside := setupQueueFixture(t, pool, userID, "dj-timewarp-outside", 1)
 	ctx := context.Background()
 
-	_, err := pool.Exec(ctx, `UPDATE albums SET year = '2000', genres = '{Synthpop}' WHERE id = $1`, seed.albumID)
+	// Seed and two candidates share the ±2yr era; the fourth track is sonically
+	// the closest of all but sits outside the era and must be excluded.
+	_, err := pool.Exec(ctx, `UPDATE albums SET year = '2000' WHERE id = $1`, seed.albumID)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `UPDATE albums SET year = '2001', genres = '{Synthpop,Electronic}' WHERE id = $1`, overlap.albumID)
+	_, err = pool.Exec(ctx, `UPDATE albums SET year = '2001' WHERE id = $1`, near.albumID)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `UPDATE albums SET year = '2000', genres = '{Death Metal}' WHERE id = $1`, other.albumID)
+	_, err = pool.Exec(ctx, `UPDATE albums SET year = '2002' WHERE id = $1`, far.albumID)
 	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `UPDATE albums SET year = '1990' WHERE id = $1`, outside.albumID)
+	require.NoError(t, err)
+
+	// Synthetic axis-aligned embeddings keep these fixtures isolated from any
+	// real vectors accumulated in the shared test DB (a real 512-d music
+	// embedding cannot land this close to a pure dim-0 unit vector).
+	vectors := map[int64][2]float32{
+		seed.trackIDs[0]:    {1, 0},
+		near.trackIDs[0]:    {0.995, 0.10},  // closest in-era neighbour
+		far.trackIDs[0]:     {0.6, 0.8},     // clearly farther, still in-era
+		outside.trackIDs[0]: {0.999, 0.045}, // nearest of all, but wrong era
+	}
+	for trackID, xy := range vectors {
+		vector := make([]float32, 512)
+		vector[0], vector[1] = xy[0], xy[1]
+		_, err := pool.Exec(ctx,
+			`INSERT INTO track_facets (track_id, track_embedding) VALUES ($1, $2)`,
+			trackID, pgvector.NewVector(vector))
+		require.NoError(t, err)
+	}
 
 	ids, err := app.timewarpDJCandidates(ctx, userID, seed.trackIDs[0], []int64{seed.trackIDs[0]}, 1, 500)
 	require.NoError(t, err)
-	overlapIndex, otherIndex := -1, -1
+
+	nearIndex, farIndex, outsideIndex := -1, -1, -1
 	for i, id := range ids {
-		if id == overlap.trackIDs[0] {
-			overlapIndex = i
-		}
-		if id == other.trackIDs[0] {
-			otherIndex = i
+		switch id {
+		case near.trackIDs[0]:
+			nearIndex = i
+		case far.trackIDs[0]:
+			farIndex = i
+		case outside.trackIDs[0]:
+			outsideIndex = i
 		}
 	}
-	require.GreaterOrEqual(t, overlapIndex, 0)
-	require.GreaterOrEqual(t, otherIndex, 0)
-	require.Less(t, overlapIndex, otherIndex, "genre/style overlap outranks an exact-year mismatch")
+	require.GreaterOrEqual(t, nearIndex, 0, "in-era neighbour is returned")
+	require.GreaterOrEqual(t, farIndex, 0, "in-era track farther in sonic space is still returned")
+	require.Less(t, nearIndex, farIndex, "sonic proximity orders tracks within the era")
+	require.Equal(t, -1, outsideIndex, "a sonically-closer track outside the era is excluded")
 }
 
 func TestQueueEncoreYieldsToListenerOwnedTrack(t *testing.T) {
