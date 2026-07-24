@@ -677,3 +677,124 @@ func scannerOpenFindingCounts(t *testing.T, ctx context.Context, q *sqlc.Queries
 	}
 	return out
 }
+
+// scanFindingRow captures the identity of a physical finding row so churn
+// (resolve + reinsert of an identical finding) is distinguishable from the
+// reconciliation no-op that should replace it.
+type scanFindingRow struct {
+	ID       int64
+	RelPath  string
+	Resolved bool
+	Data     string
+}
+
+func listScanFindingRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool, libraryID int64, code string) []scanFindingRow {
+	t.Helper()
+	rows, err := pool.Query(ctx, `
+		SELECT id, rel_path, resolved_at IS NOT NULL, data::text
+		FROM scan_findings
+		WHERE library_id = $1 AND code = $2
+		ORDER BY id`, libraryID, code)
+	require.NoError(t, err)
+	defer rows.Close()
+	var out []scanFindingRow
+	for rows.Next() {
+		var row scanFindingRow
+		require.NoError(t, rows.Scan(&row.ID, &row.RelPath, &row.Resolved, &row.Data))
+		out = append(out, row)
+	}
+	require.NoError(t, rows.Err())
+	return out
+}
+
+// TestPersistScanFindingsReconcile locks in the set-reconciliation contract:
+// re-persisting an unchanged result writes zero new finding rows (same ids,
+// no resolved churn copies), a finding that stops being drafted is swept to
+// resolved, an out-of-scope pass leaves other subtrees' findings alone, and
+// the bulk music quality codes carry no evidence blob.
+func TestPersistScanFindingsReconcile(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	userID := testutil.TestUserID(t, pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "scanner-findings-reconcile-test",
+		MediaType:    sqlc.MediaTypeMusic,
+		Paths:        []string{"/tmp/music-reconcile"},
+		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy:    userID,
+		Settings:     []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	makeResult := func(trackBBroken bool) Result {
+		trackB := MusicTrackPlan{
+			Key: "track:b", Artist: "Broken Artist", Album: "Album", TrackTitle: "B",
+			RelPath: "Broken Artist/Album/b.mp3",
+		}
+		if trackBBroken {
+			trackB.Issues = []string{"missing_track_number"}
+		}
+		return Result{
+			MusicTracks: []MusicTrackPlan{
+				{
+					Key: "track:a", Artist: "Broken Artist", Album: "Album", TrackTitle: "A",
+					RelPath: "Broken Artist/Album/a.mp3", Issues: []string{"missing_track_number"},
+				},
+				trackB,
+			},
+			MusicArtists: []MusicArtistPlan{{Key: "artist:broken artist", Artist: "Broken Artist", Confidence: 0.4}},
+		}
+	}
+	events := []Event{{Event: "nfo.parse_failed", Severity: SeverityWarn, RelPath: "Broken Artist/Album/album.nfo"}}
+
+	_, err = PersistScanResult(ctx, lib, makeResult(true), events, Options{}, pool, nil)
+	require.NoError(t, err)
+
+	first := listScanFindingRows(t, ctx, pool, lib.ID, "music_track_issue")
+	require.Len(t, first, 2)
+	for _, row := range first {
+		require.False(t, row.Resolved)
+		require.JSONEq(t, "{}", row.Data, "bulk music quality findings must not carry an evidence blob")
+	}
+
+	// Unchanged re-persist: the identical open findings are a no-op — same
+	// physical rows, no resolved churn copies.
+	_, err = PersistScanResult(ctx, lib, makeResult(true), events, Options{}, pool, nil)
+	require.NoError(t, err)
+	second := listScanFindingRows(t, ctx, pool, lib.ID, "music_track_issue")
+	require.Equal(t, first, second, "unchanged findings must not be recreated or resolved")
+
+	nfoRows := listScanFindingRows(t, ctx, pool, lib.ID, "nfo_parse_failed")
+	require.Len(t, nfoRows, 1)
+	require.False(t, nfoRows[0].Resolved)
+
+	// A scoped pass over an unrelated subtree must not sweep this subtree's
+	// unscoped findings.
+	_, err = PersistScanResult(ctx, lib, Result{}, nil, Options{ScopePaths: []string{"Other Artist"}}, pool, nil)
+	require.NoError(t, err)
+	nfoRows = listScanFindingRows(t, ctx, pool, lib.ID, "nfo_parse_failed")
+	require.Len(t, nfoRows, 1)
+	require.False(t, nfoRows[0].Resolved, "out-of-scope sweep must leave other subtrees alone")
+
+	// Track B fixed: its finding is swept to resolved, track A's row survives
+	// untouched with its original id.
+	_, err = PersistScanResult(ctx, lib, makeResult(false), events, Options{}, pool, nil)
+	require.NoError(t, err)
+	third := listScanFindingRows(t, ctx, pool, lib.ID, "music_track_issue")
+	require.Len(t, third, 2)
+	byPath := map[string]scanFindingRow{}
+	for _, row := range third {
+		byPath[row.RelPath] = row
+	}
+	require.False(t, byPath["Broken Artist/Album/a.mp3"].Resolved)
+	require.Equal(t, first[0].ID, byPath["Broken Artist/Album/a.mp3"].ID, "surviving finding keeps its row")
+	require.True(t, byPath["Broken Artist/Album/b.mp3"].Resolved, "fixed issue must be swept to resolved")
+
+	// The whole-library nfo sweep also resolved nothing extra: the event was
+	// re-drafted, so its finding stays open with the original row id.
+	nfoAfter := listScanFindingRows(t, ctx, pool, lib.ID, "nfo_parse_failed")
+	require.Equal(t, nfoRows, nfoAfter)
+}

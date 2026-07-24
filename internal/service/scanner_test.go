@@ -122,7 +122,7 @@ func TestScannerReviewViewBucketsAndActions(t *testing.T) {
 		RawData:         []byte(`{}`),
 	})
 	require.NoError(t, err)
-	_, err = q.CreateScanFinding(ctx, sqlc.CreateScanFindingParams{
+	err = q.CreateScanFinding(ctx, sqlc.CreateScanFindingParams{
 		ScanRunID:  pgInt8ForTest(run.ID),
 		LibraryID:  lib.ID,
 		MediaType:  lib.MediaType,
@@ -135,7 +135,7 @@ func TestScannerReviewViewBucketsAndActions(t *testing.T) {
 	require.NoError(t, err)
 	// Orphan finding (no identity) — must surface via issue counts + the paged
 	// issues list, never via identity findings.
-	_, err = q.CreateScanFinding(ctx, sqlc.CreateScanFindingParams{
+	err = q.CreateScanFinding(ctx, sqlc.CreateScanFindingParams{
 		ScanRunID: pgInt8ForTest(run.ID),
 		LibraryID: lib.ID,
 		MediaType: lib.MediaType,

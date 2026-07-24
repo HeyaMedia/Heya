@@ -530,13 +530,16 @@ func (q *Queries) CreateLibraryFileLink(ctx context.Context, arg CreateLibraryFi
 	return i, err
 }
 
-const createScanFinding = `-- name: CreateScanFinding :one
+const createScanFinding = `-- name: CreateScanFinding :exec
 INSERT INTO scan_findings (
     scan_run_id, library_id, media_type, identity_id, media_item_id,
     library_file_id, severity, code, rel_path, message, data
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING id, scan_run_id, library_id, media_type, identity_id, media_item_id, library_file_id, severity, code, rel_path, message, data, resolved_at, created_at
+ON CONFLICT (library_id, media_type, coalesce(identity_id, 0::bigint), code,
+             encode(sha256(rel_path::bytea), 'hex'), encode(sha256(message::bytea), 'hex'))
+    WHERE scan_findings.resolved_at IS NULL
+    DO NOTHING
 `
 
 type CreateScanFindingParams struct {
@@ -553,8 +556,12 @@ type CreateScanFindingParams struct {
 	Data          []byte      `json:"data"`
 }
 
-func (q *Queries) CreateScanFinding(ctx context.Context, arg CreateScanFindingParams) (ScanFinding, error) {
-	row := q.db.QueryRow(ctx, createScanFinding,
+// Findings are reconciled, not churned: identical open findings no-op on
+// insert (keeping their original created_at), findings that stop being
+// drafted get swept to resolved, and resolved rows are pruned after a TTL
+// by cleanup_scanner_artifacts. The arbiter is idx_scan_findings_open_key.
+func (q *Queries) CreateScanFinding(ctx context.Context, arg CreateScanFindingParams) error {
+	_, err := q.db.Exec(ctx, createScanFinding,
 		arg.ScanRunID,
 		arg.LibraryID,
 		arg.MediaType,
@@ -567,24 +574,7 @@ func (q *Queries) CreateScanFinding(ctx context.Context, arg CreateScanFindingPa
 		arg.Message,
 		arg.Data,
 	)
-	var i ScanFinding
-	err := row.Scan(
-		&i.ID,
-		&i.ScanRunID,
-		&i.LibraryID,
-		&i.MediaType,
-		&i.IdentityID,
-		&i.MediaItemID,
-		&i.LibraryFileID,
-		&i.Severity,
-		&i.Code,
-		&i.RelPath,
-		&i.Message,
-		&i.Data,
-		&i.ResolvedAt,
-		&i.CreatedAt,
-	)
-	return i, err
+	return err
 }
 
 const createScanRun = `-- name: CreateScanRun :one
@@ -688,6 +678,31 @@ DELETE FROM metadata_match_candidates WHERE identity_id = $1
 func (q *Queries) DeleteMetadataMatchCandidatesByIdentity(ctx context.Context, identityID int64) error {
 	_, err := q.db.Exec(ctx, deleteMetadataMatchCandidatesByIdentity, identityID)
 	return err
+}
+
+const deleteResolvedScanFindingsBefore = `-- name: DeleteResolvedScanFindingsBefore :execrows
+DELETE FROM scan_findings
+WHERE id IN (
+    SELECT expired.id FROM scan_findings expired
+    WHERE expired.resolved_at IS NOT NULL
+      AND expired.resolved_at < $1
+    LIMIT $2
+)
+`
+
+type DeleteResolvedScanFindingsBeforeParams struct {
+	Cutoff     pgtype.Timestamptz `json:"cutoff"`
+	BatchLimit int32              `json:"batch_limit"`
+}
+
+// TTL prune for resolved evidence, batched so the first run can chew a
+// multi-million-row backlog without one giant transaction.
+func (q *Queries) DeleteResolvedScanFindingsBefore(ctx context.Context, arg DeleteResolvedScanFindingsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteResolvedScanFindingsBefore, arg.Cutoff, arg.BatchLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteScannerEntitiesForScopeExcept = `-- name: DeleteScannerEntitiesForScopeExcept :many
@@ -2909,90 +2924,85 @@ func (q *Queries) ResetScannerIdentityReview(ctx context.Context, arg ResetScann
 	return i, err
 }
 
-const resolveMatchingOpenUnscopedScanFinding = `-- name: ResolveMatchingOpenUnscopedScanFinding :exec
-UPDATE scan_findings
+const sweepOpenScanFindingsByIdentities = `-- name: SweepOpenScanFindingsByIdentities :exec
+UPDATE scan_findings sf
 SET resolved_at = now()
-WHERE library_id = $1
-  AND media_type = $2
-  AND identity_id IS NULL
-  AND resolved_at IS NULL
-  AND code = $3
-  AND rel_path = $4
-  AND message = $5
+WHERE sf.library_id = $1
+  AND sf.media_type = $2
+  AND sf.resolved_at IS NULL
+  AND sf.code = ANY($3::text[])
+  AND sf.identity_id = ANY($4::bigint[])
+  AND NOT EXISTS (
+      SELECT 1 FROM unnest($5::text[]) AS draft(key)
+      WHERE draft.key = (sf.identity_id::text || ':' || sf.code || ':' || encode(sha256(sf.rel_path::bytea), 'hex') || ':' || encode(sha256(sf.message::bytea), 'hex'))
+  )
 `
 
-type ResolveMatchingOpenUnscopedScanFindingParams struct {
-	LibraryID int64     `json:"library_id"`
-	MediaType MediaType `json:"media_type"`
-	Code      string    `json:"code"`
-	RelPath   string    `json:"rel_path"`
-	Message   string    `json:"message"`
-}
-
-func (q *Queries) ResolveMatchingOpenUnscopedScanFinding(ctx context.Context, arg ResolveMatchingOpenUnscopedScanFindingParams) error {
-	_, err := q.db.Exec(ctx, resolveMatchingOpenUnscopedScanFinding,
-		arg.LibraryID,
-		arg.MediaType,
-		arg.Code,
-		arg.RelPath,
-		arg.Message,
-	)
-	return err
-}
-
-const resolveOpenScanFindingsByIdentities = `-- name: ResolveOpenScanFindingsByIdentities :exec
-UPDATE scan_findings
-SET resolved_at = now()
-WHERE library_id = $1
-  AND media_type = $2
-  AND resolved_at IS NULL
-  AND code = ANY($3::text[])
-  AND identity_id = ANY($4::bigint[])
-`
-
-type ResolveOpenScanFindingsByIdentitiesParams struct {
+type SweepOpenScanFindingsByIdentitiesParams struct {
 	LibraryID   int64     `json:"library_id"`
 	MediaType   MediaType `json:"media_type"`
 	Codes       []string  `json:"codes"`
 	IdentityIds []int64   `json:"identity_ids"`
+	DraftKeys   []string  `json:"draft_keys"`
 }
 
-func (q *Queries) ResolveOpenScanFindingsByIdentities(ctx context.Context, arg ResolveOpenScanFindingsByIdentitiesParams) error {
-	_, err := q.db.Exec(ctx, resolveOpenScanFindingsByIdentities,
+// Sweep half of reconciliation, identity-scoped: open managed-code findings
+// on the identities this run re-persisted that were NOT drafted again are
+// stale — the issue no longer exists. Draft keys are
+// '<identity_id>:<code>:<sha256 rel_path>:<sha256 message>'.
+func (q *Queries) SweepOpenScanFindingsByIdentities(ctx context.Context, arg SweepOpenScanFindingsByIdentitiesParams) error {
+	_, err := q.db.Exec(ctx, sweepOpenScanFindingsByIdentities,
 		arg.LibraryID,
 		arg.MediaType,
 		arg.Codes,
 		arg.IdentityIds,
+		arg.DraftKeys,
 	)
 	return err
 }
 
-const resolveOpenScanFindingsByLibrary = `-- name: ResolveOpenScanFindingsByLibrary :exec
-UPDATE scan_findings
+const sweepOpenUnscopedScanFindings = `-- name: SweepOpenUnscopedScanFindings :exec
+UPDATE scan_findings sf
 SET resolved_at = now()
-WHERE library_id = $1
-  AND media_type = $2
-  AND resolved_at IS NULL
-  AND code = ANY($3::text[])
+WHERE sf.library_id = $1
+  AND sf.media_type = $2
+  AND sf.resolved_at IS NULL
+  AND sf.identity_id IS NULL
+  AND sf.code = ANY($3::text[])
+  AND sf.rel_path <> ''
+  AND ($4::boolean OR EXISTS (
+      SELECT 1 FROM unnest($5::text[]) AS scope(prefix)
+      WHERE sf.rel_path = scope.prefix OR starts_with(sf.rel_path, scope.prefix || '/')
+  ))
+  AND NOT EXISTS (
+      SELECT 1 FROM unnest($6::text[]) AS draft(key)
+      WHERE draft.key = (sf.code || ':' || encode(sha256(sf.rel_path::bytea), 'hex') || ':' || encode(sha256(sf.message::bytea), 'hex'))
+  )
 `
 
-type ResolveOpenScanFindingsByLibraryParams struct {
-	LibraryID int64     `json:"library_id"`
-	MediaType MediaType `json:"media_type"`
-	Column3   []string  `json:"column_3"`
+type SweepOpenUnscopedScanFindingsParams struct {
+	LibraryID     int64     `json:"library_id"`
+	MediaType     MediaType `json:"media_type"`
+	Codes         []string  `json:"codes"`
+	SweepAll      bool      `json:"sweep_all"`
+	ScopePrefixes []string  `json:"scope_prefixes"`
+	DraftKeys     []string  `json:"draft_keys"`
 }
 
-func (q *Queries) ResolveOpenScanFindingsByLibrary(ctx context.Context, arg ResolveOpenScanFindingsByLibraryParams) error {
-	_, err := q.db.Exec(ctx, resolveOpenScanFindingsByLibrary, arg.LibraryID, arg.MediaType, arg.Column3)
-	return err
-}
-
-const resolveScanFinding = `-- name: ResolveScanFinding :exec
-UPDATE scan_findings SET resolved_at = now() WHERE id = $1
-`
-
-func (q *Queries) ResolveScanFinding(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, resolveScanFinding, id)
+// Sweep half of reconciliation, unscoped (identity_id IS NULL): bounded to
+// the subtrees this run actually scanned (scope_prefixes; sweep_all for a
+// whole-library pass) so a unit-scoped scan can't resolve other units'
+// findings. rel_path ” rows (album-level issues) carry no location and are
+// deliberately left alone. Draft keys are '<code>:<sha256 rel_path>:<sha256 message>'.
+func (q *Queries) SweepOpenUnscopedScanFindings(ctx context.Context, arg SweepOpenUnscopedScanFindingsParams) error {
+	_, err := q.db.Exec(ctx, sweepOpenUnscopedScanFindings,
+		arg.LibraryID,
+		arg.MediaType,
+		arg.Codes,
+		arg.SweepAll,
+		arg.ScopePrefixes,
+		arg.DraftKeys,
+	)
 	return err
 }
 

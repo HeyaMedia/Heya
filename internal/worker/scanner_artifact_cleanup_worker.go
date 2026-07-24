@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/generatedwrite"
@@ -20,6 +21,13 @@ const defaultScannerArtifactRetentionDays = 2
 const orphanedScannerEntityRetention = 15 * time.Minute
 const generatedSidecarReconcileLimit = 250
 const generatedSidecarReconcileTimeout = 30 * time.Second
+
+// Resolved scan findings are decision evidence with a TTL: long enough to
+// answer "why did the scanner do that last week," then gone. Independent of
+// the artifact retention above — findings are the user-facing paper trail,
+// artifacts the pipeline hand-off blobs.
+const resolvedScanFindingRetentionDays = 14
+const resolvedScanFindingPruneBatch = 50_000
 
 type CleanupScannerArtifactsWorker struct {
 	river.WorkerDefaults[CleanupScannerArtifactsArgs]
@@ -220,6 +228,24 @@ SELECT count(*)::bigint FROM deleted`
 	return count, err
 }
 
+// pruneResolvedScanFindings deletes resolved findings past the evidence TTL
+// in batches, so the first run after the reconciliation migration can chew a
+// multi-million-row churn backlog without one giant transaction.
+func pruneResolvedScanFindings(ctx context.Context, db *pgxpool.Pool, cutoff time.Time) (int64, error) {
+	q := sqlc.New(db)
+	var total int64
+	for {
+		deleted, err := q.DeleteResolvedScanFindingsBefore(ctx, sqlc.DeleteResolvedScanFindingsBeforeParams{
+			Cutoff:     pgtype.Timestamptz{Time: cutoff, Valid: true},
+			BatchLimit: resolvedScanFindingPruneBatch,
+		})
+		total += deleted
+		if err != nil || deleted < resolvedScanFindingPruneBatch {
+			return total, err
+		}
+	}
+}
+
 func (w *CleanupScannerArtifactsWorker) Work(ctx context.Context, job *river.Job[CleanupScannerArtifactsArgs]) error {
 	startedAt := time.Now()
 	taskID := job.Args.ScheduledTaskID
@@ -235,6 +261,11 @@ func (w *CleanupScannerArtifactsWorker) Work(ctx context.Context, job *river.Job
 	entityArtifacts, err := cleanupAppliedScannerEntityArtifactsOlderThan(ctx, w.DB, cutoff)
 	if err != nil {
 		finishKickoff(ctx, q, taskID, startedAt, 0, 0, err)
+		return err
+	}
+	resolvedFindings, err := pruneResolvedScanFindings(ctx, w.DB, time.Now().AddDate(0, 0, -resolvedScanFindingRetentionDays))
+	if err != nil {
+		finishKickoff(ctx, q, taskID, startedAt, int(entityArtifacts+resolvedFindings), 0, err)
 		return err
 	}
 	// Orphan reconciliation below covers every stale matched/fetching entity,
@@ -279,10 +310,11 @@ func (w *CleanupScannerArtifactsWorker) Work(ctx context.Context, job *river.Job
 		return err
 	}
 
-	total := int(entityArtifacts + supersededArtifacts + staleInFlight.EntitiesDeleted + staleInFlight.EntityArtifactsDeleted + orphanedInFlight.EntitiesDeleted + orphanedInFlight.EntityArtifactsDeleted + int64(generatedSidecars.Recovered+generatedSidecars.Retired))
+	total := int(entityArtifacts + resolvedFindings + supersededArtifacts + staleInFlight.EntitiesDeleted + staleInFlight.EntityArtifactsDeleted + orphanedInFlight.EntitiesDeleted + orphanedInFlight.EntityArtifactsDeleted + int64(generatedSidecars.Recovered+generatedSidecars.Retired))
 	finishKickoff(ctx, q, taskID, startedAt, total, 0, nil)
 	log.Info().
 		Int("retention_days", retentionDays).
+		Int64("resolved_scan_findings_pruned", resolvedFindings).
 		Int64("scanner_entity_artifacts", entityArtifacts).
 		Int64("superseded_scanner_entity_artifacts", supersededArtifacts).
 		Int64("stale_in_flight_entities", staleInFlight.EntitiesDeleted).

@@ -317,44 +317,71 @@ RETURNING *;
 -- name: DeleteMetadataMatchCandidatesByIdentity :exec
 DELETE FROM metadata_match_candidates WHERE identity_id = $1;
 
--- name: CreateScanFinding :one
+-- Findings are reconciled, not churned: identical open findings no-op on
+-- insert (keeping their original created_at), findings that stop being
+-- drafted get swept to resolved, and resolved rows are pruned after a TTL
+-- by cleanup_scanner_artifacts. The arbiter is idx_scan_findings_open_key.
+-- name: CreateScanFinding :exec
 INSERT INTO scan_findings (
     scan_run_id, library_id, media_type, identity_id, media_item_id,
     library_file_id, severity, code, rel_path, message, data
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING *;
+ON CONFLICT (library_id, media_type, coalesce(identity_id, 0::bigint), code,
+             encode(sha256(rel_path::bytea), 'hex'), encode(sha256(message::bytea), 'hex'))
+    WHERE scan_findings.resolved_at IS NULL
+    DO NOTHING;
 
--- name: ResolveScanFinding :exec
-UPDATE scan_findings SET resolved_at = now() WHERE id = $1;
-
--- name: ResolveOpenScanFindingsByLibrary :exec
-UPDATE scan_findings
+-- Sweep half of reconciliation, identity-scoped: open managed-code findings
+-- on the identities this run re-persisted that were NOT drafted again are
+-- stale — the issue no longer exists. Draft keys are
+-- '<identity_id>:<code>:<sha256 rel_path>:<sha256 message>'.
+-- name: SweepOpenScanFindingsByIdentities :exec
+UPDATE scan_findings sf
 SET resolved_at = now()
-WHERE library_id = $1
-  AND media_type = $2
-  AND resolved_at IS NULL
-  AND code = ANY($3::text[]);
+WHERE sf.library_id = sqlc.arg(library_id)
+  AND sf.media_type = sqlc.arg(media_type)
+  AND sf.resolved_at IS NULL
+  AND sf.code = ANY(sqlc.arg(codes)::text[])
+  AND sf.identity_id = ANY(sqlc.arg(identity_ids)::bigint[])
+  AND NOT EXISTS (
+      SELECT 1 FROM unnest(sqlc.arg(draft_keys)::text[]) AS draft(key)
+      WHERE draft.key = (sf.identity_id::text || ':' || sf.code || ':' || encode(sha256(sf.rel_path::bytea), 'hex') || ':' || encode(sha256(sf.message::bytea), 'hex'))
+  );
 
--- name: ResolveOpenScanFindingsByIdentities :exec
-UPDATE scan_findings
+-- Sweep half of reconciliation, unscoped (identity_id IS NULL): bounded to
+-- the subtrees this run actually scanned (scope_prefixes; sweep_all for a
+-- whole-library pass) so a unit-scoped scan can't resolve other units'
+-- findings. rel_path '' rows (album-level issues) carry no location and are
+-- deliberately left alone. Draft keys are '<code>:<sha256 rel_path>:<sha256 message>'.
+-- name: SweepOpenUnscopedScanFindings :exec
+UPDATE scan_findings sf
 SET resolved_at = now()
-WHERE library_id = sqlc.arg(library_id)
-  AND media_type = sqlc.arg(media_type)
-  AND resolved_at IS NULL
-  AND code = ANY(sqlc.arg(codes)::text[])
-  AND identity_id = ANY(sqlc.arg(identity_ids)::bigint[]);
+WHERE sf.library_id = sqlc.arg(library_id)
+  AND sf.media_type = sqlc.arg(media_type)
+  AND sf.resolved_at IS NULL
+  AND sf.identity_id IS NULL
+  AND sf.code = ANY(sqlc.arg(codes)::text[])
+  AND sf.rel_path <> ''
+  AND (sqlc.arg(sweep_all)::boolean OR EXISTS (
+      SELECT 1 FROM unnest(sqlc.arg(scope_prefixes)::text[]) AS scope(prefix)
+      WHERE sf.rel_path = scope.prefix OR starts_with(sf.rel_path, scope.prefix || '/')
+  ))
+  AND NOT EXISTS (
+      SELECT 1 FROM unnest(sqlc.arg(draft_keys)::text[]) AS draft(key)
+      WHERE draft.key = (sf.code || ':' || encode(sha256(sf.rel_path::bytea), 'hex') || ':' || encode(sha256(sf.message::bytea), 'hex'))
+  );
 
--- name: ResolveMatchingOpenUnscopedScanFinding :exec
-UPDATE scan_findings
-SET resolved_at = now()
-WHERE library_id = sqlc.arg(library_id)
-  AND media_type = sqlc.arg(media_type)
-  AND identity_id IS NULL
-  AND resolved_at IS NULL
-  AND code = sqlc.arg(code)
-  AND rel_path = sqlc.arg(rel_path)
-  AND message = sqlc.arg(message);
+-- TTL prune for resolved evidence, batched so the first run can chew a
+-- multi-million-row backlog without one giant transaction.
+-- name: DeleteResolvedScanFindingsBefore :execrows
+DELETE FROM scan_findings
+WHERE id IN (
+    SELECT expired.id FROM scan_findings expired
+    WHERE expired.resolved_at IS NOT NULL
+      AND expired.resolved_at < sqlc.arg(cutoff)
+    LIMIT sqlc.arg(batch_limit)
+);
 
 -- name: DeleteLibraryFileLinksByFile :exec
 DELETE FROM library_file_links WHERE library_file_id = $1;

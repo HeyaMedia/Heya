@@ -2,6 +2,8 @@ package scanner
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 
@@ -21,6 +23,22 @@ type scanFindingDraft struct {
 	Data        any
 	MediaItemID int64
 	FileID      int64
+}
+
+// Draft keys mirror the SQL side of the reconciliation sweeps: the sweep
+// resolves open findings whose key is absent from this run's drafts, and the
+// key hashes rel_path/message with sha256 to match idx_scan_findings_open_key.
+func identityScanFindingKey(identityID int64, finding scanFindingDraft) string {
+	return fmt.Sprintf("%d:%s:%s:%s", identityID, finding.Code, sha256Hex(finding.RelPath), sha256Hex(finding.Message))
+}
+
+func unscopedScanFindingKey(finding scanFindingDraft) string {
+	return fmt.Sprintf("%s:%s:%s", finding.Code, sha256Hex(finding.RelPath), sha256Hex(finding.Message))
+}
+
+func sha256Hex(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }
 
 const persistedMusicCandidateLimit = 20
@@ -70,21 +88,17 @@ func persistScanResultTx(ctx context.Context, q *sqlc.Queries, lib sqlc.Library,
 		return 0, err
 	}
 
+	// Findings reconcile instead of churning (resolve-and-reinsert used to
+	// pile up millions of identical resolved copies): inserting an already
+	// open finding no-ops on the natural key — created_at keeps meaning
+	// "broken since" — and open findings this run stopped drafting are swept
+	// to resolved below.
 	findings := scanFindingDrafts(result, events)
 	identityIDs := make([]int64, 0, len(identityByKey))
 	for _, identity := range identityByKey {
 		identityIDs = append(identityIDs, identity.ID)
 	}
-	if len(identityIDs) > 0 {
-		if err := q.ResolveOpenScanFindingsByIdentities(ctx, sqlc.ResolveOpenScanFindingsByIdentitiesParams{
-			LibraryID:   lib.ID,
-			MediaType:   lib.MediaType,
-			Codes:       managedScanFindingCodes(opts),
-			IdentityIds: identityIDs,
-		}); err != nil {
-			return 0, fmt.Errorf("resolve previous scan findings: %w", err)
-		}
-	}
+	var identityDraftKeys, unscopedDraftKeys []string
 	for _, finding := range findings {
 		identityID := int64(0)
 		if finding.Key != "" {
@@ -92,18 +106,11 @@ func persistScanResultTx(ctx context.Context, q *sqlc.Queries, lib sqlc.Library,
 				identityID = identity.ID
 			}
 		}
-		if identityID == 0 {
-			if err := q.ResolveMatchingOpenUnscopedScanFinding(ctx, sqlc.ResolveMatchingOpenUnscopedScanFindingParams{
-				LibraryID: lib.ID,
-				MediaType: lib.MediaType,
-				Code:      finding.Code,
-				RelPath:   finding.RelPath,
-				Message:   finding.Message,
-			}); err != nil {
-				return 0, fmt.Errorf("resolve duplicate unscoped scan finding %s: %w", finding.Code, err)
-			}
+		data := []byte("{}")
+		if finding.Data != nil {
+			data = mustJSONBytes(finding.Data)
 		}
-		if _, err := q.CreateScanFinding(ctx, sqlc.CreateScanFindingParams{
+		if err := q.CreateScanFinding(ctx, sqlc.CreateScanFindingParams{
 			ScanRunID:     pgInt8(run.ID),
 			LibraryID:     lib.ID,
 			MediaType:     lib.MediaType,
@@ -114,10 +121,41 @@ func persistScanResultTx(ctx context.Context, q *sqlc.Queries, lib sqlc.Library,
 			Code:          finding.Code,
 			RelPath:       finding.RelPath,
 			Message:       finding.Message,
-			Data:          mustJSONBytes(finding.Data),
+			Data:          data,
 		}); err != nil {
 			return 0, fmt.Errorf("create scan finding %s: %w", finding.Code, err)
 		}
+		if identityID != 0 {
+			identityDraftKeys = append(identityDraftKeys, identityScanFindingKey(identityID, finding))
+		} else {
+			unscopedDraftKeys = append(unscopedDraftKeys, unscopedScanFindingKey(finding))
+		}
+	}
+
+	if len(identityIDs) > 0 {
+		if err := q.SweepOpenScanFindingsByIdentities(ctx, sqlc.SweepOpenScanFindingsByIdentitiesParams{
+			LibraryID:   lib.ID,
+			MediaType:   lib.MediaType,
+			Codes:       managedScanFindingCodes(opts),
+			IdentityIds: identityIDs,
+			DraftKeys:   identityDraftKeys,
+		}); err != nil {
+			return 0, fmt.Errorf("sweep stale identity scan findings: %w", err)
+		}
+	}
+	// Unscoped findings sweep only within the subtrees this run scanned, so
+	// a unit-scoped pass can't resolve other units' findings. A whole-library
+	// pass (no scopes) sweeps everything unscoped.
+	scopePrefixes := normalizedScopePaths(opts.ScopePaths)
+	if err := q.SweepOpenUnscopedScanFindings(ctx, sqlc.SweepOpenUnscopedScanFindingsParams{
+		LibraryID:     lib.ID,
+		MediaType:     lib.MediaType,
+		Codes:         managedScanFindingCodes(opts),
+		SweepAll:      len(scopePrefixes) == 0,
+		ScopePrefixes: scopePrefixes,
+		DraftKeys:     unscopedDraftKeys,
+	}); err != nil {
+		return 0, fmt.Errorf("sweep stale unscoped scan findings: %w", err)
 	}
 
 	if err := q.FinishScanRun(ctx, sqlc.FinishScanRunParams{
@@ -843,7 +881,10 @@ func scanFindingDrafts(result Result, events []Event) []scanFindingDraft {
 			continue
 		}
 		for _, issue := range album.Issues {
-			out = append(out, scanFindingDraft{Code: "music_album_issue", Severity: string(SeverityWarn), Key: musicArtistKey(album.Artist, album.ArtistDisambiguation), Message: musicAlbumIssueMessage(album, issue), Data: album})
+			// No Data blob: the full album/track plan snapshot duplicated
+			// library_files.parse_result at ~1KB per finding × hundreds of
+			// thousands of findings, and nothing ever rendered it.
+			out = append(out, scanFindingDraft{Code: "music_album_issue", Severity: string(SeverityWarn), Key: musicArtistKey(album.Artist, album.ArtistDisambiguation), Message: musicAlbumIssueMessage(album, issue)})
 		}
 	}
 	for _, track := range result.MusicTracks {
@@ -851,7 +892,7 @@ func scanFindingDrafts(result Result, events []Event) []scanFindingDraft {
 			continue
 		}
 		for _, issue := range track.Issues {
-			out = append(out, scanFindingDraft{Code: "music_track_issue", Severity: string(SeverityWarn), Key: musicArtistKey(track.Artist, track.ArtistDisambiguation), RelPath: track.RelPath, Message: musicTrackIssueMessage(track, issue), Data: track})
+			out = append(out, scanFindingDraft{Code: "music_track_issue", Severity: string(SeverityWarn), Key: musicArtistKey(track.Artist, track.ArtistDisambiguation), RelPath: track.RelPath, Message: musicTrackIssueMessage(track, issue)})
 		}
 	}
 	for _, search := range result.MusicSearch {
