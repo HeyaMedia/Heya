@@ -128,12 +128,12 @@ const cardStyle = computed(() => ({
    plain static image layer — no CSS filter/compositor tax while the page idles. */
 .mix-image {
   position: absolute;
-  inset: -4%;
+  inset: 0;
   z-index: 0;
-  width: 108%;
-  height: 108%;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
-  transform: scale(1.03);
+  transform: scale(1.04);
 }
 .mix-wash {
   position: absolute;
@@ -155,6 +155,21 @@ const cardStyle = computed(() => ({
   text-align: center;
   pointer-events: none;
 }
+/* Soft-edged scrim pooled behind the title only — a gentle darkening that
+   fades out well before its box, so the text reads over bright artwork
+   without the hard shadow-plate the old triple text-shadow produced. */
+.mix-title-wrap::before {
+  content: '';
+  position: absolute;
+  inset: -16% -20%;
+  z-index: -1;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(0, 0, 0, 0.32),
+    rgba(0, 0, 0, 0.16) 48%,
+    rgba(0, 0, 0, 0) 74%
+  );
+}
 .mix-name {
   display: -webkit-box;
   max-width: 100%;
@@ -165,15 +180,12 @@ const cardStyle = computed(() => ({
   font-family: var(--font-display);
   font-weight: 800;
   font-variation-settings: 'wdth' 116;
-  font-size: clamp(22px, 10cqi, 32px);
+  font-size: clamp(20px, 10cqi, 32px);
   line-height: 0.98;
   letter-spacing: -0.02em;
   text-wrap: balance;
   color: var(--mix-title-color, #fff);
-  text-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.9),
-    0 0 12px rgba(0, 0, 0, 0.72),
-    0 0 28px rgba(0, 0, 0, 0.58);
+  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.5);
 }
 
 .mix-artists {
