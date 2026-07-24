@@ -298,3 +298,33 @@ func TestAdvertisedHostLabelStaysWithinTheDNSLabelLimit(t *testing.T) {
 		t.Errorf("label is %d bytes, want 63 — an over-long name fails to pack and kills every answer", len(got))
 	}
 }
+
+// A Kubernetes node carries one fe80:: per veth — 60+ of them. They are
+// unusable without a zone index, so they must not crowd out the real
+// addresses in the status list; only a host with nothing else should show
+// them at all.
+func TestInterfaceAddressesDropsLinkLocalWhenRealAddressesExist(t *testing.T) {
+	ifaces, _, _, err := resolveInterfaces(nil)
+	if err != nil {
+		t.Fatalf("resolveInterfaces: %v", err)
+	}
+	addresses := interfaceAddresses(ifaces)
+
+	var routable, linkLocal int
+	for _, text := range addresses {
+		ip := net.ParseIP(text)
+		if ip == nil {
+			t.Errorf("address %q does not parse", text)
+			continue
+		}
+		if ip.IsLinkLocalUnicast() {
+			linkLocal++
+		} else {
+			routable++
+		}
+	}
+	if routable > 0 && linkLocal > 0 {
+		t.Errorf("listed %d link-local addresses alongside %d routable ones; link-local is a last resort only",
+			linkLocal, routable)
+	}
+}

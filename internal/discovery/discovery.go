@@ -448,7 +448,12 @@ func interfaceAddresses(ifaces []net.Interface) []string {
 			}
 		}
 	}
-	if len(v6) == 0 {
+	// Link-local IPv6 is a last resort, not a companion to real addresses. A
+	// Kubernetes node has one fe80:: per veth — sixty-odd of them — and none
+	// is usable without a zone index, so listing them alongside a perfectly
+	// good 192.168.x.y buries the useful answer. Keep them only when there is
+	// genuinely nothing else.
+	if len(v4) == 0 && len(v6) == 0 {
 		v6 = v6local
 	}
 

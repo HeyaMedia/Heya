@@ -333,6 +333,18 @@ function describeDiscoveryInterfaces(names: string[]) {
   return `${names.length} interfaces — every multicast-capable one`
 }
 
+// Candidates are diagnostics, not a contract, and a container host can have a
+// lot of them. Show enough to recognise the LAN address (which sorts first)
+// and count the rest rather than filling the panel.
+const DISCOVERY_ADDRESS_PREVIEW = 8
+
+function describeDiscoveryAddresses(addresses: string[]) {
+  if (!addresses.length) return 'none'
+  if (addresses.length <= DISCOVERY_ADDRESS_PREVIEW) return addresses.join(', ')
+  const shown = addresses.slice(0, DISCOVERY_ADDRESS_PREVIEW).join(', ')
+  return `${shown} … +${addresses.length - DISCOVERY_ADDRESS_PREVIEW} more`
+}
+
 const discoveryRows = computed(() => {
   const s = discoveryStatus.value
   if (!s?.advertising) return []
@@ -347,7 +359,7 @@ const discoveryRows = computed(() => {
     // the union across every interface rather than what anyone receives.
     {
       key: s.per_interface ? 'Addresses (per interface)' : 'Addresses',
-      value: (s.addresses ?? []).join(', '),
+      value: describeDiscoveryAddresses(s.addresses ?? []),
       mono: true,
       copy: true,
     },
