@@ -246,6 +246,46 @@ func (a *App) tasteNeighborTracks(ctx context.Context, userID int64, centroid pg
 		LIMIT $3`, userID, centroid, fetch)
 }
 
+// tasteNeighborsScored is tasteNeighborTracks with the cosine distance kept,
+// so seed radio can band-shuffle the ~equally-near neighbours before scoring
+// them (see shuffleSonicBands). Kept separate from tasteNeighborTracks so the
+// day-stable mix rails, which must not rotate on every refetch, are untouched.
+func (a *App) tasteNeighborsScored(ctx context.Context, userID int64, centroid pgvector.Vector, fetch int) ([]scoredMixNeighbor, error) {
+	rows, err := a.db.Query(ctx, `
+		SELECT t.id, t.title, t.duration, t.disc_number, t.track_number,
+		       al.id, al.title, al.slug, al.cover_path, al.year,
+		       ar.id, ar.name, mi.slug,
+		       (SELECT count(*) FROM play_events pe WHERE pe.track_id = t.id AND pe.completed) AS play_count,
+		       (tf.track_embedding <=> $2)::float8 AS dist
+		FROM track_facets tf
+		JOIN tracks t ON t.id = tf.track_id
+		JOIN albums al ON al.id = t.album_id
+		JOIN artists ar ON ar.id = al.artist_id
+		JOIN media_item_cards mi ON mi.id = ar.media_item_id
+		WHERE tf.track_embedding IS NOT NULL
+		  AND `+musicVetoFilter+`
+		  AND EXISTS (SELECT 1 FROM track_files atf JOIN library_files alf ON alf.id = atf.library_file_id
+		              WHERE atf.track_id = t.id AND alf.deleted_at IS NULL)
+		ORDER BY tf.track_embedding <=> $2
+		LIMIT $3`, userID, centroid, fetch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]scoredMixNeighbor, 0, fetch)
+	for rows.Next() {
+		var n scoredMixNeighbor
+		r := &n.row
+		if err := rows.Scan(&r.TrackID, &r.TrackTitle, &r.Duration, &r.DiscNumber, &r.TrackNumber,
+			&r.AlbumID, &r.AlbumTitle, &r.AlbumSlug, &r.AlbumCoverPath, &r.AlbumYear,
+			&r.ArtistID, &r.ArtistName, &r.ArtistSlug, &r.PlayCount, &n.dist); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
 // metadataNeighborTracks searches the focused canonical-recording vectors and
 // localizes the nearest results back to playable library tracks. The embedded
 // document contains musical character only: genres/styles, tags, moods,

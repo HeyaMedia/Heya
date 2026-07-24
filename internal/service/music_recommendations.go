@@ -423,18 +423,27 @@ func (a *App) buildSeededRadioPool(
 
 	perSeed := max(80, poolLimit/max(1, len(seedEmbeddings)))
 	sonicCount := 0
+	// Fresh per-build entropy: an explicit seed radio / "play more of this"
+	// should surface a different-but-equally-similar station each time rather
+	// than the identical nearest-neighbour list. The day-stable mix rails go
+	// through buildMusicRecommendationPool and are deliberately not touched.
+	rng := newExplorationRng()
 	for _, emb := range seedEmbeddings {
 		if len(emb.Slice()) == 0 {
 			continue
 		}
-		rows, err := a.tasteNeighborTracks(ctx, userID, emb, perSeed)
+		neighbors, err := a.tasteNeighborsScored(ctx, userID, emb, perSeed)
 		if err != nil {
 			return nil, fmt.Errorf("seed sonic candidates: %w", err)
 		}
-		denom := math.Max(1, float64(len(rows)-1))
-		for i, row := range rows {
+		// Shuffle within cosine-distance bands so the ~equally-near cluster
+		// rotates while a genuine standout (its own band) still leads. The
+		// strength gradient below then rewards the rotated order.
+		shuffleSonicBands(neighbors, func(n scoredMixNeighbor) float64 { return n.dist }, sonicTieBand, rng)
+		denom := math.Max(1, float64(len(neighbors)-1))
+		for i, n := range neighbors {
 			strength := 4.5 - 3.6*(float64(i)/denom)
-			add(row, candidateSonic, strength)
+			add(n.row, candidateSonic, strength)
 			sonicCount++
 		}
 	}

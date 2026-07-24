@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -366,7 +367,7 @@ func (a *App) echoDJCandidates(ctx context.Context, userID, seedTrackID int64, e
 	}
 
 	rows, err := a.db.Query(ctx, `
-		SELECT track.id
+		SELECT track.id, (facets.track_embedding <=> $2)::float8 AS dist
 		FROM track_facets facets
 		JOIN tracks track ON track.id = facets.track_id
 		JOIN albums album ON album.id = track.album_id
@@ -383,9 +384,14 @@ func (a *App) echoDJCandidates(ctx context.Context, userID, seedTrackID int64, e
 		return nil, err
 	}
 	defer rows.Close()
-	ids, err := scanInt64Rows(rows)
-	if err != nil || len(ids) > 0 {
-		return ids, err
+	scored, err := scanScoredTrackIDs(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(scored) > 0 {
+		// Rotate among the ~equally-nearest neighbours so a given seed does not
+		// always chain to the identical next track.
+		return bandShuffleTrackIDs(scored), nil
 	}
 	// Nearest-neighbour search came back empty (heavily excluded runway, all
 	// same-artist, etc.) — fall back to the shared radio engine.
@@ -444,7 +450,9 @@ func (a *App) spotlightDJCandidates(ctx context.Context, userID, seedTrackID int
 			LEFT JOIN track_facets facets ON facets.track_id = track.id
 			WHERE track.id = $2
 		)
-		SELECT candidate.id
+		SELECT candidate.id,
+		       CASE WHEN seed.track_embedding IS NOT NULL AND facets.track_embedding IS NOT NULL
+		            THEN (facets.track_embedding <=> seed.track_embedding)::float8 END AS dist
 		FROM seed
 		JOIN albums album ON album.artist_id = seed.artist_id
 		JOIN tracks candidate ON candidate.album_id = album.id
@@ -465,7 +473,23 @@ func (a *App) spotlightDJCandidates(ctx context.Context, userID, seedTrackID int
 		return nil, err
 	}
 	defer rows.Close()
-	return scanInt64Rows(rows)
+	var ids []int64
+	var dists []*float64
+	for rows.Next() {
+		var id int64
+		var dist *float64
+		if err := rows.Scan(&id, &dist); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+		dists = append(dists, dist)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Rotate among the ~equally-close analysed tracks of this artist; the
+	// unanalysed popularity-ordered tail keeps its order.
+	return bandShuffleAnalyzedLead(ids, dists), nil
 }
 
 func (a *App) timewarpDJCandidates(ctx context.Context, userID, seedTrackID int64, exclude []int64, session int64, limit int) ([]int64, error) {
@@ -524,7 +548,7 @@ func (a *App) eraNeighborTrackIDs(ctx context.Context, userID int64, seedEmbeddi
 		return nil, err
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT track.id
+		SELECT track.id, (facets.track_embedding <=> $2)::float8 AS dist
 		FROM track_facets facets
 		JOIN tracks track ON track.id = facets.track_id
 		JOIN albums album ON album.id = track.album_id
@@ -543,43 +567,164 @@ func (a *App) eraNeighborTrackIDs(ctx context.Context, userID int64, seedEmbeddi
 	if err != nil {
 		return nil, err
 	}
-	ids, err := scanInt64Rows(rows)
+	scored, err := scanScoredTrackIDs(rows)
 	rows.Close()
 	if err != nil {
 		return nil, err
 	}
-	return ids, tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	// Rotate among the ~equally-close in-era neighbours per call.
+	return bandShuffleTrackIDs(scored), nil
 }
 
+// chillScoreBand is the mood-adjusted-score window that counts as an
+// interchangeable chill target, so Voyage's fallback destination rotates
+// instead of always resolving to the single lowest-scoring track.
+const chillScoreBand = 0.04
+
+type chillCandidate struct {
+	id    int64
+	score float64
+}
+
+// chillMoodScore mirrors the old ORDER BY: sonically close, very relaxed, not
+// aggressive, not party. Lower is a better chill target.
+func chillMoodScore(dist, relaxed, aggressive, party float64) float64 {
+	return dist - relaxed*0.35 + aggressive*0.15 + party*0.10
+}
+
+// chillDJTarget picks a relaxed "destination" for Voyage's chill fallback. It
+// is now two-stage: a bounded, index-served pool (sonic HNSW neighbourhood
+// when the seed is analysed, else the most-relaxed tracks) is re-ranked by the
+// mood-weighted score in Go. The old single query put that arithmetic score in
+// its ORDER BY, which pgvector's HNSW index cannot serve, so it scored and
+// sorted every one of ~90k relaxed tracks in the library.
 func (a *App) chillDJTarget(ctx context.Context, userID, seedTrackID int64, exclude []int64) (int64, error) {
-	var trackID int64
-	err := a.db.QueryRow(ctx, `
-		WITH seed AS (
-			SELECT track_embedding
-			FROM track_facets
-			WHERE track_id = $2 AND track_embedding IS NOT NULL
-		)
-		SELECT track.id
+	var seedEmbedding pgvector.Vector
+	err := a.db.QueryRow(ctx,
+		`SELECT track_embedding FROM track_facets WHERE track_id = $1 AND track_embedding IS NOT NULL`,
+		seedTrackID).Scan(&seedEmbedding)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return 0, err
+	}
+	hasSeed := err == nil && len(seedEmbedding.Slice()) > 0
+
+	cands, err := a.chillCandidatePool(ctx, userID, seedEmbedding, hasSeed, exclude, 200)
+	if err != nil {
+		return 0, err
+	}
+	if len(cands) == 0 {
+		return 0, nil
+	}
+	sort.SliceStable(cands, func(i, j int) bool {
+		if cands[i].score == cands[j].score {
+			return cands[i].id < cands[j].id
+		}
+		return cands[i].score < cands[j].score
+	})
+	shuffleSonicBands(cands, func(c chillCandidate) float64 { return c.score }, chillScoreBand, newExplorationRng())
+	return cands[0].id, nil
+}
+
+// chillCandidatePool returns up to `fetch` relaxed, eligible candidates scored
+// by chillMoodScore. With a seed embedding the pool is the sonic HNSW
+// neighbourhood (iterative scan, since the relaxed/duration/playable filters
+// reject most of the library); without one it is the most-relaxed tracks by
+// the partial mood index. Either way the mood re-rank happens on the caller.
+func (a *App) chillCandidatePool(ctx context.Context, userID int64, seedEmbedding pgvector.Vector, hasSeed bool, exclude []int64, fetch int) ([]chillCandidate, error) {
+	if hasSeed {
+		tx, err := a.db.Begin(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, `SET LOCAL hnsw.iterative_scan = relaxed_order`); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(ctx, `SET LOCAL hnsw.ef_search = 100`); err != nil {
+			return nil, err
+		}
+		rows, err := tx.Query(ctx, `
+			SELECT track.id,
+			       (facets.track_embedding <=> $2)::float8,
+			       COALESCE((facets.mood_tags->>'mood_relaxed')::real, 0)::float8,
+			       COALESCE((facets.mood_tags->>'mood_aggressive')::real, 0)::float8,
+			       COALESCE((facets.mood_tags->>'mood_party')::real, 0)::float8
+			FROM track_facets facets
+			JOIN tracks track ON track.id = facets.track_id
+			LEFT JOIN user_track_ratings rating ON rating.user_id = $1 AND rating.track_id = track.id
+			WHERE facets.track_embedding IS NOT NULL
+			  AND COALESCE((facets.mood_tags->>'mood_relaxed')::real, 0) >= 0.55
+			  AND NOT (track.id = ANY($3::bigint[]))
+			  AND track.duration BETWEEN $4 AND $5
+			  AND (rating.rating IS NULL OR rating.rating > 3)
+			  AND EXISTS (SELECT 1 FROM track_files file JOIN library_files library_file ON library_file.id = file.library_file_id
+			              WHERE file.track_id = track.id AND library_file.deleted_at IS NULL)
+			ORDER BY facets.track_embedding <=> $2
+			LIMIT $6`, userID, seedEmbedding, exclude, djMinDurationSeconds, djMaxDurationSeconds, fetch)
+		if err != nil {
+			return nil, err
+		}
+		cands, err := scanChillCandidates(rows, false)
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return cands, nil
+	}
+
+	// Unanalysed seed (rare): rank the most-relaxed eligible tracks via the
+	// partial mood index, hold the sonic term constant, and re-rank in Go.
+	rows, err := a.db.Query(ctx, `
+		SELECT track.id,
+		       COALESCE((facets.mood_tags->>'mood_relaxed')::real, 0)::float8,
+		       COALESCE((facets.mood_tags->>'mood_aggressive')::real, 0)::float8,
+		       COALESCE((facets.mood_tags->>'mood_party')::real, 0)::float8
 		FROM track_facets facets
 		JOIN tracks track ON track.id = facets.track_id
-		LEFT JOIN seed ON true
 		LEFT JOIN user_track_ratings rating ON rating.user_id = $1 AND rating.track_id = track.id
-		WHERE facets.track_embedding IS NOT NULL
-		  AND COALESCE((facets.mood_tags->>'mood_relaxed')::real, 0) >= 0.55
-		  AND NOT (track.id = ANY($3::bigint[]))
-		  AND track.duration BETWEEN $4 AND $5
+		WHERE facets.mood_tags ? 'mood_relaxed'
+		  AND (facets.mood_tags->>'mood_relaxed')::real >= 0.55
+		  AND NOT (track.id = ANY($2::bigint[]))
+		  AND track.duration BETWEEN $3 AND $4
 		  AND (rating.rating IS NULL OR rating.rating > 3)
 		  AND EXISTS (SELECT 1 FROM track_files file JOIN library_files library_file ON library_file.id = file.library_file_id
 		              WHERE file.track_id = track.id AND library_file.deleted_at IS NULL)
-		ORDER BY COALESCE(facets.track_embedding <=> seed.track_embedding, 0.5)
-		         - COALESCE((facets.mood_tags->>'mood_relaxed')::real, 0) * 0.35
-		         + COALESCE((facets.mood_tags->>'mood_aggressive')::real, 0) * 0.15
-		         + COALESCE((facets.mood_tags->>'mood_party')::real, 0) * 0.10
-		LIMIT 1`, userID, seedTrackID, exclude, djMinDurationSeconds, djMaxDurationSeconds).Scan(&trackID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, nil
+		ORDER BY (facets.mood_tags->>'mood_relaxed')::real DESC
+		LIMIT $5`, userID, exclude, djMinDurationSeconds, djMaxDurationSeconds, fetch)
+	if err != nil {
+		return nil, err
 	}
-	return trackID, err
+	defer rows.Close()
+	return scanChillCandidates(rows, true)
+}
+
+// scanChillCandidates reads chill candidate rows, computing chillMoodScore.
+// When noEmbedding is true the row carries no distance column and the sonic
+// term is held at the neutral 0.5 the old query used via COALESCE.
+func scanChillCandidates(rows pgx.Rows, noEmbedding bool) ([]chillCandidate, error) {
+	cands := []chillCandidate{}
+	for rows.Next() {
+		var id int64
+		var dist, relaxed, aggressive, party float64
+		dist = 0.5
+		var err error
+		if noEmbedding {
+			err = rows.Scan(&id, &relaxed, &aggressive, &party)
+		} else {
+			err = rows.Scan(&id, &dist, &relaxed, &aggressive, &party)
+		}
+		if err != nil {
+			return nil, err
+		}
+		cands = append(cands, chillCandidate{id: id, score: chillMoodScore(dist, relaxed, aggressive, party)})
+	}
+	return cands, rows.Err()
 }
 
 func (a *App) voyageDJCandidates(ctx context.Context, userID, startTrackID, endTrackID int64, exclude []int64, steps int, includeTarget bool) ([]int64, error) {
@@ -691,6 +836,21 @@ func (a *App) filterDJTrackIDs(ctx context.Context, userID int64, candidates, ex
 
 func djDurationEligible(duration int32) bool {
 	return duration >= djMinDurationSeconds && duration <= djMaxDurationSeconds
+}
+
+// scanScoredTrackIDs reads (track_id, cosine_distance) rows from a sonic
+// nearest-neighbour query, best-first, for band-shuffling before the distances
+// are dropped.
+func scanScoredTrackIDs(rows pgx.Rows) ([]scoredTrackID, error) {
+	scored := []scoredTrackID{}
+	for rows.Next() {
+		var s scoredTrackID
+		if err := rows.Scan(&s.id, &s.dist); err != nil {
+			return nil, err
+		}
+		scored = append(scored, s)
+	}
+	return scored, rows.Err()
 }
 
 func scanInt64Rows(rows pgx.Rows) ([]int64, error) {

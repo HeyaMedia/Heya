@@ -402,6 +402,7 @@ func TestDJQueueSchedulingPolicies(t *testing.T) {
 
 func TestQueueEchoChainsFromEachGeneratedTrackWithoutRepeating(t *testing.T) {
 	pool := testutil.SetupDB(t)
+	disableSonicVariety(t) // assert the deterministic nearest-neighbour chain
 	app := &App{db: pool}
 	userID := testutil.TestUserID(t, pool)
 	seed := setupQueueFixture(t, pool, userID, "dj-echo-seed", 1)
@@ -469,6 +470,48 @@ func TestQueueEchoChainsFromEachGeneratedTrackWithoutRepeating(t *testing.T) {
 	}
 }
 
+func TestEchoDJRotatesAmongNearTies(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	app := &App{db: pool}
+	userID := testutil.TestUserID(t, pool)
+	seed := setupQueueFixture(t, pool, userID, "dj-echo-var-seed", 1)
+	ctx := context.Background()
+
+	writeVec := func(id int64, x, y float32) {
+		v := make([]float32, 512)
+		v[0], v[1] = x, y
+		_, err := pool.Exec(ctx, `INSERT INTO track_facets (track_id, track_embedding) VALUES ($1, $2)`,
+			id, pgvector.NewVector(v))
+		require.NoError(t, err)
+	}
+	writeVec(seed.trackIDs[0], 1, 0)
+
+	// Six distinct-artist neighbours packed into a single cosine-distance tie
+	// band around the seed (all within ~0.0025) — the "many at ~98% similar"
+	// case the variety shuffle targets.
+	neighbors := make([]int64, 0, 6)
+	tinyY := []float32{0.02, 0.03, 0.04, 0.05, 0.06, 0.07}
+	for i := 0; i < 6; i++ {
+		f := setupQueueFixture(t, pool, userID, fmt.Sprintf("dj-echo-var-%d", i), 1)
+		writeVec(f.trackIDs[0], 1, tinyY[i])
+		neighbors = append(neighbors, f.trackIDs[0])
+	}
+
+	prev := explorationSeed
+	t.Cleanup(func() { explorationSeed = prev })
+	firsts := map[int64]bool{}
+	for s := int64(1); s <= 12; s++ {
+		seedVal := s * 7919
+		explorationSeed = func() int64 { return seedVal }
+		ids, err := app.echoDJCandidates(ctx, userID, seed.trackIDs[0], []int64{seed.trackIDs[0]}, 30)
+		require.NoError(t, err)
+		require.NotEmpty(t, ids)
+		require.Contains(t, neighbors, ids[0], "every pick is still a genuine near neighbour")
+		firsts[ids[0]] = true
+	}
+	require.Greater(t, len(firsts), 1, "Echo should rotate its next pick across builds")
+}
+
 func TestQueueVoyageFallsBackToChillAndReplansForNewDestination(t *testing.T) {
 	pool := testutil.SetupDB(t)
 	app := &App{db: pool}
@@ -527,6 +570,7 @@ func TestQueueVoyageFallsBackToChillAndReplansForNewDestination(t *testing.T) {
 
 func TestSpotlightRanksSameArtistTracksBySonicProximity(t *testing.T) {
 	pool := testutil.SetupDB(t)
+	disableSonicVariety(t)
 	app := &App{db: pool}
 	userID := testutil.TestUserID(t, pool)
 	f := setupQueueFixture(t, pool, userID, "dj-spotlight-sonic", 4)
@@ -550,6 +594,7 @@ func TestSpotlightRanksSameArtistTracksBySonicProximity(t *testing.T) {
 
 func TestTimewarpRanksEraTracksBySonicProximity(t *testing.T) {
 	pool := testutil.SetupDB(t)
+	disableSonicVariety(t)
 	app := &App{db: pool}
 	userID := testutil.TestUserID(t, pool)
 	seed := setupQueueFixture(t, pool, userID, "dj-timewarp-seed", 1)
