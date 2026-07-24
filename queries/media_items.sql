@@ -350,6 +350,30 @@ WITH profile AS (
 )
 UPDATE media_items SET updated_at = now() WHERE id = $1;
 
+-- The Reconcile* variants are the serve path's write-back: same effect as the
+-- Update* pair above, but a no-op when the column already agrees. That guard
+-- has to live in SQL rather than in Go, because the caller runs once per image
+-- request and reading the row first just to compare would double the query
+-- count on every poster in a rail. Skipping the write also leaves updated_at
+-- alone, which clients read as an image-cache revision — reconciling
+-- unconditionally would invalidate every cached poster on every request.
+
+-- name: ReconcileMediaItemPosterPath :exec
+WITH profile AS (
+  UPDATE media_item_profiles SET poster_path = $2, updated_at = now()
+  WHERE media_item_id = $1 AND poster_path IS DISTINCT FROM $2
+  RETURNING media_item_id
+)
+UPDATE media_items SET updated_at = now() WHERE id = (SELECT media_item_id FROM profile);
+
+-- name: ReconcileMediaItemBackdropPath :exec
+WITH profile AS (
+  UPDATE media_item_profiles SET backdrop_path = $2, updated_at = now()
+  WHERE media_item_id = $1 AND backdrop_path IS DISTINCT FROM $2
+  RETURNING media_item_id
+)
+UPDATE media_items SET updated_at = now() WHERE id = (SELECT media_item_id FROM profile);
+
 -- mi.description holds the provider's base (English) overview; rows enriched
 -- before that field existed have it empty, with only media_overviews
 -- translations (which exclude the base language). The browse detail view

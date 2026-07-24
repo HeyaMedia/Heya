@@ -885,6 +885,10 @@ func buildUnavailableMap(ctx context.Context, q *sqlc.Queries, mt sqlc.MediaType
 // (media_assets.remote_url, or the media_items poster/backdrop column) and
 // pulls the bytes ON DEMAND — the lazy replacement for pre-downloading all
 // artwork at enrich time. Returns the path and true if found.
+//
+// Resolving primary art also reconciles the denormalised
+// media_items.poster_path / backdrop_path column against the answer — see
+// reconcilePrimaryArt.
 func (a *App) GetMediaImagePath(ctx context.Context, mediaItemID int64, imageType string, sortOrder int, label string) (string, bool) {
 	q := sqlc.New(a.db)
 
@@ -905,9 +909,11 @@ func (a *App) GetMediaImagePath(ctx context.Context, mediaItemID int64, imageTyp
 								a.emitMediaUpdated(item.ID, item.LibraryID, item.Title, string(item.MediaType))
 							}
 						}
+						a.reconcilePrimaryArt(ctx, q, mediaItemID, imageType, sortOrder, label, representative.LocalPath)
 						return representative.LocalPath, true
 					}
 				}
+				a.reconcilePrimaryArt(ctx, q, mediaItemID, imageType, sortOrder, label, row.LocalPath)
 				return row.LocalPath, true
 			}
 			remoteURL, assetType, remoteSort = row.RemoteUrl, string(row.AssetType), int(row.SortOrder)
@@ -964,17 +970,47 @@ func (a *App) GetMediaImagePath(ctx context.Context, mediaItemID int64, imageTyp
 				a.emitMediaUpdated(item.ID, item.LibraryID, item.Title, string(item.MediaType))
 			}
 		}
-	} else if imageType == "poster" || imageType == "backdrop" {
-		if imageType == "poster" {
-			if err := q.UpdateMediaItemPosterPath(ctx, sqlc.UpdateMediaItemPosterPathParams{ID: item.ID, PosterPath: localPath}); err != nil {
-				log.Debug().Err(err).Int64("item_id", item.ID).Msg("image: update poster_path failed")
-			}
-		} else if err := q.UpdateMediaItemBackdropPath(ctx, sqlc.UpdateMediaItemBackdropPathParams{ID: item.ID, BackdropPath: localPath}); err != nil {
-			log.Debug().Err(err).Int64("item_id", item.ID).Msg("image: update backdrop_path failed")
-		}
 	}
+	a.reconcilePrimaryArt(ctx, q, item.ID, imageType, sortOrder, label, localPath)
 	a.maybeQueueImageSidecarWrite(ctx, q, item, assetType, remoteSort, label, localPath)
 	return localPath, true
+}
+
+// reconcilePrimaryArt points media_items.poster_path / backdrop_path at
+// whatever this call actually resolved.
+//
+// The column is a denormalised copy of the primary art's servable path, not an
+// independent source of truth — but only ONE of the three ways
+// GetMediaImagePath can answer used to write it back (the column-fallback
+// branch). An item whose poster resolves from a media_assets row therefore kept
+// whatever the scanner first wrote, and the two silently diverged: NEEDY GIRL
+// OVERDOSE served its local sidecar from /api/media/{id}/image/poster while
+// poster_path still held an upstream CDN URL that no asset row referenced at
+// all. Same title, two different posters, decided by which field the client
+// happened to read — which is exactly what list payloads (poster_path) and
+// detail views (the image endpoint) do differently.
+//
+// Reconciling here rather than at each of the ~6 writers is deliberate: this is
+// the single funnel where the authoritative answer is known, so it converges no
+// matter which path introduced the drift.
+//
+// Only PRIMARY art reconciles. A season poster (label) or the fourth backdrop
+// in a collection (sort) is not the item's main artwork and must not overwrite
+// it — sortOrder is -1 for a bare request and 0 for an explicit primary.
+func (a *App) reconcilePrimaryArt(ctx context.Context, q *sqlc.Queries, mediaItemID int64, imageType string, sortOrder int, label, resolved string) {
+	if resolved == "" || label != "" || sortOrder > 0 {
+		return
+	}
+	switch imageType {
+	case "poster":
+		if err := q.ReconcileMediaItemPosterPath(ctx, sqlc.ReconcileMediaItemPosterPathParams{MediaItemID: mediaItemID, PosterPath: resolved}); err != nil {
+			log.Debug().Err(err).Int64("item_id", mediaItemID).Msg("image: reconcile poster_path failed")
+		}
+	case "backdrop":
+		if err := q.ReconcileMediaItemBackdropPath(ctx, sqlc.ReconcileMediaItemBackdropPathParams{MediaItemID: mediaItemID, BackdropPath: resolved}); err != nil {
+			log.Debug().Err(err).Int64("item_id", mediaItemID).Msg("image: reconcile backdrop_path failed")
+		}
+	}
 }
 
 func (a *App) maybeQueueImageSidecarWrite(ctx context.Context, q *sqlc.Queries, item sqlc.MediaItemCard, assetType string, sortOrder int, label, localPath string) {

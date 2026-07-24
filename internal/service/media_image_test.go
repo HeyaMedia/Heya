@@ -11,10 +11,14 @@ import (
 	"os"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/config"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/images"
+	"github.com/karbowiak/heya/internal/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 func asset(at, label string, sort int, local, remote string) sqlc.MediaAsset {
@@ -95,6 +99,73 @@ func TestImageCacheFilename(t *testing.T) {
 			t.Errorf("imageCacheFilename(%q,%d,%q) = %q, want %q", c.at, c.sort, c.url, got, c.want)
 		}
 	}
+}
+
+// Reproduces the divergence NEEDY GIRL OVERDOSE exhibited in a live library:
+// a local sidecar poster in media_assets, while media_items.poster_path still
+// held an upstream CDN URL that no asset row referenced. Rails read the column
+// and detail pages read the endpoint, so one title showed two different
+// posters depending on the screen.
+func TestGetMediaImagePathReconcilesPrimaryArtColumn(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "primary-art-reconcile-test",
+		MediaType:    sqlc.MediaTypeTv,
+		Paths:        []string{"/tmp/primary-art-reconcile"},
+		ScanInterval: pgtype.Interval{Microseconds: int64(time.Hour / time.Microsecond), Valid: true},
+		CreatedBy:    testutil.TestUserID(t, pool),
+		Settings:     []byte(`{"use_local_data":true}`),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	const orphanedCDN = "https://heya.media/api/v2/images/2b454d68/variants/webp/1920"
+	item, err := q.CreateMediaItem(ctx, sqlc.CreateMediaItemParams{
+		LibraryID: lib.ID, MediaType: lib.MediaType, ProviderKind: "heya",
+		Title: "Two Posters", SortTitle: "two posters",
+		PosterPath: orphanedCDN,
+	})
+	require.NoError(t, err)
+
+	// The sidecar the endpoint actually serves, plus a season poster that must
+	// stay out of the primary slot.
+	const sidecar = "/storage/TV/Two Posters/poster.jpg"
+	_, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+		MediaItemID: item.ID, AssetType: sqlc.AssetTypePoster, Source: "local",
+		LocalPath: sidecar,
+	})
+	require.NoError(t, err)
+	const seasonPoster = "/data/images/two-posters/season01-poster.jpg"
+	_, err = q.CreateMediaAsset(ctx, sqlc.CreateMediaAssetParams{
+		MediaItemID: item.ID, AssetType: sqlc.AssetTypePoster, Source: "local",
+		LocalPath: seasonPoster, Label: "season-1",
+	})
+	require.NoError(t, err)
+
+	app := &App{db: pool, config: &config.Config{DataDir: config.Field[string]{Value: t.TempDir()}}}
+
+	served, ok := app.GetMediaImagePath(ctx, item.ID, "poster", -1, "")
+	require.True(t, ok)
+	require.Equal(t, sidecar, served)
+
+	reconciled, err := q.GetMediaItemByID(ctx, item.ID)
+	require.NoError(t, err)
+	require.Equal(t, sidecar, reconciled.PosterPath,
+		"poster_path must follow what the image endpoint serves, not the orphaned CDN URL")
+
+	// A season poster is not the item's primary art and must not claim the slot.
+	served, ok = app.GetMediaImagePath(ctx, item.ID, "poster", -1, "season-1")
+	require.True(t, ok)
+	require.Equal(t, seasonPoster, served)
+
+	after, err := q.GetMediaItemByID(ctx, item.ID)
+	require.NoError(t, err)
+	require.Equal(t, sidecar, after.PosterPath, "a labeled request must not overwrite primary art")
+	require.Equal(t, reconciled.UpdatedAt, after.UpdatedAt,
+		"an already-reconciled column must not bump updated_at — clients read it as an image-cache revision")
 }
 
 func TestMetadataImagePathWaitsForCanonicalBytes(t *testing.T) {

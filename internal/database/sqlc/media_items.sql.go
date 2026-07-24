@@ -1018,6 +1018,52 @@ func (q *Queries) MediaItemSlugExists(ctx context.Context, arg MediaItemSlugExis
 	return exists, err
 }
 
+const reconcileMediaItemBackdropPath = `-- name: ReconcileMediaItemBackdropPath :exec
+WITH profile AS (
+  UPDATE media_item_profiles SET backdrop_path = $2, updated_at = now()
+  WHERE media_item_id = $1 AND backdrop_path IS DISTINCT FROM $2
+  RETURNING media_item_id
+)
+UPDATE media_items SET updated_at = now() WHERE id = (SELECT media_item_id FROM profile)
+`
+
+type ReconcileMediaItemBackdropPathParams struct {
+	MediaItemID  int64  `json:"media_item_id"`
+	BackdropPath string `json:"backdrop_path"`
+}
+
+func (q *Queries) ReconcileMediaItemBackdropPath(ctx context.Context, arg ReconcileMediaItemBackdropPathParams) error {
+	_, err := q.db.Exec(ctx, reconcileMediaItemBackdropPath, arg.MediaItemID, arg.BackdropPath)
+	return err
+}
+
+const reconcileMediaItemPosterPath = `-- name: ReconcileMediaItemPosterPath :exec
+
+WITH profile AS (
+  UPDATE media_item_profiles SET poster_path = $2, updated_at = now()
+  WHERE media_item_id = $1 AND poster_path IS DISTINCT FROM $2
+  RETURNING media_item_id
+)
+UPDATE media_items SET updated_at = now() WHERE id = (SELECT media_item_id FROM profile)
+`
+
+type ReconcileMediaItemPosterPathParams struct {
+	MediaItemID int64  `json:"media_item_id"`
+	PosterPath  string `json:"poster_path"`
+}
+
+// The Reconcile* variants are the serve path's write-back: same effect as the
+// Update* pair above, but a no-op when the column already agrees. That guard
+// has to live in SQL rather than in Go, because the caller runs once per image
+// request and reading the row first just to compare would double the query
+// count on every poster in a rail. Skipping the write also leaves updated_at
+// alone, which clients read as an image-cache revision — reconciling
+// unconditionally would invalidate every cached poster on every request.
+func (q *Queries) ReconcileMediaItemPosterPath(ctx context.Context, arg ReconcileMediaItemPosterPathParams) error {
+	_, err := q.db.Exec(ctx, reconcileMediaItemPosterPath, arg.MediaItemID, arg.PosterPath)
+	return err
+}
+
 const searchMediaItemsByLibrary = `-- name: SearchMediaItemsByLibrary :many
 SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked, public_id FROM media_item_cards
 WHERE library_id = $1
