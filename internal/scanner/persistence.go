@@ -2,8 +2,6 @@ package scanner
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"strconv"
 
@@ -26,19 +24,15 @@ type scanFindingDraft struct {
 }
 
 // Draft keys mirror the SQL side of the reconciliation sweeps: the sweep
-// resolves open findings whose key is absent from this run's drafts, and the
-// key hashes rel_path/message with sha256 to match idx_scan_findings_open_key.
+// resolves open findings whose key is absent from this run's drafts. Raw
+// values joined with the \x1f unit separator — a control char scanner paths
+// and messages never contain — so keys stay unambiguous without hashing.
 func identityScanFindingKey(identityID int64, finding scanFindingDraft) string {
-	return fmt.Sprintf("%d:%s:%s:%s", identityID, finding.Code, sha256Hex(finding.RelPath), sha256Hex(finding.Message))
+	return fmt.Sprintf("%d\x1f%s\x1f%s\x1f%s", identityID, finding.Code, finding.RelPath, finding.Message)
 }
 
 func unscopedScanFindingKey(finding scanFindingDraft) string {
-	return fmt.Sprintf("%s:%s:%s", finding.Code, sha256Hex(finding.RelPath), sha256Hex(finding.Message))
-}
-
-func sha256Hex(value string) string {
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])
+	return fmt.Sprintf("%s\x1f%s\x1f%s", finding.Code, finding.RelPath, finding.Message)
 }
 
 const persistedMusicCandidateLimit = 20

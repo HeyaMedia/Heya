@@ -744,6 +744,13 @@ func TestPersistScanFindingsReconcile(t *testing.T) {
 					RelPath: "Broken Artist/Album/a.mp3", Issues: []string{"missing_track_number"},
 				},
 				trackB,
+				// Backslash in the path: a text→bytea cast in the natural-key
+				// expressions chokes on this exact shape (v0.4.124 prod
+				// migration failure) — it must flow through insert and sweep.
+				{
+					Key: "track:c", Artist: "Broken Artist", Album: "Album", TrackTitle: `C\Side`,
+					RelPath: `Broken Artist/Album/c\side.mp3`, Issues: []string{"missing_track_number"},
+				},
 			},
 			MusicArtists: []MusicArtistPlan{{Key: "artist:broken artist", Artist: "Broken Artist", Confidence: 0.4}},
 		}
@@ -754,7 +761,7 @@ func TestPersistScanFindingsReconcile(t *testing.T) {
 	require.NoError(t, err)
 
 	first := listScanFindingRows(t, ctx, pool, lib.ID, "music_track_issue")
-	require.Len(t, first, 2)
+	require.Len(t, first, 3)
 	for _, row := range first {
 		require.False(t, row.Resolved)
 		require.JSONEq(t, "{}", row.Data, "bulk music quality findings must not carry an evidence blob")
@@ -784,7 +791,7 @@ func TestPersistScanFindingsReconcile(t *testing.T) {
 	_, err = PersistScanResult(ctx, lib, makeResult(false), events, Options{}, pool, nil)
 	require.NoError(t, err)
 	third := listScanFindingRows(t, ctx, pool, lib.ID, "music_track_issue")
-	require.Len(t, third, 2)
+	require.Len(t, third, 3)
 	byPath := map[string]scanFindingRow{}
 	for _, row := range third {
 		byPath[row.RelPath] = row

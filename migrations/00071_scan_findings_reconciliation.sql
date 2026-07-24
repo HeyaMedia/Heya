@@ -18,7 +18,7 @@ WITH ranked AS (
     SELECT id,
            row_number() OVER (
                PARTITION BY library_id, media_type, coalesce(identity_id, 0), code,
-                            encode(sha256(rel_path::bytea), 'hex'), encode(sha256(message::bytea), 'hex')
+                            md5(rel_path), md5(message)
                ORDER BY id DESC
            ) AS rn
     FROM scan_findings
@@ -31,7 +31,7 @@ WHERE ranked.id = sf.id AND ranked.rn > 1;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_scan_findings_open_key
     ON scan_findings (library_id, media_type, coalesce(identity_id, 0::bigint), code,
-                      encode(sha256(rel_path::bytea), 'hex'), encode(sha256(message::bytea), 'hex'))
+                      md5(rel_path), md5(message))
     WHERE resolved_at IS NULL;
 
 -- The TTL prune deletes by resolved_at; without this each batch would seq

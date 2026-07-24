@@ -328,14 +328,15 @@ INSERT INTO scan_findings (
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (library_id, media_type, coalesce(identity_id, 0::bigint), code,
-             encode(sha256(rel_path::bytea), 'hex'), encode(sha256(message::bytea), 'hex'))
+             md5(rel_path), md5(message))
     WHERE scan_findings.resolved_at IS NULL
     DO NOTHING;
 
 -- Sweep half of reconciliation, identity-scoped: open managed-code findings
 -- on the identities this run re-persisted that were NOT drafted again are
--- stale — the issue no longer exists. Draft keys are
--- '<identity_id>:<code>:<sha256 rel_path>:<sha256 message>'.
+-- stale — the issue no longer exists. Draft keys join the raw values with
+-- the \x1f unit separator (never present in scanner-generated paths or
+-- messages) — no hashing, so no text→bytea casts to trip on backslashes.
 -- name: SweepOpenScanFindingsByIdentities :exec
 UPDATE scan_findings sf
 SET resolved_at = now()
@@ -346,14 +347,14 @@ WHERE sf.library_id = sqlc.arg(library_id)
   AND sf.identity_id = ANY(sqlc.arg(identity_ids)::bigint[])
   AND NOT EXISTS (
       SELECT 1 FROM unnest(sqlc.arg(draft_keys)::text[]) AS draft(key)
-      WHERE draft.key = (sf.identity_id::text || ':' || sf.code || ':' || encode(sha256(sf.rel_path::bytea), 'hex') || ':' || encode(sha256(sf.message::bytea), 'hex'))
+      WHERE draft.key = (sf.identity_id::text || E'\x1f' || sf.code || E'\x1f' || sf.rel_path || E'\x1f' || sf.message)
   );
 
 -- Sweep half of reconciliation, unscoped (identity_id IS NULL): bounded to
 -- the subtrees this run actually scanned (scope_prefixes; sweep_all for a
 -- whole-library pass) so a unit-scoped scan can't resolve other units'
 -- findings. rel_path '' rows (album-level issues) carry no location and are
--- deliberately left alone. Draft keys are '<code>:<sha256 rel_path>:<sha256 message>'.
+-- deliberately left alone. Draft keys are the \x1f-joined raw values.
 -- name: SweepOpenUnscopedScanFindings :exec
 UPDATE scan_findings sf
 SET resolved_at = now()
@@ -369,7 +370,7 @@ WHERE sf.library_id = sqlc.arg(library_id)
   ))
   AND NOT EXISTS (
       SELECT 1 FROM unnest(sqlc.arg(draft_keys)::text[]) AS draft(key)
-      WHERE draft.key = (sf.code || ':' || encode(sha256(sf.rel_path::bytea), 'hex') || ':' || encode(sha256(sf.message::bytea), 'hex'))
+      WHERE draft.key = (sf.code || E'\x1f' || sf.rel_path || E'\x1f' || sf.message)
   );
 
 -- TTL prune for resolved evidence, batched so the first run can chew a
