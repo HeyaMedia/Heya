@@ -3,6 +3,7 @@ definePageMeta({ layout: 'settings', middleware: 'admin' })
 
 import { adminDatabaseQuery } from '~/queries/admin'
 
+const { $heya } = useNuxtApp()
 const databaseData = useQuery(adminDatabaseQuery())
 const db = computed(() => databaseData.data.value ?? null)
 const loading = computed(() => databaseData.isLoading.value)
@@ -45,6 +46,49 @@ onBeforeUnmount(() => {
   if (timer) clearInterval(timer)
   if (tickTimer) clearInterval(tickTimer)
 })
+
+// --- Maintenance actions ---
+
+type MaintenanceOp = 'vacuum_analyze' | 'analyze' | 'reindex' | 'reset_query_stats'
+
+const maintenanceOpLabels: Record<string, string> = {
+  vacuum_analyze: 'Vacuum & analyze',
+  analyze: 'Analyze',
+  reindex: 'Reindex',
+  reset_query_stats: 'Reset query stats',
+}
+
+const maintenance = computed(() => db.value?.maintenance ?? null)
+const maintRunning = computed(() => maintenance.value?.running ?? null)
+const maintLast = computed(() => maintenance.value?.last ?? null)
+const maintStarting = ref(false)
+const maintFlash = ref('')
+
+const maintBusy = computed(() => maintStarting.value || !!maintRunning.value)
+const maintRunningPct = computed(() => {
+  const running = maintRunning.value
+  if (!running || !running.total) return 0
+  return Math.round((running.done / running.total) * 100)
+})
+
+async function runMaintenance(op: MaintenanceOp) {
+  maintStarting.value = true
+  maintFlash.value = ''
+  try {
+    await $heya('/api/admin/db/maintenance', { method: 'POST', body: { op } })
+    await load()
+  } catch (error: any) {
+    maintFlash.value = error?.data?.detail ?? error?.message ?? 'Failed to start maintenance.'
+  } finally {
+    maintStarting.value = false
+  }
+}
+
+function fmtDuration(ms: number): string {
+  if (ms < 1000) return `${ms} ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`
+  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
+}
 </script>
 
 <template>
@@ -130,8 +174,53 @@ onBeforeUnmount(() => {
         ]" />
       </SettingsSection>
 
+      <SettingsSection title="Maintenance" icon="wrench"
+        description="Manual PostgreSQL upkeep, table by table (biggest first). Vacuum & analyze reclaims dead rows and refreshes planner statistics; analyze refreshes statistics only; reindex rebuilds every index concurrently without blocking writes. One operation runs at a time — also available as heya db:maintain.">
+        <div class="maint-actions">
+          <button class="sv2-btn primary" :disabled="maintBusy" @click="runMaintenance('vacuum_analyze')">
+            <Icon name="sparkle" :size="13" /> Vacuum &amp; analyze
+          </button>
+          <button class="sv2-btn ghost" :disabled="maintBusy" @click="runMaintenance('analyze')">
+            <Icon name="lightning" :size="13" /> Analyze only
+          </button>
+          <button class="sv2-btn ghost" :disabled="maintBusy" @click="runMaintenance('reindex')">
+            <Icon name="refresh" :size="13" /> Rebuild indexes
+          </button>
+        </div>
+
+        <div v-if="maintFlash" class="maint-note err"><Icon name="warning" :size="13" /> {{ maintFlash }}</div>
+
+        <div v-if="maintRunning" class="maint-note running">
+          <Icon name="spinner" :size="13" />
+          <span>
+            {{ maintenanceOpLabels[maintRunning.op] ?? maintRunning.op }} running
+            <template v-if="maintRunning.total"> — {{ maintRunning.done }}/{{ maintRunning.total }} tables</template>
+            <template v-if="maintRunning.table"> · <code>{{ maintRunning.table }}</code></template>
+          </span>
+          <div v-if="maintRunning.total" class="maint-bar"><div class="maint-fill" :style="{ width: maintRunningPct + '%' }" /></div>
+        </div>
+
+        <div v-else-if="maintLast" class="maint-note" :class="maintLast.error ? 'err' : 'ok'">
+          <Icon :name="maintLast.error ? 'warning' : 'check'" :size="13" />
+          <span>
+            Last run: {{ maintenanceOpLabels[maintLast.op] ?? maintLast.op }} · {{ fmtDuration(maintLast.duration_ms) }}
+            <template v-if="maintLast.tables"> · {{ maintLast.tables }} tables</template>
+            <template v-if="maintLast.error"> · {{ maintLast.error }}</template>
+            <template v-else-if="maintLast.errors?.length"> · {{ maintLast.errors.length }} table(s) failed</template>
+          </span>
+        </div>
+        <div v-if="maintLast?.errors?.length" class="maint-errors">
+          <code v-for="e in maintLast.errors" :key="e">{{ e }}</code>
+        </div>
+      </SettingsSection>
+
       <SettingsSection title="Expensive statements" icon="timer"
         description="Database-wide pg_stat_statements totals, including both API and worker processes. Query text is normalized and sanitized before display.">
+        <template #actions>
+          <button v-if="db.query_stats_available" class="sv2-btn ghost" :disabled="maintBusy" @click="runMaintenance('reset_query_stats')">
+            <Icon name="refresh" :size="13" /> Reset stats
+          </button>
+        </template>
         <div v-if="db.query_stats_error" class="pg-stats-setup">
           <div class="setup-heading">
             <Icon name="warning" :size="15" />
@@ -236,6 +325,37 @@ onBeforeUnmount(() => {
 .legend.used .dot { background: var(--gold); }
 .legend.idle .dot { background: color-mix(in srgb, var(--good) 60%, transparent); }
 .legend.free .dot { background: var(--bg-0); border: 1px solid var(--border); }
+
+.maint-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.maint-actions .sv2-btn { display: inline-flex; align-items: center; gap: 6px; }
+
+.maint-note {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  margin-top: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-size: 12px;
+}
+.maint-note code { font-family: var(--font-mono); font-size: 11px; color: var(--fg-1); }
+.maint-note.running svg { animation: maint-spin 0.9s linear infinite; }
+.maint-note.ok { color: var(--good); border-color: color-mix(in srgb, var(--good) 25%, transparent); background: color-mix(in srgb, var(--good) 5%, var(--bg-2)); }
+.maint-note.err { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 25%, transparent); background: color-mix(in srgb, var(--bad) 5%, var(--bg-2)); }
+
+.maint-bar { flex: 1 1 120px; height: 6px; border-radius: 3px; background: var(--bg-0); overflow: hidden; }
+.maint-fill { height: 100%; background: var(--gold); transition: width 0.4s ease; }
+
+.maint-errors { display: grid; gap: 4px; margin-top: 8px; }
+.maint-errors code {
+  padding: 6px 9px; overflow-x: auto;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--bg-0); color: var(--fg-2);
+  font-family: var(--font-mono); font-size: 10.5px; white-space: nowrap;
+}
+
+@keyframes maint-spin { to { transform: rotate(360deg); } }
 
 .tbl-list { display: flex; flex-direction: column; gap: 4px; }
 .tbl-row {

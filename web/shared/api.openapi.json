@@ -770,6 +770,34 @@
         ],
         "type": "object"
       },
+      "Admin-db-maintenanceRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Admin-db-maintenanceRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "op": {
+            "description": "vacuum_analyze reclaims dead rows + refreshes stats; analyze refreshes stats only; reindex rebuilds all indexes concurrently; reset_query_stats zeroes pg_stat_statements",
+            "enum": [
+              "vacuum_analyze",
+              "analyze",
+              "reindex",
+              "reset_query_stats"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "op"
+        ],
+        "type": "object"
+      },
       "Admin-reset-user-passwordRequest": {
         "additionalProperties": false,
         "properties": {
@@ -968,6 +996,10 @@
             "format": "double",
             "type": "number"
           },
+          "maintenance": {
+            "$ref": "#/components/schemas/DBMaintenanceStatus",
+            "description": "Manual VACUUM/ANALYZE/REINDEX run state"
+          },
           "max_connections": {
             "format": "int32",
             "type": "integer"
@@ -1075,7 +1107,8 @@
           "waiting_queries",
           "longest_query_ms",
           "query_stats_available",
-          "top_queries"
+          "top_queries",
+          "maintenance"
         ],
         "type": "object"
       },
@@ -4221,6 +4254,107 @@
           "media_type",
           "paths"
         ],
+        "type": "object"
+      },
+      "DBMaintenanceProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "done": {
+            "description": "Tables completed so far",
+            "format": "int64",
+            "type": "integer"
+          },
+          "op": {
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "table": {
+            "description": "Table currently being processed",
+            "type": "string"
+          },
+          "total": {
+            "description": "Total tables in this run; 0 for reset_query_stats",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "op",
+          "started_at",
+          "done",
+          "total"
+        ],
+        "type": "object"
+      },
+      "DBMaintenanceResult": {
+        "additionalProperties": false,
+        "properties": {
+          "duration_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "error": {
+            "description": "Fatal failure that aborted the run",
+            "type": "string"
+          },
+          "errors": {
+            "description": "Per-table failures; the run continued past them",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "finished_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "op": {
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "tables": {
+            "description": "Tables processed; 0 for reset_query_stats",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "op",
+          "started_at",
+          "finished_at",
+          "duration_ms",
+          "tables"
+        ],
+        "type": "object"
+      },
+      "DBMaintenanceStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/DBMaintenanceStatus.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "last": {
+            "$ref": "#/components/schemas/DBMaintenanceResult"
+          },
+          "running": {
+            "$ref": "#/components/schemas/DBMaintenanceProgress"
+          }
+        },
         "type": "object"
       },
       "DNSStatus": {
@@ -23502,6 +23636,59 @@
           }
         ],
         "summary": "Database size, pool stats, version",
+        "tags": [
+          "Admin"
+        ]
+      }
+    },
+    "/api/admin/db/maintenance": {
+      "post": {
+        "operationId": "admin-db-maintenance",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Admin-db-maintenanceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DBMaintenanceStatus"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Start a database maintenance operation",
         "tags": [
           "Admin"
         ]

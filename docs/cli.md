@@ -87,6 +87,15 @@ the rationale.
 | `heya migrate status`  | Show applied vs pending                   |
 | `heya migrate reset`   | Roll back all migrations                  |
 | `heya db:wipe`         | Drop media tables (preserves users)       |
+| `heya db:maintain vacuum`      | VACUUM (ANALYZE) every user table — reclaim dead rows + refresh planner stats |
+| `heya db:maintain analyze`     | ANALYZE only — refresh planner statistics (fast; run after bulk imports or a pg_upgrade) |
+| `heya db:maintain reindex`     | REINDEX CONCURRENTLY every index — compact index bloat without blocking writes |
+| `heya db:maintain reset-stats` | Zero pg_stat_statements so the expensive-statements panel measures a fresh window |
+
+`db:maintain` runs table by table (biggest first), keeps going past
+per-table failures, and shares its single-flight run state with the
+Settings → Diagnostics → Database maintenance buttons — one operation at a
+time across CLI and UI.
 
 ## Users
 

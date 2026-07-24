@@ -126,6 +126,10 @@ type App struct {
 	// recovery/configuration path.
 	castAllowedUsers map[int64]struct{}
 
+	// Manual database maintenance (VACUUM/ANALYZE/REINDEX) single-flight
+	// state — see dbmaintenance.go. Zero value is ready to use.
+	dbMaint dbMaintenanceState
+
 	// Lifetime context cancelled by Close(). Used for fire-and-forget
 	// goroutines (model fetches, tailscale Enable/Logout) that must outlive
 	// the request that triggered them but should not survive shutdown.

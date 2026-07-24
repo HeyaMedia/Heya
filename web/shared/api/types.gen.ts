@@ -259,6 +259,17 @@ export type AdminCreateUserRequest = {
     username: string;
 };
 
+export type AdminDbMaintenanceRequest = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    /**
+     * vacuum_analyze reclaims dead rows + refreshes stats; analyze refreshes stats only; reindex rebuilds all indexes concurrently; reset_query_stats zeroes pg_stat_statements
+     */
+    op: 'vacuum_analyze' | 'analyze' | 'reindex' | 'reset_query_stats';
+};
+
 export type AdminResetUserPasswordRequest = {
     /**
      * A URL to the JSON Schema for this object.
@@ -329,6 +340,10 @@ export type AdminDbBody = {
     idle_connections: number;
     index_scan_ratio: number;
     longest_query_ms: number;
+    /**
+     * Manual VACUUM/ANALYZE/REINDEX run state
+     */
+    maintenance: DbMaintenanceStatus;
     max_connections: number;
     query_stats_available: boolean;
     query_stats_error?: string;
@@ -1270,6 +1285,51 @@ export type CreateLibraryInputBody = {
      */
     paths: Array<string> | null;
     settings?: LibrarySettings;
+};
+
+export type DbMaintenanceProgress = {
+    /**
+     * Tables completed so far
+     */
+    done: number;
+    op: string;
+    started_at: string;
+    /**
+     * Table currently being processed
+     */
+    table?: string;
+    /**
+     * Total tables in this run; 0 for reset_query_stats
+     */
+    total: number;
+};
+
+export type DbMaintenanceResult = {
+    duration_ms: number;
+    /**
+     * Fatal failure that aborted the run
+     */
+    error?: string;
+    /**
+     * Per-table failures; the run continued past them
+     */
+    errors?: Array<string> | null;
+    finished_at: string;
+    op: string;
+    started_at: string;
+    /**
+     * Tables processed; 0 for reset_query_stats
+     */
+    tables: number;
+};
+
+export type DbMaintenanceStatus = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    last?: DbMaintenanceResult;
+    running?: DbMaintenanceProgress;
 };
 
 export type DnsStatus = {
@@ -6734,6 +6794,13 @@ export type AdminCreateUserRequestWritable = {
     username: string;
 };
 
+export type AdminDbMaintenanceRequestWritable = {
+    /**
+     * vacuum_analyze reclaims dead rows + refreshes stats; analyze refreshes stats only; reindex rebuilds all indexes concurrently; reset_query_stats zeroes pg_stat_statements
+     */
+    op: 'vacuum_analyze' | 'analyze' | 'reindex' | 'reset_query_stats';
+};
+
 export type AdminResetUserPasswordRequestWritable = {
     new_password: string;
 };
@@ -6780,6 +6847,10 @@ export type AdminDbBodyWritable = {
     idle_connections: number;
     index_scan_ratio: number;
     longest_query_ms: number;
+    /**
+     * Manual VACUUM/ANALYZE/REINDEX run state
+     */
+    maintenance: DbMaintenanceStatusWritable;
     max_connections: number;
     query_stats_available: boolean;
     query_stats_error?: string;
@@ -7198,6 +7269,11 @@ export type CreateLibraryInputBodyWritable = {
      */
     paths: Array<string> | null;
     settings?: LibrarySettingsWritable;
+};
+
+export type DbMaintenanceStatusWritable = {
+    last?: DbMaintenanceResult;
+    running?: DbMaintenanceProgress;
 };
 
 export type DashboardStatsWritable = {
@@ -9012,6 +9088,31 @@ export type AdminDbResponses = {
 };
 
 export type AdminDbResponse = AdminDbResponses[keyof AdminDbResponses];
+
+export type AdminDbMaintenanceData = {
+    body: AdminDbMaintenanceRequestWritable;
+    path?: never;
+    query?: never;
+    url: '/api/admin/db/maintenance';
+};
+
+export type AdminDbMaintenanceErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type AdminDbMaintenanceError = AdminDbMaintenanceErrors[keyof AdminDbMaintenanceErrors];
+
+export type AdminDbMaintenanceResponses = {
+    /**
+     * OK
+     */
+    200: DbMaintenanceStatus;
+};
+
+export type AdminDbMaintenanceResponse = AdminDbMaintenanceResponses[keyof AdminDbMaintenanceResponses];
 
 export type AdminDiagnosticsData = {
     body?: never;

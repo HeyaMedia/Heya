@@ -64,6 +64,27 @@ func registerAdminSystemRoutes(api huma.API, app *service.App, hub *eventhub.Hub
 			return noStoreJSON(collectAdminDB(ctx, app)), nil
 		})
 
+	// --- Database maintenance: VACUUM / ANALYZE / REINDEX / stats reset ---
+	// Fire-and-forget: the run detaches onto a background goroutine and the
+	// database page picks up live progress from its existing /api/admin/db
+	// poll (adminDBBody.Maintenance). One run at a time; 409 while busy.
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/admin/db/maintenance", "admin-db-maintenance", "Start a database maintenance operation", "Admin")),
+		func(ctx context.Context, in *struct {
+			Body struct {
+				Op string `json:"op" enum:"vacuum_analyze,analyze,reindex,reset_query_stats" doc:"vacuum_analyze reclaims dead rows + refreshes stats; analyze refreshes stats only; reindex rebuilds all indexes concurrently; reset_query_stats zeroes pg_stat_statements"`
+			}
+		}) (*JSONOutput[service.DBMaintenanceStatus], error) {
+			maintOp, err := service.ParseDBMaintenanceOp(in.Body.Op)
+			if err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			status, err := app.StartDBMaintenance(maintOp)
+			if err != nil {
+				return nil, huma.Error409Conflict(err.Error())
+			}
+			return noStoreJSON(status), nil
+		})
+
 	// --- Listeners: LAN + tailscale exposure ---
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/admin/listeners", "admin-listeners", "HTTP / WS listener inventory", "Admin")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[adminListenersBody], error) {
@@ -388,44 +409,46 @@ type adminDBQuery struct {
 }
 
 type adminDBBody struct {
-	Version                string         `json:"version"`
-	DatabaseName           string         `json:"database_name"`
-	SizeBytes              int64          `json:"size_bytes"`
-	TotalConnections       int32          `json:"total_connections"`
-	AcquiredConnections    int32          `json:"acquired_connections"`
-	IdleConnections        int32          `json:"idle_connections"`
-	MaxConnections         int32          `json:"max_connections"`
-	AcquireCount           int64          `json:"acquire_count"`
-	AcquireDurationMs      int64          `json:"acquire_duration_ms"`
-	CanceledAcquireCount   int64          `json:"canceled_acquire_count"`
-	EmptyAcquireCount      int64          `json:"empty_acquire_count"`
-	TopTables              []adminDBTable `json:"top_tables"`
-	TransactionsCommitted  int64          `json:"transactions_committed"`
-	TransactionsRolledBack int64          `json:"transactions_rolled_back"`
-	BlocksRead             int64          `json:"blocks_read"`
-	BlocksHit              int64          `json:"blocks_hit"`
-	BufferCacheHitRatio    float64        `json:"buffer_cache_hit_ratio"`
-	RowsReturned           int64          `json:"rows_returned"`
-	RowsFetched            int64          `json:"rows_fetched"`
-	RowsInserted           int64          `json:"rows_inserted"`
-	RowsUpdated            int64          `json:"rows_updated"`
-	RowsDeleted            int64          `json:"rows_deleted"`
-	TempBytes              int64          `json:"temp_bytes"`
-	Deadlocks              int64          `json:"deadlocks"`
-	DeadTuples             int64          `json:"dead_tuples"`
-	IndexScanRatio         float64        `json:"index_scan_ratio"`
-	ActiveQueries          int64          `json:"active_queries"`
-	WaitingQueries         int64          `json:"waiting_queries"`
-	LongestQueryMS         float64        `json:"longest_query_ms"`
-	QueryStatsAvailable    bool           `json:"query_stats_available"`
-	QueryStatsError        string         `json:"query_stats_error,omitempty"`
-	TopQueries             []adminDBQuery `json:"top_queries"`
-	Error                  string         `json:"error,omitempty"`
+	Version                string                      `json:"version"`
+	DatabaseName           string                      `json:"database_name"`
+	SizeBytes              int64                       `json:"size_bytes"`
+	TotalConnections       int32                       `json:"total_connections"`
+	AcquiredConnections    int32                       `json:"acquired_connections"`
+	IdleConnections        int32                       `json:"idle_connections"`
+	MaxConnections         int32                       `json:"max_connections"`
+	AcquireCount           int64                       `json:"acquire_count"`
+	AcquireDurationMs      int64                       `json:"acquire_duration_ms"`
+	CanceledAcquireCount   int64                       `json:"canceled_acquire_count"`
+	EmptyAcquireCount      int64                       `json:"empty_acquire_count"`
+	TopTables              []adminDBTable              `json:"top_tables"`
+	TransactionsCommitted  int64                       `json:"transactions_committed"`
+	TransactionsRolledBack int64                       `json:"transactions_rolled_back"`
+	BlocksRead             int64                       `json:"blocks_read"`
+	BlocksHit              int64                       `json:"blocks_hit"`
+	BufferCacheHitRatio    float64                     `json:"buffer_cache_hit_ratio"`
+	RowsReturned           int64                       `json:"rows_returned"`
+	RowsFetched            int64                       `json:"rows_fetched"`
+	RowsInserted           int64                       `json:"rows_inserted"`
+	RowsUpdated            int64                       `json:"rows_updated"`
+	RowsDeleted            int64                       `json:"rows_deleted"`
+	TempBytes              int64                       `json:"temp_bytes"`
+	Deadlocks              int64                       `json:"deadlocks"`
+	DeadTuples             int64                       `json:"dead_tuples"`
+	IndexScanRatio         float64                     `json:"index_scan_ratio"`
+	ActiveQueries          int64                       `json:"active_queries"`
+	WaitingQueries         int64                       `json:"waiting_queries"`
+	LongestQueryMS         float64                     `json:"longest_query_ms"`
+	QueryStatsAvailable    bool                        `json:"query_stats_available"`
+	QueryStatsError        string                      `json:"query_stats_error,omitempty"`
+	TopQueries             []adminDBQuery              `json:"top_queries"`
+	Maintenance            service.DBMaintenanceStatus `json:"maintenance" doc:"Manual VACUUM/ANALYZE/REINDEX run state"`
+	Error                  string                      `json:"error,omitempty"`
 }
 
 func collectAdminDB(ctx context.Context, app *service.App) adminDBBody {
 	ctx = diagnostics.WithoutQueryTrace(ctx)
 	body := adminDBBody{TopTables: []adminDBTable{}, TopQueries: []adminDBQuery{}}
+	body.Maintenance = app.DBMaintenanceStatus()
 	pool := app.DBPool()
 	if pool == nil {
 		body.Error = "no database pool"
