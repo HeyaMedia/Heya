@@ -2010,6 +2010,9 @@
           "last_error": {
             "type": "string"
           },
+          "per_interface": {
+            "type": "boolean"
+          },
           "port": {
             "format": "int64",
             "type": "integer"
@@ -2034,7 +2037,8 @@
           "enabled",
           "advertising",
           "service_type",
-          "domain"
+          "domain",
+          "per_interface"
         ],
         "type": "object"
       },

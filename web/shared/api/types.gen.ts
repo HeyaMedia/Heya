@@ -606,6 +606,7 @@ export type AdvertisementStatus = {
     instance?: string;
     interfaces?: Array<string> | null;
     last_error?: string;
+    per_interface: boolean;
     port?: number;
     service_type: string;
     started_at?: string;

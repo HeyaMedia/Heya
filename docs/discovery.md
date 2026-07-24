@@ -49,9 +49,11 @@ be added within a version; existing keys will not change meaning.
 1. **Browse** `_heya._tcp` in `local.`.
 2. **Build the origin** from the SRV answer and `scheme`. Prefer a literal
    A-record address over the `.local.` name — Android has no mDNS resolver, so
-   a hostname is useless there. Heya orders the published addresses so the
-   server's default-route address comes first and tailnet/CGNAT addresses last;
-   try them in order.
+   a hostname is useless there. You will normally get exactly one address:
+   answers are scoped to the interface your query arrived on, so the server's
+   container and VM-bridge addresses never reach you. If more than one does
+   come back, try them in order — they are ordered default-route first and
+   tailnet/CGNAT last.
 3. **Confirm** with an unauthenticated `GET /api/server/info`:
 
    ```json
@@ -83,7 +85,7 @@ Standard provenance: env wins and locks the UI, DB values overlay defaults.
 | `HEYA_DISCOVERY_NAME` | *(empty)* | yes | Empty = this machine's hostname. Must be unique on the network |
 | `HEYA_DISCOVERY_PORT` | `0` | no | `0` = the port the server binds. Set it when a reverse proxy or container port map means clients must connect elsewhere |
 | `HEYA_DISCOVERY_HOST` | *(empty)* | no | Hostname to advertise under `.local`. Only the first label is used |
-| `HEYA_DISCOVERY_ADDRESSES` | *(empty)* | no | Comma-separated IPs to publish instead of the ones enumerated locally |
+| `HEYA_DISCOVERY_ADDRESSES` | *(empty)* | no | Comma-separated IPs to publish. Empty (the default) is better: answers are then scoped to the interface each query arrives on. Set it only when the address clients must use is one this process cannot see — a bridged container publishing its host's IP |
 | `HEYA_DISCOVERY_INTERFACES` | *(empty)* | no | Comma-separated NIC allowlist. Empty = every multicast-capable interface |
 
 ## When it doesn't work
@@ -110,23 +112,27 @@ Heya's own production deployment is a Kubernetes pod and already runs with
 `hostNetwork: true`, so it is discoverable as-is: the serve pod holds the
 node's LAN address and announces under the node's hostname.
 
-**A multi-bridge host publishes dead addresses.** That node enumerates 64
-multicast-capable interfaces, and the announcement carries every non-loopback
-address it finds:
-
-```
-ipv4: 192.168.10.10   ← default route, ordered first, the one clients use
-ipv4: 172.17.0.1      ← docker bridge, unroutable from the LAN
-ipv4: 10.0.0.210      ← CNI, unroutable from the LAN
-```
-
-The ordering means a client connects on the first try, so this is cosmetic
-rather than broken. Pin `HEYA_DISCOVERY_INTERFACES` to the real LAN NIC if you
-want the trailing two gone — a client that ever does fall through to them
-waits out a connect timeout each.
+**A multi-bridge host does not leak its bridge addresses.** The production node
+has 64 multicast-capable interfaces and three non-loopback addresses —
+`192.168.10.10` (enp38s0), `172.17.0.1` (docker0) and `10.0.0.210`
+(cilium_host) — but a LAN client is only ever told `192.168.10.10`. Answers are
+scoped to the interface the query arrived on, so a container address is
+returned only to a query that came in over that container network, where it is
+the correct answer. Nothing needs pinning.
 
 ## Implementation notes
 
+- **Register no addresses; let answers be scoped per interface.** zeroconf
+  replies to every query with its registered address list verbatim — but with
+  that list *empty* it replies with the addresses of the interface the query
+  arrived on instead. That is both RFC-correct and self-tuning: a LAN client
+  gets the LAN address, and a docker/CNI/VM-bridge address only goes to a query
+  that came in over that bridge. It removes any need to guess which interface
+  names are "real". The catch is that it depends on the interface index
+  arriving in a socket control message, and if that ever fails the answer
+  carries *no* addresses — silent and fatal — so
+  `TestLivePerInterfaceAddressScoping` asserts it against real multicast.
+  `HEYA_DISCOVERY_ADDRESSES` switches back to a static list.
 - **Never advertise under the machine's own hostname.** Heya runs its own mDNS
   responder in-process, and most hosts already run one (mDNSResponder on
   macOS, avahi on Linux) that owns *and defends* `<hostname>.local`.

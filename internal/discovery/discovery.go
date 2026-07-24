@@ -99,9 +99,14 @@ type AdvertisementStatus struct {
 	// isn't my client picking the right URL?" without a packet capture.
 	TXT        []string `json:"txt,omitempty"`
 	Interfaces []string `json:"interfaces,omitempty"`
-	Addresses  []string `json:"addresses,omitempty"`
-	StartedAt  string   `json:"started_at,omitempty"`
-	LastError  string   `json:"last_error,omitempty"`
+	// Addresses are the candidates. When PerInterface is true a client is
+	// answered with only the ones on the interface its query arrived over,
+	// so this is the union across interfaces rather than what any single
+	// client sees; when false it is the static list every client is given.
+	Addresses    []string `json:"addresses,omitempty"`
+	PerInterface bool     `json:"per_interface"`
+	StartedAt    string   `json:"started_at,omitempty"`
+	LastError    string   `json:"last_error,omitempty"`
 }
 
 // StatusFn receives a snapshot on every transition — serve.go wires it to the
@@ -194,16 +199,27 @@ func (m *Manager) Advertise(cfg Config) error {
 		return err
 	}
 
-	addresses := trimAll(cfg.Addresses)
-	if len(addresses) == 0 {
-		addresses = interfaceAddresses(selected)
-	}
-	if len(addresses) == 0 {
-		err := fmt.Errorf("no usable address found on %s (set HEYA_DISCOVERY_ADDRESSES)", describeInterfaces(ifaceNames))
-		m.update(func(s *AdvertisementStatus) {
-			*s = AdvertisementStatus{ServiceType: ServiceType, Domain: Domain, Enabled: true, LastError: err.Error()}
-		})
-		return err
+	// Registering NO addresses is deliberate and is what keeps a client from
+	// being handed addresses it cannot route to. zeroconf answers a query
+	// with its registered address list verbatim on every interface; with the
+	// list empty it instead answers with the addresses of the interface the
+	// query actually ARRIVED on (appendAddrs → addrsForInterface). That is
+	// the RFC-correct behaviour and it is self-tuning: a LAN client gets the
+	// LAN address, and a docker/CNI/VM-bridge address only ever goes to a
+	// query that came in over that bridge, where it is the right answer.
+	// Without it a host like the production node answers every client with
+	// 192.168.10.10 *plus* 172.17.0.1 (docker) and 10.0.0.210 (cilium), and
+	// clients burn a connect timeout on each dead one.
+	//
+	// HEYA_DISCOVERY_ADDRESSES overrides with a static list — required when
+	// the addresses a client must use are not ones this process can see at
+	// all (bridged container publishing its host's IP).
+	explicit := trimAll(cfg.Addresses)
+	candidates := explicit
+	if len(candidates) == 0 {
+		// Not handed to zeroconf; enumerated purely so status/UI can answer
+		// "what could a client be told?" without a packet capture.
+		candidates = interfaceAddresses(selected)
 	}
 
 	// Always proxy mode, even when advertising ourselves. Plain Register
@@ -211,10 +227,10 @@ func (m *Manager) Advertise(cfg Config) error {
 	// suffix when it thinks one is missing — on a machine already called
 	// `mac.local` that yields either `mac.local.local.` or, with an untrimmed
 	// domain, a name with no trailing dot that miekg/dns refuses to pack, so
-	// NOTHING is answered. Handing it a bare label plus explicit addresses
-	// takes that guess away and is also what container deployments need.
+	// NOTHING is answered. Handing it a bare label takes that guess away, and
+	// proxy mode is also what container deployments need.
 	txt := BuildTXT(cfg)
-	server, err := zeroconf.RegisterProxy(instance, ServiceType, Domain, cfg.Port, host, addresses, txt, ifaces)
+	server, err := zeroconf.RegisterProxy(instance, ServiceType, Domain, cfg.Port, host, explicit, txt, ifaces)
 	if err != nil {
 		m.update(func(s *AdvertisementStatus) {
 			*s = AdvertisementStatus{ServiceType: ServiceType, Domain: Domain, Enabled: true, LastError: err.Error()}
@@ -228,17 +244,18 @@ func (m *Manager) Advertise(cfg Config) error {
 
 	m.update(func(s *AdvertisementStatus) {
 		*s = AdvertisementStatus{
-			ServiceType: ServiceType,
-			Domain:      Domain,
-			Enabled:     true,
-			Advertising: true,
-			Instance:    instance,
-			Hostname:    host + "." + strings.TrimSuffix(Domain, "."),
-			Port:        cfg.Port,
-			TXT:         txt,
-			Interfaces:  ifaceNames,
-			Addresses:   addresses,
-			StartedAt:   time.Now().UTC().Format(time.RFC3339),
+			ServiceType:  ServiceType,
+			Domain:       Domain,
+			Enabled:      true,
+			Advertising:  true,
+			Instance:     instance,
+			Hostname:     host + "." + strings.TrimSuffix(Domain, "."),
+			Port:         cfg.Port,
+			TXT:          txt,
+			Interfaces:   ifaceNames,
+			Addresses:    candidates,
+			PerInterface: len(explicit) == 0,
+			StartedAt:    time.Now().UTC().Format(time.RFC3339),
 		}
 	})
 	m.log.Info().
