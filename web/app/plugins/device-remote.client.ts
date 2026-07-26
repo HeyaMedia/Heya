@@ -7,6 +7,9 @@ export default defineNuxtPlugin((nuxtApp) => {
   const qs = useQueueStore()
   const video = useVideoRenderer()
   const id = clientDeviceID()
+  // Hoisted: the `device.command` handler below is async, and useRouter() must
+  // not be called from an async body (it resolves the Nuxt instance).
+  const router = useRouter()
 
   function state() {
     if (video.snapshot.value) return video.snapshot.value
@@ -107,7 +110,12 @@ export default defineNuxtPlugin((nuxtApp) => {
           entity_id: String(args.entity_id ?? args.media_item_id ?? ''),
         }
         if (position > 0) query.t = String(position)
-        await navigateTo({ path: `/watch/${encodeURIComponent(fileID)}`, query })
+        // Swapping one video for another while the player is already open
+        // replaces its history entry — same one-entry-per-player rule as the
+        // in-player Up Next roll. Only the first hand-off pushes, so back
+        // still returns to whatever page the device was parked on.
+        const inPlayer = router.currentRoute.value.path.startsWith('/watch/')
+        await navigateTo({ path: `/watch/${encodeURIComponent(fileID)}`, query }, { replace: inPlayer })
       }
       await nextTick()
       heartbeat()

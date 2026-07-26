@@ -1119,7 +1119,11 @@ function playNextEpisode() {
     params.set('entity_id', String(upNext.value.episode_id))
   }
   if (props.shuffle) params.set('shuffle', '1')
-  navigateTo(`/watch/${fileRef}?${params}`)
+  // `replace` — the player owns exactly ONE history entry no matter how many
+  // episodes roll by. Pushing would stack every episode of a binge onto the
+  // back stack, so closing the player (or browser/mouse/keyboard back) would
+  // walk backwards through episodes instead of returning to the series page.
+  navigateTo(`/watch/${fileRef}?${params}`, { replace: true })
 }
 
 function startUpNextCountdown() {
