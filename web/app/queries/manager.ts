@@ -32,6 +32,7 @@ import type {
   ManagerDownloadClientView,
   ManagerIndexerStatsView,
   ManagerIndexerView,
+  ManagerQualityItem,
   ManagerQualityProfileView,
 } from '~~/shared/api/types.gen'
 
@@ -84,6 +85,16 @@ export const managerQualityProfilesQuery = defineQueryOptions(() => ({
     return await $heya('/api/manager/quality-profiles') as ManagerQualityProfileView[]
   },
   staleTime: 1000 * 30,
+  meta: { prefetch: 'none', sensitivity: 'private' },
+}))
+
+export const managerQualityLaddersQuery = defineQueryOptions(() => ({
+  key: ['manager', 'quality-ladders'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/manager/quality-ladders') as Record<string, ManagerQualityItem[]>
+  },
+  staleTime: 1000 * 60 * 10,
   meta: { prefetch: 'none', sensitivity: 'private' },
 }))
 

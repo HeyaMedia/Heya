@@ -27,6 +27,7 @@ import {
   PhCloudArrowDown,
   PhCloudSlash,
   PhCompass,
+  PhCopy,
   PhCopyright,
   PhCpu,
   PhCrown,
@@ -116,6 +117,7 @@ const props = defineProps<{
 // registering the library through nuxt-phosphor-icons generated one async
 // chunk for every one of its 1,500+ icons and made Workbox precache them all.
 const nameMap: Record<string, string> = {
+  copy: 'copy',
   home: 'house',
   film: 'film-slate',
   tv: 'television-simple',
@@ -332,6 +334,7 @@ const iconComponents: Record<string, Component> = {
   'clipboard-text': PhClipboardText,
   timer: PhTimer,
   hash: PhHash,
+  copy: PhCopy,
   copyright: PhCopyright,
   'speaker-low': PhSpeakerLow,
   'speaker-none': PhSpeakerNone,

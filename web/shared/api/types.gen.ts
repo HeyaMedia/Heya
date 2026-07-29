@@ -14028,6 +14028,33 @@ export type ManagerTestIndexerResponses = {
 
 export type ManagerTestIndexerResponse = ManagerTestIndexerResponses[keyof ManagerTestIndexerResponses];
 
+export type ManagerQualityLaddersData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/manager/quality-ladders';
+};
+
+export type ManagerQualityLaddersErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerQualityLaddersError = ManagerQualityLaddersErrors[keyof ManagerQualityLaddersErrors];
+
+export type ManagerQualityLaddersResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: Array<ManagerQualityItem> | null;
+    };
+};
+
+export type ManagerQualityLaddersResponse = ManagerQualityLaddersResponses[keyof ManagerQualityLaddersResponses];
+
 export type ManagerListQualityProfilesData = {
     body?: never;
     path?: never;
@@ -14137,6 +14164,36 @@ export type ManagerUpdateQualityProfileResponses = {
 };
 
 export type ManagerUpdateQualityProfileResponse = ManagerUpdateQualityProfileResponses[keyof ManagerUpdateQualityProfileResponses];
+
+export type ManagerCloneQualityProfileData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/manager/quality-profiles/{id}/clone';
+};
+
+export type ManagerCloneQualityProfileErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerCloneQualityProfileError = ManagerCloneQualityProfileErrors[keyof ManagerCloneQualityProfileErrors];
+
+export type ManagerCloneQualityProfileResponses = {
+    /**
+     * OK
+     */
+    200: ManagerQualityProfileView;
+};
+
+export type ManagerCloneQualityProfileResponse = ManagerCloneQualityProfileResponses[keyof ManagerCloneQualityProfileResponses];
 
 export type ListApiTokensData = {
     body?: never;

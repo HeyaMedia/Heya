@@ -27,7 +27,7 @@ useLiveRefresh([{
 const domainFilter = ref('all')
 const domains = computed(() => {
   const seen = new Set(formatsAll.value.map(format => format.domain))
-  return ['video', 'music', 'book'].filter(domain => seen.has(domain))
+  return ['movie', 'tv', 'music', 'book'].filter(domain => seen.has(domain))
 })
 const formats = computed(() =>
   domainFilter.value === 'all'
@@ -138,7 +138,7 @@ function blankSpec(): EditSpec {
 function openCreate() {
   editingID.value = null
   form.name = ''
-  form.domain = domainFilter.value === 'all' ? 'video' : domainFilter.value
+  form.domain = domainFilter.value === 'all' ? 'movie' : domainFilter.value
   form.specs = [blankSpec()]
   formError.value = ''
   dialogOpen.value = true
@@ -201,8 +201,8 @@ const importError = ref('')
 const importResult = ref<ManagerFormatImportResult | null>(null)
 
 const KIND_OPTIONS = [
-  { value: 'radarr', label: 'Radarr (movies → video)' },
-  { value: 'sonarr', label: 'Sonarr (TV → video)' },
+  { value: 'radarr', label: 'Radarr (movies)' },
+  { value: 'sonarr', label: 'Sonarr (TV)' },
   { value: 'lidarr', label: 'Lidarr (music)' },
 ]
 
@@ -407,7 +407,7 @@ async function runTest() {
           </label>
           <label v-if="editingID == null" class="mgr-field">
             <span>Domain</span>
-            <AppSelect v-model="form.domain" :options="[{ value: 'video', label: 'video' }, { value: 'music', label: 'music' }, { value: 'book', label: 'book' }]" />
+            <AppSelect v-model="form.domain" :options="[{ value: 'movie', label: 'movies' }, { value: 'tv', label: 'tv' }, { value: 'music', label: 'music' }, { value: 'book', label: 'books' }]" />
           </label>
         </div>
 

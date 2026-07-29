@@ -1073,9 +1073,9 @@ func (input *ManagerQualityProfileInput) normalize() error {
 		return fmt.Errorf("name is required")
 	}
 	switch input.Domain {
-	case "video", "music", "book":
+	case "movie", "tv", "music", "book":
 	default:
-		return fmt.Errorf("domain must be video, music, or book")
+		return fmt.Errorf("domain must be movie, tv, music, or book")
 	}
 	if len(input.Items) == 0 {
 		return fmt.Errorf("at least one quality is required")
@@ -1189,6 +1189,54 @@ func (a *App) UpdateManagerQualityProfile(ctx context.Context, id int64, input M
 	}
 	a.notifyManagerChanged(ctx, "quality_profiles")
 	return managerQualityProfileView(row, inUse), nil
+}
+
+// CloneManagerQualityProfile duplicates a profile (ladder, cutoff, language,
+// thresholds, format scores) under a free "<name> (copy)" name. The clone is
+// user-owned: it drops the import source so re-imports never overwrite it.
+func (a *App) CloneManagerQualityProfile(ctx context.Context, id int64) (ManagerQualityProfileView, error) {
+	q := sqlc.New(a.db)
+	row, err := q.GetManagerQualityProfile(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ManagerQualityProfileView{}, ErrManagerNotFound
+		}
+		return ManagerQualityProfileView{}, fmt.Errorf("get manager quality profile: %w", err)
+	}
+
+	existing, err := q.ListManagerQualityProfiles(ctx)
+	if err != nil {
+		return ManagerQualityProfileView{}, fmt.Errorf("list manager quality profiles: %w", err)
+	}
+	taken := make(map[string]bool, len(existing))
+	for _, profile := range existing {
+		if profile.Domain == row.Domain {
+			taken[profile.Name] = true
+		}
+	}
+	name := fmt.Sprintf("%s (copy)", row.Name)
+	for counter := 2; taken[name]; counter++ {
+		name = fmt.Sprintf("%s (copy %d)", row.Name, counter)
+	}
+
+	created, err := q.CreateManagerQualityProfile(ctx, sqlc.CreateManagerQualityProfileParams{
+		Name:              name,
+		Domain:            row.Domain,
+		Items:             row.Items,
+		Cutoff:            row.Cutoff,
+		UpgradesEnabled:   row.UpgradesEnabled,
+		MinFormatScore:    row.MinFormatScore,
+		CutoffFormatScore: row.CutoffFormatScore,
+		MinUpgradeScore:   row.MinUpgradeScore,
+		FormatScores:      row.FormatScores,
+		Source:            "",
+		Language:          row.Language,
+	})
+	if err != nil {
+		return ManagerQualityProfileView{}, fmt.Errorf("clone manager quality profile: %w", err)
+	}
+	a.notifyManagerChanged(ctx, "quality_profiles")
+	return managerQualityProfileView(created, 0), nil
 }
 
 func (a *App) DeleteManagerQualityProfile(ctx context.Context, id int64) error {

@@ -153,6 +153,11 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(views), nil
 		})
 
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/quality-ladders", "manager-quality-ladders", "Canonical per-domain quality ladder templates for new profiles", "Manager")),
+		func(_ context.Context, _ *struct{}) (*JSONOutput[map[string][]service.ManagerQualityItem], error) {
+			return &JSONOutput[map[string][]service.ManagerQualityItem]{Body: app.ManagerQualityLadders()}, nil
+		})
+
 	huma.Register(api, adminSecured(op(http.MethodPost, "/api/manager/quality-profiles", "manager-create-quality-profile", "Add a manager quality profile", "Manager")),
 		func(ctx context.Context, in *struct {
 			Body service.ManagerQualityProfileInput
@@ -172,6 +177,15 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 			view, err := app.UpdateManagerQualityProfile(ctx, in.ID, in.Body)
 			if err != nil {
 				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return &JSONOutput[service.ManagerQualityProfileView]{Body: view}, nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/manager/quality-profiles/{id}/clone", "manager-clone-quality-profile", "Duplicate a manager quality profile", "Manager")),
+		func(ctx context.Context, in *struct{ IDPath }) (*JSONOutput[service.ManagerQualityProfileView], error) {
+			view, err := app.CloneManagerQualityProfile(ctx, in.ID)
+			if err != nil {
+				return nil, humaServiceError(err)
 			}
 			return &JSONOutput[service.ManagerQualityProfileView]{Body: view}, nil
 		})

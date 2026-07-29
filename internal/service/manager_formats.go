@@ -91,9 +91,9 @@ func (input *ManagerCustomFormatInput) normalize() error {
 		return fmt.Errorf("name is required")
 	}
 	switch input.Domain {
-	case "video", "music", "book":
+	case "movie", "tv", "music", "book":
 	default:
-		return fmt.Errorf("domain must be video, music, or book")
+		return fmt.Errorf("domain must be movie, tv, music, or book")
 	}
 	if len(input.Specifications) == 0 {
 		return fmt.Errorf("at least one condition is required")
@@ -212,8 +212,10 @@ type ManagerFormatImportResult struct {
 
 func importDomainForKind(kind string) (string, error) {
 	switch kind {
-	case "radarr", "sonarr":
-		return "video", nil
+	case "radarr":
+		return "movie", nil
+	case "sonarr":
+		return "tv", nil
 	case "lidarr":
 		return "music", nil
 	default:
@@ -450,6 +452,79 @@ func (a *App) importArrProfiles(ctx context.Context, client *arr.Client, kind, d
 	return nil
 }
 
+// ── Quality ladder templates ─────────────────────────────────────────────
+
+// managerQualityLadders are the canonical per-domain ladders a new profile
+// starts from, best-first. The keys are what the release parser and the arr
+// profile importer both map onto.
+var videoLadder = []ManagerQualityItem{
+	{Quality: "remux-2160p", Allowed: false},
+	{Quality: "bluray-2160p", Allowed: true},
+	{Quality: "webdl-2160p", Allowed: true},
+	{Quality: "webrip-2160p", Allowed: true},
+	{Quality: "hdtv-2160p", Allowed: false},
+	{Quality: "remux-1080p", Allowed: false},
+	{Quality: "bluray-1080p", Allowed: true},
+	{Quality: "webdl-1080p", Allowed: true},
+	{Quality: "webrip-1080p", Allowed: true},
+	{Quality: "hdtv-1080p", Allowed: true},
+	{Quality: "bluray-720p", Allowed: true},
+	{Quality: "webdl-720p", Allowed: true},
+	{Quality: "webrip-720p", Allowed: true},
+	{Quality: "hdtv-720p", Allowed: true},
+	{Quality: "bluray-576p", Allowed: false},
+	{Quality: "bluray-480p", Allowed: false},
+	{Quality: "webdl-480p", Allowed: false},
+	{Quality: "webrip-480p", Allowed: false},
+	{Quality: "dvd", Allowed: false},
+	{Quality: "sdtv", Allowed: false},
+	{Quality: "br-disk", Allowed: false},
+	{Quality: "raw-hd", Allowed: false},
+}
+
+var managerQualityLadders = map[string][]ManagerQualityItem{
+	"movie": videoLadder,
+	"tv":    videoLadder,
+	"music": {
+		{Quality: "flac-24", Allowed: true},
+		{Quality: "flac", Allowed: true},
+		{Quality: "alac", Allowed: true},
+		{Quality: "ape", Allowed: false},
+		{Quality: "wavpack", Allowed: false},
+		{Quality: "mp3-320", Allowed: true},
+		{Quality: "mp3-v0", Allowed: true},
+		{Quality: "aac-320", Allowed: false},
+		{Quality: "mp3-256", Allowed: false},
+		{Quality: "mp3-v2", Allowed: false},
+		{Quality: "aac-256", Allowed: false},
+		{Quality: "mp3-192", Allowed: false},
+		{Quality: "ogg-vorbis-q10", Allowed: false},
+		{Quality: "wav", Allowed: false},
+	},
+	"book": {
+		{Quality: "epub", Allowed: true},
+		{Quality: "azw3", Allowed: true},
+		{Quality: "mobi", Allowed: false},
+		{Quality: "pdf", Allowed: false},
+		{Quality: "cbz", Allowed: false},
+		{Quality: "m4b", Allowed: false},
+		{Quality: "flac", Allowed: false},
+		{Quality: "mp3-320", Allowed: false},
+		{Quality: "mp3-128", Allowed: false},
+	},
+}
+
+// ManagerQualityLadders returns a copy of the per-domain ladder templates.
+func (a *App) ManagerQualityLadders() map[string][]ManagerQualityItem {
+	ladders := make(map[string][]ManagerQualityItem, len(managerQualityLadders))
+	for domain, items := range managerQualityLadders {
+		copied := make([]ManagerQualityItem, len(items))
+		copy(copied, items)
+		ladders[domain] = copied
+	}
+	return ladders
+}
+
 // ── Release tester ───────────────────────────────────────────────────────
 
 type ManagerReleaseTestInput struct {
@@ -490,13 +565,18 @@ type ManagerReleaseTestView struct {
 	Profiles []ManagerReleaseTestProfileScore `json:"profiles"`
 }
 
-// TestManagerRelease parses a release title, evaluates every video-domain
-// custom format against it, and scores the result under each video profile —
-// the same math the decision engine will run per candidate.
+// TestManagerRelease parses a release title, evaluates the matching domain's
+// custom formats against it, and scores the result under that domain's
+// profiles — the same math the decision engine will run per candidate. The
+// TV flag switches both the parser mode and the domain (tv vs movie).
 func (a *App) TestManagerRelease(ctx context.Context, input ManagerReleaseTestInput) (ManagerReleaseTestView, error) {
 	title := strings.TrimSpace(input.Title)
 	if title == "" {
 		return ManagerReleaseTestView{}, fmt.Errorf("title is required")
+	}
+	domain := "movie"
+	if input.TV {
+		domain = "tv"
 	}
 	attrs := formats.ParseVideoRelease(title, input.SizeBytes, input.TV)
 	view := ManagerReleaseTestView{
@@ -526,7 +606,7 @@ func (a *App) TestManagerRelease(ctx context.Context, input ManagerReleaseTestIn
 	}
 	matched := make(map[int64]bool)
 	for _, row := range formatRows {
-		if row.Domain != "video" {
+		if row.Domain != domain {
 			continue
 		}
 		var specs []formats.CustomFormatSpec
@@ -544,7 +624,7 @@ func (a *App) TestManagerRelease(ctx context.Context, input ManagerReleaseTestIn
 		return view, fmt.Errorf("list quality profiles: %w", err)
 	}
 	for _, row := range profileRows {
-		if row.Domain != "video" {
+		if row.Domain != domain {
 			continue
 		}
 		var scores []ManagerFormatScore

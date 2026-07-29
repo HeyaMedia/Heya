@@ -452,6 +452,63 @@ var managerProfileListCmd = &cobra.Command{
 	},
 }
 
+var managerProfileAddCmd = &cobra.Command{
+	Use:   "add",
+	Short: "Add a quality profile from the domain's canonical ladder",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name, _ := cmd.Flags().GetString("name")
+		domain, _ := cmd.Flags().GetString("domain")
+		cutoff, _ := cmd.Flags().GetString("cutoff")
+		language, _ := cmd.Flags().GetString("language")
+		return withApp(func(ctx context.Context, app *service.App) error {
+			items := app.ManagerQualityLadders()[domain]
+			if len(items) == 0 {
+				return fmt.Errorf("domain must be video, music, or book")
+			}
+			if cutoff == "" {
+				for _, item := range items {
+					if item.Allowed {
+						cutoff = item.Quality
+						break
+					}
+				}
+			}
+			view, err := app.CreateManagerQualityProfile(ctx, service.ManagerQualityProfileInput{
+				Name:     name,
+				Domain:   domain,
+				Items:    items,
+				Cutoff:   cutoff,
+				Language: language,
+			})
+			if err != nil {
+				return err
+			}
+			ui.Success("Created quality profile %q (id %d) — tune it in the UI or via the API", view.Name, view.ID)
+			return nil
+		})
+	},
+}
+
+var managerProfileCloneCmd = &cobra.Command{
+	Use:   "clone <id>",
+	Short: "Duplicate a quality profile",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid id %q", args[0])
+		}
+		return withApp(func(ctx context.Context, app *service.App) error {
+			view, err := app.CloneManagerQualityProfile(ctx, id)
+			if err != nil {
+				return err
+			}
+			ui.Success("Cloned into %q (id %d)", view.Name, view.ID)
+			return nil
+		})
+	},
+}
+
 var managerProfileRemoveCmd = &cobra.Command{
 	Use:   "rm <id>",
 	Short: "Remove a quality profile",
@@ -657,7 +714,12 @@ func init() {
 
 	managerIndexerCmd.AddCommand(managerIndexerListCmd, managerIndexerAddCmd, managerIndexerTestCmd, managerIndexerStatsCmd, managerIndexerHistoryCmd, managerIndexerRemoveCmd)
 	managerClientCmd.AddCommand(managerClientListCmd, managerClientAddCmd, managerClientTestCmd, managerClientActivityCmd, managerClientRemoveCmd)
-	managerProfileCmd.AddCommand(managerProfileListCmd, managerProfileRemoveCmd)
+	managerProfileAddCmd.Flags().String("name", "", "Profile name")
+	managerProfileAddCmd.Flags().String("domain", "movie", "movie | tv | music | book")
+	managerProfileAddCmd.Flags().String("cutoff", "", "Cutoff quality key (default: best allowed rung)")
+	managerProfileAddCmd.Flags().String("language", "any", "Language gate: any | original | a language name")
+
+	managerProfileCmd.AddCommand(managerProfileListCmd, managerProfileAddCmd, managerProfileCloneCmd, managerProfileRemoveCmd)
 	managerFormatCmd.AddCommand(managerFormatListCmd, managerFormatImportCmd, managerFormatTestCmd, managerFormatRemoveCmd)
 	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd, managerFormatCmd)
 	rootCmd.AddCommand(managerCmd)

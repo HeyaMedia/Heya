@@ -3,7 +3,9 @@ definePageMeta({ layout: 'manager', middleware: 'admin' })
 
 import {
   managerCustomFormatsQuery,
+  managerQualityLaddersQuery,
   managerQualityProfilesQuery,
+  type ManagerFormatImportResult,
   type ManagerQualityItem,
   type ManagerQualityProfileView,
 } from '~/queries/manager'
@@ -17,6 +19,9 @@ const loading = computed(() => profilesData.isLoading.value)
 
 const formatsData = useQuery(managerCustomFormatsQuery())
 const formatsAll = computed(() => formatsData.data.value ?? [])
+
+const laddersData = useQuery(managerQualityLaddersQuery())
+const ladders = computed(() => laddersData.data.value ?? {})
 
 useLiveRefresh([{
   events: ['manager.changed'],
@@ -32,10 +37,10 @@ const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
 const itemLabel = (item: ManagerQualityItem) => item.group || item.quality || ''
 const itemKey = (item: ManagerQualityItem) => item.group || item.quality || ''
 
-const DOMAIN_LABELS: Record<string, string> = { video: 'Video', music: 'Music', book: 'Books' }
+const DOMAIN_LABELS: Record<string, string> = { movie: 'Movies', tv: 'TV', music: 'Music', book: 'Books' }
 const domainGroups = computed(() => {
   const groups: { domain: string, label: string, profiles: ManagerQualityProfileView[] }[] = []
-  for (const domain of ['video', 'music', 'book']) {
+  for (const domain of ['movie', 'tv', 'music', 'book']) {
     const rows = profiles.value.filter(profile => profile.domain === domain)
     if (rows.length) groups.push({ domain, label: DOMAIN_LABELS[domain] ?? domain, profiles: rows })
   }
@@ -102,6 +107,94 @@ const visibleFormats = computed(() => {
   return editorFormats.value.filter(format => format.name.toLowerCase().includes(needle))
 })
 
+const DOMAIN_OPTIONS = [
+  { value: 'movie', label: 'movies' },
+  { value: 'tv', label: 'tv' },
+  { value: 'music', label: 'music' },
+  { value: 'book', label: 'books' },
+]
+
+function applyLadderTemplate(domain: string) {
+  form.items = (ladders.value[domain] ?? []).map(item => ({ ...item }))
+  form.cutoff = form.items.find(item => item.allowed)?.quality ?? ''
+}
+
+function onDomainChange(domain: unknown) {
+  const next = String(domain ?? 'video')
+  form.domain = next
+  applyLadderTemplate(next)
+}
+
+function openCreate() {
+  editingID.value = null
+  form.name = ''
+  form.domain = 'movie'
+  form.language = 'any'
+  form.upgrades_enabled = true
+  form.min_format_score = 0
+  form.cutoff_format_score = 0
+  form.min_upgrade_score = 1
+  applyLadderTemplate('movie')
+  formScores.clear()
+  initialScores.value = {}
+  scoreFilter.value = ''
+  formError.value = ''
+  dialogOpen.value = true
+}
+
+async function cloneProfile(profile: ManagerQualityProfileView) {
+  try {
+    await $heya(`/api/manager/quality-profiles/${profile.id}/clone`, { method: 'POST' })
+    await profilesData.refetch()
+  } catch (e: any) {
+    flash.value = { kind: 'err', text: e?.data?.detail ?? e?.message ?? 'Clone failed.' }
+  }
+}
+
+// ── Import from a running arr ────────────────────────────────────────────
+// Same endpoint as the custom-formats import — profiles need the formats
+// they score, so both always come over together.
+
+const importOpen = ref(false)
+const importForm = reactive({ kind: 'radarr', base_url: '', api_key: '' })
+const importing = ref(false)
+const importError = ref('')
+const importResult = ref<ManagerFormatImportResult | null>(null)
+
+const KIND_OPTIONS = [
+  { value: 'radarr', label: 'Radarr (movies)' },
+  { value: 'sonarr', label: 'Sonarr (TV)' },
+  { value: 'lidarr', label: 'Lidarr (music)' },
+]
+
+function openImport() {
+  importError.value = ''
+  importResult.value = null
+  importOpen.value = true
+}
+
+async function runImport() {
+  importing.value = true
+  importError.value = ''
+  importResult.value = null
+  try {
+    importResult.value = await $heya('/api/manager/custom-formats/import', {
+      method: 'POST',
+      body: {
+        kind: importForm.kind,
+        base_url: importForm.base_url,
+        api_key: importForm.api_key,
+        include_profiles: true,
+      },
+    }) as ManagerFormatImportResult
+    await Promise.all([profilesData.refetch(), formatsData.refetch()])
+  } catch (e: any) {
+    importError.value = e?.data?.detail ?? e?.message ?? 'Import failed.'
+  } finally {
+    importing.value = false
+  }
+}
+
 function openEdit(profile: ManagerQualityProfileView) {
   editingID.value = profile.id
   form.name = profile.name
@@ -139,25 +232,26 @@ function setScore(formatID: number, raw: string) {
 }
 
 async function saveForm() {
-  if (editingID.value == null) return
   savingForm.value = true
   formError.value = ''
   try {
-    await $heya(`/api/manager/quality-profiles/${editingID.value}`, {
-      method: 'PUT',
-      body: {
-        name: form.name,
-        domain: form.domain,
-        items: form.items,
-        cutoff: form.cutoff,
-        language: form.language,
-        upgrades_enabled: form.upgrades_enabled,
-        min_format_score: Math.trunc(Number(form.min_format_score) || 0),
-        cutoff_format_score: Math.trunc(Number(form.cutoff_format_score) || 0),
-        min_upgrade_score: Math.trunc(Number(form.min_upgrade_score) || 1),
-        format_scores: [...formScores.entries()].map(([format_id, score]) => ({ format_id, score })),
-      },
-    })
+    const body = {
+      name: form.name,
+      domain: form.domain,
+      items: form.items,
+      cutoff: form.cutoff,
+      language: form.language,
+      upgrades_enabled: form.upgrades_enabled,
+      min_format_score: Math.trunc(Number(form.min_format_score) || 0),
+      cutoff_format_score: Math.trunc(Number(form.cutoff_format_score) || 0),
+      min_upgrade_score: Math.trunc(Number(form.min_upgrade_score) || 1),
+      format_scores: [...formScores.entries()].map(([format_id, score]) => ({ format_id, score })),
+    }
+    if (editingID.value == null) {
+      await $heya('/api/manager/quality-profiles', { method: 'POST', body })
+    } else {
+      await $heya(`/api/manager/quality-profiles/${editingID.value}`, { method: 'PUT', body })
+    }
     dialogOpen.value = false
     await profilesData.refetch()
   } catch (e: any) {
@@ -201,6 +295,13 @@ async function removeProfile(profile: ManagerQualityProfileView) {
       icon="eq"
       description="Click a profile to open the full editor — ladder, thresholds, language, and every format score."
     >
+      <template #actions>
+        <div class="qp-actions">
+          <button type="button" class="mgr-btn" @click="openImport"><Icon name="cloud-download" :size="14" /> Import</button>
+          <button type="button" class="mgr-btn-gold" @click="openCreate"><Icon name="plus" :size="14" /> New profile</button>
+        </div>
+      </template>
+
       <div v-if="loading && !profiles.length" class="mgr-loading">
         <Icon name="spinner" :size="16" /> Loading…
       </div>
@@ -242,6 +343,9 @@ async function removeProfile(profile: ManagerQualityProfileView) {
               </span>
               <span class="qp-row-inuse num">{{ profile.in_use_count }}</span>
               <span class="qp-row-actions" @click.stop>
+                <AppTooltip label="Clone">
+                  <button type="button" class="mgr-btn-icon" :aria-label="`Clone ${profile.name}`" @click="cloneProfile(profile)"><Icon name="copy" :size="13" /></button>
+                </AppTooltip>
                 <button type="button" class="mgr-btn-icon" :aria-label="`Edit ${profile.name}`" @click="openEdit(profile)"><Icon name="pencil" :size="13" /></button>
                 <button
                   type="button"
@@ -257,14 +361,66 @@ async function removeProfile(profile: ManagerQualityProfileView) {
       </div>
     </SettingsSection>
 
-    <AppDialog v-model="dialogOpen" title="Edit quality profile" size="lg">
+    <AppDialog v-model="importOpen" title="Import quality profiles" size="sm">
+      <div class="mgr-form">
+        <p class="qpi-blurb">
+          Pulls the app's quality profiles — ladder, cutoffs, thresholds, and every
+          tuned format score — along with the custom formats they depend on.
+          Re-importing from the same app syncs your earlier import in place.
+        </p>
+        <label class="mgr-field">
+          <span>Source app</span>
+          <AppSelect v-model="importForm.kind" :options="KIND_OPTIONS" />
+        </label>
+        <label class="mgr-field">
+          <span>Base URL</span>
+          <input v-model="importForm.base_url" class="mgr-input" placeholder="https://radarr.example.ts.net">
+        </label>
+        <label class="mgr-field">
+          <span>API key</span>
+          <input v-model="importForm.api_key" class="mgr-input" type="password" autocomplete="off">
+        </label>
+
+        <p v-if="importError" class="mgr-form-error"><Icon name="warning" :size="12" /> {{ importError }}</p>
+
+        <div v-if="importResult" class="qpi-result">
+          <p class="qpi-line ok">
+            <Icon name="check" :size="13" />
+            Formats: {{ importResult.created }} new · {{ importResult.updated }} synced
+          </p>
+          <p v-for="name in importResult.profiles_created ?? []" :key="name" class="qpi-line ok">
+            <Icon name="check" :size="13" /> Profile imported: {{ name }}
+          </p>
+          <p v-for="name in importResult.profiles_updated ?? []" :key="`u-${name}`" class="qpi-line ok">
+            <Icon name="check" :size="13" /> Profile re-synced: {{ name }}
+          </p>
+          <p v-for="name in importResult.profiles_skipped ?? []" :key="`s-${name}`" class="qpi-line warn">
+            <Icon name="warning" :size="13" /> Profile skipped (name taken): {{ name }}
+          </p>
+        </div>
+      </div>
+      <template #footer>
+        <button type="button" class="mgr-btn" @click="importOpen = false">{{ importResult ? 'Done' : 'Cancel' }}</button>
+        <button type="button" class="mgr-btn-gold" :disabled="importing || !importForm.base_url" @click="runImport">
+          <Icon v-if="importing" name="spinner" :size="13" /> Import
+        </button>
+      </template>
+    </AppDialog>
+
+    <AppDialog v-model="dialogOpen" :title="editingID == null ? 'New quality profile' : 'Edit quality profile'" size="lg">
       <div class="mgr-form qpx">
         <div class="qpx-cols">
           <div class="qpx-left">
-            <label class="mgr-field">
-              <span>Name</span>
-              <input v-model="form.name" class="mgr-input">
-            </label>
+            <div class="qpx-scores-row" :class="{ two: editingID == null }">
+              <label class="mgr-field" :style="editingID == null ? undefined : { gridColumn: '1 / -1' }">
+                <span>Name</span>
+                <input v-model="form.name" class="mgr-input" placeholder="4K — Danish audio">
+              </label>
+              <label v-if="editingID == null" class="mgr-field">
+                <span>Domain</span>
+                <AppSelect :model-value="form.domain" :options="DOMAIN_OPTIONS" @update:model-value="onDomainChange" />
+              </label>
+            </div>
 
             <div class="qpx-upgrades">
               <AppSwitch v-model="form.upgrades_enabled" size="sm" aria-label="Upgrades enabled" />
@@ -304,7 +460,8 @@ async function removeProfile(profile: ManagerQualityProfileView) {
 
             <div class="mgr-field">
               <div class="qpx-formats-head">
-                <span>Custom format scores — sorted by score</span>
+                <span class="qpx-formats-label">Custom format scores</span>
+                <span class="qpx-formats-note">sorted by score</span>
                 <input v-model="scoreFilter" class="mgr-input qpx-formats-filter" placeholder="Filter…">
               </div>
               <div v-if="!editorFormats.length" class="qpx-hint">
@@ -430,62 +587,6 @@ async function removeProfile(profile: ManagerQualityProfileView) {
 .num { text-align: right; }
 .qp-row-actions { display: flex; gap: 5px; }
 
-.mgr-btn,
-.mgr-btn-gold {
-  display: inline-flex; align-items: center; gap: 7px;
-  height: 32px; padding: 0 14px;
-  border-radius: var(--r-sm);
-  font-size: 12.5px; font-weight: 600;
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s;
-}
-.mgr-btn {
-  background: rgb(var(--ink) / 0.05);
-  border: 1px solid var(--border);
-  color: var(--fg-1);
-}
-.mgr-btn:hover { background: rgb(var(--ink) / 0.1); color: var(--fg-0); }
-.mgr-btn-gold {
-  background: var(--gold-soft);
-  border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent);
-  color: var(--gold-bright);
-}
-.mgr-btn-gold:hover { background: color-mix(in srgb, var(--gold) 18%, transparent); }
-.mgr-btn-gold:disabled { opacity: 0.6; pointer-events: none; }
-
-.mgr-btn-icon {
-  width: 28px; height: 28px;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: var(--r-sm);
-  background: rgb(var(--ink) / 0.05);
-  border: 1px solid var(--border);
-  color: var(--fg-2);
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s;
-}
-.mgr-btn-icon:hover { background: rgb(var(--ink) / 0.1); color: var(--fg-0); }
-.mgr-btn-icon.danger:hover { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
-.mgr-btn-icon:disabled { opacity: 0.4; pointer-events: none; }
-
-.mgr-flash {
-  display: flex; align-items: center; gap: 8px;
-  margin-bottom: 14px;
-  padding: 10px 14px;
-  border-radius: var(--r-sm);
-  font-size: 12.5px;
-}
-.mgr-flash.ok { background: color-mix(in srgb, var(--good) 10%, transparent); border: 1px solid color-mix(in srgb, var(--good) 30%, transparent); color: var(--good); }
-.mgr-flash.err { background: color-mix(in srgb, var(--bad) 10%, transparent); border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent); color: var(--bad); }
-
-.mgr-loading {
-  display: flex; align-items: center; gap: 8px;
-  color: var(--fg-3); font-size: 12.5px;
-  padding: 14px 16px;
-  background: var(--bg-2);
-  border: 1px dashed var(--border);
-  border-radius: var(--r-md);
-}
-
 @media (max-width: 960px) {
   .qp-cols { display: none; }
   .qp-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; }
@@ -498,6 +599,31 @@ async function removeProfile(profile: ManagerQualityProfileView) {
 
 <!-- Portaled dialog additions (base .mgr-form styles live in the layout). -->
 <style>
+.qp-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.qpi-blurb {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--fg-2);
+}
+.qpi-result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.qpi-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 12px;
+}
+.qpi-line.ok { color: var(--good); }
+.qpi-line.warn { color: var(--fg-2); }
+
 .qpx-cols {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
@@ -533,28 +659,46 @@ async function removeProfile(profile: ManagerQualityProfileView) {
 
 .qpx-formats-head {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
 }
-.qpx-formats-filter { width: 140px; height: 28px; font-size: 12px; }
+.qpx-formats-label {
+  font-size: 12px;
+  font-weight: 580;
+  color: var(--fg-1);
+  white-space: nowrap;
+}
+.qpx-formats-note {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  white-space: nowrap;
+}
+.qpx-formats-filter { width: 150px; height: 28px; font-size: 12px; }
 
 .qpx-format-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
   max-height: 320px;
   overflow-y: auto;
-  padding-right: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: rgb(var(--shade) / 0.18);
+  padding: 4px;
 }
 .qpx-format-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 3px 6px 3px 8px;
+  padding: 4px 6px 4px 10px;
   border-radius: var(--r-sm);
 }
-.qpx-format-row:hover { background: rgb(var(--ink) / 0.04); }
+.qpx-format-row:not(:first-child) { margin-top: 1px; }
+.qpx-format-row:hover { background: rgb(var(--ink) / 0.05); }
 .qpx-format-name {
   flex: 1;
   font-size: 12px;

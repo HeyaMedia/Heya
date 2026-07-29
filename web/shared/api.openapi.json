@@ -33771,6 +33771,58 @@
         ]
       }
     },
+    "/api/manager/quality-ladders": {
+      "get": {
+        "operationId": "manager-quality-ladders",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "items": {
+                      "$ref": "#/components/schemas/ManagerQualityItem"
+                    },
+                    "type": [
+                      "array",
+                      "null"
+                    ]
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Canonical per-domain quality ladder templates for new profiles",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
     "/api/manager/quality-profiles": {
       "get": {
         "operationId": "manager-list-quality-profiles",
@@ -33987,6 +34039,66 @@
           }
         ],
         "summary": "Update a manager quality profile",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
+    "/api/manager/quality-profiles/{id}/clone": {
+      "post": {
+        "operationId": "manager-clone-quality-profile",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerQualityProfileView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Duplicate a manager quality profile",
         "tags": [
           "Manager"
         ]

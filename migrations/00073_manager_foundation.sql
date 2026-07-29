@@ -95,10 +95,24 @@ ALTER TABLE media_items
 CREATE INDEX media_items_monitored_idx ON media_items (library_id) WHERE monitored;
 
 -- Starter profiles matching the parser's quality vocabulary. Editable/deletable
--- like any user-created row — they just save the first-run ceremony.
+-- like any user-created row — they just save the first-run ceremony. Kept
+-- deliberately lean (4K / 1080p / Any per video domain) so a fresh install
+-- isn't buried in options. Seed data here was revised post-application (only
+-- fresh databases re-run it); prod carries its own imported set.
 INSERT INTO manager_quality_profiles (name, domain, items, cutoff) VALUES
 (
-    'HD-1080p', 'video',
+    '4K', 'movie',
+    '[{"quality": "remux-2160p", "allowed": false},
+      {"quality": "bluray-2160p", "allowed": true},
+      {"quality": "webdl-2160p", "allowed": true},
+      {"quality": "webrip-2160p", "allowed": true},
+      {"quality": "bluray-1080p", "allowed": true},
+      {"quality": "webdl-1080p", "allowed": true},
+      {"quality": "webrip-1080p", "allowed": true}]'::jsonb,
+    'bluray-2160p'
+),
+(
+    '1080p', 'movie',
     '[{"quality": "remux-1080p", "allowed": false},
       {"quality": "bluray-1080p", "allowed": true},
       {"quality": "webdl-1080p", "allowed": true},
@@ -106,17 +120,70 @@ INSERT INTO manager_quality_profiles (name, domain, items, cutoff) VALUES
       {"quality": "hdtv-1080p", "allowed": true},
       {"quality": "bluray-720p", "allowed": false},
       {"quality": "webdl-720p", "allowed": false}]'::jsonb,
-    'webdl-1080p'
+    'bluray-1080p'
 ),
 (
-    'UHD-2160p', 'video',
+    'Any', 'movie',
     '[{"quality": "remux-2160p", "allowed": true},
       {"quality": "bluray-2160p", "allowed": true},
       {"quality": "webdl-2160p", "allowed": true},
-      {"quality": "webrip-2160p", "allowed": false},
+      {"quality": "webrip-2160p", "allowed": true},
       {"quality": "bluray-1080p", "allowed": true},
-      {"quality": "webdl-1080p", "allowed": true}]'::jsonb,
-    'remux-2160p'
+      {"quality": "webdl-1080p", "allowed": true},
+      {"quality": "webrip-1080p", "allowed": true},
+      {"quality": "hdtv-1080p", "allowed": true},
+      {"quality": "bluray-720p", "allowed": true},
+      {"quality": "webdl-720p", "allowed": true},
+      {"quality": "dvd", "allowed": true},
+      {"quality": "sdtv", "allowed": true}]'::jsonb,
+    'bluray-1080p'
+),
+(
+    '4K (TV)', 'tv',
+    '[{"quality": "remux-2160p", "allowed": false},
+      {"quality": "bluray-2160p", "allowed": true},
+      {"quality": "webdl-2160p", "allowed": true},
+      {"quality": "webrip-2160p", "allowed": true},
+      {"quality": "bluray-1080p", "allowed": true},
+      {"quality": "webdl-1080p", "allowed": true},
+      {"quality": "webrip-1080p", "allowed": true}]'::jsonb,
+    'bluray-2160p'
+),
+(
+    '1080p (TV)', 'tv',
+    '[{"quality": "remux-1080p", "allowed": false},
+      {"quality": "bluray-1080p", "allowed": true},
+      {"quality": "webdl-1080p", "allowed": true},
+      {"quality": "webrip-1080p", "allowed": true},
+      {"quality": "hdtv-1080p", "allowed": true},
+      {"quality": "bluray-720p", "allowed": false},
+      {"quality": "webdl-720p", "allowed": false}]'::jsonb,
+    'bluray-1080p'
+),
+(
+    'Any (TV)', 'tv',
+    '[{"quality": "bluray-2160p", "allowed": true},
+      {"quality": "webdl-2160p", "allowed": true},
+      {"quality": "webrip-2160p", "allowed": true},
+      {"quality": "bluray-1080p", "allowed": true},
+      {"quality": "webdl-1080p", "allowed": true},
+      {"quality": "webrip-1080p", "allowed": true},
+      {"quality": "hdtv-1080p", "allowed": true},
+      {"quality": "webdl-720p", "allowed": true},
+      {"quality": "hdtv-720p", "allowed": true},
+      {"quality": "dvd", "allowed": true},
+      {"quality": "sdtv", "allowed": true}]'::jsonb,
+    'bluray-1080p'
+),
+(
+    '1080p - Anime', 'tv',
+    '[{"quality": "bluray-1080p", "allowed": true},
+      {"quality": "webdl-1080p", "allowed": true},
+      {"quality": "webrip-1080p", "allowed": true},
+      {"quality": "hdtv-1080p", "allowed": true},
+      {"quality": "bluray-720p", "allowed": true},
+      {"quality": "webdl-720p", "allowed": true}]'::jsonb,
+    'bluray-1080p'
 ),
 (
     'Lossless', 'music',
