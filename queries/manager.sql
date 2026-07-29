@@ -73,13 +73,15 @@ SELECT * FROM manager_quality_profiles ORDER BY domain ASC, name ASC;
 SELECT * FROM manager_quality_profiles WHERE id = $1;
 
 -- name: CreateManagerQualityProfile :one
-INSERT INTO manager_quality_profiles (name, domain, items, cutoff, upgrades_enabled)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO manager_quality_profiles (name, domain, items, cutoff, upgrades_enabled, min_format_score, cutoff_format_score, min_upgrade_score, format_scores, source)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING *;
 
 -- name: UpdateManagerQualityProfile :one
 UPDATE manager_quality_profiles
-SET name = $2, items = $3, cutoff = $4, upgrades_enabled = $5, updated_at = now()
+SET name = $2, items = $3, cutoff = $4, upgrades_enabled = $5,
+    min_format_score = $6, cutoff_format_score = $7, min_upgrade_score = $8,
+    format_scores = $9, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -88,3 +90,27 @@ DELETE FROM manager_quality_profiles WHERE id = $1;
 
 -- name: CountMediaItemsByQualityProfile :one
 SELECT count(*) FROM media_items WHERE quality_profile_id = $1;
+
+-- name: ListManagerCustomFormats :many
+SELECT * FROM manager_custom_formats ORDER BY domain ASC, name ASC;
+
+-- name: GetManagerCustomFormat :one
+SELECT * FROM manager_custom_formats WHERE id = $1;
+
+-- name: GetManagerCustomFormatByName :one
+SELECT * FROM manager_custom_formats WHERE domain = $1 AND name = $2;
+
+-- name: CreateManagerCustomFormat :one
+INSERT INTO manager_custom_formats (name, domain, include_when_renaming, specifications, trash_id, source)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING *;
+
+-- name: UpdateManagerCustomFormat :one
+UPDATE manager_custom_formats
+SET name = $2, include_when_renaming = $3, specifications = $4, trash_id = $5,
+    source = $6, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: DeleteManagerCustomFormat :exec
+DELETE FROM manager_custom_formats WHERE id = $1;

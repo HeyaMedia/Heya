@@ -570,6 +570,18 @@ type LocalMediaIdentityExternalID struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ManagerCustomFormat struct {
+	ID                  int64              `json:"id"`
+	Name                string             `json:"name"`
+	Domain              string             `json:"domain"`
+	IncludeWhenRenaming bool               `json:"include_when_renaming"`
+	Specifications      []byte             `json:"specifications"`
+	TrashID             string             `json:"trash_id"`
+	Source              string             `json:"source"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ManagerDownloadClient struct {
 	ID            int64              `json:"id"`
 	Name          string             `json:"name"`
@@ -613,14 +625,19 @@ type ManagerIndexer struct {
 }
 
 type ManagerQualityProfile struct {
-	ID              int64              `json:"id"`
-	Name            string             `json:"name"`
-	Domain          string             `json:"domain"`
-	Items           []byte             `json:"items"`
-	Cutoff          string             `json:"cutoff"`
-	UpgradesEnabled bool               `json:"upgrades_enabled"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	ID                int64              `json:"id"`
+	Name              string             `json:"name"`
+	Domain            string             `json:"domain"`
+	Items             []byte             `json:"items"`
+	Cutoff            string             `json:"cutoff"`
+	UpgradesEnabled   bool               `json:"upgrades_enabled"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	MinFormatScore    int32              `json:"min_format_score"`
+	CutoffFormatScore int32              `json:"cutoff_format_score"`
+	MinUpgradeScore   int32              `json:"min_upgrade_score"`
+	FormatScores      []byte             `json:"format_scores"`
+	Source            string             `json:"source"`
 }
 
 type MatchCandidate struct {

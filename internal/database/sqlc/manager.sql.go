@@ -22,6 +22,45 @@ func (q *Queries) CountMediaItemsByQualityProfile(ctx context.Context, qualityPr
 	return count, err
 }
 
+const createManagerCustomFormat = `-- name: CreateManagerCustomFormat :one
+INSERT INTO manager_custom_formats (name, domain, include_when_renaming, specifications, trash_id, source)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, name, domain, include_when_renaming, specifications, trash_id, source, created_at, updated_at
+`
+
+type CreateManagerCustomFormatParams struct {
+	Name                string `json:"name"`
+	Domain              string `json:"domain"`
+	IncludeWhenRenaming bool   `json:"include_when_renaming"`
+	Specifications      []byte `json:"specifications"`
+	TrashID             string `json:"trash_id"`
+	Source              string `json:"source"`
+}
+
+func (q *Queries) CreateManagerCustomFormat(ctx context.Context, arg CreateManagerCustomFormatParams) (ManagerCustomFormat, error) {
+	row := q.db.QueryRow(ctx, createManagerCustomFormat,
+		arg.Name,
+		arg.Domain,
+		arg.IncludeWhenRenaming,
+		arg.Specifications,
+		arg.TrashID,
+		arg.Source,
+	)
+	var i ManagerCustomFormat
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Domain,
+		&i.IncludeWhenRenaming,
+		&i.Specifications,
+		&i.TrashID,
+		&i.Source,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createManagerDownloadClient = `-- name: CreateManagerDownloadClient :one
 INSERT INTO manager_download_clients (name, kind, enabled, protocol, base_url, api_key, username, password, category, priority, path_mappings, settings)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -143,17 +182,22 @@ func (q *Queries) CreateManagerIndexer(ctx context.Context, arg CreateManagerInd
 }
 
 const createManagerQualityProfile = `-- name: CreateManagerQualityProfile :one
-INSERT INTO manager_quality_profiles (name, domain, items, cutoff, upgrades_enabled)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, name, domain, items, cutoff, upgrades_enabled, created_at, updated_at
+INSERT INTO manager_quality_profiles (name, domain, items, cutoff, upgrades_enabled, min_format_score, cutoff_format_score, min_upgrade_score, format_scores, source)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id, name, domain, items, cutoff, upgrades_enabled, created_at, updated_at, min_format_score, cutoff_format_score, min_upgrade_score, format_scores, source
 `
 
 type CreateManagerQualityProfileParams struct {
-	Name            string `json:"name"`
-	Domain          string `json:"domain"`
-	Items           []byte `json:"items"`
-	Cutoff          string `json:"cutoff"`
-	UpgradesEnabled bool   `json:"upgrades_enabled"`
+	Name              string `json:"name"`
+	Domain            string `json:"domain"`
+	Items             []byte `json:"items"`
+	Cutoff            string `json:"cutoff"`
+	UpgradesEnabled   bool   `json:"upgrades_enabled"`
+	MinFormatScore    int32  `json:"min_format_score"`
+	CutoffFormatScore int32  `json:"cutoff_format_score"`
+	MinUpgradeScore   int32  `json:"min_upgrade_score"`
+	FormatScores      []byte `json:"format_scores"`
+	Source            string `json:"source"`
 }
 
 func (q *Queries) CreateManagerQualityProfile(ctx context.Context, arg CreateManagerQualityProfileParams) (ManagerQualityProfile, error) {
@@ -163,6 +207,11 @@ func (q *Queries) CreateManagerQualityProfile(ctx context.Context, arg CreateMan
 		arg.Items,
 		arg.Cutoff,
 		arg.UpgradesEnabled,
+		arg.MinFormatScore,
+		arg.CutoffFormatScore,
+		arg.MinUpgradeScore,
+		arg.FormatScores,
+		arg.Source,
 	)
 	var i ManagerQualityProfile
 	err := row.Scan(
@@ -174,8 +223,22 @@ func (q *Queries) CreateManagerQualityProfile(ctx context.Context, arg CreateMan
 		&i.UpgradesEnabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MinFormatScore,
+		&i.CutoffFormatScore,
+		&i.MinUpgradeScore,
+		&i.FormatScores,
+		&i.Source,
 	)
 	return i, err
+}
+
+const deleteManagerCustomFormat = `-- name: DeleteManagerCustomFormat :exec
+DELETE FROM manager_custom_formats WHERE id = $1
+`
+
+func (q *Queries) DeleteManagerCustomFormat(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, deleteManagerCustomFormat, id)
+	return err
 }
 
 const deleteManagerDownloadClient = `-- name: DeleteManagerDownloadClient :exec
@@ -218,6 +281,53 @@ type DeleteStaleManagerIndexerChildrenParams struct {
 func (q *Queries) DeleteStaleManagerIndexerChildren(ctx context.Context, arg DeleteStaleManagerIndexerChildrenParams) error {
 	_, err := q.db.Exec(ctx, deleteStaleManagerIndexerChildren, arg.ParentID, arg.KeepRefs)
 	return err
+}
+
+const getManagerCustomFormat = `-- name: GetManagerCustomFormat :one
+SELECT id, name, domain, include_when_renaming, specifications, trash_id, source, created_at, updated_at FROM manager_custom_formats WHERE id = $1
+`
+
+func (q *Queries) GetManagerCustomFormat(ctx context.Context, id int64) (ManagerCustomFormat, error) {
+	row := q.db.QueryRow(ctx, getManagerCustomFormat, id)
+	var i ManagerCustomFormat
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Domain,
+		&i.IncludeWhenRenaming,
+		&i.Specifications,
+		&i.TrashID,
+		&i.Source,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getManagerCustomFormatByName = `-- name: GetManagerCustomFormatByName :one
+SELECT id, name, domain, include_when_renaming, specifications, trash_id, source, created_at, updated_at FROM manager_custom_formats WHERE domain = $1 AND name = $2
+`
+
+type GetManagerCustomFormatByNameParams struct {
+	Domain string `json:"domain"`
+	Name   string `json:"name"`
+}
+
+func (q *Queries) GetManagerCustomFormatByName(ctx context.Context, arg GetManagerCustomFormatByNameParams) (ManagerCustomFormat, error) {
+	row := q.db.QueryRow(ctx, getManagerCustomFormatByName, arg.Domain, arg.Name)
+	var i ManagerCustomFormat
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Domain,
+		&i.IncludeWhenRenaming,
+		&i.Specifications,
+		&i.TrashID,
+		&i.Source,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getManagerDownloadClient = `-- name: GetManagerDownloadClient :one
@@ -281,7 +391,7 @@ func (q *Queries) GetManagerIndexer(ctx context.Context, id int64) (ManagerIndex
 }
 
 const getManagerQualityProfile = `-- name: GetManagerQualityProfile :one
-SELECT id, name, domain, items, cutoff, upgrades_enabled, created_at, updated_at FROM manager_quality_profiles WHERE id = $1
+SELECT id, name, domain, items, cutoff, upgrades_enabled, created_at, updated_at, min_format_score, cutoff_format_score, min_upgrade_score, format_scores, source FROM manager_quality_profiles WHERE id = $1
 `
 
 func (q *Queries) GetManagerQualityProfile(ctx context.Context, id int64) (ManagerQualityProfile, error) {
@@ -296,8 +406,47 @@ func (q *Queries) GetManagerQualityProfile(ctx context.Context, id int64) (Manag
 		&i.UpgradesEnabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MinFormatScore,
+		&i.CutoffFormatScore,
+		&i.MinUpgradeScore,
+		&i.FormatScores,
+		&i.Source,
 	)
 	return i, err
+}
+
+const listManagerCustomFormats = `-- name: ListManagerCustomFormats :many
+SELECT id, name, domain, include_when_renaming, specifications, trash_id, source, created_at, updated_at FROM manager_custom_formats ORDER BY domain ASC, name ASC
+`
+
+func (q *Queries) ListManagerCustomFormats(ctx context.Context) ([]ManagerCustomFormat, error) {
+	rows, err := q.db.Query(ctx, listManagerCustomFormats)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ManagerCustomFormat{}
+	for rows.Next() {
+		var i ManagerCustomFormat
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Domain,
+			&i.IncludeWhenRenaming,
+			&i.Specifications,
+			&i.TrashID,
+			&i.Source,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listManagerDownloadClients = `-- name: ListManagerDownloadClients :many
@@ -389,7 +538,7 @@ func (q *Queries) ListManagerIndexers(ctx context.Context) ([]ManagerIndexer, er
 }
 
 const listManagerQualityProfiles = `-- name: ListManagerQualityProfiles :many
-SELECT id, name, domain, items, cutoff, upgrades_enabled, created_at, updated_at FROM manager_quality_profiles ORDER BY domain ASC, name ASC
+SELECT id, name, domain, items, cutoff, upgrades_enabled, created_at, updated_at, min_format_score, cutoff_format_score, min_upgrade_score, format_scores, source FROM manager_quality_profiles ORDER BY domain ASC, name ASC
 `
 
 func (q *Queries) ListManagerQualityProfiles(ctx context.Context) ([]ManagerQualityProfile, error) {
@@ -410,6 +559,11 @@ func (q *Queries) ListManagerQualityProfiles(ctx context.Context) ([]ManagerQual
 			&i.UpgradesEnabled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MinFormatScore,
+			&i.CutoffFormatScore,
+			&i.MinUpgradeScore,
+			&i.FormatScores,
+			&i.Source,
 		); err != nil {
 			return nil, err
 		}
@@ -453,6 +607,47 @@ type SetManagerIndexerTestResultParams struct {
 func (q *Queries) SetManagerIndexerTestResult(ctx context.Context, arg SetManagerIndexerTestResultParams) error {
 	_, err := q.db.Exec(ctx, setManagerIndexerTestResult, arg.ID, arg.LastTestOk, arg.LastTestError)
 	return err
+}
+
+const updateManagerCustomFormat = `-- name: UpdateManagerCustomFormat :one
+UPDATE manager_custom_formats
+SET name = $2, include_when_renaming = $3, specifications = $4, trash_id = $5,
+    source = $6, updated_at = now()
+WHERE id = $1
+RETURNING id, name, domain, include_when_renaming, specifications, trash_id, source, created_at, updated_at
+`
+
+type UpdateManagerCustomFormatParams struct {
+	ID                  int64  `json:"id"`
+	Name                string `json:"name"`
+	IncludeWhenRenaming bool   `json:"include_when_renaming"`
+	Specifications      []byte `json:"specifications"`
+	TrashID             string `json:"trash_id"`
+	Source              string `json:"source"`
+}
+
+func (q *Queries) UpdateManagerCustomFormat(ctx context.Context, arg UpdateManagerCustomFormatParams) (ManagerCustomFormat, error) {
+	row := q.db.QueryRow(ctx, updateManagerCustomFormat,
+		arg.ID,
+		arg.Name,
+		arg.IncludeWhenRenaming,
+		arg.Specifications,
+		arg.TrashID,
+		arg.Source,
+	)
+	var i ManagerCustomFormat
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Domain,
+		&i.IncludeWhenRenaming,
+		&i.Specifications,
+		&i.TrashID,
+		&i.Source,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateManagerDownloadClient = `-- name: UpdateManagerDownloadClient :one
@@ -569,17 +764,23 @@ func (q *Queries) UpdateManagerIndexer(ctx context.Context, arg UpdateManagerInd
 
 const updateManagerQualityProfile = `-- name: UpdateManagerQualityProfile :one
 UPDATE manager_quality_profiles
-SET name = $2, items = $3, cutoff = $4, upgrades_enabled = $5, updated_at = now()
+SET name = $2, items = $3, cutoff = $4, upgrades_enabled = $5,
+    min_format_score = $6, cutoff_format_score = $7, min_upgrade_score = $8,
+    format_scores = $9, updated_at = now()
 WHERE id = $1
-RETURNING id, name, domain, items, cutoff, upgrades_enabled, created_at, updated_at
+RETURNING id, name, domain, items, cutoff, upgrades_enabled, created_at, updated_at, min_format_score, cutoff_format_score, min_upgrade_score, format_scores, source
 `
 
 type UpdateManagerQualityProfileParams struct {
-	ID              int64  `json:"id"`
-	Name            string `json:"name"`
-	Items           []byte `json:"items"`
-	Cutoff          string `json:"cutoff"`
-	UpgradesEnabled bool   `json:"upgrades_enabled"`
+	ID                int64  `json:"id"`
+	Name              string `json:"name"`
+	Items             []byte `json:"items"`
+	Cutoff            string `json:"cutoff"`
+	UpgradesEnabled   bool   `json:"upgrades_enabled"`
+	MinFormatScore    int32  `json:"min_format_score"`
+	CutoffFormatScore int32  `json:"cutoff_format_score"`
+	MinUpgradeScore   int32  `json:"min_upgrade_score"`
+	FormatScores      []byte `json:"format_scores"`
 }
 
 func (q *Queries) UpdateManagerQualityProfile(ctx context.Context, arg UpdateManagerQualityProfileParams) (ManagerQualityProfile, error) {
@@ -589,6 +790,10 @@ func (q *Queries) UpdateManagerQualityProfile(ctx context.Context, arg UpdateMan
 		arg.Items,
 		arg.Cutoff,
 		arg.UpgradesEnabled,
+		arg.MinFormatScore,
+		arg.CutoffFormatScore,
+		arg.MinUpgradeScore,
+		arg.FormatScores,
 	)
 	var i ManagerQualityProfile
 	err := row.Scan(
@@ -600,6 +805,11 @@ func (q *Queries) UpdateManagerQualityProfile(ctx context.Context, arg UpdateMan
 		&i.UpgradesEnabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MinFormatScore,
+		&i.CutoffFormatScore,
+		&i.MinUpgradeScore,
+		&i.FormatScores,
+		&i.Source,
 	)
 	return i, err
 }

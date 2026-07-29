@@ -1303,6 +1303,16 @@ export type CreateLibraryInputBody = {
     settings?: LibrarySettings;
 };
 
+export type CustomFormatSpec = {
+    fields: {
+        [key: string]: unknown;
+    };
+    implementation: string;
+    name: string;
+    negate: boolean;
+    required: boolean;
+};
+
 export type DbMaintenanceProgress = {
     /**
      * Tables completed so far
@@ -3487,6 +3497,31 @@ export type ManagerClientWarning = {
     text: string;
 };
 
+export type ManagerCustomFormatInput = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    domain: string;
+    include_when_renaming?: boolean;
+    name: string;
+    specifications: Array<CustomFormatSpec> | null;
+};
+
+export type ManagerCustomFormatView = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    domain: string;
+    id: number;
+    include_when_renaming: boolean;
+    name: string;
+    source: string;
+    specifications: Array<CustomFormatSpec> | null;
+    trash_id: string;
+};
+
 export type ManagerDownloadClientInput = {
     /**
      * A URL to the JSON Schema for this object.
@@ -3523,6 +3558,37 @@ export type ManagerDownloadClientView = {
     priority: number;
     protocol: string;
     username: string;
+};
+
+export type ManagerFormatImportInput = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    api_key?: string;
+    base_url?: string;
+    include_profiles?: boolean;
+    json?: string;
+    kind: string;
+};
+
+export type ManagerFormatImportResult = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    created: number;
+    profiles_created: Array<string> | null;
+    profiles_skipped: Array<string> | null;
+    profiles_updated: Array<string> | null;
+    skipped: Array<string> | null;
+    updated: number;
+    warnings: Array<string> | null;
+};
+
+export type ManagerFormatScore = {
+    format_id: number;
+    score: number;
 };
 
 export type ManagerIndexerHistoryDay = {
@@ -3605,7 +3671,9 @@ export type ManagerPathMapping = {
 
 export type ManagerQualityItem = {
     allowed: boolean;
-    quality: string;
+    group?: string;
+    qualities?: Array<string> | null;
+    quality?: string;
 };
 
 export type ManagerQualityProfileInput = {
@@ -3614,8 +3682,12 @@ export type ManagerQualityProfileInput = {
      */
     readonly $schema?: string;
     cutoff: string;
+    cutoff_format_score?: number;
     domain: string;
+    format_scores?: Array<ManagerFormatScore> | null;
     items: Array<ManagerQualityItem> | null;
+    min_format_score?: number;
+    min_upgrade_score?: number;
     name: string;
     upgrades_enabled?: boolean;
 };
@@ -3626,12 +3698,59 @@ export type ManagerQualityProfileView = {
      */
     readonly $schema?: string;
     cutoff: string;
+    cutoff_format_score: number;
     domain: string;
+    format_scores: Array<ManagerFormatScore> | null;
     id: number;
     in_use_count: number;
     items: Array<ManagerQualityItem> | null;
+    min_format_score: number;
+    min_upgrade_score: number;
     name: string;
+    source: string;
     upgrades_enabled: boolean;
+};
+
+export type ManagerReleaseTestInput = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    size_bytes?: number;
+    title: string;
+    tv?: boolean;
+};
+
+export type ManagerReleaseTestMatch = {
+    format_id: number;
+    name: string;
+};
+
+export type ManagerReleaseTestParsed = {
+    group: string;
+    languages: Array<string> | null;
+    modifier: string;
+    release_type?: string;
+    resolution: number;
+    sources: Array<string> | null;
+    year: number;
+};
+
+export type ManagerReleaseTestProfileScore = {
+    min_met: boolean;
+    name: string;
+    profile_id: number;
+    score: number;
+};
+
+export type ManagerReleaseTestView = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    matches: Array<ManagerReleaseTestMatch> | null;
+    parsed: ManagerReleaseTestParsed;
+    profiles: Array<ManagerReleaseTestProfileScore> | null;
 };
 
 export type ManagerTestResult = {
@@ -7983,6 +8102,23 @@ export type ManagerClientActivityViewWritable = {
     warnings: Array<ManagerClientWarning> | null;
 };
 
+export type ManagerCustomFormatInputWritable = {
+    domain: string;
+    include_when_renaming?: boolean;
+    name: string;
+    specifications: Array<CustomFormatSpec> | null;
+};
+
+export type ManagerCustomFormatViewWritable = {
+    domain: string;
+    id: number;
+    include_when_renaming: boolean;
+    name: string;
+    source: string;
+    specifications: Array<CustomFormatSpec> | null;
+    trash_id: string;
+};
+
 export type ManagerDownloadClientInputWritable = {
     api_key: string;
     base_url: string;
@@ -8011,6 +8147,24 @@ export type ManagerDownloadClientViewWritable = {
     priority: number;
     protocol: string;
     username: string;
+};
+
+export type ManagerFormatImportInputWritable = {
+    api_key?: string;
+    base_url?: string;
+    include_profiles?: boolean;
+    json?: string;
+    kind: string;
+};
+
+export type ManagerFormatImportResultWritable = {
+    created: number;
+    profiles_created: Array<string> | null;
+    profiles_skipped: Array<string> | null;
+    profiles_updated: Array<string> | null;
+    skipped: Array<string> | null;
+    updated: number;
+    warnings: Array<string> | null;
 };
 
 export type ManagerIndexerHistoryViewWritable = {
@@ -8055,20 +8209,41 @@ export type ManagerIndexerViewWritable = {
 
 export type ManagerQualityProfileInputWritable = {
     cutoff: string;
+    cutoff_format_score?: number;
     domain: string;
+    format_scores?: Array<ManagerFormatScore> | null;
     items: Array<ManagerQualityItem> | null;
+    min_format_score?: number;
+    min_upgrade_score?: number;
     name: string;
     upgrades_enabled?: boolean;
 };
 
 export type ManagerQualityProfileViewWritable = {
     cutoff: string;
+    cutoff_format_score: number;
     domain: string;
+    format_scores: Array<ManagerFormatScore> | null;
     id: number;
     in_use_count: number;
     items: Array<ManagerQualityItem> | null;
+    min_format_score: number;
+    min_upgrade_score: number;
     name: string;
+    source: string;
     upgrades_enabled: boolean;
+};
+
+export type ManagerReleaseTestInputWritable = {
+    size_bytes?: number;
+    title: string;
+    tv?: boolean;
+};
+
+export type ManagerReleaseTestViewWritable = {
+    matches: Array<ManagerReleaseTestMatch> | null;
+    parsed: ManagerReleaseTestParsed;
+    profiles: Array<ManagerReleaseTestProfileScore> | null;
 };
 
 export type ManagerTestResultWritable = {
@@ -13316,6 +13491,166 @@ export type GetLogsResponses = {
 };
 
 export type GetLogsResponse = GetLogsResponses[keyof GetLogsResponses];
+
+export type ManagerListCustomFormatsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/manager/custom-formats';
+};
+
+export type ManagerListCustomFormatsErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerListCustomFormatsError = ManagerListCustomFormatsErrors[keyof ManagerListCustomFormatsErrors];
+
+export type ManagerListCustomFormatsResponses = {
+    /**
+     * OK
+     */
+    200: Array<ManagerCustomFormatView> | null;
+};
+
+export type ManagerListCustomFormatsResponse = ManagerListCustomFormatsResponses[keyof ManagerListCustomFormatsResponses];
+
+export type ManagerCreateCustomFormatData = {
+    body: ManagerCustomFormatInputWritable;
+    path?: never;
+    query?: never;
+    url: '/api/manager/custom-formats';
+};
+
+export type ManagerCreateCustomFormatErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerCreateCustomFormatError = ManagerCreateCustomFormatErrors[keyof ManagerCreateCustomFormatErrors];
+
+export type ManagerCreateCustomFormatResponses = {
+    /**
+     * OK
+     */
+    200: ManagerCustomFormatView;
+};
+
+export type ManagerCreateCustomFormatResponse = ManagerCreateCustomFormatResponses[keyof ManagerCreateCustomFormatResponses];
+
+export type ManagerImportCustomFormatsData = {
+    body: ManagerFormatImportInputWritable;
+    path?: never;
+    query?: never;
+    url: '/api/manager/custom-formats/import';
+};
+
+export type ManagerImportCustomFormatsErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerImportCustomFormatsError = ManagerImportCustomFormatsErrors[keyof ManagerImportCustomFormatsErrors];
+
+export type ManagerImportCustomFormatsResponses = {
+    /**
+     * OK
+     */
+    200: ManagerFormatImportResult;
+};
+
+export type ManagerImportCustomFormatsResponse = ManagerImportCustomFormatsResponses[keyof ManagerImportCustomFormatsResponses];
+
+export type ManagerTestReleaseData = {
+    body: ManagerReleaseTestInputWritable;
+    path?: never;
+    query?: never;
+    url: '/api/manager/custom-formats/test-release';
+};
+
+export type ManagerTestReleaseErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerTestReleaseError = ManagerTestReleaseErrors[keyof ManagerTestReleaseErrors];
+
+export type ManagerTestReleaseResponses = {
+    /**
+     * OK
+     */
+    200: ManagerReleaseTestView;
+};
+
+export type ManagerTestReleaseResponse = ManagerTestReleaseResponses[keyof ManagerTestReleaseResponses];
+
+export type ManagerDeleteCustomFormatData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/manager/custom-formats/{id}';
+};
+
+export type ManagerDeleteCustomFormatErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerDeleteCustomFormatError = ManagerDeleteCustomFormatErrors[keyof ManagerDeleteCustomFormatErrors];
+
+export type ManagerDeleteCustomFormatResponses = {
+    /**
+     * OK
+     */
+    200: StatusOutputBody;
+};
+
+export type ManagerDeleteCustomFormatResponse = ManagerDeleteCustomFormatResponses[keyof ManagerDeleteCustomFormatResponses];
+
+export type ManagerUpdateCustomFormatData = {
+    body: ManagerCustomFormatInputWritable;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/manager/custom-formats/{id}';
+};
+
+export type ManagerUpdateCustomFormatErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerUpdateCustomFormatError = ManagerUpdateCustomFormatErrors[keyof ManagerUpdateCustomFormatErrors];
+
+export type ManagerUpdateCustomFormatResponses = {
+    /**
+     * OK
+     */
+    200: ManagerCustomFormatView;
+};
+
+export type ManagerUpdateCustomFormatResponse = ManagerUpdateCustomFormatResponses[keyof ManagerUpdateCustomFormatResponses];
 
 export type ManagerListDownloadClientsData = {
     body?: never;

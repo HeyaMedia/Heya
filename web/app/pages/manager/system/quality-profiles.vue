@@ -1,7 +1,12 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'manager', middleware: 'admin' })
 
-import { managerQualityProfilesQuery, type ManagerQualityItem, type ManagerQualityProfileView } from '~/queries/manager'
+import {
+  managerCustomFormatsQuery,
+  managerQualityProfilesQuery,
+  type ManagerQualityItem,
+  type ManagerQualityProfileView,
+} from '~/queries/manager'
 
 const { $heya } = useNuxtApp()
 const { confirm } = useConfirm()
@@ -10,18 +15,31 @@ const profilesData = useQuery(managerQualityProfilesQuery())
 const profiles = computed(() => profilesData.data.value ?? [])
 const loading = computed(() => profilesData.isLoading.value)
 
+const formatsData = useQuery(managerCustomFormatsQuery())
+const formatsAll = computed(() => formatsData.data.value ?? [])
+
 useLiveRefresh([{
   events: ['manager.changed'],
-  keys: [['manager', 'quality-profiles']],
-  filter: event => (event.payload as { area?: string } | undefined)?.area === 'quality_profiles',
+  keys: [['manager', 'quality-profiles'], ['manager', 'custom-formats']],
+  filter: (event) => {
+    const area = (event.payload as { area?: string } | undefined)?.area
+    return area === 'quality_profiles' || area === 'custom_formats'
+  },
 }])
 
 const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
 
+const itemLabel = (item: ManagerQualityItem) => item.group || item.quality || ''
+const itemKey = (item: ManagerQualityItem) => item.group || item.quality || ''
+
+function scoredCount(profile: ManagerQualityProfileView): number {
+  return profile.format_scores?.length ?? 0
+}
+
 // ── Edit dialog ──────────────────────────────────────────────────────────
-// Phase 1 editor: rename, toggle allowed qualities, pick the cutoff, flip
-// upgrades. Ladder reordering and adding qualities arrive with the decision
-// engine work (the quality vocabulary lives server-side).
+// The full arr-style editor: thresholds and per-format scores on the left,
+// the ranked ladder on the right. Ladder membership is fixed server-side;
+// allowed flags, cutoff, and every score are editable.
 
 const dialogOpen = ref(false)
 const editingID = ref<number | null>(null)
@@ -31,12 +49,26 @@ const form = reactive({
   items: [] as ManagerQualityItem[],
   cutoff: '',
   upgrades_enabled: true,
+  min_format_score: 0,
+  cutoff_format_score: 0,
+  min_upgrade_score: 1,
 })
+const formScores = reactive(new Map<number, number>())
 const savingForm = ref(false)
 const formError = ref('')
+const scoreFilter = ref('')
 
 const cutoffOptions = computed(() =>
-  form.items.filter(item => item.allowed).map(item => ({ value: item.quality, label: item.quality })))
+  form.items.filter(item => item.allowed).map(item => ({ value: itemKey(item), label: itemLabel(item) })))
+
+const domainFormats = computed(() =>
+  formatsAll.value.filter(format => format.domain === form.domain))
+
+const visibleFormats = computed(() => {
+  const needle = scoreFilter.value.trim().toLowerCase()
+  if (!needle) return domainFormats.value
+  return domainFormats.value.filter(format => format.name.toLowerCase().includes(needle))
+})
 
 function openEdit(profile: ManagerQualityProfileView) {
   editingID.value = profile.id
@@ -45,8 +77,29 @@ function openEdit(profile: ManagerQualityProfileView) {
   form.items = (profile.items ?? []).map(item => ({ ...item }))
   form.cutoff = profile.cutoff
   form.upgrades_enabled = profile.upgrades_enabled
+  form.min_format_score = profile.min_format_score
+  form.cutoff_format_score = profile.cutoff_format_score
+  form.min_upgrade_score = profile.min_upgrade_score
+  formScores.clear()
+  for (const score of profile.format_scores ?? []) {
+    formScores.set(score.format_id, score.score)
+  }
+  scoreFilter.value = ''
   formError.value = ''
   dialogOpen.value = true
+}
+
+function scoreFor(formatID: number): number {
+  return formScores.get(formatID) ?? 0
+}
+
+function setScore(formatID: number, raw: string) {
+  const value = Math.trunc(Number(raw))
+  if (!raw.trim() || Number.isNaN(value) || value === 0) {
+    formScores.delete(formatID)
+  } else {
+    formScores.set(formatID, value)
+  }
 }
 
 async function saveForm() {
@@ -62,6 +115,10 @@ async function saveForm() {
         items: form.items,
         cutoff: form.cutoff,
         upgrades_enabled: form.upgrades_enabled,
+        min_format_score: Math.trunc(Number(form.min_format_score) || 0),
+        cutoff_format_score: Math.trunc(Number(form.cutoff_format_score) || 0),
+        min_upgrade_score: Math.trunc(Number(form.min_upgrade_score) || 1),
+        format_scores: [...formScores.entries()].map(([format_id, score]) => ({ format_id, score })),
       },
     })
     dialogOpen.value = false
@@ -95,7 +152,7 @@ async function removeProfile(profile: ManagerQualityProfileView) {
       title="Quality profiles"
       icon="eq"
       eyebrow="Manager · System"
-      description="What the decision engine is allowed to grab and when it stops upgrading. One profile set shared by every library — assign per library or per item."
+      description="What the decision engine is allowed to grab and when it stops upgrading: a ranked quality ladder plus custom-format scores that break ties inside a quality."
     />
 
     <div v-if="flash" class="mgr-flash" :class="flash.kind">
@@ -105,7 +162,7 @@ async function removeProfile(profile: ManagerQualityProfileView) {
     <SettingsSection
       title="Profiles"
       icon="eq"
-      description="Qualities are ranked top-to-bottom; the cutoff is where searching stops. Custom-format scoring lands in the decision-engine phase."
+      description="Qualities are ranked top-to-bottom (grouped qualities tie); the cutoff is where searching stops. A release must clear the minimum format score, and upgrades keep coming until the format-score cutoff is met."
     >
       <div v-if="loading && !profiles.length" class="mgr-loading">
         <Icon name="spinner" :size="16" /> Loading…
@@ -130,17 +187,23 @@ async function removeProfile(profile: ManagerQualityProfileView) {
           <div class="qp-meta">
             <span>cutoff <strong>{{ profile.cutoff }}</strong></span>
             <span>{{ profile.upgrades_enabled ? 'upgrades until cutoff met' : 'upgrades disabled' }}</span>
+            <span v-if="scoredCount(profile)">
+              {{ scoredCount(profile) }} format scores ·
+              min {{ profile.min_format_score.toLocaleString() }} ·
+              until {{ profile.cutoff_format_score.toLocaleString() }}
+            </span>
           </div>
           <ul class="qp-ladder">
             <li
               v-for="item in profile.items ?? []"
-              :key="item.quality"
+              :key="itemKey(item)"
               class="qp-quality"
-              :class="{ off: !item.allowed, cutoff: item.quality === profile.cutoff }"
+              :class="{ off: !item.allowed, cutoff: itemKey(item) === profile.cutoff }"
             >
               <Icon :name="item.allowed ? 'check' : 'close'" :size="11" />
-              <span>{{ item.quality }}</span>
-              <span v-if="item.quality === profile.cutoff" class="qp-cutoff-tag">cutoff</span>
+              <span>{{ itemLabel(item) }}</span>
+              <span v-if="item.group" class="qp-group-members">{{ (item.qualities ?? []).join(' · ') }}</span>
+              <span v-if="itemKey(item) === profile.cutoff" class="qp-cutoff-tag">cutoff</span>
             </li>
           </ul>
           <div class="qp-foot">
@@ -150,29 +213,86 @@ async function removeProfile(profile: ManagerQualityProfileView) {
       </div>
     </SettingsSection>
 
-    <AppDialog v-model="dialogOpen" title="Edit quality profile" size="sm">
-      <div class="mgr-form">
-        <label class="mgr-field">
-          <span>Name</span>
-          <input v-model="form.name" class="mgr-input">
-        </label>
-        <div class="mgr-field">
-          <span>Qualities</span>
-          <ul class="qp-edit-ladder">
-            <li v-for="item in form.items" :key="item.quality" class="qp-edit-row">
-              <AppSwitch v-model="item.allowed" size="sm" :aria-label="`Allow ${item.quality}`" />
-              <span class="qp-edit-quality" :class="{ off: !item.allowed }">{{ item.quality }}</span>
-            </li>
-          </ul>
+    <AppDialog v-model="dialogOpen" title="Edit quality profile" size="lg">
+      <div class="mgr-form qpx">
+        <div class="qpx-cols">
+          <div class="qpx-left">
+            <label class="mgr-field">
+              <span>Name</span>
+              <input v-model="form.name" class="mgr-input">
+            </label>
+
+            <div class="qpx-upgrades">
+              <AppSwitch v-model="form.upgrades_enabled" size="sm" aria-label="Upgrades enabled" />
+              <span>Upgrade existing files until the cutoffs are met</span>
+            </div>
+
+            <label class="mgr-field">
+              <span>Upgrade until — quality where searching stops</span>
+              <AppSelect v-model="form.cutoff" :options="cutoffOptions" />
+            </label>
+
+            <div class="qpx-scores-row">
+              <label class="mgr-field">
+                <span>Minimum score</span>
+                <input v-model.number="form.min_format_score" class="mgr-input" inputmode="numeric">
+              </label>
+              <label class="mgr-field">
+                <span>Upgrade until score</span>
+                <input v-model.number="form.cutoff_format_score" class="mgr-input" inputmode="numeric">
+              </label>
+              <label class="mgr-field">
+                <span>Min increment</span>
+                <input v-model.number="form.min_upgrade_score" class="mgr-input" inputmode="numeric">
+              </label>
+            </div>
+            <p class="qpx-hint">
+              A release must score at least the minimum to be grabbed. Once the current file
+              reaches the upgrade-until score, no further format upgrades are fetched; a new
+              grab must beat the current score by the increment.
+            </p>
+
+            <div class="mgr-field">
+              <div class="qpx-formats-head">
+                <span>Custom format scores</span>
+                <input v-model="scoreFilter" class="mgr-input qpx-formats-filter" placeholder="Filter…">
+              </div>
+              <div v-if="!domainFormats.length" class="qpx-hint">
+                No custom formats in the {{ form.domain }} domain yet — import or create them on the Custom formats page.
+              </div>
+              <div v-else class="qpx-format-list">
+                <label v-for="format in visibleFormats" :key="format.id" class="qpx-format-row">
+                  <span class="qpx-format-name" :class="{ scored: scoreFor(format.id) !== 0 }">{{ format.name }}</span>
+                  <input
+                    class="mgr-input qpx-format-score"
+                    :class="{ negative: scoreFor(format.id) < 0, positive: scoreFor(format.id) > 0 }"
+                    :value="scoreFor(format.id) || ''"
+                    placeholder="0"
+                    inputmode="numeric"
+                    @input="setScore(format.id, ($event.target as HTMLInputElement).value)"
+                  >
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="qpx-right">
+            <div class="mgr-field">
+              <span>Qualities — higher is preferred; grouped qualities tie; only checked qualities are wanted</span>
+              <ul class="qp-edit-ladder">
+                <li v-for="item in form.items" :key="itemKey(item)" class="qp-edit-row">
+                  <AppSwitch v-model="item.allowed" size="sm" :aria-label="`Allow ${itemLabel(item)}`" />
+                  <div class="qp-edit-labels">
+                    <span class="qp-edit-quality" :class="{ off: !item.allowed }">{{ itemLabel(item) }}</span>
+                    <span v-if="item.group" class="qp-edit-members">{{ (item.qualities ?? []).join(' · ') }}</span>
+                  </div>
+                  <span v-if="itemKey(item) === form.cutoff" class="qp-cutoff-tag">cutoff</span>
+                </li>
+              </ul>
+            </div>
+          </div>
         </div>
-        <label class="mgr-field">
-          <span>Cutoff — stop searching once met</span>
-          <AppSelect v-model="form.cutoff" :options="cutoffOptions" />
-        </label>
-        <div class="qp-edit-upgrades">
-          <AppSwitch v-model="form.upgrades_enabled" size="sm" aria-label="Upgrades enabled" />
-          <span>Upgrade existing files until the cutoff is met</span>
-        </div>
+
         <p v-if="formError" class="mgr-form-error"><Icon name="warning" :size="12" /> {{ formError }}</p>
       </div>
       <template #footer>
@@ -243,13 +363,12 @@ async function removeProfile(profile: ManagerQualityProfileView) {
 }
 .qp-quality.off { color: var(--fg-3); background: transparent; border: 1px dashed var(--hair); }
 .qp-quality.cutoff { background: var(--gold-soft); color: var(--gold-bright); }
-.qp-cutoff-tag {
-  margin-left: auto;
+.qp-group-members {
   font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--gold);
+  color: var(--fg-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .qp-foot {
@@ -321,22 +440,116 @@ async function removeProfile(profile: ManagerQualityProfileView) {
 
 <!-- Portaled dialog additions (base .mgr-form styles live in the layout). -->
 <style>
+.qpx-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+@media (max-width: 860px) {
+  .qpx-cols { grid-template-columns: minmax(0, 1fr); }
+}
+
+.qpx-left, .qpx-right { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+.qpx-upgrades {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--fg-1);
+}
+
+.qpx-scores-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.qpx-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg-3);
+}
+
+.qpx-formats-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.qpx-formats-filter { width: 140px; height: 28px; font-size: 12px; }
+
+.qpx-format-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.qpx-format-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 6px 3px 8px;
+  border-radius: var(--r-sm);
+}
+.qpx-format-row:hover { background: rgb(var(--ink) / 0.04); }
+.qpx-format-name {
+  flex: 1;
+  font-size: 12px;
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qpx-format-name.scored { color: var(--fg-0); font-weight: 500; }
+.qpx-format-score {
+  width: 76px;
+  height: 28px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.qpx-format-score.positive { color: var(--gold-bright); }
+.qpx-format-score.negative { color: var(--bad); }
+
 .qp-edit-ladder {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  max-height: 480px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
-.qp-edit-row { display: flex; align-items: center; gap: 10px; }
-.qp-edit-quality { font-family: var(--font-mono); font-size: 12px; color: var(--fg-0); }
-.qp-edit-quality.off { color: var(--fg-3); text-decoration: line-through; }
-.qp-edit-upgrades {
+.qp-edit-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 12.5px;
-  color: var(--fg-1);
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+}
+.qp-edit-row:hover { background: rgb(var(--ink) / 0.04); }
+.qp-edit-labels { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.qp-edit-quality { font-family: var(--font-mono); font-size: 12px; color: var(--fg-0); }
+.qp-edit-quality.off { color: var(--fg-3); text-decoration: line-through; }
+.qp-edit-members {
+  font-size: 10px;
+  color: var(--fg-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qp-cutoff-tag {
+  margin-left: auto;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gold);
 }
 </style>

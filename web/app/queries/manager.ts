@@ -1,12 +1,18 @@
 import { defineQueryOptions } from '@pinia/colada'
 export type {
+  CustomFormatSpec,
   ManagerClientActivityView,
   ManagerClientCategory,
   ManagerClientHistoryItem,
   ManagerClientQueueItem,
   ManagerClientWarning,
+  ManagerCustomFormatInput,
+  ManagerCustomFormatView,
   ManagerDownloadClientInput,
   ManagerDownloadClientView,
+  ManagerFormatImportInput,
+  ManagerFormatImportResult,
+  ManagerFormatScore,
   ManagerIndexerHistoryDay,
   ManagerIndexerHistoryView,
   ManagerIndexerInput,
@@ -16,11 +22,13 @@ export type {
   ManagerQualityItem,
   ManagerQualityProfileInput,
   ManagerQualityProfileView,
+  ManagerReleaseTestView,
   ManagerTestResult,
 } from '~~/shared/api/types.gen'
 
 import type {
   ManagerClientActivityView,
+  ManagerCustomFormatView,
   ManagerDownloadClientView,
   ManagerIndexerStatsView,
   ManagerIndexerView,
@@ -74,6 +82,16 @@ export const managerQualityProfilesQuery = defineQueryOptions(() => ({
   query: async () => {
     const { $heya } = useNuxtApp()
     return await $heya('/api/manager/quality-profiles') as ManagerQualityProfileView[]
+  },
+  staleTime: 1000 * 30,
+  meta: { prefetch: 'none', sensitivity: 'private' },
+}))
+
+export const managerCustomFormatsQuery = defineQueryOptions(() => ({
+  key: ['manager', 'custom-formats'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/manager/custom-formats') as ManagerCustomFormatView[]
   },
   staleTime: 1000 * 30,
   meta: { prefetch: 'none', sensitivity: 'private' },

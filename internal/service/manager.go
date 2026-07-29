@@ -77,19 +77,35 @@ type ManagerDownloadClientView struct {
 	LastTestError string               `json:"last_test_error"`
 }
 
+// ManagerQualityItem is one ladder rung: a single quality, or a named group
+// of qualities that rank equally (set Group + Qualities, leave Quality empty).
 type ManagerQualityItem struct {
-	Quality string `json:"quality"`
-	Allowed bool   `json:"allowed"`
+	Quality   string   `json:"quality,omitempty"`
+	Group     string   `json:"group,omitempty"`
+	Qualities []string `json:"qualities,omitempty"`
+	Allowed   bool     `json:"allowed"`
+}
+
+// ManagerFormatScore assigns a profile's score to one custom format. Only
+// non-zero scores are stored.
+type ManagerFormatScore struct {
+	FormatID int64 `json:"format_id"`
+	Score    int32 `json:"score"`
 }
 
 type ManagerQualityProfileView struct {
-	ID              int64                `json:"id"`
-	Name            string               `json:"name"`
-	Domain          string               `json:"domain"`
-	Items           []ManagerQualityItem `json:"items"`
-	Cutoff          string               `json:"cutoff"`
-	UpgradesEnabled bool                 `json:"upgrades_enabled"`
-	InUseCount      int64                `json:"in_use_count"`
+	ID                int64                `json:"id"`
+	Name              string               `json:"name"`
+	Domain            string               `json:"domain"`
+	Items             []ManagerQualityItem `json:"items"`
+	Cutoff            string               `json:"cutoff"`
+	UpgradesEnabled   bool                 `json:"upgrades_enabled"`
+	MinFormatScore    int32                `json:"min_format_score"`
+	CutoffFormatScore int32                `json:"cutoff_format_score"`
+	MinUpgradeScore   int32                `json:"min_upgrade_score"`
+	FormatScores      []ManagerFormatScore `json:"format_scores"`
+	Source            string               `json:"source"`
+	InUseCount        int64                `json:"in_use_count"`
 }
 
 // ManagerTestResult is the outcome of a connection test, persisted on the row
@@ -154,15 +170,21 @@ func managerDownloadClientView(row sqlc.ManagerDownloadClient) ManagerDownloadCl
 
 func managerQualityProfileView(row sqlc.ManagerQualityProfile, inUse int64) ManagerQualityProfileView {
 	view := ManagerQualityProfileView{
-		ID:              row.ID,
-		Name:            row.Name,
-		Domain:          row.Domain,
-		Items:           []ManagerQualityItem{},
-		Cutoff:          row.Cutoff,
-		UpgradesEnabled: row.UpgradesEnabled,
-		InUseCount:      inUse,
+		ID:                row.ID,
+		Name:              row.Name,
+		Domain:            row.Domain,
+		Items:             []ManagerQualityItem{},
+		Cutoff:            row.Cutoff,
+		UpgradesEnabled:   row.UpgradesEnabled,
+		MinFormatScore:    row.MinFormatScore,
+		CutoffFormatScore: row.CutoffFormatScore,
+		MinUpgradeScore:   row.MinUpgradeScore,
+		FormatScores:      []ManagerFormatScore{},
+		Source:            row.Source,
+		InUseCount:        inUse,
 	}
 	_ = json.Unmarshal(row.Items, &view.Items)
+	_ = json.Unmarshal(row.FormatScores, &view.FormatScores)
 	return view
 }
 
@@ -1030,11 +1052,16 @@ func (a *App) ListManagerQualityProfiles(ctx context.Context) ([]ManagerQualityP
 }
 
 type ManagerQualityProfileInput struct {
-	Name            string               `json:"name"`
-	Domain          string               `json:"domain"`
-	Items           []ManagerQualityItem `json:"items"`
-	Cutoff          string               `json:"cutoff"`
-	UpgradesEnabled *bool                `json:"upgrades_enabled,omitempty"`
+	Name              string               `json:"name"`
+	Domain            string               `json:"domain"`
+	Items             []ManagerQualityItem `json:"items"`
+	Cutoff            string               `json:"cutoff"`
+	UpgradesEnabled   *bool                `json:"upgrades_enabled,omitempty"`
+	MinFormatScore    *int32               `json:"min_format_score,omitempty"`
+	CutoffFormatScore *int32               `json:"cutoff_format_score,omitempty"`
+	MinUpgradeScore   *int32               `json:"min_upgrade_score,omitempty"`
+	// nil keeps the stored scores on update; an empty list clears them.
+	FormatScores []ManagerFormatScore `json:"format_scores,omitempty"`
 }
 
 func (input *ManagerQualityProfileInput) normalize() error {
@@ -1053,13 +1080,14 @@ func (input *ManagerQualityProfileInput) normalize() error {
 	anyAllowed := false
 	cutoffKnown := false
 	for _, item := range input.Items {
-		if item.Quality == "" {
-			return fmt.Errorf("quality keys must be non-empty")
+		isGroup := item.Group != "" && len(item.Qualities) > 0
+		if !isGroup && item.Quality == "" {
+			return fmt.Errorf("ladder items need a quality key or a group with members")
 		}
 		if item.Allowed {
 			anyAllowed = true
 		}
-		if item.Quality == input.Cutoff {
+		if (item.Quality != "" && item.Quality == input.Cutoff) || (item.Group != "" && item.Group == input.Cutoff) {
 			cutoffKnown = true
 		}
 	}
@@ -1081,12 +1109,21 @@ func (a *App) CreateManagerQualityProfile(ctx context.Context, input ManagerQual
 		return ManagerQualityProfileView{}, fmt.Errorf("encoding profile items: %w", err)
 	}
 	upgrades := input.UpgradesEnabled == nil || *input.UpgradesEnabled
+	scores, err := json.Marshal(nonZeroFormatScores(input.FormatScores))
+	if err != nil {
+		return ManagerQualityProfileView{}, fmt.Errorf("encoding format scores: %w", err)
+	}
 	row, err := sqlc.New(a.db).CreateManagerQualityProfile(ctx, sqlc.CreateManagerQualityProfileParams{
-		Name:            input.Name,
-		Domain:          input.Domain,
-		Items:           items,
-		Cutoff:          input.Cutoff,
-		UpgradesEnabled: upgrades,
+		Name:              input.Name,
+		Domain:            input.Domain,
+		Items:             items,
+		Cutoff:            input.Cutoff,
+		UpgradesEnabled:   upgrades,
+		MinFormatScore:    valueOrZero(input.MinFormatScore),
+		CutoffFormatScore: valueOrZero(input.CutoffFormatScore),
+		MinUpgradeScore:   valueOr(input.MinUpgradeScore, 1),
+		FormatScores:      scores,
+		Source:            "",
 	})
 	if err != nil {
 		return ManagerQualityProfileView{}, fmt.Errorf("create manager quality profile: %w", err)
@@ -1116,12 +1153,23 @@ func (a *App) UpdateManagerQualityProfile(ctx context.Context, id int64, input M
 	if input.UpgradesEnabled != nil {
 		upgrades = *input.UpgradesEnabled
 	}
+	scoresJSON := existing.FormatScores
+	if input.FormatScores != nil {
+		scoresJSON, err = json.Marshal(nonZeroFormatScores(input.FormatScores))
+		if err != nil {
+			return ManagerQualityProfileView{}, fmt.Errorf("encoding format scores: %w", err)
+		}
+	}
 	row, err := q.UpdateManagerQualityProfile(ctx, sqlc.UpdateManagerQualityProfileParams{
-		ID:              id,
-		Name:            input.Name,
-		Items:           items,
-		Cutoff:          input.Cutoff,
-		UpgradesEnabled: upgrades,
+		ID:                id,
+		Name:              input.Name,
+		Items:             items,
+		Cutoff:            input.Cutoff,
+		UpgradesEnabled:   upgrades,
+		MinFormatScore:    valueOr(input.MinFormatScore, existing.MinFormatScore),
+		CutoffFormatScore: valueOr(input.CutoffFormatScore, existing.CutoffFormatScore),
+		MinUpgradeScore:   valueOr(input.MinUpgradeScore, existing.MinUpgradeScore),
+		FormatScores:      scoresJSON,
 	})
 	if err != nil {
 		return ManagerQualityProfileView{}, fmt.Errorf("update manager quality profile: %w", err)

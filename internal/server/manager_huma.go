@@ -183,4 +183,68 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 			}
 			return statusOK("deleted"), nil
 		})
+
+	// ── Custom formats ───────────────────────────────────────────────────
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/custom-formats", "manager-list-custom-formats", "List manager custom formats", "Manager")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[[]service.ManagerCustomFormatView], error) {
+			views, err := app.ListManagerCustomFormats(ctx)
+			if err != nil {
+				return nil, humaServiceError(err)
+			}
+			return noStoreJSON(views), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/manager/custom-formats", "manager-create-custom-format", "Add a manager custom format", "Manager")),
+		func(ctx context.Context, in *struct {
+			Body service.ManagerCustomFormatInput
+		}) (*JSONOutput[service.ManagerCustomFormatView], error) {
+			view, err := app.CreateManagerCustomFormat(ctx, in.Body)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return &JSONOutput[service.ManagerCustomFormatView]{Body: view}, nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodPut, "/api/manager/custom-formats/{id}", "manager-update-custom-format", "Update a manager custom format", "Manager")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			Body service.ManagerCustomFormatInput
+		}) (*JSONOutput[service.ManagerCustomFormatView], error) {
+			view, err := app.UpdateManagerCustomFormat(ctx, in.ID, in.Body)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return &JSONOutput[service.ManagerCustomFormatView]{Body: view}, nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodDelete, "/api/manager/custom-formats/{id}", "manager-delete-custom-format", "Delete a manager custom format", "Manager")),
+		func(ctx context.Context, in *struct{ IDPath }) (*StatusOutput, error) {
+			if err := app.DeleteManagerCustomFormat(ctx, in.ID); err != nil {
+				return nil, humaServiceError(err)
+			}
+			return statusOK("deleted"), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/manager/custom-formats/import", "manager-import-custom-formats", "Import custom formats from an arr instance or pasted JSON", "Manager")),
+		func(ctx context.Context, in *struct {
+			Body service.ManagerFormatImportInput
+		}) (*JSONOutput[service.ManagerFormatImportResult], error) {
+			result, err := app.ImportManagerCustomFormats(ctx, in.Body)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return &JSONOutput[service.ManagerFormatImportResult]{Body: result}, nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/manager/custom-formats/test-release", "manager-test-release", "Parse a release title and score it against formats and profiles", "Manager")),
+		func(ctx context.Context, in *struct {
+			Body service.ManagerReleaseTestInput
+		}) (*JSONOutput[service.ManagerReleaseTestView], error) {
+			view, err := app.TestManagerRelease(ctx, in.Body)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return &JSONOutput[service.ManagerReleaseTestView]{Body: view}, nil
+		})
 }

@@ -4327,6 +4327,35 @@
         ],
         "type": "object"
       },
+      "CustomFormatSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "fields": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "implementation": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "negate": {
+            "type": "boolean"
+          },
+          "required": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "implementation",
+          "negate",
+          "required",
+          "fields"
+        ],
+        "type": "object"
+      },
       "DBMaintenanceProgress": {
         "additionalProperties": false,
         "properties": {
@@ -12673,6 +12702,96 @@
         ],
         "type": "object"
       },
+      "ManagerCustomFormatInput": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerCustomFormatInput.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "include_when_renaming": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "specifications": {
+            "items": {
+              "$ref": "#/components/schemas/CustomFormatSpec"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "domain",
+          "specifications"
+        ],
+        "type": "object"
+      },
+      "ManagerCustomFormatView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerCustomFormatView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "include_when_renaming": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "specifications": {
+            "items": {
+              "$ref": "#/components/schemas/CustomFormatSpec"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "trash_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "domain",
+          "include_when_renaming",
+          "specifications",
+          "trash_id",
+          "source"
+        ],
+        "type": "object"
+      },
       "ManagerDownloadClientInput": {
         "additionalProperties": false,
         "properties": {
@@ -12812,6 +12931,134 @@
           "path_mappings",
           "last_test_ok",
           "last_test_error"
+        ],
+        "type": "object"
+      },
+      "ManagerFormatImportInput": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerFormatImportInput.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "api_key": {
+            "type": "string"
+          },
+          "base_url": {
+            "type": "string"
+          },
+          "include_profiles": {
+            "type": "boolean"
+          },
+          "json": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "ManagerFormatImportResult": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerFormatImportResult.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "created": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "profiles_created": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "profiles_skipped": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "profiles_updated": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "skipped": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "updated": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "skipped",
+          "warnings",
+          "profiles_created",
+          "profiles_updated",
+          "profiles_skipped"
+        ],
+        "type": "object"
+      },
+      "ManagerFormatScore": {
+        "additionalProperties": false,
+        "properties": {
+          "format_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "score": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "format_id",
+          "score"
         ],
         "type": "object"
       },
@@ -13119,12 +13366,23 @@
           "allowed": {
             "type": "boolean"
           },
+          "group": {
+            "type": "string"
+          },
+          "qualities": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "quality": {
             "type": "string"
           }
         },
         "required": [
-          "quality",
           "allowed"
         ],
         "type": "object"
@@ -13144,8 +13402,21 @@
           "cutoff": {
             "type": "string"
           },
+          "cutoff_format_score": {
+            "format": "int32",
+            "type": "integer"
+          },
           "domain": {
             "type": "string"
+          },
+          "format_scores": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerFormatScore"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "items": {
             "items": {
@@ -13155,6 +13426,14 @@
               "array",
               "null"
             ]
+          },
+          "min_format_score": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "min_upgrade_score": {
+            "format": "int32",
+            "type": "integer"
           },
           "name": {
             "type": "string"
@@ -13186,8 +13465,21 @@
           "cutoff": {
             "type": "string"
           },
+          "cutoff_format_score": {
+            "format": "int32",
+            "type": "integer"
+          },
           "domain": {
             "type": "string"
+          },
+          "format_scores": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerFormatScore"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "id": {
             "format": "int64",
@@ -13206,7 +13498,18 @@
               "null"
             ]
           },
+          "min_format_score": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "min_upgrade_score": {
+            "format": "int32",
+            "type": "integer"
+          },
           "name": {
+            "type": "string"
+          },
+          "source": {
             "type": "string"
           },
           "upgrades_enabled": {
@@ -13220,7 +13523,173 @@
           "items",
           "cutoff",
           "upgrades_enabled",
+          "min_format_score",
+          "cutoff_format_score",
+          "min_upgrade_score",
+          "format_scores",
+          "source",
           "in_use_count"
+        ],
+        "type": "object"
+      },
+      "ManagerReleaseTestInput": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerReleaseTestInput.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "size_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tv": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "ManagerReleaseTestMatch": {
+        "additionalProperties": false,
+        "properties": {
+          "format_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "format_id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "ManagerReleaseTestParsed": {
+        "additionalProperties": false,
+        "properties": {
+          "group": {
+            "type": "string"
+          },
+          "languages": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "modifier": {
+            "type": "string"
+          },
+          "release_type": {
+            "type": "string"
+          },
+          "resolution": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "year": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "resolution",
+          "sources",
+          "modifier",
+          "group",
+          "languages",
+          "year"
+        ],
+        "type": "object"
+      },
+      "ManagerReleaseTestProfileScore": {
+        "additionalProperties": false,
+        "properties": {
+          "min_met": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "profile_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "score": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "profile_id",
+          "name",
+          "score",
+          "min_met"
+        ],
+        "type": "object"
+      },
+      "ManagerReleaseTestView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerReleaseTestView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerReleaseTestMatch"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "parsed": {
+            "$ref": "#/components/schemas/ManagerReleaseTestParsed"
+          },
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerReleaseTestProfileScore"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "parsed",
+          "matches",
+          "profiles"
         ],
         "type": "object"
       },
@@ -32209,6 +32678,333 @@
         "summary": "Recent log entries",
         "tags": [
           "Admin"
+        ]
+      }
+    },
+    "/api/manager/custom-formats": {
+      "get": {
+        "operationId": "manager-list-custom-formats",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ManagerCustomFormatView"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "List manager custom formats",
+        "tags": [
+          "Manager"
+        ]
+      },
+      "post": {
+        "operationId": "manager-create-custom-format",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagerCustomFormatInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerCustomFormatView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Add a manager custom format",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
+    "/api/manager/custom-formats/import": {
+      "post": {
+        "operationId": "manager-import-custom-formats",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagerFormatImportInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerFormatImportResult"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Import custom formats from an arr instance or pasted JSON",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
+    "/api/manager/custom-formats/test-release": {
+      "post": {
+        "operationId": "manager-test-release",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagerReleaseTestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerReleaseTestView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Parse a release title and score it against formats and profiles",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
+    "/api/manager/custom-formats/{id}": {
+      "delete": {
+        "operationId": "manager-delete-custom-format",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Delete a manager custom format",
+        "tags": [
+          "Manager"
+        ]
+      },
+      "put": {
+        "operationId": "manager-update-custom-format",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagerCustomFormatInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerCustomFormatView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Update a manager custom format",
+        "tags": [
+          "Manager"
         ]
       }
     },

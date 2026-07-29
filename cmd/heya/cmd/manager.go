@@ -3,7 +3,9 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
+	"strings"
 
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/ui"
@@ -449,6 +451,182 @@ var managerProfileListCmd = &cobra.Command{
 	},
 }
 
+var managerProfileRemoveCmd = &cobra.Command{
+	Use:   "rm <id>",
+	Short: "Remove a quality profile",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid id %q", args[0])
+		}
+		return withApp(func(ctx context.Context, app *service.App) error {
+			if err := app.DeleteManagerQualityProfile(ctx, id); err != nil {
+				return err
+			}
+			ui.Success("Removed quality profile %d", id)
+			return nil
+		})
+	},
+}
+
+// ── Custom formats ───────────────────────────────────────────────────────
+
+var managerFormatCmd = &cobra.Command{
+	Use:   "format",
+	Short: "Manage custom formats",
+}
+
+var managerFormatListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List custom formats",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return withApp(func(ctx context.Context, app *service.App) error {
+			views, err := app.ListManagerCustomFormats(ctx)
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(views)
+			}
+			table := ui.NewTable("ID", "Name", "Domain", "Conditions", "Source", "TRaSH")
+			for _, view := range views {
+				trash := ""
+				if view.TrashID != "" {
+					trash = "yes"
+				}
+				table.AddRow(
+					strconv.FormatInt(view.ID, 10),
+					view.Name,
+					view.Domain,
+					strconv.Itoa(len(view.Specifications)),
+					view.Source,
+					trash,
+				)
+			}
+			fmt.Println(table.Render())
+			return nil
+		})
+	},
+}
+
+var managerFormatImportCmd = &cobra.Command{
+	Use:   "import",
+	Short: "Import custom formats from a running arr instance or a JSON file",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		kind, _ := cmd.Flags().GetString("from")
+		baseURL, _ := cmd.Flags().GetString("url")
+		apiKey, _ := cmd.Flags().GetString("api-key")
+		file, _ := cmd.Flags().GetString("file")
+		withProfiles, _ := cmd.Flags().GetBool("profiles")
+
+		input := service.ManagerFormatImportInput{
+			Kind:            kind,
+			BaseURL:         baseURL,
+			APIKey:          apiKey,
+			IncludeProfiles: withProfiles,
+		}
+		if file != "" {
+			raw, err := os.ReadFile(file) //nolint:gosec // G304: user-supplied CLI path is the feature
+			if err != nil {
+				return err
+			}
+			input.JSON = string(raw)
+		}
+		return withApp(func(ctx context.Context, app *service.App) error {
+			result, err := app.ImportManagerCustomFormats(ctx, input)
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(result)
+			}
+			ui.Success("Formats: %d created, %d updated, %d skipped", result.Created, result.Updated, len(result.Skipped))
+			for _, name := range result.Skipped {
+				ui.Warn("skipped %q (name taken by another source)", name)
+			}
+			for _, name := range result.ProfilesCreated {
+				ui.Success("Profile imported: %s", name)
+			}
+			for _, name := range result.ProfilesUpdated {
+				ui.Success("Profile re-synced: %s", name)
+			}
+			for _, name := range result.ProfilesSkipped {
+				ui.Warn("profile skipped %q (name taken)", name)
+			}
+			for _, warning := range result.Warnings {
+				ui.Warn("%s", warning)
+			}
+			return nil
+		})
+	},
+}
+
+var managerFormatTestCmd = &cobra.Command{
+	Use:   "test <release title>",
+	Short: "Parse a release title and show matching formats and profile scores",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		tv, _ := cmd.Flags().GetBool("tv")
+		sizeGB, _ := cmd.Flags().GetFloat64("size-gb")
+		input := service.ManagerReleaseTestInput{
+			Title:     args[0],
+			TV:        tv,
+			SizeBytes: int64(sizeGB * (1 << 30)),
+		}
+		return withApp(func(ctx context.Context, app *service.App) error {
+			view, err := app.TestManagerRelease(ctx, input)
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(view)
+			}
+			ui.Info("Parsed", fmt.Sprintf("%dp %s modifier=%s group=%s type=%s",
+				view.Parsed.Resolution, strings.Join(view.Parsed.Sources, "+"),
+				view.Parsed.Modifier, view.Parsed.Group, view.Parsed.ReleaseType))
+			if len(view.Matches) == 0 {
+				ui.Info("Matches", "none")
+			} else {
+				names := make([]string, 0, len(view.Matches))
+				for _, match := range view.Matches {
+					names = append(names, match.Name)
+				}
+				ui.Success("Matches: %s", strings.Join(names, ", "))
+			}
+			table := ui.NewTable("Profile", "Score", "Min met")
+			for _, profile := range view.Profiles {
+				met := "yes"
+				if !profile.MinMet {
+					met = "NO"
+				}
+				table.AddRow(profile.Name, strconv.FormatInt(int64(profile.Score), 10), met)
+			}
+			fmt.Println(table.Render())
+			return nil
+		})
+	},
+}
+
+var managerFormatRemoveCmd = &cobra.Command{
+	Use:   "rm <id>",
+	Short: "Remove a custom format",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid id %q", args[0])
+		}
+		return withApp(func(ctx context.Context, app *service.App) error {
+			if err := app.DeleteManagerCustomFormat(ctx, id); err != nil {
+				return err
+			}
+			ui.Success("Removed custom format %d", id)
+			return nil
+		})
+	},
+}
+
 func init() {
 	managerIndexerAddCmd.Flags().String("name", "", "Display name")
 	managerIndexerAddCmd.Flags().String("kind", "prowlarr", "prowlarr | torznab | newznab")
@@ -464,9 +642,18 @@ func init() {
 	managerClientAddCmd.Flags().String("map-remote", "", "Path prefix as the client reports it (e.g. /storage)")
 	managerClientAddCmd.Flags().String("map-local", "", "Same prefix as this process sees it (e.g. /Volumes/Storage)")
 
+	managerFormatImportCmd.Flags().String("from", "", "radarr | sonarr | lidarr (source app; decides enum mapping and domain)")
+	managerFormatImportCmd.Flags().String("url", "", "Base URL of the running arr instance")
+	managerFormatImportCmd.Flags().String("api-key", "", "arr API key")
+	managerFormatImportCmd.Flags().String("file", "", "Import from a JSON file (arr export or TRaSH guide) instead of a live instance")
+	managerFormatImportCmd.Flags().Bool("profiles", false, "Also import quality profiles with their format scores (live instance only)")
+	managerFormatTestCmd.Flags().Bool("tv", false, "Parse as a TV release")
+	managerFormatTestCmd.Flags().Float64("size-gb", 0, "Release size in GB for size conditions")
+
 	managerIndexerCmd.AddCommand(managerIndexerListCmd, managerIndexerAddCmd, managerIndexerTestCmd, managerIndexerStatsCmd, managerIndexerHistoryCmd, managerIndexerRemoveCmd)
 	managerClientCmd.AddCommand(managerClientListCmd, managerClientAddCmd, managerClientTestCmd, managerClientActivityCmd, managerClientRemoveCmd)
-	managerProfileCmd.AddCommand(managerProfileListCmd)
-	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd)
+	managerProfileCmd.AddCommand(managerProfileListCmd, managerProfileRemoveCmd)
+	managerFormatCmd.AddCommand(managerFormatListCmd, managerFormatImportCmd, managerFormatTestCmd, managerFormatRemoveCmd)
+	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd, managerFormatCmd)
 	rootCmd.AddCommand(managerCmd)
 }
