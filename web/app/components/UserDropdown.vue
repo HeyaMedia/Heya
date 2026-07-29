@@ -75,6 +75,13 @@ const THEMES = [
 
     <div class="surface-divider" />
 
+    <DropdownMenuItem v-if="user?.is_admin" class="surface-item" as-child>
+      <NuxtLink to="/manager">
+        <Icon name="cloud-download" :size="15" class="surface-item-icon" />
+        <span>Manager</span>
+      </NuxtLink>
+    </DropdownMenuItem>
+
     <DropdownMenuItem class="surface-item" as-child>
       <NuxtLink :to="settingsTarget">
         <Icon name="settings" :size="15" class="surface-item-icon" />
