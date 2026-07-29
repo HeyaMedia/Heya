@@ -12491,6 +12491,57 @@
         ],
         "type": "object"
       },
+      "ManagerAlbumView": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rating": {
+            "format": "double",
+            "type": "number"
+          },
+          "release_date": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tracks_have": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "tracks_total": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "type": {
+            "description": "album | ep | single | compilation | ...",
+            "type": "string"
+          },
+          "year": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "slug",
+          "type",
+          "tracks_have",
+          "tracks_total",
+          "size_bytes"
+        ],
+        "type": "object"
+      },
       "ManagerClientActivityView": {
         "additionalProperties": false,
         "properties": {
@@ -12931,6 +12982,89 @@
           "path_mappings",
           "last_test_ok",
           "last_test_error"
+        ],
+        "type": "object"
+      },
+      "ManagerEpisodeView": {
+        "additionalProperties": false,
+        "properties": {
+          "air_date": {
+            "type": "string"
+          },
+          "has_file": {
+            "type": "boolean"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "number": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "quality": {
+            "description": "Resolution label of the best on-disk file, e.g. 1080p",
+            "type": "string"
+          },
+          "size_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "special": {
+            "type": "boolean"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "title",
+          "special",
+          "has_file",
+          "size_bytes"
+        ],
+        "type": "object"
+      },
+      "ManagerFileView": {
+        "additionalProperties": false,
+        "properties": {
+          "added_at": {
+            "type": "string"
+          },
+          "audio_codec": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "primary | part | extra type (trailer, clip, ...)",
+            "type": "string"
+          },
+          "path": {
+            "description": "Relative to the item's folder",
+            "type": "string"
+          },
+          "quality": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "video_codec": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "kind",
+          "size_bytes",
+          "added_at"
         ],
         "type": "object"
       },
@@ -13614,6 +13748,102 @@
         ],
         "type": "object"
       },
+      "ManagerMediaDetailView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerMediaDetailView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "albums": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerAlbumView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "external_ids": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerFileView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "genres": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "item": {
+            "$ref": "#/components/schemas/ManagerLibraryItemView"
+          },
+          "language": {
+            "type": "string"
+          },
+          "library": {
+            "$ref": "#/components/schemas/ManagerLibraryRef"
+          },
+          "overview": {
+            "type": "string"
+          },
+          "path": {
+            "description": "Common on-disk folder of the item's live files",
+            "type": "string"
+          },
+          "profile_name": {
+            "type": "string"
+          },
+          "rating": {
+            "format": "double",
+            "type": "number"
+          },
+          "release_from": {
+            "description": "Release date / first air date / active-from year",
+            "type": "string"
+          },
+          "release_to": {
+            "description": "Last air date / disbanded year, when the run has ended",
+            "type": "string"
+          },
+          "runtime_minutes": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "seasons": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerSeasonView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "item",
+          "library"
+        ],
+        "type": "object"
+      },
       "ManagerPathMapping": {
         "additionalProperties": false,
         "properties": {
@@ -13975,6 +14205,48 @@
           "parsed",
           "matches",
           "profiles"
+        ],
+        "type": "object"
+      },
+      "ManagerSeasonView": {
+        "additionalProperties": false,
+        "properties": {
+          "aired": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "episodes": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerEpisodeView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "have": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "number": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "size_on_disk": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "title",
+          "aired",
+          "have",
+          "size_on_disk",
+          "episodes"
         ],
         "type": "object"
       },
@@ -34263,6 +34535,66 @@
           }
         ],
         "summary": "Bulk-set monitored state and quality profile on media items",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
+    "/api/manager/media/{id}": {
+      "get": {
+        "operationId": "manager-media-detail",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerMediaDetailView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Arr-style item detail: hero facts plus seasons, files, or albums",
         "tags": [
           "Manager"
         ]

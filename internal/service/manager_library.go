@@ -95,8 +95,10 @@ func managerProfileDomain(mediaType string) string {
 }
 
 // managerLibraryRowsCTE returns the WITH-clause body producing the `rows`
-// relation every listing/stat query selects from. One shape per domain; the
-// only bind parameter is $1 = library id. Every shape emits the same columns.
+// relation every listing/stat query selects from. One shape per domain; bind
+// parameters are $1 = library id and $2 = optional single media_item id
+// (0 = whole library — the detail page reuses the same shapes without paying
+// the full-library aggregate). Every shape emits the same columns.
 func managerLibraryRowsCTE(mediaType string) (string, error) {
 	// All live bytes attributed to the item, regardless of relation (extras
 	// included — like the arrs, size-on-disk answers "what does this item
@@ -106,6 +108,7 @@ sizes AS (
   SELECT media_item_id, sum(size)::bigint AS size_on_disk, count(*)::int AS file_count
   FROM library_files
   WHERE library_id = $1 AND deleted_at IS NULL AND media_item_id IS NOT NULL
+    AND ($2::bigint = 0 OR media_item_id = $2)
   GROUP BY media_item_id
 )`
 	const rowsHead = `,
@@ -126,7 +129,7 @@ prim AS (
   SELECT lfl.media_item_id, count(DISTINCT lfl.library_file_id)::int AS primary_files
   FROM library_file_links lfl
   JOIN library_files lf ON lf.id = lfl.library_file_id AND lf.deleted_at IS NULL
-  WHERE lf.library_id = $1 AND lfl.relation_type IN ('primary', 'part')
+  WHERE lf.library_id = $1 AND lfl.relation_type IN ('primary', 'part') AND ($2::bigint = 0 OR lfl.media_item_id = $2)
   GROUP BY lfl.media_item_id
 )` + rowsHead + `
          LEAST(COALESCE(p.primary_files, 0), 1) AS have_count,
@@ -136,7 +139,7 @@ prim AS (
   JOIN media_items mi ON mi.id = c.id
   LEFT JOIN sizes s ON s.media_item_id = c.id
   LEFT JOIN prim p ON p.media_item_id = c.id
-  WHERE c.library_id = $1
+  WHERE c.library_id = $1 AND ($2::bigint = 0 OR c.id = $2)
 )`, nil
 	case "tv", "anime":
 		// Totals count aired, non-special episodes (arr semantics: unaired
@@ -149,7 +152,7 @@ eps AS (
          count(e.id) FILTER (WHERE NOT e.is_special AND e.air_date IS NOT NULL AND e.air_date <= now()::date)::int AS aired,
          count(DISTINCT s2.id) FILTER (WHERE s2.season_number > 0)::int AS seasons
   FROM tv_series sr
-  JOIN media_items mi2 ON mi2.id = sr.media_item_id AND mi2.library_id = $1
+  JOIN media_items mi2 ON mi2.id = sr.media_item_id AND mi2.library_id = $1 AND ($2::bigint = 0 OR mi2.id = $2)
   JOIN tv_seasons s2 ON s2.series_id = sr.id
   JOIN tv_episodes e ON e.season_id = s2.id
   GROUP BY sr.media_item_id
@@ -159,7 +162,7 @@ have AS (
   FROM library_file_links lfl
   JOIN library_files lf ON lf.id = lfl.library_file_id AND lf.deleted_at IS NULL
   JOIN tv_episodes e ON e.id = lfl.tv_episode_id AND NOT e.is_special
-  WHERE lf.library_id = $1
+  WHERE lf.library_id = $1 AND ($2::bigint = 0 OR lfl.media_item_id = $2)
   GROUP BY lfl.media_item_id
 )` + rowsHead + `
          COALESCE(h.have_eps, 0) AS have_count,
@@ -170,7 +173,7 @@ have AS (
   LEFT JOIN sizes s ON s.media_item_id = c.id
   LEFT JOIN eps ep ON ep.media_item_id = c.id
   LEFT JOIN have h ON h.media_item_id = c.id
-  WHERE c.library_id = $1
+  WHERE c.library_id = $1 AND ($2::bigint = 0 OR c.id = $2)
 )`, nil
 	case "music":
 		// media_item = artist. The albums table is local-first (catalog-only
@@ -185,7 +188,7 @@ cat AS (
          count(DISTINCT al.id)::int AS albums,
          count(DISTINCT t.id) FILTER (WHERE lf.id IS NOT NULL)::int AS have_tracks
   FROM artists ar
-  JOIN media_items mi2 ON mi2.id = ar.media_item_id AND mi2.library_id = $1
+  JOIN media_items mi2 ON mi2.id = ar.media_item_id AND mi2.library_id = $1 AND ($2::bigint = 0 OR mi2.id = $2)
   JOIN albums al ON al.artist_id = ar.id
   JOIN tracks t ON t.album_id = al.id
   LEFT JOIN track_files tf ON tf.track_id = t.id
@@ -199,7 +202,7 @@ cat AS (
   JOIN media_items mi ON mi.id = c.id
   LEFT JOIN sizes s ON s.media_item_id = c.id
   LEFT JOIN cat ct ON ct.media_item_id = c.id
-  WHERE c.library_id = $1
+  WHERE c.library_id = $1 AND ($2::bigint = 0 OR c.id = $2)
 )`, nil
 	case "book":
 		return sizes + rowsHead + `
@@ -209,7 +212,7 @@ cat AS (
   FROM media_item_cards c
   JOIN media_items mi ON mi.id = c.id
   LEFT JOIN sizes s ON s.media_item_id = c.id
-  WHERE c.library_id = $1
+  WHERE c.library_id = $1 AND ($2::bigint = 0 OR c.id = $2)
 )`, nil
 	default:
 		return "", fmt.Errorf("manager: unsupported library media type %q", mediaType)
@@ -241,7 +244,7 @@ func (a *App) ManagerLibraryItems(ctx context.Context, libraryID int64, p Manage
 	}
 
 	where := []string{"TRUE"}
-	args := []any{libraryID}
+	args := []any{libraryID, int64(0)} // $2 = single-item filter, unused for listings
 	arg := func(v any) string {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
@@ -397,7 +400,7 @@ SELECT count(*),
        COALESCE(array_agg(DISTINCT status ORDER BY status) FILTER (WHERE status <> ''), '{}')
 FROM rows`
 	var s ManagerLibraryStatsView
-	if err := a.db.QueryRow(ctx, query, libraryID).Scan(
+	if err := a.db.QueryRow(ctx, query, libraryID, int64(0)).Scan(
 		&s.Items, &s.Monitored, &s.ItemsMissing, &s.SizeOnDisk,
 		&s.UnitsHave, &s.UnitsTotal, &s.Files, &s.Statuses); err != nil {
 		return nil, fmt.Errorf("manager library stats: %w", err)

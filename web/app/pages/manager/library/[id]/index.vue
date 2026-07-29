@@ -124,15 +124,10 @@ const posterAspect = computed(() => library.value?.media_type === 'music' ? '1/1
 // Artists carry no year or release status — dead columns for music.
 const showYearStatus = computed(() => library.value?.media_type !== 'music')
 
+// Items open the manager's own detail page — the arr-style lens — not the
+// public library page (that stays one click away from the detail hero).
 function detailLink(item: ManagerLibraryItemView): string {
-  switch (item.media_type) {
-    case 'movie': return `/movies/${item.slug}`
-    case 'tv':
-    case 'anime': return `/tv/${item.slug}`
-    case 'music': return `/music/artist/${item.slug}`
-    case 'book': return `/books/${item.slug}`
-    default: return '#'
-  }
+  return `/manager/library/${libraryId.value}/${item.id}`
 }
 
 function progressPct(item: ManagerLibraryItemView): number {

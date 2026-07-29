@@ -3446,6 +3446,22 @@ export type LyricsResponse = {
     synced: boolean;
 };
 
+export type ManagerAlbumView = {
+    id: number;
+    rating?: number;
+    release_date?: string;
+    size_bytes: number;
+    slug: string;
+    title: string;
+    tracks_have: number;
+    tracks_total: number;
+    /**
+     * album | ep | single | compilation | ...
+     */
+    type: string;
+    year?: string;
+};
+
 export type ManagerClientActivityView = {
     /**
      * A URL to the JSON Schema for this object.
@@ -3558,6 +3574,37 @@ export type ManagerDownloadClientView = {
     priority: number;
     protocol: string;
     username: string;
+};
+
+export type ManagerEpisodeView = {
+    air_date?: string;
+    has_file: boolean;
+    id: number;
+    number: number;
+    /**
+     * Resolution label of the best on-disk file, e.g. 1080p
+     */
+    quality?: string;
+    size_bytes: number;
+    special: boolean;
+    title: string;
+};
+
+export type ManagerFileView = {
+    added_at: string;
+    audio_codec?: string;
+    id: number;
+    /**
+     * primary | part | extra type (trailer, clip, ...)
+     */
+    kind: string;
+    /**
+     * Relative to the item's folder
+     */
+    path: string;
+    quality?: string;
+    size_bytes: number;
+    video_codec?: string;
 };
 
 export type ManagerFormatImportInput = {
@@ -3755,6 +3802,39 @@ export type ManagerMediaBulkResult = {
     updated: number;
 };
 
+export type ManagerMediaDetailView = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    albums?: Array<ManagerAlbumView> | null;
+    external_ids?: {
+        [key: string]: string;
+    };
+    files?: Array<ManagerFileView> | null;
+    genres?: Array<string> | null;
+    item: ManagerLibraryItemView;
+    language?: string;
+    library: ManagerLibraryRef;
+    overview?: string;
+    /**
+     * Common on-disk folder of the item's live files
+     */
+    path?: string;
+    profile_name?: string;
+    rating?: number;
+    /**
+     * Release date / first air date / active-from year
+     */
+    release_from?: string;
+    /**
+     * Last air date / disbanded year, when the run has ended
+     */
+    release_to?: string;
+    runtime_minutes?: number;
+    seasons?: Array<ManagerSeasonView> | null;
+};
+
 export type ManagerPathMapping = {
     local: string;
     remote: string;
@@ -3846,6 +3926,15 @@ export type ManagerReleaseTestView = {
     matches: Array<ManagerReleaseTestMatch> | null;
     parsed: ManagerReleaseTestParsed;
     profiles: Array<ManagerReleaseTestProfileScore> | null;
+};
+
+export type ManagerSeasonView = {
+    aired: number;
+    episodes: Array<ManagerEpisodeView> | null;
+    have: number;
+    number: number;
+    size_on_disk: number;
+    title: string;
 };
 
 export type ManagerTestResult = {
@@ -8331,6 +8420,35 @@ export type ManagerMediaBulkInputWritable = {
 
 export type ManagerMediaBulkResultWritable = {
     updated: number;
+};
+
+export type ManagerMediaDetailViewWritable = {
+    albums?: Array<ManagerAlbumView> | null;
+    external_ids?: {
+        [key: string]: string;
+    };
+    files?: Array<ManagerFileView> | null;
+    genres?: Array<string> | null;
+    item: ManagerLibraryItemView;
+    language?: string;
+    library: ManagerLibraryRef;
+    overview?: string;
+    /**
+     * Common on-disk folder of the item's live files
+     */
+    path?: string;
+    profile_name?: string;
+    rating?: number;
+    /**
+     * Release date / first air date / active-from year
+     */
+    release_from?: string;
+    /**
+     * Last air date / disbanded year, when the run has ended
+     */
+    release_to?: string;
+    runtime_minutes?: number;
+    seasons?: Array<ManagerSeasonView> | null;
 };
 
 export type ManagerQualityProfileInputWritable = {
@@ -14223,6 +14341,36 @@ export type ManagerUpdateMediaResponses = {
 };
 
 export type ManagerUpdateMediaResponse = ManagerUpdateMediaResponses[keyof ManagerUpdateMediaResponses];
+
+export type ManagerMediaDetailData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/manager/media/{id}';
+};
+
+export type ManagerMediaDetailErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerMediaDetailError = ManagerMediaDetailErrors[keyof ManagerMediaDetailErrors];
+
+export type ManagerMediaDetailResponses = {
+    /**
+     * OK
+     */
+    200: ManagerMediaDetailView;
+};
+
+export type ManagerMediaDetailResponse = ManagerMediaDetailResponses[keyof ManagerMediaDetailResponses];
 
 export type ManagerQualityLaddersData = {
     body?: never;

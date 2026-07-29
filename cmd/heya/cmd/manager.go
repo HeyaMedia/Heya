@@ -600,6 +600,70 @@ var managerLibraryItemsCmd = &cobra.Command{
 	},
 }
 
+func orDash(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return "—"
+}
+
+var managerLibraryShowCmd = &cobra.Command{
+	Use:   "show <media item id>",
+	Short: "Arr-style item detail: completeness, files, seasons, or albums",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid media item id %q", args[0])
+		}
+		return withApp(func(ctx context.Context, app *service.App) error {
+			detail, err := app.GetManagerMediaDetail(ctx, id)
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(detail)
+			}
+			item := detail.Item
+			ui.Info("Title", fmt.Sprintf("%s (%s)", item.Title, item.Year))
+			ui.Info("Library", fmt.Sprintf("%s (%s)", detail.Library.Name, detail.Library.MediaType))
+			ui.Info("State", fmt.Sprintf("monitored=%v profile=%s status=%s", item.Monitored, orDash(detail.ProfileName), orDash(item.Status)))
+			ui.Info("Disk", fmt.Sprintf("%s in %d file(s) at %s", humanBytes(item.SizeOnDisk), item.FileCount, orDash(detail.Path)))
+			ui.Info("Have", fmt.Sprintf("%d/%d (%d missing)", item.HaveCount, item.TotalCount, item.MissingCount))
+			switch {
+			case len(detail.Seasons) > 0:
+				table := ui.NewTable("Season", "Aired", "Have", "Size")
+				for _, s := range detail.Seasons {
+					table.AddRow(strconv.Itoa(int(s.Number)), strconv.Itoa(int(s.Aired)), strconv.Itoa(int(s.Have)), humanBytes(s.SizeOnDisk))
+				}
+				fmt.Println(table.Render())
+			case len(detail.Albums) > 0:
+				table := ui.NewTable("Album", "Type", "Released", "Tracks", "Size")
+				for _, al := range detail.Albums {
+					table.AddRow(al.Title, al.Type, firstNonEmpty(al.ReleaseDate, al.Year), fmt.Sprintf("%d/%d", al.TracksHave, al.TracksTotal), humanBytes(al.SizeBytes))
+				}
+				fmt.Println(table.Render())
+			case len(detail.Files) > 0:
+				table := ui.NewTable("File", "Kind", "Quality", "Codecs", "Size")
+				for _, f := range detail.Files {
+					table.AddRow(f.Path, f.Kind, f.Quality, strings.TrimSpace(f.VideoCodec+" "+f.AudioCodec), humanBytes(f.SizeBytes))
+				}
+				fmt.Println(table.Render())
+			}
+			return nil
+		})
+	},
+}
+
 var managerLibrarySetCmd = &cobra.Command{
 	Use:   "set <media item id>...",
 	Short: "Set monitored state / quality profile on media items",
@@ -838,7 +902,7 @@ func init() {
 	managerLibraryItemsCmd.Flags().Int("per-page", 60, "Items per page")
 	managerLibrarySetCmd.Flags().Bool("monitor", false, "Monitored state to set (use --monitor=false to unmonitor)")
 	managerLibrarySetCmd.Flags().Int64("profile", 0, "Quality profile id to assign (0 clears it)")
-	managerLibraryCmd.AddCommand(managerLibraryItemsCmd, managerLibrarySetCmd)
+	managerLibraryCmd.AddCommand(managerLibraryItemsCmd, managerLibraryShowCmd, managerLibrarySetCmd)
 
 	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd, managerFormatCmd, managerLibraryCmd)
 	rootCmd.AddCommand(managerCmd)

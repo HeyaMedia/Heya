@@ -18,12 +18,17 @@ export type {
   ManagerIndexerInput,
   ManagerIndexerStatsView,
   ManagerIndexerView,
+  ManagerAlbumView,
+  ManagerEpisodeView,
+  ManagerFileView,
   ManagerLibraryItemView,
   ManagerLibraryItemsPage,
   ManagerLibraryRef,
   ManagerLibraryStatsView,
   ManagerMediaBulkInput,
   ManagerMediaBulkResult,
+  ManagerMediaDetailView,
+  ManagerSeasonView,
   ManagerPathMapping,
   ManagerQualityItem,
   ManagerQualityProfileInput,
@@ -39,6 +44,7 @@ import type {
   ManagerIndexerStatsView,
   ManagerIndexerView,
   ManagerLibraryItemsPage,
+  ManagerMediaDetailView,
   ManagerQualityItem,
   ManagerQualityProfileView,
 } from '~~/shared/api/types.gen'
@@ -157,5 +163,15 @@ export const managerLibraryItemsQuery = defineQueryOptions((p: ManagerLibraryIte
   // Filter/sort/page changes swap the cache key; carrying the previous page
   // as placeholder keeps the grid on screen instead of flashing a loader.
   placeholderData: (prev: ManagerLibraryItemsPage | undefined) => prev,
+  meta: { prefetch: 'none', sensitivity: 'private' },
+}))
+
+export const managerMediaDetailQuery = defineQueryOptions((id: number) => ({
+  key: ['manager', 'media', id],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya(`/api/manager/media/${id}`) as ManagerMediaDetailView
+  },
+  staleTime: 1000 * 15,
   meta: { prefetch: 'none', sensitivity: 'private' },
 }))
