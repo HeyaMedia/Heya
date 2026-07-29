@@ -8,67 +8,26 @@ import {
 } from '~/queries/manager'
 
 const route = useRoute()
+const router = useRouter()
 const { $heya } = useNuxtApp()
 
 const libraryId = computed(() => Number(route.params.id))
 
-// ── Filters / sort / paging ──────────────────────────────────────────────
-
-const search = ref('')
-const debouncedSearch = ref('')
-let searchTimer: ReturnType<typeof setTimeout> | undefined
-watch(search, value => {
-  clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => { debouncedSearch.value = value.trim() }, 300)
-})
-
-const monitored = ref('')
-const fileState = ref('')
-const status = ref('')
-const profile = ref('')
-const sort = ref('title')
-const dir = ref<'asc' | 'desc'>('asc')
-const page = ref(1)
-const perPage = ref(60)
-
-// Any filter change lands you back on page 1 — page 7 of a different result
-// set is meaningless.
-watch([debouncedSearch, monitored, fileState, status, profile, sort, dir, perPage], () => {
-  page.value = 1
-})
-watch(libraryId, () => {
-  search.value = ''
-  debouncedSearch.value = ''
-  monitored.value = ''
-  fileState.value = ''
-  status.value = ''
-  profile.value = ''
-  sort.value = 'title'
-  dir.value = 'asc'
-  page.value = 1
-  selected.value = new Set()
-})
+// ── Data: one fetch per library, filters live client-side ────────────────
+// The per-domain completeness CTE aggregates the whole library server-side
+// no matter the LIMIT, so fetching every row once costs the same as one
+// page — and makes search/filter/sort instant afterwards.
 
 const itemsQuery = useQuery(() => managerLibraryItemsQuery({
   libraryId: libraryId.value,
-  search: debouncedSearch.value,
-  monitored: monitored.value,
-  fileState: fileState.value,
-  status: status.value,
-  profile: profile.value,
-  sort: sort.value,
-  dir: dir.value,
-  page: page.value,
-  perPage: perPage.value,
+  perPage: 10000,
 }))
 const data = computed(() => itemsQuery.data.value)
-const items = computed(() => data.value?.items ?? [])
+const allItems = computed(() => data.value?.items ?? [])
 const stats = computed(() => data.value?.stats)
 const library = computed(() => data.value?.library)
 const initialLoading = computed(() => itemsQuery.isLoading.value && !data.value)
 const refreshing = computed(() => itemsQuery.isLoading.value && !!data.value)
-
-const pageCount = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / perPage.value)))
 
 // Another admin, the CLI, or a scan mutating the catalog shows up live.
 useLiveRefresh([
@@ -82,6 +41,96 @@ useLiveRefresh([
     keys: [['manager', 'library-items']],
   },
 ])
+
+// ── Filters / sort — hydrated from the URL so back-navigation restores ───
+
+function queryString(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
+const search = ref(queryString(route.query.q))
+const monitored = ref(queryString(route.query.monitored))
+const fileState = ref(queryString(route.query.state))
+const status = ref(queryString(route.query.status))
+const profile = ref(queryString(route.query.profile))
+const sort = ref(queryString(route.query.sort) || 'title')
+const dir = ref<'asc' | 'desc'>(route.query.dir === 'desc' ? 'desc' : 'asc')
+
+watch(libraryId, () => {
+  search.value = ''
+  monitored.value = ''
+  fileState.value = ''
+  status.value = ''
+  profile.value = ''
+  sort.value = 'title'
+  dir.value = 'asc'
+  selected.value = new Set()
+})
+
+// Mirror filter state into the URL (replace, so typing doesn't spam
+// history) — the browser's back button then lands on the filtered view, and
+// the detail page's breadcrumb reuses the same stored path.
+const urlQuery = computed(() => {
+  const query: Record<string, string> = {}
+  if (search.value) query.q = search.value
+  if (monitored.value) query.monitored = monitored.value
+  if (fileState.value) query.state = fileState.value
+  if (status.value) query.status = status.value
+  if (profile.value) query.profile = profile.value
+  if (sort.value !== 'title') query.sort = sort.value
+  if (dir.value !== 'asc') query.dir = dir.value
+  return query
+})
+let urlTimer: ReturnType<typeof setTimeout> | undefined
+watch(urlQuery, query => {
+  clearTimeout(urlTimer)
+  urlTimer = setTimeout(() => {
+    router.replace({ query })
+    sessionStorage.setItem(`heya:mgr-lib-return:${libraryId.value}`,
+      router.resolve({ path: route.path, query }).fullPath)
+  }, 250)
+}, { immediate: true })
+
+const filtered = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  return allItems.value.filter(item => {
+    if (q && !item.title.toLowerCase().includes(q)) return false
+    if (monitored.value === 'monitored' && !item.monitored) return false
+    if (monitored.value === 'unmonitored' && item.monitored) return false
+    if (fileState.value === 'missing' && item.missing_count <= 0) return false
+    if (fileState.value === 'complete' && (item.missing_count > 0 || item.have_count <= 0)) return false
+    if (status.value && item.status !== status.value) return false
+    if (profile.value === 'none' && item.quality_profile_id != null) return false
+    if (profile.value && profile.value !== 'none' && item.quality_profile_id !== Number(profile.value)) return false
+    return true
+  })
+})
+
+type SortFn = (a: ManagerLibraryItemView, b: ManagerLibraryItemView) => number
+const nullsLast = (a: number | null, b: number | null) => {
+  if (a == null && b == null) return 0
+  if (a == null) return 1
+  if (b == null) return -1
+  return a - b
+}
+const SORT_FNS: Record<string, SortFn> = {
+  title: (a, b) => a.title.toLowerCase().localeCompare(b.title.toLowerCase()),
+  year: (a, b) => nullsLast(Number(a.year) || null, Number(b.year) || null),
+  added: (a, b) => a.added_at.localeCompare(b.added_at),
+  size: (a, b) => a.size_on_disk - b.size_on_disk,
+  missing: (a, b) => a.missing_count - b.missing_count,
+  units: (a, b) => a.total_count - b.total_count,
+  progress: (a, b) => nullsLast(
+    a.total_count > 0 ? a.have_count / a.total_count : null,
+    b.total_count > 0 ? b.have_count / b.total_count : null),
+  status: (a, b) => (a.status || '￿').localeCompare(b.status || '￿'),
+}
+const sorted = computed(() => {
+  const fn = SORT_FNS[sort.value] ?? SORT_FNS.title!
+  const flip = dir.value === 'desc' ? -1 : 1
+  const tiebreak = SORT_FNS.title!
+  return [...filtered.value].sort((a, b) => (fn(a, b) * flip) || tiebreak(a, b))
+})
 
 // ── Quality profiles (filtered to this library's domain) ─────────────────
 
@@ -120,9 +169,10 @@ function statusLabel(value: string): string {
   return STATUS_LABELS[value] ?? value.replaceAll('_', ' ')
 }
 
-const posterAspect = computed(() => library.value?.media_type === 'music' ? '1/1' : '2/3')
+const isMusic = computed(() => library.value?.media_type === 'music')
+const posterAspect = computed(() => isMusic.value ? '1/1' : '2/3')
 // Artists carry no year or release status — dead columns for music.
-const showYearStatus = computed(() => library.value?.media_type !== 'music')
+const showYearStatus = computed(() => !isMusic.value)
 
 // Items open the manager's own detail page — the arr-style lens — not the
 // public library page (that stays one click away from the detail hero).
@@ -150,6 +200,40 @@ onMounted(() => {
 })
 watch(view, value => localStorage.setItem('heya:manager:library-view', value))
 
+// Table layout: header and virtualized rows share one grid template so the
+// columns stay aligned without a real <table>. No overflow-x wrapper around
+// the scroller — RecycleScroller's page-mode adopts the nearest ancestor
+// with ANY overflow:auto as its scroll parent, and a horizontal wrapper
+// freezes it on the first row window. Narrow screens drop columns instead.
+const { isPhone } = useViewport()
+const tableTemplate = computed(() => {
+  if (isPhone.value) return '34px 34px minmax(140px, 1fr) 130px 50px'
+  const cols = ['34px', '34px', 'minmax(220px, 2.2fr)']
+  if (showYearStatus.value) cols.push('60px', '120px')
+  cols.push('minmax(110px, 1fr)')
+  if (vocab.value!.group) cols.push('70px')
+  cols.push('160px', '70px', '90px', '80px')
+  return cols.join(' ')
+})
+
+// ── Scroll restore (the manager layout owns the scroll container) ────────
+
+const scrollKey = computed(() => `heya:mgr-lib-scroll:${libraryId.value}`)
+const restoredScroll = ref(false)
+watch([sorted, view], async () => {
+  if (restoredScroll.value || !sorted.value.length) return
+  restoredScroll.value = true
+  await nextTick()
+  const saved = Number(sessionStorage.getItem(scrollKey.value) || 0)
+  const el = document.getElementById('main-content')
+  if (saved > 0 && el) el.scrollTop = saved
+}, { immediate: true })
+watch(libraryId, () => { restoredScroll.value = false })
+onBeforeUnmount(() => {
+  const el = document.getElementById('main-content')
+  if (el) sessionStorage.setItem(scrollKey.value, String(el.scrollTop))
+})
+
 // ── Selection + bulk edit ────────────────────────────────────────────────
 
 const selected = ref(new Set<number>())
@@ -171,9 +255,9 @@ function toggleSelected(id: number) {
   else next.add(id)
   selected.value = next
 }
-function selectPage() {
+function selectAllFiltered() {
   const next = new Set(selected.value)
-  for (const item of items.value) next.add(item.id)
+  for (const item of sorted.value) next.add(item.id)
   selected.value = next
 }
 function clearSelection() {
@@ -319,78 +403,95 @@ function headerSort(key: string) {
               <Icon name="rows" :size="15" />
             </button>
           </div>
-          <button type="button" class="mgr-btn lib-select-page" @click="selectPage">Select page</button>
+          <button type="button" class="mgr-btn lib-select-page" @click="selectAllFiltered">Select all</button>
         </div>
+      </div>
+
+      <div class="lib-count mono">
+        {{ sorted.length.toLocaleString() }} of {{ allItems.length.toLocaleString() }} items
+        <template v-if="selected.size"> · {{ selected.size.toLocaleString() }} selected</template>
       </div>
 
       <div v-if="flash" class="mgr-flash" :class="flashError ? 'err' : 'ok'">{{ flash }}</div>
 
-      <div v-if="!items.length" class="lib-empty">
+      <div v-if="!sorted.length" class="lib-empty">
         <Icon name="check" :size="14" /> Nothing matches these filters.
       </div>
 
-      <!-- ── Poster grid ─────────────────────────────────────────────── -->
-      <div v-else-if="view === 'posters'" class="lib-grid" :class="{ refreshing }">
-        <div
-          v-for="(item, index) in items"
-          :key="item.id"
-          class="lib-card"
-          :class="{ selected: selected.has(item.id) }"
+      <!-- ── Poster grid (virtualized) ───────────────────────────────── -->
+      <div v-else-if="view === 'posters'" :class="{ refreshing }">
+        <VirtualPosterGrid
+          :total="sorted.length"
+          :item-at="i => sorted[i]"
+          :aspect="isMusic ? 1 : 1.5"
+          :meta-height="46"
+          :min-card="150"
         >
-          <NuxtLink :to="detailLink(item)" class="lib-card-link" :aria-label="item.title">
-            <Poster :idx="index" :src="usePosterUrl({ id: item.id })" :title="item.title" :aspect="posterAspect" :width="220">
-              <div class="lib-card-shade" />
-              <div class="lib-progress" :class="`tone-${progressTone(item)}`">
-                <div class="lib-progress-fill" :style="{ width: `${progressPct(item)}%` }" />
+          <template #default="{ item, index }">
+            <div
+              class="lib-card"
+              :class="{ selected: selected.has(item.id) }"
+            >
+              <NuxtLink :to="detailLink(item)" class="lib-card-link" :aria-label="item.title">
+                <Poster :idx="index" :src="usePosterUrl({ id: item.id })" :title="item.title" :aspect="posterAspect" :width="220">
+                  <div class="lib-card-shade" />
+                  <div class="lib-progress" :class="`tone-${progressTone(item)}`">
+                    <div class="lib-progress-fill" :style="{ width: `${progressPct(item)}%` }" />
+                  </div>
+                </Poster>
+              </NuxtLink>
+              <button
+                type="button" class="lib-card-monitor" :class="{ on: item.monitored }"
+                :aria-label="item.monitored ? `Unmonitor ${item.title}` : `Monitor ${item.title}`"
+                @click.stop.prevent="toggleMonitor(item)"
+              >
+                <Icon name="bookmark" :size="15" :weight="item.monitored ? 'fill' : 'regular'" />
+              </button>
+              <button
+                type="button" class="lib-card-select" :class="{ on: selected.has(item.id) }"
+                :aria-label="selected.has(item.id) ? `Deselect ${item.title}` : `Select ${item.title}`"
+                @click.stop.prevent="toggleSelected(item.id)"
+              >
+                <Icon name="check" :size="12" />
+              </button>
+              <div class="lib-card-meta">
+                <div class="lib-card-title" :title="item.title">{{ item.title }}</div>
+                <div class="lib-card-sub">
+                  <span v-if="item.year">{{ item.year }}</span>
+                  <span class="lib-card-counts">{{ item.have_count }}/{{ item.total_count }}</span>
+                </div>
               </div>
-            </Poster>
-          </NuxtLink>
-          <button
-            type="button" class="lib-card-monitor" :class="{ on: item.monitored }"
-            :aria-label="item.monitored ? `Unmonitor ${item.title}` : `Monitor ${item.title}`"
-            @click.stop.prevent="toggleMonitor(item)"
-          >
-            <Icon name="bookmark" :size="15" :weight="item.monitored ? 'fill' : 'regular'" />
-          </button>
-          <button
-            type="button" class="lib-card-select" :class="{ on: selected.has(item.id) }"
-            :aria-label="selected.has(item.id) ? `Deselect ${item.title}` : `Select ${item.title}`"
-            @click.stop.prevent="toggleSelected(item.id)"
-          >
-            <Icon name="check" :size="12" />
-          </button>
-          <div class="lib-card-meta">
-            <div class="lib-card-title" :title="item.title">{{ item.title }}</div>
-            <div class="lib-card-sub">
-              <span v-if="item.year">{{ item.year }}</span>
-              <span v-if="item.status" class="lib-card-status">{{ statusLabel(item.status) }}</span>
-              <span class="lib-card-counts">{{ item.have_count }}/{{ item.total_count }}</span>
             </div>
-          </div>
-        </div>
+          </template>
+        </VirtualPosterGrid>
       </div>
 
-      <!-- ── Table ───────────────────────────────────────────────────── -->
-      <div v-else class="lib-tablewrap" :class="{ refreshing }">
-        <table class="lib-table">
-          <thead>
-            <tr>
-              <th class="col-check" />
-              <th class="col-mon" aria-label="Monitored" />
-              <th><button type="button" class="lib-th" :class="{ active: sort === 'title' }" @click="headerSort('title')">Title <Icon v-if="sort === 'title'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button></th>
-              <th v-if="showYearStatus"><button type="button" class="lib-th" :class="{ active: sort === 'year' }" @click="headerSort('year')">Year <Icon v-if="sort === 'year'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button></th>
-              <th v-if="showYearStatus"><button type="button" class="lib-th" :class="{ active: sort === 'status' }" @click="headerSort('status')">Status <Icon v-if="sort === 'status'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button></th>
-              <th>Profile</th>
-              <th v-if="vocab!.group" class="num">{{ vocab!.group }}</th>
-              <th class="col-progress"><button type="button" class="lib-th" :class="{ active: sort === 'progress' }" @click="headerSort('progress')">{{ SORTS.find(s => s.key === 'units')?.label }} <Icon v-if="sort === 'progress'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button></th>
-              <th class="num"><button type="button" class="lib-th" :class="{ active: sort === 'missing' }" @click="headerSort('missing')">Missing <Icon v-if="sort === 'missing'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button></th>
-              <th class="num"><button type="button" class="lib-th" :class="{ active: sort === 'size' }" @click="headerSort('size')">Size <Icon v-if="sort === 'size'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button></th>
-              <th class="num"><button type="button" class="lib-th" :class="{ active: sort === 'added' }" @click="headerSort('added')">Added <Icon v-if="sort === 'added'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="item in items" :key="item.id" :class="{ selected: selected.has(item.id) }">
-              <td class="col-check">
+      <!-- ── Table (virtualized rows) ────────────────────────────────── -->
+      <div v-else :class="{ refreshing }">
+        <div class="libt">
+          <div class="libt-head" :style="{ gridTemplateColumns: tableTemplate }">
+            <span />
+            <span aria-label="Monitored" />
+            <button type="button" class="lib-th" :class="{ active: sort === 'title' }" @click="headerSort('title')">Title <Icon v-if="sort === 'title'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button>
+            <button v-if="showYearStatus && !isPhone" type="button" class="lib-th" :class="{ active: sort === 'year' }" @click="headerSort('year')">Year <Icon v-if="sort === 'year'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button>
+            <button v-if="showYearStatus && !isPhone" type="button" class="lib-th" :class="{ active: sort === 'status' }" @click="headerSort('status')">Status <Icon v-if="sort === 'status'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button>
+            <span v-if="!isPhone" class="lib-th static">Profile</span>
+            <span v-if="vocab!.group && !isPhone" class="lib-th static num">{{ vocab!.group }}</span>
+            <button type="button" class="lib-th" :class="{ active: sort === 'progress' }" @click="headerSort('progress')">{{ SORTS.find(s => s.key === 'units')?.label }} <Icon v-if="sort === 'progress'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button>
+            <button type="button" class="lib-th num" :class="{ active: sort === 'missing' }" @click="headerSort('missing')">Missing <Icon v-if="sort === 'missing'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button>
+            <button v-if="!isPhone" type="button" class="lib-th num" :class="{ active: sort === 'size' }" @click="headerSort('size')">Size <Icon v-if="sort === 'size'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button>
+            <button v-if="!isPhone" type="button" class="lib-th num" :class="{ active: sort === 'added' }" @click="headerSort('added')">Added <Icon v-if="sort === 'added'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button>
+          </div>
+          <RecycleScroller
+            :items="sorted"
+            :item-size="44"
+            key-field="id"
+            page-mode
+            :buffer="600"
+            v-slot="{ item }"
+          >
+            <div class="libt-row" :class="{ selected: selected.has(item.id) }" :style="{ gridTemplateColumns: tableTemplate }">
+              <span class="libt-cell">
                 <button
                   type="button" class="lib-row-select" :class="{ on: selected.has(item.id) }"
                   :aria-label="selected.has(item.id) ? `Deselect ${item.title}` : `Select ${item.title}`"
@@ -398,8 +499,8 @@ function headerSort(key: string) {
                 >
                   <Icon name="check" :size="11" />
                 </button>
-              </td>
-              <td class="col-mon">
+              </span>
+              <span class="libt-cell">
                 <button
                   type="button" class="lib-row-monitor" :class="{ on: item.monitored }"
                   :aria-label="item.monitored ? `Unmonitor ${item.title}` : `Monitor ${item.title}`"
@@ -407,42 +508,28 @@ function headerSort(key: string) {
                 >
                   <Icon name="bookmark" :size="14" :weight="item.monitored ? 'fill' : 'regular'" />
                 </button>
-              </td>
-              <td class="col-title">
+              </span>
+              <span class="libt-cell title">
                 <NuxtLink :to="detailLink(item)" class="lib-row-title">{{ item.title }}</NuxtLink>
-              </td>
-              <td v-if="showYearStatus" class="mono">{{ item.year }}</td>
-              <td v-if="showYearStatus"><span v-if="item.status" class="lib-status-chip">{{ statusLabel(item.status) }}</span></td>
-              <td class="lib-profile-cell">{{ item.quality_profile_id ? (profileNames[item.quality_profile_id] ?? `#${item.quality_profile_id}`) : '—' }}</td>
-              <td v-if="vocab!.group" class="num mono">{{ item.group_count }}</td>
-              <td class="col-progress">
-                <div class="lib-progress table" :class="`tone-${progressTone(item)}`">
-                  <div class="lib-progress-fill" :style="{ width: `${progressPct(item)}%` }" />
-                </div>
+              </span>
+              <span v-if="showYearStatus && !isPhone" class="libt-cell mono">{{ item.year }}</span>
+              <span v-if="showYearStatus && !isPhone" class="libt-cell">
+                <span v-if="item.status" class="lib-status-chip">{{ statusLabel(item.status) }}</span>
+              </span>
+              <span v-if="!isPhone" class="libt-cell profile">{{ item.quality_profile_id ? (profileNames[item.quality_profile_id] ?? `#${item.quality_profile_id}`) : '—' }}</span>
+              <span v-if="vocab!.group && !isPhone" class="libt-cell mono num">{{ item.group_count }}</span>
+              <span class="libt-cell">
+                <span class="lib-progress table" :class="`tone-${progressTone(item)}`">
+                  <span class="lib-progress-fill" :style="{ width: `${progressPct(item)}%` }" />
+                </span>
                 <span class="lib-progress-label mono">{{ item.have_count }}/{{ item.total_count }}</span>
-              </td>
-              <td class="num mono" :class="{ 'has-missing': item.missing_count > 0 }">{{ item.missing_count || '' }}</td>
-              <td class="num mono">{{ fmtBytes(item.size_on_disk) }}</td>
-              <td class="num mono">{{ timeAgoShort(item.added_at) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div v-if="pageCount > 1 || items.length" class="lib-pagination">
-        <button type="button" class="mgr-btn" :disabled="page <= 1" @click="page--">
-          <Icon name="chevleft" :size="13" /> Prev
-        </button>
-        <span class="lib-page-info">Page {{ page }} of {{ pageCount }} · {{ (data?.total ?? 0).toLocaleString() }} items</span>
-        <button type="button" class="mgr-btn" :disabled="page >= pageCount" @click="page++">
-          Next <Icon name="chevright" :size="13" />
-        </button>
-        <select v-model.number="perPage" class="lib-select" aria-label="Items per page">
-          <option :value="60">60 / page</option>
-          <option :value="120">120 / page</option>
-          <option :value="240">240 / page</option>
-          <option :value="500">500 / page</option>
-        </select>
+              </span>
+              <span class="libt-cell mono num" :class="{ 'has-missing': item.missing_count > 0 }">{{ item.missing_count || '' }}</span>
+              <span v-if="!isPhone" class="libt-cell mono num">{{ fmtBytes(item.size_on_disk) }}</span>
+              <span v-if="!isPhone" class="libt-cell mono num">{{ timeAgoShort(item.added_at) }}</span>
+            </div>
+          </RecycleScroller>
+        </div>
       </div>
     </template>
 
@@ -489,7 +576,7 @@ function headerSort(key: string) {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 .lib-toolbar-right {
   display: flex;
@@ -564,6 +651,13 @@ function headerSort(key: string) {
   border-color: color-mix(in srgb, var(--gold) 45%, transparent);
 }
 
+.lib-count {
+  margin-bottom: 12px;
+  font-size: 11px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+}
+
 .lib-empty {
   display: flex;
   align-items: center;
@@ -578,15 +672,7 @@ function headerSort(key: string) {
 
 .refreshing { opacity: 0.65; transition: opacity 0.15s; }
 
-/* ── Poster grid ─────────────────────────────────────────────────────── */
-.lib-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 14px;
-}
-@media (max-width: 720px) {
-  .lib-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
-}
+/* ── Poster cards (inside VirtualPosterGrid cells) ───────────────────── */
 .lib-card { position: relative; min-width: 0; }
 .lib-card-link { display: block; border-radius: var(--r-md); overflow: hidden; }
 .lib-card-link :deep(.poster) { border-radius: var(--r-md); }
@@ -637,7 +723,11 @@ function headerSort(key: string) {
   height: 4px;
   background: rgb(var(--ink) / 0.25);
 }
-.lib-progress-fill { height: 100%; transition: width 0.2s; }
+.lib-progress-fill {
+  display: block;
+  height: 100%;
+  transition: width 0.2s;
+}
 .lib-progress.tone-good .lib-progress-fill { background: var(--good); }
 .lib-progress.tone-warn .lib-progress-fill { background: var(--gold); }
 .lib-progress.tone-bad .lib-progress-fill { background: var(--bad); }
@@ -660,27 +750,20 @@ function headerSort(key: string) {
   color: var(--fg-3);
   font-family: var(--font-mono);
 }
-.lib-card-status { color: var(--fg-3); }
 .lib-card-counts { margin-left: auto; color: var(--fg-2); }
 
-/* ── Table ───────────────────────────────────────────────────────────── */
-.lib-tablewrap { overflow-x: auto; }
-.lib-table {
-  width: 100%;
-  min-width: 760px;
-  border-collapse: collapse;
+/* ── Table (grid + RecycleScroller rows) ─────────────────────────────── */
+/* No overflow-x here on purpose: any auto-overflow ancestor becomes the
+   page-mode scroller's scroll parent and vertical scrolling dies. Narrow
+   viewports drop columns (isPhone) rather than scroll sideways. */
+.libt { min-width: 0; }
+.libt-head {
+  display: grid;
+  align-items: center;
+  gap: 0 10px;
+  padding: 0 4px 8px;
 }
-.lib-table th {
-  padding: 4px 10px 8px;
-  text-align: left;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--fg-3);
-  white-space: nowrap;
-}
+.libt-head > * { min-width: 0; }
 .lib-th {
   display: inline-flex;
   align-items: center;
@@ -688,33 +771,45 @@ function headerSort(key: string) {
   background: none;
   border: none;
   padding: 0;
-  font: inherit;
-  color: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-3);
   cursor: pointer;
+  white-space: nowrap;
 }
-.lib-th:hover,
+.lib-th.static { cursor: default; }
+.lib-th.num { justify-content: flex-end; }
+.lib-th:not(.static):hover,
 .lib-th.active { color: var(--gold-bright); }
-.lib-table th.num,
-.lib-table td.num { text-align: right; }
-.lib-table tbody tr {
-  background: var(--bg-2);
+
+.libt-row {
+  display: grid;
+  align-items: center;
+  gap: 0 10px;
+  height: 44px;
+  padding: 0 4px;
   border-top: 1px solid var(--border);
+  background: var(--bg-2);
   transition: background 0.1s;
 }
-.lib-table tbody tr:hover { background: color-mix(in srgb, var(--bg-2) 60%, rgb(var(--ink) / 0.05)); }
-.lib-table tbody tr.selected { background: color-mix(in srgb, var(--gold) 7%, var(--bg-2)); }
-.lib-table td {
-  padding: 9px 10px;
+.libt-row:hover { background: color-mix(in srgb, var(--bg-2) 60%, rgb(var(--ink) / 0.05)); }
+.libt-row.selected { background: color-mix(in srgb, var(--gold) 7%, var(--bg-2)); }
+.libt-cell {
+  min-width: 0;
   font-size: 12.5px;
   color: var(--fg-1);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.lib-table td.mono { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-2); }
-.col-check { width: 34px; }
-.col-mon { width: 34px; }
-.col-title { max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+.libt-cell.mono { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-2); }
+.libt-cell.num { text-align: right; }
+.libt-cell.title { font-weight: 500; }
+.libt-cell.profile { font-size: 12px; color: var(--fg-2); }
+.libt-cell.has-missing { color: var(--bad); font-weight: 600; }
 .lib-row-title { color: var(--fg-0); font-weight: 500; text-decoration: none; }
 .lib-row-title:hover { color: var(--gold-bright); }
 .lib-status-chip {
@@ -729,8 +824,6 @@ function headerSort(key: string) {
   text-transform: uppercase;
   color: var(--fg-2);
 }
-.lib-profile-cell { font-size: 12px; color: var(--fg-2); }
-.col-progress { min-width: 130px; }
 .lib-progress.table {
   position: relative;
   display: inline-block;
@@ -740,9 +833,9 @@ function headerSort(key: string) {
   border-radius: 999px;
   overflow: hidden;
   margin-right: 8px;
+  background: rgb(var(--ink) / 0.25);
 }
 .lib-progress-label { font-size: 11px; color: var(--fg-2); }
-td.has-missing { color: var(--bad); font-weight: 600; }
 .lib-row-select,
 .lib-row-monitor {
   display: inline-flex;
@@ -769,20 +862,6 @@ td.has-missing { color: var(--bad); font-weight: 600; }
 .lib-row-monitor { border: none; }
 .lib-row-monitor:hover { color: var(--fg-0); }
 .lib-row-monitor.on { color: var(--gold-bright); }
-
-/* ── Pagination ──────────────────────────────────────────────────────── */
-.lib-pagination {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  justify-content: center;
-  margin-top: 18px;
-}
-.lib-page-info {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--fg-2);
-}
 
 /* ── Bulk bar ────────────────────────────────────────────────────────── */
 .lib-bulkbar {

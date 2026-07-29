@@ -298,8 +298,8 @@ func (a *App) ManagerLibraryItems(ctx context.Context, libraryID int64, p Manage
 	if perPage <= 0 {
 		perPage = 60
 	}
-	if perPage > 500 {
-		perPage = 500
+	if perPage > 10000 {
+		perPage = 10000
 	}
 	page := p.Page
 	if page < 1 {

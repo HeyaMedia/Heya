@@ -159,7 +159,10 @@ export const managerLibraryItemsQuery = defineQueryOptions((p: ManagerLibraryIte
       },
     }) as ManagerLibraryItemsPage
   },
-  staleTime: 1000 * 15,
+  // The list page fetches a library once (per_page 10000) and filters
+  // client-side; a longer stale window keeps back-navigation instant while
+  // manager.changed / media.* events still invalidate eagerly.
+  staleTime: 1000 * 60,
   // Filter/sort/page changes swap the cache key; carrying the previous page
   // as placeholder keeps the grid on screen instead of flashing a loader.
   placeholderData: (prev: ManagerLibraryItemsPage | undefined) => prev,

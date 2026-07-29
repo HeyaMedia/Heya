@@ -15,6 +15,14 @@ const { $heya } = useNuxtApp()
 const libraryId = computed(() => Number(route.params.id))
 const itemId = computed(() => Number(route.params.item))
 
+// The list page stores its filtered URL here — the breadcrumb returns to the
+// exact view the user left (filters, sort) rather than a reset list.
+const backLink = ref(`/manager/library/${Number(route.params.id)}`)
+onMounted(() => {
+  const stored = sessionStorage.getItem(`heya:mgr-lib-return:${libraryId.value}`)
+  if (stored) backLink.value = stored
+})
+
 const detailQuery = useQuery(() => managerMediaDetailQuery(itemId.value))
 const detail = computed(() => detailQuery.data.value)
 const item = computed(() => detail.value?.item)
@@ -226,7 +234,7 @@ const FILE_KIND_LABELS: Record<string, string> = {
     <div v-if="loading" class="mgr-loading">Loading item…</div>
 
     <template v-else-if="detail && item">
-      <NuxtLink :to="`/manager/library/${libraryId}`" class="det-back">
+      <NuxtLink :to="backLink" class="det-back">
         <Icon name="back" :size="13" /> {{ detail.library.name }}
       </NuxtLink>
 

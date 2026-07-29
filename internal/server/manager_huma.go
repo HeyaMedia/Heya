@@ -275,7 +275,7 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 			Sort      string `query:"sort" enum:",title,year,added,size,missing,units,progress,status" required:"false"`
 			Dir       string `query:"dir" enum:",asc,desc" required:"false"`
 			Page      int    `query:"page" minimum:"1" default:"1"`
-			PerPage   int    `query:"per_page" minimum:"1" maximum:"500" default:"60"`
+			PerPage   int    `query:"per_page" minimum:"1" maximum:"10000" default:"60"`
 		}) (*JSONOutput[service.ManagerLibraryItemsPage], error) {
 			page, err := app.ManagerLibraryItems(ctx, in.ID, service.ManagerLibraryItemsParams{
 				Search:    in.Search,
