@@ -261,4 +261,47 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 			}
 			return &JSONOutput[service.ManagerReleaseTestView]{Body: view}, nil
 		})
+
+	// ── Library lens ─────────────────────────────────────────────────────
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/library/{id}/items", "manager-library-items", "Managed view over a library: completeness, monitoring, profiles", "Manager")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			Search    string `query:"search" maxLength:"200" doc:"Title substring filter"`
+			Monitored string `query:"monitored" enum:",monitored,unmonitored" required:"false"`
+			FileState string `query:"file_state" enum:",missing,complete" required:"false"`
+			Status    string `query:"status" maxLength:"40" doc:"Metadata status filter (e.g. returning_series)"`
+			Profile   string `query:"profile" maxLength:"20" doc:"Quality profile id, or 'none' for unassigned"`
+			Sort      string `query:"sort" enum:",title,year,added,size,missing,units,progress,status" required:"false"`
+			Dir       string `query:"dir" enum:",asc,desc" required:"false"`
+			Page      int    `query:"page" minimum:"1" default:"1"`
+			PerPage   int    `query:"per_page" minimum:"1" maximum:"500" default:"60"`
+		}) (*JSONOutput[service.ManagerLibraryItemsPage], error) {
+			page, err := app.ManagerLibraryItems(ctx, in.ID, service.ManagerLibraryItemsParams{
+				Search:    in.Search,
+				Monitored: in.Monitored,
+				FileState: in.FileState,
+				Status:    in.Status,
+				Profile:   in.Profile,
+				Sort:      in.Sort,
+				Dir:       in.Dir,
+				Page:      in.Page,
+				PerPage:   in.PerPage,
+			})
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return noStoreJSON(*page), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodPut, "/api/manager/media", "manager-update-media", "Bulk-set monitored state and quality profile on media items", "Manager")),
+		func(ctx context.Context, in *struct {
+			Body service.ManagerMediaBulkInput
+		}) (*JSONOutput[service.ManagerMediaBulkResult], error) {
+			result, err := app.UpdateManagerMedia(ctx, in.Body)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return &JSONOutput[service.ManagerMediaBulkResult]{Body: result}, nil
+		})
 }

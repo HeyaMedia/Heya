@@ -3664,6 +3664,97 @@ export type ManagerIndexerView = {
     source: string;
 };
 
+export type ManagerLibraryItemView = {
+    added_at: string;
+    file_count: number;
+    /**
+     * Seasons for TV, albums for music, 0 elsewhere
+     */
+    group_count: number;
+    have_count: number;
+    id: number;
+    media_type: string;
+    missing_count: number;
+    monitored: boolean;
+    quality_profile_id?: number;
+    size_on_disk: number;
+    slug: string;
+    status: string;
+    title: string;
+    total_count: number;
+    year: string;
+};
+
+export type ManagerLibraryItemsPage = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    items: Array<ManagerLibraryItemView> | null;
+    library: ManagerLibraryRef;
+    page: number;
+    per_page: number;
+    stats: ManagerLibraryStatsView;
+    /**
+     * Rows matching the current filters, across all pages
+     */
+    total: number;
+};
+
+export type ManagerLibraryRef = {
+    /**
+     * Quality-profile domain this library maps to (movie|tv|music|book)
+     */
+    domain: string;
+    id: number;
+    media_type: string;
+    name: string;
+};
+
+export type ManagerLibraryStatsView = {
+    files: number;
+    items: number;
+    /**
+     * Items with at least one missing unit
+     */
+    items_missing: number;
+    monitored: number;
+    size_on_disk: number;
+    /**
+     * Distinct metadata statuses present, for the filter dropdown
+     */
+    statuses: Array<string> | null;
+    units_have: number;
+    units_total: number;
+};
+
+export type ManagerMediaBulkInput = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    /**
+     * media_item ids to update
+     */
+    ids: Array<number> | null;
+    /**
+     * Set monitored state; omit to leave unchanged
+     */
+    monitored?: boolean;
+    /**
+     * Assign a quality profile; 0 clears it; omit to leave unchanged
+     */
+    quality_profile_id?: number;
+};
+
+export type ManagerMediaBulkResult = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    updated: number;
+};
+
 export type ManagerPathMapping = {
     local: string;
     remote: string;
@@ -8209,6 +8300,37 @@ export type ManagerIndexerViewWritable = {
     priority: number;
     protocol: string;
     source: string;
+};
+
+export type ManagerLibraryItemsPageWritable = {
+    items: Array<ManagerLibraryItemView> | null;
+    library: ManagerLibraryRef;
+    page: number;
+    per_page: number;
+    stats: ManagerLibraryStatsView;
+    /**
+     * Rows matching the current filters, across all pages
+     */
+    total: number;
+};
+
+export type ManagerMediaBulkInputWritable = {
+    /**
+     * media_item ids to update
+     */
+    ids: Array<number> | null;
+    /**
+     * Set monitored state; omit to leave unchanged
+     */
+    monitored?: boolean;
+    /**
+     * Assign a quality profile; 0 clears it; omit to leave unchanged
+     */
+    quality_profile_id?: number;
+};
+
+export type ManagerMediaBulkResultWritable = {
+    updated: number;
 };
 
 export type ManagerQualityProfileInputWritable = {
@@ -14027,6 +14149,80 @@ export type ManagerTestIndexerResponses = {
 };
 
 export type ManagerTestIndexerResponse = ManagerTestIndexerResponses[keyof ManagerTestIndexerResponses];
+
+export type ManagerLibraryItemsData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: {
+        /**
+         * Title substring filter
+         */
+        search?: string;
+        monitored?: '' | 'monitored' | 'unmonitored';
+        file_state?: '' | 'missing' | 'complete';
+        /**
+         * Metadata status filter (e.g. returning_series)
+         */
+        status?: string;
+        /**
+         * Quality profile id, or 'none' for unassigned
+         */
+        profile?: string;
+        sort?: '' | 'title' | 'year' | 'added' | 'size' | 'missing' | 'units' | 'progress' | 'status';
+        dir?: '' | 'asc' | 'desc';
+        page?: number;
+        per_page?: number;
+    };
+    url: '/api/manager/library/{id}/items';
+};
+
+export type ManagerLibraryItemsErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerLibraryItemsError = ManagerLibraryItemsErrors[keyof ManagerLibraryItemsErrors];
+
+export type ManagerLibraryItemsResponses = {
+    /**
+     * OK
+     */
+    200: ManagerLibraryItemsPage;
+};
+
+export type ManagerLibraryItemsResponse = ManagerLibraryItemsResponses[keyof ManagerLibraryItemsResponses];
+
+export type ManagerUpdateMediaData = {
+    body: ManagerMediaBulkInputWritable;
+    path?: never;
+    query?: never;
+    url: '/api/manager/media';
+};
+
+export type ManagerUpdateMediaErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerUpdateMediaError = ManagerUpdateMediaErrors[keyof ManagerUpdateMediaErrors];
+
+export type ManagerUpdateMediaResponses = {
+    /**
+     * OK
+     */
+    200: ManagerMediaBulkResult;
+};
+
+export type ManagerUpdateMediaResponse = ManagerUpdateMediaResponses[keyof ManagerUpdateMediaResponses];
 
 export type ManagerQualityLaddersData = {
     body?: never;

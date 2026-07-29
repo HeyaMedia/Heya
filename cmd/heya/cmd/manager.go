@@ -463,7 +463,7 @@ var managerProfileAddCmd = &cobra.Command{
 		return withApp(func(ctx context.Context, app *service.App) error {
 			items := app.ManagerQualityLadders()[domain]
 			if len(items) == 0 {
-				return fmt.Errorf("domain must be video, music, or book")
+				return fmt.Errorf("domain must be movie, tv, music, or book")
 			}
 			if cutoff == "" {
 				for _, item := range items {
@@ -523,6 +523,111 @@ var managerProfileRemoveCmd = &cobra.Command{
 				return err
 			}
 			ui.Success("Removed quality profile %d", id)
+			return nil
+		})
+	},
+}
+
+// ── Library lens ─────────────────────────────────────────────────────────
+
+var managerLibraryCmd = &cobra.Command{
+	Use:   "library",
+	Short: "Managed view over a library: completeness, monitoring, profiles",
+}
+
+var managerLibraryItemsCmd = &cobra.Command{
+	Use:   "items <library id>",
+	Short: "List a library's items with completeness and monitoring state",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		libraryID, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid library id %q", args[0])
+		}
+		search, _ := cmd.Flags().GetString("search")
+		monitored, _ := cmd.Flags().GetString("monitored")
+		fileState, _ := cmd.Flags().GetString("file-state")
+		status, _ := cmd.Flags().GetString("status")
+		profile, _ := cmd.Flags().GetString("profile")
+		sort, _ := cmd.Flags().GetString("sort")
+		dir, _ := cmd.Flags().GetString("dir")
+		page, _ := cmd.Flags().GetInt("page")
+		perPage, _ := cmd.Flags().GetInt("per-page")
+		return withApp(func(ctx context.Context, app *service.App) error {
+			result, err := app.ManagerLibraryItems(ctx, libraryID, service.ManagerLibraryItemsParams{
+				Search:    search,
+				Monitored: monitored,
+				FileState: fileState,
+				Status:    status,
+				Profile:   profile,
+				Sort:      sort,
+				Dir:       dir,
+				Page:      page,
+				PerPage:   perPage,
+			})
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(result)
+			}
+			ui.Info("Library", fmt.Sprintf("%s (%s) — %d items, %d monitored, %d with gaps, %s on disk",
+				result.Library.Name, result.Library.MediaType,
+				result.Stats.Items, result.Stats.Monitored, result.Stats.ItemsMissing,
+				humanBytes(result.Stats.SizeOnDisk)))
+			table := ui.NewTable("ID", "Title", "Year", "Status", "Mon", "Have", "Missing", "Size")
+			for _, item := range result.Items {
+				mon := ""
+				if item.Monitored {
+					mon = "✓"
+				}
+				table.AddRow(
+					strconv.FormatInt(item.ID, 10),
+					item.Title,
+					item.Year,
+					item.Status,
+					mon,
+					fmt.Sprintf("%d/%d", item.HaveCount, item.TotalCount),
+					strconv.Itoa(int(item.MissingCount)),
+					humanBytes(item.SizeOnDisk),
+				)
+			}
+			fmt.Println(table.Render())
+			ui.Info("Page", fmt.Sprintf("%d of %d matching items (page %d, %d per page)",
+				len(result.Items), result.Total, result.Page, result.PerPage))
+			return nil
+		})
+	},
+}
+
+var managerLibrarySetCmd = &cobra.Command{
+	Use:   "set <media item id>...",
+	Short: "Set monitored state / quality profile on media items",
+	Args:  cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ids := make([]int64, 0, len(args))
+		for _, raw := range args {
+			id, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid media item id %q", raw)
+			}
+			ids = append(ids, id)
+		}
+		input := service.ManagerMediaBulkInput{IDs: ids}
+		if cmd.Flags().Changed("monitor") {
+			monitor, _ := cmd.Flags().GetBool("monitor")
+			input.Monitored = &monitor
+		}
+		if cmd.Flags().Changed("profile") {
+			profileID, _ := cmd.Flags().GetInt64("profile")
+			input.QualityProfileID = &profileID
+		}
+		return withApp(func(ctx context.Context, app *service.App) error {
+			result, err := app.UpdateManagerMedia(ctx, input)
+			if err != nil {
+				return err
+			}
+			ui.Success("Updated %d media item(s)", result.Updated)
 			return nil
 		})
 	},
@@ -721,6 +826,20 @@ func init() {
 
 	managerProfileCmd.AddCommand(managerProfileListCmd, managerProfileAddCmd, managerProfileCloneCmd, managerProfileRemoveCmd)
 	managerFormatCmd.AddCommand(managerFormatListCmd, managerFormatImportCmd, managerFormatTestCmd, managerFormatRemoveCmd)
-	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd, managerFormatCmd)
+
+	managerLibraryItemsCmd.Flags().String("search", "", "Title substring filter")
+	managerLibraryItemsCmd.Flags().String("monitored", "", "monitored | unmonitored")
+	managerLibraryItemsCmd.Flags().String("file-state", "", "missing | complete")
+	managerLibraryItemsCmd.Flags().String("status", "", "Metadata status filter (e.g. returning_series)")
+	managerLibraryItemsCmd.Flags().String("profile", "", "Quality profile id, or 'none' for unassigned")
+	managerLibraryItemsCmd.Flags().String("sort", "title", "title | year | added | size | missing | units | progress | status")
+	managerLibraryItemsCmd.Flags().String("dir", "asc", "asc | desc")
+	managerLibraryItemsCmd.Flags().Int("page", 1, "Page number")
+	managerLibraryItemsCmd.Flags().Int("per-page", 60, "Items per page")
+	managerLibrarySetCmd.Flags().Bool("monitor", false, "Monitored state to set (use --monitor=false to unmonitor)")
+	managerLibrarySetCmd.Flags().Int64("profile", 0, "Quality profile id to assign (0 clears it)")
+	managerLibraryCmd.AddCommand(managerLibraryItemsCmd, managerLibrarySetCmd)
+
+	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd, managerFormatCmd, managerLibraryCmd)
 	rootCmd.AddCommand(managerCmd)
 }

@@ -18,6 +18,12 @@ export type {
   ManagerIndexerInput,
   ManagerIndexerStatsView,
   ManagerIndexerView,
+  ManagerLibraryItemView,
+  ManagerLibraryItemsPage,
+  ManagerLibraryRef,
+  ManagerLibraryStatsView,
+  ManagerMediaBulkInput,
+  ManagerMediaBulkResult,
   ManagerPathMapping,
   ManagerQualityItem,
   ManagerQualityProfileInput,
@@ -32,6 +38,7 @@ import type {
   ManagerDownloadClientView,
   ManagerIndexerStatsView,
   ManagerIndexerView,
+  ManagerLibraryItemsPage,
   ManagerQualityItem,
   ManagerQualityProfileView,
 } from '~~/shared/api/types.gen'
@@ -105,5 +112,50 @@ export const managerCustomFormatsQuery = defineQueryOptions(() => ({
     return await $heya('/api/manager/custom-formats') as ManagerCustomFormatView[]
   },
   staleTime: 1000 * 30,
+  meta: { prefetch: 'none', sensitivity: 'private' },
+}))
+
+export type ManagerLibraryItemsParams = {
+  libraryId: number
+  search?: string
+  monitored?: string
+  fileState?: string
+  status?: string
+  profile?: string
+  sort?: string
+  dir?: string
+  page?: number
+  perPage?: number
+}
+
+// Callers pass reactive params through a getter (useQuery(() => ...)) so a
+// filter change produces a new key and refetches — raw refs inside a plain
+// options object silently never would.
+export const managerLibraryItemsQuery = defineQueryOptions((p: ManagerLibraryItemsParams) => ({
+  key: [
+    'manager', 'library-items', p.libraryId,
+    p.search ?? '', p.monitored ?? '', p.fileState ?? '', p.status ?? '',
+    p.profile ?? '', p.sort ?? 'title', p.dir ?? 'asc', p.page ?? 1, p.perPage ?? 60,
+  ],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya(`/api/manager/library/${p.libraryId}/items`, {
+      query: {
+        search: p.search || undefined,
+        monitored: p.monitored || undefined,
+        file_state: p.fileState || undefined,
+        status: p.status || undefined,
+        profile: p.profile || undefined,
+        sort: p.sort || undefined,
+        dir: p.dir || undefined,
+        page: p.page ?? 1,
+        per_page: p.perPage ?? 60,
+      },
+    }) as ManagerLibraryItemsPage
+  },
+  staleTime: 1000 * 15,
+  // Filter/sort/page changes swap the cache key; carrying the previous page
+  // as placeholder keeps the grid on screen instead of flashing a loader.
+  placeholderData: (prev: ManagerLibraryItemsPage | undefined) => prev,
   meta: { prefetch: 'none', sensitivity: 'private' },
 }))

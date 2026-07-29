@@ -1,50 +1,259 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'manager', middleware: 'admin' })
 
-import { librariesQuery } from '~/queries/catalog'
-import { MOCK_CATALOG, type MockCatalogItem } from '~/utils/managerMock'
+import {
+  managerLibraryItemsQuery,
+  managerQualityProfilesQuery,
+  type ManagerLibraryItemView,
+} from '~/queries/manager'
 
 const route = useRoute()
-const { data: libraries } = useQuery(librariesQuery())
+const { $heya } = useNuxtApp()
 
-const library = computed(() => {
-  const id = Number(route.params.id)
-  return (libraries.value ?? []).find(l => l.id === id) ?? null
+const libraryId = computed(() => Number(route.params.id))
+
+// ── Filters / sort / paging ──────────────────────────────────────────────
+
+const search = ref('')
+const debouncedSearch = ref('')
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+watch(search, value => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => { debouncedSearch.value = value.trim() }, 300)
 })
 
-// The real page will be a managed lens over this library's media_items
-// (monitored flags, profile, missing counts). Until then: mock rows keyed by
-// the library's media type, copied into local state so the toggles feel live.
-const items = ref<MockCatalogItem[]>([])
-watch(() => library.value?.media_type, type => {
-  items.value = (MOCK_CATALOG[type ?? 'movie'] ?? []).map(i => ({ ...i }))
-}, { immediate: true })
+const monitored = ref('')
+const fileState = ref('')
+const status = ref('')
+const profile = ref('')
+const sort = ref('title')
+const dir = ref<'asc' | 'desc'>('asc')
+const page = ref(1)
+const perPage = ref(60)
 
-const view = ref<'all' | 'monitored' | 'missing' | 'unmet'>('all')
-const VIEWS = [
-  { key: 'all' as const, label: 'All' },
-  { key: 'monitored' as const, label: 'Monitored' },
-  { key: 'missing' as const, label: 'Missing' },
-  { key: 'unmet' as const, label: 'Cutoff unmet' },
-]
+// Any filter change lands you back on page 1 — page 7 of a different result
+// set is meaningless.
+watch([debouncedSearch, monitored, fileState, status, profile, sort, dir, perPage], () => {
+  page.value = 1
+})
+watch(libraryId, () => {
+  search.value = ''
+  debouncedSearch.value = ''
+  monitored.value = ''
+  fileState.value = ''
+  status.value = ''
+  profile.value = ''
+  sort.value = 'title'
+  dir.value = 'asc'
+  page.value = 1
+  selected.value = new Set()
+})
 
-const rows = computed(() => {
-  switch (view.value) {
-    case 'monitored': return items.value.filter(i => i.monitored)
-    case 'missing': return items.value.filter(i => i.status === 'missing')
-    case 'unmet': return items.value.filter(i => i.status === 'unmet')
-    default: return items.value
+const itemsQuery = useQuery(() => managerLibraryItemsQuery({
+  libraryId: libraryId.value,
+  search: debouncedSearch.value,
+  monitored: monitored.value,
+  fileState: fileState.value,
+  status: status.value,
+  profile: profile.value,
+  sort: sort.value,
+  dir: dir.value,
+  page: page.value,
+  perPage: perPage.value,
+}))
+const data = computed(() => itemsQuery.data.value)
+const items = computed(() => data.value?.items ?? [])
+const stats = computed(() => data.value?.stats)
+const library = computed(() => data.value?.library)
+const initialLoading = computed(() => itemsQuery.isLoading.value && !data.value)
+const refreshing = computed(() => itemsQuery.isLoading.value && !!data.value)
+
+const pageCount = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / perPage.value)))
+
+// Another admin, the CLI, or a scan mutating the catalog shows up live.
+useLiveRefresh([
+  {
+    events: ['manager.changed'],
+    keys: [['manager', 'library-items']],
+    filter: event => (event.payload as { area?: string } | undefined)?.area === 'library',
+  },
+  {
+    events: ['media.added', 'media.updated'],
+    keys: [['manager', 'library-items']],
+  },
+])
+
+// ── Quality profiles (filtered to this library's domain) ─────────────────
+
+const profilesData = useQuery(managerQualityProfilesQuery())
+const domainProfiles = computed(() =>
+  (profilesData.data.value ?? []).filter(p => p.domain === library.value?.domain))
+const profileNames = computed(() => {
+  const names: Record<number, string> = {}
+  for (const p of profilesData.data.value ?? []) names[p.id] = p.name
+  return names
+})
+
+// ── Domain vocabulary ────────────────────────────────────────────────────
+
+const UNIT_LABELS: Record<string, { unit: string, group: string }> = {
+  movie: { unit: 'movies', group: '' },
+  tv: { unit: 'episodes', group: 'Seasons' },
+  anime: { unit: 'episodes', group: 'Seasons' },
+  music: { unit: 'tracks', group: 'Albums' },
+  book: { unit: 'books', group: '' },
+}
+const vocab = computed(() => UNIT_LABELS[library.value?.media_type ?? 'movie'] ?? UNIT_LABELS.movie!)
+
+const STATUS_LABELS: Record<string, string> = {
+  returning_series: 'Continuing',
+  ended: 'Ended',
+  canceled: 'Canceled',
+  released: 'Released',
+  in_production: 'In production',
+  post_production: 'Post production',
+  planned: 'Planned',
+  rumored: 'Rumored',
+}
+function statusLabel(value: string): string {
+  if (!value) return ''
+  return STATUS_LABELS[value] ?? value.replaceAll('_', ' ')
+}
+
+const posterAspect = computed(() => library.value?.media_type === 'music' ? '1/1' : '2/3')
+// Artists carry no year or release status — dead columns for music.
+const showYearStatus = computed(() => library.value?.media_type !== 'music')
+
+function detailLink(item: ManagerLibraryItemView): string {
+  switch (item.media_type) {
+    case 'movie': return `/movies/${item.slug}`
+    case 'tv':
+    case 'anime': return `/tv/${item.slug}`
+    case 'music': return `/music/artist/${item.slug}`
+    case 'book': return `/books/${item.slug}`
+    default: return '#'
   }
+}
+
+function progressPct(item: ManagerLibraryItemView): number {
+  if (item.total_count <= 0) return 0
+  return Math.min(100, Math.round((item.have_count / item.total_count) * 100))
+}
+function progressTone(item: ManagerLibraryItemView): 'good' | 'warn' | 'bad' | 'none' {
+  if (item.total_count <= 0) return 'none'
+  if (item.have_count <= 0) return 'bad'
+  if (item.missing_count > 0) return 'warn'
+  return 'good'
+}
+
+// ── View mode ────────────────────────────────────────────────────────────
+
+const view = ref<'posters' | 'table'>('posters')
+onMounted(() => {
+  const saved = localStorage.getItem('heya:manager:library-view')
+  if (saved === 'posters' || saved === 'table') view.value = saved
 })
+watch(view, value => localStorage.setItem('heya:manager:library-view', value))
 
-const monitoredCount = computed(() => items.value.filter(i => i.monitored).length)
-const missingCount = computed(() => items.value.filter(i => i.status === 'missing').length)
-const unmetCount = computed(() => items.value.filter(i => i.status === 'unmet').length)
+// ── Selection + bulk edit ────────────────────────────────────────────────
 
-const STATUS_STATE: Record<MockCatalogItem['status'], 'ok' | 'warn' | 'error'> = {
-  ok: 'ok',
-  unmet: 'warn',
-  missing: 'error',
+const selected = ref(new Set<number>())
+const bulkProfile = ref('')
+const bulkBusy = ref(false)
+const flash = ref('')
+const flashError = ref(false)
+let flashTimer: ReturnType<typeof setTimeout> | undefined
+function showFlash(message: string, isError = false) {
+  flash.value = message
+  flashError.value = isError
+  clearTimeout(flashTimer)
+  flashTimer = setTimeout(() => { flash.value = '' }, 3500)
+}
+
+function toggleSelected(id: number) {
+  const next = new Set(selected.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selected.value = next
+}
+function selectPage() {
+  const next = new Set(selected.value)
+  for (const item of items.value) next.add(item.id)
+  selected.value = next
+}
+function clearSelection() {
+  selected.value = new Set()
+}
+
+const queryCache = useQueryCache()
+function invalidateItems() {
+  queryCache.invalidateQueries({ key: ['manager', 'library-items'] })
+}
+
+async function updateMedia(ids: number[], patch: { monitored?: boolean, quality_profile_id?: number }) {
+  await $heya('/api/manager/media', { method: 'PUT', body: { ids, ...patch } })
+  invalidateItems()
+}
+
+async function toggleMonitor(item: ManagerLibraryItemView) {
+  const next = !item.monitored
+  item.monitored = next // optimistic; the invalidation refetch corrects on failure
+  try {
+    await updateMedia([item.id], { monitored: next })
+  } catch (e: any) {
+    item.monitored = !next
+    showFlash(e?.data?.detail ?? 'Update failed.', true)
+  }
+}
+
+async function bulkMonitor(state: boolean) {
+  if (!selected.value.size) return
+  bulkBusy.value = true
+  try {
+    await updateMedia([...selected.value], { monitored: state })
+    showFlash(`${state ? 'Monitoring' : 'Unmonitored'} ${selected.value.size} item(s)`)
+  } catch (e: any) {
+    showFlash(e?.data?.detail ?? 'Update failed.', true)
+  } finally {
+    bulkBusy.value = false
+  }
+}
+
+async function bulkAssignProfile() {
+  if (!selected.value.size || bulkProfile.value === '') return
+  bulkBusy.value = true
+  try {
+    await updateMedia([...selected.value], { quality_profile_id: Number(bulkProfile.value) })
+    showFlash(bulkProfile.value === '0'
+      ? `Cleared profile on ${selected.value.size} item(s)`
+      : `Profile set on ${selected.value.size} item(s)`)
+  } catch (e: any) {
+    showFlash(e?.data?.detail ?? 'Update failed.', true)
+  } finally {
+    bulkBusy.value = false
+  }
+}
+
+// ── Toolbar options ──────────────────────────────────────────────────────
+
+const SORTS = computed(() => [
+  { key: 'title', label: 'Title' },
+  { key: 'year', label: 'Year' },
+  { key: 'added', label: 'Added' },
+  { key: 'size', label: 'Size on disk' },
+  { key: 'missing', label: 'Missing' },
+  { key: 'units', label: vocab.value!.unit.charAt(0).toUpperCase() + vocab.value!.unit.slice(1) },
+  { key: 'progress', label: 'Progress' },
+  { key: 'status', label: 'Status' },
+])
+
+function headerSort(key: string) {
+  if (sort.value === key) {
+    dir.value = dir.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sort.value = key
+    dir.value = key === 'title' || key === 'status' ? 'asc' : 'desc'
+  }
 }
 </script>
 
@@ -53,57 +262,218 @@ const STATUS_STATE: Record<MockCatalogItem['status'], 'ok' | 'warn' | 'error'> =
     <SettingsContextHero
       :title="library?.name ?? 'Library'"
       :icon="managerLibraryIcon(library?.media_type ?? '')"
-      eyebrow="Manager · Preview — mock data"
-      description="The managed lens over this library: what's monitored, what's missing, and what sits below its quality cutoff. Same catalog as the server — a different room, not a second database."
+      eyebrow="Manager · Library"
+      description="The managed lens over this library: what's monitored, what's missing, and what's assigned to which quality profile. Same catalog as the server — a different room, not a second database."
     />
 
-    <div class="tiles">
-      <MetricTile label="Items" :value="items.length" icon="folder" tone="neutral" :sub="`in ${library?.name ?? 'library'}`" />
-      <MetricTile label="Monitored" :value="monitoredCount" icon="eye" tone="good" sub="watched for releases" />
-      <MetricTile label="Missing" :value="missingCount" icon="target" :tone="missingCount ? 'warn' : 'good'" sub="no file on disk" />
-      <MetricTile label="Cutoff unmet" :value="unmetCount" icon="sort" tone="neutral" sub="upgrade candidates" />
-    </div>
+    <div v-if="initialLoading" class="mgr-loading">Loading library…</div>
 
-    <div class="lib-toolbar">
-      <div class="lib-views" role="group" aria-label="Filter items">
-        <button
-          v-for="v in VIEWS"
-          :key="v.key"
-          type="button"
-          class="lib-view-chip"
-          :class="{ active: view === v.key }"
-          @click="view = v.key"
-        >{{ v.label }}</button>
+    <template v-else-if="stats">
+      <div class="tiles">
+        <MetricTile label="Items" :value="stats.items" icon="folder" tone="neutral" :sub="`${stats.files.toLocaleString()} files on disk`" />
+        <MetricTile label="Monitored" :value="stats.monitored" icon="eye" :tone="stats.monitored ? 'good' : 'neutral'" :sub="`of ${stats.items} watched for releases`" />
+        <MetricTile
+          label="Missing" :value="stats.items_missing" icon="target"
+          :tone="stats.items_missing ? 'warn' : 'good'"
+          :sub="`${Math.max(0, stats.units_total - stats.units_have).toLocaleString()} ${vocab!.unit} wanted`"
+        />
+        <MetricTile label="On disk" :value="fmtBytes(stats.size_on_disk)" icon="hard-drives" tone="neutral" :sub="`${stats.units_have.toLocaleString()} of ${stats.units_total.toLocaleString()} ${vocab!.unit}`" />
       </div>
-      <button type="button" class="lib-search-all">
-        <Icon name="search" :size="14" />
-        <span>Search all missing</span>
-      </button>
-    </div>
 
-    <div class="lib-table">
-      <div class="lib-head">
-        <span>Title</span>
-        <span>Monitored</span>
-        <span>Profile</span>
-        <span>Status</span>
-        <span>Size</span>
-      </div>
-      <div v-for="row in rows" :key="row.id" class="lib-row">
-        <div class="lib-item">
-          <div class="lib-title">{{ row.title }}</div>
-          <div class="lib-sub">{{ row.detail }}</div>
+      <div class="lib-toolbar">
+        <div class="lib-search">
+          <Icon name="search" :size="14" />
+          <input v-model="search" class="lib-search-input" type="search" :placeholder="`Search ${library?.name ?? 'library'}…`" aria-label="Search titles">
         </div>
-        <AppSwitch v-model="row.monitored" :aria-label="`Monitor ${row.title}`" />
-        <span class="lib-profile">{{ row.profile }}</span>
-        <StatusBadge :state="STATUS_STATE[row.status]">{{ row.statusLabel }}</StatusBadge>
-        <span class="lib-size">{{ row.size }}</span>
-      </div>
-    </div>
 
-    <div v-if="rows.length === 0" class="lib-empty">
-      <Icon name="check" :size="14" /> Nothing matches this view.
-    </div>
+        <div class="lib-chips" role="group" aria-label="Monitoring filter">
+          <button type="button" class="lib-chip" :class="{ active: monitored === '' }" @click="monitored = ''">All</button>
+          <button type="button" class="lib-chip" :class="{ active: monitored === 'monitored' }" @click="monitored = 'monitored'">Monitored</button>
+          <button type="button" class="lib-chip" :class="{ active: monitored === 'unmonitored' }" @click="monitored = 'unmonitored'">Unmonitored</button>
+        </div>
+
+        <div class="lib-chips" role="group" aria-label="File state filter">
+          <button type="button" class="lib-chip" :class="{ active: fileState === '' }" @click="fileState = ''">Any state</button>
+          <button type="button" class="lib-chip" :class="{ active: fileState === 'missing' }" @click="fileState = 'missing'">Missing</button>
+          <button type="button" class="lib-chip" :class="{ active: fileState === 'complete' }" @click="fileState = 'complete'">Complete</button>
+        </div>
+
+        <select v-if="stats.statuses?.length" v-model="status" class="lib-select" aria-label="Status filter">
+          <option value="">Any status</option>
+          <option v-for="s in stats.statuses ?? []" :key="s" :value="s">{{ statusLabel(s) }}</option>
+        </select>
+
+        <select v-model="profile" class="lib-select" aria-label="Profile filter">
+          <option value="">Any profile</option>
+          <option value="none">Unassigned</option>
+          <option v-for="p in domainProfiles" :key="p.id" :value="String(p.id)">{{ p.name }}</option>
+        </select>
+
+        <div class="lib-toolbar-right">
+          <select v-model="sort" class="lib-select" aria-label="Sort by">
+            <option v-for="s in SORTS" :key="s.key" :value="s.key">{{ s.label }}</option>
+          </select>
+          <button type="button" class="mgr-btn-icon" :aria-label="dir === 'asc' ? 'Ascending — switch to descending' : 'Descending — switch to ascending'" @click="dir = dir === 'asc' ? 'desc' : 'asc'">
+            <Icon name="sort" :size="15" :style="dir === 'desc' ? 'transform: scaleY(-1)' : ''" />
+          </button>
+          <div class="lib-view-toggle" role="group" aria-label="View mode">
+            <button type="button" class="mgr-btn-icon" :class="{ active: view === 'posters' }" aria-label="Poster view" @click="view = 'posters'">
+              <Icon name="grid" :size="15" />
+            </button>
+            <button type="button" class="mgr-btn-icon" :class="{ active: view === 'table' }" aria-label="Table view" @click="view = 'table'">
+              <Icon name="rows" :size="15" />
+            </button>
+          </div>
+          <button type="button" class="mgr-btn lib-select-page" @click="selectPage">Select page</button>
+        </div>
+      </div>
+
+      <div v-if="flash" class="mgr-flash" :class="flashError ? 'err' : 'ok'">{{ flash }}</div>
+
+      <div v-if="!items.length" class="lib-empty">
+        <Icon name="check" :size="14" /> Nothing matches these filters.
+      </div>
+
+      <!-- ── Poster grid ─────────────────────────────────────────────── -->
+      <div v-else-if="view === 'posters'" class="lib-grid" :class="{ refreshing }">
+        <div
+          v-for="(item, index) in items"
+          :key="item.id"
+          class="lib-card"
+          :class="{ selected: selected.has(item.id) }"
+        >
+          <NuxtLink :to="detailLink(item)" class="lib-card-link" :aria-label="item.title">
+            <Poster :idx="index" :src="usePosterUrl({ id: item.id })" :title="item.title" :aspect="posterAspect" :width="220">
+              <div class="lib-card-shade" />
+              <div class="lib-progress" :class="`tone-${progressTone(item)}`">
+                <div class="lib-progress-fill" :style="{ width: `${progressPct(item)}%` }" />
+              </div>
+            </Poster>
+          </NuxtLink>
+          <button
+            type="button" class="lib-card-monitor" :class="{ on: item.monitored }"
+            :aria-label="item.monitored ? `Unmonitor ${item.title}` : `Monitor ${item.title}`"
+            @click.stop.prevent="toggleMonitor(item)"
+          >
+            <Icon name="bookmark" :size="15" :weight="item.monitored ? 'fill' : 'regular'" />
+          </button>
+          <button
+            type="button" class="lib-card-select" :class="{ on: selected.has(item.id) }"
+            :aria-label="selected.has(item.id) ? `Deselect ${item.title}` : `Select ${item.title}`"
+            @click.stop.prevent="toggleSelected(item.id)"
+          >
+            <Icon name="check" :size="12" />
+          </button>
+          <div class="lib-card-meta">
+            <div class="lib-card-title" :title="item.title">{{ item.title }}</div>
+            <div class="lib-card-sub">
+              <span v-if="item.year">{{ item.year }}</span>
+              <span v-if="item.status" class="lib-card-status">{{ statusLabel(item.status) }}</span>
+              <span class="lib-card-counts">{{ item.have_count }}/{{ item.total_count }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Table ───────────────────────────────────────────────────── -->
+      <div v-else class="lib-tablewrap" :class="{ refreshing }">
+        <table class="lib-table">
+          <thead>
+            <tr>
+              <th class="col-check" />
+              <th class="col-mon" aria-label="Monitored" />
+              <th><button type="button" class="lib-th" :class="{ active: sort === 'title' }" @click="headerSort('title')">Title <Icon v-if="sort === 'title'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button></th>
+              <th v-if="showYearStatus"><button type="button" class="lib-th" :class="{ active: sort === 'year' }" @click="headerSort('year')">Year <Icon v-if="sort === 'year'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button></th>
+              <th v-if="showYearStatus"><button type="button" class="lib-th" :class="{ active: sort === 'status' }" @click="headerSort('status')">Status <Icon v-if="sort === 'status'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button></th>
+              <th>Profile</th>
+              <th v-if="vocab!.group" class="num">{{ vocab!.group }}</th>
+              <th class="col-progress"><button type="button" class="lib-th" :class="{ active: sort === 'progress' }" @click="headerSort('progress')">{{ SORTS.find(s => s.key === 'units')?.label }} <Icon v-if="sort === 'progress'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button></th>
+              <th class="num"><button type="button" class="lib-th" :class="{ active: sort === 'missing' }" @click="headerSort('missing')">Missing <Icon v-if="sort === 'missing'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button></th>
+              <th class="num"><button type="button" class="lib-th" :class="{ active: sort === 'size' }" @click="headerSort('size')">Size <Icon v-if="sort === 'size'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button></th>
+              <th class="num"><button type="button" class="lib-th" :class="{ active: sort === 'added' }" @click="headerSort('added')">Added <Icon v-if="sort === 'added'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="item in items" :key="item.id" :class="{ selected: selected.has(item.id) }">
+              <td class="col-check">
+                <button
+                  type="button" class="lib-row-select" :class="{ on: selected.has(item.id) }"
+                  :aria-label="selected.has(item.id) ? `Deselect ${item.title}` : `Select ${item.title}`"
+                  @click="toggleSelected(item.id)"
+                >
+                  <Icon name="check" :size="11" />
+                </button>
+              </td>
+              <td class="col-mon">
+                <button
+                  type="button" class="lib-row-monitor" :class="{ on: item.monitored }"
+                  :aria-label="item.monitored ? `Unmonitor ${item.title}` : `Monitor ${item.title}`"
+                  @click="toggleMonitor(item)"
+                >
+                  <Icon name="bookmark" :size="14" :weight="item.monitored ? 'fill' : 'regular'" />
+                </button>
+              </td>
+              <td class="col-title">
+                <NuxtLink :to="detailLink(item)" class="lib-row-title">{{ item.title }}</NuxtLink>
+              </td>
+              <td v-if="showYearStatus" class="mono">{{ item.year }}</td>
+              <td v-if="showYearStatus"><span v-if="item.status" class="lib-status-chip">{{ statusLabel(item.status) }}</span></td>
+              <td class="lib-profile-cell">{{ item.quality_profile_id ? (profileNames[item.quality_profile_id] ?? `#${item.quality_profile_id}`) : '—' }}</td>
+              <td v-if="vocab!.group" class="num mono">{{ item.group_count }}</td>
+              <td class="col-progress">
+                <div class="lib-progress table" :class="`tone-${progressTone(item)}`">
+                  <div class="lib-progress-fill" :style="{ width: `${progressPct(item)}%` }" />
+                </div>
+                <span class="lib-progress-label mono">{{ item.have_count }}/{{ item.total_count }}</span>
+              </td>
+              <td class="num mono" :class="{ 'has-missing': item.missing_count > 0 }">{{ item.missing_count || '' }}</td>
+              <td class="num mono">{{ fmtBytes(item.size_on_disk) }}</td>
+              <td class="num mono">{{ timeAgoShort(item.added_at) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div v-if="pageCount > 1 || items.length" class="lib-pagination">
+        <button type="button" class="mgr-btn" :disabled="page <= 1" @click="page--">
+          <Icon name="chevleft" :size="13" /> Prev
+        </button>
+        <span class="lib-page-info">Page {{ page }} of {{ pageCount }} · {{ (data?.total ?? 0).toLocaleString() }} items</span>
+        <button type="button" class="mgr-btn" :disabled="page >= pageCount" @click="page++">
+          Next <Icon name="chevright" :size="13" />
+        </button>
+        <select v-model.number="perPage" class="lib-select" aria-label="Items per page">
+          <option :value="60">60 / page</option>
+          <option :value="120">120 / page</option>
+          <option :value="240">240 / page</option>
+          <option :value="500">500 / page</option>
+        </select>
+      </div>
+    </template>
+
+    <!-- ── Bulk bar ──────────────────────────────────────────────────── -->
+    <Transition name="bulkbar">
+      <div v-if="selected.size" class="lib-bulkbar" role="toolbar" aria-label="Bulk edit selection">
+        <span class="lib-bulk-count">{{ selected.size }} selected</span>
+        <button type="button" class="mgr-btn" :disabled="bulkBusy" @click="bulkMonitor(true)">
+          <Icon name="bookmark" :size="13" weight="fill" /> Monitor
+        </button>
+        <button type="button" class="mgr-btn" :disabled="bulkBusy" @click="bulkMonitor(false)">
+          <Icon name="bookmark" :size="13" /> Unmonitor
+        </button>
+        <div class="lib-bulk-profile">
+          <select v-model="bulkProfile" class="lib-select" aria-label="Profile to assign">
+            <option value="" disabled>Set profile…</option>
+            <option v-for="p in domainProfiles" :key="p.id" :value="String(p.id)">{{ p.name }}</option>
+            <option value="0">— Clear profile —</option>
+          </select>
+          <button type="button" class="mgr-btn-gold" :disabled="bulkBusy || bulkProfile === ''" @click="bulkAssignProfile">Apply</button>
+        </div>
+        <button type="button" class="mgr-btn lib-bulk-clear" :disabled="bulkBusy" @click="clearSelection">
+          <Icon name="close" :size="13" /> Clear
+        </button>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -112,109 +482,342 @@ const STATUS_STATE: Record<MockCatalogItem['status'], 'ok' | 'warn' | 'error'> =
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 10px;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 @media (max-width: 720px) {
   .tiles { grid-template-columns: repeat(2, 1fr); }
 }
 
+/* ── Toolbar ─────────────────────────────────────────────────────────── */
 .lib-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 14px;
+  gap: 10px;
   flex-wrap: wrap;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
-.lib-views { display: flex; gap: 6px; flex-wrap: wrap; }
-.lib-view-chip {
+.lib-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.lib-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  background: rgb(var(--ink) / 0.06);
+  border: 1px solid var(--border);
+  color: var(--fg-3);
+  min-width: 200px;
+}
+.lib-search:focus-within { border-color: var(--gold); }
+.lib-search-input {
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--fg-0);
+  font-size: 13px;
+  width: 100%;
+}
+.lib-search-input::placeholder { color: var(--fg-3); }
+
+.lib-chips { display: flex; gap: 5px; }
+.lib-chip {
   display: inline-flex;
   align-items: center;
   height: 30px;
-  padding: 0 12px;
+  padding: 0 11px;
   border-radius: 999px;
   background: rgb(var(--ink) / 0.05);
   border: 1px solid var(--border);
   color: var(--fg-2);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
-.lib-view-chip:hover { background: rgb(var(--ink) / 0.09); color: var(--fg-0); }
-.lib-view-chip.active {
+.lib-chip:hover { background: rgb(var(--ink) / 0.09); color: var(--fg-0); }
+.lib-chip.active {
   color: var(--gold-bright);
   background: var(--gold-soft);
   border-color: color-mix(in srgb, var(--gold) 45%, transparent);
 }
 
-.lib-search-all {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
+.lib-select {
   height: 32px;
-  padding: 0 14px;
+  padding: 0 8px;
   border-radius: var(--r-sm);
-  background: var(--gold-soft);
-  border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent);
-  color: var(--gold-bright);
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.12s;
-}
-.lib-search-all:hover { background: color-mix(in srgb, var(--gold) 18%, transparent); }
-
-.lib-table { display: flex; flex-direction: column; gap: 6px; }
-.lib-head,
-.lib-row {
-  display: grid;
-  grid-template-columns: minmax(220px, 2.4fr) 90px 120px minmax(160px, 1.2fr) 90px;
-  gap: 14px;
-  align-items: center;
-}
-.lib-head {
-  padding: 0 14px 6px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--fg-3);
-}
-.lib-row {
-  padding: 12px 14px;
-  background: var(--bg-2);
+  background: rgb(var(--ink) / 0.06);
   border: 1px solid var(--border);
-  border-radius: var(--r-md);
+  color: var(--fg-1);
+  font-size: 12.5px;
+  cursor: pointer;
 }
+.lib-select:focus { border-color: var(--gold); outline: none; }
 
-.lib-item { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.lib-title { font-size: 13.5px; font-weight: 500; color: var(--fg-0); }
-.lib-sub { font-size: 12px; color: var(--fg-2); }
-.lib-profile { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-1); }
-.lib-size { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-2); text-align: right; }
+.lib-view-toggle { display: flex; gap: 4px; }
+.lib-view-toggle .mgr-btn-icon.active {
+  color: var(--gold-bright);
+  background: var(--gold-soft);
+  border-color: color-mix(in srgb, var(--gold) 45%, transparent);
+}
 
 .lib-empty {
-  display: flex; align-items: center; gap: 8px;
-  color: var(--fg-3); font-size: 12.5px;
-  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 16px;
+  color: var(--fg-2);
+  font-size: 13px;
   background: var(--bg-2);
   border: 1px dashed var(--border);
   border-radius: var(--r-md);
-  margin-top: 6px;
 }
 
-@media (max-width: 960px) {
-  .lib-head { display: none; }
-  .lib-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-    row-gap: 8px;
-  }
-  .lib-profile, .lib-size { display: none; }
-  .lib-row > :nth-child(4) { grid-column: 1; justify-self: start; }
+.refreshing { opacity: 0.65; transition: opacity 0.15s; }
+
+/* ── Poster grid ─────────────────────────────────────────────────────── */
+.lib-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 14px;
 }
+@media (max-width: 720px) {
+  .lib-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
+}
+.lib-card { position: relative; min-width: 0; }
+.lib-card-link { display: block; border-radius: var(--r-md); overflow: hidden; }
+.lib-card-link :deep(.poster) { border-radius: var(--r-md); }
+.lib-card-shade {
+  position: absolute;
+  inset: 0;
+  /* Artwork scrim — stays literal by convention. */
+  background: linear-gradient(to top, rgb(0 0 0 / 0.45) 0%, transparent 30%);
+  pointer-events: none;
+}
+.lib-card.selected .lib-card-link { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+.lib-card-monitor,
+.lib-card-select {
+  position: absolute;
+  top: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid rgb(var(--ink) / 0.18);
+  background: color-mix(in srgb, var(--bg-1) 78%, transparent);
+  backdrop-filter: blur(6px);
+  color: var(--fg-2);
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s, opacity 0.12s;
+}
+.lib-card-monitor { left: 6px; }
+.lib-card-monitor:hover { color: var(--fg-0); }
+.lib-card-monitor.on { color: var(--gold-bright); }
+.lib-card-select { right: 6px; opacity: 0; }
+.lib-card:hover .lib-card-select,
+.lib-card-select:focus-visible,
+.lib-card-select.on { opacity: 1; }
+.lib-card-select.on {
+  color: var(--bg-0);
+  background: var(--gold);
+  border-color: var(--gold);
+}
+
+.lib-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: rgb(var(--ink) / 0.25);
+}
+.lib-progress-fill { height: 100%; transition: width 0.2s; }
+.lib-progress.tone-good .lib-progress-fill { background: var(--good); }
+.lib-progress.tone-warn .lib-progress-fill { background: var(--gold); }
+.lib-progress.tone-bad .lib-progress-fill { background: var(--bad); }
+.lib-progress.tone-none { display: none; }
+
+.lib-card-meta { padding: 7px 2px 0; }
+.lib-card-title {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fg-0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lib-card-sub {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+}
+.lib-card-status { color: var(--fg-3); }
+.lib-card-counts { margin-left: auto; color: var(--fg-2); }
+
+/* ── Table ───────────────────────────────────────────────────────────── */
+.lib-tablewrap { overflow-x: auto; }
+.lib-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+}
+.lib-table th {
+  padding: 4px 10px 8px;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  white-space: nowrap;
+}
+.lib-th {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.lib-th:hover,
+.lib-th.active { color: var(--gold-bright); }
+.lib-table th.num,
+.lib-table td.num { text-align: right; }
+.lib-table tbody tr {
+  background: var(--bg-2);
+  border-top: 1px solid var(--border);
+  transition: background 0.1s;
+}
+.lib-table tbody tr:hover { background: color-mix(in srgb, var(--bg-2) 60%, rgb(var(--ink) / 0.05)); }
+.lib-table tbody tr.selected { background: color-mix(in srgb, var(--gold) 7%, var(--bg-2)); }
+.lib-table td {
+  padding: 9px 10px;
+  font-size: 12.5px;
+  color: var(--fg-1);
+  white-space: nowrap;
+}
+.lib-table td.mono { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-2); }
+.col-check { width: 34px; }
+.col-mon { width: 34px; }
+.col-title { max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+.lib-row-title { color: var(--fg-0); font-weight: 500; text-decoration: none; }
+.lib-row-title:hover { color: var(--gold-bright); }
+.lib-status-chip {
+  display: inline-flex;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgb(var(--ink) / 0.07);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+.lib-profile-cell { font-size: 12px; color: var(--fg-2); }
+.col-progress { min-width: 130px; }
+.lib-progress.table {
+  position: relative;
+  display: inline-block;
+  vertical-align: middle;
+  width: 70px;
+  height: 5px;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-right: 8px;
+}
+.lib-progress-label { font-size: 11px; color: var(--fg-2); }
+td.has-missing { color: var(--bad); font-weight: 600; }
+.lib-row-select,
+.lib-row-monitor {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--fg-3);
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+.lib-row-select svg { opacity: 0; transition: opacity 0.1s; }
+.lib-row-select:hover svg,
+.lib-row-select.on svg { opacity: 1; }
+.lib-row-select:hover { color: var(--fg-1); border-color: var(--fg-3); }
+.lib-row-select.on {
+  color: var(--bg-0);
+  background: var(--gold);
+  border-color: var(--gold);
+}
+.lib-row-monitor { border: none; }
+.lib-row-monitor:hover { color: var(--fg-0); }
+.lib-row-monitor.on { color: var(--gold-bright); }
+
+/* ── Pagination ──────────────────────────────────────────────────────── */
+.lib-pagination {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 18px;
+}
+.lib-page-info {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-2);
+}
+
+/* ── Bulk bar ────────────────────────────────────────────────────────── */
+.lib-bulkbar {
+  position: sticky;
+  bottom: 14px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding: 10px 14px;
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--bg-1) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gold) 35%, var(--border));
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 30px rgb(var(--ink) / 0.18);
+}
+.lib-bulk-count {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--gold-bright);
+  margin-right: 4px;
+}
+.lib-bulk-profile { display: flex; align-items: center; gap: 6px; }
+.lib-bulk-clear { margin-left: auto; }
+
+.bulkbar-enter-active,
+.bulkbar-leave-active { transition: opacity 0.15s, transform 0.15s; }
+.bulkbar-enter-from,
+.bulkbar-leave-to { opacity: 0; transform: translateY(8px); }
 </style>
