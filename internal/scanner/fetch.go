@@ -603,7 +603,7 @@ func resolveLocalMusicReleaseGroups(ctx context.Context, artist MusicArtistPlan,
 	}
 	for _, local := range artist.Albums {
 		remote, _, _, matched := findMusicRemoteAlbum(local, detail.Albums)
-		if matched && remote.CanonicalID != "" && len(remote.Tracks) > 0 {
+		if matched && remote.CanonicalID != "" && musicIssuedReleaseSatisfied(local, remote) {
 			continue
 		}
 
@@ -663,9 +663,7 @@ func musicReleaseGroupDiscoveryIDs(values map[string]string) map[string]string {
 		case "musicbrainz_release_group", "mb_release_group":
 			result["musicbrainz_release_group"] = value
 		case "musicbrainz_album", "mb_release":
-			if result["musicbrainz_release_group"] == "" {
-				result["musicbrainz_album"] = value
-			}
+			result["musicbrainz_album"] = value
 		case "itunes_album", "apple_album":
 			result["apple"] = value
 		case "audiodb_album":
@@ -676,13 +674,23 @@ func musicReleaseGroupDiscoveryIDs(values map[string]string) map[string]string {
 			result["discogs"] = value
 		}
 	}
-	if result["musicbrainz_release_group"] != "" {
-		delete(result, "musicbrainz_album")
-	}
 	if len(result) == 0 {
 		return nil
 	}
 	return result
+}
+
+func musicIssuedReleaseSatisfied(local MusicAlbumPlan, remote metadata.AlbumEntry) bool {
+	wanted := strings.TrimSpace(local.ExternalIDs["musicbrainz_album"])
+	if wanted == "" {
+		return true
+	}
+	actual := firstNonEmpty(
+		remote.ExternalIDs["musicbrainz_album"],
+		remote.ExternalIDs["mb_release"],
+		remote.ExternalIDs["musicbrainz:release"],
+	)
+	return strings.EqualFold(strings.TrimSpace(actual), wanted)
 }
 
 func albumEntryFromReleaseGroupDetail(detail *metadata.MediaDetail) (metadata.AlbumEntry, bool) {

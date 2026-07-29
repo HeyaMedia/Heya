@@ -1350,6 +1350,7 @@ type RecordingLyricsOutputBody struct {
 
 // ReleaseHint defines model for ReleaseHint.
 type ReleaseHint struct {
+	Changed     *bool         `json:"changed,omitempty"`
 	Identifiers *[]Identifier `json:"identifiers,omitempty"`
 	Title       string        `json:"title"`
 	Type        *string       `json:"type,omitempty"`

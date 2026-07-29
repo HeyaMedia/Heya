@@ -63,6 +63,7 @@ type MusicAlbumPlan struct {
 	Aliases              []string          `json:"aliases,omitempty"`
 	Year                 string            `json:"year,omitempty"`
 	ReleaseKind          string            `json:"release_kind,omitempty"`
+	Changed              bool              `json:"changed,omitempty"`
 	ExternalIDs          map[string]string `json:"external_ids,omitempty"`
 	NFOs                 []string          `json:"nfos,omitempty"`
 	Tracks               []MusicTrackPlan  `json:"tracks"`

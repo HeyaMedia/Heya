@@ -453,6 +453,10 @@ func discoveryRequest(kind string, query metadata.SearchQuery) gen.Request {
 				continue
 			}
 			release := gen.ReleaseHint{Title: title}
+			if hint.Changed {
+				changed := true
+				release.Changed = &changed
+			}
 			if identifiers := discoveryIdentifiers(hint.Identifiers); len(identifiers) > 0 {
 				release.Identifiers = &identifiers
 			}
@@ -512,8 +516,16 @@ func identifierScheme(key string) string {
 	switch key {
 	case "", "provider_id", "heyametadata", "canonical_id":
 		return ""
-	case "mbid", "musicbrainz_artist", "musicbrainz_album", "musicbrainz_release_group", "musicbrainz_recording":
+	case "mbid":
 		return "musicbrainz"
+	case "musicbrainz_artist":
+		return "musicbrainz_artist"
+	case "musicbrainz_album", "musicbrainz_release":
+		return "musicbrainz_release"
+	case "musicbrainz_release_group":
+		return "musicbrainz_release_group"
+	case "musicbrainz_recording":
+		return "musicbrainz_recording"
 	case "mal", "mal_id":
 		return "myanimelist"
 	case "ol_work_id", "openlibrary_work", "openlibrary_edition":

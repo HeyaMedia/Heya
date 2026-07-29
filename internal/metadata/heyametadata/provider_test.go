@@ -238,8 +238,10 @@ func TestDiscoveryRequestIncludesCompactReleaseEvidence(t *testing.T) {
 	request := discoveryRequest("artist", metadata.SearchQuery{
 		Title: "Daft Punk",
 		Releases: []metadata.ReleaseHint{
-			{Title: "Homework", Year: "1997", Type: "album", Identifiers: map[string]string{
+			{Title: "Homework", Year: "1997", Type: "album", Changed: true, Identifiers: map[string]string{
 				"itunes_album": "123", "deezer_album": "456", "itunes_artist": "ignored-artist-id",
+				"musicbrainz_release_group": "f3f3577a-6ea1-4219-8aa7-b4a61c799a15",
+				"musicbrainz_album":         "34e7ff03-8160-4d4f-a407-03f2c6510a2e",
 			}},
 			{Title: "Discovery", Year: "2001", Type: "album"},
 		},
@@ -251,8 +253,19 @@ func TestDiscoveryRequestIncludesCompactReleaseEvidence(t *testing.T) {
 	if first.Title != "Homework" || first.Year == nil || *first.Year != 1997 || first.Type == nil || *first.Type != "album" {
 		t.Fatalf("first release hint = %#v", first)
 	}
-	if first.Identifiers == nil || len(*first.Identifiers) != 3 {
+	if first.Changed == nil || !*first.Changed {
+		t.Fatalf("changed-release signal = %#v", first.Changed)
+	}
+	if first.Identifiers == nil || len(*first.Identifiers) != 5 {
 		t.Fatalf("first release identifiers = %#v", first.Identifiers)
+	}
+	schemes := map[string]string{}
+	for _, identifier := range *first.Identifiers {
+		schemes[identifier.Scheme] = identifier.Value
+	}
+	if schemes["musicbrainz_release_group"] != "f3f3577a-6ea1-4219-8aa7-b4a61c799a15" ||
+		schemes["musicbrainz_release"] != "34e7ff03-8160-4d4f-a407-03f2c6510a2e" {
+		t.Fatalf("MusicBrainz namespaces collapsed: %#v", *first.Identifiers)
 	}
 	if (*first.Identifiers)[0].Scheme != "deezer_album" || (*first.Identifiers)[1].Scheme != "itunes_album" || (*first.Identifiers)[2].Scheme != "itunes_artist" {
 		t.Fatalf("sorted first release identifiers = %#v", *first.Identifiers)

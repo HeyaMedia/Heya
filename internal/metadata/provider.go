@@ -49,6 +49,7 @@ type ReleaseHint struct {
 	Title       string
 	Year        string
 	Type        string
+	Changed     bool
 	Identifiers map[string]string
 }
 

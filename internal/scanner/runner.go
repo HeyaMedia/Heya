@@ -471,6 +471,11 @@ func (r *LibraryRun) runSearch(ctx context.Context) error {
 	case lib.MediaType == sqlc.MediaTypeBook:
 		r.result.BookSearch, err = SearchBookPlans(ctx, r.result.BookPlans, r.opts.BookSearcher, r.sink, threshold, r.searchDecisions)
 	case lib.MediaType == sqlc.MediaTypeMusic:
+		if db := r.scannerStageDB(); db != nil {
+			if err = markChangedMusicReleases(ctx, db, lib.ID, r.result.MusicArtists); err != nil {
+				return r.fail(err)
+			}
+		}
 		r.result.MusicSearch, err = SearchMusicArtistsWithFingerprints(ctx, r.result.MusicArtists, r.opts.MusicSearcher, r.opts.MusicFingerprinter, r.sink, threshold, r.searchDecisions)
 	case mediatype.IsTVLike(lib.MediaType):
 		searcher := r.opts.TVSearcher

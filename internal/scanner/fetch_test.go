@@ -576,6 +576,7 @@ func TestMusicReleaseGroupDiscoveryPreservesUnifiedProviderEvidence(t *testing.T
 	})
 	want := map[string]string{
 		"musicbrainz_release_group": "release-group",
+		"musicbrainz_album":         "issued-release",
 		"apple":                     "1630125755",
 		"audiodb":                   "audiodb-release",
 		"deezer":                    "deezer-release",
@@ -583,6 +584,52 @@ func TestMusicReleaseGroupDiscoveryPreservesUnifiedProviderEvidence(t *testing.T
 	}
 	if fmt.Sprint(ids) != fmt.Sprint(want) {
 		t.Fatalf("release discovery IDs = %#v, want %#v", ids, want)
+	}
+}
+
+func TestCanonicalReleaseGroupDoesNotRequireTrackMaterialization(t *testing.T) {
+	artist := MusicArtistPlan{Artist: "Daft Punk", Albums: []MusicAlbumPlan{{
+		Album: "Homework", Year: "1997",
+		ExternalIDs: map[string]string{"musicbrainz_release_group": "group-id"},
+	}}}
+	detail := &metadata.MediaDetail{Albums: []metadata.AlbumEntry{{
+		CanonicalID: "canonical-group", Title: "Homework", Year: 1997,
+		ExternalIDs: map[string]string{"musicbrainz_release_group": "group-id"},
+	}}}
+	provider := &fakeMusicReleaseGroupProvider{}
+	if err := resolveLocalMusicReleaseGroups(context.Background(), artist, detail, provider, &captureEmitter{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.queries) != 0 {
+		t.Fatalf("canonical release group was rediscovered only because it had no tracks: %#v", provider.queries)
+	}
+}
+
+func TestCanonicalReleaseGroupMaterializesOnlyRequestedEdition(t *testing.T) {
+	artist := MusicArtistPlan{Artist: "Daft Punk", Albums: []MusicAlbumPlan{{
+		Album: "Homework", Year: "1997",
+		ExternalIDs: map[string]string{
+			"musicbrainz_release_group": "group-id",
+			"musicbrainz_album":         "wanted-edition",
+		},
+	}}}
+	detail := &metadata.MediaDetail{Albums: []metadata.AlbumEntry{{
+		CanonicalID: "canonical-group", Title: "Homework", Year: 1997,
+		ExternalIDs: map[string]string{
+			"musicbrainz_release_group": "group-id",
+			"musicbrainz_album":         "other-edition",
+		},
+	}}}
+	provider := &fakeMusicReleaseGroupProvider{}
+	if err := resolveLocalMusicReleaseGroups(context.Background(), artist, detail, provider, &captureEmitter{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.queries) != 1 {
+		t.Fatalf("edition discovery queries = %#v", provider.queries)
+	}
+	ids := provider.queries[0].Identifiers
+	if ids["musicbrainz_release_group"] != "group-id" || ids["musicbrainz_album"] != "wanted-edition" {
+		t.Fatalf("edition discovery lost its namespace: %#v", ids)
 	}
 }
 

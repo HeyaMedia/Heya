@@ -2070,6 +2070,8 @@ components:
     ReleaseHint:
       additionalProperties: false
       properties:
+        changed:
+          type: boolean
         identifiers:
           items:
             $ref: "#/components/schemas/Identifier"

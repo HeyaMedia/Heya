@@ -174,7 +174,7 @@ func TestSearchMusicArtistsSelectsAndRejects(t *testing.T) {
 		{Key: "artist:ado", Artist: "Ado", Albums: []MusicAlbumPlan{
 			{Album: "Single First", Year: "2020", ReleaseKind: "single", Tracks: []MusicTrackPlan{{}}},
 			{Album: "Album Short", Year: "2022", ReleaseKind: "album", Tracks: []MusicTrackPlan{{}}},
-			{Album: "Album Long", Year: "2023", ReleaseKind: "album", Tracks: []MusicTrackPlan{{}, {}}},
+			{Album: "Album Long", Year: "2023", ReleaseKind: "album", Changed: true, Tracks: []MusicTrackPlan{{}, {}}},
 			{Album: "EP", Year: "2021", ReleaseKind: "ep", Tracks: []MusicTrackPlan{{}}},
 		}},
 		{Key: "artist:ano", Artist: "ano", ExternalIDs: map[string]string{"mbid": "ebb4513e-4aab-4ac9-a949-14e77bb7b836"}},
@@ -210,12 +210,15 @@ func TestSearchMusicArtistsSelectsAndRejects(t *testing.T) {
 	if byKey["artist:heya test tones"].Accepted || byKey["artist:heya test tones"].Reason != "no_candidates" {
 		t.Fatalf("test tones search: %#v", byKey["artist:heya test tones"])
 	}
-	if provider.calls["ano"] != 1 || provider.queries["ano"].Identifiers["mbid"] != "ebb4513e-4aab-4ac9-a949-14e77bb7b836" {
+	if provider.calls["ano"] != 1 || provider.queries["ano"].Identifiers["musicbrainz_artist"] != "ebb4513e-4aab-4ac9-a949-14e77bb7b836" {
 		t.Fatalf("MBID evidence was not sent through unified discovery: calls=%#v query=%#v", provider.calls, provider.queries["ano"])
 	}
 	adoReleases := provider.queries["Ado"].Releases
 	if len(adoReleases) != musicArtistDiscoveryReleaseHintLimit || adoReleases[0].Title != "Album Long" || adoReleases[1].Title != "Album Short" || adoReleases[2].Title != "EP" {
 		t.Fatalf("bounded release evidence = %#v", adoReleases)
+	}
+	if !adoReleases[0].Changed || adoReleases[1].Changed || adoReleases[2].Changed {
+		t.Fatalf("new-release signal was not kept narrow: %#v", adoReleases)
 	}
 
 	var report bytes.Buffer
@@ -712,11 +715,13 @@ func TestSearchMusicArtistsUsesConsistentMusicBrainzSpine(t *testing.T) {
 		t.Fatalf("search result = %#v", results)
 	}
 	query := provider.queries["Ado"]
-	if len(query.Identifiers) != 1 || query.Identifiers["mbid"] != "ado-mbid" {
+	if len(query.Identifiers) != 1 || query.Identifiers["musicbrainz_artist"] != "ado-mbid" {
 		t.Fatalf("artist identifiers = %#v", query.Identifiers)
 	}
-	if len(query.Releases) != 1 || len(query.Releases[0].Identifiers) != 0 {
-		t.Fatalf("release hints retained competing hard IDs = %#v", query.Releases)
+	if len(query.Releases) != 1 ||
+		query.Releases[0].Identifiers["musicbrainz_release_group"] != "release-group" ||
+		query.Releases[0].Identifiers["itunes_album"] != "456" {
+		t.Fatalf("release namespaces were not preserved alongside artist identity: %#v", query.Releases)
 	}
 }
 

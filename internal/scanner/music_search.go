@@ -202,13 +202,6 @@ fanout:
 func searchOneMusicArtist(ctx context.Context, artist MusicArtistPlan, provider MusicSearchProvider, fingerprints MusicFingerprintEvidenceProvider, emit Emitter, threshold float64, decisions SearchDecisions) (MusicSearchMatch, error) {
 	releases := musicDiscoveryReleaseHints(artist.Albums)
 	identifiers := musicDiscoveryArtistIdentifiers(artist.ExternalIDs)
-	if identifiers["mbid"] != "" {
-		// A consistent MusicBrainz artist ID is the authoritative artist spine.
-		// Release identifiers remain useful when no artist spine is known, but
-		// submitting them alongside an exact MBID lets one stale album/NFO turn
-		// an otherwise exact artist lookup into conflicting-identifiers review.
-		releases = musicReleaseHintsWithoutIdentifiers(releases)
-	}
 	query := metadata.SearchQuery{Title: artist.Artist, Identifiers: identifiers, Releases: releases}
 	search := MusicSearchMatch{
 		Key:   artist.Key,
@@ -1001,6 +994,17 @@ func musicDiscoveryReleaseHints(albums []MusicAlbumPlan) []metadata.ReleaseHint 
 	}
 	candidates := append([]MusicAlbumPlan(nil), albums...)
 	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].Changed != candidates[j].Changed {
+			return candidates[i].Changed
+		}
+		iIdentifiers := len(musicReleaseHintIdentifiers(candidates[i].ExternalIDs))
+		jIdentifiers := len(musicReleaseHintIdentifiers(candidates[j].ExternalIDs))
+		if (iIdentifiers > 0) != (jIdentifiers > 0) {
+			return iIdentifiers > 0
+		}
+		if candidates[i].Year != candidates[j].Year {
+			return candidates[i].Year > candidates[j].Year
+		}
 		iPriority := musicDiscoveryReleasePriority(candidates[i].ReleaseKind)
 		jPriority := musicDiscoveryReleasePriority(candidates[j].ReleaseKind)
 		if iPriority != jPriority {
@@ -1008,9 +1012,6 @@ func musicDiscoveryReleaseHints(albums []MusicAlbumPlan) []metadata.ReleaseHint 
 		}
 		if len(candidates[i].Tracks) != len(candidates[j].Tracks) {
 			return len(candidates[i].Tracks) > len(candidates[j].Tracks)
-		}
-		if candidates[i].Year != candidates[j].Year {
-			return candidates[i].Year < candidates[j].Year
 		}
 		return candidates[i].Album < candidates[j].Album
 	})
@@ -1031,6 +1032,7 @@ func musicDiscoveryReleaseHints(albums []MusicAlbumPlan) []metadata.ReleaseHint 
 			Title:       title,
 			Year:        album.Year,
 			Type:        album.ReleaseKind,
+			Changed:     album.Changed,
 			Identifiers: musicReleaseHintIdentifiers(album.ExternalIDs),
 		})
 		if len(hints) == musicArtistDiscoveryReleaseHintLimit {
@@ -1042,23 +1044,12 @@ func musicDiscoveryReleaseHints(albums []MusicAlbumPlan) []metadata.ReleaseHint 
 
 func musicDiscoveryArtistIdentifiers(values map[string]string) map[string]string {
 	if mbid := strings.TrimSpace(values["mbid"]); mbid != "" {
-		return map[string]string{"mbid": mbid}
+		return map[string]string{"musicbrainz_artist": mbid}
 	}
 	if apple := strings.TrimSpace(values["apple"]); apple != "" {
 		return map[string]string{"apple": apple}
 	}
 	return nil
-}
-
-func musicReleaseHintsWithoutIdentifiers(values []metadata.ReleaseHint) []metadata.ReleaseHint {
-	if len(values) == 0 {
-		return nil
-	}
-	result := append([]metadata.ReleaseHint(nil), values...)
-	for i := range result {
-		result[i].Identifiers = nil
-	}
-	return result
 }
 
 // resolveConvergedMusicCandidates handles the safe subset of duplicate
