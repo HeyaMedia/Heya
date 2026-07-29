@@ -21,8 +21,8 @@ const EVENT_META: Record<string, { icon: string, cls: string }> = {
 <template>
   <div>
     <SettingsContextHero
-      title="Manager"
-      icon="cloud-download"
+      title="Activity"
+      icon="pulse"
       eyebrow="Manager · Preview — mock data"
       description="Acquisition at a glance: what's downloading, what's wanted, and what the pipeline did recently. Everything on these pages is a static stub until the backend lands."
     />

@@ -100,7 +100,7 @@ function albumLink(ref: number | string): string {
           <h1 class="alb-title">{{ album.title }}</h1>
           <div class="alb-meta">
             <NuxtLink :to="artistPath" class="alb-artist">{{ detail.artist_name }}</NuxtLink>
-            <span v-if="album.release_date || album.year">{{ album.release_date || album.year }}</span>
+            <span v-if="album.release_date || album.year">{{ releaseDateLabel(album.release_date, album.year) }}</span>
             <span v-if="detail.duration_seconds">{{ Math.round(detail.duration_seconds / 60) }} min</span>
             <span v-if="album.rating">★ {{ album.rating.toFixed(1) }}</span>
           </div>
@@ -116,7 +116,7 @@ function albumLink(ref: number | string): string {
           </div>
           <p v-if="detail.overview" class="alb-overview">{{ detail.overview }}</p>
           <div class="alb-actions">
-            <NuxtLink v-if="publicLink" :to="publicLink" class="mgr-btn"><Icon name="play" :size="13" /> Open in Heya</NuxtLink>
+            <NuxtLink v-if="publicLink" :to="publicLink" class="mgr-btn"><Icon name="play" :size="13" /> View in library</NuxtLink>
             <template v-if="detail.editions?.length">
               <span class="alb-editions-label mono">Editions:</span>
               <NuxtLink
@@ -198,6 +198,11 @@ function albumLink(ref: number | string): string {
 .alb-cover-wrap { flex: 0 0 180px; }
 @media (max-width: 720px) {
   .alb-cover-wrap { flex-basis: 110px; }
+}
+/* Phones: stack cover above facts instead of squeezing them side by side. */
+@media (max-width: 480px) {
+  .alb-hero { flex-direction: column; }
+  .alb-cover-wrap { flex-basis: auto; width: 132px; }
 }
 .alb-cover {
   display: block;
@@ -297,7 +302,9 @@ function albumLink(ref: number | string): string {
 .det-badge.tone-warn { color: var(--gold-bright); border-color: color-mix(in srgb, var(--gold) 45%, transparent); background: var(--gold-soft); }
 .det-badge.tone-bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); background: color-mix(in srgb, var(--bad) 9%, transparent); }
 
-.det-tablewrap { border-top: 1px solid var(--border); }
+/* overflow-x matches the artist page's wrap — scoped styles don't cross
+   files, so the shared class name alone doesn't bring the scroll along. */
+.det-tablewrap { overflow-x: auto; border-top: 1px solid var(--border); }
 .det-table { width: 100%; border-collapse: collapse; }
 .det-table th {
   padding: 8px 12px;

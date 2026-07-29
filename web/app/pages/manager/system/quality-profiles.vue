@@ -306,6 +306,10 @@ async function removeProfile(profile: ManagerQualityProfileView) {
         <Icon name="spinner" :size="16" /> Loading…
       </div>
 
+      <div v-else-if="!profiles.length" class="mgr-loading">
+        No quality profiles yet — create one with New profile, or Import your existing Radarr/Sonarr/Lidarr profiles with their format scores.
+      </div>
+
       <div v-else class="qp-groups">
         <div v-for="group in domainGroups" :key="group.domain" class="qp-group">
           <div class="qp-group-head">{{ group.label }}</div>

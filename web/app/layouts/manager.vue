@@ -14,6 +14,17 @@ const navOpen = ref(false)
 const currentTitle = computed(() => {
   const exact = titleByPath.value.get(route.path)
   if (exact) return exact
+  // Drilled below a nav entry (library item/album, system subpage): show the
+  // owning entry's name — "Music", not a generic "Library".
+  let best = ''
+  let bestLabel = ''
+  for (const [path, label] of titleByPath.value) {
+    if (route.path.startsWith(path + '/') && path.length > best.length) {
+      best = path
+      bestLabel = label
+    }
+  }
+  if (bestLabel) return bestLabel
   if (route.path.startsWith('/manager/library/')) return 'Library'
   return 'Manager'
 })

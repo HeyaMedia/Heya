@@ -176,6 +176,9 @@ async function saveForm() {
   }
 }
 
+// Deletions happen from the LIST, so their failures surface on the page —
+// formError only renders inside the (closed) editor dialog.
+const pageError = ref('')
 async function removeFormat(format: ManagerCustomFormatView) {
   const ok = await confirm({
     title: 'Delete custom format',
@@ -185,9 +188,10 @@ async function removeFormat(format: ManagerCustomFormatView) {
   if (!ok) return
   try {
     await $heya(`/api/manager/custom-formats/${format.id}`, { method: 'DELETE' })
+    pageError.value = ''
     await formatsData.refetch()
   } catch (e: any) {
-    formError.value = e?.data?.detail ?? e?.message ?? 'Delete failed.'
+    pageError.value = e?.data?.detail ?? e?.message ?? 'Delete failed.'
   }
 }
 
@@ -295,6 +299,10 @@ async function runTest() {
           :class="{ active: domainFilter === domain }"
           @click="domainFilter = domain"
         >{{ domain }}</button>
+      </div>
+
+      <div v-if="pageError" class="mgr-flash err" role="alert">
+        <Icon name="warning" :size="13" /> {{ pageError }}
       </div>
 
       <div v-if="loading && !formatsAll.length" class="mgr-loading">

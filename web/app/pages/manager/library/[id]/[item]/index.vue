@@ -400,7 +400,7 @@ const FILE_KIND_LABELS: Record<string, string> = {
                 <option value="">No profile</option>
                 <option v-for="p in domainProfiles" :key="p.id" :value="p.id">{{ p.name }}</option>
               </select>
-              <NuxtLink :to="publicLink" class="mgr-btn"><Icon name="play" :size="13" /> Open in Heya</NuxtLink>
+              <NuxtLink :to="publicLink" class="mgr-btn"><Icon name="play" :size="13" /> View in library</NuxtLink>
             </div>
           </div>
         </div>
@@ -501,7 +501,7 @@ const FILE_KIND_LABELS: Record<string, string> = {
                         {{ release.editions.length + 1 }} editions
                       </button>
                     </td>
-                    <td class="mono">{{ release.primary.release_date || release.primary.year || '—' }}</td>
+                    <td class="mono">{{ releaseDateLabel(release.primary.release_date, release.primary.year) || '—' }}</td>
                     <td class="num">
                       <span v-if="!release.primary.in_library && !release.primary.tracks_total" class="det-badge tone-bad">Missing</span>
                       <span v-else class="det-badge" :class="`tone-${albumTone(release.primary)}`">{{ release.primary.tracks_have }} / {{ release.primary.tracks_total }}</span>
@@ -523,7 +523,7 @@ const FILE_KIND_LABELS: Record<string, string> = {
                         <span v-if="!edition.in_library" class="det-badge tone-bad det-wanted-badge">Not in library</span>
                         <div v-if="editionDiff(release.primary, edition)" class="det-ed-diff">{{ editionDiff(release.primary, edition) }}</div>
                       </td>
-                      <td class="mono">{{ edition.release_date || edition.year || '—' }}</td>
+                      <td class="mono">{{ releaseDateLabel(edition.release_date, edition.year) || '—' }}</td>
                       <td class="num">
                         <span v-if="!edition.in_library && !edition.tracks_total" class="det-badge tone-bad">Missing</span>
                         <span v-else class="det-badge" :class="`tone-${albumTone(edition)}`">{{ edition.tracks_have }} / {{ edition.tracks_total }}</span>
@@ -598,6 +598,11 @@ const FILE_KIND_LABELS: Record<string, string> = {
 .det-poster :deep(.poster) { border-radius: var(--r-md); box-shadow: 0 6px 24px rgb(0 0 0 / 0.5); }
 @media (max-width: 720px) {
   .det-poster { flex-basis: 100px; }
+}
+/* Phones: stack poster above facts instead of squeezing them side by side. */
+@media (max-width: 480px) {
+  .det-hero-content { flex-direction: column; }
+  .det-poster { flex-basis: auto; width: 110px; }
 }
 
 .det-facts { min-width: 0; flex: 1; }

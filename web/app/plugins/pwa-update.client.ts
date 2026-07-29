@@ -161,7 +161,25 @@ export default defineNuxtPlugin({
     // Nuxt keeps spa-loading-template mounted until async plugins finish.
     // Gate mounting on the SW update/install so a server release is applied
     // atomically before the user sees or interacts with the previous client.
-    await gateStartupUpdate(pwa, nuxtApp.$config.public.heyaVersion)
+    //
+    // Dev builds skip the gate outright: the client stamps a per-build
+    // "dev-<id>" version while the server reports "dev", so the equality
+    // short-circuit can never match and every dev load would eat the full
+    // gate (registration wait + update check) staring at the splash.
+    //
+    // The watchdog is the lockout brace: no combination of SW weirdness
+    // (stalled install, misbehaving registration) may keep users on the
+    // splash forever — after 20s the app mounts with the current client,
+    // which is always a complete atomic version. A genuinely-finishing
+    // update still applies: the gate keeps running behind the mounted app
+    // and its reload path stays intact.
+    const clientVersion = String(nuxtApp.$config.public.heyaVersion ?? '')
+    if (!import.meta.dev && !clientVersion.startsWith('dev')) {
+      await Promise.race([
+        gateStartupUpdate(pwa, clientVersion),
+        new Promise<void>(resolve => window.setTimeout(resolve, 20_000)),
+      ])
+    }
 
     const { playing } = usePlayerBindings()
 

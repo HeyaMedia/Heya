@@ -4,8 +4,12 @@ withDefaults(defineProps<{ variant?: 'sidebar' | 'sheet' }>(), { variant: 'sideb
 const route = useRoute()
 const { groups } = useManagerNav()
 
+// Prefix matching keeps the library entry lit while drilled into an item or
+// album under it; exact matching for /manager itself so the Activity entry
+// doesn't light up for every manager route.
 function isActive(item: ManagerNavItem) {
-  return route.path === item.to
+  if (item.to === '/manager') return route.path === item.to
+  return route.path === item.to || route.path.startsWith(item.to + '/')
 }
 </script>
 

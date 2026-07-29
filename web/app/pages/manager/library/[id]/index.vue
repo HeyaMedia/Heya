@@ -6,6 +6,7 @@ import {
   managerQualityProfilesQuery,
   type ManagerLibraryItemView,
 } from '~/queries/manager'
+import { librariesQuery } from '~/queries/catalog'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,7 +26,21 @@ const itemsQuery = useQuery(() => managerLibraryItemsQuery({
 const data = computed(() => itemsQuery.data.value)
 const allItems = computed(() => data.value?.items ?? [])
 const stats = computed(() => data.value?.stats)
-const library = computed(() => data.value?.library)
+// The sidebar's libraries query is already cached, so the media type (and
+// name) are known BEFORE the items land — the skeleton gets the right card
+// aspect and the hero the right title on first paint.
+const { data: navLibraries } = useQuery(librariesQuery())
+const navLibrary = computed(() => (navLibraries.value ?? []).find(l => l.id === libraryId.value))
+const library = computed(() => data.value?.library
+  ?? (navLibrary.value
+    ? {
+        id: navLibrary.value.id,
+        name: navLibrary.value.name,
+        media_type: navLibrary.value.media_type,
+        // Mirrors the server's managerProfileDomain: anime shares tv profiles.
+        domain: navLibrary.value.media_type === 'anime' ? 'tv' : navLibrary.value.media_type,
+      }
+    : undefined))
 const initialLoading = computed(() => itemsQuery.isLoading.value && !data.value)
 const refreshing = computed(() => itemsQuery.isLoading.value && !!data.value)
 
@@ -56,12 +71,18 @@ const profile = ref(queryString(route.query.profile))
 const sort = ref(queryString(route.query.sort) || 'title')
 const dir = ref<'asc' | 'desc'>(route.query.dir === 'desc' ? 'desc' : 'asc')
 
-watch(libraryId, () => {
+function resetFilters() {
   search.value = ''
   monitored.value = ''
   fileState.value = ''
   status.value = ''
   profile.value = ''
+}
+const hasActiveFilters = computed(() =>
+  !!(search.value || monitored.value || fileState.value || status.value || profile.value))
+
+watch(libraryId, () => {
+  resetFilters()
   sort.value = 'title'
   dir.value = 'asc'
   selected.value = new Set()
@@ -345,12 +366,14 @@ async function toggleMonitor(item: ManagerLibraryItemView) {
   }
 }
 
+const countItems = (n: number) => `${n.toLocaleString()} ${n === 1 ? 'item' : 'items'}`
+
 async function bulkMonitor(state: boolean) {
   if (!selected.value.size) return
   bulkBusy.value = true
   try {
     await updateMedia([...selected.value], { monitored: state })
-    showFlash(`${state ? 'Monitoring' : 'Unmonitored'} ${selected.value.size} item(s)`)
+    showFlash(`${state ? 'Monitoring' : 'Unmonitored'} ${countItems(selected.value.size)}`)
   } catch (e: any) {
     showFlash(e?.data?.detail ?? 'Update failed.', true)
   } finally {
@@ -364,8 +387,8 @@ async function bulkAssignProfile() {
   try {
     await updateMedia([...selected.value], { quality_profile_id: Number(bulkProfile.value) })
     showFlash(bulkProfile.value === '0'
-      ? `Cleared profile on ${selected.value.size} item(s)`
-      : `Profile set on ${selected.value.size} item(s)`)
+      ? `Cleared profile on ${countItems(selected.value.size)}`
+      : `Profile set on ${countItems(selected.value.size)}`)
   } catch (e: any) {
     showFlash(e?.data?.detail ?? 'Update failed.', true)
   } finally {
@@ -405,14 +428,24 @@ function headerSort(key: string) {
       description="The managed lens over this library: what's monitored, what's missing, and what's assigned to which quality profile. Same catalog as the server — a different room, not a second database."
     />
 
-    <div v-if="initialLoading" class="mgr-loading">Loading library…</div>
+    <!-- Skeleton mirrors the loaded geometry (tiles, toolbar, poster grid)
+         so the page doesn't reflow when data lands. -->
+    <div v-if="initialLoading" class="lib-skel" aria-label="Loading library" role="status">
+      <div class="tiles">
+        <div v-for="i in 4" :key="i" class="lib-skel-tile" />
+      </div>
+      <div class="lib-skel-toolbar" />
+      <div class="lib-skel-grid">
+        <div v-for="i in 14" :key="i" class="lib-skel-card" :style="{ aspectRatio: isMusic ? '1 / 1.3' : '2 / 3.4' }" />
+      </div>
+    </div>
 
     <template v-else-if="stats">
       <div class="tiles">
-        <MetricTile label="Items" :value="stats.items" icon="folder" tone="neutral" :sub="`${stats.files.toLocaleString()} files on disk`" />
-        <MetricTile label="Monitored" :value="stats.monitored" icon="eye" :tone="stats.monitored ? 'good' : 'neutral'" :sub="`of ${stats.items} watched for releases`" />
+        <MetricTile label="Items" :value="stats.items.toLocaleString()" icon="folder" tone="neutral" :sub="`${stats.files.toLocaleString()} files on disk`" />
+        <MetricTile label="Monitored" :value="stats.monitored.toLocaleString()" icon="eye" :tone="stats.monitored ? 'good' : 'neutral'" :sub="`of ${stats.items.toLocaleString()} monitored for releases`" />
         <MetricTile
-          label="Missing" :value="stats.items_missing" icon="target"
+          label="Missing" :value="stats.items_missing.toLocaleString()" icon="target"
           :tone="stats.items_missing ? 'warn' : 'good'"
           :sub="`${Math.max(0, stats.units_total - stats.units_have).toLocaleString()} ${vocab!.unit} wanted`"
         />
@@ -426,15 +459,15 @@ function headerSort(key: string) {
         </div>
 
         <div class="lib-chips" role="group" aria-label="Monitoring filter">
-          <button type="button" class="lib-chip" :class="{ active: monitored === '' }" @click="monitored = ''">All</button>
-          <button type="button" class="lib-chip" :class="{ active: monitored === 'monitored' }" @click="monitored = 'monitored'">Monitored</button>
-          <button type="button" class="lib-chip" :class="{ active: monitored === 'unmonitored' }" @click="monitored = 'unmonitored'">Unmonitored</button>
+          <button type="button" class="lib-chip" :class="{ active: monitored === '' }" :aria-pressed="monitored === ''" @click="monitored = ''">All</button>
+          <button type="button" class="lib-chip" :class="{ active: monitored === 'monitored' }" :aria-pressed="monitored === 'monitored'" @click="monitored = 'monitored'">Monitored</button>
+          <button type="button" class="lib-chip" :class="{ active: monitored === 'unmonitored' }" :aria-pressed="monitored === 'unmonitored'" @click="monitored = 'unmonitored'">Unmonitored</button>
         </div>
 
         <div class="lib-chips" role="group" aria-label="File state filter">
-          <button type="button" class="lib-chip" :class="{ active: fileState === '' }" @click="fileState = ''">Any state</button>
-          <button type="button" class="lib-chip" :class="{ active: fileState === 'missing' }" @click="fileState = 'missing'">Missing</button>
-          <button type="button" class="lib-chip" :class="{ active: fileState === 'complete' }" @click="fileState = 'complete'">Complete</button>
+          <button type="button" class="lib-chip" :class="{ active: fileState === '' }" :aria-pressed="fileState === ''" @click="fileState = ''">Any state</button>
+          <button type="button" class="lib-chip" :class="{ active: fileState === 'missing' }" :aria-pressed="fileState === 'missing'" @click="fileState = 'missing'">Missing</button>
+          <button type="button" class="lib-chip" :class="{ active: fileState === 'complete' }" :aria-pressed="fileState === 'complete'" @click="fileState = 'complete'">Complete</button>
         </div>
 
         <select v-if="stats.statuses?.length" v-model="status" class="lib-select" aria-label="Status filter">
@@ -475,7 +508,13 @@ function headerSort(key: string) {
       <div v-if="flash" class="mgr-flash" :class="flashError ? 'err' : 'ok'">{{ flash }}</div>
 
       <div v-if="!sorted.length" class="lib-empty">
-        <Icon name="check" :size="14" /> Nothing matches these filters.
+        <template v-if="hasActiveFilters">
+          <Icon name="search" :size="14" /> Nothing matches these filters.
+          <button type="button" class="mgr-btn lib-empty-reset" @click="resetFilters">Reset filters</button>
+        </template>
+        <template v-else>
+          <Icon name="check" :size="14" /> This library is empty.
+        </template>
       </div>
 
       <!-- ── Poster grid (virtualized) ───────────────────────────────── -->
@@ -730,8 +769,35 @@ function headerSort(key: string) {
   border: 1px dashed var(--border);
   border-radius: var(--r-md);
 }
+.lib-empty-reset { margin-left: 8px; }
+
+/* Bigger hit areas on touch devices — 30px chips are precise-pointer sizing. */
+@media (pointer: coarse) {
+  .lib-chip { height: 40px; padding: 0 14px; }
+  .lib-select { height: 40px; }
+}
 
 .refreshing { opacity: 0.65; transition: opacity 0.15s; }
+
+/* ── Loading skeleton (mirrors tiles + toolbar + grid geometry) ──────── */
+.lib-skel-tile,
+.lib-skel-toolbar,
+.lib-skel-card {
+  background: var(--bg-3);
+  border-radius: var(--r-md);
+  animation: lib-skel-pulse 1.5s ease-in-out infinite;
+}
+.lib-skel-tile { height: 92px; }
+.lib-skel-toolbar { height: 44px; margin: 14px 0; }
+.lib-skel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--grid-gap-x, 14px);
+}
+@keyframes lib-skel-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
 
 /* ── Poster cards (inside VirtualPosterGrid cells) ───────────────────── */
 .lib-card { position: relative; min-width: 0; }
