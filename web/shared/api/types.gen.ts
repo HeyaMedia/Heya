@@ -3686,6 +3686,7 @@ export type ManagerQualityProfileInput = {
     domain: string;
     format_scores?: Array<ManagerFormatScore> | null;
     items: Array<ManagerQualityItem> | null;
+    language?: string;
     min_format_score?: number;
     min_upgrade_score?: number;
     name: string;
@@ -3704,6 +3705,7 @@ export type ManagerQualityProfileView = {
     id: number;
     in_use_count: number;
     items: Array<ManagerQualityItem> | null;
+    language: string;
     min_format_score: number;
     min_upgrade_score: number;
     name: string;
@@ -3737,6 +3739,8 @@ export type ManagerReleaseTestParsed = {
 };
 
 export type ManagerReleaseTestProfileScore = {
+    language: string;
+    language_ok: boolean;
     min_met: boolean;
     name: string;
     profile_id: number;
@@ -8213,6 +8217,7 @@ export type ManagerQualityProfileInputWritable = {
     domain: string;
     format_scores?: Array<ManagerFormatScore> | null;
     items: Array<ManagerQualityItem> | null;
+    language?: string;
     min_format_score?: number;
     min_upgrade_score?: number;
     name: string;
@@ -8227,6 +8232,7 @@ export type ManagerQualityProfileViewWritable = {
     id: number;
     in_use_count: number;
     items: Array<ManagerQualityItem> | null;
+    language: string;
     min_format_score: number;
     min_upgrade_score: number;
     name: string;

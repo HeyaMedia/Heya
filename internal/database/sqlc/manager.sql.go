@@ -182,9 +182,9 @@ func (q *Queries) CreateManagerIndexer(ctx context.Context, arg CreateManagerInd
 }
 
 const createManagerQualityProfile = `-- name: CreateManagerQualityProfile :one
-INSERT INTO manager_quality_profiles (name, domain, items, cutoff, upgrades_enabled, min_format_score, cutoff_format_score, min_upgrade_score, format_scores, source)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, name, domain, items, cutoff, upgrades_enabled, created_at, updated_at, min_format_score, cutoff_format_score, min_upgrade_score, format_scores, source
+INSERT INTO manager_quality_profiles (name, domain, items, cutoff, upgrades_enabled, min_format_score, cutoff_format_score, min_upgrade_score, format_scores, source, language)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+RETURNING id, name, domain, items, cutoff, upgrades_enabled, created_at, updated_at, min_format_score, cutoff_format_score, min_upgrade_score, format_scores, source, language
 `
 
 type CreateManagerQualityProfileParams struct {
@@ -198,6 +198,7 @@ type CreateManagerQualityProfileParams struct {
 	MinUpgradeScore   int32  `json:"min_upgrade_score"`
 	FormatScores      []byte `json:"format_scores"`
 	Source            string `json:"source"`
+	Language          string `json:"language"`
 }
 
 func (q *Queries) CreateManagerQualityProfile(ctx context.Context, arg CreateManagerQualityProfileParams) (ManagerQualityProfile, error) {
@@ -212,6 +213,7 @@ func (q *Queries) CreateManagerQualityProfile(ctx context.Context, arg CreateMan
 		arg.MinUpgradeScore,
 		arg.FormatScores,
 		arg.Source,
+		arg.Language,
 	)
 	var i ManagerQualityProfile
 	err := row.Scan(
@@ -228,6 +230,7 @@ func (q *Queries) CreateManagerQualityProfile(ctx context.Context, arg CreateMan
 		&i.MinUpgradeScore,
 		&i.FormatScores,
 		&i.Source,
+		&i.Language,
 	)
 	return i, err
 }
@@ -391,7 +394,7 @@ func (q *Queries) GetManagerIndexer(ctx context.Context, id int64) (ManagerIndex
 }
 
 const getManagerQualityProfile = `-- name: GetManagerQualityProfile :one
-SELECT id, name, domain, items, cutoff, upgrades_enabled, created_at, updated_at, min_format_score, cutoff_format_score, min_upgrade_score, format_scores, source FROM manager_quality_profiles WHERE id = $1
+SELECT id, name, domain, items, cutoff, upgrades_enabled, created_at, updated_at, min_format_score, cutoff_format_score, min_upgrade_score, format_scores, source, language FROM manager_quality_profiles WHERE id = $1
 `
 
 func (q *Queries) GetManagerQualityProfile(ctx context.Context, id int64) (ManagerQualityProfile, error) {
@@ -411,6 +414,7 @@ func (q *Queries) GetManagerQualityProfile(ctx context.Context, id int64) (Manag
 		&i.MinUpgradeScore,
 		&i.FormatScores,
 		&i.Source,
+		&i.Language,
 	)
 	return i, err
 }
@@ -538,7 +542,7 @@ func (q *Queries) ListManagerIndexers(ctx context.Context) ([]ManagerIndexer, er
 }
 
 const listManagerQualityProfiles = `-- name: ListManagerQualityProfiles :many
-SELECT id, name, domain, items, cutoff, upgrades_enabled, created_at, updated_at, min_format_score, cutoff_format_score, min_upgrade_score, format_scores, source FROM manager_quality_profiles ORDER BY domain ASC, name ASC
+SELECT id, name, domain, items, cutoff, upgrades_enabled, created_at, updated_at, min_format_score, cutoff_format_score, min_upgrade_score, format_scores, source, language FROM manager_quality_profiles ORDER BY domain ASC, name ASC
 `
 
 func (q *Queries) ListManagerQualityProfiles(ctx context.Context) ([]ManagerQualityProfile, error) {
@@ -564,6 +568,7 @@ func (q *Queries) ListManagerQualityProfiles(ctx context.Context) ([]ManagerQual
 			&i.MinUpgradeScore,
 			&i.FormatScores,
 			&i.Source,
+			&i.Language,
 		); err != nil {
 			return nil, err
 		}
@@ -766,9 +771,9 @@ const updateManagerQualityProfile = `-- name: UpdateManagerQualityProfile :one
 UPDATE manager_quality_profiles
 SET name = $2, items = $3, cutoff = $4, upgrades_enabled = $5,
     min_format_score = $6, cutoff_format_score = $7, min_upgrade_score = $8,
-    format_scores = $9, updated_at = now()
+    format_scores = $9, language = $10, updated_at = now()
 WHERE id = $1
-RETURNING id, name, domain, items, cutoff, upgrades_enabled, created_at, updated_at, min_format_score, cutoff_format_score, min_upgrade_score, format_scores, source
+RETURNING id, name, domain, items, cutoff, upgrades_enabled, created_at, updated_at, min_format_score, cutoff_format_score, min_upgrade_score, format_scores, source, language
 `
 
 type UpdateManagerQualityProfileParams struct {
@@ -781,6 +786,7 @@ type UpdateManagerQualityProfileParams struct {
 	CutoffFormatScore int32  `json:"cutoff_format_score"`
 	MinUpgradeScore   int32  `json:"min_upgrade_score"`
 	FormatScores      []byte `json:"format_scores"`
+	Language          string `json:"language"`
 }
 
 func (q *Queries) UpdateManagerQualityProfile(ctx context.Context, arg UpdateManagerQualityProfileParams) (ManagerQualityProfile, error) {
@@ -794,6 +800,7 @@ func (q *Queries) UpdateManagerQualityProfile(ctx context.Context, arg UpdateMan
 		arg.CutoffFormatScore,
 		arg.MinUpgradeScore,
 		arg.FormatScores,
+		arg.Language,
 	)
 	var i ManagerQualityProfile
 	err := row.Scan(
@@ -810,6 +817,7 @@ func (q *Queries) UpdateManagerQualityProfile(ctx context.Context, arg UpdateMan
 		&i.MinUpgradeScore,
 		&i.FormatScores,
 		&i.Source,
+		&i.Language,
 	)
 	return i, err
 }

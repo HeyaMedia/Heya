@@ -421,6 +421,7 @@ func (a *App) importArrProfiles(ctx context.Context, client *arr.Client, kind, d
 				CutoffFormatScore: int32(profile.CutoffFormatScore),
 				MinUpgradeScore:   int32(profile.MinUpgradeScore),
 				FormatScores:      scoresJSON,
+				Language:          profile.Language,
 			}); err != nil {
 				return fmt.Errorf("updating profile %q: %w", existing.Name, err)
 			}
@@ -439,6 +440,7 @@ func (a *App) importArrProfiles(ctx context.Context, client *arr.Client, kind, d
 			MinUpgradeScore:   int32(profile.MinUpgradeScore),
 			FormatScores:      scoresJSON,
 			Source:            kind,
+			Language:          profile.Language,
 		}); err != nil {
 			return fmt.Errorf("creating profile %q: %w", name, err)
 		}
@@ -474,10 +476,12 @@ type ManagerReleaseTestMatch struct {
 }
 
 type ManagerReleaseTestProfileScore struct {
-	ProfileID int64  `json:"profile_id"`
-	Name      string `json:"name"`
-	Score     int32  `json:"score"`
-	MinMet    bool   `json:"min_met"`
+	ProfileID  int64  `json:"profile_id"`
+	Name       string `json:"name"`
+	Score      int32  `json:"score"`
+	MinMet     bool   `json:"min_met"`
+	Language   string `json:"language"`
+	LanguageOK bool   `json:"language_ok"`
 }
 
 type ManagerReleaseTestView struct {
@@ -552,10 +556,12 @@ func (a *App) TestManagerRelease(ctx context.Context, input ManagerReleaseTestIn
 			}
 		}
 		view.Profiles = append(view.Profiles, ManagerReleaseTestProfileScore{
-			ProfileID: row.ID,
-			Name:      row.Name,
-			Score:     total,
-			MinMet:    total >= row.MinFormatScore,
+			ProfileID:  row.ID,
+			Name:       row.Name,
+			Score:      total,
+			MinMet:     total >= row.MinFormatScore,
+			Language:   row.Language,
+			LanguageOK: formats.LanguageAcceptable(row.Language, attrs),
 		})
 	}
 	return view, nil

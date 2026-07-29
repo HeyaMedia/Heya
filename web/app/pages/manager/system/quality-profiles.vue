@@ -32,14 +32,32 @@ const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
 const itemLabel = (item: ManagerQualityItem) => item.group || item.quality || ''
 const itemKey = (item: ManagerQualityItem) => item.group || item.quality || ''
 
-function scoredCount(profile: ManagerQualityProfileView): number {
-  return profile.format_scores?.length ?? 0
+const DOMAIN_LABELS: Record<string, string> = { video: 'Video', music: 'Music', book: 'Books' }
+const domainGroups = computed(() => {
+  const groups: { domain: string, label: string, profiles: ManagerQualityProfileView[] }[] = []
+  for (const domain of ['video', 'music', 'book']) {
+    const rows = profiles.value.filter(profile => profile.domain === domain)
+    if (rows.length) groups.push({ domain, label: DOMAIN_LABELS[domain] ?? domain, profiles: rows })
+  }
+  return groups
+})
+
+function allowedSummary(profile: ManagerQualityProfileView): string {
+  const items = profile.items ?? []
+  return `${items.filter(item => item.allowed).length} of ${items.length}`
 }
 
 // ── Edit dialog ──────────────────────────────────────────────────────────
-// The full arr-style editor: thresholds and per-format scores on the left,
-// the ranked ladder on the right. Ladder membership is fixed server-side;
-// allowed flags, cutoff, and every score are editable.
+// Thresholds, language gate, and per-format scores on the left; the ranked
+// ladder on the right. The score list is ordered by the scores the profile
+// had when the dialog opened — stable while typing, so rows don't jump.
+
+const LANGUAGE_OPTIONS = [
+  { value: 'any', label: 'Any — no language filter' },
+  { value: 'original', label: 'Original — the item\'s original audio' },
+  ...['english', 'danish', 'swedish', 'norwegian', 'finnish', 'german', 'french', 'spanish', 'italian', 'dutch', 'portuguese', 'polish', 'russian', 'ukrainian', 'czech', 'hungarian', 'romanian', 'greek', 'turkish', 'arabic', 'hebrew', 'hindi', 'thai', 'vietnamese', 'chinese', 'japanese', 'korean']
+    .map(value => ({ value, label: value.charAt(0).toUpperCase() + value.slice(1) })),
+]
 
 const dialogOpen = ref(false)
 const editingID = ref<number | null>(null)
@@ -48,12 +66,14 @@ const form = reactive({
   domain: 'video',
   items: [] as ManagerQualityItem[],
   cutoff: '',
+  language: 'any',
   upgrades_enabled: true,
   min_format_score: 0,
   cutoff_format_score: 0,
   min_upgrade_score: 1,
 })
 const formScores = reactive(new Map<number, number>())
+const initialScores = ref<Record<number, number>>({})
 const savingForm = ref(false)
 const formError = ref('')
 const scoreFilter = ref('')
@@ -61,13 +81,25 @@ const scoreFilter = ref('')
 const cutoffOptions = computed(() =>
   form.items.filter(item => item.allowed).map(item => ({ value: itemKey(item), label: itemLabel(item) })))
 
-const domainFormats = computed(() =>
-  formatsAll.value.filter(format => format.domain === form.domain))
+// Sorted by the snapshot taken when the dialog opened: positives first
+// (highest on top), zero-scored alphabetically, penalties at the bottom.
+const editorFormats = computed(() => {
+  const snapshot = initialScores.value
+  return formatsAll.value
+    .filter(format => format.domain === form.domain)
+    .slice()
+    .sort((a, b) => {
+      const scoreA = snapshot[a.id] ?? 0
+      const scoreB = snapshot[b.id] ?? 0
+      if (scoreA !== scoreB) return scoreB - scoreA
+      return a.name.localeCompare(b.name)
+    })
+})
 
 const visibleFormats = computed(() => {
   const needle = scoreFilter.value.trim().toLowerCase()
-  if (!needle) return domainFormats.value
-  return domainFormats.value.filter(format => format.name.toLowerCase().includes(needle))
+  if (!needle) return editorFormats.value
+  return editorFormats.value.filter(format => format.name.toLowerCase().includes(needle))
 })
 
 function openEdit(profile: ManagerQualityProfileView) {
@@ -76,14 +108,18 @@ function openEdit(profile: ManagerQualityProfileView) {
   form.domain = profile.domain
   form.items = (profile.items ?? []).map(item => ({ ...item }))
   form.cutoff = profile.cutoff
+  form.language = profile.language || 'any'
   form.upgrades_enabled = profile.upgrades_enabled
   form.min_format_score = profile.min_format_score
   form.cutoff_format_score = profile.cutoff_format_score
   form.min_upgrade_score = profile.min_upgrade_score
   formScores.clear()
+  const snapshot: Record<number, number> = {}
   for (const score of profile.format_scores ?? []) {
     formScores.set(score.format_id, score.score)
+    snapshot[score.format_id] = score.score
   }
+  initialScores.value = snapshot
   scoreFilter.value = ''
   formError.value = ''
   dialogOpen.value = true
@@ -114,6 +150,7 @@ async function saveForm() {
         domain: form.domain,
         items: form.items,
         cutoff: form.cutoff,
+        language: form.language,
         upgrades_enabled: form.upgrades_enabled,
         min_format_score: Math.trunc(Number(form.min_format_score) || 0),
         cutoff_format_score: Math.trunc(Number(form.cutoff_format_score) || 0),
@@ -152,7 +189,7 @@ async function removeProfile(profile: ManagerQualityProfileView) {
       title="Quality profiles"
       icon="eq"
       eyebrow="Manager · System"
-      description="What the decision engine is allowed to grab and when it stops upgrading: a ranked quality ladder plus custom-format scores that break ties inside a quality."
+      description="What the decision engine is allowed to grab and when it stops upgrading: a ranked quality ladder, an optional language gate, and custom-format scores that break ties inside a quality."
     />
 
     <div v-if="flash" class="mgr-flash" :class="flash.kind">
@@ -162,52 +199,59 @@ async function removeProfile(profile: ManagerQualityProfileView) {
     <SettingsSection
       title="Profiles"
       icon="eq"
-      description="Qualities are ranked top-to-bottom (grouped qualities tie); the cutoff is where searching stops. A release must clear the minimum format score, and upgrades keep coming until the format-score cutoff is met."
+      description="Click a profile to open the full editor — ladder, thresholds, language, and every format score."
     >
       <div v-if="loading && !profiles.length" class="mgr-loading">
         <Icon name="spinner" :size="16" /> Loading…
       </div>
 
-      <div v-else class="qp-grid">
-        <div v-for="profile in profiles" :key="profile.id" class="qp-card">
-          <div class="qp-head">
-            <div class="qp-name">{{ profile.name }}</div>
-            <div class="qp-head-actions">
-              <span class="qp-domain">{{ profile.domain }}</span>
-              <AppTooltip label="Edit">
-                <button type="button" class="mgr-btn-icon" @click="openEdit(profile)"><Icon name="pencil" :size="14" /></button>
-              </AppTooltip>
-              <AppTooltip :label="profile.in_use_count > 0 ? `In use by ${profile.in_use_count} items` : 'Delete'">
-                <button type="button" class="mgr-btn-icon danger" :disabled="profile.in_use_count > 0" @click="removeProfile(profile)">
-                  <Icon name="trash" :size="14" />
-                </button>
-              </AppTooltip>
+      <div v-else class="qp-groups">
+        <div v-for="group in domainGroups" :key="group.domain" class="qp-group">
+          <div class="qp-group-head">{{ group.label }}</div>
+          <div class="qp-list">
+            <div class="qp-cols">
+              <span>Profile</span>
+              <span>Cutoff</span>
+              <span>Qualities</span>
+              <span>Format scoring</span>
+              <span class="num">In use</span>
+              <span />
             </div>
-          </div>
-          <div class="qp-meta">
-            <span>cutoff <strong>{{ profile.cutoff }}</strong></span>
-            <span>{{ profile.upgrades_enabled ? 'upgrades until cutoff met' : 'upgrades disabled' }}</span>
-            <span v-if="scoredCount(profile)">
-              {{ scoredCount(profile) }} format scores ·
-              min {{ profile.min_format_score.toLocaleString() }} ·
-              until {{ profile.cutoff_format_score.toLocaleString() }}
-            </span>
-          </div>
-          <ul class="qp-ladder">
-            <li
-              v-for="item in profile.items ?? []"
-              :key="itemKey(item)"
-              class="qp-quality"
-              :class="{ off: !item.allowed, cutoff: itemKey(item) === profile.cutoff }"
+            <div
+              v-for="profile in group.profiles"
+              :key="profile.id"
+              class="qp-row"
+              role="button"
+              tabindex="0"
+              @click="openEdit(profile)"
+              @keydown.enter="openEdit(profile)"
             >
-              <Icon :name="item.allowed ? 'check' : 'close'" :size="11" />
-              <span>{{ itemLabel(item) }}</span>
-              <span v-if="item.group" class="qp-group-members">{{ (item.qualities ?? []).join(' · ') }}</span>
-              <span v-if="itemKey(item) === profile.cutoff" class="qp-cutoff-tag">cutoff</span>
-            </li>
-          </ul>
-          <div class="qp-foot">
-            <span>{{ profile.in_use_count }} items assigned</span>
+              <span class="qp-row-name">
+                {{ profile.name }}
+                <span v-if="profile.source" class="qp-chip">{{ profile.source }}</span>
+                <span v-if="profile.language && profile.language !== 'any'" class="qp-chip lang">{{ profile.language }}</span>
+                <span v-if="!profile.upgrades_enabled" class="qp-chip muted">no upgrades</span>
+              </span>
+              <span class="qp-row-cutoff">{{ profile.cutoff }}</span>
+              <span class="qp-row-qual">{{ allowedSummary(profile) }}</span>
+              <span class="qp-row-scores">
+                <template v-if="profile.format_scores?.length">
+                  {{ profile.format_scores.length }} scored · min {{ profile.min_format_score.toLocaleString() }} · until {{ profile.cutoff_format_score.toLocaleString() }}
+                </template>
+                <template v-else>—</template>
+              </span>
+              <span class="qp-row-inuse num">{{ profile.in_use_count }}</span>
+              <span class="qp-row-actions" @click.stop>
+                <button type="button" class="mgr-btn-icon" :aria-label="`Edit ${profile.name}`" @click="openEdit(profile)"><Icon name="pencil" :size="13" /></button>
+                <button
+                  type="button"
+                  class="mgr-btn-icon danger"
+                  :disabled="profile.in_use_count > 0"
+                  :aria-label="`Delete ${profile.name}`"
+                  @click="removeProfile(profile)"
+                ><Icon name="trash" :size="13" /></button>
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -227,10 +271,16 @@ async function removeProfile(profile: ManagerQualityProfileView) {
               <span>Upgrade existing files until the cutoffs are met</span>
             </div>
 
-            <label class="mgr-field">
-              <span>Upgrade until — quality where searching stops</span>
-              <AppSelect v-model="form.cutoff" :options="cutoffOptions" />
-            </label>
+            <div class="qpx-scores-row two">
+              <label class="mgr-field">
+                <span>Upgrade until</span>
+                <AppSelect v-model="form.cutoff" :options="cutoffOptions" />
+              </label>
+              <label class="mgr-field">
+                <span>Language</span>
+                <AppSelect v-model="form.language" :options="LANGUAGE_OPTIONS" />
+              </label>
+            </div>
 
             <div class="qpx-scores-row">
               <label class="mgr-field">
@@ -247,17 +297,17 @@ async function removeProfile(profile: ManagerQualityProfileView) {
               </label>
             </div>
             <p class="qpx-hint">
-              A release must score at least the minimum to be grabbed. Once the current file
-              reaches the upgrade-until score, no further format upgrades are fetched; a new
-              grab must beat the current score by the increment.
+              A release must score at least the minimum to be grabbed, and must be in the
+              profile's language (or any, or the item's original audio). Once the current
+              file reaches the upgrade-until score, no further format upgrades are fetched.
             </p>
 
             <div class="mgr-field">
               <div class="qpx-formats-head">
-                <span>Custom format scores</span>
+                <span>Custom format scores — sorted by score</span>
                 <input v-model="scoreFilter" class="mgr-input qpx-formats-filter" placeholder="Filter…">
               </div>
-              <div v-if="!domainFormats.length" class="qpx-hint">
+              <div v-if="!editorFormats.length" class="qpx-hint">
                 No custom formats in the {{ form.domain }} domain yet — import or create them on the Custom formats page.
               </div>
               <div v-else class="qpx-format-list">
@@ -306,80 +356,79 @@ async function removeProfile(profile: ManagerQualityProfileView) {
 </template>
 
 <style scoped>
-.qp-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 10px;
-}
-.qp-card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px 16px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-}
-.qp-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.qp-name { font-size: 14px; font-weight: 600; color: var(--fg-0); }
-.qp-head-actions { display: flex; align-items: center; gap: 6px; }
-.qp-domain {
+.qp-groups { display: flex; flex-direction: column; gap: 22px; }
+.qp-group { display: flex; flex-direction: column; gap: 8px; }
+.qp-group-head {
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--fg-3);
-  padding: 2px 8px;
+}
+
+.qp-list { display: flex; flex-direction: column; gap: 5px; }
+.qp-cols,
+.qp-row {
+  display: grid;
+  grid-template-columns: minmax(200px, 1.8fr) minmax(110px, 1fr) 80px minmax(180px, 1.4fr) 52px auto;
+  gap: 14px;
+  align-items: center;
+}
+.qp-cols {
+  padding: 0 14px 2px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.qp-row {
+  padding: 10px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.qp-row:hover { border-color: color-mix(in srgb, var(--gold) 35%, var(--border)); background: rgb(var(--ink) / 0.03); }
+
+.qp-row-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-0);
+  min-width: 0;
+}
+.qp-chip {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 7px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: rgb(var(--ink) / 0.04);
+  background: rgb(var(--ink) / 0.05);
+  color: var(--fg-2);
 }
+.qp-chip.lang {
+  color: var(--gold-bright);
+  border-color: color-mix(in srgb, var(--gold) 40%, transparent);
+  background: var(--gold-soft);
+}
+.qp-chip.muted { color: var(--fg-3); border-style: dashed; }
 
-.qp-meta {
-  display: flex; flex-direction: column; gap: 2px;
-  font-size: 11.5px; color: var(--fg-2);
-}
-.qp-meta strong { color: var(--gold); font-weight: 600; }
-
-.qp-ladder {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.qp-quality {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 10px;
-  border-radius: var(--r-sm);
-  background: rgb(var(--ink) / 0.04);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--fg-1);
-}
-.qp-quality.off { color: var(--fg-3); background: transparent; border: 1px dashed var(--hair); }
-.qp-quality.cutoff { background: var(--gold-soft); color: var(--gold-bright); }
-.qp-group-members {
-  font-size: 9.5px;
-  color: var(--fg-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.qp-foot {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--hair);
-  font-size: 11px;
-  color: var(--fg-3);
-}
+.qp-row-cutoff { font-family: var(--font-mono); font-size: 11.5px; color: var(--gold); }
+.qp-row-qual { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-2); }
+.qp-row-scores { font-size: 11.5px; color: var(--fg-2); }
+.qp-row-inuse { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-3); }
+.num { text-align: right; }
+.qp-row-actions { display: flex; gap: 5px; }
 
 .mgr-btn,
 .mgr-btn-gold {
@@ -436,6 +485,15 @@ async function removeProfile(profile: ManagerQualityProfileView) {
   border: 1px dashed var(--border);
   border-radius: var(--r-md);
 }
+
+@media (max-width: 960px) {
+  .qp-cols { display: none; }
+  .qp-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; }
+  .qp-row-cutoff { grid-column: 1; }
+  .qp-row-qual, .qp-row-inuse { display: none; }
+  .qp-row-scores { grid-column: 1 / -1; }
+  .qp-row-actions { grid-row: 1; grid-column: 2; }
+}
 </style>
 
 <!-- Portaled dialog additions (base .mgr-form styles live in the layout). -->
@@ -465,6 +523,7 @@ async function removeProfile(profile: ManagerQualityProfileView) {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
+.qpx-scores-row.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .qpx-hint {
   margin: 0;
   font-size: 11px;

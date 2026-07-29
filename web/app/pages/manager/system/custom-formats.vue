@@ -381,10 +381,16 @@ async function runTest() {
           </div>
 
           <div v-if="testResult.profiles?.length" class="cf-tester-profiles">
-            <div v-for="profile in testResult.profiles" :key="profile.profile_id" class="cf-tester-profile" :class="{ rejected: !profile.min_met }">
+            <div
+              v-for="profile in testResult.profiles"
+              :key="profile.profile_id"
+              class="cf-tester-profile"
+              :class="{ rejected: !profile.min_met || !profile.language_ok }"
+            >
               <span class="cf-tester-profile-name">{{ profile.name }}</span>
+              <span v-if="!profile.language_ok" class="cf-tester-profile-flag">wrong language (wants {{ profile.language }})</span>
+              <span v-else-if="!profile.min_met" class="cf-tester-profile-flag">below minimum</span>
               <span class="cf-tester-profile-score">{{ profile.score.toLocaleString() }}</span>
-              <span v-if="!profile.min_met" class="cf-tester-profile-flag">below minimum</span>
             </div>
           </div>
         </div>

@@ -99,6 +99,7 @@ type ManagerQualityProfileView struct {
 	Domain            string               `json:"domain"`
 	Items             []ManagerQualityItem `json:"items"`
 	Cutoff            string               `json:"cutoff"`
+	Language          string               `json:"language"`
 	UpgradesEnabled   bool                 `json:"upgrades_enabled"`
 	MinFormatScore    int32                `json:"min_format_score"`
 	CutoffFormatScore int32                `json:"cutoff_format_score"`
@@ -175,6 +176,7 @@ func managerQualityProfileView(row sqlc.ManagerQualityProfile, inUse int64) Mana
 		Domain:            row.Domain,
 		Items:             []ManagerQualityItem{},
 		Cutoff:            row.Cutoff,
+		Language:          row.Language,
 		UpgradesEnabled:   row.UpgradesEnabled,
 		MinFormatScore:    row.MinFormatScore,
 		CutoffFormatScore: row.CutoffFormatScore,
@@ -1056,6 +1058,7 @@ type ManagerQualityProfileInput struct {
 	Domain            string               `json:"domain"`
 	Items             []ManagerQualityItem `json:"items"`
 	Cutoff            string               `json:"cutoff"`
+	Language          string               `json:"language,omitempty"`
 	UpgradesEnabled   *bool                `json:"upgrades_enabled,omitempty"`
 	MinFormatScore    *int32               `json:"min_format_score,omitempty"`
 	CutoffFormatScore *int32               `json:"cutoff_format_score,omitempty"`
@@ -1097,6 +1100,10 @@ func (input *ManagerQualityProfileInput) normalize() error {
 	if input.Cutoff == "" || !cutoffKnown {
 		return fmt.Errorf("cutoff must be one of the profile's qualities")
 	}
+	input.Language = strings.ToLower(strings.TrimSpace(input.Language))
+	if input.Language == "" {
+		input.Language = "any"
+	}
 	return nil
 }
 
@@ -1124,6 +1131,7 @@ func (a *App) CreateManagerQualityProfile(ctx context.Context, input ManagerQual
 		MinUpgradeScore:   valueOr(input.MinUpgradeScore, 1),
 		FormatScores:      scores,
 		Source:            "",
+		Language:          input.Language,
 	})
 	if err != nil {
 		return ManagerQualityProfileView{}, fmt.Errorf("create manager quality profile: %w", err)
@@ -1170,6 +1178,7 @@ func (a *App) UpdateManagerQualityProfile(ctx context.Context, id int64, input M
 		CutoffFormatScore: valueOr(input.CutoffFormatScore, existing.CutoffFormatScore),
 		MinUpgradeScore:   valueOr(input.MinUpgradeScore, existing.MinUpgradeScore),
 		FormatScores:      scoresJSON,
+		Language:          input.Language,
 	})
 	if err != nil {
 		return ManagerQualityProfileView{}, fmt.Errorf("update manager quality profile: %w", err)

@@ -73,15 +73,15 @@ SELECT * FROM manager_quality_profiles ORDER BY domain ASC, name ASC;
 SELECT * FROM manager_quality_profiles WHERE id = $1;
 
 -- name: CreateManagerQualityProfile :one
-INSERT INTO manager_quality_profiles (name, domain, items, cutoff, upgrades_enabled, min_format_score, cutoff_format_score, min_upgrade_score, format_scores, source)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO manager_quality_profiles (name, domain, items, cutoff, upgrades_enabled, min_format_score, cutoff_format_score, min_upgrade_score, format_scores, source, language)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING *;
 
 -- name: UpdateManagerQualityProfile :one
 UPDATE manager_quality_profiles
 SET name = $2, items = $3, cutoff = $4, upgrades_enabled = $5,
     min_format_score = $6, cutoff_format_score = $7, min_upgrade_score = $8,
-    format_scores = $9, updated_at = now()
+    format_scores = $9, language = $10, updated_at = now()
 WHERE id = $1
 RETURNING *;
 

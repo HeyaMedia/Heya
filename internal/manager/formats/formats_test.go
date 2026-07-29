@@ -218,6 +218,9 @@ func TestImportRadarrProfiles(t *testing.T) {
 	if all.MinFormatScore != 10 || all.CutoffFormatScore != 4500 {
 		t.Fatalf("score thresholds mangled: %+v", all)
 	}
+	if all.Language != "original" {
+		t.Fatalf("radarr profile language should import as %q, got %q", "original", all.Language)
+	}
 	if all.FormatScores["x265"] != 2000 {
 		t.Fatalf("format score for x265 should survive import, got %d", all.FormatScores["x265"])
 	}
@@ -261,7 +264,36 @@ func TestImportSonarrProfileCutoff(t *testing.T) {
 			if !profile.UpgradesEnabled {
 				t.Fatal("4K profile should allow upgrades")
 			}
+			if profile.Language != "any" {
+				t.Fatalf("sonarr profiles carry no language and should default to %q, got %q", "any", profile.Language)
+			}
 		}
+	}
+}
+
+func TestLanguageAcceptable(t *testing.T) {
+	danish := ParseVideoRelease("Forbrydelsen.S01E01.DANISH.1080p.WEB-DL.H.264-GRP", 0, true)
+	plain := ParseVideoRelease("Show.Name.S01E01.1080p.WEB-DL.H.264-GRP", 0, true)
+
+	if !LanguageAcceptable("any", plain) || !LanguageAcceptable("", plain) {
+		t.Error("'any' must accept everything")
+	}
+	if !LanguageAcceptable("danish", danish) {
+		t.Error("a DANISH-tagged release should pass a danish gate")
+	}
+	if LanguageAcceptable("danish", plain) {
+		t.Error("an untagged release defaults to original/english and should fail a danish gate")
+	}
+	if !LanguageAcceptable("original", plain) {
+		t.Error("an untagged release is the original audio and should pass 'original'")
+	}
+	danishOriginal := danish
+	danishOriginal.OriginalLanguage = "danish"
+	if !LanguageAcceptable("original", danishOriginal) {
+		t.Error("a DANISH release of a Danish show should pass 'original'")
+	}
+	if LanguageAcceptable("original", danish) {
+		t.Error("a DANISH release with unknown original (assumed english) should fail 'original'")
 	}
 }
 

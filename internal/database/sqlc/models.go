@@ -638,6 +638,7 @@ type ManagerQualityProfile struct {
 	MinUpgradeScore   int32              `json:"min_upgrade_score"`
 	FormatScores      []byte             `json:"format_scores"`
 	Source            string             `json:"source"`
+	Language          string             `json:"language"`
 }
 
 type MatchCandidate struct {

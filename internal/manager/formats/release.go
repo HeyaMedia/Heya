@@ -102,6 +102,25 @@ func ParseVideoRelease(title string, sizeBytes int64, isTV bool) Attrs {
 	return attrs
 }
 
+// LanguageAcceptable applies a profile's language gate to a release:
+// 'any' passes everything, 'original' requires the media item's original
+// audio (English when unknown), and a language name requires that language
+// among the release's effective languages.
+func LanguageAcceptable(profileLanguage string, attrs Attrs) bool {
+	switch profileLanguage {
+	case "", "any":
+		return true
+	case "original":
+		original := attrs.OriginalLanguage
+		if original == "" {
+			original = "english"
+		}
+		return contains(attrs.effectiveLanguages(), original)
+	default:
+		return contains(attrs.effectiveLanguages(), profileLanguage)
+	}
+}
+
 // effectiveLanguages resolves the languages a release is assumed to carry: a
 // title with no language token is the original audio (scene convention), and
 // original falls back to English when the caller didn't supply one.

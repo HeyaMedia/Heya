@@ -13427,6 +13427,9 @@
               "null"
             ]
           },
+          "language": {
+            "type": "string"
+          },
           "min_format_score": {
             "format": "int32",
             "type": "integer"
@@ -13498,6 +13501,9 @@
               "null"
             ]
           },
+          "language": {
+            "type": "string"
+          },
           "min_format_score": {
             "format": "int32",
             "type": "integer"
@@ -13522,6 +13528,7 @@
           "domain",
           "items",
           "cutoff",
+          "language",
           "upgrades_enabled",
           "min_format_score",
           "cutoff_format_score",
@@ -13629,6 +13636,12 @@
       "ManagerReleaseTestProfileScore": {
         "additionalProperties": false,
         "properties": {
+          "language": {
+            "type": "string"
+          },
+          "language_ok": {
+            "type": "boolean"
+          },
           "min_met": {
             "type": "boolean"
           },
@@ -13648,7 +13661,9 @@
           "profile_id",
           "name",
           "score",
-          "min_met"
+          "min_met",
+          "language",
+          "language_ok"
         ],
         "type": "object"
       },

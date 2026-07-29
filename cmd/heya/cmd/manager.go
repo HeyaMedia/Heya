@@ -428,7 +428,7 @@ var managerProfileListCmd = &cobra.Command{
 			if ui.JSONMode {
 				return ui.OutputJSON(views)
 			}
-			table := ui.NewTable("ID", "Name", "Domain", "Cutoff", "Qualities", "In use")
+			table := ui.NewTable("ID", "Name", "Domain", "Cutoff", "Language", "Qualities", "In use")
 			for _, view := range views {
 				allowed := 0
 				for _, item := range view.Items {
@@ -441,6 +441,7 @@ var managerProfileListCmd = &cobra.Command{
 					view.Name,
 					view.Domain,
 					view.Cutoff,
+					view.Language,
 					fmt.Sprintf("%d allowed / %d", allowed, len(view.Items)),
 					strconv.FormatInt(view.InUseCount, 10),
 				)
@@ -594,13 +595,17 @@ var managerFormatTestCmd = &cobra.Command{
 				}
 				ui.Success("Matches: %s", strings.Join(names, ", "))
 			}
-			table := ui.NewTable("Profile", "Score", "Min met")
+			table := ui.NewTable("Profile", "Score", "Min met", "Language")
 			for _, profile := range view.Profiles {
 				met := "yes"
 				if !profile.MinMet {
 					met = "NO"
 				}
-				table.AddRow(profile.Name, strconv.FormatInt(int64(profile.Score), 10), met)
+				lang := "ok"
+				if !profile.LanguageOK {
+					lang = fmt.Sprintf("REJECTED (wants %s)", profile.Language)
+				}
+				table.AddRow(profile.Name, strconv.FormatInt(int64(profile.Score), 10), met, lang)
 			}
 			fmt.Println(table.Render())
 			return nil

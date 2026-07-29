@@ -17,11 +17,14 @@ type ImportedQualityItem struct {
 
 // ImportedProfile is a quality profile normalized out of an arr payload.
 // FormatScores is keyed by custom format name — the caller resolves names to
-// Heya format ids after the formats themselves are imported.
+// Heya format ids after the formats themselves are imported. Language is the
+// Radarr-only profile gate ('any' when the payload has none — Sonarr models
+// language preference through scored custom formats instead).
 type ImportedProfile struct {
 	Name              string
 	UpgradesEnabled   bool
 	Cutoff            string
+	Language          string
 	MinFormatScore    int
 	CutoffFormatScore int
 	MinUpgradeScore   int
@@ -33,11 +36,16 @@ type arrProfile struct {
 	Name                  string           `json:"name"`
 	UpgradeAllowed        bool             `json:"upgradeAllowed"`
 	Cutoff                int              `json:"cutoff"`
+	Language              *arrLanguageRef  `json:"language"`
 	MinFormatScore        int              `json:"minFormatScore"`
 	CutoffFormatScore     int              `json:"cutoffFormatScore"`
 	MinUpgradeFormatScore int              `json:"minUpgradeFormatScore"`
 	Items                 []arrProfileItem `json:"items"`
 	FormatItems           []arrFormatItem  `json:"formatItems"`
+}
+
+type arrLanguageRef struct {
+	Name string `json:"name"`
 }
 
 type arrProfileItem struct {
@@ -92,10 +100,14 @@ func ParseArrProfiles(raw []byte) ([]ImportedProfile, error) {
 		result := ImportedProfile{
 			Name:              profile.Name,
 			UpgradesEnabled:   profile.UpgradeAllowed,
+			Language:          "any",
 			MinFormatScore:    profile.MinFormatScore,
 			CutoffFormatScore: profile.CutoffFormatScore,
 			MinUpgradeScore:   profile.MinUpgradeFormatScore,
 			FormatScores:      map[string]int{},
+		}
+		if profile.Language != nil && profile.Language.Name != "" {
+			result.Language = strings.ToLower(profile.Language.Name)
 		}
 		if result.MinUpgradeScore <= 0 {
 			result.MinUpgradeScore = 1
