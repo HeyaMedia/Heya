@@ -81,13 +81,20 @@ const urlQuery = computed(() => {
   if (dir.value !== 'asc') query.dir = dir.value
   return query
 })
+const FILTER_QUERY_KEYS = ['q', 'monitored', 'state', 'status', 'profile', 'sort', 'dir'] as const
 let urlTimer: ReturnType<typeof setTimeout> | undefined
 watch(urlQuery, query => {
   clearTimeout(urlTimer)
   urlTimer = setTimeout(() => {
-    router.replace({ query })
     sessionStorage.setItem(`heya:mgr-lib-return:${libraryId.value}`,
       router.resolve({ path: route.path, query }).fullPath)
+    // Replace ONLY when the URL actually disagrees. On a back-navigation the
+    // URL already carries these filters (state was hydrated from it), and a
+    // redundant replace registers as a fresh navigation with the
+    // scroll-memory plugin — cancelling its restore and yanking to top.
+    const current = route.query
+    const changed = FILTER_QUERY_KEYS.some(key => (current[key] ?? undefined) !== (query[key] ?? undefined))
+    if (changed) router.replace({ query })
   }, 250)
 }, { immediate: true })
 
@@ -216,23 +223,61 @@ const tableTemplate = computed(() => {
   return cols.join(' ')
 })
 
-// ── Scroll restore (the manager layout owns the scroll container) ────────
+// ── Table windowing ──────────────────────────────────────────────────────
+// Hand-rolled instead of RecycleScroller: page-mode picks its scroll parent
+// by walking ancestors for overflow:auto, and when that heuristic misfires
+// the row window freezes while the track keeps its height — the list "just
+// ends" mid-scroll. This binds directly to the layout's #main-content
+// scroller, so there is no detection to go wrong.
 
-const scrollKey = computed(() => `heya:mgr-lib-scroll:${libraryId.value}`)
-const restoredScroll = ref(false)
-watch([sorted, view], async () => {
-  if (restoredScroll.value || !sorted.value.length) return
-  restoredScroll.value = true
-  await nextTick()
-  const saved = Number(sessionStorage.getItem(scrollKey.value) || 0)
-  const el = document.getElementById('main-content')
-  if (saved > 0 && el) el.scrollTop = saved
-}, { immediate: true })
-watch(libraryId, () => { restoredScroll.value = false })
-onBeforeUnmount(() => {
-  const el = document.getElementById('main-content')
-  if (el) sessionStorage.setItem(scrollKey.value, String(el.scrollTop))
+const ROW_H = 44
+const OVERSCAN = 10
+const tbodyEl = ref<HTMLElement | null>(null)
+let scrollEl: HTMLElement | null = null
+const scrollTop = ref(0)
+const viewH = ref(800)
+const bodyTop = ref(0)
+
+function syncScroll() {
+  if (!scrollEl) return
+  scrollTop.value = scrollEl.scrollTop
+  viewH.value = scrollEl.clientHeight
+  // Re-derive the table's offset inside the scroll content every event —
+  // a rect read is cheap and immune to the content above changing height.
+  if (tbodyEl.value) {
+    bodyTop.value = tbodyEl.value.getBoundingClientRect().top
+      - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop
+  }
+}
+
+let resizeObserver: ResizeObserver | undefined
+onMounted(() => {
+  scrollEl = document.getElementById('main-content')
+  scrollEl?.addEventListener('scroll', syncScroll, { passive: true })
+  resizeObserver = new ResizeObserver(() => syncScroll())
+  if (scrollEl) resizeObserver.observe(scrollEl)
+  syncScroll()
 })
+onBeforeUnmount(() => {
+  scrollEl?.removeEventListener('scroll', syncScroll)
+  resizeObserver?.disconnect()
+})
+// The table body mounts after data arrives or when the view toggles —
+// measure as soon as it exists (and again on view switches).
+watch([tbodyEl, view, sorted], () => nextTick(syncScroll))
+
+const tableTotalH = computed(() => sorted.value.length * ROW_H)
+const windowStart = computed(() =>
+  Math.max(0, Math.floor((scrollTop.value - bodyTop.value) / ROW_H) - OVERSCAN))
+const windowEnd = computed(() =>
+  Math.min(sorted.value.length, Math.ceil((scrollTop.value - bodyTop.value + viewH.value) / ROW_H) + OVERSCAN))
+const windowItems = computed(() => sorted.value.slice(windowStart.value, windowEnd.value))
+const windowOffset = computed(() => windowStart.value * ROW_H)
+
+// Scroll restoration is owned by the scroll-memory plugin: it snapshots
+// #main-content in beforeEach and re-applies on history navigations, retrying
+// until the virtual track has grown enough to take the offset. The detail
+// page's breadcrumb goes through router.back() so it rides that path.
 
 // ── Selection + bulk edit ────────────────────────────────────────────────
 
@@ -482,15 +527,15 @@ function headerSort(key: string) {
             <button v-if="!isPhone" type="button" class="lib-th num" :class="{ active: sort === 'size' }" @click="headerSort('size')">Size <Icon v-if="sort === 'size'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button>
             <button v-if="!isPhone" type="button" class="lib-th num" :class="{ active: sort === 'added' }" @click="headerSort('added')">Added <Icon v-if="sort === 'added'" :name="dir === 'asc' ? 'chevup' : 'chevdown'" :size="11" /></button>
           </div>
-          <RecycleScroller
-            :items="sorted"
-            :item-size="44"
-            key-field="id"
-            page-mode
-            :buffer="600"
-            v-slot="{ item }"
-          >
-            <div class="libt-row" :class="{ selected: selected.has(item.id) }" :style="{ gridTemplateColumns: tableTemplate }">
+          <div ref="tbodyEl" class="libt-body" :style="{ height: `${tableTotalH}px` }">
+            <div class="libt-slice" :style="{ transform: `translateY(${windowOffset}px)` }">
+              <div
+                v-for="item in windowItems"
+                :key="item.id"
+                class="libt-row"
+                :class="{ selected: selected.has(item.id) }"
+                :style="{ gridTemplateColumns: tableTemplate }"
+              >
               <span class="libt-cell">
                 <button
                   type="button" class="lib-row-select" :class="{ on: selected.has(item.id) }"
@@ -527,8 +572,9 @@ function headerSort(key: string) {
               <span class="libt-cell mono num" :class="{ 'has-missing': item.missing_count > 0 }">{{ item.missing_count || '' }}</span>
               <span v-if="!isPhone" class="libt-cell mono num">{{ fmtBytes(item.size_on_disk) }}</span>
               <span v-if="!isPhone" class="libt-cell mono num">{{ timeAgoShort(item.added_at) }}</span>
+              </div>
             </div>
-          </RecycleScroller>
+          </div>
         </div>
       </div>
     </template>
@@ -752,11 +798,10 @@ function headerSort(key: string) {
 }
 .lib-card-counts { margin-left: auto; color: var(--fg-2); }
 
-/* ── Table (grid + RecycleScroller rows) ─────────────────────────────── */
-/* No overflow-x here on purpose: any auto-overflow ancestor becomes the
-   page-mode scroller's scroll parent and vertical scrolling dies. Narrow
-   viewports drop columns (isPhone) rather than scroll sideways. */
+/* ── Table (grid header + hand-rolled row window) ────────────────────── */
 .libt { min-width: 0; }
+.libt-body { position: relative; overflow: hidden; }
+.libt-slice { will-change: transform; }
 .libt-head {
   display: grid;
   align-items: center;

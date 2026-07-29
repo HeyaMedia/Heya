@@ -58,10 +58,27 @@ function capture(): ScrollSnapshot {
 
 let restorationGeneration = 0
 
+// User input that starts a scroll of their own — the moment it appears,
+// restoration must stop reapplying or it fights the user for the scrollbar.
+const USER_SCROLL_EVENTS = ['wheel', 'touchstart', 'mousedown'] as const
+
 function restore(snapshot: ScrollSnapshot, generation: number) {
   let tries = 0
+  let cancelled = false
+  const cancel = () => {
+    cancelled = true
+    teardown()
+  }
+  const teardown = () => {
+    for (const event of USER_SCROLL_EVENTS) window.removeEventListener(event, cancel)
+  }
+  for (const event of USER_SCROLL_EVENTS) window.addEventListener(event, cancel, { passive: true })
+
   const attempt = () => {
-    if (generation !== restorationGeneration) return
+    if (cancelled || generation !== restorationGeneration) {
+      teardown()
+      return
+    }
     const vertical = pageScroller()
     if (vertical) vertical.scrollTop = snapshot.top
 
@@ -80,8 +97,12 @@ function restore(snapshot: ScrollSnapshot, generation: number) {
     })
 
     // Queries, virtualized tracks, and responsive measurements can grow the
-    // scroll ranges after mount. Keep applying for roughly half a second.
-    if ((!verticalReady || !railsReady) && ++tries < 40) requestAnimationFrame(attempt)
+    // scroll ranges after mount — a cold library fetch takes a second or two
+    // before the virtual track exists to scroll into. Keep applying for up to
+    // ~5s; the cancel listeners hand control back the instant the user
+    // scrolls themselves, and a new navigation bumps the generation.
+    if ((!verticalReady || !railsReady) && ++tries < 300) requestAnimationFrame(attempt)
+    else teardown()
   }
   requestAnimationFrame(attempt)
 }

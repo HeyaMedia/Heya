@@ -23,6 +23,26 @@ onMounted(() => {
   if (stored) backLink.value = stored
 })
 
+// Prefer a REAL history back when the previous entry is this library's list:
+// only history navigations get scroll restored by the scroll-memory plugin
+// (a forward push to the same URL deliberately resets to top). Plain <a> +
+// manual routing on purpose — a NuxtLink would ALSO push its :to on the same
+// click, and the racing push resolves after the back, yanking to top. The
+// stored URL stays as the fallback for deep links straight into a detail
+// page; modified clicks fall through to the browser (new tab on the href).
+const router = useRouter()
+function goBack(event: MouseEvent) {
+  if (event.defaultPrevented || event.button !== 0
+    || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  event.preventDefault()
+  const previous = (history.state as { back?: string } | null)?.back
+  if (typeof previous === 'string' && previous.startsWith(`/manager/library/${libraryId.value}`)) {
+    router.back()
+  } else {
+    router.push(backLink.value)
+  }
+}
+
 const detailQuery = useQuery(() => managerMediaDetailQuery(itemId.value))
 const detail = computed(() => detailQuery.data.value)
 const item = computed(() => detail.value?.item)
@@ -234,9 +254,9 @@ const FILE_KIND_LABELS: Record<string, string> = {
     <div v-if="loading" class="mgr-loading">Loading item…</div>
 
     <template v-else-if="detail && item">
-      <NuxtLink :to="backLink" class="det-back">
+      <a :href="backLink" class="det-back" @click="goBack">
         <Icon name="back" :size="13" /> {{ detail.library.name }}
-      </NuxtLink>
+      </a>
 
       <!-- ── Hero ────────────────────────────────────────────────────── -->
       <div class="det-hero">
