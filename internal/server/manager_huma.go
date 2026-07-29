@@ -298,6 +298,17 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(events), nil
 		})
 
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/calendar/events", "manager-calendar-event-details", "Expanded details for calendar events (the click-through modal)", "Manager")),
+		func(ctx context.Context, in *struct {
+			IDs []string `query:"ids" maxItems:"50" doc:"Opaque calendar event ids (ep:N, movie:N, album:dN, book:N), comma-separated"`
+		}) (*JSONOutput[[]service.CalendarEventDetailView], error) {
+			details, err := app.CalendarEventDetails(ctx, in.IDs)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return noStoreJSON(details), nil
+		})
+
 	// ── Library lens ─────────────────────────────────────────────────────
 
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/library/{id}/items", "manager-library-items", "Managed view over a library: completeness, monitoring, profiles", "Manager")),

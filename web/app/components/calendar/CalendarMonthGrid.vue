@@ -12,7 +12,12 @@ const props = defineProps<{
   /** Which month to render, as YYYY-MM. */
   month: string
   entries: CalendarEntry[]
+  /** Opt-in day selection (v-model:selected-date + gold highlight). Off by
+      default — most consumers act on individual events via @select. */
+  selectable?: boolean
 }>()
+
+const emit = defineEmits<{ select: [entry: CalendarEntry] }>()
 
 const selectedDate = defineModel<string | null>('selectedDate', { default: null })
 
@@ -71,6 +76,7 @@ const cells = computed<DayCell[]>(() => {
 })
 
 function toggleDay(cell: DayCell) {
+  if (!props.selectable) return
   selectedDate.value = selectedDate.value === cell.date ? null : cell.date
 }
 </script>
@@ -81,24 +87,32 @@ function toggleDay(cell: DayCell) {
       <span v-for="day in weekdays" :key="day" class="cmg-weekday">{{ day }}</span>
     </div>
     <div class="cmg-grid">
-      <button
+      <component
+        :is="selectable ? 'button' : 'div'"
         v-for="cell in cells"
         :key="cell.date"
-        type="button"
+        :type="selectable ? 'button' : undefined"
         class="cmg-cell"
         :class="{
           outside: !cell.inMonth,
           weekend: cell.weekend,
           today: cell.isToday,
-          selected: selectedDate === cell.date,
-          'has-events': cell.entries.length > 0,
+          selected: selectable && selectedDate === cell.date,
+          selectable,
         }"
-        :aria-label="`${cell.date}, ${cell.entries.length} releases`"
-        :aria-pressed="selectedDate === cell.date"
+        :aria-label="selectable ? `${cell.date}, ${cell.entries.length} releases` : undefined"
+        :aria-pressed="selectable ? selectedDate === cell.date : undefined"
         @click="toggleDay(cell)"
       >
         <span class="cmg-daynum">{{ cell.dayOfMonth }}</span>
-        <span v-for="entry in cell.entries" :key="entry.id" class="cmg-chip">
+        <button
+          v-for="entry in cell.entries"
+          :key="entry.id"
+          type="button"
+          class="cmg-chip"
+          :aria-label="`${entry.title}${entry.subtitle ? ' — ' + entry.subtitle : ''}`"
+          @click.stop="emit('select', entry)"
+        >
           <span class="cmg-chip-head">
             <span v-if="entry.badge" class="cmg-dot" :class="`state-${entry.badge.state}`" />
             <Icon v-if="entry.icon" :name="entry.icon" :size="10" class="cmg-chip-icon" />
@@ -106,8 +120,8 @@ function toggleDay(cell: DayCell) {
             <span v-if="entry.tags?.length" class="cmg-chip-tag" :class="`tone-${entry.tags[0]!.tone}`">{{ entry.tags[0]!.label }}</span>
           </span>
           <span v-if="entry.subtitle" class="cmg-chip-sub">{{ entry.subtitle }}</span>
-        </span>
-      </button>
+        </button>
+      </component>
     </div>
   </div>
 </template>
@@ -159,12 +173,12 @@ function toggleDay(cell: DayCell) {
   background: none;
   border: 0;
   border-top: 1px solid var(--hair);
-  cursor: pointer;
   transition: background 0.12s;
   min-width: 0;
 }
+.cmg-cell.selectable { cursor: pointer; }
 .cmg-cell:not(:nth-child(7n + 1)) { border-left: 1px solid var(--hair); }
-.cmg-cell:hover { background: rgb(var(--ink) / 0.04); }
+.cmg-cell.selectable:hover { background: rgb(var(--ink) / 0.04); }
 .cmg-cell.weekend { background: rgb(var(--shade) / 0.14); }
 .cmg-cell.weekend:hover { background: rgb(var(--ink) / 0.04); }
 .cmg-cell.outside { background: rgb(var(--shade) / 0.28); }
@@ -193,12 +207,18 @@ function toggleDay(cell: DayCell) {
 .cmg-chip {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 1px;
   padding: 3px 6px;
+  border: 0;
   border-radius: 4px;
   background: rgb(var(--ink) / 0.06);
   min-width: 0;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s;
 }
+.cmg-chip:hover { background: rgb(var(--ink) / 0.12); }
 .cmg-chip-head {
   display: flex;
   align-items: center;

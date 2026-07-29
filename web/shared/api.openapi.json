@@ -3285,6 +3285,121 @@
         ],
         "type": "object"
       },
+      "CalendarEventDetailView": {
+        "additionalProperties": false,
+        "properties": {
+          "album_ref": {
+            "type": "string"
+          },
+          "album_slug": {
+            "description": "Local album slug for public links; empty for catalog-only releases",
+            "type": "string"
+          },
+          "album_title": {
+            "type": "string"
+          },
+          "album_type": {
+            "type": "string"
+          },
+          "cover_url": {
+            "description": "Provider cover for catalog-only releases",
+            "type": "string"
+          },
+          "date": {
+            "description": "Air / release / publish date",
+            "type": "string"
+          },
+          "episode": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "episode_name": {
+            "type": "string"
+          },
+          "has_file": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "episode",
+              "movie",
+              "album",
+              "book"
+            ],
+            "type": "string"
+          },
+          "library_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "media_item_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "media_type": {
+            "type": "string"
+          },
+          "monitored": {
+            "type": "boolean"
+          },
+          "overview": {
+            "type": "string"
+          },
+          "quality": {
+            "type": "string"
+          },
+          "rating": {
+            "format": "double",
+            "type": "number"
+          },
+          "runtime_minutes": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "size_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "slug": {
+            "description": "The owning item's slug (series/artist/movie/book)",
+            "type": "string"
+          },
+          "special": {
+            "type": "boolean"
+          },
+          "title": {
+            "description": "Series / artist / movie / book name",
+            "type": "string"
+          },
+          "tracks_have": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "tracks_total": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "library_id",
+          "media_type",
+          "media_item_id",
+          "slug",
+          "title",
+          "has_file",
+          "monitored"
+        ],
+        "type": "object"
+      },
       "CalendarEventView": {
         "additionalProperties": false,
         "properties": {
@@ -33642,6 +33757,74 @@
           }
         ],
         "summary": "Release calendar: episodes airing, movies and albums releasing, books publishing",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
+    "/api/manager/calendar/events": {
+      "get": {
+        "operationId": "manager-calendar-event-details",
+        "parameters": [
+          {
+            "description": "Opaque calendar event ids (ep:N, movie:N, album:dN, book:N), comma-separated",
+            "explode": false,
+            "in": "query",
+            "name": "ids",
+            "schema": {
+              "description": "Opaque calendar event ids (ep:N, movie:N, album:dN, book:N), comma-separated",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 50,
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CalendarEventDetailView"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Expanded details for calendar events (the click-through modal)",
         "tags": [
           "Manager"
         ]

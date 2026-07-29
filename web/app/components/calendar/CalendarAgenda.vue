@@ -6,7 +6,12 @@ import { parseCalendarDate, toCalendarDate, type CalendarEntry } from '~/compone
 const props = defineProps<{
   entries: CalendarEntry[]
   emptyText?: string
+  /** 'link' navigates rows via entry.to (default); 'select' renders rows as
+      buttons and emits instead — for consumers that open a details modal. */
+  interactive?: 'link' | 'select'
 }>()
+
+const emit = defineEmits<{ select: [entry: CalendarEntry] }>()
 
 type DayGroup = { date: string, label: string, sub: string, isToday: boolean, entries: CalendarEntry[] }
 
@@ -58,10 +63,12 @@ const days = computed<DayGroup[]>(() => {
       <ul class="cal-list">
         <li v-for="entry in day.entries" :key="entry.id">
           <component
-            :is="entry.to ? resolveComponent('NuxtLink') : 'div'"
-            :to="entry.to"
+            :is="interactive === 'select' ? 'button' : (entry.to ? resolveComponent('NuxtLink') : 'div')"
+            :to="interactive === 'select' ? undefined : entry.to"
+            :type="interactive === 'select' ? 'button' : undefined"
             class="cal-row"
-            :class="{ linked: !!entry.to }"
+            :class="{ linked: interactive === 'select' || !!entry.to }"
+            @click="interactive === 'select' && emit('select', entry)"
           >
             <span v-if="entry.icon" class="cal-kind"><Icon :name="entry.icon" :size="15" /></span>
             <div class="cal-body">
@@ -116,12 +123,15 @@ const days = computed<DayGroup[]>(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+  width: 100%;
   padding: 11px 14px;
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   color: inherit;
   text-decoration: none;
+  text-align: left;
+  font: inherit;
 }
 .cal-row.linked { transition: background 0.12s, border-color 0.12s; }
 .cal-row.linked:hover { background: var(--bg-3); border-color: color-mix(in srgb, var(--gold) 30%, var(--border)); }

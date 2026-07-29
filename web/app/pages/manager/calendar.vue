@@ -5,10 +5,11 @@ definePageMeta({ layout: 'manager', middleware: 'admin' })
 // components are generic and reusable (the public sections will embed them
 // later) — everything manager-specific happens here: fetching the admin
 // endpoint, mapping API events into entries, and building manager links.
-import { managerCalendarQuery, type CalendarEventView } from '~/queries/manager'
+import { managerCalendarQuery, type CalendarEventView, type CalendarEventDetailView } from '~/queries/manager'
 import { librariesQuery } from '~/queries/catalog'
 import { managerLibraryIcon } from '~/composables/useManagerNav'
-import { toCalendarDate, parseCalendarDate, type CalendarEntry, type CalendarEntryTag } from '~/components/calendar/calendarEntry'
+import { toCalendarDate, type CalendarEntry, type CalendarEntryTag } from '~/components/calendar/calendarEntry'
+import { fmtBytes } from '~/composables/useFormat'
 
 // ── View state ───────────────────────────────────────────────────────────
 
@@ -22,8 +23,6 @@ watch(view, value => localStorage.setItem('heya:manager:calendar-view', value))
 const today = toCalendarDate(new Date())
 // Month cursor, YYYY-MM. Agenda ignores it (rolling window).
 const monthCursor = ref(today.slice(0, 7))
-const selectedDate = ref<string | null>(null)
-watch([view, monthCursor], () => { selectedDate.value = null })
 
 function shiftMonth(delta: number) {
   const [y, m] = monthCursor.value.split('-').map(Number)
@@ -122,9 +121,12 @@ const MILESTONE_TAGS: Record<string, CalendarEntryTag> = {
   series_finale: { label: 'Series finale', tone: 'bad' },
 }
 
-const entries = computed<CalendarEntry[]>(() => {
+// One pass produces the display entries AND remembers which raw event ids a
+// collapsed run covers, so the modal can expand every episode of the run.
+const mapped = computed<{ entries: CalendarEntry[], runIds: Map<string, string[]> }>(() => {
   const list = events.value
   const out: CalendarEntry[] = []
+  const runIds = new Map<string, string[]>()
   let i = 0
   while (i < list.length) {
     const ev = list[i]!
@@ -148,6 +150,7 @@ const entries = computed<CalendarEntry[]>(() => {
       const finale = [...run].reverse().find(e => e.milestone?.includes('finale'))
       if (premiere?.milestone) tags.push(MILESTONE_TAGS[premiere.milestone]!)
       if (finale?.milestone) tags.push(MILESTONE_TAGS[finale.milestone]!)
+      runIds.set(ev.id, run.map(e => e.id))
       out.push({
         id: ev.id,
         date: ev.date,
@@ -186,16 +189,82 @@ const entries = computed<CalendarEntry[]>(() => {
     out.push(entry)
     i++
   }
-  return out
+  return { entries: out, runIds }
 })
+const entries = computed(() => mapped.value.entries)
 
-const selectedDayEntries = computed(() =>
-  selectedDate.value ? entries.value.filter(e => e.date === selectedDate.value) : [])
+// ── Details modal ────────────────────────────────────────────────────────
+// Any event click opens it — an episode run expands into every episode.
 
-const selectedDayLabel = computed(() => {
-  if (!selectedDate.value) return ''
-  return new Intl.DateTimeFormat(undefined, { weekday: 'long', day: '2-digit', month: 'long' })
-    .format(parseCalendarDate(selectedDate.value))
+const { $heya } = useNuxtApp()
+const modalOpen = ref(false)
+const modalEntry = ref<CalendarEntry | null>(null)
+const modalDetails = ref<CalendarEventDetailView[] | null>(null)
+const modalError = ref('')
+
+async function openEvent(entry: CalendarEntry) {
+  modalEntry.value = entry
+  modalDetails.value = null
+  modalError.value = ''
+  modalOpen.value = true
+  const ids = mapped.value.runIds.get(entry.id) ?? [entry.id]
+  try {
+    modalDetails.value = await $heya('/api/manager/calendar/events', {
+      query: { ids: ids.join(',') },
+    }) as CalendarEventDetailView[]
+  } catch (e: any) {
+    modalError.value = e?.data?.detail ?? 'Couldn\'t load details.'
+  }
+}
+
+const pad2 = (n: number) => String(n).padStart(2, '0')
+const stillUrl = (d: CalendarEventDetailView) =>
+  `/api/media/${d.media_item_id}/image/still?label=s${pad2(d.season ?? 0)}e${pad2(d.episode ?? 0)}`
+
+function detailCover(d: CalendarEventDetailView): string | null {
+  if (d.kind === 'episode') return stillUrl(d)
+  if (d.kind === 'album') {
+    if (d.album_slug) return useAlbumCoverUrl(d.slug, d.album_slug)
+    return metadataImageProxyUrl(d.cover_url ?? '') || null
+  }
+  return usePosterUrl({ id: d.media_item_id })
+}
+
+function detailHeading(d: CalendarEventDetailView): string {
+  if (d.kind === 'episode') return `${epCode(d.season ?? 0, d.episode ?? 0)}${d.episode_name ? ` · ${d.episode_name}` : ''}`
+  if (d.kind === 'album') return d.album_title || d.title
+  return d.title
+}
+
+function detailMeta(d: CalendarEventDetailView): string {
+  const parts: string[] = []
+  if (d.date) parts.push(releaseDateLabel(d.date, d.date.slice(0, 4)))
+  if (d.runtime_minutes) parts.push(`${d.runtime_minutes} min`)
+  if (d.rating) parts.push(`★ ${d.rating.toFixed(1)}`)
+  if (d.kind === 'album' && d.tracks_total) parts.push(`${d.tracks_have}/${d.tracks_total} tracks`)
+  if (d.has_file && d.quality) parts.push(d.quality)
+  if (d.has_file && d.size_bytes) parts.push(fmtBytes(d.size_bytes))
+  return parts.join(' · ')
+}
+
+const modalPrimary = computed(() => modalDetails.value?.[0] ?? null)
+const managerLink = computed(() => {
+  const d = modalPrimary.value
+  if (!d) return null
+  if (d.kind === 'album' && d.album_ref) return `/manager/library/${d.library_id}/${d.media_item_id}/${d.album_ref}`
+  return `/manager/library/${d.library_id}/${d.media_item_id}`
+})
+const publicLink = computed(() => {
+  const d = modalPrimary.value
+  if (!d) return null
+  switch (d.media_type) {
+    case 'movie': return `/movies/${d.slug}`
+    case 'tv':
+    case 'anime': return `/tv/${d.slug}`
+    case 'music': return d.album_slug ? `/music/artist/${d.slug}/${d.album_slug}` : `/music/artist/${d.slug}`
+    case 'book': return `/books/${d.slug}`
+    default: return null
+  }
 })
 
 // Honest sparseness: music dates only exist once artists have re-enriched —
@@ -259,19 +328,52 @@ const emptyText = computed(() => {
       <div v-for="i in 6" :key="i" class="calp-skel-row" />
     </div>
 
-    <template v-else-if="effectiveView === 'month'">
-      <div :class="{ refreshing }">
-        <CalendarMonthGrid v-model:selected-date="selectedDate" :month="monthCursor" :entries="entries" />
-      </div>
-      <div v-if="selectedDate" class="calp-day-panel">
-        <div class="calp-day-panel-head">{{ selectedDayLabel }}</div>
-        <CalendarAgenda :entries="selectedDayEntries" empty-text="Nothing on this day." />
-      </div>
-    </template>
+    <div v-else-if="effectiveView === 'month'" :class="{ refreshing }">
+      <CalendarMonthGrid :month="monthCursor" :entries="entries" @select="openEvent" />
+    </div>
 
     <div v-else :class="{ refreshing }">
-      <CalendarAgenda :entries="entries" :empty-text="emptyText" />
+      <CalendarAgenda :entries="entries" :empty-text="emptyText" interactive="select" @select="openEvent" />
     </div>
+
+    <AppDialog v-model="modalOpen" :title="modalEntry?.title ?? ''" size="md">
+      <div v-if="modalError" class="mgr-flash err" role="alert">
+        <Icon name="warning" :size="13" /> {{ modalError }}
+      </div>
+      <div v-else-if="!modalDetails" class="calm-loading">
+        <Icon name="spinner" :size="16" /> Loading…
+      </div>
+      <div v-else class="calm-list">
+        <div v-for="d in modalDetails" :key="d.id" class="calm-item">
+          <NuxtImg
+            v-if="detailCover(d)"
+            :src="detailCover(d)!"
+            :width="d.kind === 'episode' ? 220 : 120"
+            class="calm-image"
+            :class="`kind-${d.kind}`"
+            :alt="detailHeading(d)"
+          />
+          <div class="calm-body">
+            <div class="calm-heading">
+              {{ detailHeading(d) }}
+              <span v-if="d.kind === 'album' && d.album_type && d.album_type !== 'album'" class="calm-type">{{ d.album_type }}</span>
+            </div>
+            <div class="calm-meta">
+              <span>{{ detailMeta(d) }}</span>
+              <StatusBadge :state="d.has_file ? 'ok' : (d.date && d.date < today ? 'error' : 'idle')">
+                {{ d.has_file ? 'downloaded' : (d.date && d.date < today ? 'missing' : 'upcoming') }}
+              </StatusBadge>
+            </div>
+            <p v-if="d.overview" class="calm-overview">{{ d.overview }}</p>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <NuxtLink v-if="managerLink" :to="managerLink" class="mgr-btn">Open in manager</NuxtLink>
+        <NuxtLink v-if="publicLink" :to="publicLink" class="mgr-btn">View in library</NuxtLink>
+        <button type="button" class="mgr-btn-gold" @click="modalOpen = false">Close</button>
+      </template>
+    </AppDialog>
   </div>
 </template>
 
@@ -319,15 +421,71 @@ const emptyText = computed(() => {
 
 .calp-retry { margin-left: 10px; }
 
-.calp-day-panel { margin-top: 18px; }
-.calp-day-panel-head {
-  font-family: var(--font-mono);
-  font-size: 11px;
+/* ── Details modal ───────────────────────────────────────────────────── */
+.calm-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-2);
+  font-size: 13px;
+  padding: 18px 0;
+}
+.calm-list { display: flex; flex-direction: column; gap: 16px; }
+.calm-item { display: flex; gap: 14px; align-items: flex-start; }
+.calm-image {
+  flex-shrink: 0;
+  border-radius: var(--r-sm);
+  background: var(--bg-3);
+  object-fit: cover;
+}
+.calm-image.kind-episode { width: 168px; aspect-ratio: 16 / 9; }
+.calm-image.kind-movie,
+.calm-image.kind-book { width: 84px; aspect-ratio: 2 / 3; }
+.calm-image.kind-album { width: 96px; aspect-ratio: 1; }
+.calm-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.calm-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 14px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  color: var(--fg-0);
+}
+.calm-type {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
   text-transform: uppercase;
-  color: var(--fg-3);
-  margin-bottom: 10px;
+  letter-spacing: 0.05em;
+  color: var(--fg-2);
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid var(--border);
+}
+.calm-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+}
+.calm-overview {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--fg-1);
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+@media (max-width: 560px) {
+  .calm-item { flex-direction: column; }
+  .calm-image.kind-episode { width: 100%; }
 }
 
 .refreshing { opacity: 0.65; transition: opacity 0.15s; }

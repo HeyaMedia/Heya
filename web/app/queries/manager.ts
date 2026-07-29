@@ -121,7 +121,7 @@ export const managerCustomFormatsQuery = defineQueryOptions(() => ({
   meta: { prefetch: 'none', sensitivity: 'private' },
 }))
 
-export type { ManagerAlbumDetailView, ManagerTrackView, CalendarEventView } from '~~/shared/api/types.gen'
+export type { ManagerAlbumDetailView, ManagerTrackView, CalendarEventView, CalendarEventDetailView } from '~~/shared/api/types.gen'
 import type { ManagerAlbumDetailView, CalendarEventView } from '~~/shared/api/types.gen'
 
 export type ManagerCalendarParams = {

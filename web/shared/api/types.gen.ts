@@ -966,6 +966,50 @@ export type BrowseBucketArtist = {
     public_id: string;
 };
 
+export type CalendarEventDetailView = {
+    album_ref?: string;
+    /**
+     * Local album slug for public links; empty for catalog-only releases
+     */
+    album_slug?: string;
+    album_title?: string;
+    album_type?: string;
+    /**
+     * Provider cover for catalog-only releases
+     */
+    cover_url?: string;
+    /**
+     * Air / release / publish date
+     */
+    date?: string;
+    episode?: number;
+    episode_name?: string;
+    has_file: boolean;
+    id: string;
+    kind: 'episode' | 'movie' | 'album' | 'book';
+    library_id: number;
+    media_item_id: number;
+    media_type: string;
+    monitored: boolean;
+    overview?: string;
+    quality?: string;
+    rating?: number;
+    runtime_minutes?: number;
+    season?: number;
+    size_bytes?: number;
+    /**
+     * The owning item's slug (series/artist/movie/book)
+     */
+    slug: string;
+    special?: boolean;
+    /**
+     * Series / artist / movie / book name
+     */
+    title: string;
+    tracks_have?: number;
+    tracks_total?: number;
+};
+
 export type CalendarEventView = {
     /**
      * Manager album page ref: local id or d<discography id>
@@ -13939,6 +13983,36 @@ export type ManagerCalendarResponses = {
 };
 
 export type ManagerCalendarResponse = ManagerCalendarResponses[keyof ManagerCalendarResponses];
+
+export type ManagerCalendarEventDetailsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Opaque calendar event ids (ep:N, movie:N, album:dN, book:N), comma-separated
+         */
+        ids?: Array<string> | null;
+    };
+    url: '/api/manager/calendar/events';
+};
+
+export type ManagerCalendarEventDetailsErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerCalendarEventDetailsError = ManagerCalendarEventDetailsErrors[keyof ManagerCalendarEventDetailsErrors];
+
+export type ManagerCalendarEventDetailsResponses = {
+    /**
+     * OK
+     */
+    200: Array<CalendarEventDetailView> | null;
+};
+
+export type ManagerCalendarEventDetailsResponse = ManagerCalendarEventDetailsResponses[keyof ManagerCalendarEventDetailsResponses];
 
 export type ManagerListCustomFormatsData = {
     body?: never;

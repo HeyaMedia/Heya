@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -260,4 +262,272 @@ func (a *App) CalendarEvents(ctx context.Context, p CalendarParams) ([]CalendarE
 		return events[i].Episode < events[j].Episode
 	})
 	return events, nil
+}
+
+// ── Event details (the calendar modal) ───────────────────────────────────
+
+// CalendarEventDetailView expands one calendar event for the details modal.
+// Looked up by the same opaque id the event list emits — ep:N, movie:N,
+// album:dN, book:N — so a click needs no second vocabulary.
+type CalendarEventDetailView struct {
+	ID          string  `json:"id"`
+	Kind        string  `json:"kind" enum:"episode,movie,album,book"`
+	LibraryID   int64   `json:"library_id"`
+	MediaType   string  `json:"media_type"`
+	MediaItemID int64   `json:"media_item_id"`
+	Slug        string  `json:"slug" doc:"The owning item's slug (series/artist/movie/book)"`
+	Title       string  `json:"title" doc:"Series / artist / movie / book name"`
+	Date        string  `json:"date,omitempty" doc:"Air / release / publish date"`
+	Overview    string  `json:"overview,omitempty"`
+	Rating      float64 `json:"rating,omitempty"`
+	Runtime     int32   `json:"runtime_minutes,omitempty"`
+	Season      int32   `json:"season,omitempty"`
+	Episode     int32   `json:"episode,omitempty"`
+	EpisodeName string  `json:"episode_name,omitempty"`
+	Special     bool    `json:"special,omitempty"`
+	AlbumTitle  string  `json:"album_title,omitempty"`
+	AlbumType   string  `json:"album_type,omitempty"`
+	AlbumRef    string  `json:"album_ref,omitempty"`
+	AlbumSlug   string  `json:"album_slug,omitempty" doc:"Local album slug for public links; empty for catalog-only releases"`
+	CoverURL    string  `json:"cover_url,omitempty" doc:"Provider cover for catalog-only releases"`
+	TracksHave  int32   `json:"tracks_have,omitempty"`
+	TracksTotal int32   `json:"tracks_total,omitempty"`
+	HasFile     bool    `json:"has_file"`
+	Quality     string  `json:"quality,omitempty"`
+	SizeBytes   int64   `json:"size_bytes,omitempty"`
+	Monitored   bool    `json:"monitored"`
+}
+
+// CalendarEventDetails resolves up to a run's worth of event ids. Unknown or
+// malformed ids are skipped rather than failing the batch — the calendar the
+// click came from may be a stale window.
+func (a *App) CalendarEventDetails(ctx context.Context, ids []string) ([]CalendarEventDetailView, error) {
+	if len(ids) == 0 {
+		return []CalendarEventDetailView{}, nil
+	}
+	if len(ids) > 50 {
+		return nil, fmt.Errorf("calendar: too many event ids")
+	}
+	var episodeIDs, movieIDs, bookIDs, discoIDs []int64
+	for _, id := range ids {
+		kind, rest, ok := strings.Cut(strings.TrimSpace(id), ":")
+		if !ok {
+			continue
+		}
+		switch kind {
+		case "ep":
+			if n, err := strconv.ParseInt(rest, 10, 64); err == nil {
+				episodeIDs = append(episodeIDs, n)
+			}
+		case "movie":
+			if n, err := strconv.ParseInt(rest, 10, 64); err == nil {
+				movieIDs = append(movieIDs, n)
+			}
+		case "book":
+			if n, err := strconv.ParseInt(rest, 10, 64); err == nil {
+				bookIDs = append(bookIDs, n)
+			}
+		case "album":
+			if n, err := strconv.ParseInt(strings.TrimPrefix(rest, "d"), 10, 64); err == nil {
+				discoIDs = append(discoIDs, n)
+			}
+		}
+	}
+
+	out := []CalendarEventDetailView{}
+
+	if len(episodeIDs) > 0 {
+		rows, err := a.db.Query(ctx, `
+			SELECT e.id, mi.library_id, c.media_type::text, c.id, c.slug, c.title,
+			       s.season_number, e.episode_number, e.title, e.overview, e.air_date,
+			       e.runtime_minutes, e.is_special, mi.monitored,
+			       COALESCE(bool_or(lf.id IS NOT NULL), false),
+			       COALESCE(max(lf.video_height), 0),
+			       COALESCE(sum(lf.size) FILTER (WHERE lf.id IS NOT NULL), 0)
+			FROM tv_episodes e
+			JOIN tv_seasons s ON s.id = e.season_id
+			JOIN tv_series sr ON sr.id = s.series_id
+			JOIN media_items mi ON mi.id = sr.media_item_id
+			JOIN media_item_cards c ON c.id = mi.id
+			LEFT JOIN library_file_links lfl ON lfl.tv_episode_id = e.id
+			LEFT JOIN library_files lf ON lf.id = lfl.library_file_id AND lf.deleted_at IS NULL
+			WHERE e.id = ANY($1::bigint[])
+			GROUP BY e.id, mi.library_id, c.media_type, c.id, c.slug, c.title,
+			         s.season_number, e.episode_number, e.title, e.overview, e.air_date,
+			         e.runtime_minutes, e.is_special, mi.monitored
+			ORDER BY s.season_number, e.episode_number`, episodeIDs)
+		if err != nil {
+			return nil, fmt.Errorf("calendar episode details: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var v CalendarEventDetailView
+			var episodeID int64
+			var airDate pgtype.Date
+			var height int32
+			if err := rows.Scan(&episodeID, &v.LibraryID, &v.MediaType, &v.MediaItemID, &v.Slug, &v.Title,
+				&v.Season, &v.Episode, &v.EpisodeName, &v.Overview, &airDate,
+				&v.Runtime, &v.Special, &v.Monitored,
+				&v.HasFile, &height, &v.SizeBytes); err != nil {
+				return nil, err
+			}
+			v.ID = fmt.Sprintf("ep:%d", episodeID)
+			v.Kind = "episode"
+			v.Date = dateToString(airDate)
+			if v.HasFile {
+				v.Quality = resolutionLabel(0, height)
+			}
+			out = append(out, v)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+
+	if len(movieIDs) > 0 {
+		rows, err := a.db.Query(ctx, `
+			SELECT c.id, mi.library_id, c.media_type::text, c.slug, c.title, c.description,
+			       m.release_date, m.runtime_minutes, m.rating, mi.monitored,
+			       COALESCE(bool_or(lf.id IS NOT NULL) FILTER (WHERE lfl.relation_type IN ('primary', 'part')), false),
+			       COALESCE(max(lf.video_height) FILTER (WHERE lfl.relation_type IN ('primary', 'part')), 0),
+			       COALESCE(sum(lf.size) FILTER (WHERE lfl.relation_type IN ('primary', 'part')), 0)
+			FROM movies m
+			JOIN media_items mi ON mi.id = m.media_item_id
+			JOIN media_item_cards c ON c.id = mi.id
+			LEFT JOIN library_file_links lfl ON lfl.media_item_id = mi.id
+			LEFT JOIN library_files lf ON lf.id = lfl.library_file_id AND lf.deleted_at IS NULL
+			WHERE mi.id = ANY($1::bigint[])
+			GROUP BY c.id, mi.library_id, c.media_type, c.slug, c.title, c.description,
+			         m.release_date, m.runtime_minutes, m.rating, mi.monitored`, movieIDs)
+		if err != nil {
+			return nil, fmt.Errorf("calendar movie details: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var v CalendarEventDetailView
+			var release pgtype.Date
+			var rating pgtype.Numeric
+			var height int32
+			if err := rows.Scan(&v.MediaItemID, &v.LibraryID, &v.MediaType, &v.Slug, &v.Title, &v.Overview,
+				&release, &v.Runtime, &rating, &v.Monitored,
+				&v.HasFile, &height, &v.SizeBytes); err != nil {
+				return nil, err
+			}
+			v.ID = fmt.Sprintf("movie:%d", v.MediaItemID)
+			v.Kind = "movie"
+			v.Date = dateToString(release)
+			v.Rating = numericToFloat(rating)
+			if v.HasFile {
+				v.Quality = resolutionLabel(0, height)
+			}
+			out = append(out, v)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+
+	if len(discoIDs) > 0 {
+		rows, err := a.db.Query(ctx, `
+			SELECT d.id, mi.library_id, c.media_type::text, c.id, c.slug, c.title,
+			       d.title, d.album_type, d.secondary_types, d.release_date, d.track_count,
+			       d.cover_url, d.album_id, mi.monitored,
+			       al.slug, al.description, al.rating,
+			       COALESCE(ts.total, 0), COALESCE(ts.have, 0), COALESCE(ts.bytes, 0)
+			FROM artist_discography d
+			JOIN artists ar ON ar.id = d.artist_id
+			JOIN media_items mi ON mi.id = ar.media_item_id
+			JOIN media_item_cards c ON c.id = mi.id
+			LEFT JOIN albums al ON al.id = d.album_id
+			LEFT JOIN LATERAL (
+			  SELECT count(DISTINCT t.id)::int AS total,
+			         count(DISTINCT t.id) FILTER (WHERE lf.id IS NOT NULL)::int AS have,
+			         COALESCE(sum(tf.size_bytes) FILTER (WHERE lf.id IS NOT NULL), 0)::bigint AS bytes
+			  FROM tracks t
+			  LEFT JOIN track_files tf ON tf.track_id = t.id
+			  LEFT JOIN library_files lf ON lf.id = tf.library_file_id AND lf.deleted_at IS NULL
+			  WHERE t.album_id = d.album_id
+			) ts ON d.album_id IS NOT NULL
+			WHERE d.id = ANY($1::bigint[])`, discoIDs)
+		if err != nil {
+			return nil, fmt.Errorf("calendar album details: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var v CalendarEventDetailView
+			var secondary []string
+			var discoID, trackCount int64
+			var release pgtype.Date
+			var albumID pgtype.Int8
+			var albumSlug, albumDesc pgtype.Text
+			var rating pgtype.Numeric
+			var localTotal, localHave int32
+			if err := rows.Scan(&discoID, &v.LibraryID, &v.MediaType, &v.MediaItemID, &v.Slug, &v.Title,
+				&v.AlbumTitle, &v.AlbumType, &secondary, &release, &trackCount,
+				&v.CoverURL, &albumID, &v.Monitored,
+				&albumSlug, &albumDesc, &rating,
+				&localTotal, &localHave, &v.SizeBytes); err != nil {
+				return nil, err
+			}
+			v.ID = fmt.Sprintf("album:d%d", discoID)
+			v.Kind = "album"
+			v.Date = dateToString(release)
+			v.AlbumType = effectiveReleaseType(v.AlbumType, secondary, v.AlbumTitle)
+			v.Rating = numericToFloat(rating)
+			v.Overview = albumDesc.String
+			v.AlbumSlug = albumSlug.String
+			if albumID.Valid {
+				v.AlbumRef = fmt.Sprintf("%d", albumID.Int64)
+				v.TracksTotal = localTotal
+				v.TracksHave = localHave
+				v.HasFile = localHave > 0 && localHave >= localTotal && localTotal > 0
+			} else {
+				v.AlbumRef = fmt.Sprintf("d%d", discoID)
+				v.TracksTotal = int32(trackCount)
+			}
+			if int32(trackCount) > v.TracksTotal {
+				v.TracksTotal = int32(trackCount)
+			}
+			out = append(out, v)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+
+	if len(bookIDs) > 0 {
+		rows, err := a.db.Query(ctx, `
+			SELECT c.id, mi.library_id, c.media_type::text, c.slug, c.title, c.description,
+			       b.publish_date, mi.monitored,
+			       COALESCE(bool_or(lf.id IS NOT NULL), false),
+			       COALESCE(sum(lf.size), 0)
+			FROM books b
+			JOIN media_items mi ON mi.id = b.media_item_id
+			JOIN media_item_cards c ON c.id = mi.id
+			LEFT JOIN library_files lf ON lf.media_item_id = mi.id AND lf.deleted_at IS NULL
+			WHERE mi.id = ANY($1::bigint[])
+			GROUP BY c.id, mi.library_id, c.media_type, c.slug, c.title, c.description,
+			         b.publish_date, mi.monitored`, bookIDs)
+		if err != nil {
+			return nil, fmt.Errorf("calendar book details: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var v CalendarEventDetailView
+			var publish pgtype.Date
+			if err := rows.Scan(&v.MediaItemID, &v.LibraryID, &v.MediaType, &v.Slug, &v.Title, &v.Overview,
+				&publish, &v.Monitored, &v.HasFile, &v.SizeBytes); err != nil {
+				return nil, err
+			}
+			v.ID = fmt.Sprintf("book:%d", v.MediaItemID)
+			v.Kind = "book"
+			v.Date = dateToString(publish)
+			out = append(out, v)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+
+	return out, nil
 }
