@@ -1,8 +1,11 @@
 <script setup lang="ts">
-// Month grid — the scanning view. Weeks start Monday; each day cell shows up
-// to three compact chips and a "+N more" overflow. Clicking a day selects it
-// (the consumer typically shows that day's agenda beside/below the grid).
-// Presentation-only, same generic entry contract as CalendarAgenda.
+// Month grid — the scanning view. Weeks start Monday; every day cell lists
+// ALL of its events with their full fields (title, detail line, state dot,
+// tag), and the whole month is ONE css grid so `grid-auto-rows: 1fr` sizes
+// every week row to the tallest one — an Outlook-style fused table, not
+// islands of cards. Clicking a day selects it (the consumer typically shows
+// that day's agenda below). Presentation-only, same generic entry contract
+// as CalendarAgenda.
 import { parseCalendarDate, toCalendarDate, type CalendarEntry } from '~/components/calendar/calendarEntry'
 
 const props = defineProps<{
@@ -13,12 +16,11 @@ const props = defineProps<{
 
 const selectedDate = defineModel<string | null>('selectedDate', { default: null })
 
-const MAX_CHIPS = 3
-
 type DayCell = {
   date: string
   dayOfMonth: number
   inMonth: boolean
+  weekend: boolean
   isToday: boolean
   entries: CalendarEntry[]
 }
@@ -41,7 +43,7 @@ const weekdays = computed(() => {
     weekdayFormat.format(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i)))
 })
 
-const weeks = computed<DayCell[][]>(() => {
+const cells = computed<DayCell[]>(() => {
   const [y, m] = props.month.split('-').map(Number)
   const first = new Date(y!, (m ?? 1) - 1, 1)
   // Walk back to Monday (getDay(): 0 = Sunday).
@@ -49,23 +51,22 @@ const weeks = computed<DayCell[][]>(() => {
   start.setDate(first.getDate() - ((first.getDay() + 6) % 7))
   const today = toCalendarDate(new Date())
 
-  const out: DayCell[][] = []
+  const out: DayCell[] = []
   const cursor = new Date(start)
   do {
-    const week: DayCell[] = []
     for (let i = 0; i < 7; i++) {
       const date = toCalendarDate(cursor)
-      week.push({
+      out.push({
         date,
         dayOfMonth: cursor.getDate(),
         inMonth: cursor.getMonth() === (m ?? 1) - 1,
+        weekend: i >= 5,
         isToday: date === today,
         entries: byDate.value.get(date) ?? [],
       })
       cursor.setDate(cursor.getDate() + 1)
     }
-    out.push(week)
-  } while (cursor.getMonth() === (m ?? 1) - 1 && out.length < 6)
+  } while (cursor.getMonth() === (m ?? 1) - 1 && out.length < 6 * 7)
   return out
 })
 
@@ -79,15 +80,15 @@ function toggleDay(cell: DayCell) {
     <div class="cmg-weekdays">
       <span v-for="day in weekdays" :key="day" class="cmg-weekday">{{ day }}</span>
     </div>
-    <div v-for="(week, wi) in weeks" :key="wi" class="cmg-week">
+    <div class="cmg-grid">
       <button
-        v-for="(cell, ci) in week"
+        v-for="cell in cells"
         :key="cell.date"
         type="button"
         class="cmg-cell"
         :class="{
           outside: !cell.inMonth,
-          weekend: ci >= 5,
+          weekend: cell.weekend,
           today: cell.isToday,
           selected: selectedDate === cell.date,
           'has-events': cell.entries.length > 0,
@@ -97,14 +98,14 @@ function toggleDay(cell: DayCell) {
         @click="toggleDay(cell)"
       >
         <span class="cmg-daynum">{{ cell.dayOfMonth }}</span>
-        <span v-for="entry in cell.entries.slice(0, MAX_CHIPS)" :key="entry.id" class="cmg-chip">
-          <span v-if="entry.badge" class="cmg-dot" :class="`state-${entry.badge.state}`" />
-          <Icon v-if="entry.icon" :name="entry.icon" :size="10" class="cmg-chip-icon" />
-          <span class="cmg-chip-title">{{ entry.title }}</span>
-          <span v-if="entry.tags?.length" class="cmg-chip-tag" :class="`tone-${entry.tags[0]!.tone}`">{{ entry.tags[0]!.label }}</span>
-        </span>
-        <span v-if="cell.entries.length > MAX_CHIPS" class="cmg-more">
-          +{{ cell.entries.length - MAX_CHIPS }} more
+        <span v-for="entry in cell.entries" :key="entry.id" class="cmg-chip">
+          <span class="cmg-chip-head">
+            <span v-if="entry.badge" class="cmg-dot" :class="`state-${entry.badge.state}`" />
+            <Icon v-if="entry.icon" :name="entry.icon" :size="10" class="cmg-chip-icon" />
+            <span class="cmg-chip-title">{{ entry.title }}</span>
+            <span v-if="entry.tags?.length" class="cmg-chip-tag" :class="`tone-${entry.tags[0]!.tone}`">{{ entry.tags[0]!.label }}</span>
+          </span>
+          <span v-if="entry.subtitle" class="cmg-chip-sub">{{ entry.subtitle }}</span>
         </span>
       </button>
     </div>
@@ -123,13 +124,10 @@ function toggleDay(cell: DayCell) {
   overflow: hidden;
 }
 
-.cmg-weekdays,
-.cmg-week {
+.cmg-weekdays {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
 }
-.cmg-week { border-top: 1px solid var(--hair); }
-
 .cmg-weekday {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -142,21 +140,30 @@ function toggleDay(cell: DayCell) {
 }
 .cmg-weekday + .cmg-weekday { border-left: 1px solid var(--hair); }
 
+/* One grid for the whole month: 1fr auto-rows give every week row the
+   height of the tallest, Outlook-style. */
+.cmg-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
+}
+
 .cmg-cell {
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 3px;
-  min-height: 116px;
+  min-height: 104px;
   padding: 6px;
   text-align: left;
   background: none;
   border: 0;
+  border-top: 1px solid var(--hair);
   cursor: pointer;
   transition: background 0.12s;
   min-width: 0;
 }
-.cmg-cell + .cmg-cell { border-left: 1px solid var(--hair); }
+.cmg-cell:not(:nth-child(7n + 1)) { border-left: 1px solid var(--hair); }
 .cmg-cell:hover { background: rgb(var(--ink) / 0.04); }
 .cmg-cell.weekend { background: rgb(var(--shade) / 0.14); }
 .cmg-cell.weekend:hover { background: rgb(var(--ink) / 0.04); }
@@ -185,14 +192,20 @@ function toggleDay(cell: DayCell) {
 
 .cmg-chip {
   display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 5px;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px 6px;
   border-radius: 4px;
   background: rgb(var(--ink) / 0.06);
+  min-width: 0;
+}
+.cmg-chip-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
   font-size: 10.5px;
   color: var(--fg-1);
-  min-width: 0;
 }
 .cmg-chip-icon { flex-shrink: 0; color: var(--fg-3); }
 .cmg-chip-title {
@@ -200,6 +213,14 @@ function toggleDay(cell: DayCell) {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+.cmg-chip-sub {
+  font-size: 9.5px;
+  color: var(--fg-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-left: 13px;
 }
 
 .cmg-chip-tag {
@@ -221,11 +242,4 @@ function toggleDay(cell: DayCell) {
 .cmg-dot.state-warn { background: var(--gold-bright); }
 .cmg-dot.state-error { background: var(--bad); }
 .cmg-dot.state-idle { background: var(--fg-3); }
-
-.cmg-more {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  color: var(--fg-3);
-  padding: 0 5px;
-}
 </style>

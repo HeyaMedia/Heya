@@ -12,7 +12,7 @@ import { toCalendarDate, parseCalendarDate, type CalendarEntry, type CalendarEnt
 
 // ── View state ───────────────────────────────────────────────────────────
 
-const view = ref<'agenda' | 'month'>('agenda')
+const view = ref<'agenda' | 'month'>('month')
 onMounted(() => {
   const saved = localStorage.getItem('heya:manager:calendar-view')
   if (saved === 'agenda' || saved === 'month') view.value = saved
