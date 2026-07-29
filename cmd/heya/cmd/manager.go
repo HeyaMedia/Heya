@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/karbowiak/heya/internal/service"
 	"github.com/karbowiak/heya/internal/ui"
@@ -924,7 +925,79 @@ var managerFormatRemoveCmd = &cobra.Command{
 	},
 }
 
+// ── Calendar ─────────────────────────────────────────────────────────────
+
+var managerCalendarCmd = &cobra.Command{
+	Use:   "calendar",
+	Short: "Release calendar: episodes airing, movies and albums releasing",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fromFlag, _ := cmd.Flags().GetString("from")
+		toFlag, _ := cmd.Flags().GetString("to")
+		libraries, _ := cmd.Flags().GetInt64Slice("library")
+		monitored, _ := cmd.Flags().GetBool("monitored")
+
+		now := time.Now()
+		from := now.AddDate(0, 0, -7)
+		to := now.AddDate(0, 0, 30)
+		var err error
+		if fromFlag != "" {
+			if from, err = time.Parse("2006-01-02", fromFlag); err != nil {
+				return fmt.Errorf("--from must be YYYY-MM-DD")
+			}
+		}
+		if toFlag != "" {
+			if to, err = time.Parse("2006-01-02", toFlag); err != nil {
+				return fmt.Errorf("--to must be YYYY-MM-DD")
+			}
+		}
+
+		return withApp(func(ctx context.Context, app *service.App) error {
+			events, err := app.CalendarEvents(ctx, service.CalendarParams{
+				From:       from,
+				To:         to,
+				LibraryIDs: libraries,
+				Monitored:  monitored,
+			})
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(events)
+			}
+			table := ui.NewTable("Date", "Kind", "Title", "Detail", "State")
+			today := now.Format("2006-01-02")
+			for _, ev := range events {
+				detail := ""
+				switch ev.Kind {
+				case "episode":
+					detail = fmt.Sprintf("S%02dE%02d · %s", ev.Season, ev.Episode, ev.EpisodeName)
+				case "album":
+					detail = fmt.Sprintf("%s (%s)", ev.AlbumTitle, ev.AlbumType)
+				}
+				state := "upcoming"
+				switch {
+				case ev.HasFile:
+					state = "downloaded"
+				case ev.Date == today:
+					state = "today"
+				case ev.Date < today:
+					state = "missing"
+				}
+				table.AddRow(ev.Date, ev.Kind, ev.Title, detail, state)
+			}
+			fmt.Println(table.Render())
+			ui.Info("Events", fmt.Sprintf("%d · %s → %s", len(events), from.Format("2006-01-02"), to.Format("2006-01-02")))
+			return nil
+		})
+	},
+}
+
 func init() {
+	managerCalendarCmd.Flags().String("from", "", "Window start (YYYY-MM-DD; default one week back)")
+	managerCalendarCmd.Flags().String("to", "", "Window end (YYYY-MM-DD; default 30 days ahead)")
+	managerCalendarCmd.Flags().Int64Slice("library", nil, "Restrict to library ids (repeatable)")
+	managerCalendarCmd.Flags().Bool("monitored", false, "Monitored items only")
+
 	managerIndexerAddCmd.Flags().String("name", "", "Display name")
 	managerIndexerAddCmd.Flags().String("kind", "prowlarr", "prowlarr | torznab | newznab")
 	managerIndexerAddCmd.Flags().String("url", "", "Base URL (prowlarr app URL, or the torznab api endpoint)")
@@ -970,6 +1043,6 @@ func init() {
 	managerLibrarySetCmd.Flags().Int64("profile", 0, "Quality profile id to assign (0 clears it)")
 	managerLibraryCmd.AddCommand(managerLibraryItemsCmd, managerLibraryShowCmd, managerLibraryAlbumCmd, managerLibrarySetCmd, managerLibraryRefreshCmd)
 
-	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd, managerFormatCmd, managerLibraryCmd)
+	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd, managerFormatCmd, managerLibraryCmd, managerCalendarCmd)
 	rootCmd.AddCommand(managerCmd)
 }

@@ -121,8 +121,37 @@ export const managerCustomFormatsQuery = defineQueryOptions(() => ({
   meta: { prefetch: 'none', sensitivity: 'private' },
 }))
 
-export type { ManagerAlbumDetailView, ManagerTrackView } from '~~/shared/api/types.gen'
-import type { ManagerAlbumDetailView } from '~~/shared/api/types.gen'
+export type { ManagerAlbumDetailView, ManagerTrackView, CalendarEventView } from '~~/shared/api/types.gen'
+import type { ManagerAlbumDetailView, CalendarEventView } from '~~/shared/api/types.gen'
+
+export type ManagerCalendarParams = {
+  from: string // YYYY-MM-DD, inclusive
+  to: string // YYYY-MM-DD, inclusive
+  libraries?: number[]
+  monitored?: boolean
+}
+
+export const managerCalendarQuery = defineQueryOptions((p: ManagerCalendarParams) => ({
+  key: ['manager', 'calendar', p.from, p.to, (p.libraries ?? []).join(','), p.monitored ?? false],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/manager/calendar', {
+      query: {
+        from: p.from,
+        to: p.to,
+        // Comma-joined on purpose: huma parses "3,2" into the []int64 param,
+        // while ofetch's repeated-key array form keeps only the first value.
+        libraries: p.libraries?.length ? p.libraries.join(',') : undefined,
+        monitored: p.monitored || undefined,
+      },
+    }) as CalendarEventView[]
+  },
+  // Month navigation swaps the key; carrying the previous window keeps the
+  // grid on screen instead of flashing empty while the new range loads.
+  placeholderData: (prev: CalendarEventView[] | undefined) => prev,
+  staleTime: 1000 * 60 * 5,
+  meta: { prefetch: 'none', sensitivity: 'private' },
+}))
 
 export const managerAlbumDetailQuery = defineQueryOptions((ref: string) => ({
   key: ['manager', 'album', ref],

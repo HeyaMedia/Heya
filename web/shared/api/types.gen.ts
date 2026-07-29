@@ -966,6 +966,54 @@ export type BrowseBucketArtist = {
     public_id: string;
 };
 
+export type CalendarEventView = {
+    /**
+     * Manager album page ref: local id or d<discography id>
+     */
+    album_ref?: string;
+    album_title?: string;
+    /**
+     * Resolved release bucket: album | ep | single | live | ...
+     */
+    album_type?: string;
+    /**
+     * YYYY-MM-DD
+     */
+    date: string;
+    episode?: number;
+    episode_name?: string;
+    /**
+     * Episode/movie/book: a live file exists. Album: the linked local copy is complete.
+     */
+    has_file: boolean;
+    /**
+     * Stable opaque event id, e.g. ep:123 / movie:9 / album:d42 — media_item_id alone is not unique for episodes or artist releases
+     */
+    id: string;
+    /**
+     * What kind of release this is
+     */
+    kind: 'episode' | 'movie' | 'album' | 'book';
+    library_id: number;
+    /**
+     * The owning item: series, movie, artist, or book
+     */
+    media_item_id: number;
+    media_type: string;
+    /**
+     * Season/series boundary markers for episode events
+     */
+    milestone?: '' | 'series_premiere' | 'season_premiere' | 'season_finale' | 'series_finale';
+    monitored: boolean;
+    season?: number;
+    slug: string;
+    special?: boolean;
+    /**
+     * Series / movie / artist / book name
+     */
+    title: string;
+};
+
 export type CancelBody = {
     /**
      * A URL to the JSON Schema for this object.
@@ -13849,6 +13897,48 @@ export type ManagerAlbumDetailResponses = {
 };
 
 export type ManagerAlbumDetailResponse = ManagerAlbumDetailResponses[keyof ManagerAlbumDetailResponses];
+
+export type ManagerCalendarData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * YYYY-MM-DD; default one week back
+         */
+        from?: string;
+        /**
+         * YYYY-MM-DD; default 30 days ahead
+         */
+        to?: string;
+        /**
+         * Library ids to include; omit for all
+         */
+        libraries?: Array<number> | null;
+        /**
+         * Monitored items only
+         */
+        monitored?: boolean;
+    };
+    url: '/api/manager/calendar';
+};
+
+export type ManagerCalendarErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerCalendarError = ManagerCalendarErrors[keyof ManagerCalendarErrors];
+
+export type ManagerCalendarResponses = {
+    /**
+     * OK
+     */
+    200: Array<CalendarEventView> | null;
+};
+
+export type ManagerCalendarResponse = ManagerCalendarResponses[keyof ManagerCalendarResponses];
 
 export type ManagerListCustomFormatsData = {
     body?: never;

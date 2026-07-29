@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/karbowiak/heya/internal/service"
@@ -260,6 +261,41 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
 			}
 			return &JSONOutput[service.ManagerReleaseTestView]{Body: view}, nil
+		})
+
+	// ── Calendar ─────────────────────────────────────────────────────────
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/calendar", "manager-calendar", "Release calendar: episodes airing, movies and albums releasing, books publishing", "Manager")),
+		func(ctx context.Context, in *struct {
+			From      string  `query:"from" doc:"YYYY-MM-DD; default one week back"`
+			To        string  `query:"to" doc:"YYYY-MM-DD; default 30 days ahead"`
+			Libraries []int64 `query:"libraries" doc:"Library ids to include; omit for all"`
+			Monitored bool    `query:"monitored" doc:"Monitored items only"`
+		}) (*JSONOutput[[]service.CalendarEventView], error) {
+			now := time.Now()
+			from := now.AddDate(0, 0, -7)
+			to := now.AddDate(0, 0, 30)
+			var err error
+			if in.From != "" {
+				if from, err = time.Parse("2006-01-02", in.From); err != nil {
+					return nil, huma.Error400BadRequest("from must be YYYY-MM-DD")
+				}
+			}
+			if in.To != "" {
+				if to, err = time.Parse("2006-01-02", in.To); err != nil {
+					return nil, huma.Error400BadRequest("to must be YYYY-MM-DD")
+				}
+			}
+			events, err := app.CalendarEvents(ctx, service.CalendarParams{
+				From:       from,
+				To:         to,
+				LibraryIDs: in.Libraries,
+				Monitored:  in.Monitored,
+			})
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return noStoreJSON(events), nil
 		})
 
 	// ── Library lens ─────────────────────────────────────────────────────

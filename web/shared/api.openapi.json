@@ -3285,6 +3285,104 @@
         ],
         "type": "object"
       },
+      "CalendarEventView": {
+        "additionalProperties": false,
+        "properties": {
+          "album_ref": {
+            "description": "Manager album page ref: local id or d\u003cdiscography id\u003e",
+            "type": "string"
+          },
+          "album_title": {
+            "type": "string"
+          },
+          "album_type": {
+            "description": "Resolved release bucket: album | ep | single | live | ...",
+            "type": "string"
+          },
+          "date": {
+            "description": "YYYY-MM-DD",
+            "type": "string"
+          },
+          "episode": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "episode_name": {
+            "type": "string"
+          },
+          "has_file": {
+            "description": "Episode/movie/book: a live file exists. Album: the linked local copy is complete.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Stable opaque event id, e.g. ep:123 / movie:9 / album:d42 — media_item_id alone is not unique for episodes or artist releases",
+            "type": "string"
+          },
+          "kind": {
+            "description": "What kind of release this is",
+            "enum": [
+              "episode",
+              "movie",
+              "album",
+              "book"
+            ],
+            "type": "string"
+          },
+          "library_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "media_item_id": {
+            "description": "The owning item: series, movie, artist, or book",
+            "format": "int64",
+            "type": "integer"
+          },
+          "media_type": {
+            "type": "string"
+          },
+          "milestone": {
+            "description": "Season/series boundary markers for episode events",
+            "enum": [
+              "",
+              "series_premiere",
+              "season_premiere",
+              "season_finale",
+              "series_finale"
+            ],
+            "type": "string"
+          },
+          "monitored": {
+            "type": "boolean"
+          },
+          "season": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "special": {
+            "type": "boolean"
+          },
+          "title": {
+            "description": "Series / movie / artist / book name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "date",
+          "kind",
+          "library_id",
+          "media_type",
+          "media_item_id",
+          "slug",
+          "title",
+          "has_file",
+          "monitored"
+        ],
+        "type": "object"
+      },
       "CancelBody": {
         "additionalProperties": false,
         "properties": {
@@ -33446,6 +33544,104 @@
           }
         ],
         "summary": "Album page: tracklist with per-track file and quality state",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
+    "/api/manager/calendar": {
+      "get": {
+        "operationId": "manager-calendar",
+        "parameters": [
+          {
+            "description": "YYYY-MM-DD; default one week back",
+            "explode": false,
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "description": "YYYY-MM-DD; default one week back",
+              "type": "string"
+            }
+          },
+          {
+            "description": "YYYY-MM-DD; default 30 days ahead",
+            "explode": false,
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "description": "YYYY-MM-DD; default 30 days ahead",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Library ids to include; omit for all",
+            "explode": false,
+            "in": "query",
+            "name": "libraries",
+            "schema": {
+              "description": "Library ids to include; omit for all",
+              "items": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "Monitored items only",
+            "explode": false,
+            "in": "query",
+            "name": "monitored",
+            "schema": {
+              "description": "Monitored items only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CalendarEventView"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Release calendar: episodes airing, movies and albums releasing, books publishing",
         "tags": [
           "Manager"
         ]

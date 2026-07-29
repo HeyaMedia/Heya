@@ -1,0 +1,231 @@
+<script setup lang="ts">
+// Month grid — the scanning view. Weeks start Monday; each day cell shows up
+// to three compact chips and a "+N more" overflow. Clicking a day selects it
+// (the consumer typically shows that day's agenda beside/below the grid).
+// Presentation-only, same generic entry contract as CalendarAgenda.
+import { parseCalendarDate, toCalendarDate, type CalendarEntry } from '~/components/calendar/calendarEntry'
+
+const props = defineProps<{
+  /** Which month to render, as YYYY-MM. */
+  month: string
+  entries: CalendarEntry[]
+}>()
+
+const selectedDate = defineModel<string | null>('selectedDate', { default: null })
+
+const MAX_CHIPS = 3
+
+type DayCell = {
+  date: string
+  dayOfMonth: number
+  inMonth: boolean
+  isToday: boolean
+  entries: CalendarEntry[]
+}
+
+const byDate = computed(() => {
+  const map = new Map<string, CalendarEntry[]>()
+  for (const entry of props.entries) {
+    const list = map.get(entry.date)
+    if (list) list.push(entry)
+    else map.set(entry.date, [entry])
+  }
+  return map
+})
+
+const weekdayFormat = new Intl.DateTimeFormat(undefined, { weekday: 'short' })
+const weekdays = computed(() => {
+  // A known Monday (2024-01-01) anchors the label order.
+  const monday = new Date(2024, 0, 1)
+  return Array.from({ length: 7 }, (_, i) =>
+    weekdayFormat.format(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i)))
+})
+
+const weeks = computed<DayCell[][]>(() => {
+  const [y, m] = props.month.split('-').map(Number)
+  const first = new Date(y!, (m ?? 1) - 1, 1)
+  // Walk back to Monday (getDay(): 0 = Sunday).
+  const start = new Date(first)
+  start.setDate(first.getDate() - ((first.getDay() + 6) % 7))
+  const today = toCalendarDate(new Date())
+
+  const out: DayCell[][] = []
+  const cursor = new Date(start)
+  do {
+    const week: DayCell[] = []
+    for (let i = 0; i < 7; i++) {
+      const date = toCalendarDate(cursor)
+      week.push({
+        date,
+        dayOfMonth: cursor.getDate(),
+        inMonth: cursor.getMonth() === (m ?? 1) - 1,
+        isToday: date === today,
+        entries: byDate.value.get(date) ?? [],
+      })
+      cursor.setDate(cursor.getDate() + 1)
+    }
+    out.push(week)
+  } while (cursor.getMonth() === (m ?? 1) - 1 && out.length < 6)
+  return out
+})
+
+function toggleDay(cell: DayCell) {
+  selectedDate.value = selectedDate.value === cell.date ? null : cell.date
+}
+</script>
+
+<template>
+  <div class="cmg">
+    <div class="cmg-weekdays">
+      <span v-for="day in weekdays" :key="day" class="cmg-weekday">{{ day }}</span>
+    </div>
+    <div v-for="(week, wi) in weeks" :key="wi" class="cmg-week">
+      <button
+        v-for="(cell, ci) in week"
+        :key="cell.date"
+        type="button"
+        class="cmg-cell"
+        :class="{
+          outside: !cell.inMonth,
+          weekend: ci >= 5,
+          today: cell.isToday,
+          selected: selectedDate === cell.date,
+          'has-events': cell.entries.length > 0,
+        }"
+        :aria-label="`${cell.date}, ${cell.entries.length} releases`"
+        :aria-pressed="selectedDate === cell.date"
+        @click="toggleDay(cell)"
+      >
+        <span class="cmg-daynum">{{ cell.dayOfMonth }}</span>
+        <span v-for="entry in cell.entries.slice(0, MAX_CHIPS)" :key="entry.id" class="cmg-chip">
+          <span v-if="entry.badge" class="cmg-dot" :class="`state-${entry.badge.state}`" />
+          <Icon v-if="entry.icon" :name="entry.icon" :size="10" class="cmg-chip-icon" />
+          <span class="cmg-chip-title">{{ entry.title }}</span>
+          <span v-if="entry.tags?.length" class="cmg-chip-tag" :class="`tone-${entry.tags[0]!.tone}`">{{ entry.tags[0]!.label }}</span>
+        </span>
+        <span v-if="cell.entries.length > MAX_CHIPS" class="cmg-more">
+          +{{ cell.entries.length - MAX_CHIPS }} more
+        </span>
+      </button>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+/* Outlook-style fused table: one continuous bordered grid, weeks as rows,
+   hairline separators instead of per-day card islands. */
+.cmg {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-2);
+  overflow: hidden;
+}
+
+.cmg-weekdays,
+.cmg-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.cmg-week { border-top: 1px solid var(--hair); }
+
+.cmg-weekday {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  padding: 8px 10px 7px;
+  text-align: right;
+}
+.cmg-weekday + .cmg-weekday { border-left: 1px solid var(--hair); }
+
+.cmg-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  min-height: 116px;
+  padding: 6px;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  transition: background 0.12s;
+  min-width: 0;
+}
+.cmg-cell + .cmg-cell { border-left: 1px solid var(--hair); }
+.cmg-cell:hover { background: rgb(var(--ink) / 0.04); }
+.cmg-cell.weekend { background: rgb(var(--shade) / 0.14); }
+.cmg-cell.weekend:hover { background: rgb(var(--ink) / 0.04); }
+.cmg-cell.outside { background: rgb(var(--shade) / 0.28); }
+.cmg-cell.outside .cmg-daynum,
+.cmg-cell.outside .cmg-chip { opacity: 0.5; }
+.cmg-cell.selected,
+.cmg-cell.selected.weekend { background: var(--gold-soft); }
+
+/* Outlook grammar: the day number sits top-right; today wears a gold pill. */
+.cmg-daynum {
+  align-self: flex-end;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-2);
+  min-width: 20px;
+  line-height: 20px;
+  text-align: center;
+  border-radius: 999px;
+}
+.cmg-cell.today .cmg-daynum {
+  background: var(--gold);
+  color: var(--accent-ink, var(--bg-0));
+}
+
+.cmg-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgb(var(--ink) / 0.06);
+  font-size: 10.5px;
+  color: var(--fg-1);
+  min-width: 0;
+}
+.cmg-chip-icon { flex-shrink: 0; color: var(--fg-3); }
+.cmg-chip-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.cmg-chip-tag {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.cmg-chip-tag.tone-gold { color: var(--gold-bright); }
+.cmg-chip-tag.tone-good { color: var(--good); }
+.cmg-chip-tag.tone-bad { color: var(--bad); }
+.cmg-chip-tag.tone-neutral { color: var(--fg-3); }
+
+.cmg-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+.cmg-dot.state-ok { background: var(--good); }
+.cmg-dot.state-warn { background: var(--gold-bright); }
+.cmg-dot.state-error { background: var(--bad); }
+.cmg-dot.state-idle { background: var(--fg-3); }
+
+.cmg-more {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--fg-3);
+  padding: 0 5px;
+}
+</style>
