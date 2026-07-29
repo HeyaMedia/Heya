@@ -12494,9 +12494,22 @@
       "ManagerAlbumView": {
         "additionalProperties": false,
         "properties": {
-          "id": {
+          "cover_url": {
+            "description": "Provider cover for catalog-only releases (local albums use the cover endpoint)",
+            "type": "string"
+          },
+          "discography_id": {
+            "description": "artist_discography row id when the release is in the provider catalog",
             "format": "int64",
             "type": "integer"
+          },
+          "id": {
+            "description": "Local album id; 0 for catalog-only releases the library doesn't have",
+            "format": "int64",
+            "type": "integer"
+          },
+          "in_library": {
+            "type": "boolean"
           },
           "rating": {
             "format": "double",
@@ -12538,7 +12551,8 @@
           "type",
           "tracks_have",
           "tracks_total",
-          "size_bytes"
+          "size_bytes",
+          "in_library"
         ],
         "type": "object"
       },

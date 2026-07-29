@@ -237,6 +237,15 @@ const albumGroups = computed(() => {
       }
     })
 })
+// Local albums use the unconditional cover endpoint; catalog-only releases
+// carry a provider URL (proxied) or nothing — a bare <img> with no src
+// renders the broken-image glyph, so coverless rows get a plain tile.
+function albumCoverSrc(al: ManagerAlbumView): string | null {
+  if (al.in_library) return useAlbumCoverUrl(item.value?.slug, al.slug)
+  const proxied = metadataImageProxyUrl(al.cover_url ?? '')
+  return proxied || null
+}
+
 function albumTone(al: ManagerAlbumView): string {
   if (al.tracks_total <= 0) return 'none'
   if (al.tracks_have <= 0) return 'bad'
@@ -386,17 +395,25 @@ const FILE_KIND_LABELS: Record<string, string> = {
                 <tr><th class="det-cover-col" /><th>Title</th><th>Released</th><th class="num">Tracks</th><th class="num">Size</th></tr>
               </thead>
               <tbody>
-                <tr v-for="album in group.albums" :key="album.id">
+                <tr v-for="album in group.albums" :key="album.id || `d${album.discography_id}`" :class="{ 'det-row-wanted': !album.in_library }">
                   <td class="det-cover-col">
                     <NuxtImg
-                      :src="useAlbumCoverUrl(item.slug, album.slug) ?? undefined"
+                      v-if="albumCoverSrc(album)"
+                      :src="albumCoverSrc(album)!"
                       class="det-cover" :alt="''" width="64" loading="lazy"
                     />
+                    <div v-else class="det-cover" aria-hidden="true" />
                   </td>
-                  <td class="det-ep-title">{{ album.title }}</td>
+                  <td class="det-ep-title">
+                    {{ album.title }}
+                    <span v-if="!album.in_library" class="det-badge tone-bad det-wanted-badge">Not in library</span>
+                  </td>
                   <td class="mono">{{ album.release_date || album.year || '—' }}</td>
-                  <td class="num"><span class="det-badge" :class="`tone-${albumTone(album)}`">{{ album.tracks_have }} / {{ album.tracks_total }}</span></td>
-                  <td class="num mono">{{ fmtBytes(album.size_bytes) }}</td>
+                  <td class="num">
+                    <span v-if="!album.in_library && !album.tracks_total" class="det-badge tone-bad">Missing</span>
+                    <span v-else class="det-badge" :class="`tone-${albumTone(album)}`">{{ album.tracks_have }} / {{ album.tracks_total }}</span>
+                  </td>
+                  <td class="num mono">{{ album.in_library ? fmtBytes(album.size_bytes) : '—' }}</td>
                 </tr>
               </tbody>
             </table>
@@ -635,4 +652,6 @@ const FILE_KIND_LABELS: Record<string, string> = {
   object-fit: cover;
   background: var(--bg-3);
 }
+.det-row-wanted .det-ep-title { color: var(--fg-2); }
+.det-wanted-badge { margin-left: 8px; }
 </style>

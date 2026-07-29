@@ -50,16 +50,19 @@ type ManagerFileView struct {
 }
 
 type ManagerAlbumView struct {
-	ID          int64   `json:"id"`
-	Title       string  `json:"title"`
-	Slug        string  `json:"slug"`
-	Type        string  `json:"type" doc:"album | ep | single | compilation | ..."`
-	ReleaseDate string  `json:"release_date,omitempty"`
-	Year        string  `json:"year,omitempty"`
-	Rating      float64 `json:"rating,omitempty"`
-	TracksHave  int32   `json:"tracks_have"`
-	TracksTotal int32   `json:"tracks_total"`
-	SizeBytes   int64   `json:"size_bytes"`
+	ID            int64   `json:"id" doc:"Local album id; 0 for catalog-only releases the library doesn't have"`
+	DiscographyID int64   `json:"discography_id,omitempty" doc:"artist_discography row id when the release is in the provider catalog"`
+	Title         string  `json:"title"`
+	Slug          string  `json:"slug"`
+	Type          string  `json:"type" doc:"album | ep | single | compilation | ..."`
+	ReleaseDate   string  `json:"release_date,omitempty"`
+	Year          string  `json:"year,omitempty"`
+	Rating        float64 `json:"rating,omitempty"`
+	TracksHave    int32   `json:"tracks_have"`
+	TracksTotal   int32   `json:"tracks_total"`
+	SizeBytes     int64   `json:"size_bytes"`
+	InLibrary     bool    `json:"in_library"`
+	CoverURL      string  `json:"cover_url,omitempty" doc:"Provider cover for catalog-only releases (local albums use the cover endpoint)"`
 }
 
 type ManagerMediaDetailView struct {
@@ -518,6 +521,10 @@ func (a *App) managerSeriesSeasons(ctx context.Context, id int64) ([]ManagerSeas
 	return seasons, sizeRows.Err()
 }
 
+// managerArtistAlbums merges the provider's full discography with the
+// library's local albums, Lidarr-style: every known release appears, linked
+// ones carry local completeness and size, catalog-only ones read 0/N. Local
+// albums the catalog doesn't know (bootlegs, unmatched) still show.
 func (a *App) managerArtistAlbums(ctx context.Context, id int64) ([]ManagerAlbumView, error) {
 	rows, err := a.db.Query(ctx, `
 		SELECT al.id, al.title, al.slug, al.album_type, al.release_date, al.year, al.rating,
@@ -536,7 +543,8 @@ func (a *App) managerArtistAlbums(ctx context.Context, id int64) ([]ManagerAlbum
 	}
 	defer rows.Close()
 
-	albums := []ManagerAlbumView{}
+	locals := []ManagerAlbumView{}
+	byAlbumID := map[int64]int{}
 	for rows.Next() {
 		var al ManagerAlbumView
 		var release pgtype.Date
@@ -547,7 +555,73 @@ func (a *App) managerArtistAlbums(ctx context.Context, id int64) ([]ManagerAlbum
 		}
 		al.ReleaseDate = dateToString(release)
 		al.Rating = numericToFloat(rating)
-		albums = append(albums, al)
+		al.InLibrary = true
+		byAlbumID[al.ID] = len(locals)
+		locals = append(locals, al)
 	}
-	return albums, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	discoRows, err := a.db.Query(ctx, `
+		SELECT d.id, d.title, d.album_type, d.release_date, d.year, d.track_count, d.cover_url, d.album_id
+		FROM artist_discography d
+		JOIN artists ar ON ar.id = d.artist_id AND ar.media_item_id = $1
+		ORDER BY d.release_date DESC NULLS LAST, d.year DESC, d.title ASC`, id)
+	if err != nil {
+		return nil, fmt.Errorf("manager artist discography: %w", err)
+	}
+	defer discoRows.Close()
+
+	merged := []ManagerAlbumView{}
+	linked := map[int64]bool{}
+	haveDiscography := false
+	for discoRows.Next() {
+		haveDiscography = true
+		var discoID, trackCount int64
+		var title, albumType, year, coverURL string
+		var release pgtype.Date
+		var albumID pgtype.Int8
+		if err := discoRows.Scan(&discoID, &title, &albumType, &release, &year,
+			&trackCount, &coverURL, &albumID); err != nil {
+			return nil, err
+		}
+		if albumID.Valid {
+			if idx, ok := byAlbumID[albumID.Int64]; ok {
+				local := locals[idx]
+				local.DiscographyID = discoID
+				// The catalog's release-group type wins — local rows often
+				// default to 'album'; catalog track counts fill gaps where
+				// the local rip is partial.
+				local.Type = albumType
+				if int32(trackCount) > local.TracksTotal {
+					local.TracksTotal = int32(trackCount)
+				}
+				linked[albumID.Int64] = true
+				merged = append(merged, local)
+				continue
+			}
+		}
+		merged = append(merged, ManagerAlbumView{
+			DiscographyID: discoID,
+			Title:         title,
+			Type:          albumType,
+			ReleaseDate:   dateToString(release),
+			Year:          year,
+			TracksTotal:   int32(trackCount),
+			CoverURL:      coverURL,
+		})
+	}
+	if err := discoRows.Err(); err != nil {
+		return nil, err
+	}
+	if !haveDiscography {
+		return locals, nil
+	}
+	for _, local := range locals {
+		if !linked[local.ID] {
+			merged = append(merged, local)
+		}
+	}
+	return merged, nil
 }

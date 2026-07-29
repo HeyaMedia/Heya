@@ -257,6 +257,22 @@ type ArtistCentroid struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ArtistDiscography struct {
+	ID             int64              `json:"id"`
+	ArtistID       int64              `json:"artist_id"`
+	CanonicalID    string             `json:"canonical_id"`
+	Title          string             `json:"title"`
+	AlbumType      string             `json:"album_type"`
+	SecondaryTypes []string           `json:"secondary_types"`
+	ReleaseDate    pgtype.Date        `json:"release_date"`
+	Year           string             `json:"year"`
+	TrackCount     int32              `json:"track_count"`
+	ExternalIds    []byte             `json:"external_ids"`
+	CoverUrl       string             `json:"cover_url"`
+	AlbumID        pgtype.Int8        `json:"album_id"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ArtistSimilarArtist struct {
 	ID            int64          `json:"id"`
 	ArtistID      int64          `json:"artist_id"`

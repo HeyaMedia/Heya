@@ -156,7 +156,7 @@ const UNIT_LABELS: Record<string, { unit: string, group: string }> = {
   movie: { unit: 'movies', group: '' },
   tv: { unit: 'episodes', group: 'Seasons' },
   anime: { unit: 'episodes', group: 'Seasons' },
-  music: { unit: 'tracks', group: 'Albums' },
+  music: { unit: 'releases', group: 'Albums' },
   book: { unit: 'books', group: '' },
 }
 const vocab = computed(() => UNIT_LABELS[library.value?.media_type ?? 'movie'] ?? UNIT_LABELS.movie!)

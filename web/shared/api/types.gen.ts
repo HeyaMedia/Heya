@@ -3447,7 +3447,19 @@ export type LyricsResponse = {
 };
 
 export type ManagerAlbumView = {
+    /**
+     * Provider cover for catalog-only releases (local albums use the cover endpoint)
+     */
+    cover_url?: string;
+    /**
+     * artist_discography row id when the release is in the provider catalog
+     */
+    discography_id?: number;
+    /**
+     * Local album id; 0 for catalog-only releases the library doesn't have
+     */
     id: number;
+    in_library: boolean;
     rating?: number;
     release_date?: string;
     size_bytes: number;

@@ -176,32 +176,54 @@ have AS (
   WHERE c.library_id = $1 AND ($2::bigint = 0 OR c.id = $2)
 )`, nil
 	case "music":
-		// media_item = artist. The albums table is local-first (catalog-only
-		// discography lives in music_catalog_*), so track totals are "tracks
-		// this library knows about", and missing = partial albums. One pass
-		// over the 400k-track join with FILTER beats separate total/have
-		// aggregates by ~2.5x.
+		// media_item = artist, and the unit is a RELEASE (album/EP/single).
+		// artist_discography carries the full provider catalog; the albums
+		// table stays local-first. A release counts as "have" only when its
+		// local album exists AND every known track has a live file — so both
+		// a missing EP and a half-ripped album read as gaps. Local albums the
+		// catalog doesn't know (bootlegs, unmatched) still count via the
+		// unlinked bucket, and artists with no synced discography yet fall
+		// back to purely local numbers through the same expressions.
 		return sizes + `,
-cat AS (
-  SELECT ar.media_item_id,
+albstat AS (
+  SELECT al.id AS album_id, ar.media_item_id,
          count(DISTINCT t.id)::int AS total_tracks,
-         count(DISTINCT al.id)::int AS albums,
-         count(DISTINCT t.id) FILTER (WHERE lf.id IS NOT NULL)::int AS have_tracks
+         count(DISTINCT t.id) FILTER (WHERE lf.id IS NOT NULL)::int AS have_tracks,
+         EXISTS (SELECT 1 FROM artist_discography dl WHERE dl.album_id = al.id) AS linked
   FROM artists ar
   JOIN media_items mi2 ON mi2.id = ar.media_item_id AND mi2.library_id = $1 AND ($2::bigint = 0 OR mi2.id = $2)
   JOIN albums al ON al.artist_id = ar.id
-  JOIN tracks t ON t.album_id = al.id
+  LEFT JOIN tracks t ON t.album_id = al.id
   LEFT JOIN track_files tf ON tf.track_id = t.id
   LEFT JOIN library_files lf ON lf.id = tf.library_file_id AND lf.deleted_at IS NULL
+  GROUP BY al.id, ar.media_item_id
+),
+localrel AS (
+  SELECT media_item_id,
+         count(*)::int AS albums,
+         count(*) FILTER (WHERE NOT linked)::int AS unlinked,
+         count(*) FILTER (WHERE NOT linked AND have_tracks > 0 AND have_tracks >= total_tracks)::int AS unlinked_complete
+  FROM albstat
+  GROUP BY media_item_id
+),
+disco AS (
+  SELECT ar.media_item_id,
+         count(*)::int AS releases,
+         count(*) FILTER (WHERE ds.have_tracks > 0 AND ds.have_tracks >= ds.total_tracks)::int AS complete
+  FROM artist_discography d
+  JOIN artists ar ON ar.id = d.artist_id
+  JOIN media_items mi2 ON mi2.id = ar.media_item_id AND mi2.library_id = $1 AND ($2::bigint = 0 OR mi2.id = $2)
+  LEFT JOIN albstat ds ON ds.album_id = d.album_id
   GROUP BY ar.media_item_id
 )` + rowsHead + `
-         COALESCE(ct.have_tracks, 0) AS have_count,
-         COALESCE(ct.total_tracks, 0) AS total_count,
-         COALESCE(ct.albums, 0) AS group_count
+         COALESCE(dc.complete, 0) + COALESCE(lr.unlinked_complete, 0) AS have_count,
+         COALESCE(dc.releases, 0) + COALESCE(lr.unlinked, 0) AS total_count,
+         COALESCE(lr.albums, 0) AS group_count
   FROM media_item_cards c
   JOIN media_items mi ON mi.id = c.id
   LEFT JOIN sizes s ON s.media_item_id = c.id
-  LEFT JOIN cat ct ON ct.media_item_id = c.id
+  LEFT JOIN localrel lr ON lr.media_item_id = c.id
+  LEFT JOIN disco dc ON dc.media_item_id = c.id
   WHERE c.library_id = $1 AND ($2::bigint = 0 OR c.id = $2)
 )`, nil
 	case "book":

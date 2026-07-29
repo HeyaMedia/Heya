@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/discography"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
@@ -481,6 +482,15 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 					log.Debug().Err(recordingErr).Str("recording", embeddedTrack.CanonicalID).Msg("recording metadata fetch failed; keeping previous")
 				}
 			}
+		}
+	}
+
+	// Persist the artist's FULL discography (the fetch above already paid for
+	// it) so the manager can count releases the library doesn't have. Runs
+	// after the album walk so freshly enriched local rows link up.
+	if len(detail.Albums) > 0 {
+		if syncErr := discography.Sync(ctx, m.q, artistID, detail.Albums); syncErr != nil {
+			log.Warn().Err(syncErr).Int64("artist", artistID).Msg("discography sync failed")
 		}
 	}
 

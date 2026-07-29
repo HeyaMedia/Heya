@@ -664,6 +664,30 @@ var managerLibraryShowCmd = &cobra.Command{
 	},
 }
 
+var managerLibraryRefreshCmd = &cobra.Command{
+	Use:   "refresh <media item id>",
+	Short: "Refresh an artist's metadata inline (incl. discography) — no worker needed",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid media item id %q", args[0])
+		}
+		return withApp(func(ctx context.Context, app *service.App) error {
+			result, err := app.RefreshMusicArtistNow(ctx, id)
+			if err != nil {
+				return err
+			}
+			if result.Skipped {
+				ui.Info("Result", "skipped (identity guard or no upstream record)")
+				return nil
+			}
+			ui.Success("Refreshed: %d albums matched, %d updated", result.AlbumsMatched, result.AlbumsUpdated)
+			return nil
+		})
+	},
+}
+
 var managerLibrarySetCmd = &cobra.Command{
 	Use:   "set <media item id>...",
 	Short: "Set monitored state / quality profile on media items",
@@ -902,7 +926,7 @@ func init() {
 	managerLibraryItemsCmd.Flags().Int("per-page", 60, "Items per page")
 	managerLibrarySetCmd.Flags().Bool("monitor", false, "Monitored state to set (use --monitor=false to unmonitor)")
 	managerLibrarySetCmd.Flags().Int64("profile", 0, "Quality profile id to assign (0 clears it)")
-	managerLibraryCmd.AddCommand(managerLibraryItemsCmd, managerLibraryShowCmd, managerLibrarySetCmd)
+	managerLibraryCmd.AddCommand(managerLibraryItemsCmd, managerLibraryShowCmd, managerLibrarySetCmd, managerLibraryRefreshCmd)
 
 	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd, managerFormatCmd, managerLibraryCmd)
 	rootCmd.AddCommand(managerCmd)

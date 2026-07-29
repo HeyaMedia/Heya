@@ -731,6 +731,18 @@ func mergeIssuedRelease(album *metadata.AlbumEntry, release releaseDocument) {
 	album.ReleaseDate = firstNonEmpty(release.Data.Date, album.ReleaseDate)
 	album.Country = release.Data.Country
 	album.Barcode = release.Data.Barcode
+	// Discography entries never materialize a tracklist, but the issued
+	// release still knows how many tracks it carries — that count is what
+	// lets the manager say "0/6" for an EP the library doesn't have.
+	if album.TrackCount == 0 {
+		total := 0
+		for _, medium := range release.Data.Media {
+			total += medium.TrackCount
+		}
+		if total > 0 {
+			album.TrackCount = total
+		}
+	}
 	if len(release.Data.Labels) > 0 {
 		album.Label, album.CatalogNo = release.Data.Labels[0].Name, release.Data.Labels[0].CatalogNumber
 	}

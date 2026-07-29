@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/matcher"
 	"github.com/karbowiak/heya/internal/worker"
 )
 
@@ -20,4 +21,17 @@ func (a *App) RefreshMediaItem(ctx context.Context, mediaItemID int64) error {
 	}
 
 	return worker.EnqueueEnrichForce(ctx, a.river, mediaItemID, item.MediaType, worker.EnrichSourceForced)
+}
+
+// RefreshMusicArtistNow runs the full artist metadata refresh inline —
+// including the discography sync — instead of enqueueing it. The queue is
+// the norm; this is the CLI/manager lever for "refresh this artist right
+// now" that doesn't depend on a worker process being up.
+func (a *App) RefreshMusicArtistNow(ctx context.Context, mediaItemID int64) (matcher.RefreshArtistResult, error) {
+	q := sqlc.New(a.db)
+	artist, err := q.GetArtistByMediaItemID(ctx, mediaItemID)
+	if err != nil {
+		return matcher.RefreshArtistResult{}, fmt.Errorf("media item %d has no artist row: %w", mediaItemID, err)
+	}
+	return a.matcher.RefreshMusicArtist(ctx, artist.ID)
 }

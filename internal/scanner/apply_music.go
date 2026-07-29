@@ -15,9 +15,11 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/karbowiak/heya/internal/database/sqlc"
+	"github.com/karbowiak/heya/internal/discography"
 	"github.com/karbowiak/heya/internal/mediaprobe"
 	"github.com/karbowiak/heya/internal/metadata"
 	"github.com/karbowiak/heya/internal/slug"
+	"github.com/rs/zerolog/log"
 )
 
 type MusicApplyResult struct {
@@ -156,6 +158,15 @@ func ApplyMusicMaterialization(ctx context.Context, lib sqlc.Library, result Res
 			results = append(results, applied)
 			emitMusicApplyResult(applied, emit)
 			return results, fmt.Errorf("apply music tracks %s: %w", preview.Key, err)
+		}
+		// The provider fetch already carried the artist's FULL discography —
+		// persist it (after album writes, so fresh local rows link up). The
+		// manager counts missing releases off this; a failure shouldn't fail
+		// the scan.
+		if detail != nil && len(detail.Albums) > 0 {
+			if syncErr := discography.Sync(ctx, q, artist.ID, detail.Albums); syncErr != nil {
+				log.Warn().Err(syncErr).Str("artist", preview.Artist).Msg("discography sync failed")
+			}
 		}
 		applied.AlbumsCreated = counts.albumsCreated
 		applied.AlbumsUpdated = counts.albumsUpdated
