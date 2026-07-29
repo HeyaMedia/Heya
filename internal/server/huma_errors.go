@@ -101,6 +101,10 @@ func humaServiceErrorStatus(err error, fallbackStatus int) error {
 		return huma.Error503ServiceUnavailable(message)
 	case errors.Is(err, service.ErrNoFacets), errors.Is(err, service.ErrNoRadioSeed):
 		return huma.Error404NotFound(message)
+	case errors.Is(err, service.ErrManagerNotFound):
+		return huma.Error404NotFound(message)
+	case errors.Is(err, service.ErrManagerProfileInUse):
+		return huma.Error409Conflict(message)
 	default:
 		return huma.NewError(fallbackStatus, message)
 	}

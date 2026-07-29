@@ -1220,7 +1220,7 @@ WITH entity AS (
          heya_slug = $2,
          updated_at = now()
    WHERE media_items.id = $3
-   RETURNING id, public_id, library_id, media_type, slug, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked
+   RETURNING id, public_id, library_id, media_type, slug, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked, monitored, quality_profile_id
 ),
 profile AS (
   INSERT INTO media_item_profiles (

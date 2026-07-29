@@ -3436,6 +3436,127 @@ export type LyricsResponse = {
     synced: boolean;
 };
 
+export type ManagerDownloadClientInput = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    api_key: string;
+    base_url: string;
+    category: string;
+    enabled?: boolean;
+    kind: string;
+    name: string;
+    password: string;
+    path_mappings: Array<ManagerPathMapping> | null;
+    priority?: number;
+    username: string;
+};
+
+export type ManagerDownloadClientView = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    api_key_set: boolean;
+    base_url: string;
+    category: string;
+    enabled: boolean;
+    id: number;
+    kind: string;
+    last_test_at?: string;
+    last_test_error: string;
+    last_test_ok: boolean;
+    name: string;
+    path_mappings: Array<ManagerPathMapping> | null;
+    priority: number;
+    protocol: string;
+    username: string;
+};
+
+export type ManagerIndexerInput = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    api_key: string;
+    base_url: string;
+    categories: Array<number> | null;
+    enabled?: boolean;
+    kind: string;
+    name: string;
+    priority?: number;
+    protocol: string;
+};
+
+export type ManagerIndexerView = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    api_key_set: boolean;
+    base_url: string;
+    categories: Array<number> | null;
+    children?: Array<ManagerIndexerView> | null;
+    enabled: boolean;
+    id: number;
+    kind: string;
+    last_test_at?: string;
+    last_test_error: string;
+    last_test_ok: boolean;
+    name: string;
+    parent_id?: number;
+    priority: number;
+    protocol: string;
+    source: string;
+};
+
+export type ManagerPathMapping = {
+    local: string;
+    remote: string;
+};
+
+export type ManagerQualityItem = {
+    allowed: boolean;
+    quality: string;
+};
+
+export type ManagerQualityProfileInput = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    cutoff: string;
+    domain: string;
+    items: Array<ManagerQualityItem> | null;
+    name: string;
+    upgrades_enabled?: boolean;
+};
+
+export type ManagerQualityProfileView = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    cutoff: string;
+    domain: string;
+    id: number;
+    in_use_count: number;
+    items: Array<ManagerQualityItem> | null;
+    name: string;
+    upgrades_enabled: boolean;
+};
+
+export type ManagerTestResult = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    detail?: string;
+    error?: string;
+    ok: boolean;
+};
+
 export type MarkMediaWatchedRequest = {
     /**
      * A URL to the JSON Schema for this object.
@@ -7759,6 +7880,89 @@ export type LovedBodyWritable = {
 export type LyricsResponseWritable = {
     lines: Array<LyricsLine> | null;
     synced: boolean;
+};
+
+export type ManagerDownloadClientInputWritable = {
+    api_key: string;
+    base_url: string;
+    category: string;
+    enabled?: boolean;
+    kind: string;
+    name: string;
+    password: string;
+    path_mappings: Array<ManagerPathMapping> | null;
+    priority?: number;
+    username: string;
+};
+
+export type ManagerDownloadClientViewWritable = {
+    api_key_set: boolean;
+    base_url: string;
+    category: string;
+    enabled: boolean;
+    id: number;
+    kind: string;
+    last_test_at?: string;
+    last_test_error: string;
+    last_test_ok: boolean;
+    name: string;
+    path_mappings: Array<ManagerPathMapping> | null;
+    priority: number;
+    protocol: string;
+    username: string;
+};
+
+export type ManagerIndexerInputWritable = {
+    api_key: string;
+    base_url: string;
+    categories: Array<number> | null;
+    enabled?: boolean;
+    kind: string;
+    name: string;
+    priority?: number;
+    protocol: string;
+};
+
+export type ManagerIndexerViewWritable = {
+    api_key_set: boolean;
+    base_url: string;
+    categories: Array<number> | null;
+    children?: Array<ManagerIndexerViewWritable> | null;
+    enabled: boolean;
+    id: number;
+    kind: string;
+    last_test_at?: string;
+    last_test_error: string;
+    last_test_ok: boolean;
+    name: string;
+    parent_id?: number;
+    priority: number;
+    protocol: string;
+    source: string;
+};
+
+export type ManagerQualityProfileInputWritable = {
+    cutoff: string;
+    domain: string;
+    items: Array<ManagerQualityItem> | null;
+    name: string;
+    upgrades_enabled?: boolean;
+};
+
+export type ManagerQualityProfileViewWritable = {
+    cutoff: string;
+    domain: string;
+    id: number;
+    in_use_count: number;
+    items: Array<ManagerQualityItem> | null;
+    name: string;
+    upgrades_enabled: boolean;
+};
+
+export type ManagerTestResultWritable = {
+    detail?: string;
+    error?: string;
+    ok: boolean;
 };
 
 export type MarkMediaWatchedRequestWritable = {
@@ -13000,6 +13204,396 @@ export type GetLogsResponses = {
 };
 
 export type GetLogsResponse = GetLogsResponses[keyof GetLogsResponses];
+
+export type ManagerListDownloadClientsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/manager/download-clients';
+};
+
+export type ManagerListDownloadClientsErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerListDownloadClientsError = ManagerListDownloadClientsErrors[keyof ManagerListDownloadClientsErrors];
+
+export type ManagerListDownloadClientsResponses = {
+    /**
+     * OK
+     */
+    200: Array<ManagerDownloadClientView> | null;
+};
+
+export type ManagerListDownloadClientsResponse = ManagerListDownloadClientsResponses[keyof ManagerListDownloadClientsResponses];
+
+export type ManagerCreateDownloadClientData = {
+    body: ManagerDownloadClientInputWritable;
+    path?: never;
+    query?: never;
+    url: '/api/manager/download-clients';
+};
+
+export type ManagerCreateDownloadClientErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerCreateDownloadClientError = ManagerCreateDownloadClientErrors[keyof ManagerCreateDownloadClientErrors];
+
+export type ManagerCreateDownloadClientResponses = {
+    /**
+     * OK
+     */
+    200: ManagerDownloadClientView;
+};
+
+export type ManagerCreateDownloadClientResponse = ManagerCreateDownloadClientResponses[keyof ManagerCreateDownloadClientResponses];
+
+export type ManagerDeleteDownloadClientData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/manager/download-clients/{id}';
+};
+
+export type ManagerDeleteDownloadClientErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerDeleteDownloadClientError = ManagerDeleteDownloadClientErrors[keyof ManagerDeleteDownloadClientErrors];
+
+export type ManagerDeleteDownloadClientResponses = {
+    /**
+     * OK
+     */
+    200: StatusOutputBody;
+};
+
+export type ManagerDeleteDownloadClientResponse = ManagerDeleteDownloadClientResponses[keyof ManagerDeleteDownloadClientResponses];
+
+export type ManagerUpdateDownloadClientData = {
+    body: ManagerDownloadClientInputWritable;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/manager/download-clients/{id}';
+};
+
+export type ManagerUpdateDownloadClientErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerUpdateDownloadClientError = ManagerUpdateDownloadClientErrors[keyof ManagerUpdateDownloadClientErrors];
+
+export type ManagerUpdateDownloadClientResponses = {
+    /**
+     * OK
+     */
+    200: ManagerDownloadClientView;
+};
+
+export type ManagerUpdateDownloadClientResponse = ManagerUpdateDownloadClientResponses[keyof ManagerUpdateDownloadClientResponses];
+
+export type ManagerTestDownloadClientData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/manager/download-clients/{id}/test';
+};
+
+export type ManagerTestDownloadClientErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerTestDownloadClientError = ManagerTestDownloadClientErrors[keyof ManagerTestDownloadClientErrors];
+
+export type ManagerTestDownloadClientResponses = {
+    /**
+     * OK
+     */
+    200: ManagerTestResult;
+};
+
+export type ManagerTestDownloadClientResponse = ManagerTestDownloadClientResponses[keyof ManagerTestDownloadClientResponses];
+
+export type ManagerListIndexersData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/manager/indexers';
+};
+
+export type ManagerListIndexersErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerListIndexersError = ManagerListIndexersErrors[keyof ManagerListIndexersErrors];
+
+export type ManagerListIndexersResponses = {
+    /**
+     * OK
+     */
+    200: Array<ManagerIndexerView> | null;
+};
+
+export type ManagerListIndexersResponse = ManagerListIndexersResponses[keyof ManagerListIndexersResponses];
+
+export type ManagerCreateIndexerData = {
+    body: ManagerIndexerInputWritable;
+    path?: never;
+    query?: never;
+    url: '/api/manager/indexers';
+};
+
+export type ManagerCreateIndexerErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerCreateIndexerError = ManagerCreateIndexerErrors[keyof ManagerCreateIndexerErrors];
+
+export type ManagerCreateIndexerResponses = {
+    /**
+     * OK
+     */
+    200: ManagerIndexerView;
+};
+
+export type ManagerCreateIndexerResponse = ManagerCreateIndexerResponses[keyof ManagerCreateIndexerResponses];
+
+export type ManagerDeleteIndexerData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/manager/indexers/{id}';
+};
+
+export type ManagerDeleteIndexerErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerDeleteIndexerError = ManagerDeleteIndexerErrors[keyof ManagerDeleteIndexerErrors];
+
+export type ManagerDeleteIndexerResponses = {
+    /**
+     * OK
+     */
+    200: StatusOutputBody;
+};
+
+export type ManagerDeleteIndexerResponse = ManagerDeleteIndexerResponses[keyof ManagerDeleteIndexerResponses];
+
+export type ManagerUpdateIndexerData = {
+    body: ManagerIndexerInputWritable;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/manager/indexers/{id}';
+};
+
+export type ManagerUpdateIndexerErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerUpdateIndexerError = ManagerUpdateIndexerErrors[keyof ManagerUpdateIndexerErrors];
+
+export type ManagerUpdateIndexerResponses = {
+    /**
+     * OK
+     */
+    200: ManagerIndexerView;
+};
+
+export type ManagerUpdateIndexerResponse = ManagerUpdateIndexerResponses[keyof ManagerUpdateIndexerResponses];
+
+export type ManagerTestIndexerData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/manager/indexers/{id}/test';
+};
+
+export type ManagerTestIndexerErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerTestIndexerError = ManagerTestIndexerErrors[keyof ManagerTestIndexerErrors];
+
+export type ManagerTestIndexerResponses = {
+    /**
+     * OK
+     */
+    200: ManagerTestResult;
+};
+
+export type ManagerTestIndexerResponse = ManagerTestIndexerResponses[keyof ManagerTestIndexerResponses];
+
+export type ManagerListQualityProfilesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/manager/quality-profiles';
+};
+
+export type ManagerListQualityProfilesErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerListQualityProfilesError = ManagerListQualityProfilesErrors[keyof ManagerListQualityProfilesErrors];
+
+export type ManagerListQualityProfilesResponses = {
+    /**
+     * OK
+     */
+    200: Array<ManagerQualityProfileView> | null;
+};
+
+export type ManagerListQualityProfilesResponse = ManagerListQualityProfilesResponses[keyof ManagerListQualityProfilesResponses];
+
+export type ManagerCreateQualityProfileData = {
+    body: ManagerQualityProfileInputWritable;
+    path?: never;
+    query?: never;
+    url: '/api/manager/quality-profiles';
+};
+
+export type ManagerCreateQualityProfileErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerCreateQualityProfileError = ManagerCreateQualityProfileErrors[keyof ManagerCreateQualityProfileErrors];
+
+export type ManagerCreateQualityProfileResponses = {
+    /**
+     * OK
+     */
+    200: ManagerQualityProfileView;
+};
+
+export type ManagerCreateQualityProfileResponse = ManagerCreateQualityProfileResponses[keyof ManagerCreateQualityProfileResponses];
+
+export type ManagerDeleteQualityProfileData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/manager/quality-profiles/{id}';
+};
+
+export type ManagerDeleteQualityProfileErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerDeleteQualityProfileError = ManagerDeleteQualityProfileErrors[keyof ManagerDeleteQualityProfileErrors];
+
+export type ManagerDeleteQualityProfileResponses = {
+    /**
+     * OK
+     */
+    200: StatusOutputBody;
+};
+
+export type ManagerDeleteQualityProfileResponse = ManagerDeleteQualityProfileResponses[keyof ManagerDeleteQualityProfileResponses];
+
+export type ManagerUpdateQualityProfileData = {
+    body: ManagerQualityProfileInputWritable;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/manager/quality-profiles/{id}';
+};
+
+export type ManagerUpdateQualityProfileErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerUpdateQualityProfileError = ManagerUpdateQualityProfileErrors[keyof ManagerUpdateQualityProfileErrors];
+
+export type ManagerUpdateQualityProfileResponses = {
+    /**
+     * OK
+     */
+    200: ManagerQualityProfileView;
+};
+
+export type ManagerUpdateQualityProfileResponse = ManagerUpdateQualityProfileResponses[keyof ManagerUpdateQualityProfileResponses];
 
 export type ListApiTokensData = {
     body?: never;

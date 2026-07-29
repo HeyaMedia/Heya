@@ -113,6 +113,7 @@ func BuildAPI(mux *http.ServeMux, app *service.App, cfg *config.Config, opts ...
 	registerJellyfinConfigRoutes(api, app)
 	registerSubsonicRoutes(api, app)
 	registerLibraryRoutes(api, app)
+	registerManagerRoutes(api, app)
 	registerJobRoutes(api, app)
 	registerTaskRoutes(api, app)
 	registerMediaRoutes(api, app)

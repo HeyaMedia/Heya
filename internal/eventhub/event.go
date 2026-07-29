@@ -71,7 +71,17 @@ const (
 	// heartbeats so another client controlling that device can mirror video
 	// playback without polling the device list.
 	EventDeviceState EventType = "device.state"
+	// Manager (acquisition) config change — indexers, download clients, or
+	// quality profiles mutated. Thin invalidation signal for the /manager
+	// System pages; payload names the area that changed.
+	EventManagerChanged EventType = "manager.changed"
 )
+
+// ManagerChangedPayload is the body for EventManagerChanged. Area is one of
+// "indexers", "download_clients", "quality_profiles".
+type ManagerChangedPayload struct {
+	Area string `json:"area"`
+}
 
 // VisibilityFor returns the delivery policy for an event type. Unknown event
 // types default to admin-only: adding a new event without classifying it must
@@ -99,7 +109,8 @@ func VisibilityFor(t EventType) EventVisibility {
 		EventTaskProgress,
 		EventTailscale,
 		EventRemote,
-		EventDiscovery:
+		EventDiscovery,
+		EventManagerChanged:
 		return VisibilityAdmin
 	case EventMediaWatched,
 		EventRadioICY,

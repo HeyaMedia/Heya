@@ -570,6 +570,59 @@ type LocalMediaIdentityExternalID struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ManagerDownloadClient struct {
+	ID            int64              `json:"id"`
+	Name          string             `json:"name"`
+	Kind          string             `json:"kind"`
+	Enabled       bool               `json:"enabled"`
+	Protocol      string             `json:"protocol"`
+	BaseUrl       string             `json:"base_url"`
+	ApiKey        string             `json:"api_key"`
+	Username      string             `json:"username"`
+	Password      string             `json:"password"`
+	Category      string             `json:"category"`
+	Priority      int32              `json:"priority"`
+	PathMappings  []byte             `json:"path_mappings"`
+	Settings      []byte             `json:"settings"`
+	LastTestAt    pgtype.Timestamptz `json:"last_test_at"`
+	LastTestOk    bool               `json:"last_test_ok"`
+	LastTestError string             `json:"last_test_error"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ManagerIndexer struct {
+	ID            int64              `json:"id"`
+	Name          string             `json:"name"`
+	Kind          string             `json:"kind"`
+	Enabled       bool               `json:"enabled"`
+	BaseUrl       string             `json:"base_url"`
+	ApiKey        string             `json:"api_key"`
+	Protocol      string             `json:"protocol"`
+	Priority      int32              `json:"priority"`
+	Categories    []int32            `json:"categories"`
+	Source        string             `json:"source"`
+	SourceRef     string             `json:"source_ref"`
+	ParentID      pgtype.Int8        `json:"parent_id"`
+	Settings      []byte             `json:"settings"`
+	LastTestAt    pgtype.Timestamptz `json:"last_test_at"`
+	LastTestOk    bool               `json:"last_test_ok"`
+	LastTestError string             `json:"last_test_error"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ManagerQualityProfile struct {
+	ID              int64              `json:"id"`
+	Name            string             `json:"name"`
+	Domain          string             `json:"domain"`
+	Items           []byte             `json:"items"`
+	Cutoff          string             `json:"cutoff"`
+	UpgradesEnabled bool               `json:"upgrades_enabled"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type MatchCandidate struct {
 	ID            int64              `json:"id"`
 	LibraryFileID int64              `json:"library_file_id"`
@@ -660,6 +713,8 @@ type MediaItem struct {
 	FieldProvenance     []byte             `json:"field_provenance"`
 	MatchConfidence     float32            `json:"match_confidence"`
 	SlugLocked          bool               `json:"slug_locked"`
+	Monitored           bool               `json:"monitored"`
+	QualityProfileID    pgtype.Int8        `json:"quality_profile_id"`
 }
 
 type MediaItemCard struct {
