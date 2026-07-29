@@ -280,6 +280,11 @@ function toggleEditions(key: string) {
   expandedEditions.value = next
 }
 
+function albumLink(al: ManagerAlbumView): string {
+  const ref = al.id || `d${al.discography_id}`
+  return `/manager/library/${libraryId.value}/${itemId.value}/${ref}`
+}
+
 function normTrack(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '')
 }
@@ -480,7 +485,7 @@ const FILE_KIND_LABELS: Record<string, string> = {
                       <div v-else class="det-cover" aria-hidden="true" />
                     </td>
                     <td class="det-ep-title">
-                      {{ release.primary.title }}
+                      <NuxtLink :to="albumLink(release.primary)" class="det-album-link">{{ release.primary.title }}</NuxtLink>
                       <span v-if="!release.primary.in_library" class="det-badge tone-bad det-wanted-badge">Not in library</span>
                       <button
                         v-if="release.editions.length"
@@ -509,7 +514,7 @@ const FILE_KIND_LABELS: Record<string, string> = {
                         <div v-else class="det-cover sm" aria-hidden="true" />
                       </td>
                       <td class="det-ep-title det-edition-title">
-                        {{ edition.title }}
+                        <NuxtLink :to="albumLink(edition)" class="det-album-link">{{ edition.title }}</NuxtLink>
                         <span v-if="!edition.in_library" class="det-badge tone-bad det-wanted-badge">Not in library</span>
                         <div v-if="editionDiff(release.primary, edition)" class="det-ed-diff">{{ editionDiff(release.primary, edition) }}</div>
                       </td>
@@ -759,6 +764,8 @@ const FILE_KIND_LABELS: Record<string, string> = {
   object-fit: cover;
   background: var(--bg-3);
 }
+.det-album-link { color: inherit; text-decoration: none; }
+.det-album-link:hover { color: var(--gold-bright); }
 .det-row-wanted .det-ep-title { color: var(--fg-2); }
 .det-wanted-badge { margin-left: 8px; }
 .det-cover.sm { width: 26px; height: 26px; margin-left: 6px; }

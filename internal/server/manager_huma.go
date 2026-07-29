@@ -303,6 +303,17 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(*view), nil
 		})
 
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/album/{ref}", "manager-album-detail", "Album page: tracklist with per-track file and quality state", "Manager")),
+		func(ctx context.Context, in *struct {
+			Ref string `path:"ref" maxLength:"24" doc:"Local album id, or d<id> for a catalog-only discography entry"`
+		}) (*JSONOutput[service.ManagerAlbumDetailView], error) {
+			view, err := app.GetManagerAlbumDetail(ctx, in.Ref)
+			if err != nil {
+				return nil, humaServiceError(err)
+			}
+			return noStoreJSON(*view), nil
+		})
+
 	huma.Register(api, adminSecured(op(http.MethodPut, "/api/manager/media", "manager-update-media", "Bulk-set monitored state and quality profile on media items", "Manager")),
 		func(ctx context.Context, in *struct {
 			Body service.ManagerMediaBulkInput

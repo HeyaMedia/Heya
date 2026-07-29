@@ -121,6 +121,19 @@ export const managerCustomFormatsQuery = defineQueryOptions(() => ({
   meta: { prefetch: 'none', sensitivity: 'private' },
 }))
 
+export type { ManagerAlbumDetailView, ManagerTrackView } from '~~/shared/api/types.gen'
+import type { ManagerAlbumDetailView } from '~~/shared/api/types.gen'
+
+export const managerAlbumDetailQuery = defineQueryOptions((ref: string) => ({
+  key: ['manager', 'album', ref],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya(`/api/manager/album/${ref}`) as ManagerAlbumDetailView
+  },
+  staleTime: 1000 * 30,
+  meta: { prefetch: 'none', sensitivity: 'private' },
+}))
+
 export type ManagerLibraryItemsParams = {
   libraryId: number
   search?: string

@@ -3446,6 +3446,32 @@ export type LyricsResponse = {
     synced: boolean;
 };
 
+export type ManagerAlbumDetailView = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    album: ManagerAlbumView;
+    /**
+     * media_item id of the artist, for breadcrumbs
+     */
+    artist_media_item_id: number;
+    artist_name: string;
+    artist_slug: string;
+    country?: string;
+    discs?: number;
+    duration_seconds?: number;
+    /**
+     * Sibling editions sharing this release's edition_key
+     */
+    editions?: Array<ManagerAlbumView> | null;
+    genres?: Array<string> | null;
+    label?: string;
+    library: ManagerLibraryRef;
+    overview?: string;
+    tracks?: Array<ManagerTrackView> | null;
+};
+
 export type ManagerAlbumView = {
     /**
      * Provider cover for catalog-only releases (local albums use the cover endpoint)
@@ -3965,6 +3991,20 @@ export type ManagerTestResult = {
     detail?: string;
     error?: string;
     ok: boolean;
+};
+
+export type ManagerTrackView = {
+    disc: number;
+    duration_seconds: number;
+    has_file: boolean;
+    id: number;
+    number: number;
+    /**
+     * Best on-disk file: format + bit depth/rate, e.g. 'FLAC 24/96' or 'MP3 320'
+     */
+    quality?: string;
+    size_bytes: number;
+    title: string;
 };
 
 export type MarkMediaWatchedRequest = {
@@ -8290,6 +8330,28 @@ export type LovedBodyWritable = {
 export type LyricsResponseWritable = {
     lines: Array<LyricsLine> | null;
     synced: boolean;
+};
+
+export type ManagerAlbumDetailViewWritable = {
+    album: ManagerAlbumView;
+    /**
+     * media_item id of the artist, for breadcrumbs
+     */
+    artist_media_item_id: number;
+    artist_name: string;
+    artist_slug: string;
+    country?: string;
+    discs?: number;
+    duration_seconds?: number;
+    /**
+     * Sibling editions sharing this release's edition_key
+     */
+    editions?: Array<ManagerAlbumView> | null;
+    genres?: Array<string> | null;
+    label?: string;
+    library: ManagerLibraryRef;
+    overview?: string;
+    tracks?: Array<ManagerTrackView> | null;
 };
 
 export type ManagerClientActivityViewWritable = {
@@ -13757,6 +13819,36 @@ export type GetLogsResponses = {
 };
 
 export type GetLogsResponse = GetLogsResponses[keyof GetLogsResponses];
+
+export type ManagerAlbumDetailData = {
+    body?: never;
+    path: {
+        /**
+         * Local album id, or d<id> for a catalog-only discography entry
+         */
+        ref: string;
+    };
+    query?: never;
+    url: '/api/manager/album/{ref}';
+};
+
+export type ManagerAlbumDetailErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerAlbumDetailError = ManagerAlbumDetailErrors[keyof ManagerAlbumDetailErrors];
+
+export type ManagerAlbumDetailResponses = {
+    /**
+     * OK
+     */
+    200: ManagerAlbumDetailView;
+};
+
+export type ManagerAlbumDetailResponse = ManagerAlbumDetailResponses[keyof ManagerAlbumDetailResponses];
 
 export type ManagerListCustomFormatsData = {
     body?: never;

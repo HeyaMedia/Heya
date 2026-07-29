@@ -12491,6 +12491,90 @@
         ],
         "type": "object"
       },
+      "ManagerAlbumDetailView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerAlbumDetailView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "album": {
+            "$ref": "#/components/schemas/ManagerAlbumView"
+          },
+          "artist_media_item_id": {
+            "description": "media_item id of the artist, for breadcrumbs",
+            "format": "int64",
+            "type": "integer"
+          },
+          "artist_name": {
+            "type": "string"
+          },
+          "artist_slug": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "discs": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "duration_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "editions": {
+            "description": "Sibling editions sharing this release's edition_key",
+            "items": {
+              "$ref": "#/components/schemas/ManagerAlbumView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "genres": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "library": {
+            "$ref": "#/components/schemas/ManagerLibraryRef"
+          },
+          "overview": {
+            "type": "string"
+          },
+          "tracks": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerTrackView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "album",
+          "artist_media_item_id",
+          "artist_name",
+          "artist_slug",
+          "library"
+        ],
+        "type": "object"
+      },
       "ManagerAlbumView": {
         "additionalProperties": false,
         "properties": {
@@ -14302,6 +14386,51 @@
         },
         "required": [
           "ok"
+        ],
+        "type": "object"
+      },
+      "ManagerTrackView": {
+        "additionalProperties": false,
+        "properties": {
+          "disc": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "duration_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "has_file": {
+            "type": "boolean"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "number": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "quality": {
+            "description": "Best on-disk file: format + bit depth/rate, e.g. 'FLAC 24/96' or 'MP3 320'",
+            "type": "string"
+          },
+          "size_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "disc",
+          "number",
+          "title",
+          "duration_seconds",
+          "has_file",
+          "size_bytes"
         ],
         "type": "object"
       },
@@ -33263,6 +33392,62 @@
         "summary": "Recent log entries",
         "tags": [
           "Admin"
+        ]
+      }
+    },
+    "/api/manager/album/{ref}": {
+      "get": {
+        "operationId": "manager-album-detail",
+        "parameters": [
+          {
+            "description": "Local album id, or d\u003cid\u003e for a catalog-only discography entry",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Local album id, or d\u003cid\u003e for a catalog-only discography entry",
+              "maxLength": 24,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerAlbumDetailView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Album page: tracklist with per-track file and quality state",
+        "tags": [
+          "Manager"
         ]
       }
     },

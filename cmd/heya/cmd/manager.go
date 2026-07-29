@@ -664,6 +664,48 @@ var managerLibraryShowCmd = &cobra.Command{
 	},
 }
 
+var managerLibraryAlbumCmd = &cobra.Command{
+	Use:   "album <album id | d<discography id>>",
+	Short: "Album detail: tracklist with per-track file and quality state",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return withApp(func(ctx context.Context, app *service.App) error {
+			detail, err := app.GetManagerAlbumDetail(ctx, args[0])
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(detail)
+			}
+			al := detail.Album
+			ui.Info("Album", fmt.Sprintf("%s — %s (%s)", detail.ArtistName, al.Title, firstNonEmpty(al.ReleaseDate, al.Year)))
+			ui.Info("Type", al.Type)
+			ui.Info("Have", fmt.Sprintf("%d/%d tracks · %s", al.TracksHave, al.TracksTotal, humanBytes(al.SizeBytes)))
+			if len(detail.Tracks) > 0 {
+				table := ui.NewTable("#", "Title", "Length", "Quality", "Size")
+				for _, track := range detail.Tracks {
+					state := track.Quality
+					if !track.HasFile {
+						state = "MISSING"
+					}
+					table.AddRow(
+						fmt.Sprintf("%d-%02d", track.Disc, track.Number),
+						track.Title,
+						fmt.Sprintf("%d:%02d", track.Duration/60, track.Duration%60),
+						state,
+						humanBytes(track.SizeBytes),
+					)
+				}
+				fmt.Println(table.Render())
+			}
+			if len(detail.Editions) > 0 {
+				ui.Info("Editions", fmt.Sprintf("%d sibling edition(s)", len(detail.Editions)))
+			}
+			return nil
+		})
+	},
+}
+
 var managerLibraryRefreshCmd = &cobra.Command{
 	Use:   "refresh <media item id>",
 	Short: "Refresh an artist's metadata inline (incl. discography) — no worker needed",
@@ -926,7 +968,7 @@ func init() {
 	managerLibraryItemsCmd.Flags().Int("per-page", 60, "Items per page")
 	managerLibrarySetCmd.Flags().Bool("monitor", false, "Monitored state to set (use --monitor=false to unmonitor)")
 	managerLibrarySetCmd.Flags().Int64("profile", 0, "Quality profile id to assign (0 clears it)")
-	managerLibraryCmd.AddCommand(managerLibraryItemsCmd, managerLibraryShowCmd, managerLibrarySetCmd, managerLibraryRefreshCmd)
+	managerLibraryCmd.AddCommand(managerLibraryItemsCmd, managerLibraryShowCmd, managerLibraryAlbumCmd, managerLibrarySetCmd, managerLibraryRefreshCmd)
 
 	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd, managerFormatCmd, managerLibraryCmd)
 	rootCmd.AddCommand(managerCmd)
