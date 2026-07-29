@@ -272,6 +272,7 @@ type ArtistDiscography struct {
 	AlbumID        pgtype.Int8        `json:"album_id"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 	EditionKey     string             `json:"edition_key"`
+	NaturalKey     string             `json:"natural_key"`
 }
 
 type ArtistSimilarArtist struct {

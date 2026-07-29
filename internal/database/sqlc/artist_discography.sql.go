@@ -22,58 +22,23 @@ func (q *Queries) CountArtistDiscography(ctx context.Context, artistID int64) (i
 	return count, err
 }
 
-const deleteArtistDiscography = `-- name: DeleteArtistDiscography :exec
-
-DELETE FROM artist_discography WHERE artist_id = $1
+const deleteStaleArtistDiscography = `-- name: DeleteStaleArtistDiscography :exec
+DELETE FROM artist_discography
+WHERE artist_id = $1 AND NOT (natural_key = ANY($2::text[]))
 `
 
-// Per-artist release-group catalog from the metadata provider. Synced as a
-// full replace on enrich/refresh; consumed by the manager's music lens.
-func (q *Queries) DeleteArtistDiscography(ctx context.Context, artistID int64) error {
-	_, err := q.db.Exec(ctx, deleteArtistDiscography, artistID)
-	return err
+type DeleteStaleArtistDiscographyParams struct {
+	ArtistID    int64    `json:"artist_id"`
+	NaturalKeys []string `json:"natural_keys"`
 }
 
-const insertArtistDiscographyEntry = `-- name: InsertArtistDiscographyEntry :exec
-INSERT INTO artist_discography (artist_id, canonical_id, title, album_type, secondary_types, release_date, year, track_count, external_ids, cover_url, album_id, edition_key)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-`
-
-type InsertArtistDiscographyEntryParams struct {
-	ArtistID       int64       `json:"artist_id"`
-	CanonicalID    string      `json:"canonical_id"`
-	Title          string      `json:"title"`
-	AlbumType      string      `json:"album_type"`
-	SecondaryTypes []string    `json:"secondary_types"`
-	ReleaseDate    pgtype.Date `json:"release_date"`
-	Year           string      `json:"year"`
-	TrackCount     int32       `json:"track_count"`
-	ExternalIds    []byte      `json:"external_ids"`
-	CoverUrl       string      `json:"cover_url"`
-	AlbumID        pgtype.Int8 `json:"album_id"`
-	EditionKey     string      `json:"edition_key"`
-}
-
-func (q *Queries) InsertArtistDiscographyEntry(ctx context.Context, arg InsertArtistDiscographyEntryParams) error {
-	_, err := q.db.Exec(ctx, insertArtistDiscographyEntry,
-		arg.ArtistID,
-		arg.CanonicalID,
-		arg.Title,
-		arg.AlbumType,
-		arg.SecondaryTypes,
-		arg.ReleaseDate,
-		arg.Year,
-		arg.TrackCount,
-		arg.ExternalIds,
-		arg.CoverUrl,
-		arg.AlbumID,
-		arg.EditionKey,
-	)
+func (q *Queries) DeleteStaleArtistDiscography(ctx context.Context, arg DeleteStaleArtistDiscographyParams) error {
+	_, err := q.db.Exec(ctx, deleteStaleArtistDiscography, arg.ArtistID, arg.NaturalKeys)
 	return err
 }
 
 const listArtistDiscography = `-- name: ListArtistDiscography :many
-SELECT id, artist_id, canonical_id, title, album_type, secondary_types, release_date, year, track_count, external_ids, cover_url, album_id, updated_at, edition_key FROM artist_discography
+SELECT id, artist_id, canonical_id, title, album_type, secondary_types, release_date, year, track_count, external_ids, cover_url, album_id, updated_at, edition_key, natural_key FROM artist_discography
 WHERE artist_id = $1
 ORDER BY release_date DESC NULLS LAST, year DESC, title ASC
 `
@@ -102,6 +67,7 @@ func (q *Queries) ListArtistDiscography(ctx context.Context, artistID int64) ([]
 			&i.AlbumID,
 			&i.UpdatedAt,
 			&i.EditionKey,
+			&i.NaturalKey,
 		); err != nil {
 			return nil, err
 		}
@@ -111,4 +77,62 @@ func (q *Queries) ListArtistDiscography(ctx context.Context, artistID int64) ([]
 		return nil, err
 	}
 	return items, nil
+}
+
+const upsertArtistDiscographyEntry = `-- name: UpsertArtistDiscographyEntry :exec
+
+INSERT INTO artist_discography (artist_id, natural_key, canonical_id, title, album_type, secondary_types, release_date, year, track_count, external_ids, cover_url, album_id, edition_key)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+ON CONFLICT (artist_id, natural_key) DO UPDATE SET
+    canonical_id = EXCLUDED.canonical_id,
+    title = EXCLUDED.title,
+    album_type = EXCLUDED.album_type,
+    secondary_types = EXCLUDED.secondary_types,
+    release_date = EXCLUDED.release_date,
+    year = EXCLUDED.year,
+    track_count = EXCLUDED.track_count,
+    external_ids = EXCLUDED.external_ids,
+    cover_url = EXCLUDED.cover_url,
+    album_id = EXCLUDED.album_id,
+    edition_key = EXCLUDED.edition_key,
+    updated_at = now()
+`
+
+type UpsertArtistDiscographyEntryParams struct {
+	ArtistID       int64       `json:"artist_id"`
+	NaturalKey     string      `json:"natural_key"`
+	CanonicalID    string      `json:"canonical_id"`
+	Title          string      `json:"title"`
+	AlbumType      string      `json:"album_type"`
+	SecondaryTypes []string    `json:"secondary_types"`
+	ReleaseDate    pgtype.Date `json:"release_date"`
+	Year           string      `json:"year"`
+	TrackCount     int32       `json:"track_count"`
+	ExternalIds    []byte      `json:"external_ids"`
+	CoverUrl       string      `json:"cover_url"`
+	AlbumID        pgtype.Int8 `json:"album_id"`
+	EditionKey     string      `json:"edition_key"`
+}
+
+// Per-artist release-group catalog from the metadata provider. Synced on
+// enrich/refresh as an upsert keyed by natural_key (stable row ids — the
+// manager addresses catalog-only releases as d<row id>), with a stale-delete
+// pass for releases the provider no longer reports.
+func (q *Queries) UpsertArtistDiscographyEntry(ctx context.Context, arg UpsertArtistDiscographyEntryParams) error {
+	_, err := q.db.Exec(ctx, upsertArtistDiscographyEntry,
+		arg.ArtistID,
+		arg.NaturalKey,
+		arg.CanonicalID,
+		arg.Title,
+		arg.AlbumType,
+		arg.SecondaryTypes,
+		arg.ReleaseDate,
+		arg.Year,
+		arg.TrackCount,
+		arg.ExternalIds,
+		arg.CoverUrl,
+		arg.AlbumID,
+		arg.EditionKey,
+	)
+	return err
 }

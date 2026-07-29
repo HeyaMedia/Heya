@@ -91,6 +91,12 @@ DELETE FROM manager_quality_profiles WHERE id = $1;
 -- name: CountMediaItemsByQualityProfile :one
 SELECT count(*) FROM media_items WHERE quality_profile_id = $1;
 
+-- name: CountMediaItemsByQualityProfileGrouped :many
+SELECT quality_profile_id, count(*) AS in_use
+FROM media_items
+WHERE quality_profile_id IS NOT NULL
+GROUP BY quality_profile_id;
+
 -- name: ListManagerCustomFormats :many
 SELECT * FROM manager_custom_formats ORDER BY domain ASC, name ASC;
 

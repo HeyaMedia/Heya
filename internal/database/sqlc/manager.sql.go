@@ -22,6 +22,38 @@ func (q *Queries) CountMediaItemsByQualityProfile(ctx context.Context, qualityPr
 	return count, err
 }
 
+const countMediaItemsByQualityProfileGrouped = `-- name: CountMediaItemsByQualityProfileGrouped :many
+SELECT quality_profile_id, count(*) AS in_use
+FROM media_items
+WHERE quality_profile_id IS NOT NULL
+GROUP BY quality_profile_id
+`
+
+type CountMediaItemsByQualityProfileGroupedRow struct {
+	QualityProfileID pgtype.Int8 `json:"quality_profile_id"`
+	InUse            int64       `json:"in_use"`
+}
+
+func (q *Queries) CountMediaItemsByQualityProfileGrouped(ctx context.Context) ([]CountMediaItemsByQualityProfileGroupedRow, error) {
+	rows, err := q.db.Query(ctx, countMediaItemsByQualityProfileGrouped)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountMediaItemsByQualityProfileGroupedRow{}
+	for rows.Next() {
+		var i CountMediaItemsByQualityProfileGroupedRow
+		if err := rows.Scan(&i.QualityProfileID, &i.InUse); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createManagerCustomFormat = `-- name: CreateManagerCustomFormat :one
 INSERT INTO manager_custom_formats (name, domain, include_when_renaming, specifications, trash_id, source)
 VALUES ($1, $2, $3, $4, $5, $6)

@@ -487,9 +487,25 @@ func (m *Matcher) RefreshMusicArtist(ctx context.Context, artistID int64) (Refre
 
 	// Persist the artist's FULL discography (the fetch above already paid for
 	// it) so the manager can count releases the library doesn't have. Runs
-	// after the album walk so freshly enriched local rows link up.
+	// after the album walk so freshly enriched local rows link up. Wrapped in
+	// its own transaction (unless the whole refresh already runs in one) so a
+	// mid-loop failure can't strand a half-reconciled catalog.
 	if len(detail.Albums) > 0 {
-		if syncErr := discography.Sync(ctx, m.q, artistID, detail.Albums); syncErr != nil {
+		syncErr := func() error {
+			if m.inTx {
+				return discography.Sync(ctx, m.q, artistID, detail.Albums)
+			}
+			tx, err := m.db.Begin(ctx)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
+			if err := discography.Sync(ctx, m.q.WithTx(tx), artistID, detail.Albums); err != nil {
+				return err
+			}
+			return tx.Commit(ctx)
+		}()
+		if syncErr != nil {
 			log.Warn().Err(syncErr).Int64("artist", artistID).Msg("discography sync failed")
 		}
 	}

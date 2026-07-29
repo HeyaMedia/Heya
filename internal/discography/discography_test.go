@@ -3,31 +3,67 @@ package discography
 import (
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/metadata"
 )
 
-func TestMatchLocalAlbumPrecedence(t *testing.T) {
+func TestMatchLocalAlbumsPrecedence(t *testing.T) {
 	locals := []sqlc.Album{
 		{ID: 1, Title: "Room 93", Year: "2014", MusicbrainzID: "aaa-111"},
 		{ID: 2, Title: "Room 93", Year: "2015"},
 		{ID: 3, Title: "BADLANDS", Year: "2015", ExternalIds: []byte(`{"mb_release_group":"bbb-222"}`)},
 	}
+	one := func(entry metadata.AlbumEntry) pgtype.Int8 {
+		return matchLocalAlbums([]metadata.AlbumEntry{entry}, locals)[0]
+	}
 
 	// External id beats title matching, wherever the id lives locally.
-	if got, ok := matchLocalAlbum(metadata.AlbumEntry{Title: "Different Name", ExternalIDs: map[string]string{"mbid": "BBB-222"}}, locals); !ok || got.ID != 3 {
-		t.Fatalf("external id match: got %v ok=%v, want album 3", got.ID, ok)
+	if got := one(metadata.AlbumEntry{Title: "Different Name", ExternalIDs: map[string]string{"mbid": "BBB-222"}}); !got.Valid || got.Int64 != 3 {
+		t.Fatalf("external id match: got %+v, want album 3", got)
 	}
 	// Title+year narrows between same-titled releases.
-	if got, ok := matchLocalAlbum(metadata.AlbumEntry{Title: "room 93!", Year: 2015}, locals); !ok || got.ID != 2 {
-		t.Fatalf("title+year match: got %v ok=%v, want album 2", got.ID, ok)
+	if got := one(metadata.AlbumEntry{Title: "room 93!", Year: 2015}); !got.Valid || got.Int64 != 2 {
+		t.Fatalf("title+year match: got %+v, want album 2", got)
 	}
 	// Title alone falls back to the first candidate.
-	if got, ok := matchLocalAlbum(metadata.AlbumEntry{Title: "Room 93"}, locals); !ok || got.ID != 1 {
-		t.Fatalf("title match: got %v ok=%v, want album 1", got.ID, ok)
+	if got := one(metadata.AlbumEntry{Title: "Room 93"}); !got.Valid || got.Int64 != 1 {
+		t.Fatalf("title match: got %+v, want album 1", got)
 	}
-	if _, ok := matchLocalAlbum(metadata.AlbumEntry{Title: "Manic"}, locals); ok {
+	if got := one(metadata.AlbumEntry{Title: "Manic"}); got.Valid {
 		t.Fatal("unknown title must not match")
+	}
+}
+
+func TestMatchLocalAlbumsClaimsEachLocalOnce(t *testing.T) {
+	locals := []sqlc.Album{
+		{ID: 10, Title: "BADLANDS", Year: "2015", MusicbrainzID: "rg-album"},
+	}
+
+	// A same-titled single must not double-attach to the album's local row —
+	// the exact external-id claim wins even though the single sorts first.
+	got := matchLocalAlbums([]metadata.AlbumEntry{
+		{Title: "BADLANDS", Type: "single", Year: 2015},
+		{Title: "BADLANDS", Type: "album", Year: 2015, ExternalIDs: map[string]string{"mbid": "rg-album"}},
+	}, locals)
+	if got[0].Valid {
+		t.Fatalf("title-only single claimed the local out from under the ext-id album match: %+v", got[0])
+	}
+	if !got[1].Valid || got[1].Int64 != 10 {
+		t.Fatalf("ext-id album match should claim local 10, got %+v", got[1])
+	}
+
+	// Without an ext-id anywhere, the first entry claims and the second stays
+	// catalog-only rather than duplicating the local.
+	got = matchLocalAlbums([]metadata.AlbumEntry{
+		{Title: "BADLANDS", Type: "album", Year: 2015},
+		{Title: "BADLANDS", Type: "single", Year: 2015},
+	}, locals)
+	if !got[0].Valid || got[0].Int64 != 10 {
+		t.Fatalf("first title match should claim local 10, got %+v", got[0])
+	}
+	if got[1].Valid {
+		t.Fatalf("second entry must not re-claim the same local, got %+v", got[1])
 	}
 }
 

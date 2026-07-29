@@ -18,11 +18,15 @@ import (
 	"github.com/karbowiak/heya/internal/metadata"
 )
 
-// Sync replaces an artist's stored discography with the provider's current
+// Sync reconciles an artist's stored discography with the provider's current
 // view, linking entries to local albums where the library has the release.
-// A nil/empty entries slice is a no-op rather than a wipe: providers
-// occasionally return partial payloads on errors upstream, and an empty
-// discography for an artist with local albums is always wrong.
+// Rows are upserted on natural_key so ids stay stable across refreshes — the
+// manager addresses catalog-only releases as d<row id> — and releases the
+// provider dropped are removed in a trailing stale-delete pass. A nil/empty
+// entries slice is a no-op rather than a wipe: providers occasionally return
+// partial payloads on errors upstream, and an empty discography for an artist
+// with local albums is always wrong. Run inside a transaction where possible
+// so a mid-loop failure can't strand a half-reconciled catalog.
 func Sync(ctx context.Context, q *sqlc.Queries, artistID int64, entries []metadata.AlbumEntry) error {
 	if len(entries) == 0 {
 		return nil
@@ -32,18 +36,16 @@ func Sync(ctx context.Context, q *sqlc.Queries, artistID int64, entries []metada
 		return fmt.Errorf("discography: list local albums: %w", err)
 	}
 
-	if err := q.DeleteArtistDiscography(ctx, artistID); err != nil {
-		return fmt.Errorf("discography: clear: %w", err)
-	}
-
+	// Dedup first: one row per release group — canonical id when resolved,
+	// otherwise title+year keeps unresolved relation evidence from duplicating.
 	seen := map[string]bool{}
+	deduped := make([]metadata.AlbumEntry, 0, len(entries))
+	keys := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		title := strings.TrimSpace(entry.Title)
 		if title == "" {
 			continue
 		}
-		// One row per release group: canonical id when resolved, otherwise
-		// title+year keeps unresolved relation evidence from duplicating.
 		key := entry.CanonicalID
 		if key == "" {
 			key = "t:" + normalizeTitle(title) + "|" + strconv.Itoa(entry.Year)
@@ -52,7 +54,14 @@ func Sync(ctx context.Context, q *sqlc.Queries, artistID int64, entries []metada
 			continue
 		}
 		seen[key] = true
+		deduped = append(deduped, entry)
+		keys = append(keys, key)
+	}
 
+	albumIDs := matchLocalAlbums(deduped, locals)
+
+	for i, entry := range deduped {
+		title := strings.TrimSpace(entry.Title)
 		externalIDs, _ := json.Marshal(entry.ExternalIDs)
 		if entry.ExternalIDs == nil {
 			externalIDs = []byte("{}")
@@ -74,12 +83,9 @@ func Sync(ctx context.Context, q *sqlc.Queries, artistID int64, entries []metada
 				}
 			}
 		}
-		var albumID pgtype.Int8
-		if local, ok := matchLocalAlbum(entry, locals); ok {
-			albumID = pgtype.Int8{Int64: local.ID, Valid: true}
-		}
-		if err := q.InsertArtistDiscographyEntry(ctx, sqlc.InsertArtistDiscographyEntryParams{
+		if err := q.UpsertArtistDiscographyEntry(ctx, sqlc.UpsertArtistDiscographyEntryParams{
 			ArtistID:       artistID,
+			NaturalKey:     keys[i],
 			CanonicalID:    entry.CanonicalID,
 			Title:          title,
 			AlbumType:      firstNonEmpty(entry.Type, "album"),
@@ -89,59 +95,144 @@ func Sync(ctx context.Context, q *sqlc.Queries, artistID int64, entries []metada
 			TrackCount:     int32(trackCount),
 			ExternalIds:    externalIDs,
 			CoverUrl:       entry.CoverURL,
-			AlbumID:        albumID,
+			AlbumID:        albumIDs[i],
 			EditionKey:     EditionKey(title),
 		}); err != nil {
-			return fmt.Errorf("discography: insert %q: %w", title, err)
+			return fmt.Errorf("discography: upsert %q: %w", title, err)
 		}
+	}
+	if err := q.DeleteStaleArtistDiscography(ctx, sqlc.DeleteStaleArtistDiscographyParams{
+		ArtistID:    artistID,
+		NaturalKeys: keys,
+	}); err != nil {
+		return fmt.Errorf("discography: prune stale: %w", err)
 	}
 	return nil
 }
 
-// matchLocalAlbum links a provider release group to the library's album row.
-// Precedence: shared external id (MBIDs and friends) → normalized title +
-// year → normalized title alone.
-func matchLocalAlbum(entry metadata.AlbumEntry, locals []sqlc.Album) (sqlc.Album, bool) {
-	entryIDs := map[string]bool{}
-	for _, value := range entry.ExternalIDs {
-		if value = strings.TrimSpace(value); value != "" {
-			entryIDs[strings.ToLower(value)] = true
-		}
+// matchLocalAlbums links provider release groups to the library's album rows,
+// each local album claimed at most once — a single sharing its parent album's
+// title must not attach to the same row and duplicate it in the merged view.
+// External-id matches (exact) claim in a first pass so a looser title match
+// earlier in the list can never steal a local from its true release group;
+// the title passes then run over what's left. Per-entry precedence stays
+// ext-id → normalized title + year → normalized title with compatible year.
+func matchLocalAlbums(entries []metadata.AlbumEntry, locals []sqlc.Album) []pgtype.Int8 {
+	albumIDs := make([]pgtype.Int8, len(entries))
+	claimed := make(map[int64]bool, len(locals))
+	claim := func(i int, local sqlc.Album) {
+		albumIDs[i] = pgtype.Int8{Int64: local.ID, Valid: true}
+		claimed[local.ID] = true
 	}
-	if len(entryIDs) > 0 {
+
+	for i, entry := range entries {
+		// MusicBrainz ids are UUIDs — collision-free across providers, so the
+		// dedicated column matches against any entry value. The generic map
+		// comparison pairs provider FAMILIES ("deezer" and "deezer:album" are
+		// aliases; "mbid" is MusicBrainz): providers with short numeric ids
+		// (tidal, deezer) can collide on bare values across families.
+		entryIDs := map[string]map[string]bool{}
+		anyEntryID := map[string]bool{}
+		for provider, value := range entry.ExternalIDs {
+			if value = strings.TrimSpace(value); value != "" {
+				family := providerFamily(provider)
+				if entryIDs[family] == nil {
+					entryIDs[family] = map[string]bool{}
+				}
+				entryIDs[family][strings.ToLower(value)] = true
+				anyEntryID[strings.ToLower(value)] = true
+			}
+		}
+		if len(entryIDs) == 0 {
+			continue
+		}
 		for _, local := range locals {
-			if local.MusicbrainzID != "" && entryIDs[strings.ToLower(local.MusicbrainzID)] {
-				return local, true
+			if claimed[local.ID] {
+				continue
+			}
+			if local.MusicbrainzID != "" && anyEntryID[strings.ToLower(local.MusicbrainzID)] {
+				claim(i, local)
+				break
 			}
 			var localIDs map[string]string
 			if len(local.ExternalIds) > 0 && json.Unmarshal(local.ExternalIds, &localIDs) == nil {
-				for _, value := range localIDs {
-					if value != "" && entryIDs[strings.ToLower(value)] {
-						return local, true
+				matched := false
+				for provider, value := range localIDs {
+					if value == "" {
+						continue
 					}
+					if entryIDs[providerFamily(provider)][strings.ToLower(strings.TrimSpace(value))] {
+						matched = true
+						break
+					}
+				}
+				if matched {
+					claim(i, local)
+					break
 				}
 			}
 		}
 	}
 
-	wantTitle := normalizeTitle(entry.Title)
-	wantYear := ""
-	if entry.Year > 0 {
-		wantYear = strconv.Itoa(entry.Year)
-	}
-	if wantYear != "" {
+	for i, entry := range entries {
+		if albumIDs[i].Valid {
+			continue
+		}
+		wantTitle := normalizeTitle(entry.Title)
+		wantYear := ""
+		if entry.Year > 0 {
+			wantYear = strconv.Itoa(entry.Year)
+		}
+		if wantYear != "" {
+			for _, local := range locals {
+				if !claimed[local.ID] && normalizeTitle(local.Title) == wantTitle && local.Year == wantYear {
+					claim(i, local)
+					break
+				}
+			}
+		}
+		if albumIDs[i].Valid {
+			continue
+		}
 		for _, local := range locals {
-			if normalizeTitle(local.Title) == wantTitle && local.Year == wantYear {
-				return local, true
+			if !claimed[local.ID] && normalizeTitle(local.Title) == wantTitle && yearsCompatible(entry.Year, local.Year) {
+				claim(i, local)
+				break
 			}
 		}
 	}
-	for _, local := range locals {
-		if normalizeTitle(local.Title) == wantTitle {
-			return local, true
-		}
+	return albumIDs
+}
+
+// providerFamily normalizes an external-id key to its provider family:
+// "deezer:album" and "deezer" are the same namespace, "musicbrainz:release_group",
+// "musicbrainz_album", and "mbid" are all MusicBrainz. Matching within a family
+// keeps alias drift working while never comparing, say, a Tidal id against a
+// Deezer id that happens to share the digits.
+func providerFamily(provider string) string {
+	p := strings.ToLower(strings.TrimSpace(provider))
+	if i := strings.IndexAny(p, ":_"); i > 0 {
+		p = p[:i]
 	}
-	return sqlc.Album{}, false
+	if p == "mbid" || p == "mb" {
+		return "musicbrainz"
+	}
+	return p
+}
+
+// yearsCompatible gates the title-only fallback: release-group vs rip years
+// drift by a year routinely (regional releases, remaster tags), but a decade
+// apart means a reissue or an unrelated same-titled release — don't link.
+func yearsCompatible(entryYear int, localYear string) bool {
+	if entryYear == 0 || localYear == "" {
+		return true
+	}
+	local, err := strconv.Atoi(localYear)
+	if err != nil {
+		return true
+	}
+	diff := entryYear - local
+	return diff >= -1 && diff <= 1
 }
 
 // editionMarker matches a trailing parenthesized qualifier that names an
