@@ -1,7 +1,7 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'manager', middleware: 'admin' })
 
-import { managerIndexersQuery, type ManagerIndexerInput, type ManagerIndexerView, type ManagerTestResult } from '~/queries/manager'
+import { managerIndexersQuery, type ManagerIndexerInput, type ManagerIndexerStatsView, type ManagerIndexerView, type ManagerTestResult } from '~/queries/manager'
 
 const { $heya } = useNuxtApp()
 const { confirm } = useConfirm()
@@ -19,6 +19,53 @@ useLiveRefresh([{
 
 const prowlarrApps = computed(() => indexers.value.filter(ix => ix.kind === 'prowlarr'))
 const manualIndexers = computed(() => indexers.value.filter(ix => ix.kind !== 'prowlarr'))
+
+// ── Live stats (Prowlarr owns the history; we fetch, never persist) ──────
+
+const statsByApp = ref<Record<number, ManagerIndexerStatsView[]>>({})
+const statsError = ref('')
+
+async function loadStats() {
+  for (const app of prowlarrApps.value) {
+    if (app.last_test_at && !app.last_test_ok) continue
+    try {
+      statsByApp.value[app.id] = await $heya(`/api/manager/indexers/${app.id}/stats`) as ManagerIndexerStatsView[]
+      statsError.value = ''
+    } catch (e: any) {
+      statsError.value = e?.data?.detail ?? e?.message ?? 'Stats unavailable.'
+    }
+  }
+}
+
+watch(prowlarrApps, () => { loadStats() }, { immediate: true })
+
+// Stats rows keyed by the Heya child-row id, for the children table.
+const statsByChildID = computed(() => {
+  const map = new Map<number, ManagerIndexerStatsView>()
+  for (const rows of Object.values(statsByApp.value)) {
+    for (const row of rows) {
+      if (row.id) map.set(row.id, row)
+    }
+  }
+  return map
+})
+
+function failCount(stat?: ManagerIndexerStatsView): number {
+  if (!stat) return 0
+  return (stat.failed_queries ?? 0) + (stat.failed_rss ?? 0) + (stat.failed_grabs ?? 0)
+}
+
+// ── Per-indexer detail dialog ────────────────────────────────────────────
+
+const statsDialogOpen = ref(false)
+const statsDialogChild = ref<ManagerIndexerView | null>(null)
+const statsDialogStat = computed(() =>
+  statsDialogChild.value ? statsByChildID.value.get(statsDialogChild.value.id) : undefined)
+
+function openStats(child: ManagerIndexerView) {
+  statsDialogChild.value = child
+  statsDialogOpen.value = true
+}
 
 const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
 const busyID = ref<number | null>(null)
@@ -115,6 +162,7 @@ async function testIndexer(ix: ManagerIndexerView) {
   } finally {
     busyID.value = null
     await indexersData.refetch()
+    await loadStats()
   }
 }
 
@@ -179,8 +227,8 @@ function testStateOf(ix: ManagerIndexerView): { state: 'ok' | 'warn' | 'error' |
         description="One connection, every indexer. Heya syncs the indexer list on every successful test and searches through Prowlarr's per-indexer Torznab endpoints."
       >
         <template #actions>
-          <button v-if="!prowlarrApps.length" type="button" class="mgr-btn-gold" @click="openAdd">
-            <Icon name="plus" :size="14" /> Connect Prowlarr
+          <button type="button" :class="prowlarrApps.length ? 'mgr-btn' : 'mgr-btn-gold'" @click="openAdd">
+            <Icon name="plus" :size="14" /> {{ prowlarrApps.length ? 'Add connection' : 'Connect Prowlarr' }}
           </button>
         </template>
 
@@ -212,18 +260,45 @@ function testStateOf(ix: ManagerIndexerView): { state: 'ok' | 'warn' | 'error' |
           </div>
         </div>
 
+        <div v-if="statsError" class="mgr-flash err">
+          <Icon name="warning" :size="13" /> {{ statsError }}
+        </div>
+
         <div v-for="app in prowlarrApps" :key="`children-${app.id}`" class="ix-table">
           <div class="ix-head">
             <span>Indexer</span>
             <span>Protocol</span>
             <span>Priority</span>
+            <span class="num">Grabs</span>
+            <span class="num">Queries</span>
+            <span class="num">Fails</span>
+            <span class="num">Avg</span>
             <span>Enabled</span>
           </div>
-          <div v-for="child in app.children ?? []" :key="child.id" class="ix-row" :class="{ dim: !child.enabled }">
-            <span class="ix-name">{{ child.name }}</span>
+          <div
+            v-for="child in app.children ?? []"
+            :key="child.id"
+            class="ix-row clickable"
+            :class="{ dim: !child.enabled }"
+            role="button"
+            tabindex="0"
+            :aria-label="`${child.name} stats`"
+            @click="openStats(child)"
+            @keydown.enter="openStats(child)"
+          >
+            <span class="ix-name">
+              {{ child.name }}
+              <StatusBadge v-if="statsByChildID.get(child.id)?.disabled_till" state="warn">backoff</StatusBadge>
+            </span>
             <span class="ix-proto" :class="child.protocol">{{ child.protocol }}</span>
             <span class="ix-prio">{{ child.priority }}</span>
-            <AppSwitch :model-value="child.enabled" :aria-label="`Enable ${child.name}`" @update:model-value="(v: boolean) => toggleChild(child, v)" />
+            <span class="ix-stat">{{ statsByChildID.get(child.id)?.grabs ?? '—' }}</span>
+            <span class="ix-stat">{{ statsByChildID.get(child.id) ? (statsByChildID.get(child.id)!.queries + statsByChildID.get(child.id)!.rss_queries).toLocaleString() : '—' }}</span>
+            <span class="ix-stat" :class="{ bad: failCount(statsByChildID.get(child.id)) > 0 }">{{ statsByChildID.get(child.id) ? failCount(statsByChildID.get(child.id)) : '—' }}</span>
+            <span class="ix-stat">{{ statsByChildID.get(child.id) ? `${statsByChildID.get(child.id)!.avg_response_ms} ms` : '—' }}</span>
+            <span @click.stop>
+              <AppSwitch :model-value="child.enabled" :aria-label="`Enable ${child.name}`" @update:model-value="(v: boolean) => toggleChild(child, v)" />
+            </span>
           </div>
         </div>
       </SettingsSection>
@@ -269,7 +344,27 @@ function testStateOf(ix: ManagerIndexerView): { state: 'ok' | 'warn' | 'error' |
       </SettingsSection>
     </template>
 
-    <AppDialog v-model:open="dialogOpen" :title="editingID != null ? 'Edit indexer' : 'Add indexer'" size="sm">
+    <AppDialog v-model="statsDialogOpen" :title="statsDialogChild?.name ?? 'Indexer'" size="sm">
+      <div v-if="statsDialogChild" class="ixs-detail">
+        <div class="ixs-url">{{ statsDialogChild.base_url }}</div>
+        <div v-if="statsDialogStat" class="ixs-grid">
+          <div class="ixs-cell"><span class="ixs-label">Grabs</span><span class="ixs-value">{{ statsDialogStat.grabs.toLocaleString() }}</span></div>
+          <div class="ixs-cell"><span class="ixs-label">Searches</span><span class="ixs-value">{{ statsDialogStat.queries.toLocaleString() }}</span></div>
+          <div class="ixs-cell"><span class="ixs-label">RSS queries</span><span class="ixs-value">{{ statsDialogStat.rss_queries.toLocaleString() }}</span></div>
+          <div class="ixs-cell"><span class="ixs-label">Avg response</span><span class="ixs-value">{{ statsDialogStat.avg_response_ms }} ms</span></div>
+          <div class="ixs-cell"><span class="ixs-label">Failed searches</span><span class="ixs-value" :class="{ bad: statsDialogStat.failed_queries > 0 }">{{ statsDialogStat.failed_queries }}</span></div>
+          <div class="ixs-cell"><span class="ixs-label">Failed RSS</span><span class="ixs-value" :class="{ bad: statsDialogStat.failed_rss > 0 }">{{ statsDialogStat.failed_rss }}</span></div>
+          <div class="ixs-cell"><span class="ixs-label">Failed grabs</span><span class="ixs-value" :class="{ bad: statsDialogStat.failed_grabs > 0 }">{{ statsDialogStat.failed_grabs }}</span></div>
+          <div class="ixs-cell"><span class="ixs-label">Health</span><span class="ixs-value">{{ statsDialogStat.disabled_till ? `backoff until ${statsDialogStat.disabled_till}` : 'healthy' }}</span></div>
+        </div>
+        <div v-else class="ixs-none">No stats yet — Prowlarr reports counters once an indexer has been queried.</div>
+        <p v-if="statsDialogStat?.recent_failure" class="mgr-form-error">
+          <Icon name="warning" :size="12" /> Last failure: {{ statsDialogStat.recent_failure }}
+        </p>
+      </div>
+    </AppDialog>
+
+    <AppDialog v-model="dialogOpen" :title="editingID != null ? 'Edit indexer' : 'Add indexer'" size="sm">
       <div class="mgr-form">
         <label class="mgr-field">
           <span>Name</span>
@@ -338,10 +433,22 @@ function testStateOf(ix: ManagerIndexerView): { state: 'ok' | 'warn' | 'error' |
 .ix-head,
 .ix-row {
   display: grid;
-  grid-template-columns: minmax(140px, 1.6fr) 90px 70px minmax(120px, auto);
-  gap: 14px;
+  grid-template-columns: minmax(150px, 1.6fr) 74px 56px 62px 76px 52px 64px minmax(52px, auto);
+  gap: 12px;
   align-items: center;
 }
+.ix-head .num { text-align: right; }
+.ix-row.clickable { cursor: pointer; transition: background 0.12s, border-color 0.12s; }
+.ix-row.clickable:hover { background: rgb(var(--ink) / 0.04); border-color: var(--border-strong); }
+.ix-row.clickable:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+.ix-stat {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-2);
+  text-align: right;
+  white-space: nowrap;
+}
+.ix-stat.bad { color: var(--bad); }
 .ix-head {
   padding: 0 14px 6px;
   font-family: var(--font-mono);
@@ -432,8 +539,46 @@ function testStateOf(ix: ManagerIndexerView): { state: 'ok' | 'warn' | 'error' |
 @media (max-width: 960px) {
   .ix-head { display: none; }
   .ix-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; }
-  .ix-prio { display: none; }
+  .ix-prio, .ix-stat { display: none; }
 }
+</style>
+
+<!-- Stats dialog content is portaled — unscoped. -->
+<style>
+.ixs-detail { display: flex; flex-direction: column; gap: 14px; }
+.ixs-url {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ixs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.ixs-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  background: rgb(var(--ink) / 0.04);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+.ixs-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.ixs-value { font-size: 15px; font-weight: 600; color: var(--fg-0); }
+.ixs-value.bad { color: var(--bad); }
+.ixs-none { font-size: 12.5px; color: var(--fg-3); }
 </style>
 
 <!-- Shared .mgr-form/.mgr-input dialog styles live unscoped in

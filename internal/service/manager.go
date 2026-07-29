@@ -429,6 +429,84 @@ func (a *App) syncProwlarrIndexers(ctx context.Context, app sqlc.ManagerIndexer,
 	return len(indexers), nil
 }
 
+// ManagerIndexerStatsView is one synced indexer's live counters, pulled from
+// the Prowlarr app on demand (not persisted — Prowlarr owns this history).
+type ManagerIndexerStatsView struct {
+	// ID is the Heya child-row id (0 when the indexer isn't synced locally).
+	ID            int64  `json:"id"`
+	Name          string `json:"name"`
+	Queries       int    `json:"queries"`
+	RssQueries    int    `json:"rss_queries"`
+	Grabs         int    `json:"grabs"`
+	FailedQueries int    `json:"failed_queries"`
+	FailedRss     int    `json:"failed_rss"`
+	FailedGrabs   int    `json:"failed_grabs"`
+	AvgResponseMs int    `json:"avg_response_ms"`
+	// DisabledTill is set when Prowlarr has the indexer in failure backoff.
+	DisabledTill  string `json:"disabled_till,omitempty"`
+	RecentFailure string `json:"recent_failure,omitempty"`
+}
+
+// ManagerIndexerStats fetches live per-indexer counters for a Prowlarr app
+// row, keyed back onto the synced child rows.
+func (a *App) ManagerIndexerStats(ctx context.Context, id int64) ([]ManagerIndexerStatsView, error) {
+	q := sqlc.New(a.db)
+	row, err := q.GetManagerIndexer(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrManagerNotFound
+		}
+		return nil, fmt.Errorf("get manager indexer: %w", err)
+	}
+	if row.Kind != IndexerKindProwlarr {
+		return []ManagerIndexerStatsView{}, nil
+	}
+	client := prowlarr.New(row.BaseUrl, row.ApiKey)
+	stats, err := client.Stats(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching indexer stats: %w", err)
+	}
+	statuses, err := client.Statuses(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching indexer statuses: %w", err)
+	}
+	statusByID := make(map[int]prowlarr.IndexerStatus, len(statuses))
+	for _, status := range statuses {
+		statusByID[status.IndexerID] = status
+	}
+	// Map Prowlarr indexer ids back to Heya child rows via source_ref.
+	rows, err := q.ListManagerIndexers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list manager indexers: %w", err)
+	}
+	childIDByRef := make(map[string]int64)
+	for _, child := range rows {
+		if child.ParentID.Valid && child.ParentID.Int64 == row.ID {
+			childIDByRef[child.SourceRef] = child.ID
+		}
+	}
+	views := make([]ManagerIndexerStatsView, 0, len(stats))
+	for _, stat := range stats {
+		view := ManagerIndexerStatsView{
+			ID:            childIDByRef[strconv.Itoa(stat.IndexerID)],
+			Name:          stat.IndexerName,
+			Queries:       stat.NumberOfQueries,
+			RssQueries:    stat.NumberOfRssQueries,
+			Grabs:         stat.NumberOfGrabs,
+			FailedQueries: stat.NumberOfFailedQueries,
+			FailedRss:     stat.NumberOfFailedRssQueries,
+			FailedGrabs:   stat.NumberOfFailedGrabs,
+			AvgResponseMs: stat.AverageResponseTime,
+		}
+		if status, ok := statusByID[stat.IndexerID]; ok {
+			view.DisabledTill = status.DisabledTill
+			view.RecentFailure = status.MostRecentFailure
+		}
+		views = append(views, view)
+	}
+	return views, nil
+}
+
 // ── Download clients ─────────────────────────────────────────────────────
 
 func (a *App) ListManagerDownloadClients(ctx context.Context) ([]ManagerDownloadClientView, error) {
@@ -623,6 +701,112 @@ func (a *App) TestManagerDownloadClient(ctx context.Context, id int64) (ManagerT
 	}
 	a.notifyManagerChanged(ctx, "download_clients")
 	return result, nil
+}
+
+// ManagerClientQueueItem is one in-flight download, normalized from the
+// client's own shapes (SAB reports sizes as decimal-string MB).
+type ManagerClientQueueItem struct {
+	Name       string  `json:"name"`
+	Category   string  `json:"category"`
+	Status     string  `json:"status"`
+	SizeMB     float64 `json:"size_mb"`
+	SizeLeftMB float64 `json:"size_left_mb"`
+	Percentage int     `json:"percentage"`
+	TimeLeft   string  `json:"time_left"`
+}
+
+type ManagerClientHistoryItem struct {
+	Name        string `json:"name"`
+	Status      string `json:"status"`
+	Category    string `json:"category"`
+	Bytes       int64  `json:"bytes"`
+	Storage     string `json:"storage"`
+	FailMessage string `json:"fail_message,omitempty"`
+	CompletedAt int64  `json:"completed_at"`
+}
+
+// ManagerClientActivityView is the live picture of what a download client is
+// doing: current queue, recent history, and lifetime transfer counters.
+type ManagerClientActivityView struct {
+	Paused          bool                       `json:"paused"`
+	SpeedKBps       float64                    `json:"speed_kbps"`
+	DiskFreeGB      float64                    `json:"disk_free_gb"`
+	Queue           []ManagerClientQueueItem   `json:"queue"`
+	History         []ManagerClientHistoryItem `json:"history"`
+	DownloadedDay   int64                      `json:"downloaded_day"`
+	DownloadedWeek  int64                      `json:"downloaded_week"`
+	DownloadedMonth int64                      `json:"downloaded_month"`
+	DownloadedTotal int64                      `json:"downloaded_total"`
+}
+
+func parseSABFloat(raw string) float64 {
+	value, _ := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	return value
+}
+
+// ManagerDownloadClientActivity fetches the client's live queue, recent
+// history, and transfer totals. Read-only against the client — nothing is
+// persisted.
+func (a *App) ManagerDownloadClientActivity(ctx context.Context, id int64) (*ManagerClientActivityView, error) {
+	row, err := sqlc.New(a.db).GetManagerDownloadClient(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrManagerNotFound
+		}
+		return nil, fmt.Errorf("get manager download client: %w", err)
+	}
+	if row.Kind != DownloadClientKindSABnzbd {
+		return nil, fmt.Errorf("activity not supported for client kind %q", row.Kind)
+	}
+
+	client := sabnzbd.New(row.BaseUrl, row.ApiKey)
+	queue, err := client.Queue(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching queue: %w", err)
+	}
+	stats, err := client.ServerStats(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching server stats: %w", err)
+	}
+	history, err := client.History(ctx, 10)
+	if err != nil {
+		return nil, fmt.Errorf("fetching history: %w", err)
+	}
+
+	view := &ManagerClientActivityView{
+		Paused:          queue.Paused,
+		SpeedKBps:       parseSABFloat(queue.SpeedKBps),
+		DiskFreeGB:      parseSABFloat(queue.DiskspaceFreeGB),
+		Queue:           make([]ManagerClientQueueItem, 0, len(queue.Slots)),
+		History:         make([]ManagerClientHistoryItem, 0, len(history)),
+		DownloadedDay:   stats.Day,
+		DownloadedWeek:  stats.Week,
+		DownloadedMonth: stats.Month,
+		DownloadedTotal: stats.Total,
+	}
+	for _, slot := range queue.Slots {
+		view.Queue = append(view.Queue, ManagerClientQueueItem{
+			Name:       slot.Filename,
+			Category:   slot.Category,
+			Status:     slot.Status,
+			SizeMB:     parseSABFloat(slot.SizeMB),
+			SizeLeftMB: parseSABFloat(slot.SizeLeftMB),
+			Percentage: int(parseSABFloat(slot.Percentage)),
+			TimeLeft:   slot.TimeLeft,
+		})
+	}
+	for _, slot := range history {
+		view.History = append(view.History, ManagerClientHistoryItem{
+			Name:        slot.Name,
+			Status:      slot.Status,
+			Category:    slot.Category,
+			Bytes:       slot.Bytes,
+			Storage:     slot.Storage,
+			FailMessage: slot.FailMessage,
+			CompletedAt: slot.Completed,
+		})
+	}
+	return view, nil
 }
 
 // ── Quality profiles ─────────────────────────────────────────────────────

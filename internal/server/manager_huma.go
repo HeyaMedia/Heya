@@ -64,6 +64,15 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 			return &JSONOutput[service.ManagerTestResult]{Body: result}, nil
 		})
 
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/indexers/{id}/stats", "manager-indexer-stats", "Live per-indexer stats from a Prowlarr app", "Manager")),
+		func(ctx context.Context, in *struct{ IDPath }) (*JSONOutput[[]service.ManagerIndexerStatsView], error) {
+			stats, err := app.ManagerIndexerStats(ctx, in.ID)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadGateway)
+			}
+			return noStoreJSON(stats), nil
+		})
+
 	// ── Download clients ─────────────────────────────────────────────────
 
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/download-clients", "manager-list-download-clients", "List manager download clients", "Manager")),
@@ -113,6 +122,15 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 				return nil, humaServiceError(err)
 			}
 			return &JSONOutput[service.ManagerTestResult]{Body: result}, nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/download-clients/{id}/activity", "manager-download-client-activity", "Live queue, history, and transfer totals", "Manager")),
+		func(ctx context.Context, in *struct{ IDPath }) (*JSONOutput[service.ManagerClientActivityView], error) {
+			activity, err := app.ManagerDownloadClientActivity(ctx, in.ID)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadGateway)
+			}
+			return noStoreJSON(*activity), nil
 		})
 
 	// ── Quality profiles ─────────────────────────────────────────────────

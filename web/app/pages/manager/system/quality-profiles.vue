@@ -150,7 +150,7 @@ async function removeProfile(profile: ManagerQualityProfileView) {
       </div>
     </SettingsSection>
 
-    <AppDialog v-model:open="dialogOpen" title="Edit quality profile" size="sm">
+    <AppDialog v-model="dialogOpen" title="Edit quality profile" size="sm">
       <div class="mgr-form">
         <label class="mgr-field">
           <span>Name</span>

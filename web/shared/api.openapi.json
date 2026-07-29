@@ -12462,6 +12462,153 @@
         ],
         "type": "object"
       },
+      "ManagerClientActivityView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerClientActivityView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "disk_free_gb": {
+            "format": "double",
+            "type": "number"
+          },
+          "downloaded_day": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "downloaded_month": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "downloaded_total": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "downloaded_week": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerClientHistoryItem"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "queue": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerClientQueueItem"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "speed_kbps": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "paused",
+          "speed_kbps",
+          "disk_free_gb",
+          "queue",
+          "history",
+          "downloaded_day",
+          "downloaded_week",
+          "downloaded_month",
+          "downloaded_total"
+        ],
+        "type": "object"
+      },
+      "ManagerClientHistoryItem": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "category": {
+            "type": "string"
+          },
+          "completed_at": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "fail_message": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "storage": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "category",
+          "bytes",
+          "storage",
+          "completed_at"
+        ],
+        "type": "object"
+      },
+      "ManagerClientQueueItem": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "percentage": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "size_left_mb": {
+            "format": "double",
+            "type": "number"
+          },
+          "size_mb": {
+            "format": "double",
+            "type": "number"
+          },
+          "status": {
+            "type": "string"
+          },
+          "time_left": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "category",
+          "status",
+          "size_mb",
+          "size_left_mb",
+          "percentage",
+          "time_left"
+        ],
+        "type": "object"
+      },
       "ManagerDownloadClientInput": {
         "additionalProperties": false,
         "properties": {
@@ -12656,6 +12803,64 @@
           "api_key",
           "protocol",
           "categories"
+        ],
+        "type": "object"
+      },
+      "ManagerIndexerStatsView": {
+        "additionalProperties": false,
+        "properties": {
+          "avg_response_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "disabled_till": {
+            "type": "string"
+          },
+          "failed_grabs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "failed_queries": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "failed_rss": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "grabs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "queries": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "recent_failure": {
+            "type": "string"
+          },
+          "rss_queries": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "queries",
+          "rss_queries",
+          "grabs",
+          "failed_queries",
+          "failed_rss",
+          "failed_grabs",
+          "avg_response_ms"
         ],
         "type": "object"
       },
@@ -32085,6 +32290,66 @@
         ]
       }
     },
+    "/api/manager/download-clients/{id}/activity": {
+      "get": {
+        "operationId": "manager-download-client-activity",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerClientActivityView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Live queue, history, and transfer totals",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
     "/api/manager/download-clients/{id}/test": {
       "post": {
         "operationId": "manager-test-download-client",
@@ -32361,6 +32626,72 @@
           }
         ],
         "summary": "Update a manager indexer",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
+    "/api/manager/indexers/{id}/stats": {
+      "get": {
+        "operationId": "manager-indexer-stats",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ManagerIndexerStatsView"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Live per-indexer stats from a Prowlarr app",
         "tags": [
           "Manager"
         ]

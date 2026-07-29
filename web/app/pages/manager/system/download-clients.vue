@@ -1,7 +1,8 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'manager', middleware: 'admin' })
 
-import { managerDownloadClientsQuery, type ManagerDownloadClientInput, type ManagerDownloadClientView, type ManagerTestResult } from '~/queries/manager'
+import { managerDownloadClientsQuery, type ManagerClientActivityView, type ManagerDownloadClientInput, type ManagerDownloadClientView, type ManagerTestResult } from '~/queries/manager'
+import { fmtBytes, timeAgoShort } from '~/composables/useFormat'
 
 const { $heya } = useNuxtApp()
 const { confirm } = useConfirm()
@@ -15,6 +16,56 @@ useLiveRefresh([{
   keys: [['manager', 'download-clients']],
   filter: event => (event.payload as { area?: string } | undefined)?.area === 'download_clients',
 }])
+
+// ── Live activity (queue, history, transfer totals) ──────────────────────
+// Polled straight off the client every 10s while the tab is visible —
+// nothing is persisted server-side, so Colada caching buys little here.
+
+const activityByClient = ref<Record<number, ManagerClientActivityView>>({})
+const activityError = ref('')
+let activityTimer: ReturnType<typeof setInterval> | null = null
+
+async function loadActivity() {
+  for (const client of clients.value) {
+    if (!client.enabled || (client.last_test_at && !client.last_test_ok)) continue
+    try {
+      activityByClient.value[client.id] = await $heya(`/api/manager/download-clients/${client.id}/activity`) as ManagerClientActivityView
+      activityError.value = ''
+    } catch (e: any) {
+      activityError.value = e?.data?.detail ?? e?.message ?? 'Activity unavailable.'
+    }
+  }
+}
+
+watch(clients, () => { loadActivity() }, { immediate: true })
+onMounted(() => {
+  activityTimer = setInterval(() => {
+    if (document.visibilityState === 'hidden') return
+    loadActivity()
+  }, 10_000)
+})
+onBeforeUnmount(() => {
+  if (activityTimer) clearInterval(activityTimer)
+})
+
+function clientState(activity?: ManagerClientActivityView): { label: string, state: 'ok' | 'warn' | 'idle' } {
+  if (!activity) return { label: 'no data', state: 'idle' }
+  if (activity.paused) return { label: 'paused', state: 'warn' }
+  const active = activity.queue?.length ?? 0
+  if (active > 0) return { label: `downloading ${active}`, state: 'ok' }
+  return { label: 'idle', state: 'idle' }
+}
+
+function speedText(activity: ManagerClientActivityView): string {
+  const kbps = activity.speed_kbps
+  if (kbps >= 1024) return `${(kbps / 1024).toFixed(1)} MB/s`
+  return `${kbps.toFixed(0)} KB/s`
+}
+
+function historyAge(completedAt: number): string {
+  if (!completedAt) return ''
+  return timeAgoShort(new Date(completedAt * 1000).toISOString())
+}
 
 const flash = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
 const busyID = ref<number | null>(null)
@@ -35,6 +86,11 @@ const form = reactive({
 })
 const savingForm = ref(false)
 const formError = ref('')
+
+// One entry today; the selector is the pattern the torrent clients slot into.
+const CLIENT_KIND_OPTIONS = [
+  { value: 'sabnzbd', label: 'SABnzbd', meta: 'usenet' },
+]
 
 function openAdd() {
   editingID.value = null
@@ -166,40 +222,107 @@ function testStateOf(client: ManagerDownloadClientView): { state: 'ok' | 'warn' 
         <Icon name="info" :size="14" /> No download clients configured yet.
       </div>
 
+      <div v-if="activityError" class="mgr-flash err">
+        <Icon name="warning" :size="13" /> {{ activityError }}
+      </div>
+
       <div v-for="client in clients" :key="client.id" class="dc-card">
-        <div class="dc-icon" :class="{ err: client.last_test_at && !client.last_test_ok }"><Icon name="download" :size="16" /></div>
-        <div class="dc-body">
-          <div class="dc-name">
-            {{ client.name }}
-            <StatusBadge :state="testStateOf(client).state">{{ testStateOf(client).label }}</StatusBadge>
+        <div class="dc-card-head">
+          <div class="dc-icon" :class="{ err: client.last_test_at && !client.last_test_ok }"><Icon name="download" :size="16" /></div>
+          <div class="dc-body">
+            <div class="dc-name">
+              {{ client.name }}
+              <StatusBadge :state="testStateOf(client).state">{{ testStateOf(client).label }}</StatusBadge>
+              <StatusBadge v-if="activityByClient[client.id]" :state="clientState(activityByClient[client.id]).state === 'idle' ? 'idle' : clientState(activityByClient[client.id]).state === 'warn' ? 'warn' : 'ok'">
+                {{ clientState(activityByClient[client.id]).label }}
+              </StatusBadge>
+            </div>
+            <div class="dc-host">{{ client.base_url }}</div>
+            <div class="dc-meta">
+              <span class="dc-proto" :class="client.protocol">{{ client.protocol }}</span>
+              <span>· category <code>{{ client.category }}</code></span>
+              <span v-for="mapping in client.path_mappings" :key="mapping.remote">
+                · maps <code>{{ mapping.remote }}</code> → <code>{{ mapping.local }}</code>
+              </span>
+            </div>
           </div>
-          <div class="dc-host">{{ client.base_url }}</div>
-          <div class="dc-meta">
-            <span class="dc-proto" :class="client.protocol">{{ client.protocol }}</span>
-            <span>· category <code>{{ client.category }}</code></span>
-            <span v-for="mapping in client.path_mappings" :key="mapping.remote">
-              · maps <code>{{ mapping.remote }}</code> → <code>{{ mapping.local }}</code>
-            </span>
+          <div class="mgr-row-actions">
+            <AppTooltip label="Test connection">
+              <button type="button" class="mgr-btn-icon" :disabled="busyID === client.id" @click="testClient(client)">
+                <Icon :name="busyID === client.id ? 'spinner' : 'refresh'" :size="14" />
+              </button>
+            </AppTooltip>
+            <AppTooltip label="Edit">
+              <button type="button" class="mgr-btn-icon" @click="openEdit(client)"><Icon name="pencil" :size="14" /></button>
+            </AppTooltip>
+            <AppTooltip label="Remove">
+              <button type="button" class="mgr-btn-icon danger" @click="removeClient(client)"><Icon name="trash" :size="14" /></button>
+            </AppTooltip>
           </div>
         </div>
-        <div class="mgr-row-actions">
-          <AppTooltip label="Test connection">
-            <button type="button" class="mgr-btn-icon" :disabled="busyID === client.id" @click="testClient(client)">
-              <Icon :name="busyID === client.id ? 'spinner' : 'refresh'" :size="14" />
-            </button>
-          </AppTooltip>
-          <AppTooltip label="Edit">
-            <button type="button" class="mgr-btn-icon" @click="openEdit(client)"><Icon name="pencil" :size="14" /></button>
-          </AppTooltip>
-          <AppTooltip label="Remove">
-            <button type="button" class="mgr-btn-icon danger" @click="removeClient(client)"><Icon name="trash" :size="14" /></button>
-          </AppTooltip>
-        </div>
+
+        <template v-if="activityByClient[client.id]">
+          <div class="dc-activity">
+            <div class="dc-stats">
+              <div class="dc-stat">
+                <span class="dc-stat-label">Speed</span>
+                <span class="dc-stat-value">{{ speedText(activityByClient[client.id]!) }}</span>
+              </div>
+              <div class="dc-stat">
+                <span class="dc-stat-label">Today</span>
+                <span class="dc-stat-value">{{ fmtBytes(activityByClient[client.id]!.downloaded_day) }}</span>
+              </div>
+              <div class="dc-stat">
+                <span class="dc-stat-label">This week</span>
+                <span class="dc-stat-value">{{ fmtBytes(activityByClient[client.id]!.downloaded_week) }}</span>
+              </div>
+              <div class="dc-stat">
+                <span class="dc-stat-label">This month</span>
+                <span class="dc-stat-value">{{ fmtBytes(activityByClient[client.id]!.downloaded_month) }}</span>
+              </div>
+              <div class="dc-stat">
+                <span class="dc-stat-label">All time</span>
+                <span class="dc-stat-value">{{ fmtBytes(activityByClient[client.id]!.downloaded_total) }}</span>
+              </div>
+              <div class="dc-stat">
+                <span class="dc-stat-label">Disk free</span>
+                <span class="dc-stat-value">{{ fmtBytes(activityByClient[client.id]!.disk_free_gb * 1024 ** 3) }}</span>
+              </div>
+            </div>
+
+            <div v-if="activityByClient[client.id]?.queue?.length" class="dc-queue">
+              <div class="dc-sub-label">Queue</div>
+              <div v-for="item in activityByClient[client.id]?.queue ?? []" :key="item.name" class="dc-queue-row">
+                <div class="dc-queue-main">
+                  <span class="dc-queue-name">{{ item.name }}</span>
+                  <span class="dc-queue-meta">{{ item.category }} · {{ item.status }} · {{ item.time_left }}</span>
+                </div>
+                <div class="dc-queue-bar">
+                  <div class="dc-queue-fill" :style="{ width: `${item.percentage}%` }" />
+                </div>
+                <span class="dc-queue-pct">{{ item.percentage }}%</span>
+              </div>
+            </div>
+
+            <div v-if="activityByClient[client.id]?.history?.length" class="dc-history">
+              <div class="dc-sub-label">Recent</div>
+              <div v-for="item in (activityByClient[client.id]?.history ?? []).slice(0, 5)" :key="item.name + item.completed_at" class="dc-history-row">
+                <Icon :name="item.status === 'Completed' ? 'check' : item.status === 'Failed' ? 'warning' : 'clock'" :size="12" class="dc-history-icon" :class="{ ok: item.status === 'Completed', bad: item.status === 'Failed' }" />
+                <span class="dc-history-name">{{ item.name }}</span>
+                <span class="dc-history-meta">{{ item.category }} · {{ fmtBytes(item.bytes) }} · {{ historyAge(item.completed_at) }}</span>
+              </div>
+            </div>
+          </div>
+        </template>
       </div>
     </SettingsSection>
 
-    <AppDialog v-model:open="dialogOpen" :title="editingID != null ? 'Edit download client' : 'Add download client'" size="sm">
+    <AppDialog v-model="dialogOpen" :title="editingID != null ? 'Edit download client' : 'Add download client'" size="sm">
       <div class="mgr-form">
+        <label v-if="editingID == null" class="mgr-field">
+          <span>Client</span>
+          <AppSelect v-model="form.kind" :options="CLIENT_KIND_OPTIONS" />
+        </label>
         <label class="mgr-field">
           <span>Name</span>
           <input v-model="form.name" class="mgr-input" placeholder="SABnzbd">
@@ -240,14 +363,109 @@ function testStateOf(client: ManagerDownloadClientView): { state: 'ok' | 'warn' 
 <style scoped>
 .dc-card {
   display: flex;
-  align-items: flex-start;
-  gap: 14px;
+  flex-direction: column;
+  gap: 12px;
   padding: 14px 16px;
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   margin-bottom: 8px;
 }
+.dc-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+/* ── Live activity panel ── */
+.dc-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hair);
+}
+.dc-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+.dc-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 11px;
+  background: rgb(var(--ink) / 0.04);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+.dc-stat-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.dc-stat-value { font-size: 13.5px; font-weight: 600; color: var(--fg-0); white-space: nowrap; }
+
+.dc-sub-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  margin-bottom: 6px;
+}
+
+.dc-queue-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px 42px;
+  gap: 12px;
+  align-items: center;
+  padding: 7px 0;
+}
+.dc-queue-main { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.dc-queue-name {
+  font-size: 12.5px; font-weight: 500; color: var(--fg-0);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dc-queue-meta { font-size: 11px; color: var(--fg-3); }
+.dc-queue-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: rgb(var(--ink) / 0.08);
+  overflow: hidden;
+}
+.dc-queue-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--gold);
+  transition: width 0.5s ease;
+}
+.dc-queue-pct {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-2);
+  text-align: right;
+}
+
+.dc-history-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  min-width: 0;
+}
+.dc-history-icon { color: var(--fg-3); flex-shrink: 0; }
+.dc-history-icon.ok { color: var(--good); }
+.dc-history-icon.bad { color: var(--bad); }
+.dc-history-name {
+  font-size: 12px; color: var(--fg-1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dc-history-meta { font-size: 11px; color: var(--fg-3); flex-shrink: 0; margin-left: auto; white-space: nowrap; }
 .dc-icon {
   width: 36px; height: 36px;
   border-radius: var(--r-sm);
@@ -344,7 +562,9 @@ function testStateOf(client: ManagerDownloadClientView): { state: 'ok' | 'warn' 
 }
 
 @media (max-width: 720px) {
-  .dc-card { flex-wrap: wrap; }
+  .dc-card-head { flex-wrap: wrap; }
+  .dc-queue-row { grid-template-columns: minmax(0, 1fr) 60px; }
+  .dc-queue-pct { display: none; }
 }
 </style>
 

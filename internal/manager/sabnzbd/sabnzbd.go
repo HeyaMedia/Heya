@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -70,6 +71,50 @@ func (c *Client) Queue(ctx context.Context) (*Queue, error) {
 		return nil, fmt.Errorf("sabnzbd: queue response missing queue object")
 	}
 	return out.Queue, nil
+}
+
+// ServerStats is the lifetime/day/week/month downloaded byte counters.
+type ServerStats struct {
+	Total int64 `json:"total"`
+	Month int64 `json:"month"`
+	Week  int64 `json:"week"`
+	Day   int64 `json:"day"`
+}
+
+func (c *Client) ServerStats(ctx context.Context) (*ServerStats, error) {
+	var out ServerStats
+	if err := c.call(ctx, url.Values{"mode": {"server_stats"}}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+type HistorySlot struct {
+	NzoID       string `json:"nzo_id"`
+	Name        string `json:"name"`
+	Status      string `json:"status"`
+	Category    string `json:"category"`
+	Bytes       int64  `json:"bytes"`
+	Storage     string `json:"storage"`
+	FailMessage string `json:"fail_message"`
+	// Completed is a unix timestamp.
+	Completed int64 `json:"completed"`
+}
+
+func (c *Client) History(ctx context.Context, limit int) ([]HistorySlot, error) {
+	var out struct {
+		History struct {
+			Slots []HistorySlot `json:"slots"`
+		} `json:"history"`
+	}
+	params := url.Values{"mode": {"history"}}
+	if limit > 0 {
+		params.Set("limit", strconv.Itoa(limit))
+	}
+	if err := c.call(ctx, params, &out); err != nil {
+		return nil, err
+	}
+	return out.History.Slots, nil
 }
 
 func (c *Client) call(ctx context.Context, params url.Values, out any) error {

@@ -13,6 +13,19 @@ import (
 // heya manager — the acquisition subsystem's CLI surface (CLI-first rule:
 // everything the /manager UI can do, this can do).
 
+func humanBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
 var managerCmd = &cobra.Command{
 	Use:   "manager",
 	Short: "Manage the acquisition pipeline (indexers, download clients, quality profiles)",
@@ -64,7 +77,7 @@ var managerIndexerListCmd = &cobra.Command{
 			for _, view := range views {
 				addRow(view, "")
 			}
-			table.Render()
+			fmt.Println(table.Render())
 			return nil
 		})
 	},
@@ -132,6 +145,45 @@ var managerIndexerTestCmd = &cobra.Command{
 	},
 }
 
+var managerIndexerStatsCmd = &cobra.Command{
+	Use:   "stats <id>",
+	Short: "Show live per-indexer stats for a Prowlarr connection",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid id %q", args[0])
+		}
+		return withApp(func(ctx context.Context, app *service.App) error {
+			stats, err := app.ManagerIndexerStats(ctx, id)
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(stats)
+			}
+			table := ui.NewTable("Indexer", "Queries", "RSS", "Grabs", "Failed", "Avg resp", "Health")
+			for _, stat := range stats {
+				health := "ok"
+				if stat.DisabledTill != "" {
+					health = "backoff until " + stat.DisabledTill
+				}
+				table.AddRow(
+					stat.Name,
+					strconv.Itoa(stat.Queries),
+					strconv.Itoa(stat.RssQueries),
+					strconv.Itoa(stat.Grabs),
+					strconv.Itoa(stat.FailedQueries+stat.FailedRss+stat.FailedGrabs),
+					fmt.Sprintf("%d ms", stat.AvgResponseMs),
+					health,
+				)
+			}
+			fmt.Println(table.Render())
+			return nil
+		})
+	},
+}
+
 var managerIndexerRemoveCmd = &cobra.Command{
 	Use:   "rm <id>",
 	Short: "Remove an indexer",
@@ -190,7 +242,7 @@ var managerClientListCmd = &cobra.Command{
 					test,
 				)
 			}
-			table.Render()
+			fmt.Println(table.Render())
 			return nil
 		})
 	},
@@ -264,6 +316,48 @@ var managerClientTestCmd = &cobra.Command{
 	},
 }
 
+var managerClientActivityCmd = &cobra.Command{
+	Use:   "activity <id>",
+	Short: "Show a download client's live queue and transfer totals",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid id %q", args[0])
+		}
+		return withApp(func(ctx context.Context, app *service.App) error {
+			activity, err := app.ManagerDownloadClientActivity(ctx, id)
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(activity)
+			}
+			state := "downloading"
+			if activity.Paused {
+				state = "paused"
+			} else if len(activity.Queue) == 0 {
+				state = "idle"
+			}
+			ui.Info("State", state)
+			ui.Info("Speed", fmt.Sprintf("%.1f MB/s", activity.SpeedKBps/1024))
+			ui.Info("Disk free", fmt.Sprintf("%.1f GB", activity.DiskFreeGB))
+			ui.Info("Downloaded", fmt.Sprintf("today %s · week %s · month %s · total %s",
+				humanBytes(activity.DownloadedDay), humanBytes(activity.DownloadedWeek),
+				humanBytes(activity.DownloadedMonth), humanBytes(activity.DownloadedTotal)))
+			if len(activity.Queue) > 0 {
+				table := ui.NewTable("Name", "Category", "Status", "Progress", "ETA")
+				for _, item := range activity.Queue {
+					table.AddRow(item.Name, item.Category, item.Status,
+						fmt.Sprintf("%d%%", item.Percentage), item.TimeLeft)
+				}
+				fmt.Println(table.Render())
+			}
+			return nil
+		})
+	},
+}
+
 var managerClientRemoveCmd = &cobra.Command{
 	Use:   "rm <id>",
 	Short: "Remove a download client",
@@ -319,7 +413,7 @@ var managerProfileListCmd = &cobra.Command{
 					strconv.FormatInt(view.InUseCount, 10),
 				)
 			}
-			table.Render()
+			fmt.Println(table.Render())
 			return nil
 		})
 	},
@@ -340,8 +434,8 @@ func init() {
 	managerClientAddCmd.Flags().String("map-remote", "", "Path prefix as the client reports it (e.g. /storage)")
 	managerClientAddCmd.Flags().String("map-local", "", "Same prefix as this process sees it (e.g. /Volumes/Storage)")
 
-	managerIndexerCmd.AddCommand(managerIndexerListCmd, managerIndexerAddCmd, managerIndexerTestCmd, managerIndexerRemoveCmd)
-	managerClientCmd.AddCommand(managerClientListCmd, managerClientAddCmd, managerClientTestCmd, managerClientRemoveCmd)
+	managerIndexerCmd.AddCommand(managerIndexerListCmd, managerIndexerAddCmd, managerIndexerTestCmd, managerIndexerStatsCmd, managerIndexerRemoveCmd)
+	managerClientCmd.AddCommand(managerClientListCmd, managerClientAddCmd, managerClientTestCmd, managerClientActivityCmd, managerClientRemoveCmd)
 	managerProfileCmd.AddCommand(managerProfileListCmd)
 	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd)
 	rootCmd.AddCommand(managerCmd)

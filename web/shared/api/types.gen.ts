@@ -3436,6 +3436,42 @@ export type LyricsResponse = {
     synced: boolean;
 };
 
+export type ManagerClientActivityView = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    disk_free_gb: number;
+    downloaded_day: number;
+    downloaded_month: number;
+    downloaded_total: number;
+    downloaded_week: number;
+    history: Array<ManagerClientHistoryItem> | null;
+    paused: boolean;
+    queue: Array<ManagerClientQueueItem> | null;
+    speed_kbps: number;
+};
+
+export type ManagerClientHistoryItem = {
+    bytes: number;
+    category: string;
+    completed_at: number;
+    fail_message?: string;
+    name: string;
+    status: string;
+    storage: string;
+};
+
+export type ManagerClientQueueItem = {
+    category: string;
+    name: string;
+    percentage: number;
+    size_left_mb: number;
+    size_mb: number;
+    status: string;
+    time_left: string;
+};
+
 export type ManagerDownloadClientInput = {
     /**
      * A URL to the JSON Schema for this object.
@@ -3487,6 +3523,20 @@ export type ManagerIndexerInput = {
     name: string;
     priority?: number;
     protocol: string;
+};
+
+export type ManagerIndexerStatsView = {
+    avg_response_ms: number;
+    disabled_till?: string;
+    failed_grabs: number;
+    failed_queries: number;
+    failed_rss: number;
+    grabs: number;
+    id: number;
+    name: string;
+    queries: number;
+    recent_failure?: string;
+    rss_queries: number;
 };
 
 export type ManagerIndexerView = {
@@ -7880,6 +7930,18 @@ export type LovedBodyWritable = {
 export type LyricsResponseWritable = {
     lines: Array<LyricsLine> | null;
     synced: boolean;
+};
+
+export type ManagerClientActivityViewWritable = {
+    disk_free_gb: number;
+    downloaded_day: number;
+    downloaded_month: number;
+    downloaded_total: number;
+    downloaded_week: number;
+    history: Array<ManagerClientHistoryItem> | null;
+    paused: boolean;
+    queue: Array<ManagerClientQueueItem> | null;
+    speed_kbps: number;
 };
 
 export type ManagerDownloadClientInputWritable = {
@@ -13315,6 +13377,36 @@ export type ManagerUpdateDownloadClientResponses = {
 
 export type ManagerUpdateDownloadClientResponse = ManagerUpdateDownloadClientResponses[keyof ManagerUpdateDownloadClientResponses];
 
+export type ManagerDownloadClientActivityData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/manager/download-clients/{id}/activity';
+};
+
+export type ManagerDownloadClientActivityErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerDownloadClientActivityError = ManagerDownloadClientActivityErrors[keyof ManagerDownloadClientActivityErrors];
+
+export type ManagerDownloadClientActivityResponses = {
+    /**
+     * OK
+     */
+    200: ManagerClientActivityView;
+};
+
+export type ManagerDownloadClientActivityResponse = ManagerDownloadClientActivityResponses[keyof ManagerDownloadClientActivityResponses];
+
 export type ManagerTestDownloadClientData = {
     body?: never;
     path: {
@@ -13454,6 +13546,36 @@ export type ManagerUpdateIndexerResponses = {
 };
 
 export type ManagerUpdateIndexerResponse = ManagerUpdateIndexerResponses[keyof ManagerUpdateIndexerResponses];
+
+export type ManagerIndexerStatsData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/manager/indexers/{id}/stats';
+};
+
+export type ManagerIndexerStatsErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerIndexerStatsError = ManagerIndexerStatsErrors[keyof ManagerIndexerStatsErrors];
+
+export type ManagerIndexerStatsResponses = {
+    /**
+     * OK
+     */
+    200: Array<ManagerIndexerStatsView> | null;
+};
+
+export type ManagerIndexerStatsResponse = ManagerIndexerStatsResponses[keyof ManagerIndexerStatsResponses];
 
 export type ManagerTestIndexerData = {
     body?: never;

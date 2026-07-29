@@ -64,6 +64,45 @@ func (c *Client) Indexers(ctx context.Context) ([]Indexer, error) {
 	return indexers, nil
 }
 
+// IndexerStats is one indexer's lifetime counters from /api/v1/indexerstats.
+type IndexerStats struct {
+	IndexerID                int    `json:"indexerId"`
+	IndexerName              string `json:"indexerName"`
+	AverageResponseTime      int    `json:"averageResponseTime"`
+	NumberOfQueries          int    `json:"numberOfQueries"`
+	NumberOfGrabs            int    `json:"numberOfGrabs"`
+	NumberOfRssQueries       int    `json:"numberOfRssQueries"`
+	NumberOfFailedQueries    int    `json:"numberOfFailedQueries"`
+	NumberOfFailedGrabs      int    `json:"numberOfFailedGrabs"`
+	NumberOfFailedRssQueries int    `json:"numberOfFailedRssQueries"`
+}
+
+func (c *Client) Stats(ctx context.Context) ([]IndexerStats, error) {
+	var out struct {
+		Indexers []IndexerStats `json:"indexers"`
+	}
+	if err := c.get(ctx, "/api/v1/indexerstats", &out); err != nil {
+		return nil, err
+	}
+	return out.Indexers, nil
+}
+
+// IndexerStatus reports health backoff: present only for indexers Prowlarr
+// has temporarily disabled after failures.
+type IndexerStatus struct {
+	IndexerID         int    `json:"indexerId"`
+	DisabledTill      string `json:"disabledTill"`
+	MostRecentFailure string `json:"mostRecentFailure"`
+}
+
+func (c *Client) Statuses(ctx context.Context) ([]IndexerStatus, error) {
+	var out []IndexerStatus
+	if err := c.get(ctx, "/api/v1/indexerstatus", &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TorznabURL is the per-indexer Torznab endpoint Prowlarr exposes for the
 // given indexer id, authenticated with the same app API key.
 func (c *Client) TorznabURL(indexerID int) string {
