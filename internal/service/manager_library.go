@@ -207,14 +207,22 @@ localrel AS (
   GROUP BY media_item_id
 ),
 disco AS (
-  SELECT ar.media_item_id,
+  -- Edition variants ("(Deluxe)", "(Extended)") share an edition_key and
+  -- count once: owning ANY complete edition means the release isn't missing.
+  SELECT media_item_id,
          count(*)::int AS releases,
-         count(*) FILTER (WHERE ds.have_tracks > 0 AND ds.have_tracks >= ds.total_tracks)::int AS complete
-  FROM artist_discography d
-  JOIN artists ar ON ar.id = d.artist_id
-  JOIN media_items mi2 ON mi2.id = ar.media_item_id AND mi2.library_id = $1 AND ($2::bigint = 0 OR mi2.id = $2)
-  LEFT JOIN albstat ds ON ds.album_id = d.album_id
-  GROUP BY ar.media_item_id
+         count(*) FILTER (WHERE complete)::int AS complete
+  FROM (
+    -- Keyed per type so a self-titled single never merges with the album.
+    SELECT ar.media_item_id,
+           bool_or(ds.have_tracks > 0 AND ds.have_tracks >= ds.total_tracks) AS complete
+    FROM artist_discography d
+    JOIN artists ar ON ar.id = d.artist_id
+    JOIN media_items mi2 ON mi2.id = ar.media_item_id AND mi2.library_id = $1 AND ($2::bigint = 0 OR mi2.id = $2)
+    LEFT JOIN albstat ds ON ds.album_id = d.album_id
+    GROUP BY ar.media_item_id, d.album_type, COALESCE(NULLIF(d.edition_key, ''), d.title)
+  ) editions
+  GROUP BY media_item_id
 )` + rowsHead + `
          COALESCE(dc.complete, 0) + COALESCE(lr.unlinked_complete, 0) AS have_count,
          COALESCE(dc.releases, 0) + COALESCE(lr.unlinked, 0) AS total_count,

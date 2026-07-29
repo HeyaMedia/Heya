@@ -5,8 +5,8 @@
 DELETE FROM artist_discography WHERE artist_id = $1;
 
 -- name: InsertArtistDiscographyEntry :exec
-INSERT INTO artist_discography (artist_id, canonical_id, title, album_type, secondary_types, release_date, year, track_count, external_ids, cover_url, album_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
+INSERT INTO artist_discography (artist_id, canonical_id, title, album_type, secondary_types, release_date, year, track_count, external_ids, cover_url, album_id, edition_key)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12);
 
 -- name: ListArtistDiscography :many
 SELECT * FROM artist_discography

@@ -210,12 +210,41 @@ function episodeState(e: ManagerEpisodeView): { label: string, tone: string } {
 
 // ── Music: albums grouped by type ────────────────────────────────────────
 
-const ALBUM_TYPE_ORDER = ['album', 'ep', 'single', 'remix', 'compilation', 'soundtrack', 'live', 'demo', 'broadcast', 'other']
+const ALBUM_TYPE_ORDER = ['album', 'ep', 'single', 'remix', 'compilation', 'soundtrack', 'live', 'mixtape', 'demo', 'broadcast', 'other']
 const ALBUM_TYPE_LABELS: Record<string, string> = {
   album: 'Albums', ep: 'EPs', single: 'Singles', remix: 'Remixes',
   compilation: 'Compilations', soundtrack: 'Soundtracks', live: 'Live',
-  demo: 'Demos', broadcast: 'Broadcasts', other: 'Other',
+  mixtape: 'Mixtapes', demo: 'Demos', broadcast: 'Broadcasts', other: 'Other',
 }
+// A release is "have" when it's in the library with every known track on
+// disk — same math as the library listing, so the hero chip and the group
+// badges agree.
+function releaseComplete(al: ManagerAlbumView): boolean {
+  return al.in_library && al.tracks_have > 0 && al.tracks_have >= al.tracks_total
+}
+
+// Edition variants (Deluxe / Extended / Anniversary...) share an edition_key
+// and fold into ONE row: the primary is the best copy on disk (else the
+// base title), the rest expand underneath with what they add.
+type EditionGroup = { key: string, primary: ManagerAlbumView, editions: ManagerAlbumView[] }
+function groupEditions(albums: ManagerAlbumView[]): EditionGroup[] {
+  const byKey = new Map<string, ManagerAlbumView[]>()
+  for (const al of albums) {
+    const key = al.edition_key || al.title.toLowerCase()
+    if (!byKey.has(key)) byKey.set(key, [])
+    byKey.get(key)!.push(al)
+  }
+  return [...byKey.entries()].map(([key, members]) => {
+    const ranked = [...members].sort((a, b) => {
+      if (a.in_library !== b.in_library) return a.in_library ? -1 : 1
+      if (a.tracks_have !== b.tracks_have) return b.tracks_have - a.tracks_have
+      return a.title.length - b.title.length
+    })
+    const primary = ranked[0]!
+    return { key, primary, editions: members.filter(m => m !== primary) }
+  })
+}
+
 const albumGroups = computed(() => {
   const groups = new Map<string, ManagerAlbumView[]>()
   for (const al of detail.value?.albums ?? []) {
@@ -226,17 +255,57 @@ const albumGroups = computed(() => {
   return ALBUM_TYPE_ORDER
     .filter(type => groups.has(type))
     .map(type => {
-      const albums = groups.get(type)!
+      const releases = groupEditions(groups.get(type)!)
+      const inLibrary = releases.flatMap(r => [r.primary, ...r.editions]).filter(al => al.in_library)
       return {
         type,
         label: ALBUM_TYPE_LABELS[type] ?? type,
-        albums,
-        have: albums.reduce((n, al) => n + al.tracks_have, 0),
-        total: albums.reduce((n, al) => n + al.tracks_total, 0),
-        size: albums.reduce((n, al) => n + al.size_bytes, 0),
+        releases,
+        releasesHave: releases.filter(r => [r.primary, ...r.editions].some(releaseComplete)).length,
+        releasesTotal: releases.length,
+        // Track math follows the primary copies; size is real disk usage
+        // across every edition you keep.
+        tracksHave: releases.reduce((n, r) => n + r.primary.tracks_have, 0),
+        tracksTotal: releases.reduce((n, r) => n + r.primary.tracks_total, 0),
+        size: inLibrary.reduce((n, al) => n + al.size_bytes, 0),
       }
     })
 })
+
+const expandedEditions = ref(new Set<string>())
+function toggleEditions(key: string) {
+  const next = new Set(expandedEditions.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  expandedEditions.value = next
+}
+
+function normTrack(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+// What an edition adds over the primary copy: named tracks when both sides
+// are local, a count when only totals are known.
+function editionDiff(primary: ManagerAlbumView, edition: ManagerAlbumView): string {
+  if (primary.track_titles?.length && edition.track_titles?.length) {
+    const base = new Set(primary.track_titles.map(normTrack))
+    const extra = edition.track_titles.filter(t => !base.has(normTrack(t)))
+    if (!extra.length) return 'same tracks'
+    const shown = extra.slice(0, 3).join(', ')
+    return `+${extra.length}: ${shown}${extra.length > 3 ? ', …' : ''}`
+  }
+  if (edition.tracks_total && primary.tracks_total && edition.tracks_total > primary.tracks_total) {
+    return `+${edition.tracks_total - primary.tracks_total} tracks`
+  }
+  return ''
+}
+
+const collapsedGroups = ref(new Set<string>())
+function toggleGroup(type: string) {
+  const next = new Set(collapsedGroups.value)
+  if (next.has(type)) next.delete(type)
+  else next.add(type)
+  collapsedGroups.value = next
+}
 // Local albums use the unconditional cover endpoint; catalog-only releases
 // carry a provider URL (proxied) or nothing — a bare <img> with no src
 // renders the broken-image glyph, so coverless rows get a plain tile.
@@ -307,6 +376,10 @@ const FILE_KIND_LABELS: Record<string, string> = {
               <span class="det-chip" :class="item.missing_count > 0 ? 'warn' : 'good'">
                 {{ item.have_count }}/{{ item.total_count }}<template v-if="item.missing_count"> · {{ item.missing_count }} missing</template>
               </span>
+              <span
+                v-for="g in albumGroups" :key="g.type" class="det-chip"
+                :class="{ warn: g.releasesHave < g.releasesTotal }"
+              >{{ g.label }} {{ g.releasesHave }}/{{ g.releasesTotal }}</span>
               <a v-for="link in externalLinks" :key="link.label" class="det-chip link" :href="link.href" target="_blank" rel="noopener">
                 <Icon name="link" :size="12" /> {{ link.label }}
               </a>
@@ -384,37 +457,71 @@ const FILE_KIND_LABELS: Record<string, string> = {
       <!-- ── Music: albums by type ───────────────────────────────────── -->
       <div v-else-if="albumGroups.length" class="det-sections">
         <section v-for="group in albumGroups" :key="group.type" class="det-section">
-          <div class="det-section-head static">
+          <button type="button" class="det-section-head" @click="toggleGroup(group.type)">
+            <Icon :name="collapsedGroups.has(group.type) ? 'chevright' : 'chevdown'" :size="14" />
             <span class="det-section-title">{{ group.label }}</span>
-            <span class="det-badge" :class="group.have >= group.total ? 'tone-good' : 'tone-warn'">{{ group.have }} / {{ group.total }}</span>
-            <span class="det-section-sub mono">{{ group.albums.length }} releases · {{ fmtBytes(group.size) }}</span>
-          </div>
-          <div class="det-tablewrap">
+            <span class="det-badge" :class="group.releasesHave >= group.releasesTotal ? 'tone-good' : 'tone-warn'">{{ group.releasesHave }} / {{ group.releasesTotal }}</span>
+            <span class="det-section-sub mono">{{ group.tracksHave }}/{{ group.tracksTotal }} tracks · {{ fmtBytes(group.size) }}</span>
+          </button>
+          <div v-if="!collapsedGroups.has(group.type)" class="det-tablewrap">
             <table class="det-table">
               <thead>
                 <tr><th class="det-cover-col" /><th>Title</th><th>Released</th><th class="num">Tracks</th><th class="num">Size</th></tr>
               </thead>
               <tbody>
-                <tr v-for="album in group.albums" :key="album.id || `d${album.discography_id}`" :class="{ 'det-row-wanted': !album.in_library }">
-                  <td class="det-cover-col">
-                    <NuxtImg
-                      v-if="albumCoverSrc(album)"
-                      :src="albumCoverSrc(album)!"
-                      class="det-cover" :alt="''" width="64" loading="lazy"
-                    />
-                    <div v-else class="det-cover" aria-hidden="true" />
-                  </td>
-                  <td class="det-ep-title">
-                    {{ album.title }}
-                    <span v-if="!album.in_library" class="det-badge tone-bad det-wanted-badge">Not in library</span>
-                  </td>
-                  <td class="mono">{{ album.release_date || album.year || '—' }}</td>
-                  <td class="num">
-                    <span v-if="!album.in_library && !album.tracks_total" class="det-badge tone-bad">Missing</span>
-                    <span v-else class="det-badge" :class="`tone-${albumTone(album)}`">{{ album.tracks_have }} / {{ album.tracks_total }}</span>
-                  </td>
-                  <td class="num mono">{{ album.in_library ? fmtBytes(album.size_bytes) : '—' }}</td>
-                </tr>
+                <template v-for="release in group.releases" :key="release.key">
+                  <tr :class="{ 'det-row-wanted': !release.primary.in_library }">
+                    <td class="det-cover-col">
+                      <NuxtImg
+                        v-if="albumCoverSrc(release.primary)"
+                        :src="albumCoverSrc(release.primary)!"
+                        class="det-cover" :alt="''" width="64" loading="lazy"
+                      />
+                      <div v-else class="det-cover" aria-hidden="true" />
+                    </td>
+                    <td class="det-ep-title">
+                      {{ release.primary.title }}
+                      <span v-if="!release.primary.in_library" class="det-badge tone-bad det-wanted-badge">Not in library</span>
+                      <button
+                        v-if="release.editions.length"
+                        type="button" class="det-editions-toggle"
+                        @click="toggleEditions(`${group.type}:${release.key}`)"
+                      >
+                        <Icon :name="expandedEditions.has(`${group.type}:${release.key}`) ? 'chevdown' : 'chevright'" :size="10" />
+                        {{ release.editions.length + 1 }} editions
+                      </button>
+                    </td>
+                    <td class="mono">{{ release.primary.release_date || release.primary.year || '—' }}</td>
+                    <td class="num">
+                      <span v-if="!release.primary.in_library && !release.primary.tracks_total" class="det-badge tone-bad">Missing</span>
+                      <span v-else class="det-badge" :class="`tone-${albumTone(release.primary)}`">{{ release.primary.tracks_have }} / {{ release.primary.tracks_total }}</span>
+                    </td>
+                    <td class="num mono">{{ release.primary.in_library ? fmtBytes(release.primary.size_bytes) : '—' }}</td>
+                  </tr>
+                  <template v-if="expandedEditions.has(`${group.type}:${release.key}`)">
+                    <tr v-for="edition in release.editions" :key="edition.id || `d${edition.discography_id}`" class="det-edition-row" :class="{ 'det-row-wanted': !edition.in_library }">
+                      <td class="det-cover-col">
+                        <NuxtImg
+                          v-if="albumCoverSrc(edition)"
+                          :src="albumCoverSrc(edition)!"
+                          class="det-cover sm" :alt="''" width="48" loading="lazy"
+                        />
+                        <div v-else class="det-cover sm" aria-hidden="true" />
+                      </td>
+                      <td class="det-ep-title det-edition-title">
+                        {{ edition.title }}
+                        <span v-if="!edition.in_library" class="det-badge tone-bad det-wanted-badge">Not in library</span>
+                        <div v-if="editionDiff(release.primary, edition)" class="det-ed-diff">{{ editionDiff(release.primary, edition) }}</div>
+                      </td>
+                      <td class="mono">{{ edition.release_date || edition.year || '—' }}</td>
+                      <td class="num">
+                        <span v-if="!edition.in_library && !edition.tracks_total" class="det-badge tone-bad">Missing</span>
+                        <span v-else class="det-badge" :class="`tone-${albumTone(edition)}`">{{ edition.tracks_have }} / {{ edition.tracks_total }}</span>
+                      </td>
+                      <td class="num mono">{{ edition.in_library ? fmtBytes(edition.size_bytes) : '—' }}</td>
+                    </tr>
+                  </template>
+                </template>
               </tbody>
             </table>
           </div>
@@ -654,4 +761,29 @@ const FILE_KIND_LABELS: Record<string, string> = {
 }
 .det-row-wanted .det-ep-title { color: var(--fg-2); }
 .det-wanted-badge { margin-left: 8px; }
+.det-cover.sm { width: 26px; height: 26px; margin-left: 6px; }
+.det-editions-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgb(var(--ink) / 0.06);
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+.det-editions-toggle:hover { color: var(--gold-bright); border-color: color-mix(in srgb, var(--gold) 45%, transparent); }
+.det-edition-row { background: rgb(var(--ink) / 0.03); }
+.det-edition-title { padding-left: 26px; }
+.det-ed-diff {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-3);
+  margin-top: 2px;
+  white-space: normal;
+}
 </style>

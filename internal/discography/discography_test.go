@@ -31,6 +31,35 @@ func TestMatchLocalAlbumPrecedence(t *testing.T) {
 	}
 }
 
+func TestEditionKeyGroupsVariants(t *testing.T) {
+	base := EditionKey("If I Can’t Have Love, I Want Power")
+	for _, variant := range []string{
+		"If I Can’t Have Love, I Want Power (Deluxe)",
+		"If I Can’t Have Love, I Want Power (Extended)",
+		"If I Can’t Have Love, I Want Power (25th Anniversary Edition)",
+	} {
+		if EditionKey(variant) != base {
+			t.Fatalf("EditionKey(%q) should group with the base album", variant)
+		}
+	}
+	// Parens that name a DIFFERENT release must stay distinct.
+	for _, distinct := range []string{
+		"BADLANDS (live from Webster Hall)",
+		"Room 93 (commentary)",
+		"Colors (Ian Asher remix)",
+	} {
+		if EditionKey(distinct) == EditionKey("BADLANDS") && distinct != "BADLANDS (live from Webster Hall)" {
+			t.Fatalf("EditionKey(%q) must not collapse into another release", distinct)
+		}
+	}
+	if EditionKey("BADLANDS (live from Webster Hall)") == EditionKey("BADLANDS") {
+		t.Fatal("live release must not group with the studio album")
+	}
+	if EditionKey("hopeless fountain kingdom (Deluxe Plus)") != EditionKey("hopeless fountain kingdom") {
+		t.Fatal("Deluxe Plus must group with the base album")
+	}
+}
+
 func TestParseDatePartials(t *testing.T) {
 	for value, valid := range map[string]bool{"2020-01-17": true, "2020-01": true, "2020": true, "": false, "soon": false} {
 		if got := parseDate(value).Valid; got != valid {

@@ -3456,6 +3456,10 @@ export type ManagerAlbumView = {
      */
     discography_id?: number;
     /**
+     * Shared key for edition variants (Deluxe/Extended/...) of one release
+     */
+    edition_key?: string;
+    /**
      * Local album id; 0 for catalog-only releases the library doesn't have
      */
     id: number;
@@ -3465,6 +3469,10 @@ export type ManagerAlbumView = {
     size_bytes: number;
     slug: string;
     title: string;
+    /**
+     * Local track titles in disc/track order — lets the UI diff editions by name
+     */
+    track_titles?: Array<string> | null;
     tracks_have: number;
     tracks_total: number;
     /**

@@ -35,8 +35,8 @@ func (q *Queries) DeleteArtistDiscography(ctx context.Context, artistID int64) e
 }
 
 const insertArtistDiscographyEntry = `-- name: InsertArtistDiscographyEntry :exec
-INSERT INTO artist_discography (artist_id, canonical_id, title, album_type, secondary_types, release_date, year, track_count, external_ids, cover_url, album_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+INSERT INTO artist_discography (artist_id, canonical_id, title, album_type, secondary_types, release_date, year, track_count, external_ids, cover_url, album_id, edition_key)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 `
 
 type InsertArtistDiscographyEntryParams struct {
@@ -51,6 +51,7 @@ type InsertArtistDiscographyEntryParams struct {
 	ExternalIds    []byte      `json:"external_ids"`
 	CoverUrl       string      `json:"cover_url"`
 	AlbumID        pgtype.Int8 `json:"album_id"`
+	EditionKey     string      `json:"edition_key"`
 }
 
 func (q *Queries) InsertArtistDiscographyEntry(ctx context.Context, arg InsertArtistDiscographyEntryParams) error {
@@ -66,12 +67,13 @@ func (q *Queries) InsertArtistDiscographyEntry(ctx context.Context, arg InsertAr
 		arg.ExternalIds,
 		arg.CoverUrl,
 		arg.AlbumID,
+		arg.EditionKey,
 	)
 	return err
 }
 
 const listArtistDiscography = `-- name: ListArtistDiscography :many
-SELECT id, artist_id, canonical_id, title, album_type, secondary_types, release_date, year, track_count, external_ids, cover_url, album_id, updated_at FROM artist_discography
+SELECT id, artist_id, canonical_id, title, album_type, secondary_types, release_date, year, track_count, external_ids, cover_url, album_id, updated_at, edition_key FROM artist_discography
 WHERE artist_id = $1
 ORDER BY release_date DESC NULLS LAST, year DESC, title ASC
 `
@@ -99,6 +101,7 @@ func (q *Queries) ListArtistDiscography(ctx context.Context, artistID int64) ([]
 			&i.CoverUrl,
 			&i.AlbumID,
 			&i.UpdatedAt,
+			&i.EditionKey,
 		); err != nil {
 			return nil, err
 		}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/karbowiak/heya/internal/discography"
 )
 
 // Manager media detail: the arr-style item page under /manager — hero facts
@@ -50,19 +51,21 @@ type ManagerFileView struct {
 }
 
 type ManagerAlbumView struct {
-	ID            int64   `json:"id" doc:"Local album id; 0 for catalog-only releases the library doesn't have"`
-	DiscographyID int64   `json:"discography_id,omitempty" doc:"artist_discography row id when the release is in the provider catalog"`
-	Title         string  `json:"title"`
-	Slug          string  `json:"slug"`
-	Type          string  `json:"type" doc:"album | ep | single | compilation | ..."`
-	ReleaseDate   string  `json:"release_date,omitempty"`
-	Year          string  `json:"year,omitempty"`
-	Rating        float64 `json:"rating,omitempty"`
-	TracksHave    int32   `json:"tracks_have"`
-	TracksTotal   int32   `json:"tracks_total"`
-	SizeBytes     int64   `json:"size_bytes"`
-	InLibrary     bool    `json:"in_library"`
-	CoverURL      string  `json:"cover_url,omitempty" doc:"Provider cover for catalog-only releases (local albums use the cover endpoint)"`
+	ID            int64    `json:"id" doc:"Local album id; 0 for catalog-only releases the library doesn't have"`
+	DiscographyID int64    `json:"discography_id,omitempty" doc:"artist_discography row id when the release is in the provider catalog"`
+	Title         string   `json:"title"`
+	Slug          string   `json:"slug"`
+	Type          string   `json:"type" doc:"album | ep | single | compilation | ..."`
+	ReleaseDate   string   `json:"release_date,omitempty"`
+	Year          string   `json:"year,omitempty"`
+	Rating        float64  `json:"rating,omitempty"`
+	TracksHave    int32    `json:"tracks_have"`
+	TracksTotal   int32    `json:"tracks_total"`
+	SizeBytes     int64    `json:"size_bytes"`
+	InLibrary     bool     `json:"in_library"`
+	CoverURL      string   `json:"cover_url,omitempty" doc:"Provider cover for catalog-only releases (local albums use the cover endpoint)"`
+	EditionKey    string   `json:"edition_key,omitempty" doc:"Shared key for edition variants (Deluxe/Extended/...) of one release"`
+	TrackTitles   []string `json:"track_titles,omitempty" doc:"Local track titles in disc/track order — lets the UI diff editions by name"`
 }
 
 type ManagerMediaDetailView struct {
@@ -521,13 +524,78 @@ func (a *App) managerSeriesSeasons(ctx context.Context, id int64) ([]ManagerSeas
 	return seasons, sizeRows.Err()
 }
 
+// releaseTitleTypeHint classifies releases whose upstream record carries no
+// secondary types from unambiguous title markers — "BADLANDS (live from
+// Webster Hall)" is primary=album with EMPTY secondary types in MusicBrainz.
+// Deliberately narrow: parenthesized/positional markers only, so titles like
+// "Alive" can never match.
+func releaseTitleTypeHint(title string) string {
+	t := strings.ToLower(title)
+	switch {
+	case strings.Contains(t, "(live") || strings.Contains(t, "live from ") || strings.Contains(t, "live at "):
+		return "live"
+	case strings.Contains(t, "(commentary") || strings.Contains(t, "(interview"):
+		return "other"
+	case strings.Contains(t, "(demo"):
+		return "demo"
+	}
+	return ""
+}
+
+// effectiveReleaseType resolves the display bucket for a release. MusicBrainz
+// carries the interesting signal in SECONDARY types — a live album is
+// primary=album + secondary=[live] — so those override the primary bucket.
+// Compilation only promotes plain albums: the "Manic: Revenge EP"-style rows
+// are tagged compilation upstream but belong with the EPs. Unknown or absent
+// types land in "other" rather than masquerading as studio albums; when
+// secondary types are missing entirely, an unambiguous title marker fills in.
+func effectiveReleaseType(primary string, secondary []string, title string) string {
+	has := func(want string) bool {
+		for _, s := range secondary {
+			if strings.EqualFold(strings.TrimSpace(s), want) {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case has("live"):
+		return "live"
+	case has("remix") || has("dj-mix"):
+		return "remix"
+	case has("soundtrack"):
+		return "soundtrack"
+	case has("demo"):
+		return "demo"
+	case has("mixtape/street") || has("mixtape"):
+		return "mixtape"
+	case has("interview") || has("spokenword") || has("audiobook") || has("audio drama") || has("field recording"):
+		return "other"
+	}
+	if len(secondary) == 0 {
+		if hint := releaseTitleTypeHint(title); hint != "" {
+			return hint
+		}
+	}
+	p := strings.ToLower(strings.TrimSpace(primary))
+	if p == "album" && has("compilation") {
+		return "compilation"
+	}
+	switch p {
+	case "album", "ep", "single", "compilation", "soundtrack", "live", "remix", "demo", "broadcast", "mixtape", "other":
+		return p
+	default:
+		return "other"
+	}
+}
+
 // managerArtistAlbums merges the provider's full discography with the
 // library's local albums, Lidarr-style: every known release appears, linked
 // ones carry local completeness and size, catalog-only ones read 0/N. Local
 // albums the catalog doesn't know (bootlegs, unmatched) still show.
 func (a *App) managerArtistAlbums(ctx context.Context, id int64) ([]ManagerAlbumView, error) {
 	rows, err := a.db.Query(ctx, `
-		SELECT al.id, al.title, al.slug, al.album_type, al.release_date, al.year, al.rating,
+		SELECT al.id, al.title, al.slug, al.album_type, al.secondary_types, al.release_date, al.year, al.rating,
 		       count(DISTINCT t.id)::int,
 		       count(DISTINCT t.id) FILTER (WHERE lf.id IS NOT NULL)::int,
 		       COALESCE(sum(tf.size_bytes) FILTER (WHERE lf.id IS NOT NULL), 0)::bigint
@@ -547,12 +615,15 @@ func (a *App) managerArtistAlbums(ctx context.Context, id int64) ([]ManagerAlbum
 	byAlbumID := map[int64]int{}
 	for rows.Next() {
 		var al ManagerAlbumView
+		var secondary []string
 		var release pgtype.Date
 		var rating pgtype.Numeric
-		if err := rows.Scan(&al.ID, &al.Title, &al.Slug, &al.Type, &release, &al.Year,
+		if err := rows.Scan(&al.ID, &al.Title, &al.Slug, &al.Type, &secondary, &release, &al.Year,
 			&rating, &al.TracksTotal, &al.TracksHave, &al.SizeBytes); err != nil {
 			return nil, err
 		}
+		al.Type = effectiveReleaseType(al.Type, secondary, al.Title)
+		al.EditionKey = discography.EditionKey(al.Title)
 		al.ReleaseDate = dateToString(release)
 		al.Rating = numericToFloat(rating)
 		al.InLibrary = true
@@ -563,8 +634,40 @@ func (a *App) managerArtistAlbums(ctx context.Context, id int64) ([]ManagerAlbum
 		return nil, err
 	}
 
+	// Local track titles let the UI say WHICH tracks a Deluxe adds over the
+	// base edition, not just how many.
+	if len(locals) > 0 {
+		ids := make([]int64, 0, len(locals))
+		for _, al := range locals {
+			ids = append(ids, al.ID)
+		}
+		titleRows, err := a.db.Query(ctx, `
+			SELECT album_id, title FROM tracks
+			WHERE album_id = ANY($1::bigint[])
+			ORDER BY album_id, disc_number, track_number`, ids)
+		if err != nil {
+			return nil, fmt.Errorf("manager artist track titles: %w", err)
+		}
+		defer titleRows.Close()
+		titlesByAlbum := map[int64][]string{}
+		for titleRows.Next() {
+			var albumID int64
+			var title string
+			if err := titleRows.Scan(&albumID, &title); err != nil {
+				return nil, err
+			}
+			titlesByAlbum[albumID] = append(titlesByAlbum[albumID], title)
+		}
+		if err := titleRows.Err(); err != nil {
+			return nil, err
+		}
+		for i := range locals {
+			locals[i].TrackTitles = titlesByAlbum[locals[i].ID]
+		}
+	}
+
 	discoRows, err := a.db.Query(ctx, `
-		SELECT d.id, d.title, d.album_type, d.release_date, d.year, d.track_count, d.cover_url, d.album_id
+		SELECT d.id, d.title, d.album_type, d.secondary_types, d.release_date, d.year, d.track_count, d.cover_url, d.album_id, d.edition_key
 		FROM artist_discography d
 		JOIN artists ar ON ar.id = d.artist_id AND ar.media_item_id = $1
 		ORDER BY d.release_date DESC NULLS LAST, d.year DESC, d.title ASC`, id)
@@ -579,21 +682,27 @@ func (a *App) managerArtistAlbums(ctx context.Context, id int64) ([]ManagerAlbum
 	for discoRows.Next() {
 		haveDiscography = true
 		var discoID, trackCount int64
-		var title, albumType, year, coverURL string
+		var title, albumType, year, coverURL, editionKey string
+		var secondary []string
 		var release pgtype.Date
 		var albumID pgtype.Int8
-		if err := discoRows.Scan(&discoID, &title, &albumType, &release, &year,
-			&trackCount, &coverURL, &albumID); err != nil {
+		if err := discoRows.Scan(&discoID, &title, &albumType, &secondary, &release, &year,
+			&trackCount, &coverURL, &albumID, &editionKey); err != nil {
 			return nil, err
+		}
+		resolvedType := effectiveReleaseType(albumType, secondary, title)
+		if editionKey == "" {
+			editionKey = discography.EditionKey(title)
 		}
 		if albumID.Valid {
 			if idx, ok := byAlbumID[albumID.Int64]; ok {
 				local := locals[idx]
 				local.DiscographyID = discoID
-				// The catalog's release-group type wins — local rows often
-				// default to 'album'; catalog track counts fill gaps where
-				// the local rip is partial.
-				local.Type = albumType
+				// The catalog's release-group classification wins — local
+				// rows often default to 'album'; catalog track counts fill
+				// gaps where the local rip is partial.
+				local.Type = resolvedType
+				local.EditionKey = editionKey
 				if int32(trackCount) > local.TracksTotal {
 					local.TracksTotal = int32(trackCount)
 				}
@@ -605,11 +714,12 @@ func (a *App) managerArtistAlbums(ctx context.Context, id int64) ([]ManagerAlbum
 		merged = append(merged, ManagerAlbumView{
 			DiscographyID: discoID,
 			Title:         title,
-			Type:          albumType,
+			Type:          resolvedType,
 			ReleaseDate:   dateToString(release),
 			Year:          year,
 			TracksTotal:   int32(trackCount),
 			CoverURL:      coverURL,
+			EditionKey:    editionKey,
 		})
 	}
 	if err := discoRows.Err(); err != nil {

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -89,6 +90,7 @@ func Sync(ctx context.Context, q *sqlc.Queries, artistID int64, entries []metada
 			ExternalIds:    externalIDs,
 			CoverUrl:       entry.CoverURL,
 			AlbumID:        albumID,
+			EditionKey:     EditionKey(title),
 		}); err != nil {
 			return fmt.Errorf("discography: insert %q: %w", title, err)
 		}
@@ -140,6 +142,28 @@ func matchLocalAlbum(entry metadata.AlbumEntry, locals []sqlc.Album) (sqlc.Album
 		}
 	}
 	return sqlc.Album{}, false
+}
+
+// editionMarker matches a trailing parenthesized qualifier that names an
+// EDITION of the same release — "(Deluxe)", "(Extended)", "(25th Anniversary
+// Edition)", "(Plus)" — as opposed to parens that name a different release
+// ("(live from Webster Hall)", "(commentary)"), which must stay distinct.
+var editionMarker = regexp.MustCompile(`(?i)\(([^)]*(deluxe|extended|expanded|anniversary|edition|remaster|bonus|special|platinum|collector|definitive|reissue|complete|plus)[^)]*)\)\s*$`)
+
+// EditionKey collapses edition variants of one release onto a shared key:
+// "If I Can't Have Love, I Want Power (Deluxe)" and "(Extended)" group with
+// the base album. Applied at sync time (stored per row) and to local-only
+// albums at read time, so both sides agree.
+func EditionKey(title string) string {
+	t := strings.TrimSpace(title)
+	for {
+		next := strings.TrimSpace(editionMarker.ReplaceAllString(t, ""))
+		if next == t || next == "" {
+			break
+		}
+		t = next
+	}
+	return normalizeTitle(t)
 }
 
 func normalizeTitle(value string) string {

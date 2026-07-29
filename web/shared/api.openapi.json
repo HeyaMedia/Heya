@@ -12503,6 +12503,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "edition_key": {
+            "description": "Shared key for edition variants (Deluxe/Extended/...) of one release",
+            "type": "string"
+          },
           "id": {
             "description": "Local album id; 0 for catalog-only releases the library doesn't have",
             "format": "int64",
@@ -12527,6 +12531,16 @@
           },
           "title": {
             "type": "string"
+          },
+          "track_titles": {
+            "description": "Local track titles in disc/track order — lets the UI diff editions by name",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "tracks_have": {
             "format": "int32",
