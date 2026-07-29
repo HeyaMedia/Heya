@@ -1,7 +1,7 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'manager', middleware: 'admin' })
 
-import { managerIndexersQuery, type ManagerIndexerInput, type ManagerIndexerStatsView, type ManagerIndexerView, type ManagerTestResult } from '~/queries/manager'
+import { managerIndexersQuery, type ManagerIndexerHistoryDay, type ManagerIndexerHistoryView, type ManagerIndexerInput, type ManagerIndexerStatsView, type ManagerIndexerView, type ManagerTestResult } from '~/queries/manager'
 
 const { $heya } = useNuxtApp()
 const { confirm } = useConfirm()
@@ -25,6 +25,8 @@ const manualIndexers = computed(() => indexers.value.filter(ix => ix.kind !== 'p
 const statsByApp = ref<Record<number, ManagerIndexerStatsView[]>>({})
 const statsError = ref('')
 
+const historyByApp = ref<Record<number, ManagerIndexerHistoryView>>({})
+
 async function loadStats() {
   for (const app of prowlarrApps.value) {
     if (app.last_test_at && !app.last_test_ok) continue
@@ -34,10 +36,38 @@ async function loadStats() {
     } catch (e: any) {
       statsError.value = e?.data?.detail ?? e?.message ?? 'Stats unavailable.'
     }
+    try {
+      historyByApp.value[app.id] = await $heya(`/api/manager/indexers/${app.id}/history`) as ManagerIndexerHistoryView
+    } catch (e: any) {
+      statsError.value = e?.data?.detail ?? e?.message ?? 'History unavailable.'
+    }
   }
 }
 
 watch(prowlarrApps, () => { loadStats() }, { immediate: true })
+
+// Chart feeds: overall per app, and per synced child for the stats dialog.
+function appChartDays(appID: number): { date: string, ok: number, bad: number }[] {
+  return (historyByApp.value[appID]?.days ?? []).map(day => ({ date: day.date, ok: day.queries, bad: day.failed }))
+}
+function appGrabDays(appID: number): { date: string, ok: number }[] {
+  return (historyByApp.value[appID]?.days ?? []).map(day => ({ date: day.date, ok: day.grabs }))
+}
+function appSources(appID: number): { name: string, count: number }[] {
+  const sources = historyByApp.value[appID]?.by_source ?? {}
+  return Object.entries(sources)
+    .map(([name, count]) => ({ name, count: count as number }))
+    .sort((a, b) => b.count - a.count)
+}
+
+const dialogHistory = computed<ManagerIndexerHistoryDay[]>(() => {
+  const child = statsDialogChild.value
+  if (!child || child.parent_id == null) return []
+  return historyByApp.value[child.parent_id]?.by_indexer?.[child.id] ?? []
+})
+const dialogQueryDays = computed(() => dialogHistory.value.map(day => ({ date: day.date, ok: day.queries, bad: day.failed })))
+const dialogGrabDays = computed(() => dialogHistory.value.map(day => ({ date: day.date, ok: day.grabs })))
+const dialogHasActivity = computed(() => dialogHistory.value.some(day => day.queries + day.failed + day.grabs > 0))
 
 // Stats rows keyed by the Heya child-row id, for the children table.
 const statsByChildID = computed(() => {
@@ -264,6 +294,19 @@ function testStateOf(ix: ManagerIndexerView): { state: 'ok' | 'warn' | 'error' |
           <Icon name="warning" :size="13" /> {{ statsError }}
         </div>
 
+        <div v-for="app in prowlarrApps" :key="`activity-${app.id}`">
+          <div v-if="appChartDays(app.id).length" class="ix-activity">
+            <ManagerActivityChart :days="appChartDays(app.id)" title="Searches / day" unit="searches" />
+            <ManagerActivityChart :days="appGrabDays(app.id)" title="Grabs / day" unit="grabs" />
+          </div>
+          <div v-if="appSources(app.id).length" class="ix-sources">
+            <span class="ix-sources-label">searched by</span>
+            <span v-for="source in appSources(app.id)" :key="source.name" class="ix-source-chip">
+              {{ source.name }} <strong>{{ source.count.toLocaleString() }}</strong>
+            </span>
+          </div>
+        </div>
+
         <div v-for="app in prowlarrApps" :key="`children-${app.id}`" class="ix-table">
           <div class="ix-head">
             <span>Indexer</span>
@@ -358,6 +401,10 @@ function testStateOf(ix: ManagerIndexerView): { state: 'ok' | 'warn' | 'error' |
           <div class="ixs-cell"><span class="ixs-label">Health</span><span class="ixs-value">{{ statsDialogStat.disabled_till ? `backoff until ${statsDialogStat.disabled_till}` : 'healthy' }}</span></div>
         </div>
         <div v-else class="ixs-none">No stats yet — Prowlarr reports counters once an indexer has been queried.</div>
+        <div v-if="dialogHasActivity" class="ixs-charts">
+          <ManagerActivityChart :days="dialogQueryDays" title="Searches / day" unit="searches" :height="64" />
+          <ManagerActivityChart :days="dialogGrabDays" title="Grabs / day" unit="grabs" :height="64" />
+        </div>
         <p v-if="statsDialogStat?.recent_failure" class="mgr-form-error">
           <Icon name="warning" :size="12" /> Last failure: {{ statsDialogStat.recent_failure }}
         </p>
@@ -427,6 +474,49 @@ function testStateOf(ix: ManagerIndexerView): { state: 'ok' | 'warn' | 'error' |
 .px-host {
   font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-2);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.ix-activity {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+  padding: 14px 16px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  margin-bottom: 10px;
+}
+.ix-sources {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.ix-sources-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  margin-right: 2px;
+}
+.ix-source-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--fg-2);
+}
+.ix-source-chip strong { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-0); font-weight: 600; }
+
+@media (max-width: 720px) {
+  .ix-activity { grid-template-columns: 1fr; }
 }
 
 .ix-table { display: flex; flex-direction: column; gap: 6px; }
@@ -579,6 +669,15 @@ function testStateOf(ix: ManagerIndexerView): { state: 'ok' | 'warn' | 'error' |
 .ixs-value { font-size: 15px; font-weight: 600; color: var(--fg-0); }
 .ixs-value.bad { color: var(--bad); }
 .ixs-none { font-size: 12.5px; color: var(--fg-3); }
+.ixs-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 12px;
+  background: rgb(var(--ink) / 0.03);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-sm);
+}
 </style>
 
 <!-- Shared .mgr-form/.mgr-input dialog styles live unscoped in

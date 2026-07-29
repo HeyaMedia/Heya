@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -507,6 +508,146 @@ func (a *App) ManagerIndexerStats(ctx context.Context, id int64) ([]ManagerIndex
 	return views, nil
 }
 
+// ManagerIndexerHistoryDay is one day's bucketed activity.
+type ManagerIndexerHistoryDay struct {
+	Date    string `json:"date"` // YYYY-MM-DD
+	Queries int    `json:"queries"`
+	Failed  int    `json:"failed"`
+	Grabs   int    `json:"grabs"`
+}
+
+// ManagerIndexerHistoryView is the Prowlarr query/grab log bucketed per day —
+// overall and per synced child — plus who's been driving the searches.
+type ManagerIndexerHistoryView struct {
+	// CoveredFrom is the oldest event actually fetched (the log is paged; we
+	// cap the fetch, so the window is honest rather than fixed).
+	CoveredFrom string                               `json:"covered_from"`
+	Days        []ManagerIndexerHistoryDay           `json:"days"`
+	ByIndexer   map[int64][]ManagerIndexerHistoryDay `json:"by_indexer"`
+	BySource    map[string]int                       `json:"by_source"`
+}
+
+const (
+	managerHistoryMaxPages = 5
+	managerHistoryPageSize = 1000
+	managerHistoryMaxDays  = 30
+)
+
+// ManagerIndexerHistory fetches and buckets the Prowlarr history log for one
+// app row. Read-only against Prowlarr; nothing is persisted.
+func (a *App) ManagerIndexerHistory(ctx context.Context, id int64) (*ManagerIndexerHistoryView, error) {
+	q := sqlc.New(a.db)
+	row, err := q.GetManagerIndexer(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrManagerNotFound
+		}
+		return nil, fmt.Errorf("get manager indexer: %w", err)
+	}
+	if row.Kind != IndexerKindProwlarr {
+		return &ManagerIndexerHistoryView{Days: []ManagerIndexerHistoryDay{}, ByIndexer: map[int64][]ManagerIndexerHistoryDay{}, BySource: map[string]int{}}, nil
+	}
+
+	rows, err := q.ListManagerIndexers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list manager indexers: %w", err)
+	}
+	childIDByRef := make(map[string]int64)
+	for _, child := range rows {
+		if child.ParentID.Valid && child.ParentID.Int64 == row.ID {
+			childIDByRef[child.SourceRef] = child.ID
+		}
+	}
+
+	client := prowlarr.New(row.BaseUrl, row.ApiKey)
+	cutoff := time.Now().UTC().AddDate(0, 0, -managerHistoryMaxDays)
+	type dayKey struct {
+		child int64
+		date  string
+	}
+	overall := make(map[string]*ManagerIndexerHistoryDay)
+	perChild := make(map[dayKey]*ManagerIndexerHistoryDay)
+	bySource := make(map[string]int)
+	coveredFrom := time.Now().UTC()
+
+fetch:
+	for page := 1; page <= managerHistoryMaxPages; page++ {
+		records, err := client.History(ctx, page, managerHistoryPageSize)
+		if err != nil {
+			return nil, fmt.Errorf("fetching prowlarr history: %w", err)
+		}
+		if len(records) == 0 {
+			break
+		}
+		for _, record := range records {
+			at, err := time.Parse(time.RFC3339, record.Date)
+			if err != nil {
+				continue
+			}
+			if at.Before(cutoff) {
+				break fetch
+			}
+			if at.Before(coveredFrom) {
+				coveredFrom = at
+			}
+			date := at.Format("2006-01-02")
+			childID := childIDByRef[strconv.Itoa(record.IndexerID)]
+			bump := func(day *ManagerIndexerHistoryDay) {
+				switch record.EventType {
+				case "releaseGrabbed":
+					day.Grabs++
+				default:
+					if record.Successful {
+						day.Queries++
+					} else {
+						day.Failed++
+					}
+				}
+			}
+			if overall[date] == nil {
+				overall[date] = &ManagerIndexerHistoryDay{Date: date}
+			}
+			bump(overall[date])
+			key := dayKey{child: childID, date: date}
+			if perChild[key] == nil {
+				perChild[key] = &ManagerIndexerHistoryDay{Date: date}
+			}
+			bump(perChild[key])
+			if record.EventType != "releaseGrabbed" && record.Data.Source != "" {
+				bySource[record.Data.Source]++
+			}
+		}
+		if len(records) < managerHistoryPageSize {
+			break
+		}
+	}
+
+	view := &ManagerIndexerHistoryView{
+		CoveredFrom: coveredFrom.Format("2006-01-02"),
+		Days:        make([]ManagerIndexerHistoryDay, 0, len(overall)),
+		ByIndexer:   make(map[int64][]ManagerIndexerHistoryDay),
+		BySource:    bySource,
+	}
+	// Emit a contiguous day axis from coveredFrom to today so charts show
+	// quiet days as gaps-with-zero instead of skipping them.
+	for cursor := coveredFrom; !cursor.After(time.Now().UTC()); cursor = cursor.AddDate(0, 0, 1) {
+		date := cursor.Format("2006-01-02")
+		if day := overall[date]; day != nil {
+			view.Days = append(view.Days, *day)
+		} else {
+			view.Days = append(view.Days, ManagerIndexerHistoryDay{Date: date})
+		}
+		for _, childID := range childIDByRef {
+			day := perChild[dayKey{child: childID, date: date}]
+			if day == nil {
+				day = &ManagerIndexerHistoryDay{Date: date}
+			}
+			view.ByIndexer[childID] = append(view.ByIndexer[childID], *day)
+		}
+	}
+	return view, nil
+}
+
 // ── Download clients ─────────────────────────────────────────────────────
 
 func (a *App) ListManagerDownloadClients(ctx context.Context) ([]ManagerDownloadClientView, error) {
@@ -725,18 +866,46 @@ type ManagerClientHistoryItem struct {
 	CompletedAt int64  `json:"completed_at"`
 }
 
+// ManagerClientCategory is one download category with its remote landing dir
+// and — when a path mapping covers it — the path this process would read.
+type ManagerClientCategory struct {
+	Name      string `json:"name"`
+	RemoteDir string `json:"remote_dir"`
+	LocalDir  string `json:"local_dir,omitempty"`
+	Priority  int    `json:"priority"`
+	Script    string `json:"script,omitempty"`
+}
+
+type ManagerClientWarning struct {
+	Text string `json:"text"`
+	At   int64  `json:"at"`
+}
+
 // ManagerClientActivityView is the live picture of what a download client is
-// doing: current queue, recent history, and lifetime transfer counters.
+// doing: current queue, recent history, categories, and transfer counters.
 type ManagerClientActivityView struct {
 	Paused          bool                       `json:"paused"`
 	SpeedKBps       float64                    `json:"speed_kbps"`
 	DiskFreeGB      float64                    `json:"disk_free_gb"`
 	Queue           []ManagerClientQueueItem   `json:"queue"`
 	History         []ManagerClientHistoryItem `json:"history"`
+	Categories      []ManagerClientCategory    `json:"categories"`
+	Warnings        []ManagerClientWarning     `json:"warnings"`
 	DownloadedDay   int64                      `json:"downloaded_day"`
 	DownloadedWeek  int64                      `json:"downloaded_week"`
 	DownloadedMonth int64                      `json:"downloaded_month"`
 	DownloadedTotal int64                      `json:"downloaded_total"`
+}
+
+// applyPathMappings rewrites a client-reported path into this process's view
+// via the client row's mappings; empty when no mapping covers it.
+func applyPathMappings(mappings []ManagerPathMapping, remote string) string {
+	for _, mapping := range mappings {
+		if remote == mapping.Remote || strings.HasPrefix(remote, mapping.Remote+"/") {
+			return mapping.Local + strings.TrimPrefix(remote, mapping.Remote)
+		}
+	}
+	return ""
 }
 
 func parseSABFloat(raw string) float64 {
@@ -772,6 +941,17 @@ func (a *App) ManagerDownloadClientActivity(ctx context.Context, id int64) (*Man
 	if err != nil {
 		return nil, fmt.Errorf("fetching history: %w", err)
 	}
+	config, err := client.Config(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching config: %w", err)
+	}
+	warnings, err := client.Warnings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching warnings: %w", err)
+	}
+
+	var mappings []ManagerPathMapping
+	_ = json.Unmarshal(row.PathMappings, &mappings)
 
 	view := &ManagerClientActivityView{
 		Paused:          queue.Paused,
@@ -779,10 +959,31 @@ func (a *App) ManagerDownloadClientActivity(ctx context.Context, id int64) (*Man
 		DiskFreeGB:      parseSABFloat(queue.DiskspaceFreeGB),
 		Queue:           make([]ManagerClientQueueItem, 0, len(queue.Slots)),
 		History:         make([]ManagerClientHistoryItem, 0, len(history)),
+		Categories:      make([]ManagerClientCategory, 0, len(config.Categories)),
+		Warnings:        []ManagerClientWarning{},
 		DownloadedDay:   stats.Day,
 		DownloadedWeek:  stats.Week,
 		DownloadedMonth: stats.Month,
 		DownloadedTotal: stats.Total,
+	}
+	for _, category := range config.Categories {
+		remote := category.Dir
+		if remote == "" {
+			remote = config.CompleteDir
+		} else if !strings.HasPrefix(remote, "/") {
+			remote = strings.TrimRight(config.CompleteDir, "/") + "/" + remote
+		}
+		view.Categories = append(view.Categories, ManagerClientCategory{
+			Name:      category.Name,
+			RemoteDir: remote,
+			LocalDir:  applyPathMappings(mappings, remote),
+			Priority:  category.Priority,
+			Script:    category.Script,
+		})
+	}
+	// Newest first, capped — the card shows problems, not the whole log.
+	for i := len(warnings) - 1; i >= 0 && len(view.Warnings) < 5; i-- {
+		view.Warnings = append(view.Warnings, ManagerClientWarning{Text: warnings[i].Text, At: warnings[i].Time})
 	}
 	for _, slot := range queue.Slots {
 		view.Queue = append(view.Queue, ManagerClientQueueItem{

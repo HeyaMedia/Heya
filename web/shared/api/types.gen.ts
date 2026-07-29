@@ -3441,6 +3441,7 @@ export type ManagerClientActivityView = {
      * A URL to the JSON Schema for this object.
      */
     readonly $schema?: string;
+    categories: Array<ManagerClientCategory> | null;
     disk_free_gb: number;
     downloaded_day: number;
     downloaded_month: number;
@@ -3450,6 +3451,15 @@ export type ManagerClientActivityView = {
     paused: boolean;
     queue: Array<ManagerClientQueueItem> | null;
     speed_kbps: number;
+    warnings: Array<ManagerClientWarning> | null;
+};
+
+export type ManagerClientCategory = {
+    local_dir?: string;
+    name: string;
+    priority: number;
+    remote_dir: string;
+    script?: string;
 };
 
 export type ManagerClientHistoryItem = {
@@ -3470,6 +3480,11 @@ export type ManagerClientQueueItem = {
     size_mb: number;
     status: string;
     time_left: string;
+};
+
+export type ManagerClientWarning = {
+    at: number;
+    text: string;
 };
 
 export type ManagerDownloadClientInput = {
@@ -3508,6 +3523,28 @@ export type ManagerDownloadClientView = {
     priority: number;
     protocol: string;
     username: string;
+};
+
+export type ManagerIndexerHistoryDay = {
+    date: string;
+    failed: number;
+    grabs: number;
+    queries: number;
+};
+
+export type ManagerIndexerHistoryView = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    by_indexer: {
+        [key: string]: Array<ManagerIndexerHistoryDay> | null;
+    };
+    by_source: {
+        [key: string]: number;
+    };
+    covered_from: string;
+    days: Array<ManagerIndexerHistoryDay> | null;
 };
 
 export type ManagerIndexerInput = {
@@ -7933,6 +7970,7 @@ export type LyricsResponseWritable = {
 };
 
 export type ManagerClientActivityViewWritable = {
+    categories: Array<ManagerClientCategory> | null;
     disk_free_gb: number;
     downloaded_day: number;
     downloaded_month: number;
@@ -7942,6 +7980,7 @@ export type ManagerClientActivityViewWritable = {
     paused: boolean;
     queue: Array<ManagerClientQueueItem> | null;
     speed_kbps: number;
+    warnings: Array<ManagerClientWarning> | null;
 };
 
 export type ManagerDownloadClientInputWritable = {
@@ -7972,6 +8011,17 @@ export type ManagerDownloadClientViewWritable = {
     priority: number;
     protocol: string;
     username: string;
+};
+
+export type ManagerIndexerHistoryViewWritable = {
+    by_indexer: {
+        [key: string]: Array<ManagerIndexerHistoryDay> | null;
+    };
+    by_source: {
+        [key: string]: number;
+    };
+    covered_from: string;
+    days: Array<ManagerIndexerHistoryDay> | null;
 };
 
 export type ManagerIndexerInputWritable = {
@@ -13546,6 +13596,36 @@ export type ManagerUpdateIndexerResponses = {
 };
 
 export type ManagerUpdateIndexerResponse = ManagerUpdateIndexerResponses[keyof ManagerUpdateIndexerResponses];
+
+export type ManagerIndexerHistoryData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/manager/indexers/{id}/history';
+};
+
+export type ManagerIndexerHistoryErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerIndexerHistoryError = ManagerIndexerHistoryErrors[keyof ManagerIndexerHistoryErrors];
+
+export type ManagerIndexerHistoryResponses = {
+    /**
+     * OK
+     */
+    200: ManagerIndexerHistoryView;
+};
+
+export type ManagerIndexerHistoryResponse = ManagerIndexerHistoryResponses[keyof ManagerIndexerHistoryResponses];
 
 export type ManagerIndexerStatsData = {
     body?: never;

@@ -312,6 +312,31 @@ function testStateOf(client: ManagerDownloadClientView): { state: 'ok' | 'warn' 
                 <span class="dc-history-meta">{{ item.category }} · {{ fmtBytes(item.bytes) }} · {{ historyAge(item.completed_at) }}</span>
               </div>
             </div>
+
+            <div v-if="activityByClient[client.id]?.warnings?.length" class="dc-warnings">
+              <div class="dc-sub-label">Warnings</div>
+              <div v-for="warning in activityByClient[client.id]?.warnings ?? []" :key="warning.at + warning.text.slice(0, 24)" class="dc-warning-row">
+                <Icon name="warning" :size="12" class="dc-warning-icon" />
+                <span class="dc-warning-text">{{ warning.text }}</span>
+                <span class="dc-warning-age">{{ historyAge(warning.at) }}</span>
+              </div>
+            </div>
+
+            <div v-if="activityByClient[client.id]?.categories?.length" class="dc-categories">
+              <div class="dc-sub-label">Categories</div>
+              <div class="dc-cat-table">
+                <div class="dc-cat-head">
+                  <span>Name</span>
+                  <span>Client path</span>
+                  <span>Heya sees</span>
+                </div>
+                <div v-for="cat in activityByClient[client.id]?.categories ?? []" :key="cat.name" class="dc-cat-row">
+                  <span class="dc-cat-name">{{ cat.name }}</span>
+                  <span class="dc-cat-path">{{ cat.remote_dir }}</span>
+                  <span class="dc-cat-path" :class="{ unmapped: !cat.local_dir }">{{ cat.local_dir || 'no mapping' }}</span>
+                </div>
+              </div>
+            </div>
           </div>
         </template>
       </div>
@@ -466,6 +491,56 @@ function testStateOf(client: ManagerDownloadClientView): { state: 'ok' | 'warn' 
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .dc-history-meta { font-size: 11px; color: var(--fg-3); flex-shrink: 0; margin-left: auto; white-space: nowrap; }
+
+.dc-warning-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  min-width: 0;
+}
+.dc-warning-icon { color: var(--gold); flex-shrink: 0; align-self: center; }
+.dc-warning-text {
+  font-size: 11.5px; color: var(--fg-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dc-warning-age { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); margin-left: auto; flex-shrink: 0; }
+
+.dc-cat-table { display: flex; flex-direction: column; }
+.dc-cat-head,
+.dc-cat-row {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: baseline;
+  padding: 4px 0;
+}
+.dc-cat-head {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  border-bottom: 1px solid var(--hair);
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+}
+.dc-cat-name { font-size: 12px; font-weight: 500; color: var(--fg-0); }
+.dc-cat-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dc-cat-path.unmapped { color: var(--fg-3); font-style: italic; }
+
+@media (max-width: 720px) {
+  .dc-cat-head, .dc-cat-row { grid-template-columns: 90px minmax(0, 1fr); }
+  .dc-cat-head span:last-child, .dc-cat-row span:last-child { display: none; }
+}
 .dc-icon {
   width: 36px; height: 36px;
   border-radius: var(--r-sm);

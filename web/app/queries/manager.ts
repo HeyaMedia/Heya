@@ -1,10 +1,14 @@
 import { defineQueryOptions } from '@pinia/colada'
 export type {
   ManagerClientActivityView,
+  ManagerClientCategory,
   ManagerClientHistoryItem,
   ManagerClientQueueItem,
+  ManagerClientWarning,
   ManagerDownloadClientInput,
   ManagerDownloadClientView,
+  ManagerIndexerHistoryDay,
+  ManagerIndexerHistoryView,
   ManagerIndexerInput,
   ManagerIndexerStatsView,
   ManagerIndexerView,

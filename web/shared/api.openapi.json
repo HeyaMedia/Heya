@@ -12474,6 +12474,15 @@
             "readOnly": true,
             "type": "string"
           },
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerClientCategory"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "disk_free_gb": {
             "format": "double",
             "type": "number"
@@ -12518,6 +12527,15 @@
           "speed_kbps": {
             "format": "double",
             "type": "number"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerClientWarning"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
         "required": [
@@ -12526,10 +12544,39 @@
           "disk_free_gb",
           "queue",
           "history",
+          "categories",
+          "warnings",
           "downloaded_day",
           "downloaded_week",
           "downloaded_month",
           "downloaded_total"
+        ],
+        "type": "object"
+      },
+      "ManagerClientCategory": {
+        "additionalProperties": false,
+        "properties": {
+          "local_dir": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "priority": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "remote_dir": {
+            "type": "string"
+          },
+          "script": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "remote_dir",
+          "priority"
         ],
         "type": "object"
       },
@@ -12606,6 +12653,23 @@
           "size_left_mb",
           "percentage",
           "time_left"
+        ],
+        "type": "object"
+      },
+      "ManagerClientWarning": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "at"
         ],
         "type": "object"
       },
@@ -12748,6 +12812,85 @@
           "path_mappings",
           "last_test_ok",
           "last_test_error"
+        ],
+        "type": "object"
+      },
+      "ManagerIndexerHistoryDay": {
+        "additionalProperties": false,
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "failed": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "grabs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "queries": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "queries",
+          "failed",
+          "grabs"
+        ],
+        "type": "object"
+      },
+      "ManagerIndexerHistoryView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerIndexerHistoryView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "by_indexer": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/ManagerIndexerHistoryDay"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "type": "object"
+          },
+          "by_source": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "covered_from": {
+            "type": "string"
+          },
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerIndexerHistoryDay"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "covered_from",
+          "days",
+          "by_indexer",
+          "by_source"
         ],
         "type": "object"
       },
@@ -32626,6 +32769,66 @@
           }
         ],
         "summary": "Update a manager indexer",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
+    "/api/manager/indexers/{id}/history": {
+      "get": {
+        "operationId": "manager-indexer-history",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerIndexerHistoryView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Daily query/grab activity bucketed from Prowlarr's history",
         "tags": [
           "Manager"
         ]

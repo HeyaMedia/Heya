@@ -103,6 +103,32 @@ func (c *Client) Statuses(ctx context.Context) ([]IndexerStatus, error) {
 	return out, nil
 }
 
+// HistoryRecord is one query/grab event from /api/v1/history.
+type HistoryRecord struct {
+	IndexerID  int    `json:"indexerId"`
+	Date       string `json:"date"` // RFC3339
+	Successful bool   `json:"successful"`
+	// EventType: "indexerQuery", "indexerRss", "releaseGrabbed", "indexerAuth".
+	EventType string `json:"eventType"`
+	Data      struct {
+		Source      string `json:"source"` // requesting app ("Sonarr", "Radarr", …)
+		ElapsedTime string `json:"elapsedTime"`
+		Query       string `json:"query"`
+	} `json:"data"`
+}
+
+// History fetches one page of the query/grab log, newest first.
+func (c *Client) History(ctx context.Context, page, pageSize int) ([]HistoryRecord, error) {
+	var out struct {
+		Records []HistoryRecord `json:"records"`
+	}
+	path := fmt.Sprintf("/api/v1/history?page=%d&pageSize=%d&sortKey=date&sortDirection=descending", page, pageSize)
+	if err := c.get(ctx, path, &out); err != nil {
+		return nil, err
+	}
+	return out.Records, nil
+}
+
 // TorznabURL is the per-indexer Torznab endpoint Prowlarr exposes for the
 // given indexer id, authenticated with the same app API key.
 func (c *Client) TorznabURL(indexerID int) string {

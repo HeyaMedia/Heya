@@ -73,6 +73,15 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(stats), nil
 		})
 
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/indexers/{id}/history", "manager-indexer-history", "Daily query/grab activity bucketed from Prowlarr's history", "Manager")),
+		func(ctx context.Context, in *struct{ IDPath }) (*JSONOutput[service.ManagerIndexerHistoryView], error) {
+			history, err := app.ManagerIndexerHistory(ctx, in.ID)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadGateway)
+			}
+			return noStoreJSON(*history), nil
+		})
+
 	// ── Download clients ─────────────────────────────────────────────────
 
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/download-clients", "manager-list-download-clients", "List manager download clients", "Manager")),

@@ -184,6 +184,36 @@ var managerIndexerStatsCmd = &cobra.Command{
 	},
 }
 
+var managerIndexerHistoryCmd = &cobra.Command{
+	Use:   "history <id>",
+	Short: "Show daily query/grab activity for a Prowlarr connection",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid id %q", args[0])
+		}
+		return withApp(func(ctx context.Context, app *service.App) error {
+			history, err := app.ManagerIndexerHistory(ctx, id)
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(history)
+			}
+			table := ui.NewTable("Date", "Queries", "Failed", "Grabs")
+			for _, day := range history.Days {
+				table.AddRow(day.Date, strconv.Itoa(day.Queries), strconv.Itoa(day.Failed), strconv.Itoa(day.Grabs))
+			}
+			fmt.Println(table.Render())
+			for source, count := range history.BySource {
+				ui.Info(source, strconv.Itoa(count)+" queries")
+			}
+			return nil
+		})
+	},
+}
+
 var managerIndexerRemoveCmd = &cobra.Command{
 	Use:   "rm <id>",
 	Short: "Remove an indexer",
@@ -434,7 +464,7 @@ func init() {
 	managerClientAddCmd.Flags().String("map-remote", "", "Path prefix as the client reports it (e.g. /storage)")
 	managerClientAddCmd.Flags().String("map-local", "", "Same prefix as this process sees it (e.g. /Volumes/Storage)")
 
-	managerIndexerCmd.AddCommand(managerIndexerListCmd, managerIndexerAddCmd, managerIndexerTestCmd, managerIndexerStatsCmd, managerIndexerRemoveCmd)
+	managerIndexerCmd.AddCommand(managerIndexerListCmd, managerIndexerAddCmd, managerIndexerTestCmd, managerIndexerStatsCmd, managerIndexerHistoryCmd, managerIndexerRemoveCmd)
 	managerClientCmd.AddCommand(managerClientListCmd, managerClientAddCmd, managerClientTestCmd, managerClientActivityCmd, managerClientRemoveCmd)
 	managerProfileCmd.AddCommand(managerProfileListCmd)
 	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd)

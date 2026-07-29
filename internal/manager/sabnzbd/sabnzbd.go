@@ -117,6 +117,54 @@ func (c *Client) History(ctx context.Context, limit int) ([]HistorySlot, error) 
 	return out.History.Slots, nil
 }
 
+// ConfigCategory is one SAB category; Dir is relative to CompleteDir unless
+// absolute.
+type ConfigCategory struct {
+	Name     string `json:"name"`
+	Dir      string `json:"dir"`
+	Priority int    `json:"priority"`
+	Script   string `json:"script"`
+}
+
+type Config struct {
+	CompleteDir string
+	Categories  []ConfigCategory
+}
+
+func (c *Client) Config(ctx context.Context) (*Config, error) {
+	var out struct {
+		Config struct {
+			Misc struct {
+				CompleteDir string `json:"complete_dir"`
+			} `json:"misc"`
+			Categories []ConfigCategory `json:"categories"`
+		} `json:"config"`
+	}
+	if err := c.call(ctx, url.Values{"mode": {"get_config"}}, &out); err != nil {
+		return nil, err
+	}
+	return &Config{
+		CompleteDir: out.Config.Misc.CompleteDir,
+		Categories:  out.Config.Categories,
+	}, nil
+}
+
+type Warning struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+	Time int64  `json:"time"`
+}
+
+func (c *Client) Warnings(ctx context.Context) ([]Warning, error) {
+	var out struct {
+		Warnings []Warning `json:"warnings"`
+	}
+	if err := c.call(ctx, url.Values{"mode": {"warnings"}}, &out); err != nil {
+		return nil, err
+	}
+	return out.Warnings, nil
+}
+
 func (c *Client) call(ctx context.Context, params url.Values, out any) error {
 	params.Set("output", "json")
 	params.Set("apikey", c.APIKey)
