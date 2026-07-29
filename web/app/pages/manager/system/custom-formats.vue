@@ -319,6 +319,7 @@ async function runTest() {
           tabindex="0"
           @click="openEdit(format)"
           @keydown.enter="openEdit(format)"
+          @keydown.space.prevent="openEdit(format)"
         >
           <span class="cf-name">
             {{ format.name }}

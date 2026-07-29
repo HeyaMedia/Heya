@@ -326,6 +326,7 @@ async function removeProfile(profile: ManagerQualityProfileView) {
               tabindex="0"
               @click="openEdit(profile)"
               @keydown.enter="openEdit(profile)"
+              @keydown.space.prevent="openEdit(profile)"
             >
               <span class="qp-row-name">
                 {{ profile.name }}

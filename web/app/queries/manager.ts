@@ -177,8 +177,11 @@ export const managerLibraryItemsQuery = defineQueryOptions((p: ManagerLibraryIte
   // manager.changed / media.* events still invalidate eagerly.
   staleTime: 1000 * 60,
   // Filter/sort/page changes swap the cache key; carrying the previous page
-  // as placeholder keeps the grid on screen instead of flashing a loader.
-  placeholderData: (prev: ManagerLibraryItemsPage | undefined) => prev,
+  // as placeholder keeps the grid on screen instead of flashing a loader —
+  // but only within the SAME library, or switching libraries would render the
+  // old library's items under the new one's routes while the fetch runs.
+  placeholderData: (prev: ManagerLibraryItemsPage | undefined) =>
+    prev && prev.library.id === p.libraryId ? prev : undefined,
   meta: { prefetch: 'none', sensitivity: 'private' },
 }))
 

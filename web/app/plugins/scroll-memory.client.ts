@@ -61,6 +61,9 @@ let restorationGeneration = 0
 // User input that starts a scroll of their own — the moment it appears,
 // restoration must stop reapplying or it fights the user for the scrollbar.
 const USER_SCROLL_EVENTS = ['wheel', 'touchstart', 'mousedown'] as const
+// Keys that scroll: while a delayed restore is retrying, PageDown must win
+// over the reapplied snapshot just like a wheel tick does.
+const SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', 'Home', 'End', ' ', 'Spacebar'])
 
 function restore(snapshot: ScrollSnapshot, generation: number) {
   let tries = 0
@@ -69,10 +72,15 @@ function restore(snapshot: ScrollSnapshot, generation: number) {
     cancelled = true
     teardown()
   }
+  const onKeydown = (event: KeyboardEvent) => {
+    if (SCROLL_KEYS.has(event.key)) cancel()
+  }
   const teardown = () => {
     for (const event of USER_SCROLL_EVENTS) window.removeEventListener(event, cancel)
+    window.removeEventListener('keydown', onKeydown)
   }
   for (const event of USER_SCROLL_EVENTS) window.addEventListener(event, cancel, { passive: true })
+  window.addEventListener('keydown', onKeydown, { passive: true })
 
   const attempt = () => {
     if (cancelled || generation !== restorationGeneration) {

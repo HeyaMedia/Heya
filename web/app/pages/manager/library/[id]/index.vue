@@ -238,16 +238,24 @@ const scrollTop = ref(0)
 const viewH = ref(800)
 const bodyTop = ref(0)
 
+// Coalesced through rAF: scroll events can outpace frames, and each sync
+// does two rect reads — once per painted frame is all the window math needs.
+let syncQueued = false
 function syncScroll() {
-  if (!scrollEl) return
-  scrollTop.value = scrollEl.scrollTop
-  viewH.value = scrollEl.clientHeight
-  // Re-derive the table's offset inside the scroll content every event —
-  // a rect read is cheap and immune to the content above changing height.
-  if (tbodyEl.value) {
-    bodyTop.value = tbodyEl.value.getBoundingClientRect().top
-      - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop
-  }
+  if (syncQueued) return
+  syncQueued = true
+  requestAnimationFrame(() => {
+    syncQueued = false
+    if (!scrollEl) return
+    scrollTop.value = scrollEl.scrollTop
+    viewH.value = scrollEl.clientHeight
+    // Re-derive the table's offset inside the scroll content every pass —
+    // a rect read is cheap and immune to the content above changing height.
+    if (tbodyEl.value) {
+      bodyTop.value = tbodyEl.value.getBoundingClientRect().top
+        - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop
+    }
+  })
 }
 
 let resizeObserver: ResizeObserver | undefined
@@ -261,6 +269,10 @@ onMounted(() => {
 onBeforeUnmount(() => {
   scrollEl?.removeEventListener('scroll', syncScroll)
   resizeObserver?.disconnect()
+  // The URL-sync debounce would otherwise fire after unmount and stamp this
+  // page's filter query onto whatever route is active by then.
+  clearTimeout(urlTimer)
+  clearTimeout(flashTimer)
 })
 // The table body mounts after data arrives or when the view toggles —
 // measure as soon as it exists (and again on view switches).
@@ -293,6 +305,9 @@ function showFlash(message: string, isError = false) {
   clearTimeout(flashTimer)
   flashTimer = setTimeout(() => { flash.value = '' }, 3500)
 }
+// The flash banner sits above the table, so showing/dismissing it shifts
+// every row — remeasure the virtualization offset.
+watch(flash, () => nextTick(syncScroll))
 
 function toggleSelected(id: number) {
   const next = new Set(selected.value)

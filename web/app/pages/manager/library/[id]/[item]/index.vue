@@ -182,13 +182,18 @@ async function setProfile(event: Event) {
 // ── TV: seasons ──────────────────────────────────────────────────────────
 
 const expandedSeasons = ref(new Set<number>())
+// "Untouched" and "user collapsed everything" both leave the set empty — the
+// touched flag keeps a live refetch (manager.changed / media.updated) from
+// re-opening a season the user explicitly closed.
+let seasonsTouched = false
 watch(detail, d => {
   // Sonarr-style: latest season open, the rest collapsed. Only on first load.
-  if (d?.seasons?.length && !expandedSeasons.value.size) {
+  if (d?.seasons?.length && !seasonsTouched && !expandedSeasons.value.size) {
     expandedSeasons.value = new Set([d.seasons[0]!.number])
   }
 }, { immediate: true })
 function toggleSeason(number: number) {
+  seasonsTouched = true
   const next = new Set(expandedSeasons.value)
   if (next.has(number)) next.delete(number)
   else next.add(number)
@@ -553,6 +558,10 @@ const FILE_KIND_LABELS: Record<string, string> = {
 .det-back:hover { color: var(--gold-bright); }
 
 /* ── Hero ────────────────────────────────────────────────────────────── */
+/* Hero chrome (title, chips, select) composites on the literal-dark artwork
+   scrim below — like the player OSD, its ink stays literal white/black per
+   the docs/ui.md artwork rule; theme tokens would go dark-on-dark in light
+   mode. Accents on artwork use --accent/--gold-bright as usual. */
 .det-hero {
   position: relative;
   border-radius: var(--r-lg);

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'manager', middleware: 'admin' })
 
-import { managerDownloadClientsQuery, type ManagerClientActivityView, type ManagerDownloadClientInput, type ManagerDownloadClientView, type ManagerTestResult } from '~/queries/manager'
+import { managerDownloadClientsQuery, type ManagerClientActivityView, type ManagerDownloadClientInput, type ManagerDownloadClientView, type ManagerPathMapping, type ManagerTestResult } from '~/queries/manager'
 import { fmtBytes, timeAgoShort } from '~/composables/useFormat'
 
 const { $heya } = useNuxtApp()
@@ -24,16 +24,25 @@ useLiveRefresh([{
 const activityByClient = ref<Record<number, ManagerClientActivityView>>({})
 const activityError = ref('')
 let activityTimer: ReturnType<typeof setInterval> | null = null
+// In-flight guard: a slow client must not let 10s ticks stack concurrent
+// sweeps whose stale responses overwrite newer state.
+let activityBusy = false
 
 async function loadActivity() {
-  for (const client of clients.value) {
-    if (!client.enabled || (client.last_test_at && !client.last_test_ok)) continue
-    try {
-      activityByClient.value[client.id] = await $heya(`/api/manager/download-clients/${client.id}/activity`) as ManagerClientActivityView
-      activityError.value = ''
-    } catch (e: any) {
-      activityError.value = e?.data?.detail ?? e?.message ?? 'Activity unavailable.'
+  if (activityBusy) return
+  activityBusy = true
+  try {
+    for (const client of clients.value) {
+      if (!client.enabled || (client.last_test_at && !client.last_test_ok)) continue
+      try {
+        activityByClient.value[client.id] = await $heya(`/api/manager/download-clients/${client.id}/activity`) as ManagerClientActivityView
+        activityError.value = ''
+      } catch (e: any) {
+        activityError.value = e?.data?.detail ?? e?.message ?? 'Activity unavailable.'
+      }
     }
+  } finally {
+    activityBusy = false
   }
 }
 
@@ -84,6 +93,9 @@ const form = reactive({
   map_local: '',
   hasStoredKey: false,
 })
+// The dialog edits the FIRST mapping only; rows past it (added via API/CLI)
+// ride along untouched instead of being silently dropped on save.
+let extraMappings: ManagerPathMapping[] = []
 const savingForm = ref(false)
 const formError = ref('')
 
@@ -102,6 +114,7 @@ function openAdd() {
   form.map_remote = ''
   form.map_local = ''
   form.hasStoredKey = false
+  extraMappings = []
   formError.value = ''
   dialogOpen.value = true
 }
@@ -116,6 +129,7 @@ function openEdit(client: ManagerDownloadClientView) {
   form.map_remote = client.path_mappings?.[0]?.remote ?? ''
   form.map_local = client.path_mappings?.[0]?.local ?? ''
   form.hasStoredKey = client.api_key_set
+  extraMappings = client.path_mappings?.slice(1) ?? []
   formError.value = ''
   dialogOpen.value = true
 }
@@ -131,9 +145,12 @@ async function saveForm() {
     username: '',
     password: '',
     category: form.category,
-    path_mappings: form.map_remote && form.map_local
-      ? [{ remote: form.map_remote, local: form.map_local }]
-      : [],
+    path_mappings: [
+      ...(form.map_remote && form.map_local
+        ? [{ remote: form.map_remote, local: form.map_local }]
+        : []),
+      ...extraMappings,
+    ],
   }
   try {
     let saved: ManagerDownloadClientView

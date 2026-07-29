@@ -328,6 +328,7 @@ function testStateOf(ix: ManagerIndexerView): { state: 'ok' | 'warn' | 'error' |
             :aria-label="`${child.name} stats`"
             @click="openStats(child)"
             @keydown.enter="openStats(child)"
+            @keydown.space.prevent="openStats(child)"
           >
             <span class="ix-name">
               {{ child.name }}
