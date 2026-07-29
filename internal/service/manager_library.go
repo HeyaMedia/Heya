@@ -249,11 +249,20 @@ disco AS (
 	}
 }
 
+// escapeLikePattern backslash-escapes LIKE/ILIKE metacharacters so user
+// search input always matches literally ('\' is the default ESCAPE char).
+func escapeLikePattern(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
+}
+
 // managerLibrarySorts whitelists ORDER BY expressions — the sort key comes
 // off the query string and must never reach SQL as-is.
 var managerLibrarySorts = map[string]string{
-	"title":    "order_title",
-	"year":     "NULLIF(year, '')::int",
+	"title": "order_title",
+	// Guarded cast: year is unconstrained text, and one legacy "2020–2021"
+	// row must not turn the whole sort into a database error.
+	"year":     `CASE WHEN year ~ '^\d{4}' THEN left(year, 4)::int END`,
 	"added":    "added_at",
 	"size":     "size_on_disk",
 	"missing":  "GREATEST(total_count - have_count, 0)",
@@ -280,7 +289,9 @@ func (a *App) ManagerLibraryItems(ctx context.Context, libraryID int64, p Manage
 		return "$" + strconv.Itoa(len(args))
 	}
 	if q := strings.TrimSpace(p.Search); q != "" {
-		ph := arg("%" + q + "%")
+		// Substring semantics, not pattern semantics: a user searching "100%"
+		// means the literal string, so LIKE metacharacters are escaped.
+		ph := arg("%" + escapeLikePattern(q) + "%")
 		where = append(where, fmt.Sprintf("(title ILIKE %s OR order_title LIKE lower(%s))", ph, ph))
 	}
 	switch p.Monitored {
@@ -393,11 +404,17 @@ SELECT f.*, s.* FROM (
 	}
 
 	// Zero matching rows means the CROSS JOIN produced nothing — fetch the
-	// (filter-independent) stats on their own so the header tiles still fill.
+	// (filter-independent) stats on their own so the header tiles still fill,
+	// and count the filtered set directly: an OFFSET past the last match also
+	// lands here, and the window function never saw the rows it skipped.
 	if stats == nil {
 		stats, err = a.managerLibraryStats(ctx, libraryID, cte)
 		if err != nil {
 			return nil, err
+		}
+		countQuery := "WITH " + cte + "\nSELECT count(*) FROM rows WHERE " + strings.Join(where, " AND ")
+		if err := a.db.QueryRow(ctx, countQuery, args[:len(args)-2]...).Scan(&total); err != nil {
+			return nil, fmt.Errorf("manager library count: %w", err)
 		}
 	}
 
@@ -455,10 +472,33 @@ func (a *App) UpdateManagerMedia(ctx context.Context, input ManagerMediaBulkInpu
 		return ManagerMediaBulkResult{}, fmt.Errorf("manager: nothing to update")
 	}
 	if input.QualityProfileID != nil && *input.QualityProfileID != 0 {
-		if _, err := sqlc.New(a.db).GetManagerQualityProfile(ctx, *input.QualityProfileID); err != nil {
+		profile, err := sqlc.New(a.db).GetManagerQualityProfile(ctx, *input.QualityProfileID)
+		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ManagerMediaBulkResult{}, ErrManagerNotFound
 			}
+			return ManagerMediaBulkResult{}, err
+		}
+		// A TV profile on a movie scores nonsense — every target's library
+		// must live in the profile's domain.
+		domainRows, err := a.db.Query(ctx, `
+			SELECT DISTINCT l.media_type::text
+			FROM media_items mi JOIN libraries l ON l.id = mi.library_id
+			WHERE mi.id = ANY($1::bigint[])`, input.IDs)
+		if err != nil {
+			return ManagerMediaBulkResult{}, fmt.Errorf("manager media domains: %w", err)
+		}
+		defer domainRows.Close()
+		for domainRows.Next() {
+			var mediaType string
+			if err := domainRows.Scan(&mediaType); err != nil {
+				return ManagerMediaBulkResult{}, err
+			}
+			if managerProfileDomain(mediaType) != profile.Domain {
+				return ManagerMediaBulkResult{}, fmt.Errorf("manager: profile %q is a %s profile; it cannot be assigned to %s items", profile.Name, profile.Domain, mediaType)
+			}
+		}
+		if err := domainRows.Err(); err != nil {
 			return ManagerMediaBulkResult{}, err
 		}
 	}

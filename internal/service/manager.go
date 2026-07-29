@@ -11,13 +11,16 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/eventhub"
 	"github.com/karbowiak/heya/internal/manager/prowlarr"
 	"github.com/karbowiak/heya/internal/manager/sabnzbd"
 	"github.com/karbowiak/heya/internal/manager/torznab"
+	"github.com/karbowiak/heya/internal/secrettext"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/errgroup"
 )
 
 // Heya Media Manager, phase 1: connection + policy config (indexers, download
@@ -119,18 +122,20 @@ type ManagerTestResult struct {
 
 func managerIndexerView(row sqlc.ManagerIndexer) ManagerIndexerView {
 	view := ManagerIndexerView{
-		ID:            row.ID,
-		Name:          row.Name,
-		Kind:          row.Kind,
-		Enabled:       row.Enabled,
-		BaseURL:       row.BaseUrl,
-		APIKeySet:     row.ApiKey != "",
-		Protocol:      row.Protocol,
-		Priority:      row.Priority,
-		Categories:    row.Categories,
-		Source:        row.Source,
-		LastTestOK:    row.LastTestOk,
-		LastTestError: row.LastTestError,
+		ID:         row.ID,
+		Name:       row.Name,
+		Kind:       row.Kind,
+		Enabled:    row.Enabled,
+		BaseURL:    row.BaseUrl,
+		APIKeySet:  row.ApiKey != "",
+		Protocol:   row.Protocol,
+		Priority:   row.Priority,
+		Categories: row.Categories,
+		Source:     row.Source,
+		LastTestOK: row.LastTestOk,
+		// Redact on the way out too — rows written before the key-stripping
+		// braces existed may still carry a query-string credential.
+		LastTestError: secrettext.Redact(row.LastTestError),
 	}
 	if row.ParentID.Valid {
 		id := row.ParentID.Int64
@@ -145,19 +150,20 @@ func managerIndexerView(row sqlc.ManagerIndexer) ManagerIndexerView {
 
 func managerDownloadClientView(row sqlc.ManagerDownloadClient) ManagerDownloadClientView {
 	view := ManagerDownloadClientView{
-		ID:            row.ID,
-		Name:          row.Name,
-		Kind:          row.Kind,
-		Enabled:       row.Enabled,
-		Protocol:      row.Protocol,
-		BaseURL:       row.BaseUrl,
-		APIKeySet:     row.ApiKey != "",
-		Username:      row.Username,
-		Category:      row.Category,
-		Priority:      row.Priority,
-		PathMappings:  []ManagerPathMapping{},
-		LastTestOK:    row.LastTestOk,
-		LastTestError: row.LastTestError,
+		ID:           row.ID,
+		Name:         row.Name,
+		Kind:         row.Kind,
+		Enabled:      row.Enabled,
+		Protocol:     row.Protocol,
+		BaseURL:      row.BaseUrl,
+		APIKeySet:    row.ApiKey != "",
+		Username:     row.Username,
+		Category:     row.Category,
+		Priority:     row.Priority,
+		PathMappings: []ManagerPathMapping{},
+		LastTestOK:   row.LastTestOk,
+		// Same belt as the indexer view: legacy rows may hold a raw URL error.
+		LastTestError: secrettext.Redact(row.LastTestError),
 	}
 	// Mapping rows were validated on write; a decode failure here would mean
 	// hand-edited DB contents, surfaced as the empty default rather than a 500.
@@ -196,6 +202,16 @@ func (a *App) notifyManagerChanged(ctx context.Context, area string) {
 	if err := eventhub.Notify(ctx, a.db, eventhub.EventManagerChanged, eventhub.ManagerChangedPayload{Area: area}); err != nil {
 		log.Warn().Err(err).Str("area", area).Msg("manager change notify failed")
 	}
+}
+
+// friendlyUniqueError turns a (domain, name) unique violation into a message
+// an admin can act on instead of a raw constraint string.
+func friendlyUniqueError(err error, what string) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return fmt.Errorf("a %s with that name already exists in this domain", what)
+	}
+	return err
 }
 
 func validateManagerBaseURL(raw string) (string, error) {
@@ -405,6 +421,9 @@ func (a *App) TestManagerIndexer(ctx context.Context, id int64) (ManagerTestResu
 		result.Error = fmt.Sprintf("unknown indexer kind %q", row.Kind)
 	}
 
+	// Belt to the clients' own URL-stripping braces: nothing key-shaped may
+	// reach the row or the response, whatever the error's provenance.
+	result.Error = secrettext.Redact(result.Error)
 	if err := q.SetManagerIndexerTestResult(ctx, sqlc.SetManagerIndexerTestResultParams{
 		ID:            id,
 		LastTestOk:    result.OK,
@@ -857,6 +876,9 @@ func (a *App) TestManagerDownloadClient(ctx context.Context, id int64) (ManagerT
 		result.Error = fmt.Sprintf("unknown download client kind %q", row.Kind)
 	}
 
+	// Belt to the clients' own URL-stripping braces: nothing key-shaped may
+	// reach the row or the response, whatever the error's provenance.
+	result.Error = secrettext.Redact(result.Error)
 	if err := q.SetManagerDownloadClientTestResult(ctx, sqlc.SetManagerDownloadClientTestResultParams{
 		ID:            id,
 		LastTestOk:    result.OK,
@@ -952,26 +974,50 @@ func (a *App) ManagerDownloadClientActivity(ctx context.Context, id int64) (*Man
 		return nil, fmt.Errorf("activity not supported for client kind %q", row.Kind)
 	}
 
+	// The five reads are independent — fetch them concurrently so a sluggish
+	// SAB answers in one round-trip's latency, not five stacked (the FE polls
+	// this every 10s).
 	client := sabnzbd.New(row.BaseUrl, row.ApiKey)
-	queue, err := client.Queue(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("fetching queue: %w", err)
-	}
-	stats, err := client.ServerStats(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("fetching server stats: %w", err)
-	}
-	history, err := client.History(ctx, 10)
-	if err != nil {
-		return nil, fmt.Errorf("fetching history: %w", err)
-	}
-	config, err := client.Config(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("fetching config: %w", err)
-	}
-	warnings, err := client.Warnings(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("fetching warnings: %w", err)
+	var (
+		queue    *sabnzbd.Queue
+		stats    *sabnzbd.ServerStats
+		history  []sabnzbd.HistorySlot
+		config   *sabnzbd.Config
+		warnings []sabnzbd.Warning
+	)
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.Go(func() (err error) {
+		if queue, err = client.Queue(groupCtx); err != nil {
+			return fmt.Errorf("fetching queue: %w", err)
+		}
+		return nil
+	})
+	group.Go(func() (err error) {
+		if stats, err = client.ServerStats(groupCtx); err != nil {
+			return fmt.Errorf("fetching server stats: %w", err)
+		}
+		return nil
+	})
+	group.Go(func() (err error) {
+		if history, err = client.History(groupCtx, 10); err != nil {
+			return fmt.Errorf("fetching history: %w", err)
+		}
+		return nil
+	})
+	group.Go(func() (err error) {
+		if config, err = client.Config(groupCtx); err != nil {
+			return fmt.Errorf("fetching config: %w", err)
+		}
+		return nil
+	})
+	group.Go(func() (err error) {
+		if warnings, err = client.Warnings(groupCtx); err != nil {
+			return fmt.Errorf("fetching warnings: %w", err)
+		}
+		return nil
+	})
+	if err := group.Wait(); err != nil {
+		return nil, err
 	}
 
 	var mappings []ManagerPathMapping
@@ -1042,13 +1088,20 @@ func (a *App) ListManagerQualityProfiles(ctx context.Context) ([]ManagerQualityP
 	if err != nil {
 		return nil, fmt.Errorf("list manager quality profiles: %w", err)
 	}
+	// One grouped count instead of a media_items scan per profile.
+	counts, err := q.CountMediaItemsByQualityProfileGrouped(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("count profile assignments: %w", err)
+	}
+	inUseByProfile := make(map[int64]int64, len(counts))
+	for _, count := range counts {
+		if count.QualityProfileID.Valid {
+			inUseByProfile[count.QualityProfileID.Int64] = count.InUse
+		}
+	}
 	views := make([]ManagerQualityProfileView, 0, len(rows))
 	for _, row := range rows {
-		inUse, err := q.CountMediaItemsByQualityProfile(ctx, pgtype.Int8{Int64: row.ID, Valid: true})
-		if err != nil {
-			return nil, fmt.Errorf("count profile assignments: %w", err)
-		}
-		views = append(views, managerQualityProfileView(row, inUse))
+		views = append(views, managerQualityProfileView(row, inUseByProfile[row.ID]))
 	}
 	return views, nil
 }
@@ -1134,7 +1187,7 @@ func (a *App) CreateManagerQualityProfile(ctx context.Context, input ManagerQual
 		Language:          input.Language,
 	})
 	if err != nil {
-		return ManagerQualityProfileView{}, fmt.Errorf("create manager quality profile: %w", err)
+		return ManagerQualityProfileView{}, fmt.Errorf("create manager quality profile: %w", friendlyUniqueError(err, "quality profile"))
 	}
 	a.notifyManagerChanged(ctx, "quality_profiles")
 	return managerQualityProfileView(row, 0), nil
@@ -1181,7 +1234,7 @@ func (a *App) UpdateManagerQualityProfile(ctx context.Context, id int64, input M
 		Language:          input.Language,
 	})
 	if err != nil {
-		return ManagerQualityProfileView{}, fmt.Errorf("update manager quality profile: %w", err)
+		return ManagerQualityProfileView{}, fmt.Errorf("update manager quality profile: %w", friendlyUniqueError(err, "quality profile"))
 	}
 	inUse, err := q.CountMediaItemsByQualityProfile(ctx, pgtype.Int8{Int64: id, Valid: true})
 	if err != nil {

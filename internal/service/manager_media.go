@@ -439,9 +439,13 @@ func channelLayoutLabel(channels int32) string {
 }
 
 func (a *App) managerSeriesSeasons(ctx context.Context, id int64) ([]ManagerSeasonView, error) {
+	// Airedness comes from the DATABASE clock (now()::date), matching the
+	// library listing's CTE — the Go process can sit in a different timezone
+	// and disagree with Postgres about "today" around midnight.
 	rows, err := a.db.Query(ctx, `
 		SELECT s.season_number, s.title,
 		       e.id, e.episode_number, e.title, e.air_date, e.is_special,
+		       (e.air_date IS NOT NULL AND e.air_date <= now()::date),
 		       bool_or(lf.id IS NOT NULL),
 		       COALESCE(max(lf.video_height), 0),
 		       COALESCE(sum(lf.size) FILTER (WHERE lf.id IS NOT NULL), 0)
@@ -460,15 +464,15 @@ func (a *App) managerSeriesSeasons(ctx context.Context, id int64) ([]ManagerSeas
 
 	seasons := []ManagerSeasonView{}
 	byNumber := map[int32]int{}
-	today := time.Now().Format("2006-01-02")
 	for rows.Next() {
 		var seasonNumber int32
 		var seasonTitle string
 		var e ManagerEpisodeView
 		var airDate pgtype.Date
+		var aired bool
 		var height int32
 		if err := rows.Scan(&seasonNumber, &seasonTitle, &e.ID, &e.Number, &e.Title,
-			&airDate, &e.Special, &e.HasFile, &height, &e.SizeBytes); err != nil {
+			&airDate, &e.Special, &aired, &e.HasFile, &height, &e.SizeBytes); err != nil {
 			return nil, err
 		}
 		e.AirDate = dateToString(airDate)
@@ -482,7 +486,7 @@ func (a *App) managerSeriesSeasons(ctx context.Context, id int64) ([]ManagerSeas
 			seasons = append(seasons, ManagerSeasonView{Number: seasonNumber, Title: seasonTitle, Episodes: []ManagerEpisodeView{}})
 		}
 		s := &seasons[idx]
-		if !e.Special && e.AirDate != "" && e.AirDate <= today {
+		if !e.Special && aired {
 			s.Aired++
 		}
 		if e.HasFile && !e.Special {
@@ -594,6 +598,8 @@ func effectiveReleaseType(primary string, secondary []string, title string) stri
 // ones carry local completeness and size, catalog-only ones read 0/N. Local
 // albums the catalog doesn't know (bootlegs, unmatched) still show.
 func (a *App) managerArtistAlbums(ctx context.Context, id int64) ([]ManagerAlbumView, error) {
+	// LEFT JOIN tracks so a just-created album with no track rows yet still
+	// lists (as 0/0) instead of vanishing from the artist page.
 	rows, err := a.db.Query(ctx, `
 		SELECT al.id, al.title, al.slug, al.album_type, al.secondary_types, al.release_date, al.year, al.rating,
 		       count(DISTINCT t.id)::int,
@@ -601,7 +607,7 @@ func (a *App) managerArtistAlbums(ctx context.Context, id int64) ([]ManagerAlbum
 		       COALESCE(sum(tf.size_bytes) FILTER (WHERE lf.id IS NOT NULL), 0)::bigint
 		FROM albums al
 		JOIN artists ar ON ar.id = al.artist_id AND ar.media_item_id = $1
-		JOIN tracks t ON t.album_id = al.id
+		LEFT JOIN tracks t ON t.album_id = al.id
 		LEFT JOIN track_files tf ON tf.track_id = t.id
 		LEFT JOIN library_files lf ON lf.id = tf.library_file_id AND lf.deleted_at IS NULL
 		GROUP BY al.id
@@ -694,7 +700,10 @@ func (a *App) managerArtistAlbums(ctx context.Context, id int64) ([]ManagerAlbum
 		if editionKey == "" {
 			editionKey = discography.EditionKey(title)
 		}
-		if albumID.Valid {
+		// A local album merges into at most ONE catalog row — legacy links
+		// (written before Sync claimed each local once) can point two rows at
+		// the same album; the second falls through to catalog-only.
+		if albumID.Valid && !linked[albumID.Int64] {
 			if idx, ok := byAlbumID[albumID.Int64]; ok {
 				local := locals[idx]
 				local.DiscographyID = discoID

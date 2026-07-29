@@ -32,10 +32,15 @@ func valueOr[T any](ptr *T, fallback T) T {
 	return *ptr
 }
 
+// nonZeroFormatScores drops zero entries and dedupes by format id (first
+// occurrence wins) — the scorer sums every stored entry, so a duplicated id
+// would silently double-count.
 func nonZeroFormatScores(scores []ManagerFormatScore) []ManagerFormatScore {
 	kept := make([]ManagerFormatScore, 0, len(scores))
+	seen := make(map[int64]bool, len(scores))
 	for _, score := range scores {
-		if score.Score != 0 {
+		if score.Score != 0 && !seen[score.FormatID] {
+			seen[score.FormatID] = true
 			kept = append(kept, score)
 		}
 	}
@@ -129,7 +134,7 @@ func (a *App) CreateManagerCustomFormat(ctx context.Context, input ManagerCustom
 		Specifications:      specs,
 	})
 	if err != nil {
-		return ManagerCustomFormatView{}, fmt.Errorf("create manager custom format: %w", err)
+		return ManagerCustomFormatView{}, fmt.Errorf("create manager custom format: %w", friendlyUniqueError(err, "custom format"))
 	}
 	a.notifyManagerChanged(ctx, "custom_formats")
 	return managerCustomFormatView(row), nil
@@ -161,7 +166,7 @@ func (a *App) UpdateManagerCustomFormat(ctx context.Context, id int64, input Man
 		Source:              existing.Source,
 	})
 	if err != nil {
-		return ManagerCustomFormatView{}, fmt.Errorf("update manager custom format: %w", err)
+		return ManagerCustomFormatView{}, fmt.Errorf("update manager custom format: %w", friendlyUniqueError(err, "custom format"))
 	}
 	a.notifyManagerChanged(ctx, "custom_formats")
 	return managerCustomFormatView(row), nil
@@ -259,7 +264,23 @@ func (a *App) ImportManagerCustomFormats(ctx context.Context, input ManagerForma
 		return result, err
 	}
 
-	q := sqlc.New(a.db)
+	// Remote reads all happen above/here; the mutations below run in ONE
+	// transaction, so a mid-import failure can't leave half the formats
+	// committed while the response reports an error.
+	var rawProfiles []byte
+	if input.IncludeProfiles && client != nil {
+		if rawProfiles, err = client.QualityProfilesRaw(ctx); err != nil {
+			return result, err
+		}
+	}
+
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return result, fmt.Errorf("begin import: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // rollback after commit is a no-op
+
+	q := sqlc.New(tx)
 	for _, format := range imported {
 		for _, warning := range format.Warnings {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("%s: %s", format.Name, warning))
@@ -303,10 +324,14 @@ func (a *App) ImportManagerCustomFormats(ctx context.Context, input ManagerForma
 		}
 	}
 
-	if input.IncludeProfiles && client != nil {
-		if err := a.importArrProfiles(ctx, client, input.Kind, domain, &result); err != nil {
+	if rawProfiles != nil {
+		if err := a.importArrProfiles(ctx, q, input.Kind, domain, rawProfiles, &result); err != nil {
 			return result, err
 		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return result, fmt.Errorf("commit import: %w", err)
 	}
 
 	a.notifyManagerChanged(ctx, "custom_formats")
@@ -316,17 +341,15 @@ func (a *App) ImportManagerCustomFormats(ctx context.Context, input ManagerForma
 	return result, nil
 }
 
-func (a *App) importArrProfiles(ctx context.Context, client *arr.Client, kind, domain string, result *ManagerFormatImportResult) error {
-	rawProfiles, err := client.QualityProfilesRaw(ctx)
-	if err != nil {
-		return err
-	}
+// importArrProfiles maps parsed arr profiles onto manager rows. It runs on
+// the caller's queries handle — inside the import transaction — and the
+// profile payload is fetched by the caller before that transaction opens.
+func (a *App) importArrProfiles(ctx context.Context, q *sqlc.Queries, kind, domain string, rawProfiles []byte, result *ManagerFormatImportResult) error {
 	profiles, err := formats.ParseArrProfiles(rawProfiles)
 	if err != nil {
 		return err
 	}
 
-	q := sqlc.New(a.db)
 	formatRows, err := q.ListManagerCustomFormats(ctx)
 	if err != nil {
 		return fmt.Errorf("list custom formats: %w", err)

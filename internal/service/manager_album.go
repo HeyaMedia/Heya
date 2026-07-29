@@ -49,16 +49,17 @@ type ManagerAlbumDetailView struct {
 // discography entry) into the album page payload.
 func (a *App) GetManagerAlbumDetail(ctx context.Context, ref string) (*ManagerAlbumDetailView, error) {
 	ref = strings.TrimSpace(ref)
+	// A ref that doesn't parse can't name anything — that's a 404, not a 500.
 	if id, ok := strings.CutPrefix(ref, "d"); ok {
 		discoID, err := strconv.ParseInt(id, 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("manager: bad album ref %q", ref)
+			return nil, ErrManagerNotFound
 		}
 		return a.managerAlbumFromDiscography(ctx, discoID)
 	}
 	albumID, err := strconv.ParseInt(ref, 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf("manager: bad album ref %q", ref)
+		return nil, ErrManagerNotFound
 	}
 	return a.managerAlbumFromLocal(ctx, albumID)
 }
@@ -99,12 +100,20 @@ func (a *App) managerAlbumFromLocal(ctx context.Context, albumID int64) (*Manage
 	}
 	view.Library = ManagerLibraryRef{ID: lib.ID, Name: lib.Name, MediaType: string(lib.MediaType), Domain: managerProfileDomain(string(lib.MediaType))}
 
+	// Per-track rows show the BEST file (that's the quality that matters);
+	// all_bytes carries every live copy so the album total agrees with the
+	// artist page and the library lens, which both count what the release
+	// costs on disk — a track kept in FLAC and MP3 is two files.
 	rows, err := a.db.Query(ctx, `
 		SELECT t.id, t.disc_number, t.track_number, t.title, t.duration,
 		       best.id IS NOT NULL,
 		       COALESCE(best.format, ''), COALESCE(best.bitrate_kbps, 0),
 		       COALESCE(best.bit_depth, 0), COALESCE(best.sample_rate_hz, 0),
-		       COALESCE(best.size_bytes, 0)
+		       COALESCE(best.size_bytes, 0),
+		       COALESCE((SELECT sum(tf2.size_bytes)
+		                 FROM track_files tf2
+		                 JOIN library_files lf2 ON lf2.id = tf2.library_file_id AND lf2.deleted_at IS NULL
+		                 WHERE tf2.track_id = t.id), 0)::bigint
 		FROM tracks t
 		LEFT JOIN LATERAL (
 		  SELECT tf.id, tf.format, tf.bitrate_kbps, tf.bit_depth, tf.sample_rate_hz, tf.size_bytes
@@ -124,18 +133,17 @@ func (a *App) managerAlbumFromLocal(ctx context.Context, albumID int64) (*Manage
 		var t ManagerTrackView
 		var format string
 		var bitrate, bitDepth, sampleRate int32
+		var allBytes int64
 		if err := rows.Scan(&t.ID, &t.Disc, &t.Number, &t.Title, &t.Duration,
-			&t.HasFile, &format, &bitrate, &bitDepth, &sampleRate, &t.SizeBytes); err != nil {
+			&t.HasFile, &format, &bitrate, &bitDepth, &sampleRate, &t.SizeBytes, &allBytes); err != nil {
 			return nil, err
 		}
 		if t.HasFile {
 			t.Quality = audioQualityLabel(format, bitrate, bitDepth, sampleRate)
-		}
-		if t.HasFile {
 			album.TracksHave++
 		}
 		album.TracksTotal++
-		album.SizeBytes += t.SizeBytes
+		album.SizeBytes += allBytes
 		view.Tracks = append(view.Tracks, t)
 	}
 	if err := rows.Err(); err != nil {
