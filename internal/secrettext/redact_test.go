@@ -31,6 +31,27 @@ func TestRedact(t *testing.T) {
 			want:  "webdav+https://xxxxx@example.test/share",
 		},
 		{name: "raw at in malformed password", input: "https://user:pa@ss@example.test/share", want: "https://xxxxx@example.test/share"},
+		{
+			name:  "apikey query parameter",
+			input: `Get "https://sab.example.test/api?apikey=0123456789abcdef&mode=queue&output=json": dial tcp: lookup sab.example.test: no such host`,
+			want:  `Get "https://sab.example.test/api?apikey=xxxxx&mode=queue&output=json": dial tcp: lookup sab.example.test: no such host`,
+		},
+		{
+			name:  "secret params mid-query stay scoped",
+			input: "https://indexer.test/42/api?t=caps&apikey=deadbeef&extended=1",
+			want:  "https://indexer.test/42/api?t=caps&apikey=xxxxx&extended=1",
+		},
+		{
+			name:  "token and password params",
+			input: "call https://x.test/cb?access_token=abc.def&password=hunter2#frag",
+			want:  "call https://x.test/cb?access_token=xxxxx&password=xxxxx#frag",
+		},
+		{
+			name:  "auth param exact, author untouched",
+			input: "https://x.test/q?author=melville&auth=tok3n",
+			want:  "https://x.test/q?author=melville&auth=xxxxx",
+		},
+		{name: "secret word in prose untouched", input: "the token was rejected upstream", want: "the token was rejected upstream"},
 		{name: "malformed repeated at", input: "open https://user:pass@@example.test/share failed", want: "open https://xxxxx@example.test/share failed"},
 		{name: "malformed missing host", input: "bad https://user:pass@", want: "bad https://xxxxx@"},
 		{

@@ -6,6 +6,7 @@ package sabnzbd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -174,6 +175,17 @@ func (c *Client) call(ctx context.Context, params url.Values, out any) error {
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
+		// SAB authenticates via ?apikey= and url.Error embeds the full request
+		// URL — strip the query so the key can't ride the error into persisted
+		// test results or response bodies. The chain stays intact for
+		// errors.Is(context.Canceled) and friends.
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			if u, perr := url.Parse(uerr.URL); perr == nil && u.RawQuery != "" {
+				u.RawQuery = ""
+				uerr.URL = u.String()
+			}
+		}
 		return fmt.Errorf("sabnzbd: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck // defer close

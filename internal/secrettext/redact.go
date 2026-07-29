@@ -20,15 +20,26 @@ const redactedUserinfo = "xxxxx"
 // provider errors, legacy database rows, or other diagnostic text.
 var urlScheme = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://`)
 
-// Redact replaces URL userinfo in arbitrary text while preserving the URL's
-// scheme, host, port, path, query, and fragment. It intentionally does not
-// parse whole URLs: filesystem paths and error strings can contain malformed
-// URLs or literal '#', '?', and '%' bytes, and those must survive unchanged.
+// Query parameters whose value is a credential by any reasonable reading —
+// services like SABnzbd and Torznab indexers authenticate via ?apikey=, and
+// transport errors embed the full request URL. The [?&] anchor keeps this to
+// query-string position, so prose like "the token was rejected" is untouched.
+var secretQueryParam = regexp.MustCompile(`(?i)([?&](?:api[_-]?key|token|access[_-]?token|refresh[_-]?token|auth|password|passwd|secret|passkey)=)[^&#\s"'<>]+`)
+
+// Redact replaces URL userinfo and secret-named query-parameter values in
+// arbitrary text while preserving the URL's scheme, host, port, path, other
+// query parameters, and fragment. It intentionally does not parse whole URLs:
+// filesystem paths and error strings can contain malformed URLs or literal
+// '#', '?', and '%' bytes, and those must survive unchanged.
 //
 // The last '@' in an authority is the delimiter. This safely handles raw '@'
 // bytes in malformed passwords and percent-encoded credentials without ever
 // copying any part of the original userinfo to the result.
 func Redact(input string) string {
+	return secretQueryParam.ReplaceAllString(redactUserinfo(input), "${1}"+redactedUserinfo)
+}
+
+func redactUserinfo(input string) string {
 	searchFrom := 0
 	lastWrite := 0
 	changed := false
