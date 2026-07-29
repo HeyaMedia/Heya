@@ -103,7 +103,7 @@
                 <template v-if="nextEpisode.runtime_minutes"> &middot; {{ nextEpisode.runtime_minutes }}m</template>
                 <template v-if="ratingStr(nextEpisode.rating)"> &middot; &#9733; {{ ratingStr(nextEpisode.rating) }}</template>
               </div>
-              <p v-if="nextEpisode.preferred_overview">{{ nextEpisode.preferred_overview }}</p>
+              <p v-if="episodeSynopsis(nextEpisode)">{{ episodeSynopsis(nextEpisode) }}</p>
             </div>
           </NuxtLink>
         </div>
@@ -237,11 +237,10 @@ const nextEpisode = computed(() => epIndex.value >= 0 && epIndex.value < episode
 
 const episodeTitle = computed(() =>
   episode.value?.preferred_title || episode.value?.title || `Episode ${currentEpNum.value}`)
-// Story uses ONLY the library-language overview the server resolved
-// (preferred_overview). Falling back to the raw `overview` surfaced the
-// provider's original-language text (e.g. Japanese on an English library), so
-// when there's no localized synopsis we show the empty state instead.
-const episodeOverview = computed(() => episode.value?.preferred_overview || '')
+// Use the same policy as the season ledger: library language (with English
+// fallback) first, then the provider's original-language synopsis when that is
+// the only text available.
+const episodeOverview = computed(() => episodeSynopsis(episode.value))
 
 const seasonLabel = computed(() => {
   if (currentSeasonNum.value === 0) return 'Specials'
@@ -270,6 +269,7 @@ const watched = computed(() => episode.value ? watchedEpisodes.value.has(episode
 
 function pad(n: number) { return String(n).padStart(2, '0') }
 function epCodeFor(ep: any) { return `S${pad(currentSeasonNum.value)}E${pad(ep.episode_number)}` }
+function episodeSynopsis(ep: any) { return ep?.preferred_overview || ep?.overview || '' }
 function ratingStr(r: unknown) {
   const n = typeof r === 'number' ? r : parseFloat(String(r ?? ''))
   return (!Number.isFinite(n) || n <= 0) ? '' : n.toFixed(1)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -219,6 +220,105 @@ func (a *App) preferredTitleOverlayFor(ctx context.Context, q *sqlc.Queries, tar
 	return out
 }
 
+// episodeLocalizationQueryLanguages returns the base languages accepted by the
+// whole-series localization queries. Canonical metadata can store "en",
+// "en-US", or "en_US"; all three must be considered English.
+func episodeLocalizationQueryLanguages(preferredLanguage string) []string {
+	base := baseLanguage(preferredLanguage)
+	if base == "" {
+		return nil
+	}
+	languages := []string{base}
+	if base != "en" {
+		languages = append(languages, "en")
+	}
+	return languages
+}
+
+// pickEpisodeLocalization applies the detail-page policy to the localized
+// rows fetched for one episode: library language/country, then English. The raw
+// episode title/overview remains the caller's final original-language fallback.
+func pickEpisodeLocalization(values map[string]string, preferredLanguage, preferredCountry string) string {
+	if len(values) == 0 {
+		return ""
+	}
+
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	normalized := make(map[string]string, len(values))
+	for _, key := range keys {
+		value := strings.TrimSpace(values[key])
+		if value == "" {
+			continue
+		}
+		tag := normalizeLanguageTag(key)
+		if _, exists := normalized[tag]; !exists {
+			normalized[tag] = value
+		}
+	}
+
+	var candidates []string
+	add := func(tag string) {
+		tag = normalizeLanguageTag(tag)
+		if tag == "" {
+			return
+		}
+		for _, existing := range candidates {
+			if existing == tag {
+				return
+			}
+		}
+		candidates = append(candidates, tag)
+	}
+	addLanguage := func(language, country string) {
+		tag := normalizeLanguageTag(language)
+		base := baseLanguage(tag)
+		if base == "" {
+			return
+		}
+		if strings.Contains(tag, "-") {
+			add(tag)
+		}
+		if country = strings.TrimSpace(country); country != "" {
+			add(base + "-" + country)
+		}
+		add(base)
+		for _, key := range keys {
+			normalizedKey := normalizeLanguageTag(key)
+			if baseLanguage(normalizedKey) == base {
+				add(normalizedKey)
+			}
+		}
+	}
+
+	addLanguage(preferredLanguage, preferredCountry)
+	if baseLanguage(preferredLanguage) != "en" {
+		addLanguage("en", preferredCountry)
+	}
+	for _, candidate := range candidates {
+		if value := normalized[candidate]; value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func normalizeLanguageTag(value string) string {
+	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(value), "_", "-"))
+}
+
+func baseLanguage(value string) string {
+	value = normalizeLanguageTag(value)
+	if i := strings.IndexByte(value, '-'); i >= 0 {
+		return value[:i]
+	}
+	return value
+}
+
 // preferredTitleResolver returns a closure that overlays the library's
 // PreferredLanguage title on a (mediaItemID, libraryID) pair, falling back
 // to English and then the supplied raw title. Library settings are cached
@@ -385,11 +485,13 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 				lib, _ := q.GetLibraryByID(ctx, item.LibraryID)
 				libSettings := metadata.ParseSettings(lib.Settings)
 				prefLang := libSettings.PreferredLanguage
+				prefCountry := libSettings.PreferredCountry
 
 				// Three whole-series queries instead of one per season plus 2-4
 				// per episode — the old shape was ~4000 queries on a
 				// 1000-episode series. Preferred-language resolution happens
-				// in-memory off the maps.
+				// in-memory off the maps. Query by base language so regional
+				// metadata tags such as en-US still satisfy an English library.
 				allEps, _ := q.ListTVEpisodesBySeries(ctx, series.ID)
 				epsBySeason := map[int64][]sqlc.TvEpisode{}
 				for _, ep := range allEps {
@@ -399,10 +501,7 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 				titleByEp := map[int64]map[string]string{}
 				overviewByEp := map[int64]map[string]string{}
 				if prefLang != "" {
-					langs := []string{prefLang}
-					if prefLang != "en" {
-						langs = append(langs, "en")
-					}
+					langs := episodeLocalizationQueryLanguages(prefLang)
 					if titles, err := q.ListEpisodeTitlesForSeries(ctx, sqlc.ListEpisodeTitlesForSeriesParams{SeriesID: series.ID, Languages: langs}); err == nil {
 						for _, t := range titles {
 							if titleByEp[t.EpisodeID] == nil {
@@ -420,14 +519,6 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 						}
 					}
 				}
-				pick := func(m map[int64]map[string]string, epID int64) string {
-					byLang := m[epID]
-					if v := byLang[prefLang]; v != "" {
-						return v
-					}
-					return byLang["en"]
-				}
-
 				var enriched []seasonWithEpisodes
 				for _, s := range seasons {
 					if len(availableSeasons) > 0 && !availableSeasons[int(s.SeasonNumber)] {
@@ -437,8 +528,8 @@ func (a *App) GetMediaDetail(ctx context.Context, idOrSlug string) (map[string]a
 					for _, ep := range epsBySeason[s.ID] {
 						ev := episodeView{TvEpisode: ep}
 						if prefLang != "" {
-							ev.PreferredTitle = pick(titleByEp, ep.ID)
-							ev.PreferredOverview = pick(overviewByEp, ep.ID)
+							ev.PreferredTitle = pickEpisodeLocalization(titleByEp[ep.ID], prefLang, prefCountry)
+							ev.PreferredOverview = pickEpisodeLocalization(overviewByEp[ep.ID], prefLang, prefCountry)
 						}
 						views = append(views, ev)
 					}

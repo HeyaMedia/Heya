@@ -97,7 +97,8 @@ const listEpisodeTitlesForSeries = `-- name: ListEpisodeTitlesForSeries :many
 SELECT et.id, et.episode_id, et.title, et.language, et.source FROM episode_titles et
 JOIN tv_episodes e ON e.id = et.episode_id
 JOIN tv_seasons s ON s.id = e.season_id
-WHERE s.series_id = $1 AND et.language = ANY($2::text[])
+WHERE s.series_id = $1
+  AND lower(split_part(replace(et.language, '_', '-'), '-', 1)) = ANY($2::text[])
 `
 
 type ListEpisodeTitlesForSeriesParams struct {

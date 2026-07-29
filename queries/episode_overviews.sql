@@ -17,4 +17,5 @@ DELETE FROM episode_overviews WHERE episode_id = $1;
 SELECT eo.* FROM episode_overviews eo
 JOIN tv_episodes e ON e.id = eo.episode_id
 JOIN tv_seasons s ON s.id = e.season_id
-WHERE s.series_id = $1 AND eo.language = ANY(@languages::text[]);
+WHERE s.series_id = $1
+  AND lower(split_part(replace(eo.language, '_', '-'), '-', 1)) = ANY(@languages::text[]);
