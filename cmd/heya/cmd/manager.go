@@ -707,6 +707,51 @@ var managerLibraryAlbumCmd = &cobra.Command{
 	},
 }
 
+var managerLibraryMetadataCmd = &cobra.Command{
+	Use:   "metadata <media item id>",
+	Short: "Full metadata dump: every known field with per-field provenance",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid media item id %q", args[0])
+		}
+		return withApp(func(ctx context.Context, app *service.App) error {
+			view, err := app.ManagerMetadata(ctx, id)
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(view)
+			}
+			for _, section := range view.Sections {
+				ui.Info("──", section.Title)
+				for _, f := range section.Fields {
+					value := f.Value
+					if len(f.Values) > 0 {
+						value = strings.Join(f.Values, ", ")
+					}
+					if value == "" {
+						value = "—"
+					}
+					if f.Provenance != "" {
+						value += " [" + f.Provenance + "]"
+					}
+					ui.Info(f.Label, value)
+				}
+			}
+			if len(view.AltTitles) > 0 {
+				table := ui.NewTable("Title", "Language", "Country", "Kind", "Source")
+				for _, t := range view.AltTitles {
+					table.AddRow(t.Title, t.Language, t.Country, t.Kind, t.Source)
+				}
+				fmt.Println(table.Render())
+			}
+			return nil
+		})
+	},
+}
+
 var managerLibraryFileCmd = &cobra.Command{
 	Use:   "file <library file id>",
 	Short: "Full probe detail for one file: absolute path and every stream",
@@ -1266,7 +1311,7 @@ func init() {
 	managerLibraryItemsCmd.Flags().Int("per-page", 60, "Items per page")
 	managerLibrarySetCmd.Flags().Bool("monitor", false, "Monitored state to set (use --monitor=false to unmonitor)")
 	managerLibrarySetCmd.Flags().Int64("profile", 0, "Quality profile id to assign (0 clears it)")
-	managerLibraryCmd.AddCommand(managerLibraryItemsCmd, managerLibraryShowCmd, managerLibraryAlbumCmd, managerLibraryFileCmd, managerLibrarySetCmd, managerLibraryRefreshCmd)
+	managerLibraryCmd.AddCommand(managerLibraryItemsCmd, managerLibraryShowCmd, managerLibraryAlbumCmd, managerLibraryFileCmd, managerLibraryMetadataCmd, managerLibrarySetCmd, managerLibraryRefreshCmd)
 
 	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd, managerFormatCmd, managerLibraryCmd, managerCalendarCmd, managerSearchCmd, managerHistoryCmd, managerRSSCmd, managerWantedCmd)
 	managerRSSCmd.AddCommand(managerRSSRunCmd)

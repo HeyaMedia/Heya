@@ -396,6 +396,9 @@ func (a *App) UpdateMediaMetadata(ctx context.Context, mediaItemID int64, req Up
 		if req.Title != nil {
 			edited = append(edited, "title")
 		}
+		if req.SortTitle != nil {
+			edited = append(edited, "sort_title")
+		}
 		if req.Year != nil {
 			edited = append(edited, "year")
 		}

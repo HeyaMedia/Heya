@@ -13064,6 +13064,30 @@
         ],
         "type": "object"
       },
+      "ManagerAltTitleView": {
+        "additionalProperties": false,
+        "properties": {
+          "country": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
       "ManagerClientActivityView": {
         "additionalProperties": false,
         "properties": {
@@ -14637,6 +14661,111 @@
         ],
         "type": "object"
       },
+      "ManagerMetadataField": {
+        "additionalProperties": false,
+        "properties": {
+          "href": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "long": {
+            "description": "Full-width prose (overview, biography)",
+            "type": "boolean"
+          },
+          "mono": {
+            "type": "boolean"
+          },
+          "provenance": {
+            "description": "'user' when manually edited (locked against enrichment)",
+            "type": "string"
+          },
+          "tone": {
+            "description": "'bad' flags a problem value (enrich error)",
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "values": {
+            "description": "Chip lists (genres, countries, aliases)",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "type": "object"
+      },
+      "ManagerMetadataSection": {
+        "additionalProperties": false,
+        "properties": {
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerMetadataField"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "fields"
+        ],
+        "type": "object"
+      },
+      "ManagerMetadataView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerMetadataView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "alt_titles": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerAltTitleView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerMetadataSection"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "sections"
+        ],
+        "type": "object"
+      },
       "ManagerPathMapping": {
         "additionalProperties": false,
         "properties": {
@@ -15588,6 +15717,11 @@
             "format": "int32",
             "type": "integer"
           },
+          "id": {
+            "description": "tv_seasons id — feeds the season metadata editor",
+            "format": "int64",
+            "type": "integer"
+          },
           "number": {
             "format": "int32",
             "type": "integer"
@@ -15601,6 +15735,7 @@
           }
         },
         "required": [
+          "id",
           "number",
           "title",
           "aired",
@@ -36878,6 +37013,66 @@
           }
         ],
         "summary": "Decision history for one media item (entity accountability)",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
+    "/api/manager/media/{id}/metadata": {
+      "get": {
+        "operationId": "manager-media-metadata",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerMetadataView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Full metadata dump: every known field with per-field provenance",
         "tags": [
           "Manager"
         ]

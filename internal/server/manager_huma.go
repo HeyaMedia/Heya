@@ -507,6 +507,15 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(*view), nil
 		})
 
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/media/{id}/metadata", "manager-media-metadata", "Full metadata dump: every known field with per-field provenance", "Manager")),
+		func(ctx context.Context, in *struct{ IDPath }) (*JSONOutput[service.ManagerMetadataView], error) {
+			view, err := app.ManagerMetadata(ctx, in.ID)
+			if err != nil {
+				return nil, humaServiceError(err)
+			}
+			return noStoreJSON(*view), nil
+		})
+
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/file/{id}", "manager-file-detail", "Full probe detail for one library file: absolute path and every stream", "Manager")),
 		func(ctx context.Context, in *struct{ IDPath }) (*JSONOutput[service.ManagerFileDetailView], error) {
 			view, err := app.ManagerFile(ctx, in.ID)

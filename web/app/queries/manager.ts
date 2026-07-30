@@ -45,6 +45,7 @@ import type {
   ManagerIndexerView,
   ManagerLibraryItemsPage,
   ManagerMediaDetailView,
+  ManagerMetadataView,
   ManagerQualityItem,
   ManagerQualityProfileView,
 } from '~~/shared/api/types.gen'
@@ -276,6 +277,16 @@ export const managerRunDetailQuery = defineQueryOptions((id: number) => ({
   },
   // Runs are immutable once finished — cache aggressively.
   staleTime: 1000 * 60 * 10,
+  meta: { prefetch: 'none', sensitivity: 'private' },
+}))
+
+export const managerMetadataQuery = defineQueryOptions((id: number) => ({
+  key: ['manager', 'metadata', id],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya(`/api/manager/media/${id}/metadata`) as ManagerMetadataView
+  },
+  staleTime: 1000 * 15,
   meta: { prefetch: 'none', sensitivity: 'private' },
 }))
 

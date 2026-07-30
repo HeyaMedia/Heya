@@ -3658,6 +3658,14 @@ export type ManagerAlbumView = {
     year?: string;
 };
 
+export type ManagerAltTitleView = {
+    country?: string;
+    kind?: string;
+    language?: string;
+    source?: string;
+    title: string;
+};
+
 export type ManagerClientActivityView = {
     /**
      * A URL to the JSON Schema for this object.
@@ -4116,6 +4124,44 @@ export type ManagerMediaDetailView = {
     seasons?: Array<ManagerSeasonView> | null;
 };
 
+export type ManagerMetadataField = {
+    href?: string;
+    key: string;
+    label: string;
+    /**
+     * Full-width prose (overview, biography)
+     */
+    long?: boolean;
+    mono?: boolean;
+    /**
+     * 'user' when manually edited (locked against enrichment)
+     */
+    provenance?: string;
+    /**
+     * 'bad' flags a problem value (enrich error)
+     */
+    tone?: string;
+    value?: string;
+    /**
+     * Chip lists (genres, countries, aliases)
+     */
+    values?: Array<string> | null;
+};
+
+export type ManagerMetadataSection = {
+    fields: Array<ManagerMetadataField> | null;
+    title: string;
+};
+
+export type ManagerMetadataView = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    alt_titles?: Array<ManagerAltTitleView> | null;
+    sections: Array<ManagerMetadataSection> | null;
+};
+
 export type ManagerPathMapping = {
     local: string;
     remote: string;
@@ -4353,6 +4399,10 @@ export type ManagerSeasonView = {
     aired: number;
     episodes: Array<ManagerEpisodeView> | null;
     have: number;
+    /**
+     * tv_seasons id — feeds the season metadata editor
+     */
+    id: number;
     number: number;
     size_on_disk: number;
     title: string;
@@ -9031,6 +9081,11 @@ export type ManagerMediaDetailViewWritable = {
     release_to?: string;
     runtime_minutes?: number;
     seasons?: Array<ManagerSeasonView> | null;
+};
+
+export type ManagerMetadataViewWritable = {
+    alt_titles?: Array<ManagerAltTitleView> | null;
+    sections: Array<ManagerMetadataSection> | null;
 };
 
 export type ManagerQualityProfileInputWritable = {
@@ -15299,6 +15354,36 @@ export type ManagerMediaDecisionsResponses = {
 };
 
 export type ManagerMediaDecisionsResponse = ManagerMediaDecisionsResponses[keyof ManagerMediaDecisionsResponses];
+
+export type ManagerMediaMetadataData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/manager/media/{id}/metadata';
+};
+
+export type ManagerMediaMetadataErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerMediaMetadataError = ManagerMediaMetadataErrors[keyof ManagerMediaMetadataErrors];
+
+export type ManagerMediaMetadataResponses = {
+    /**
+     * OK
+     */
+    200: ManagerMetadataView;
+};
+
+export type ManagerMediaMetadataResponse = ManagerMediaMetadataResponses[keyof ManagerMediaMetadataResponses];
 
 export type ManagerMediaSearchData = {
     body?: never;

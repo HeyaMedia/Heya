@@ -32,6 +32,7 @@ type ManagerEpisodeView struct {
 }
 
 type ManagerSeasonView struct {
+	ID         int64                `json:"id" doc:"tv_seasons id — feeds the season metadata editor"`
 	Number     int32                `json:"number"`
 	Title      string               `json:"title"`
 	Aired      int32                `json:"aired"`
@@ -446,7 +447,7 @@ func (a *App) managerSeriesSeasons(ctx context.Context, id int64) ([]ManagerSeas
 	// library listing's CTE — the Go process can sit in a different timezone
 	// and disagree with Postgres about "today" around midnight.
 	rows, err := a.db.Query(ctx, `
-		SELECT s.season_number, s.title,
+		SELECT s.id, s.season_number, s.title,
 		       e.id, e.episode_number, e.title, e.air_date, e.is_special,
 		       (e.air_date IS NOT NULL AND e.air_date <= now()::date),
 		       bool_or(lf.id IS NOT NULL),
@@ -459,7 +460,7 @@ func (a *App) managerSeriesSeasons(ctx context.Context, id int64) ([]ManagerSeas
 		LEFT JOIN library_file_links lfl ON lfl.tv_episode_id = e.id
 		LEFT JOIN library_files lf ON lf.id = lfl.library_file_id AND lf.deleted_at IS NULL
 		WHERE sr.media_item_id = $1
-		GROUP BY s.season_number, s.title, e.id, e.episode_number, e.title, e.air_date, e.is_special
+		GROUP BY s.id, s.season_number, s.title, e.id, e.episode_number, e.title, e.air_date, e.is_special
 		ORDER BY s.season_number DESC, e.episode_number DESC`, id)
 	if err != nil {
 		return nil, fmt.Errorf("manager series seasons: %w", err)
@@ -469,13 +470,14 @@ func (a *App) managerSeriesSeasons(ctx context.Context, id int64) ([]ManagerSeas
 	seasons := []ManagerSeasonView{}
 	byNumber := map[int32]int{}
 	for rows.Next() {
+		var seasonID int64
 		var seasonNumber int32
 		var seasonTitle string
 		var e ManagerEpisodeView
 		var airDate pgtype.Date
 		var aired bool
 		var height int32
-		if err := rows.Scan(&seasonNumber, &seasonTitle, &e.ID, &e.Number, &e.Title,
+		if err := rows.Scan(&seasonID, &seasonNumber, &seasonTitle, &e.ID, &e.Number, &e.Title,
 			&airDate, &e.Special, &aired, &e.HasFile, &height, &e.SizeBytes, &e.FileID); err != nil {
 			return nil, err
 		}
@@ -487,7 +489,7 @@ func (a *App) managerSeriesSeasons(ctx context.Context, id int64) ([]ManagerSeas
 		if !ok {
 			idx = len(seasons)
 			byNumber[seasonNumber] = idx
-			seasons = append(seasons, ManagerSeasonView{Number: seasonNumber, Title: seasonTitle, Episodes: []ManagerEpisodeView{}})
+			seasons = append(seasons, ManagerSeasonView{ID: seasonID, Number: seasonNumber, Title: seasonTitle, Episodes: []ManagerEpisodeView{}})
 		}
 		s := &seasons[idx]
 		if !e.Special && aired {

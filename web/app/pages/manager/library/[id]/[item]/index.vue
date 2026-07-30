@@ -371,6 +371,26 @@ function toggleFile(fileId: number) {
   else next.add(fileId)
   expandedFiles.value = next
 }
+
+// Season/episode metadata editing rides the same full editor modal the
+// metadata panel opens for the item — scoped to the clicked unit.
+const unitEditorOpen = ref(false)
+const unitEditorSeasonId = ref<number | null>(null)
+const unitEditorEpisodeId = ref<number | null>(null)
+function openSeasonEditor(seasonId: number) {
+  unitEditorSeasonId.value = seasonId
+  unitEditorEpisodeId.value = null
+  unitEditorOpen.value = true
+}
+function openEpisodeEditor(episodeId: number) {
+  unitEditorSeasonId.value = null
+  unitEditorEpisodeId.value = episodeId
+  unitEditorOpen.value = true
+}
+function onUnitEditorClose() {
+  unitEditorOpen.value = false
+  invalidate()
+}
 </script>
 
 <template>
@@ -462,6 +482,11 @@ function toggleFile(fileId: number) {
               <ManagerCountPill :have="season.have" :total="season.aired" :tone="seasonTone(season)" />
               <span class="det-section-sub mono">{{ season.episodes?.length ?? 0 }} episodes · {{ fmtBytes(season.size_on_disk) }}</span>
             </button>
+            <AppTooltip label="Edit season metadata">
+              <button type="button" class="det-search-btn" @click="openSeasonEditor(season.id)">
+                <Icon name="pencil" :size="13" />
+              </button>
+            </AppTooltip>
             <AppTooltip label="Interactive search for this season (dry run)">
               <button type="button" class="det-search-btn" @click="openSeasonSearch(season.number)">
                 <Icon name="search" :size="13" />
@@ -491,11 +516,18 @@ function toggleFile(fileId: number) {
                     <td class="num mono">{{ episode.size_bytes ? fmtBytes(episode.size_bytes) : '' }}</td>
                     <td class="det-right"><span class="det-badge" :class="`tone-${episodeState(episode).tone}`">{{ episodeState(episode).label }}</span></td>
                     <td class="det-right">
-                      <AppTooltip label="Interactive search for this episode (dry run)">
-                        <button type="button" class="det-search-btn sm" @click.stop="openEpisodeSearch(season.number, episode.number, episode.id)">
-                          <Icon name="search" :size="12" />
-                        </button>
-                      </AppTooltip>
+                      <span class="det-row-actions">
+                        <AppTooltip label="Edit episode metadata">
+                          <button type="button" class="det-search-btn sm" @click.stop="openEpisodeEditor(episode.id)">
+                            <Icon name="pencil" :size="12" />
+                          </button>
+                        </AppTooltip>
+                        <AppTooltip label="Interactive search for this episode (dry run)">
+                          <button type="button" class="det-search-btn sm" @click.stop="openEpisodeSearch(season.number, episode.number, episode.id)">
+                            <Icon name="search" :size="12" />
+                          </button>
+                        </AppTooltip>
+                      </span>
                     </td>
                   </tr>
                   <tr v-if="episode.file_id && expandedFiles.has(episode.file_id)" class="det-mfi-row">
@@ -620,7 +652,15 @@ function toggleFile(fileId: number) {
         </section>
       </div>
 
+      <ManagerMetadataPanel v-if="item" :media-item-id="item.id" />
+
       <ManagerDecisionsPanel v-if="item" :media-item-id="item.id" />
+
+      <MetadataEditorModal
+        v-if="item" :media-id="item.id"
+        :season-id="unitEditorSeasonId" :episode-id="unitEditorEpisodeId"
+        :show="unitEditorOpen" @close="onUnitEditorClose"
+      />
     </template>
   </div>
 </template>
@@ -798,6 +838,7 @@ function toggleFile(fileId: number) {
 }
 .det-search-btn:hover { background: rgb(var(--ink) / 0.1); color: var(--fg-0); }
 .det-search-btn.sm { width: 26px; height: 26px; }
+.det-row-actions { display: inline-flex; gap: 4px; }
 .det-section {
   background: var(--bg-2);
   border: 1px solid var(--border);
