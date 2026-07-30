@@ -992,11 +992,89 @@ var managerCalendarCmd = &cobra.Command{
 	},
 }
 
+var managerSearchCmd = &cobra.Command{
+	Use:   "search <media-item-id>",
+	Short: "Shadow-search a movie: evaluate every candidate and show what would be grabbed and why (no download)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		itemID, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("media item id must be numeric")
+		}
+		return withApp(func(ctx context.Context, app *service.App) error {
+			view, err := app.SearchManagerMovie(ctx, itemID, "cli")
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(view)
+			}
+			ui.Info("Target", view.Target)
+			ui.Info("Profile", view.Profile)
+			ui.Info("Run", fmt.Sprintf("#%d · %s%s", view.RunID, view.Status, map[bool]string{true: " (partial)", false: ""}[view.Partial]))
+			for _, idx := range view.Indexers {
+				line := fmt.Sprintf("%s · %d results · %dms", idx.Status, idx.Fetched, idx.DurationMs)
+				if idx.Error != "" {
+					line += " · " + idx.Error
+				}
+				ui.Info(idx.Indexer, line)
+			}
+			table := ui.NewTable("✓", "Title", "Indexer", "Quality", "Score", "Size", "Why not")
+			for _, cand := range view.Candidates {
+				mark := ""
+				switch {
+				case cand.Chosen:
+					mark = "★"
+				case cand.Acceptable:
+					mark = fmt.Sprintf("#%d", cand.SelectionRank)
+				}
+				whyNot := ""
+				if !cand.Acceptable && len(cand.Rejections) > 0 {
+					whyNot = cand.Rejections[0].Message
+				}
+				table.AddRow(mark, cand.Title, cand.Indexer, cand.Quality,
+					fmt.Sprintf("%d", cand.FormatScore), humanBytes(cand.SizeBytes), whyNot)
+			}
+			fmt.Println(table.Render())
+			ui.Info("Verdict", view.Verdict+map[bool]string{true: " → " + view.ChosenTitle, false: ""}[view.ChosenTitle != ""])
+			return nil
+		})
+	},
+}
+
+var managerHistoryCmd = &cobra.Command{
+	Use:   "history",
+	Short: "The decision ledger: what the pipeline would have done, and why",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		limit, _ := cmd.Flags().GetInt("limit")
+		return withApp(func(ctx context.Context, app *service.App) error {
+			page, err := app.ManagerHistory(ctx, service.ManagerHistoryParams{Limit: limit})
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(page)
+			}
+			table := ui.NewTable("When", "Kind", "Target", "Verdict", "Would have grabbed")
+			for _, d := range page.Decisions {
+				target := d.TargetTitle
+				if d.TargetYear > 0 {
+					target = fmt.Sprintf("%s (%d)", d.TargetTitle, d.TargetYear)
+				}
+				table.AddRow(d.DecidedAt.Format("2006-01-02 15:04"), d.RunKind, target, d.Verdict, d.ChosenTitle)
+			}
+			fmt.Println(table.Render())
+			return nil
+		})
+	},
+}
+
 func init() {
 	managerCalendarCmd.Flags().String("from", "", "Window start (YYYY-MM-DD; default one week back)")
 	managerCalendarCmd.Flags().String("to", "", "Window end (YYYY-MM-DD; default 30 days ahead)")
 	managerCalendarCmd.Flags().Int64Slice("library", nil, "Restrict to library ids (repeatable)")
 	managerCalendarCmd.Flags().Bool("monitored", false, "Monitored items only")
+	managerHistoryCmd.Flags().Int("limit", 50, "Max decisions to list")
 
 	managerIndexerAddCmd.Flags().String("name", "", "Display name")
 	managerIndexerAddCmd.Flags().String("kind", "prowlarr", "prowlarr | torznab | newznab")
@@ -1043,6 +1121,6 @@ func init() {
 	managerLibrarySetCmd.Flags().Int64("profile", 0, "Quality profile id to assign (0 clears it)")
 	managerLibraryCmd.AddCommand(managerLibraryItemsCmd, managerLibraryShowCmd, managerLibraryAlbumCmd, managerLibrarySetCmd, managerLibraryRefreshCmd)
 
-	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd, managerFormatCmd, managerLibraryCmd, managerCalendarCmd)
+	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd, managerFormatCmd, managerLibraryCmd, managerCalendarCmd, managerSearchCmd, managerHistoryCmd)
 	rootCmd.AddCommand(managerCmd)
 }

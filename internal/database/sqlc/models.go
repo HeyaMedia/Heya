@@ -588,6 +588,36 @@ type LocalMediaIdentityExternalID struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ManagerCandidate struct {
+	ID              int64              `json:"id"`
+	RunID           int64              `json:"run_id"`
+	ReleaseID       pgtype.Int8        `json:"release_id"`
+	IndexerID       pgtype.Int8        `json:"indexer_id"`
+	IndexerName     string             `json:"indexer_name"`
+	IndexerPriority int32              `json:"indexer_priority"`
+	Title           string             `json:"title"`
+	SizeBytes       int64              `json:"size_bytes"`
+	PublishDate     pgtype.Timestamptz `json:"publish_date"`
+	Categories      []int32            `json:"categories"`
+	Parsed          []byte             `json:"parsed"`
+	Quality         pgtype.Text        `json:"quality"`
+	QualityPosition pgtype.Int4        `json:"quality_position"`
+	FormatScore     int32              `json:"format_score"`
+	FormatBreakdown []byte             `json:"format_breakdown"`
+	Rejections      []byte             `json:"rejections"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type ManagerCandidateTarget struct {
+	ID            int64       `json:"id"`
+	CandidateID   int64       `json:"candidate_id"`
+	DecisionID    int64       `json:"decision_id"`
+	RunID         int64       `json:"run_id"`
+	Verdict       string      `json:"verdict"`
+	Rejections    []byte      `json:"rejections"`
+	SelectionRank pgtype.Int4 `json:"selection_rank"`
+}
+
 type ManagerCustomFormat struct {
 	ID                  int64              `json:"id"`
 	Name                string             `json:"name"`
@@ -598,6 +628,36 @@ type ManagerCustomFormat struct {
 	Source              string             `json:"source"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ManagerDecision struct {
+	ID               int64              `json:"id"`
+	RunID            int64              `json:"run_id"`
+	DecidedAt        pgtype.Timestamptz `json:"decided_at"`
+	TargetKind       string             `json:"target_kind"`
+	TargetKey        string             `json:"target_key"`
+	MediaItemID      pgtype.Int8        `json:"media_item_id"`
+	TvEpisodeID      pgtype.Int8        `json:"tv_episode_id"`
+	MusicTargetID    pgtype.Int8        `json:"music_target_id"`
+	LibraryID        int64              `json:"library_id"`
+	Domain           string             `json:"domain"`
+	TargetTitle      string             `json:"target_title"`
+	TargetYear       int32              `json:"target_year"`
+	SeasonNumber     pgtype.Int4        `json:"season_number"`
+	EpisodeNumber    pgtype.Int4        `json:"episode_number"`
+	AbsoluteNumber   pgtype.Int4        `json:"absolute_number"`
+	ArtistName       string             `json:"artist_name"`
+	AlbumType        string             `json:"album_type"`
+	EditionKey       string             `json:"edition_key"`
+	AlbumTitle       string             `json:"album_title"`
+	ProfileID        pgtype.Int8        `json:"profile_id"`
+	ProfileName      string             `json:"profile_name"`
+	PolicyHash       pgtype.Text        `json:"policy_hash"`
+	EvaluatorVersion int32              `json:"evaluator_version"`
+	ParserVersion    int32              `json:"parser_version"`
+	Verdict          string             `json:"verdict"`
+	ChosenTargetRow  pgtype.Int8        `json:"chosen_target_row"`
+	Context          []byte             `json:"context"`
 }
 
 type ManagerDownloadClient struct {
@@ -642,6 +702,12 @@ type ManagerIndexer struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ManagerPolicySnapshot struct {
+	PolicyHash string             `json:"policy_hash"`
+	Snapshot   []byte             `json:"snapshot"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
 type ManagerQualityProfile struct {
 	ID                int64              `json:"id"`
 	Name              string             `json:"name"`
@@ -657,6 +723,79 @@ type ManagerQualityProfile struct {
 	FormatScores      []byte             `json:"format_scores"`
 	Source            string             `json:"source"`
 	Language          string             `json:"language"`
+}
+
+type ManagerRelease struct {
+	ID             int64              `json:"id"`
+	IndexerID      pgtype.Int8        `json:"indexer_id"`
+	IndexerName    string             `json:"indexer_name"`
+	Domain         string             `json:"domain"`
+	ReleaseKey     string             `json:"release_key"`
+	UiFingerprint  string             `json:"ui_fingerprint"`
+	Guid           pgtype.Text        `json:"guid"`
+	Title          string             `json:"title"`
+	SizeBytes      int64              `json:"size_bytes"`
+	PublishDate    pgtype.Timestamptz `json:"publish_date"`
+	PublishDateRaw string             `json:"publish_date_raw"`
+	Categories     []int32            `json:"categories"`
+	RawAttrs       []byte             `json:"raw_attrs"`
+	InfoUrl        string             `json:"info_url"`
+	FirstSeenAt    pgtype.Timestamptz `json:"first_seen_at"`
+	LastSeenAt     pgtype.Timestamptz `json:"last_seen_at"`
+	TimesSeen      int32              `json:"times_seen"`
+}
+
+type ManagerReleaseSighting struct {
+	ID            int64              `json:"id"`
+	ReleaseID     int64              `json:"release_id"`
+	RunID         pgtype.Int8        `json:"run_id"`
+	RunRequestID  pgtype.Int8        `json:"run_request_id"`
+	SeenAt        pgtype.Timestamptz `json:"seen_at"`
+	ResponseAttrs []byte             `json:"response_attrs"`
+	Status        string             `json:"status"`
+	Attempts      int32              `json:"attempts"`
+	Error         string             `json:"error"`
+	Matched       []byte             `json:"matched"`
+	DecisionID    pgtype.Int8        `json:"decision_id"`
+	PolicyHash    pgtype.Text        `json:"policy_hash"`
+}
+
+type ManagerRun struct {
+	ID         int64              `json:"id"`
+	Kind       string             `json:"kind"`
+	Source     string             `json:"source"`
+	Status     string             `json:"status"`
+	Partial    bool               `json:"partial"`
+	Truncated  bool               `json:"truncated"`
+	Scope      []byte             `json:"scope"`
+	Stats      []byte             `json:"stats"`
+	Errors     []byte             `json:"errors"`
+	StartedAt  pgtype.Timestamptz `json:"started_at"`
+	FinishedAt pgtype.Timestamptz `json:"finished_at"`
+}
+
+type ManagerRunIndexer struct {
+	ID           int64       `json:"id"`
+	RunID        int64       `json:"run_id"`
+	IndexerID    pgtype.Int8 `json:"indexer_id"`
+	IndexerName  string      `json:"indexer_name"`
+	Domain       string      `json:"domain"`
+	Status       string      `json:"status"`
+	PagesFetched int32       `json:"pages_fetched"`
+	Fetched      int32       `json:"fetched"`
+	DurationMs   int64       `json:"duration_ms"`
+	Error        string      `json:"error"`
+}
+
+type ManagerRunRequest struct {
+	ID           int64  `json:"id"`
+	RunIndexerID int64  `json:"run_indexer_id"`
+	Ordinal      int32  `json:"ordinal"`
+	Params       []byte `json:"params"`
+	PageOffset   int32  `json:"page_offset"`
+	Results      int32  `json:"results"`
+	DurationMs   int64  `json:"duration_ms"`
+	Error        string `json:"error"`
 }
 
 type MatchCandidate struct {

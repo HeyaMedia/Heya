@@ -309,6 +309,70 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(details), nil
 		})
 
+	// ── Acquisition (dry-run) ────────────────────────────────────────────
+
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/manager/media/{id}/search", "manager-media-search", "Shadow-search a movie across enabled indexers: evaluate, rank, and record what would be grabbed and why (no download)", "Manager")),
+		func(ctx context.Context, in *struct {
+			IDPath
+		}) (*JSONOutput[service.ManagerSearchRunView], error) {
+			view, err := app.SearchManagerMovie(ctx, in.ID, "api")
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return noStoreJSON(*view), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/history", "manager-history", "The decision ledger: every evaluation run's verdicts, newest first", "Manager")),
+		func(ctx context.Context, in *struct {
+			Verdicts []string `query:"verdicts" doc:"Verdict filter, comma-separated"`
+			Domains  []string `query:"domains" doc:"Domain filter, comma-separated"`
+			Library  int64    `query:"library" doc:"Library id; 0 = all"`
+			Before   string   `query:"before" doc:"Keyset cursor: RFC3339 decided_at from next_before"`
+			BeforeID int64    `query:"before_id" doc:"Keyset cursor: decision id from next_id"`
+			Limit    int      `query:"limit" minimum:"1" maximum:"200" default:"50"`
+		}) (*JSONOutput[service.ManagerHistoryPage], error) {
+			params := service.ManagerHistoryParams{
+				Verdicts: in.Verdicts, Domains: in.Domains,
+				LibraryID: in.Library, BeforeID: in.BeforeID, Limit: in.Limit,
+			}
+			if in.Before != "" {
+				t, err := time.Parse(time.RFC3339Nano, in.Before)
+				if err != nil {
+					return nil, huma.Error400BadRequest("before must be RFC3339")
+				}
+				params.Before = &t
+			}
+			page, err := app.ManagerHistory(ctx, params)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return noStoreJSON(page), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/runs/{id}", "manager-run-detail", "One evaluation run's full accountability record: indexers queried, every candidate, every rejection", "Manager")),
+		func(ctx context.Context, in *struct {
+			IDPath
+		}) (*JSONOutput[service.ManagerRunDetailView], error) {
+			view, err := app.ManagerRunDetail(ctx, in.ID)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusNotFound)
+			}
+			return noStoreJSON(*view), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/media/{id}/decisions", "manager-media-decisions", "Decision history for one media item (entity accountability)", "Manager")),
+		func(ctx context.Context, in *struct {
+			IDPath
+			Page    int `query:"page" minimum:"1" default:"1"`
+			PerPage int `query:"per_page" minimum:"1" maximum:"100" default:"25"`
+		}) (*JSONOutput[managerItemDecisionsPage], error) {
+			decisions, total, err := app.ManagerItemDecisions(ctx, in.ID, in.Page, in.PerPage)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return noStoreJSON(managerItemDecisionsPage{Decisions: decisions, Total: total}), nil
+		})
+
 	// ── Library lens ─────────────────────────────────────────────────────
 
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/library/{id}/items", "manager-library-items", "Managed view over a library: completeness, monitoring, profiles", "Manager")),
@@ -371,4 +435,11 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 			}
 			return &JSONOutput[service.ManagerMediaBulkResult]{Body: result}, nil
 		})
+}
+
+// managerItemDecisionsPage wraps the entity accountability slice with its
+// total for pagination.
+type managerItemDecisionsPage struct {
+	Decisions []service.ManagerDecisionView `json:"decisions"`
+	Total     int64                         `json:"total"`
 }

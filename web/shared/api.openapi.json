@@ -6318,6 +6318,28 @@
         ],
         "type": "object"
       },
+      "FormatHit": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "score": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "score"
+        ],
+        "type": "object"
+      },
       "FsBrowseBody": {
         "additionalProperties": false,
         "properties": {
@@ -13002,6 +13024,9 @@
           "fail_message": {
             "type": "string"
           },
+          "id": {
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -13013,6 +13038,7 @@
           }
         },
         "required": [
+          "id",
           "name",
           "status",
           "category",
@@ -13026,6 +13052,9 @@
         "additionalProperties": false,
         "properties": {
           "category": {
+            "type": "string"
+          },
+          "id": {
             "type": "string"
           },
           "name": {
@@ -13051,6 +13080,7 @@
           }
         },
         "required": [
+          "id",
           "name",
           "category",
           "status",
@@ -13165,6 +13195,81 @@
           "specifications",
           "trash_id",
           "source"
+        ],
+        "type": "object"
+      },
+      "ManagerDecisionView": {
+        "additionalProperties": false,
+        "properties": {
+          "chosen_title": {
+            "type": "string"
+          },
+          "context": {},
+          "decided_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "episode_number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "library_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "media_item_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "profile_name": {
+            "type": "string"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "run_kind": {
+            "type": "string"
+          },
+          "season_number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "target_key": {
+            "type": "string"
+          },
+          "target_kind": {
+            "type": "string"
+          },
+          "target_title": {
+            "type": "string"
+          },
+          "target_year": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "verdict": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "run_kind",
+          "decided_at",
+          "target_kind",
+          "target_key",
+          "library_id",
+          "domain",
+          "target_title",
+          "verdict"
         ],
         "type": "object"
       },
@@ -13521,6 +13626,41 @@
         ],
         "type": "object"
       },
+      "ManagerHistoryPage": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerHistoryPage.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerDecisionView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "next_before": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "next_id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decisions"
+        ],
+        "type": "object"
+      },
       "ManagerIndexerHistoryDay": {
         "additionalProperties": false,
         "properties": {
@@ -13800,6 +13940,38 @@
           "source",
           "last_test_ok",
           "last_test_error"
+        ],
+        "type": "object"
+      },
+      "ManagerItemDecisionsPage": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerItemDecisionsPage.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerDecisionView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decisions",
+          "total"
         ],
         "type": "object"
       },
@@ -14364,6 +14536,30 @@
         ],
         "type": "object"
       },
+      "ManagerRejectionView": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "stage": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "stage",
+          "message"
+        ],
+        "type": "object"
+      },
       "ManagerReleaseTestInput": {
         "additionalProperties": false,
         "properties": {
@@ -14530,6 +14726,353 @@
           "parsed",
           "matches",
           "profiles"
+        ],
+        "type": "object"
+      },
+      "ManagerRunCandidateView": {
+        "additionalProperties": false,
+        "properties": {
+          "format_breakdown": {},
+          "format_score": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "indexer": {
+            "type": "string"
+          },
+          "parsed": {},
+          "per_target": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerRunTargetEval"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "publish_date": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "quality": {
+            "type": "string"
+          },
+          "rejections": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerRejectionView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "size_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "indexer",
+          "size_bytes",
+          "format_score",
+          "rejections"
+        ],
+        "type": "object"
+      },
+      "ManagerRunDetailView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerRunDetailView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerRunCandidateView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerDecisionView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "finished_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "indexers": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerRunIndexerView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "partial": {
+            "type": "boolean"
+          },
+          "scope": {},
+          "source": {
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "stats": {},
+          "status": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "source",
+          "status",
+          "partial",
+          "truncated",
+          "started_at",
+          "indexers",
+          "decisions",
+          "candidates"
+        ],
+        "type": "object"
+      },
+      "ManagerRunIndexerView": {
+        "additionalProperties": false,
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "duration_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "fetched": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "indexer": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "indexer",
+          "domain",
+          "status",
+          "fetched",
+          "duration_ms"
+        ],
+        "type": "object"
+      },
+      "ManagerRunTargetEval": {
+        "additionalProperties": false,
+        "properties": {
+          "chosen": {
+            "type": "boolean"
+          },
+          "decision_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rejections": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerRejectionView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "selection_rank": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "verdict": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision_id",
+          "verdict",
+          "chosen"
+        ],
+        "type": "object"
+      },
+      "ManagerSearchCandidateView": {
+        "additionalProperties": false,
+        "properties": {
+          "acceptable": {
+            "type": "boolean"
+          },
+          "chosen": {
+            "type": "boolean"
+          },
+          "format_breakdown": {
+            "items": {
+              "$ref": "#/components/schemas/FormatHit"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "format_score": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "indexer": {
+            "type": "string"
+          },
+          "languages": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "publish_date": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "quality": {
+            "type": "string"
+          },
+          "rejections": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerRejectionView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "selection_rank": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "size_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "indexer",
+          "size_bytes",
+          "format_score",
+          "rejections",
+          "acceptable",
+          "chosen"
+        ],
+        "type": "object"
+      },
+      "ManagerSearchRunView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerSearchRunView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerSearchCandidateView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "chosen_title": {
+            "type": "string"
+          },
+          "indexers": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerRunIndexerView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "partial": {
+            "type": "boolean"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "partial",
+          "verdict",
+          "target",
+          "profile",
+          "indexers",
+          "candidates"
         ],
         "type": "object"
       },
@@ -34498,6 +35041,127 @@
         ]
       }
     },
+    "/api/manager/history": {
+      "get": {
+        "operationId": "manager-history",
+        "parameters": [
+          {
+            "description": "Verdict filter, comma-separated",
+            "explode": false,
+            "in": "query",
+            "name": "verdicts",
+            "schema": {
+              "description": "Verdict filter, comma-separated",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "Domain filter, comma-separated",
+            "explode": false,
+            "in": "query",
+            "name": "domains",
+            "schema": {
+              "description": "Domain filter, comma-separated",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "Library id; 0 = all",
+            "explode": false,
+            "in": "query",
+            "name": "library",
+            "schema": {
+              "description": "Library id; 0 = all",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Keyset cursor: RFC3339 decided_at from next_before",
+            "explode": false,
+            "in": "query",
+            "name": "before",
+            "schema": {
+              "description": "Keyset cursor: RFC3339 decided_at from next_before",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Keyset cursor: decision id from next_id",
+            "explode": false,
+            "in": "query",
+            "name": "before_id",
+            "schema": {
+              "description": "Keyset cursor: decision id from next_id",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerHistoryPage"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "The decision ledger: every evaluation run's verdicts, newest first",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
     "/api/manager/indexers": {
       "get": {
         "operationId": "manager-list-indexers",
@@ -35192,6 +35856,149 @@
         ]
       }
     },
+    "/api/manager/media/{id}/decisions": {
+      "get": {
+        "operationId": "manager-media-decisions",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "default": 1,
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "per_page",
+            "schema": {
+              "default": 25,
+              "format": "int64",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerItemDecisionsPage"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Decision history for one media item (entity accountability)",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
+    "/api/manager/media/{id}/search": {
+      "post": {
+        "operationId": "manager-media-search",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerSearchRunView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Shadow-search a movie across enabled indexers: evaluate, rank, and record what would be grabbed and why (no download)",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
     "/api/manager/quality-ladders": {
       "get": {
         "operationId": "manager-quality-ladders",
@@ -35520,6 +36327,66 @@
           }
         ],
         "summary": "Duplicate a manager quality profile",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
+    "/api/manager/runs/{id}": {
+      "get": {
+        "operationId": "manager-run-detail",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerRunDetailView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "One evaluation run's full accountability record: indexers queried, every candidate, every rejection",
         "tags": [
           "Manager"
         ]

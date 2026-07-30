@@ -8,6 +8,52 @@ import (
 	"github.com/karbowiak/heya/internal/matcher"
 )
 
+// ResolveUnits resolves every existing file and queued release in the
+// target against the profile: ladder position and custom-format score (the
+// basename or queued title is scored exactly like a candidate would be).
+// Callers run this once after loading the profile — without it, existing
+// files carry no position and the upgrade spec would treat everything on
+// disk as infinitely upgradeable.
+func ResolveUnits(target *Target) {
+	profile := target.Profile
+	if profile == nil {
+		return
+	}
+	scoreTitle := func(title string) int32 {
+		attrs := ParseFor(target.Domain, title)
+		attrs.OriginalLanguage = target.OriginalLanguage
+		var total int32
+		for _, format := range profile.Formats {
+			if formats.Matches(format, attrs) {
+				total += profile.FormatScores[format.ID]
+			}
+		}
+		return total
+	}
+	for ui := range target.Units {
+		unit := &target.Units[ui]
+		for fi := range unit.Existing {
+			file := &unit.Existing[fi]
+			file.Position, _, file.PositionFound = profile.Position(file.Quality)
+			if file.Basename != "" {
+				file.FormatScore = scoreTitle(file.Basename)
+			}
+		}
+		for qi := range unit.Queued {
+			queued := &unit.Queued[qi]
+			queued.Position, _, queued.PositionFound = profile.Position(queued.Quality)
+			if queued.Title != "" {
+				queued.FormatScore = scoreTitle(queued.Title)
+			}
+		}
+	}
+}
+
+// ParseFor parses a release title with the right domain parser.
+func ParseFor(domain, title string) formats.Attrs {
+	return formats.ParseVideoRelease(title, 0, domain == "tv")
+}
+
 // Evaluate runs the full gate pipeline for every candidate against every
 // unit of the target and derives per-unit decisions. Every failure is a
 // recorded rejection — nothing is silently dropped.

@@ -1958,6 +1958,12 @@ export type ForYouResult = {
     items: Array<ForYouItem> | null;
 };
 
+export type FormatHit = {
+    id: number;
+    name: string;
+    score: number;
+};
+
 export type FsBrowseBody = {
     /**
      * A URL to the JSON Schema for this object.
@@ -3631,6 +3637,7 @@ export type ManagerClientHistoryItem = {
     category: string;
     completed_at: number;
     fail_message?: string;
+    id: string;
     name: string;
     status: string;
     storage: string;
@@ -3638,6 +3645,7 @@ export type ManagerClientHistoryItem = {
 
 export type ManagerClientQueueItem = {
     category: string;
+    id: string;
     name: string;
     percentage: number;
     size_left_mb: number;
@@ -3674,6 +3682,26 @@ export type ManagerCustomFormatView = {
     source: string;
     specifications: Array<CustomFormatSpec> | null;
     trash_id: string;
+};
+
+export type ManagerDecisionView = {
+    chosen_title?: string;
+    context?: unknown;
+    decided_at: string;
+    domain: string;
+    episode_number?: number;
+    id: number;
+    library_id: number;
+    media_item_id?: number;
+    profile_name?: string;
+    run_id: number;
+    run_kind: string;
+    season_number?: number;
+    target_key: string;
+    target_kind: string;
+    target_title: string;
+    target_year?: number;
+    verdict: string;
 };
 
 export type ManagerDownloadClientInput = {
@@ -3776,6 +3804,16 @@ export type ManagerFormatScore = {
     score: number;
 };
 
+export type ManagerHistoryPage = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    decisions: Array<ManagerDecisionView> | null;
+    next_before?: string;
+    next_id?: number;
+};
+
 export type ManagerIndexerHistoryDay = {
     date: string;
     failed: number;
@@ -3847,6 +3885,15 @@ export type ManagerIndexerView = {
     priority: number;
     protocol: string;
     source: string;
+};
+
+export type ManagerItemDecisionsPage = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    decisions: Array<ManagerDecisionView> | null;
+    total: number;
 };
 
 export type ManagerLibraryItemView = {
@@ -4022,6 +4069,15 @@ export type ManagerQualityProfileView = {
     upgrades_enabled: boolean;
 };
 
+export type ManagerRejectionView = {
+    code: string;
+    message: string;
+    params?: {
+        [key: string]: unknown;
+    };
+    stage: string;
+};
+
 export type ManagerReleaseTestInput = {
     /**
      * A URL to the JSON Schema for this object.
@@ -4064,6 +4120,88 @@ export type ManagerReleaseTestView = {
     matches: Array<ManagerReleaseTestMatch> | null;
     parsed: ManagerReleaseTestParsed;
     profiles: Array<ManagerReleaseTestProfileScore> | null;
+};
+
+export type ManagerRunCandidateView = {
+    format_breakdown?: unknown;
+    format_score: number;
+    id: number;
+    indexer: string;
+    parsed?: unknown;
+    per_target?: Array<ManagerRunTargetEval> | null;
+    publish_date?: string;
+    quality?: string;
+    rejections: Array<ManagerRejectionView> | null;
+    size_bytes: number;
+    title: string;
+};
+
+export type ManagerRunDetailView = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    candidates: Array<ManagerRunCandidateView> | null;
+    decisions: Array<ManagerDecisionView> | null;
+    finished_at?: string;
+    id: number;
+    indexers: Array<ManagerRunIndexerView> | null;
+    kind: string;
+    partial: boolean;
+    scope?: unknown;
+    source: string;
+    started_at: string;
+    stats?: unknown;
+    status: string;
+    truncated: boolean;
+};
+
+export type ManagerRunIndexerView = {
+    domain: string;
+    duration_ms: number;
+    error?: string;
+    fetched: number;
+    indexer: string;
+    status: string;
+};
+
+export type ManagerRunTargetEval = {
+    chosen: boolean;
+    decision_id: number;
+    rejections?: Array<ManagerRejectionView> | null;
+    selection_rank?: number;
+    verdict: string;
+};
+
+export type ManagerSearchCandidateView = {
+    acceptable: boolean;
+    chosen: boolean;
+    format_breakdown?: Array<FormatHit> | null;
+    format_score: number;
+    indexer: string;
+    languages?: Array<string> | null;
+    publish_date?: string;
+    quality?: string;
+    rejections: Array<ManagerRejectionView> | null;
+    selection_rank?: number;
+    size_bytes: number;
+    title: string;
+};
+
+export type ManagerSearchRunView = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    candidates: Array<ManagerSearchCandidateView> | null;
+    chosen_title?: string;
+    indexers: Array<ManagerRunIndexerView> | null;
+    partial: boolean;
+    profile: string;
+    run_id: number;
+    status: string;
+    target: string;
+    verdict: string;
 };
 
 export type ManagerSeasonView = {
@@ -8525,6 +8663,12 @@ export type ManagerFormatImportResultWritable = {
     warnings: Array<string> | null;
 };
 
+export type ManagerHistoryPageWritable = {
+    decisions: Array<ManagerDecisionView> | null;
+    next_before?: string;
+    next_id?: number;
+};
+
 export type ManagerIndexerHistoryViewWritable = {
     by_indexer: {
         [key: string]: Array<ManagerIndexerHistoryDay> | null;
@@ -8563,6 +8707,11 @@ export type ManagerIndexerViewWritable = {
     priority: number;
     protocol: string;
     source: string;
+};
+
+export type ManagerItemDecisionsPageWritable = {
+    decisions: Array<ManagerDecisionView> | null;
+    total: number;
 };
 
 export type ManagerLibraryItemsPageWritable = {
@@ -8664,6 +8813,34 @@ export type ManagerReleaseTestViewWritable = {
     matches: Array<ManagerReleaseTestMatch> | null;
     parsed: ManagerReleaseTestParsed;
     profiles: Array<ManagerReleaseTestProfileScore> | null;
+};
+
+export type ManagerRunDetailViewWritable = {
+    candidates: Array<ManagerRunCandidateView> | null;
+    decisions: Array<ManagerDecisionView> | null;
+    finished_at?: string;
+    id: number;
+    indexers: Array<ManagerRunIndexerView> | null;
+    kind: string;
+    partial: boolean;
+    scope?: unknown;
+    source: string;
+    started_at: string;
+    stats?: unknown;
+    status: string;
+    truncated: boolean;
+};
+
+export type ManagerSearchRunViewWritable = {
+    candidates: Array<ManagerSearchCandidateView> | null;
+    chosen_title?: string;
+    indexers: Array<ManagerRunIndexerView> | null;
+    partial: boolean;
+    profile: string;
+    run_id: number;
+    status: string;
+    target: string;
+    verdict: string;
 };
 
 export type ManagerTestResultWritable = {
@@ -14344,6 +14521,53 @@ export type ManagerTestDownloadClientResponses = {
 
 export type ManagerTestDownloadClientResponse = ManagerTestDownloadClientResponses[keyof ManagerTestDownloadClientResponses];
 
+export type ManagerHistoryData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Verdict filter, comma-separated
+         */
+        verdicts?: Array<string> | null;
+        /**
+         * Domain filter, comma-separated
+         */
+        domains?: Array<string> | null;
+        /**
+         * Library id; 0 = all
+         */
+        library?: number;
+        /**
+         * Keyset cursor: RFC3339 decided_at from next_before
+         */
+        before?: string;
+        /**
+         * Keyset cursor: decision id from next_id
+         */
+        before_id?: number;
+        limit?: number;
+    };
+    url: '/api/manager/history';
+};
+
+export type ManagerHistoryErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerHistoryError = ManagerHistoryErrors[keyof ManagerHistoryErrors];
+
+export type ManagerHistoryResponses = {
+    /**
+     * OK
+     */
+    200: ManagerHistoryPage;
+};
+
+export type ManagerHistoryResponse = ManagerHistoryResponses[keyof ManagerHistoryResponses];
+
 export type ManagerListIndexersData = {
     body?: never;
     path?: never;
@@ -14648,6 +14872,69 @@ export type ManagerMediaDetailResponses = {
 
 export type ManagerMediaDetailResponse = ManagerMediaDetailResponses[keyof ManagerMediaDetailResponses];
 
+export type ManagerMediaDecisionsData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: {
+        page?: number;
+        per_page?: number;
+    };
+    url: '/api/manager/media/{id}/decisions';
+};
+
+export type ManagerMediaDecisionsErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerMediaDecisionsError = ManagerMediaDecisionsErrors[keyof ManagerMediaDecisionsErrors];
+
+export type ManagerMediaDecisionsResponses = {
+    /**
+     * OK
+     */
+    200: ManagerItemDecisionsPage;
+};
+
+export type ManagerMediaDecisionsResponse = ManagerMediaDecisionsResponses[keyof ManagerMediaDecisionsResponses];
+
+export type ManagerMediaSearchData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/manager/media/{id}/search';
+};
+
+export type ManagerMediaSearchErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerMediaSearchError = ManagerMediaSearchErrors[keyof ManagerMediaSearchErrors];
+
+export type ManagerMediaSearchResponses = {
+    /**
+     * OK
+     */
+    200: ManagerSearchRunView;
+};
+
+export type ManagerMediaSearchResponse = ManagerMediaSearchResponses[keyof ManagerMediaSearchResponses];
+
 export type ManagerQualityLaddersData = {
     body?: never;
     path?: never;
@@ -14814,6 +15101,36 @@ export type ManagerCloneQualityProfileResponses = {
 };
 
 export type ManagerCloneQualityProfileResponse = ManagerCloneQualityProfileResponses[keyof ManagerCloneQualityProfileResponses];
+
+export type ManagerRunDetailData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/manager/runs/{id}';
+};
+
+export type ManagerRunDetailErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerRunDetailError = ManagerRunDetailErrors[keyof ManagerRunDetailErrors];
+
+export type ManagerRunDetailResponses = {
+    /**
+     * OK
+     */
+    200: ManagerRunDetailView;
+};
+
+export type ManagerRunDetailResponse = ManagerRunDetailResponses[keyof ManagerRunDetailResponses];
 
 export type ListApiTokensData = {
     body?: never;
