@@ -7,6 +7,7 @@
 SELECT mi.*
 FROM media_item_cards mi
 WHERE (mi.media_type = $2 OR ($2::text = 'tv' AND mi.media_type = 'anime'))
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = mi.id AND mm.materialized_at IS NOT NULL)
   AND (
     lower(mi.title) % lower($1)
     OR mi.search_vector @@ websearch_to_tsquery('english', $1)
@@ -25,6 +26,7 @@ LIMIT $3 OFFSET $4;
 SELECT count(*)
 FROM media_item_cards mi
 WHERE (mi.media_type = $2 OR ($2::text = 'tv' AND mi.media_type = 'anime'))
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = mi.id AND mm.materialized_at IS NOT NULL)
   AND (
     lower(mi.title) % lower($1)
     OR mi.search_vector @@ websearch_to_tsquery('english', $1)
@@ -39,6 +41,7 @@ WHERE (
     OR mi.search_vector @@ websearch_to_tsquery('english', $1)
     OR lower(mi.title) ILIKE lower($1) || '%'
   )
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = mi.id AND mm.materialized_at IS NOT NULL)
 ORDER BY
   greatest(
     similarity(lower(mi.title), lower($1)),

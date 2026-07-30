@@ -88,7 +88,7 @@ func (a *App) wantedMissing(ctx context.Context, p ManagerWantedParams) (Manager
 	err := a.db.QueryRow(ctx, `
 		WITH missing_movies AS (
 			SELECT mi.id FROM media_items mi
-			JOIN movies m ON m.media_item_id = mi.id
+			LEFT JOIN movies m ON m.media_item_id = mi.id
 			WHERE mi.monitored AND mi.media_type = 'movie'
 			  AND (cardinality($1::bigint[]) = 0 OR mi.library_id = ANY($1))
 			  AND (m.release_date IS NULL OR m.release_date <= CURRENT_DATE)
@@ -128,7 +128,7 @@ func (a *App) wantedMissing(ctx context.Context, p ManagerWantedParams) (Manager
 			       COALESCE(m.release_date, '1900-01-01'::date) AS sort_date
 			FROM media_items mi
 			JOIN media_item_cards c ON c.id = mi.id
-			JOIN movies m ON m.media_item_id = mi.id
+			LEFT JOIN movies m ON m.media_item_id = mi.id
 			LEFT JOIN manager_quality_profiles qp ON qp.id = mi.quality_profile_id
 			WHERE mi.monitored AND mi.media_type = 'movie'
 			  AND (cardinality($1::bigint[]) = 0 OR mi.library_id = ANY($1))

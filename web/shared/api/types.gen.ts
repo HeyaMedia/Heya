@@ -3567,6 +3567,35 @@ export type ManagerActivityRun = {
     truncated: boolean;
 };
 
+export type ManagerAddInput = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    description?: string;
+    external_ids?: {
+        [key: string]: string;
+    };
+    heya_slug?: string;
+    library_id: number;
+    monitored: boolean;
+    poster_url?: string;
+    quality_profile_id?: number;
+    title: string;
+    year?: string;
+};
+
+export type ManagerAddResult = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    library_id: number;
+    media_item_id: number;
+    run_id: number;
+    title: string;
+};
+
 export type ManagerAlbumDetailView = {
     /**
      * A URL to the JSON Schema for this object.
@@ -3981,6 +4010,21 @@ export type ManagerLibraryStatsView = {
     statuses: Array<string> | null;
     units_have: number;
     units_total: number;
+};
+
+export type ManagerLookupResult = {
+    already_in_library: boolean;
+    description?: string;
+    existing_item_id?: number;
+    external_ids?: {
+        [key: string]: string;
+    };
+    heya_slug?: string;
+    poster_url?: string;
+    provider_id: string;
+    provider_name: string;
+    title: string;
+    year?: string;
 };
 
 export type ManagerMediaBulkInput = {
@@ -8666,6 +8710,27 @@ export type LyricsResponseWritable = {
 export type ManagerActivityPageWritable = {
     runs: Array<ManagerActivityRun> | null;
     total: number;
+};
+
+export type ManagerAddInputWritable = {
+    description?: string;
+    external_ids?: {
+        [key: string]: string;
+    };
+    heya_slug?: string;
+    library_id: number;
+    monitored: boolean;
+    poster_url?: string;
+    quality_profile_id?: number;
+    title: string;
+    year?: string;
+};
+
+export type ManagerAddResultWritable = {
+    library_id: number;
+    media_item_id: number;
+    run_id: number;
+    title: string;
 };
 
 export type ManagerAlbumDetailViewWritable = {
@@ -14248,6 +14313,31 @@ export type ManagerActivityResponses = {
 
 export type ManagerActivityResponse = ManagerActivityResponses[keyof ManagerActivityResponses];
 
+export type ManagerAddData = {
+    body: ManagerAddInputWritable;
+    path?: never;
+    query?: never;
+    url: '/api/manager/add';
+};
+
+export type ManagerAddErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerAddError = ManagerAddErrors[keyof ManagerAddErrors];
+
+export type ManagerAddResponses = {
+    /**
+     * OK
+     */
+    200: ManagerAddResult;
+};
+
+export type ManagerAddResponse = ManagerAddResponses[keyof ManagerAddResponses];
+
 export type ManagerAlbumDetailData = {
     body?: never;
     path: {
@@ -14975,6 +15065,34 @@ export type ManagerLibraryItemsResponses = {
 };
 
 export type ManagerLibraryItemsResponse = ManagerLibraryItemsResponses[keyof ManagerLibraryItemsResponses];
+
+export type ManagerLookupData = {
+    body?: never;
+    path?: never;
+    query?: {
+        library_id?: number;
+        q?: string;
+    };
+    url: '/api/manager/lookup';
+};
+
+export type ManagerLookupErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerLookupError = ManagerLookupErrors[keyof ManagerLookupErrors];
+
+export type ManagerLookupResponses = {
+    /**
+     * OK
+     */
+    200: Array<ManagerLookupResult> | null;
+};
+
+export type ManagerLookupResponse = ManagerLookupResponses[keyof ManagerLookupResponses];
 
 export type ManagerUpdateMediaData = {
     body: ManagerMediaBulkInputWritable;

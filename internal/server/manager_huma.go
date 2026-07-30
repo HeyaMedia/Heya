@@ -351,6 +351,29 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(page), nil
 		})
 
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/lookup", "manager-lookup", "Search the metadata provider for new items to add to a library", "Manager")),
+		func(ctx context.Context, in *struct {
+			LibraryID int64  `query:"library_id" minimum:"1"`
+			Q         string `query:"q" minLength:"1" maxLength:"300"`
+		}) (*JSONOutput[[]service.ManagerLookupResult], error) {
+			results, err := app.ManagerLookup(ctx, in.LibraryID, in.Q)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return noStoreJSON(results), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/manager/add", "manager-add", "Add a new item to a library from a lookup result: monitored and fileless until the pipeline (or a scan) delivers files", "Manager")),
+		func(ctx context.Context, in *struct {
+			Body service.ManagerAddInput
+		}) (*JSONOutput[service.ManagerAddResult], error) {
+			result, err := app.ManagerAdd(ctx, in.Body)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusConflict)
+			}
+			return &JSONOutput[service.ManagerAddResult]{Body: *result}, nil
+		})
+
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/queue", "manager-queue", "Merged download-client queue + recent history, each item annotated with Heya's shadow verdict", "Manager")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[service.ManagerQueueView], error) {
 			view, err := app.ManagerQueue(ctx)

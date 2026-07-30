@@ -37,6 +37,7 @@ export function useManagerNav() {
       label: null,
       items: [
         { to: '/manager', label: 'Activity', icon: 'pulse' },
+        { to: '/manager/add', label: 'Add new', icon: 'plus' },
         { to: '/manager/calendar', label: 'Calendar', icon: 'calendar' },
         { to: '/manager/queue', label: 'Queue', icon: 'cloud-download' },
         { to: '/manager/wanted', label: 'Wanted', icon: 'target' },

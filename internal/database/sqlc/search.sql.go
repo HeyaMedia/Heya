@@ -205,6 +205,7 @@ WHERE (
     OR mi.search_vector @@ websearch_to_tsquery('english', $1)
     OR lower(mi.title) ILIKE lower($1) || '%'
   )
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = mi.id AND mm.materialized_at IS NOT NULL)
 ORDER BY
   greatest(
     similarity(lower(mi.title), lower($1)),
@@ -353,6 +354,7 @@ const searchMediaByType = `-- name: SearchMediaByType :many
 SELECT mi.id, mi.library_id, mi.media_type, mi.title, mi.sort_title, mi.year, mi.description, mi.poster_path, mi.backdrop_path, mi.external_ids, mi.slug, mi.homepage, mi.tagline, mi.original_title, mi.original_language, mi.status, mi.provider_kind, mi.heya_slug, mi.heya_enriched_at, mi.metadata_refreshed_at, mi.created_at, mi.updated_at, mi.search_vector, mi.matched_at, mi.enrichment_status, mi.base_enriched_at, mi.people_enriched_at, mi.extras_enriched_at, mi.images_enriched_at, mi.structure_enriched_at, mi.last_enrich_attempt_at, mi.last_enrich_error, mi.field_provenance, mi.match_confidence, mi.slug_locked, mi.public_id
 FROM media_item_cards mi
 WHERE (mi.media_type = $2 OR ($2::text = 'tv' AND mi.media_type = 'anime'))
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = mi.id AND mm.materialized_at IS NOT NULL)
   AND (
     lower(mi.title) % lower($1)
     OR mi.search_vector @@ websearch_to_tsquery('english', $1)
@@ -445,6 +447,7 @@ const searchMediaByTypeCount = `-- name: SearchMediaByTypeCount :one
 SELECT count(*)
 FROM media_item_cards mi
 WHERE (mi.media_type = $2 OR ($2::text = 'tv' AND mi.media_type = 'anime'))
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = mi.id AND mm.materialized_at IS NOT NULL)
   AND (
     lower(mi.title) % lower($1)
     OR mi.search_vector @@ websearch_to_tsquery('english', $1)

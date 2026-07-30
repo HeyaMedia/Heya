@@ -97,23 +97,28 @@ UPDATE media_items SET heya_slug = $2, updated_at = now() WHERE id = $1;
 SELECT EXISTS(SELECT 1 FROM media_items WHERE slug = $1 AND slug <> '' AND id != $2) as exists;
 
 -- name: ListMediaItemsByLibrary :many
-SELECT * FROM media_item_cards
-WHERE library_id = $1
+-- Public listing: announced (manager-added, fileless) rows stay hidden
+-- until real files materialize.
+SELECT * FROM media_item_cards c
+WHERE c.library_id = $1
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = c.id AND mm.materialized_at IS NOT NULL)
 ORDER BY sort_title ASC, title ASC
 LIMIT $2 OFFSET $3;
 
 -- name: ListMediaItemsByType :many
-SELECT * FROM media_item_cards
-WHERE (media_type = $1 OR ($1::text = 'tv' AND media_type = 'anime'))
+SELECT * FROM media_item_cards c
+WHERE (c.media_type = $1 OR ($1::text = 'tv' AND c.media_type = 'anime'))
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = c.id AND mm.materialized_at IS NOT NULL)
 ORDER BY sort_title ASC, title ASC
 LIMIT $2 OFFSET $3;
 
 -- name: ListMediaItemsByTypeRecent :many
 -- Same page shape as ListMediaItemsByType but newest-first — powers the
 -- home "Recently Added" rails (created_at is when the first file matched).
-SELECT * FROM media_item_cards
-WHERE (media_type = $1 OR ($1::text = 'tv' AND media_type = 'anime'))
-ORDER BY created_at DESC, id DESC
+SELECT * FROM media_item_cards c
+WHERE (c.media_type = $1 OR ($1::text = 'tv' AND c.media_type = 'anime'))
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = c.id AND mm.materialized_at IS NOT NULL)
+ORDER BY c.created_at DESC, c.id DESC
 LIMIT $2 OFFSET $3;
 
 -- name: UpdateMediaItemRaw :one
@@ -199,10 +204,10 @@ CROSS JOIN (SELECT count(*) FROM inserted_external_ids) inserted_write_count;
 DELETE FROM media_items WHERE id = $1;
 
 -- name: CountMediaItemsByLibrary :one
-SELECT count(*) FROM media_items WHERE library_id = $1;
+SELECT count(*) FROM media_items WHERE library_id = $1 AND materialized_at IS NOT NULL;
 
 -- name: CountMediaItemsByType :one
-SELECT count(*) FROM media_items WHERE media_type = $1;
+SELECT count(*) FROM media_items WHERE media_type = $1 AND materialized_at IS NOT NULL;
 
 -- name: MarkMetadataRefreshed :exec
 UPDATE media_items SET metadata_refreshed_at = now() WHERE id = $1;

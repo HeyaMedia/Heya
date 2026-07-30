@@ -19,6 +19,7 @@ FROM media_item_cards mi
 LEFT JOIN movies m ON m.media_item_id = mi.id
 LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
 WHERE (sqlc.arg(genre)::text = ANY(m.genres) OR sqlc.arg(genre)::text = ANY(ts.genres))
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = mi.id AND mm.materialized_at IS NOT NULL)
   AND (sqlc.arg(media_type)::text = '' OR mi.media_type::text = sqlc.arg(media_type)::text)
 ORDER BY
   CASE WHEN sqlc.arg(sort)::text = 'year-desc' THEN NULLIF(mi.year, '') END DESC NULLS LAST,
@@ -34,6 +35,7 @@ FROM media_item_cards mi
 LEFT JOIN movies m ON m.media_item_id = mi.id
 LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
 WHERE (sqlc.arg(genre)::text = ANY(m.genres) OR sqlc.arg(genre)::text = ANY(ts.genres))
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = mi.id AND mm.materialized_at IS NOT NULL)
 GROUP BY mi.media_type;
 
 -- name: ListMediaByKeyword :many
@@ -42,6 +44,7 @@ FROM media_item_cards mi
 JOIN media_keywords mk ON mk.media_item_id = mi.id
 JOIN keywords k ON k.id = mk.keyword_id
 WHERE lower(k.name) = lower(sqlc.arg(keyword)::text)
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = mi.id AND mm.materialized_at IS NOT NULL)
   AND (sqlc.arg(media_type)::text = '' OR mi.media_type::text = sqlc.arg(media_type)::text)
 ORDER BY
   CASE WHEN sqlc.arg(sort)::text = 'year-desc' THEN NULLIF(mi.year, '') END DESC NULLS LAST,
@@ -55,4 +58,5 @@ FROM media_item_cards mi
 JOIN media_keywords mk ON mk.media_item_id = mi.id
 JOIN keywords k ON k.id = mk.keyword_id
 WHERE lower(k.name) = lower(sqlc.arg(keyword)::text)
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = mi.id AND mm.materialized_at IS NOT NULL)
 GROUP BY mi.media_type;

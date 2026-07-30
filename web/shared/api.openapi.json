@@ -12812,6 +12812,95 @@
         ],
         "type": "object"
       },
+      "ManagerAddInput": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerAddInput.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "external_ids": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "heya_slug": {
+            "type": "string"
+          },
+          "library_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "monitored": {
+            "type": "boolean"
+          },
+          "poster_url": {
+            "type": "string"
+          },
+          "quality_profile_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "year": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "library_id",
+          "title",
+          "monitored"
+        ],
+        "type": "object"
+      },
+      "ManagerAddResult": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerAddResult.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "library_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "media_item_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "media_item_id",
+          "library_id",
+          "title",
+          "run_id"
+        ],
+        "type": "object"
+      },
       "ManagerAlbumDetailView": {
         "additionalProperties": false,
         "properties": {
@@ -14266,6 +14355,52 @@
           "units_total",
           "files",
           "statuses"
+        ],
+        "type": "object"
+      },
+      "ManagerLookupResult": {
+        "additionalProperties": false,
+        "properties": {
+          "already_in_library": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          },
+          "existing_item_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "external_ids": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "heya_slug": {
+            "type": "string"
+          },
+          "poster_url": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "year": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_name",
+          "provider_id",
+          "title",
+          "already_in_library"
         ],
         "type": "object"
       },
@@ -34599,6 +34734,59 @@
         ]
       }
     },
+    "/api/manager/add": {
+      "post": {
+        "operationId": "manager-add",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagerAddInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerAddResult"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Add a new item to a library from a lookup result: monitored and fileless until the pipeline (or a scan) delivers files",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
     "/api/manager/album/{ref}": {
       "get": {
         "operationId": "manager-album-detail",
@@ -36186,6 +36374,77 @@
           }
         ],
         "summary": "Managed view over a library: completeness, monitoring, profiles",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
+    "/api/manager/lookup": {
+      "get": {
+        "operationId": "manager-lookup",
+        "parameters": [
+          {
+            "explode": false,
+            "in": "query",
+            "name": "library_id",
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "maxLength": 300,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ManagerLookupResult"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Search the metadata provider for new items to add to a library",
         "tags": [
           "Manager"
         ]

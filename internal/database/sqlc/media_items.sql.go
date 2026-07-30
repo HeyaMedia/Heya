@@ -13,7 +13,7 @@ import (
 )
 
 const countMediaItemsByLibrary = `-- name: CountMediaItemsByLibrary :one
-SELECT count(*) FROM media_items WHERE library_id = $1
+SELECT count(*) FROM media_items WHERE library_id = $1 AND materialized_at IS NOT NULL
 `
 
 func (q *Queries) CountMediaItemsByLibrary(ctx context.Context, libraryID int64) (int64, error) {
@@ -24,7 +24,7 @@ func (q *Queries) CountMediaItemsByLibrary(ctx context.Context, libraryID int64)
 }
 
 const countMediaItemsByType = `-- name: CountMediaItemsByType :one
-SELECT count(*) FROM media_items WHERE media_type = $1
+SELECT count(*) FROM media_items WHERE media_type = $1 AND materialized_at IS NOT NULL
 `
 
 func (q *Queries) CountMediaItemsByType(ctx context.Context, mediaType MediaType) (int64, error) {
@@ -570,8 +570,9 @@ func (q *Queries) ListEnrichedTVSeries(ctx context.Context, arg ListEnrichedTVSe
 }
 
 const listMediaItemsByLibrary = `-- name: ListMediaItemsByLibrary :many
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked, public_id FROM media_item_cards
-WHERE library_id = $1
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked, public_id FROM media_item_cards c
+WHERE c.library_id = $1
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = c.id AND mm.materialized_at IS NOT NULL)
 ORDER BY sort_title ASC, title ASC
 LIMIT $2 OFFSET $3
 `
@@ -582,6 +583,8 @@ type ListMediaItemsByLibraryParams struct {
 	Offset    int32 `json:"offset"`
 }
 
+// Public listing: announced (manager-added, fileless) rows stay hidden
+// until real files materialize.
 func (q *Queries) ListMediaItemsByLibrary(ctx context.Context, arg ListMediaItemsByLibraryParams) ([]MediaItemCard, error) {
 	rows, err := q.db.Query(ctx, listMediaItemsByLibrary, arg.LibraryID, arg.Limit, arg.Offset)
 	if err != nil {
@@ -640,8 +643,9 @@ func (q *Queries) ListMediaItemsByLibrary(ctx context.Context, arg ListMediaItem
 }
 
 const listMediaItemsByType = `-- name: ListMediaItemsByType :many
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked, public_id FROM media_item_cards
-WHERE (media_type = $1 OR ($1::text = 'tv' AND media_type = 'anime'))
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked, public_id FROM media_item_cards c
+WHERE (c.media_type = $1 OR ($1::text = 'tv' AND c.media_type = 'anime'))
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = c.id AND mm.materialized_at IS NOT NULL)
 ORDER BY sort_title ASC, title ASC
 LIMIT $2 OFFSET $3
 `
@@ -710,9 +714,10 @@ func (q *Queries) ListMediaItemsByType(ctx context.Context, arg ListMediaItemsBy
 }
 
 const listMediaItemsByTypeRecent = `-- name: ListMediaItemsByTypeRecent :many
-SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked, public_id FROM media_item_cards
-WHERE (media_type = $1 OR ($1::text = 'tv' AND media_type = 'anime'))
-ORDER BY created_at DESC, id DESC
+SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked, public_id FROM media_item_cards c
+WHERE (c.media_type = $1 OR ($1::text = 'tv' AND c.media_type = 'anime'))
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = c.id AND mm.materialized_at IS NOT NULL)
+ORDER BY c.created_at DESC, c.id DESC
 LIMIT $2 OFFSET $3
 `
 

@@ -15,6 +15,7 @@ FROM media_item_cards mi
 LEFT JOIN movies m ON m.media_item_id = mi.id
 LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
 WHERE ($1::text = ANY(m.genres) OR $1::text = ANY(ts.genres))
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = mi.id AND mm.materialized_at IS NOT NULL)
 GROUP BY mi.media_type
 `
 
@@ -51,6 +52,7 @@ FROM media_item_cards mi
 JOIN media_keywords mk ON mk.media_item_id = mi.id
 JOIN keywords k ON k.id = mk.keyword_id
 WHERE lower(k.name) = lower($1::text)
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = mi.id AND mm.materialized_at IS NOT NULL)
 GROUP BY mi.media_type
 `
 
@@ -121,6 +123,7 @@ FROM media_item_cards mi
 LEFT JOIN movies m ON m.media_item_id = mi.id
 LEFT JOIN tv_series ts ON ts.media_item_id = mi.id
 WHERE ($1::text = ANY(m.genres) OR $1::text = ANY(ts.genres))
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = mi.id AND mm.materialized_at IS NOT NULL)
   AND ($2::text = '' OR mi.media_type::text = $2::text)
 ORDER BY
   CASE WHEN $3::text = 'year-desc' THEN NULLIF(mi.year, '') END DESC NULLS LAST,
@@ -211,6 +214,7 @@ FROM media_item_cards mi
 JOIN media_keywords mk ON mk.media_item_id = mi.id
 JOIN keywords k ON k.id = mk.keyword_id
 WHERE lower(k.name) = lower($1::text)
+  AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = mi.id AND mm.materialized_at IS NOT NULL)
   AND ($2::text = '' OR mi.media_type::text = $2::text)
 ORDER BY
   CASE WHEN $3::text = 'year-desc' THEN NULLIF(mi.year, '') END DESC NULLS LAST,
