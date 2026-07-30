@@ -186,6 +186,17 @@ function fmtSize(bytes?: number): string {
                 <template v-if="d.chosen_title">would have grabbed <span class="mono">{{ d.chosen_title }}</span></template>
                 <template v-else>{{ VERDICT_META[d.verdict]?.label ?? d.verdict }}<template v-if="d.profile_name"> · profile {{ d.profile_name }}</template></template>
               </div>
+              <div v-if="d.chosen_title" class="h-facts">
+                <span v-if="d.chosen_quality" class="h-fact mono">{{ d.chosen_quality }}</span>
+                <span class="h-fact mono">score {{ d.chosen_score ?? 0 }}</span>
+                <span v-if="d.chosen_size_bytes" class="h-fact mono">{{ fmtSize(d.chosen_size_bytes) }}</span>
+                <span v-if="d.profile_name" class="h-fact">{{ d.profile_name }}</span>
+                <template v-for="hit in ((d.chosen_breakdown as any[]) ?? [])" :key="hit.name">
+                  <span class="h-cf" :class="{ pos: (hit.score ?? 0) > 0, neg: (hit.score ?? 0) < 0 }">
+                    {{ hit.name }}<template v-if="hit.score"> {{ hit.score > 0 ? '+' : '' }}{{ hit.score }}</template>
+                  </span>
+                </template>
+              </div>
             </div>
             <div class="h-meta">
               <span class="h-time">{{ fmtWhen(d.decided_at) }}</span>
@@ -204,31 +215,18 @@ function fmtSize(bytes?: number): string {
                   {{ idx.indexer }}: {{ idx.status === 'ok' ? `${idx.fetched} results` : idx.status }}
                 </span>
               </div>
-              <div class="h-tablewrap">
-                <table class="h-table">
-                  <thead>
-                    <tr><th>Release</th><th>Indexer</th><th>Quality</th><th class="num">Score</th><th class="num">Size</th><th>Verdict</th></tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="row in decisionCandidates" :key="row.cand.id" :class="{ chosen: row.target?.chosen }">
-                      <td class="h-rel mono" :title="row.cand.title">{{ row.cand.title }}</td>
-                      <td>{{ row.cand.indexer }}</td>
-                      <td class="mono">{{ row.cand.quality || '—' }}</td>
-                      <td class="num mono">{{ row.cand.format_score }}</td>
-                      <td class="num mono">{{ fmtSize(row.cand.size_bytes) }}</td>
-                      <td class="h-why">
-                        <template v-if="row.target?.chosen"><span class="h-star">★ chosen</span></template>
-                        <template v-else-if="row.target?.verdict === 'acceptable'">#{{ row.target?.selection_rank }}</template>
-                        <AppTooltip v-else-if="row.target?.rejections?.length" :label="row.target.rejections.map(r => r.message).join(' · ')">
-                          <span class="h-rejcode">{{ row.target.rejections[0]!.code }}</span>
-                        </AppTooltip>
-                        <AppTooltip v-else-if="row.cand.rejections?.length" :label="row.cand.rejections.map(r => r.message).join(' · ')">
-                          <span class="h-rejcode">{{ row.cand.rejections[0]!.code }}</span>
-                        </AppTooltip>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+              <div class="h-candlist">
+                <ManagerCandidateRow
+                  v-for="row in decisionCandidates" :key="row.cand.id"
+                  :title="row.cand.title" :indexer="row.cand.indexer" :quality="row.cand.quality"
+                  :score="row.cand.format_score ?? 0" :size-bytes="row.cand.size_bytes ?? 0"
+                  :publish-date="row.cand.publish_date"
+                  :breakdown="(row.cand.format_breakdown as any[]) ?? []"
+                  :rejections="(row.target?.rejections?.length ? row.target.rejections : row.cand.rejections) ?? []"
+                  :acceptable="row.target?.verdict === 'acceptable'"
+                  :chosen="row.target?.chosen ?? false"
+                  :selection-rank="row.target?.selection_rank"
+                />
               </div>
             </template>
           </div>
@@ -322,28 +320,23 @@ function fmtSize(bytes?: number): string {
 .h-expand-loading { display: flex; align-items: center; gap: 8px; color: var(--fg-3); font-size: 12px; }
 .h-indexers { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
 .h-idx { font-size: 11px; color: var(--fg-2); }
-.h-tablewrap { overflow-x: auto; max-height: 420px; overflow-y: auto; }
-.h-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.h-table th {
-  position: sticky; top: 0;
-  background: var(--bg-2);
-  text-align: left;
-  padding: 6px 8px;
+.h-candlist { max-height: 480px; overflow-y: auto; border: 1px solid var(--hair); border-radius: var(--r-sm); background: var(--bg-1); }
+.h-facts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.h-fact { font-size: 10.5px; color: var(--fg-2); }
+.h-cf {
+  display: inline-flex;
+  padding: 0 6px;
+  border-radius: 999px;
   font-family: var(--font-mono);
   font-size: 9.5px;
   font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--fg-3);
-  border-bottom: 1px solid var(--border);
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid var(--border);
+  color: var(--fg-2);
+  white-space: nowrap;
 }
-.h-table td { padding: 5px 8px; border-bottom: 1px solid var(--hair); }
-.h-table th.num, .h-table td.num { text-align: right; }
-.h-table tr.chosen td { background: var(--gold-soft); }
-.h-rel { max-width: 480px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.h-why { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-2); white-space: nowrap; }
-.h-star { color: var(--gold-bright); }
-.h-rejcode { cursor: help; color: var(--bad); }
+.h-cf.pos { color: var(--good); border-color: color-mix(in srgb, var(--good) 28%, transparent); }
+.h-cf.neg { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 28%, transparent); }
 
 .h-empty {
   display: flex; align-items: center; gap: 8px;

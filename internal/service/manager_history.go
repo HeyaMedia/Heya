@@ -29,7 +29,12 @@ type ManagerDecisionView struct {
 	ProfileName  string    `json:"profile_name,omitempty"`
 	Verdict      string    `json:"verdict"`
 	ChosenTitle  string    `json:"chosen_title,omitempty"`
-	Context      any       `json:"context,omitempty"`
+	// The chosen release's evaluation facts — why it won, legibly.
+	ChosenQuality   string `json:"chosen_quality,omitempty"`
+	ChosenScore     int32  `json:"chosen_score,omitempty"`
+	ChosenSizeBytes int64  `json:"chosen_size_bytes,omitempty"`
+	ChosenBreakdown any    `json:"chosen_breakdown,omitempty"`
+	Context         any    `json:"context,omitempty"`
 }
 
 type ManagerHistoryPage struct {
@@ -159,41 +164,58 @@ func chosenDecisionIDs(models []sqlc.ManagerDecision) []int64 {
 	return ids
 }
 
-// chosenTitlesFor resolves chosen candidate titles for a page of decisions
-// in one query.
-func (a *App) chosenTitlesFor(ctx context.Context, ids []int64) (map[int64]string, error) {
-	titles := map[int64]string{}
+// chosenFact is the chosen candidate's evaluation record for one decision.
+type chosenFact struct {
+	Title     string
+	Quality   string
+	Score     int32
+	SizeBytes int64
+	Breakdown []byte
+}
+
+// chosenTitlesFor resolves the chosen candidates' facts for a page of
+// decisions in one query — the "why it won" data every surface renders.
+func (a *App) chosenTitlesFor(ctx context.Context, ids []int64) (map[int64]chosenFact, error) {
+	facts := map[int64]chosenFact{}
 	if len(ids) == 0 {
-		return titles, nil
+		return facts, nil
 	}
 	dbRows, err := a.db.Query(ctx, `
-		SELECT d.id, c.title
+		SELECT d.id, c.title, COALESCE(c.quality, ''), c.format_score, c.size_bytes, c.format_breakdown
 		FROM manager_decisions d
 		JOIN manager_candidate_targets ct ON ct.id = d.chosen_target_row
 		JOIN manager_candidates c ON c.id = ct.candidate_id
 		WHERE d.id = ANY($1)`, ids)
 	if err != nil {
-		return nil, fmt.Errorf("resolving chosen titles: %w", err)
+		return nil, fmt.Errorf("resolving chosen candidates: %w", err)
 	}
 	defer dbRows.Close()
 	for dbRows.Next() {
 		var id int64
-		var title string
-		if err := dbRows.Scan(&id, &title); err != nil {
+		var fact chosenFact
+		if err := dbRows.Scan(&id, &fact.Title, &fact.Quality, &fact.Score, &fact.SizeBytes, &fact.Breakdown); err != nil {
 			return nil, err
 		}
-		titles[id] = title
+		facts[id] = fact
 	}
-	return titles, dbRows.Err()
+	return facts, dbRows.Err()
 }
 
-func decisionView(row sqlc.ManagerDecision, runKind, chosenTitle string) ManagerDecisionView {
+func decisionView(row sqlc.ManagerDecision, runKind string, chosen chosenFact) ManagerDecisionView {
 	view := ManagerDecisionView{
 		ID: row.ID, RunID: row.RunID, RunKind: runKind,
 		DecidedAt: row.DecidedAt.Time, TargetKind: row.TargetKind, TargetKey: row.TargetKey,
 		LibraryID: row.LibraryID, Domain: row.Domain,
 		TargetTitle: row.TargetTitle, TargetYear: int(row.TargetYear),
-		ProfileName: row.ProfileName, Verdict: row.Verdict, ChosenTitle: chosenTitle,
+		ProfileName: row.ProfileName, Verdict: row.Verdict,
+		ChosenTitle: chosen.Title, ChosenQuality: chosen.Quality,
+		ChosenScore: chosen.Score, ChosenSizeBytes: chosen.SizeBytes,
+	}
+	if len(chosen.Breakdown) > 0 {
+		var breakdown any
+		if json.Unmarshal(chosen.Breakdown, &breakdown) == nil {
+			view.ChosenBreakdown = breakdown
+		}
 	}
 	if row.MediaItemID.Valid {
 		id := row.MediaItemID.Int64

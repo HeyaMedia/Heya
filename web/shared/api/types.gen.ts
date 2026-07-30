@@ -3737,6 +3737,10 @@ export type ManagerCustomFormatView = {
 };
 
 export type ManagerDecisionView = {
+    chosen_breakdown?: unknown;
+    chosen_quality?: string;
+    chosen_score?: number;
+    chosen_size_bytes?: number;
     chosen_title?: string;
     context?: unknown;
     decided_at: string;

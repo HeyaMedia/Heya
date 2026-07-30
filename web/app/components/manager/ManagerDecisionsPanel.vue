@@ -21,6 +21,11 @@ function fmtWhen(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
+function fmtSize(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`
+  return `${(bytes / 1024 ** 2).toFixed(0)} MB`
+}
+
 function unitLabel(d: { target_kind: string, season_number?: number, episode_number?: number, album_title?: string }): string {
   if (d.target_kind === 'episode' && d.season_number != null && d.episode_number != null) {
     return `S${String(d.season_number).padStart(2, '0')}E${String(d.episode_number).padStart(2, '0')}`
@@ -40,8 +45,18 @@ function unitLabel(d: { target_kind: string, season_number?: number, episode_num
         <div class="mdp-body">
           <div class="mdp-line">
             <span v-if="unitLabel(d)" class="mdp-unit mono">{{ unitLabel(d) }}</span>
-            <span v-if="d.chosen_title" class="mdp-chosen mono" :title="d.chosen_title">{{ d.chosen_title }}</span>
+            <span v-if="d.chosen_title" class="mdp-chosen mono">{{ d.chosen_title }}</span>
             <span v-else class="mdp-none">no release selected</span>
+          </div>
+          <div v-if="d.chosen_title" class="mdp-facts">
+            <span v-if="d.chosen_quality" class="mdp-fact mono">{{ d.chosen_quality }}</span>
+            <span class="mdp-fact mono">score {{ d.chosen_score ?? 0 }}</span>
+            <span v-if="d.chosen_size_bytes" class="mdp-fact mono">{{ fmtSize(d.chosen_size_bytes) }}</span>
+            <template v-for="hit in ((d.chosen_breakdown as any[]) ?? [])" :key="hit.name">
+              <span class="mdp-cf" :class="{ pos: (hit.score ?? 0) > 0, neg: (hit.score ?? 0) < 0 }">
+                {{ hit.name }}<template v-if="hit.score"> {{ hit.score > 0 ? '+' : '' }}{{ hit.score }}</template>
+              </span>
+            </template>
           </div>
           <div class="mdp-sub">{{ fmtWhen(d.decided_at) }} · {{ d.run_kind }}<template v-if="d.profile_name"> · {{ d.profile_name }}</template></div>
         </div>
@@ -76,7 +91,23 @@ function unitLabel(d: { target_kind: string, season_number?: number, episode_num
 .mdp-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .mdp-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .mdp-unit { font-size: 11px; color: var(--fg-2); flex-shrink: 0; }
-.mdp-chosen { font-size: 12px; color: var(--fg-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mdp-chosen { font-size: 12px; color: var(--fg-1); overflow-wrap: anywhere; }
+.mdp-facts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mdp-fact { font-size: 10.5px; color: var(--fg-2); }
+.mdp-cf {
+  display: inline-flex;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid var(--border);
+  color: var(--fg-2);
+  white-space: nowrap;
+}
+.mdp-cf.pos { color: var(--good); border-color: color-mix(in srgb, var(--good) 28%, transparent); }
+.mdp-cf.neg { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 28%, transparent); }
 .mdp-none { font-size: 12px; color: var(--fg-3); }
 .mdp-sub { font-size: 11px; color: var(--fg-3); }
 .mdp-link { flex-shrink: 0; font-size: 11px; color: var(--fg-3); text-decoration: none; }

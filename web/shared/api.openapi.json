@@ -13376,6 +13376,18 @@
       "ManagerDecisionView": {
         "additionalProperties": false,
         "properties": {
+          "chosen_breakdown": {},
+          "chosen_quality": {
+            "type": "string"
+          },
+          "chosen_score": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "chosen_size_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
           "chosen_title": {
             "type": "string"
           },
