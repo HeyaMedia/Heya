@@ -22,6 +22,15 @@ type Attrs struct {
 	SizeBytes        int64
 	ReleaseType      string
 	OriginalLanguage string
+	// RevisionVersion is 1 for a plain release, 2+ for proper/repack/rerip;
+	// RevisionReal counts REAL tags. Upgrade decisions compare revisions
+	// within the same quality, arr-style.
+	RevisionVersion int
+	RevisionReal    int
+	// IsMultiSeason marks releases spanning multiple seasons — Sonarr
+	// rejects these outright and parity mode must too (a multi-season
+	// release still carries ReleaseType "season-pack" for format specs).
+	IsMultiSeason bool
 }
 
 var parserSourceNames = map[video.Source]string{
@@ -72,10 +81,15 @@ func ParseVideoRelease(title string, sizeBytes int64, isTV bool) Attrs {
 	default:
 		attrs.Modifier = "none"
 	}
+	attrs.RevisionVersion = quality.Revision.Version
+	attrs.RevisionReal = quality.Revision.Real
 
 	attrs.Group = video.ParseGroup(title)
 	attrs.Edition = strings.Join(video.ParseEdition(title).Flags(), " ")
-	for _, lang := range video.ParseLanguage(title) {
+	// Strict: an untagged title stays empty, meaning original audio —
+	// LanguageAcceptable and the Language spec's "unknown" value both key
+	// off the empty list, which a default-English injection would poison.
+	for _, lang := range video.ParseLanguageStrict(title) {
 		attrs.Languages = append(attrs.Languages, strings.ToLower(string(lang)))
 	}
 
@@ -84,6 +98,7 @@ func ParseVideoRelease(title string, sizeBytes int64, isTV bool) Attrs {
 		if year, err := strconv.Atoi(show.Year); err == nil {
 			attrs.Year = year
 		}
+		attrs.IsMultiSeason = show.IsMultiSeason
 		switch {
 		case show.FullSeason || show.IsMultiSeason:
 			attrs.ReleaseType = "season-pack"

@@ -109,6 +109,18 @@ var langChecks = []langCheck{
 }
 
 func ParseLanguage(title string) []Language {
+	languages := ParseLanguageStrict(title)
+	if len(languages) == 0 {
+		languages = append(languages, LangEnglish)
+	}
+	return languages
+}
+
+// ParseLanguageStrict returns only languages the title explicitly carries —
+// no default-English injection. An empty result means "no language token",
+// which acquisition code treats as original-audio (scene convention); the
+// plain ParseLanguage keeps the English fallback for library-file parsing.
+func ParseLanguageStrict(title string) []Language {
 	parsedTitle := ParseTitleAndYear(title).Title
 	languageTitle := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(title, ".", " "), parsedTitle, ""))
 
@@ -136,10 +148,6 @@ func ParseLanguage(title string) []Language {
 
 	if IsMulti(languageTitle) {
 		add(LangEnglish)
-	}
-
-	if len(languages) == 0 {
-		languages = append(languages, LangEnglish)
 	}
 
 	return languages

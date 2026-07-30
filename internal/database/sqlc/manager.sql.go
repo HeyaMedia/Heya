@@ -860,6 +860,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (parent_id, source_ref) WHERE parent_id IS NOT NULL
 DO UPDATE SET name = EXCLUDED.name, base_url = EXCLUDED.base_url,
     api_key = EXCLUDED.api_key, protocol = EXCLUDED.protocol,
+    enabled = EXCLUDED.enabled, priority = EXCLUDED.priority,
     updated_at = now()
 RETURNING id, name, kind, enabled, base_url, api_key, protocol, priority, categories, source, source_ref, parent_id, settings, last_test_at, last_test_ok, last_test_error, created_at, updated_at
 `

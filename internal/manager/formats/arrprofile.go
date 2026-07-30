@@ -109,10 +109,6 @@ func ParseArrProfiles(raw []byte) ([]ImportedProfile, error) {
 		if profile.Language != nil && profile.Language.Name != "" {
 			result.Language = strings.ToLower(profile.Language.Name)
 		}
-		if result.MinUpgradeScore <= 0 {
-			result.MinUpgradeScore = 1
-		}
-
 		for index := len(profile.Items) - 1; index >= 0; index-- {
 			item := profile.Items[index]
 			converted, cutoffName := convertProfileItem(item, profile.Cutoff)

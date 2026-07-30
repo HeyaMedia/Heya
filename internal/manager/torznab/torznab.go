@@ -123,6 +123,8 @@ func convertCategory(raw categoryXML) Category {
 }
 
 // Query is one search request. Zero-value fields are omitted from the call.
+// Season/Episode are pointers so an explicit zero survives — specials live in
+// season 0 and `S00E05` must emit season=0, not drop the constraint.
 type Query struct {
 	// Type is the torznab search mode: "search", "tvsearch", "movie", "music", "book".
 	Type    string
@@ -131,27 +133,42 @@ type Query struct {
 	ImdbID  string
 	TmdbID  string
 	TvdbID  string
-	Season  int
-	Episode int
+	Season  *int
+	Episode *int
 	Artist  string
 	Album   string
 	Limit   int
 	Offset  int
 }
 
+// Attr is one raw torznab:attr/newznab:attr pair, order-preserved. Repeated
+// names are legal (e.g. multiple category attrs) and must not collapse.
+type Attr struct {
+	Name  string
+	Value string
+}
+
 // Release is one search result item, protocol-agnostic: torznab:attr and
-// newznab:attr both land in Attrs.
+// newznab:attr both land in Attrs (last-wins flattened) and RawAttrs
+// (ordered, duplicates preserved — the accountability record).
 type Release struct {
 	Title       string
 	GUID        string
 	Size        int64
 	PublishDate time.Time
-	DownloadURL string
-	InfoURL     string
-	Categories  []int
-	Seeders     int
-	Peers       int
-	Attrs       map[string]string
+	// PublishDateRaw carries the unparsed pubDate text when no known layout
+	// matched, so the failure is visible instead of a silent zero time.
+	PublishDateRaw string
+	DownloadURL    string
+	InfoURL        string
+	Categories     []int
+	// RawCategories keeps non-numeric <category> element text (site-specific
+	// names) that can't map to newznab ids.
+	RawCategories []string
+	Seeders       int
+	Peers         int
+	Attrs         map[string]string
+	RawAttrs      []Attr
 }
 
 type rssXML struct {
@@ -161,13 +178,15 @@ type rssXML struct {
 }
 
 type itemXML struct {
-	Title     string `xml:"title"`
-	GUID      string `xml:"guid"`
-	Link      string `xml:"link"`
-	Comments  string `xml:"comments"`
-	PubDate   string `xml:"pubDate"`
-	Size      int64  `xml:"size"`
-	Category  []string
+	Title    string `xml:"title"`
+	GUID     string `xml:"guid"`
+	Link     string `xml:"link"`
+	Comments string `xml:"comments"`
+	PubDate  string `xml:"pubDate"`
+	Size     int64  `xml:"size"`
+	// Plain RSS <category> elements — some feeds carry ids here without
+	// mirroring them into attrs.
+	Category  []string `xml:"category"`
 	Enclosure struct {
 		URL    string `xml:"url,attr"`
 		Length int64  `xml:"length,attr"`
@@ -206,11 +225,11 @@ func (c *Client) Search(ctx context.Context, q Query) ([]Release, error) {
 	if q.TvdbID != "" {
 		params.Set("tvdbid", q.TvdbID)
 	}
-	if q.Season > 0 {
-		params.Set("season", strconv.Itoa(q.Season))
+	if q.Season != nil {
+		params.Set("season", strconv.Itoa(*q.Season))
 	}
-	if q.Episode > 0 {
-		params.Set("ep", strconv.Itoa(q.Episode))
+	if q.Episode != nil {
+		params.Set("ep", strconv.Itoa(*q.Episode))
 	}
 	if q.Artist != "" {
 		params.Set("artist", q.Artist)
@@ -243,6 +262,7 @@ func (c *Client) Search(ctx context.Context, q Query) ([]Release, error) {
 			DownloadURL: item.Link,
 			InfoURL:     item.Comments,
 			Attrs:       make(map[string]string, len(item.Attrs)),
+			RawAttrs:    make([]Attr, 0, len(item.Attrs)),
 		}
 		if rel.DownloadURL == "" {
 			rel.DownloadURL = item.Enclosure.URL
@@ -250,15 +270,34 @@ func (c *Client) Search(ctx context.Context, q Query) ([]Release, error) {
 		if rel.Size == 0 {
 			rel.Size = item.Enclosure.Length
 		}
-		if t, err := time.Parse(time.RFC1123Z, item.PubDate); err == nil {
-			rel.PublishDate = t
+		rel.PublishDate, rel.PublishDateRaw = parsePubDate(item.PubDate)
+		seenCats := make(map[int]bool)
+		addCat := func(id int) {
+			if !seenCats[id] {
+				seenCats[id] = true
+				rel.Categories = append(rel.Categories, id)
+			}
+		}
+		// Some feeds put category ids only in plain <category> elements and
+		// never mirror them into attrs; parse both representations.
+		for _, cat := range item.Category {
+			cat = strings.TrimSpace(cat)
+			if cat == "" {
+				continue
+			}
+			if id, err := strconv.Atoi(cat); err == nil {
+				addCat(id)
+			} else {
+				rel.RawCategories = append(rel.RawCategories, cat)
+			}
 		}
 		for _, attr := range item.Attrs {
 			rel.Attrs[attr.Name] = attr.Value
+			rel.RawAttrs = append(rel.RawAttrs, Attr{Name: attr.Name, Value: attr.Value})
 			switch attr.Name {
 			case "category":
 				if id, err := strconv.Atoi(attr.Value); err == nil {
-					rel.Categories = append(rel.Categories, id)
+					addCat(id)
 				}
 			case "seeders":
 				rel.Seeders, _ = strconv.Atoi(attr.Value)
@@ -273,6 +312,31 @@ func (c *Client) Search(ctx context.Context, q Query) ([]Release, error) {
 		releases = append(releases, rel)
 	}
 	return releases, nil
+}
+
+// pubDateLayouts covers the formats real Newznab/Prowlarr feeds emit; RFC1123Z
+// is the spec, the rest show up in the wild.
+var pubDateLayouts = []string{
+	time.RFC1123Z,
+	time.RFC1123,
+	time.RFC3339,
+	"Mon, 2 Jan 2006 15:04:05 -0700",
+	"2 Jan 2006 15:04:05 -0700",
+}
+
+// parsePubDate returns the parsed time, or the zero time plus the raw text
+// when nothing matched — a recorded failure, not a silent one.
+func parsePubDate(raw string) (time.Time, string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, ""
+	}
+	for _, layout := range pubDateLayouts {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t, ""
+		}
+	}
+	return time.Time{}, raw
 }
 
 // errorXML is the torznab error envelope: <error code="100" description="..."/>.

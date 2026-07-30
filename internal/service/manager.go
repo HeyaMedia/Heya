@@ -891,8 +891,10 @@ func (a *App) TestManagerDownloadClient(ctx context.Context, id int64) (ManagerT
 }
 
 // ManagerClientQueueItem is one in-flight download, normalized from the
-// client's own shapes (SAB reports sizes as decimal-string MB).
+// client's own shapes (SAB reports sizes as decimal-string MB). ID is the
+// client's stable job id (SAB nzo_id) — the key queue verdicts hang off.
 type ManagerClientQueueItem struct {
+	ID         string  `json:"id"`
 	Name       string  `json:"name"`
 	Category   string  `json:"category"`
 	Status     string  `json:"status"`
@@ -903,6 +905,7 @@ type ManagerClientQueueItem struct {
 }
 
 type ManagerClientHistoryItem struct {
+	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Status      string `json:"status"`
 	Category    string `json:"category"`
@@ -1057,6 +1060,7 @@ func (a *App) ManagerDownloadClientActivity(ctx context.Context, id int64) (*Man
 	}
 	for _, slot := range queue.Slots {
 		view.Queue = append(view.Queue, ManagerClientQueueItem{
+			ID:         slot.NzoID,
 			Name:       slot.Filename,
 			Category:   slot.Category,
 			Status:     slot.Status,
@@ -1068,6 +1072,7 @@ func (a *App) ManagerDownloadClientActivity(ctx context.Context, id int64) (*Man
 	}
 	for _, slot := range history {
 		view.History = append(view.History, ManagerClientHistoryItem{
+			ID:          slot.NzoID,
 			Name:        slot.Name,
 			Status:      slot.Status,
 			Category:    slot.Category,
