@@ -3544,6 +3544,29 @@ export type LyricsResponse = {
     synced: boolean;
 };
 
+export type ManagerActivityPage = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    runs: Array<ManagerActivityRun> | null;
+    total: number;
+};
+
+export type ManagerActivityRun = {
+    finished_at?: string;
+    id: number;
+    indexers: Array<ManagerRunIndexerView> | null;
+    kind: string;
+    partial: boolean;
+    scope?: unknown;
+    source: string;
+    started_at: string;
+    stats?: unknown;
+    status: string;
+    truncated: boolean;
+};
+
 export type ManagerAlbumDetailView = {
     /**
      * A URL to the JSON Schema for this object.
@@ -4067,6 +4090,35 @@ export type ManagerQualityProfileView = {
     name: string;
     source: string;
     upgrades_enabled: boolean;
+};
+
+export type ManagerQueueItemView = {
+    category: string;
+    client: string;
+    completed_at?: number;
+    fail_message?: string;
+    history: boolean;
+    matched_item_id?: number;
+    matched_library?: number;
+    matched_title?: string;
+    name: string;
+    nzo_id: string;
+    percentage: number;
+    size_left_mb: number;
+    size_mb: number;
+    status: string;
+    time_left?: string;
+    verdict: string;
+    verdict_detail?: string;
+};
+
+export type ManagerQueueView = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    errors?: Array<string> | null;
+    items: Array<ManagerQueueItemView> | null;
 };
 
 export type ManagerRssRunView = {
@@ -8611,6 +8663,11 @@ export type LyricsResponseWritable = {
     synced: boolean;
 };
 
+export type ManagerActivityPageWritable = {
+    runs: Array<ManagerActivityRun> | null;
+    total: number;
+};
+
 export type ManagerAlbumDetailViewWritable = {
     album: ManagerAlbumView;
     /**
@@ -8850,6 +8907,11 @@ export type ManagerQualityProfileViewWritable = {
     name: string;
     source: string;
     upgrades_enabled: boolean;
+};
+
+export type ManagerQueueViewWritable = {
+    errors?: Array<string> | null;
+    items: Array<ManagerQueueItemView> | null;
 };
 
 export type ManagerRssRunViewWritable = {
@@ -14158,6 +14220,34 @@ export type GetLogsResponses = {
 
 export type GetLogsResponse = GetLogsResponses[keyof GetLogsResponses];
 
+export type ManagerActivityData = {
+    body?: never;
+    path?: never;
+    query?: {
+        page?: number;
+        per_page?: number;
+    };
+    url: '/api/manager/activity';
+};
+
+export type ManagerActivityErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerActivityError = ManagerActivityErrors[keyof ManagerActivityErrors];
+
+export type ManagerActivityResponses = {
+    /**
+     * OK
+     */
+    200: ManagerActivityPage;
+};
+
+export type ManagerActivityResponse = ManagerActivityResponses[keyof ManagerActivityResponses];
+
 export type ManagerAlbumDetailData = {
     body?: never;
     path: {
@@ -15179,6 +15269,31 @@ export type ManagerCloneQualityProfileResponses = {
 };
 
 export type ManagerCloneQualityProfileResponse = ManagerCloneQualityProfileResponses[keyof ManagerCloneQualityProfileResponses];
+
+export type ManagerQueueData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/manager/queue';
+};
+
+export type ManagerQueueErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerQueueError = ManagerQueueErrors[keyof ManagerQueueErrors];
+
+export type ManagerQueueResponses = {
+    /**
+     * OK
+     */
+    200: ManagerQueueView;
+};
+
+export type ManagerQueueResponse = ManagerQueueResponses[keyof ManagerQueueResponses];
 
 export type ManagerRssRunData = {
     body?: never;

@@ -1,25 +1,45 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'manager', middleware: 'admin' })
 
-import { MOCK_LIBRARY_OPTIONS, MOCK_QUEUE } from '~/utils/managerMock'
+import { useQuery, defineQueryOptions } from '@pinia/colada'
+import type { ManagerQueueView, ManagerQueueItemView } from '~~/shared/api/types.gen'
 
-const filter = ref<string[]>([])
+const queueQuery = defineQueryOptions(() => ({
+  key: ['manager', 'queue'],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/manager/queue') as ManagerQueueView
+  },
+  staleTime: 1000 * 10,
+  meta: { prefetch: 'none', sensitivity: 'private' },
+}))
 
-const rows = computed(() => filter.value.length === 0
-  ? MOCK_QUEUE
-  : MOCK_QUEUE.filter(q => filter.value.includes(q.library)))
+const { data, asyncStatus, error, refetch } = useQuery(queueQuery)
 
-const STATUS_META: Record<string, { label: string, state: 'ok' | 'warn' | 'error' | 'idle' }> = {
-  downloading: { label: 'downloading', state: 'ok' },
-  importing: { label: 'importing', state: 'ok' },
-  seeding: { label: 'seeding', state: 'idle' },
-  paused: { label: 'paused', state: 'idle' },
-  stalled: { label: 'stalled', state: 'error' },
+// The queue is live — poll while the page is visible.
+const poll = setInterval(() => {
+  if (document.visibilityState === 'visible') refetch()
+}, 15000)
+onUnmounted(() => clearInterval(poll))
+
+const active = computed(() => (data.value?.items ?? []).filter(i => !i.history))
+const finished = computed(() => (data.value?.items ?? []).filter(i => i.history))
+
+const VERDICT_META: Record<string, { label: string, state: 'ok' | 'warn' | 'error' | 'idle' }> = {
+  would_accept: { label: 'Heya agrees', state: 'ok' },
+  would_reject: { label: 'Heya would reject', state: 'error' },
+  unknown_identity: { label: 'unknown to Heya', state: 'idle' },
+  unmonitored: { label: 'not monitored', state: 'idle' },
+  no_profile: { label: 'no profile', state: 'warn' },
 }
 
-function pct(row: { sizeGb: number, doneGb: number }) {
-  if (row.sizeGb <= 0) return 0
-  return Math.min(100, Math.round((row.doneGb / row.sizeGb) * 100))
+function pct(item: ManagerQueueItemView): number {
+  return Math.min(100, Math.max(0, item.percentage))
+}
+
+function fmtSize(mb: number): string {
+  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
+  return `${Math.round(mb)} MB`
 }
 </script>
 
@@ -28,68 +48,92 @@ function pct(row: { sizeGb: number, doneGb: number }) {
     <SettingsContextHero
       title="Queue"
       icon="cloud-download"
-      eyebrow="Manager · Preview — mock data"
-      description="Everything the download clients are working on, from grab to import. One queue across all libraries and both protocols."
+      eyebrow="Manager · Dry run"
+      description="Everything the download clients are working on — grabbed by your live arr setup — with Heya's shadow verdict beside each: would this pipeline have taken the same release?"
     />
 
-    <div class="q-toolbar">
-      <ManagerLibraryFilter v-model="filter" :options="MOCK_LIBRARY_OPTIONS" />
+    <div v-if="error" class="q-empty">
+      <Icon name="warning" :size="14" /> Couldn't reach the download clients.
+      <button type="button" class="mgr-btn" @click="refetch()">Retry</button>
+    </div>
+    <div v-else-if="asyncStatus === 'loading' && !data" class="q-empty">
+      <span class="mgr-loading" /> Loading queues…
     </div>
 
-    <div class="q-table">
-      <div class="q-head">
-        <span>Release</span>
-        <span>Quality</span>
-        <span class="q-col-progress">Progress</span>
-        <span>Speed / ETA</span>
-        <span>Status</span>
-        <span class="q-col-actions" aria-hidden="true" />
-      </div>
-      <div v-for="row in rows" :key="row.id" class="q-row">
-        <div class="q-release">
-          <div class="q-title">{{ row.title }} <ManagerLibraryChip :library="row.library" /></div>
-          <div class="q-sub">
-            {{ row.subtitle }}
-            <span class="q-via">· {{ row.client }} · {{ row.indexer }}</span>
-          </div>
-        </div>
-        <span class="q-quality">{{ row.quality }}</span>
-        <div class="q-progress">
-          <div class="q-bar" :class="{ stalled: row.status === 'stalled', paused: row.status === 'paused' }">
-            <div class="q-bar-fill" :style="{ width: `${pct(row)}%` }" />
-          </div>
-          <span class="q-progress-text">{{ row.doneGb }} / {{ row.sizeGb }} GB</span>
-        </div>
-        <div class="q-speed">
-          <span>{{ row.speed }}</span>
-          <span class="q-eta">{{ row.eta }}</span>
-        </div>
-        <StatusBadge :state="STATUS_META[row.status]!.state">{{ STATUS_META[row.status]!.label }}</StatusBadge>
-        <div class="q-actions">
-          <AppTooltip :label="row.status === 'paused' ? 'Resume' : 'Pause'">
-            <button type="button" class="q-btn"><Icon :name="row.status === 'paused' ? 'play' : 'pause'" :size="14" /></button>
-          </AppTooltip>
-          <AppTooltip label="Remove & blocklist">
-            <button type="button" class="q-btn danger"><Icon name="trash" :size="14" /></button>
-          </AppTooltip>
-        </div>
-      </div>
-    </div>
+    <template v-else-if="data">
+      <div v-for="err in data.errors ?? []" :key="err" class="mgr-flash err">{{ err }}</div>
 
-    <div v-if="rows.length === 0" class="q-empty">
-      <Icon name="info" :size="14" /> The queue is empty for the selected libraries.
-    </div>
+      <div class="q-table" role="table" aria-label="Active downloads">
+        <div class="q-head">
+          <span>Release</span>
+          <span>Heya verdict</span>
+          <span class="q-col-progress">Progress</span>
+          <span>Status</span>
+        </div>
+        <div v-for="item in active" :key="`${item.client}-${item.nzo_id}`" class="q-row">
+          <div class="q-release">
+            <div class="q-title mono" :title="item.name">{{ item.name }}</div>
+            <div class="q-sub">
+              <template v-if="item.matched_title">
+                <NuxtLink v-if="item.matched_item_id" :to="`/manager/library/${item.matched_library}/${item.matched_item_id}`" class="q-matchlink">{{ item.matched_title }}</NuxtLink>
+                <template v-else>{{ item.matched_title }}</template> ·
+              </template>
+              {{ item.client }} · {{ item.category || 'no category' }}
+            </div>
+          </div>
+          <div class="q-verdict">
+            <AppTooltip v-if="item.verdict_detail" :label="item.verdict_detail">
+              <StatusBadge :state="VERDICT_META[item.verdict]?.state ?? 'idle'">{{ VERDICT_META[item.verdict]?.label ?? item.verdict }}</StatusBadge>
+            </AppTooltip>
+            <StatusBadge v-else :state="VERDICT_META[item.verdict]?.state ?? 'idle'">{{ VERDICT_META[item.verdict]?.label ?? item.verdict }}</StatusBadge>
+          </div>
+          <div class="q-progress">
+            <div class="q-bar"><div class="q-bar-fill" :style="{ width: `${pct(item)}%` }" /></div>
+            <span class="q-progress-text mono">{{ fmtSize(item.size_mb - item.size_left_mb) }} / {{ fmtSize(item.size_mb) }}<template v-if="item.time_left"> · {{ item.time_left }}</template></span>
+          </div>
+          <StatusBadge :state="item.status.toLowerCase() === 'downloading' ? 'ok' : 'idle'">{{ item.status.toLowerCase() }}</StatusBadge>
+        </div>
+      </div>
+      <div v-if="active.length === 0" class="q-empty">
+        <Icon name="info" :size="14" /> Nothing downloading right now.
+      </div>
+
+      <template v-if="finished.length">
+        <h2 class="q-section">Recently completed</h2>
+        <div class="q-table">
+          <div v-for="item in finished" :key="`${item.client}-${item.nzo_id}`" class="q-row done">
+            <div class="q-release">
+              <div class="q-title mono" :title="item.name">{{ item.name }}</div>
+              <div class="q-sub">
+                <template v-if="item.matched_title">
+                  <NuxtLink v-if="item.matched_item_id" :to="`/manager/library/${item.matched_library}/${item.matched_item_id}`" class="q-matchlink">{{ item.matched_title }}</NuxtLink>
+                  <template v-else>{{ item.matched_title }}</template> ·
+                </template>
+                {{ item.client }} · {{ fmtSize(item.size_mb) }}
+                <span v-if="item.fail_message" class="q-fail">· {{ item.fail_message }}</span>
+              </div>
+            </div>
+            <div class="q-verdict">
+              <AppTooltip v-if="item.verdict_detail" :label="item.verdict_detail">
+                <StatusBadge :state="VERDICT_META[item.verdict]?.state ?? 'idle'">{{ VERDICT_META[item.verdict]?.label ?? item.verdict }}</StatusBadge>
+              </AppTooltip>
+              <StatusBadge v-else :state="VERDICT_META[item.verdict]?.state ?? 'idle'">{{ VERDICT_META[item.verdict]?.label ?? item.verdict }}</StatusBadge>
+            </div>
+            <span class="q-when mono">{{ item.completed_at ? new Date(item.completed_at * 1000).toLocaleString() : '' }}</span>
+            <StatusBadge :state="item.status.toLowerCase() === 'completed' ? 'ok' : item.status.toLowerCase() === 'failed' ? 'error' : 'idle'">{{ item.status.toLowerCase() }}</StatusBadge>
+          </div>
+        </div>
+      </template>
+    </template>
   </div>
 </template>
 
 <style scoped>
-.q-toolbar { margin-bottom: 18px; }
-
 .q-table { display: flex; flex-direction: column; gap: 6px; }
 .q-head,
 .q-row {
   display: grid;
-  grid-template-columns: minmax(220px, 2.2fr) 130px minmax(160px, 1.4fr) 110px 120px 76px;
+  grid-template-columns: minmax(260px, 2.4fr) 150px minmax(180px, 1.2fr) 110px;
   gap: 14px;
   align-items: center;
 }
@@ -108,66 +152,29 @@ function pct(row: { sizeGb: number, doneGb: number }) {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
 }
+.q-row.done { opacity: 0.85; }
 
 .q-release { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.q-title {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  font-size: 13.5px; font-weight: 500; color: var(--fg-0);
-}
-.q-sub {
-  font-size: 12px; color: var(--fg-2);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.q-via { color: var(--fg-3); }
-
-.q-quality {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--fg-1);
-}
+.q-title { font-size: 12.5px; color: var(--fg-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.q-sub { font-size: 11.5px; color: var(--fg-2); }
+.q-matchlink { color: var(--gold-bright); text-decoration: none; }
+.q-fail { color: var(--bad); }
 
 .q-progress { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.q-bar {
-  height: 5px;
-  border-radius: 999px;
-  background: rgb(var(--ink) / 0.08);
-  overflow: hidden;
-}
-.q-bar-fill {
-  height: 100%;
-  border-radius: 999px;
-  background: var(--gold);
-  transition: width 0.3s ease;
-}
-.q-bar.stalled .q-bar-fill { background: var(--bad); }
-.q-bar.paused .q-bar-fill { background: var(--fg-3); }
-.q-progress-text {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--fg-3);
-}
+.q-bar { height: 5px; border-radius: 999px; background: rgb(var(--ink) / 0.1); overflow: hidden; }
+.q-bar-fill { height: 100%; border-radius: 999px; background: var(--gold); transition: width 0.4s; }
+.q-progress-text { font-size: 10.5px; color: var(--fg-3); }
+.q-when { font-size: 11px; color: var(--fg-3); }
 
-.q-speed {
-  display: flex; flex-direction: column; gap: 2px;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--fg-1);
+.q-section {
+  font-family: var(--font-display);
+  font-variation-settings: "wdth" 100;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--fg-0);
+  margin: 24px 0 12px;
 }
-.q-eta { color: var(--fg-3); font-size: 10.5px; }
-
-.q-actions { display: flex; gap: 4px; justify-content: flex-end; }
-.q-btn {
-  width: 30px; height: 30px;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: var(--r-sm);
-  background: rgb(var(--ink) / 0.05);
-  border: 1px solid var(--border);
-  color: var(--fg-2);
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s;
-}
-.q-btn:hover { background: rgb(var(--ink) / 0.1); color: var(--fg-0); }
-.q-btn.danger:hover { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
 
 .q-empty {
   display: flex; align-items: center; gap: 8px;
@@ -178,19 +185,11 @@ function pct(row: { sizeGb: number, doneGb: number }) {
   border-radius: var(--r-md);
   margin-top: 6px;
 }
+.mono { font-family: var(--font-mono); }
 
-/* Tablet/phone: collapse the grid into a two-line card. */
 @media (max-width: 960px) {
   .q-head { display: none; }
-  .q-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-    row-gap: 10px;
-  }
-  .q-release { grid-column: 1; }
-  .q-quality { display: none; }
-  .q-progress { grid-column: 1 / -1; order: 3; }
-  .q-speed { grid-row: 1; grid-column: 2; align-items: flex-end; }
-  .q-actions { order: 4; grid-column: 2; }
-  .q-row > :nth-child(5) { order: 4; grid-column: 1; justify-self: start; }
+  .q-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 8px; }
+  .q-progress, .q-when { grid-column: 1 / -1; }
 }
 </style>

@@ -351,6 +351,27 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(page), nil
 		})
 
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/queue", "manager-queue", "Merged download-client queue + recent history, each item annotated with Heya's shadow verdict", "Manager")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[service.ManagerQueueView], error) {
+			view, err := app.ManagerQueue(ctx)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadGateway)
+			}
+			return noStoreJSON(*view), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/activity", "manager-activity", "Pipeline runs feed: RSS sweeps, searches, adds — with per-indexer accounting", "Manager")),
+		func(ctx context.Context, in *struct {
+			Page    int `query:"page" minimum:"1" default:"1"`
+			PerPage int `query:"per_page" minimum:"1" maximum:"100" default:"30"`
+		}) (*JSONOutput[service.ManagerActivityPage], error) {
+			page, err := app.ManagerActivity(ctx, in.Page, in.PerPage)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return noStoreJSON(page), nil
+		})
+
 	huma.Register(api, adminSecured(op(http.MethodPost, "/api/manager/rss/run", "manager-rss-run", "Run an RSS sweep now: ingest recent releases, match monitored items, record dry-run decisions", "Manager")),
 		func(ctx context.Context, _ *struct{}) (*JSONOutput[service.ManagerRSSRunView], error) {
 			view, err := app.RunManagerRSS(ctx, "api")

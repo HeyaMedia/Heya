@@ -355,3 +355,71 @@ func orEmptyStrings(in []string) []string {
 	}
 	return in
 }
+
+// ── Activity feed ────────────────────────────────────────────────────────
+
+type ManagerActivityRun struct {
+	ID         int64                   `json:"id"`
+	Kind       string                  `json:"kind"`
+	Source     string                  `json:"source"`
+	Status     string                  `json:"status"`
+	Partial    bool                    `json:"partial"`
+	Truncated  bool                    `json:"truncated"`
+	Scope      any                     `json:"scope,omitempty"`
+	Stats      any                     `json:"stats,omitempty"`
+	StartedAt  time.Time               `json:"started_at"`
+	FinishedAt *time.Time              `json:"finished_at,omitempty"`
+	Indexers   []ManagerRunIndexerView `json:"indexers"`
+}
+
+type ManagerActivityPage struct {
+	Runs  []ManagerActivityRun `json:"runs"`
+	Total int64                `json:"total"`
+}
+
+// ManagerActivity lists pipeline runs newest-first with their per-indexer
+// accounting — the operational feed.
+func (a *App) ManagerActivity(ctx context.Context, page, perPage int) (ManagerActivityPage, error) {
+	q := sqlc.New(a.db)
+	if perPage <= 0 || perPage > 100 {
+		perPage = 30
+	}
+	if page < 1 {
+		page = 1
+	}
+	rows, err := q.ListManagerRuns(ctx, sqlc.ListManagerRunsParams{
+		Kinds: []string{}, PageLimit: int32(perPage), PageOffset: int32((page - 1) * perPage),
+	})
+	if err != nil {
+		return ManagerActivityPage{}, err
+	}
+	total, err := q.CountManagerRuns(ctx, []string{})
+	if err != nil {
+		return ManagerActivityPage{}, err
+	}
+	out := ManagerActivityPage{Runs: []ManagerActivityRun{}, Total: total}
+	for _, run := range rows {
+		view := ManagerActivityRun{
+			ID: run.ID, Kind: run.Kind, Source: run.Source, Status: run.Status,
+			Partial: run.Partial, Truncated: run.Truncated,
+			StartedAt: run.StartedAt.Time, Indexers: []ManagerRunIndexerView{},
+		}
+		if run.FinishedAt.Valid {
+			t := run.FinishedAt.Time
+			view.FinishedAt = &t
+		}
+		_ = json.Unmarshal(run.Scope, &view.Scope)
+		_ = json.Unmarshal(run.Stats, &view.Stats)
+		indexers, err := q.ListManagerRunIndexers(ctx, run.ID)
+		if err == nil {
+			for _, idx := range indexers {
+				view.Indexers = append(view.Indexers, ManagerRunIndexerView{
+					Indexer: idx.IndexerName, Domain: idx.Domain, Status: idx.Status,
+					Fetched: int(idx.Fetched), DurationMs: idx.DurationMs, Error: idx.Error,
+				})
+			}
+		}
+		out.Runs = append(out.Runs, view)
+	}
+	return out, nil
+}

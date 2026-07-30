@@ -11,6 +11,28 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const appendManagerQueueVerdictHistory = `-- name: AppendManagerQueueVerdictHistory :exec
+INSERT INTO manager_queue_verdict_history (verdict_id, verdict, rejections, input_hash)
+VALUES ($1, $2, $3, $4)
+`
+
+type AppendManagerQueueVerdictHistoryParams struct {
+	VerdictID  int64  `json:"verdict_id"`
+	Verdict    string `json:"verdict"`
+	Rejections []byte `json:"rejections"`
+	InputHash  string `json:"input_hash"`
+}
+
+func (q *Queries) AppendManagerQueueVerdictHistory(ctx context.Context, arg AppendManagerQueueVerdictHistoryParams) error {
+	_, err := q.db.Exec(ctx, appendManagerQueueVerdictHistory,
+		arg.VerdictID,
+		arg.Verdict,
+		arg.Rejections,
+		arg.InputHash,
+	)
+	return err
+}
+
 const countManagerDecisionsByItem = `-- name: CountManagerDecisionsByItem :one
 SELECT count(*) FROM manager_decisions WHERE media_item_id = $1
 `
@@ -489,6 +511,39 @@ func (q *Queries) GetManagerPolicySnapshot(ctx context.Context, policyHash strin
 	row := q.db.QueryRow(ctx, getManagerPolicySnapshot, policyHash)
 	var i ManagerPolicySnapshot
 	err := row.Scan(&i.PolicyHash, &i.Snapshot, &i.CreatedAt)
+	return i, err
+}
+
+const getManagerQueueVerdict = `-- name: GetManagerQueueVerdict :one
+SELECT id, download_client_id, client_name, nzo_id, release_title, category, sab_status_latest, first_seen_at, last_seen_at, parsed, matched_media_item_id, matched_title, verdict, rejections, policy_hash, evaluation_input_hash FROM manager_queue_verdicts WHERE download_client_id = $1 AND nzo_id = $2
+`
+
+type GetManagerQueueVerdictParams struct {
+	DownloadClientID pgtype.Int8 `json:"download_client_id"`
+	NzoID            string      `json:"nzo_id"`
+}
+
+func (q *Queries) GetManagerQueueVerdict(ctx context.Context, arg GetManagerQueueVerdictParams) (ManagerQueueVerdict, error) {
+	row := q.db.QueryRow(ctx, getManagerQueueVerdict, arg.DownloadClientID, arg.NzoID)
+	var i ManagerQueueVerdict
+	err := row.Scan(
+		&i.ID,
+		&i.DownloadClientID,
+		&i.ClientName,
+		&i.NzoID,
+		&i.ReleaseTitle,
+		&i.Category,
+		&i.SabStatusLatest,
+		&i.FirstSeenAt,
+		&i.LastSeenAt,
+		&i.Parsed,
+		&i.MatchedMediaItemID,
+		&i.MatchedTitle,
+		&i.Verdict,
+		&i.Rejections,
+		&i.PolicyHash,
+		&i.EvaluationInputHash,
+	)
 	return i, err
 }
 
@@ -1113,6 +1168,98 @@ func (q *Queries) UpdateManagerReleaseSighting(ctx context.Context, arg UpdateMa
 		arg.PolicyHash,
 	)
 	return err
+}
+
+const upsertManagerQueueVerdict = `-- name: UpsertManagerQueueVerdict :one
+
+INSERT INTO manager_queue_verdicts (download_client_id, client_name, nzo_id, release_title, category, sab_status_latest, parsed, matched_media_item_id, matched_title, verdict, rejections, policy_hash, evaluation_input_hash)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+ON CONFLICT (download_client_id, nzo_id) DO UPDATE
+SET last_seen_at = now(), sab_status_latest = EXCLUDED.sab_status_latest,
+    release_title = EXCLUDED.release_title, category = EXCLUDED.category,
+    parsed = EXCLUDED.parsed,
+    matched_media_item_id = EXCLUDED.matched_media_item_id,
+    matched_title = EXCLUDED.matched_title,
+    verdict = EXCLUDED.verdict, rejections = EXCLUDED.rejections,
+    policy_hash = EXCLUDED.policy_hash,
+    evaluation_input_hash = EXCLUDED.evaluation_input_hash
+RETURNING id, download_client_id, client_name, nzo_id, release_title, category, sab_status_latest, first_seen_at, last_seen_at, parsed, matched_media_item_id, matched_title, verdict, rejections, policy_hash, evaluation_input_hash, (xmax = 0) AS inserted
+`
+
+type UpsertManagerQueueVerdictParams struct {
+	DownloadClientID    pgtype.Int8 `json:"download_client_id"`
+	ClientName          string      `json:"client_name"`
+	NzoID               string      `json:"nzo_id"`
+	ReleaseTitle        string      `json:"release_title"`
+	Category            string      `json:"category"`
+	SabStatusLatest     string      `json:"sab_status_latest"`
+	Parsed              []byte      `json:"parsed"`
+	MatchedMediaItemID  pgtype.Int8 `json:"matched_media_item_id"`
+	MatchedTitle        string      `json:"matched_title"`
+	Verdict             string      `json:"verdict"`
+	Rejections          []byte      `json:"rejections"`
+	PolicyHash          pgtype.Text `json:"policy_hash"`
+	EvaluationInputHash string      `json:"evaluation_input_hash"`
+}
+
+type UpsertManagerQueueVerdictRow struct {
+	ID                  int64              `json:"id"`
+	DownloadClientID    pgtype.Int8        `json:"download_client_id"`
+	ClientName          string             `json:"client_name"`
+	NzoID               string             `json:"nzo_id"`
+	ReleaseTitle        string             `json:"release_title"`
+	Category            string             `json:"category"`
+	SabStatusLatest     string             `json:"sab_status_latest"`
+	FirstSeenAt         pgtype.Timestamptz `json:"first_seen_at"`
+	LastSeenAt          pgtype.Timestamptz `json:"last_seen_at"`
+	Parsed              []byte             `json:"parsed"`
+	MatchedMediaItemID  pgtype.Int8        `json:"matched_media_item_id"`
+	MatchedTitle        string             `json:"matched_title"`
+	Verdict             string             `json:"verdict"`
+	Rejections          []byte             `json:"rejections"`
+	PolicyHash          pgtype.Text        `json:"policy_hash"`
+	EvaluationInputHash string             `json:"evaluation_input_hash"`
+	Inserted            bool               `json:"inserted"`
+}
+
+// ── Queue verdicts ───────────────────────────────────────────────────────
+func (q *Queries) UpsertManagerQueueVerdict(ctx context.Context, arg UpsertManagerQueueVerdictParams) (UpsertManagerQueueVerdictRow, error) {
+	row := q.db.QueryRow(ctx, upsertManagerQueueVerdict,
+		arg.DownloadClientID,
+		arg.ClientName,
+		arg.NzoID,
+		arg.ReleaseTitle,
+		arg.Category,
+		arg.SabStatusLatest,
+		arg.Parsed,
+		arg.MatchedMediaItemID,
+		arg.MatchedTitle,
+		arg.Verdict,
+		arg.Rejections,
+		arg.PolicyHash,
+		arg.EvaluationInputHash,
+	)
+	var i UpsertManagerQueueVerdictRow
+	err := row.Scan(
+		&i.ID,
+		&i.DownloadClientID,
+		&i.ClientName,
+		&i.NzoID,
+		&i.ReleaseTitle,
+		&i.Category,
+		&i.SabStatusLatest,
+		&i.FirstSeenAt,
+		&i.LastSeenAt,
+		&i.Parsed,
+		&i.MatchedMediaItemID,
+		&i.MatchedTitle,
+		&i.Verdict,
+		&i.Rejections,
+		&i.PolicyHash,
+		&i.EvaluationInputHash,
+		&i.Inserted,
+	)
+	return i, err
 }
 
 const upsertManagerRSSCursor = `-- name: UpsertManagerRSSCursor :exec

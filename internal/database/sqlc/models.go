@@ -725,6 +725,34 @@ type ManagerQualityProfile struct {
 	Language          string             `json:"language"`
 }
 
+type ManagerQueueVerdict struct {
+	ID                  int64              `json:"id"`
+	DownloadClientID    pgtype.Int8        `json:"download_client_id"`
+	ClientName          string             `json:"client_name"`
+	NzoID               string             `json:"nzo_id"`
+	ReleaseTitle        string             `json:"release_title"`
+	Category            string             `json:"category"`
+	SabStatusLatest     string             `json:"sab_status_latest"`
+	FirstSeenAt         pgtype.Timestamptz `json:"first_seen_at"`
+	LastSeenAt          pgtype.Timestamptz `json:"last_seen_at"`
+	Parsed              []byte             `json:"parsed"`
+	MatchedMediaItemID  pgtype.Int8        `json:"matched_media_item_id"`
+	MatchedTitle        string             `json:"matched_title"`
+	Verdict             string             `json:"verdict"`
+	Rejections          []byte             `json:"rejections"`
+	PolicyHash          pgtype.Text        `json:"policy_hash"`
+	EvaluationInputHash string             `json:"evaluation_input_hash"`
+}
+
+type ManagerQueueVerdictHistory struct {
+	ID          int64              `json:"id"`
+	VerdictID   int64              `json:"verdict_id"`
+	Verdict     string             `json:"verdict"`
+	Rejections  []byte             `json:"rejections"`
+	InputHash   string             `json:"input_hash"`
+	EvaluatedAt pgtype.Timestamptz `json:"evaluated_at"`
+}
+
 type ManagerRelease struct {
 	ID             int64              `json:"id"`
 	IndexerID      pgtype.Int8        `json:"indexer_id"`

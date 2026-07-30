@@ -169,3 +169,26 @@ ORDER BY id;
 
 -- name: GetManagerRelease :one
 SELECT * FROM manager_releases WHERE id = $1;
+
+-- ── Queue verdicts ───────────────────────────────────────────────────────
+
+-- name: UpsertManagerQueueVerdict :one
+INSERT INTO manager_queue_verdicts (download_client_id, client_name, nzo_id, release_title, category, sab_status_latest, parsed, matched_media_item_id, matched_title, verdict, rejections, policy_hash, evaluation_input_hash)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+ON CONFLICT (download_client_id, nzo_id) DO UPDATE
+SET last_seen_at = now(), sab_status_latest = EXCLUDED.sab_status_latest,
+    release_title = EXCLUDED.release_title, category = EXCLUDED.category,
+    parsed = EXCLUDED.parsed,
+    matched_media_item_id = EXCLUDED.matched_media_item_id,
+    matched_title = EXCLUDED.matched_title,
+    verdict = EXCLUDED.verdict, rejections = EXCLUDED.rejections,
+    policy_hash = EXCLUDED.policy_hash,
+    evaluation_input_hash = EXCLUDED.evaluation_input_hash
+RETURNING *, (xmax = 0) AS inserted;
+
+-- name: GetManagerQueueVerdict :one
+SELECT * FROM manager_queue_verdicts WHERE download_client_id = $1 AND nzo_id = $2;
+
+-- name: AppendManagerQueueVerdictHistory :exec
+INSERT INTO manager_queue_verdict_history (verdict_id, verdict, rejections, input_hash)
+VALUES ($1, $2, $3, $4);
