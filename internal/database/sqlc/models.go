@@ -850,6 +850,45 @@ type MatchCandidate struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type MaterializedMediaItemCard struct {
+	ID                  int64              `json:"id"`
+	LibraryID           int64              `json:"library_id"`
+	MediaType           MediaType          `json:"media_type"`
+	Title               string             `json:"title"`
+	SortTitle           string             `json:"sort_title"`
+	Year                string             `json:"year"`
+	Description         string             `json:"description"`
+	PosterPath          string             `json:"poster_path"`
+	BackdropPath        string             `json:"backdrop_path"`
+	ExternalIds         []byte             `json:"external_ids"`
+	Slug                string             `json:"slug"`
+	Homepage            string             `json:"homepage"`
+	Tagline             string             `json:"tagline"`
+	OriginalTitle       string             `json:"original_title"`
+	OriginalLanguage    string             `json:"original_language"`
+	Status              string             `json:"status"`
+	ProviderKind        string             `json:"provider_kind"`
+	HeyaSlug            string             `json:"heya_slug"`
+	HeyaEnrichedAt      pgtype.Timestamptz `json:"heya_enriched_at"`
+	MetadataRefreshedAt pgtype.Timestamptz `json:"metadata_refreshed_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	SearchVector        interface{}        `json:"search_vector"`
+	MatchedAt           pgtype.Timestamptz `json:"matched_at"`
+	EnrichmentStatus    string             `json:"enrichment_status"`
+	BaseEnrichedAt      pgtype.Timestamptz `json:"base_enriched_at"`
+	PeopleEnrichedAt    pgtype.Timestamptz `json:"people_enriched_at"`
+	ExtrasEnrichedAt    pgtype.Timestamptz `json:"extras_enriched_at"`
+	ImagesEnrichedAt    pgtype.Timestamptz `json:"images_enriched_at"`
+	StructureEnrichedAt pgtype.Timestamptz `json:"structure_enriched_at"`
+	LastEnrichAttemptAt pgtype.Timestamptz `json:"last_enrich_attempt_at"`
+	LastEnrichError     string             `json:"last_enrich_error"`
+	FieldProvenance     []byte             `json:"field_provenance"`
+	MatchConfidence     float32            `json:"match_confidence"`
+	SlugLocked          bool               `json:"slug_locked"`
+	PublicID            uuid.UUID          `json:"public_id"`
+}
+
 type MediaAsset struct {
 	ID          int64              `json:"id"`
 	MediaItemID int64              `json:"media_item_id"`
@@ -927,6 +966,8 @@ type MediaItem struct {
 	SlugLocked          bool               `json:"slug_locked"`
 	Monitored           bool               `json:"monitored"`
 	QualityProfileID    pgtype.Int8        `json:"quality_profile_id"`
+	MaterializedAt      pgtype.Timestamptz `json:"materialized_at"`
+	AddedSource         string             `json:"added_source"`
 }
 
 type MediaItemCard struct {

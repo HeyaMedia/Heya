@@ -440,3 +440,24 @@ func TestTVMultiSeasonRejected(t *testing.T) {
 		t.Fatalf("code = %s, want multi_season", code)
 	}
 }
+
+func TestAboveProfileQualityIsSatisfied(t *testing.T) {
+	// A 2160p disc under a 1080p profile whose ladder has no 2160p entries:
+	// the file is ABOVE the want — candidates must bounce off cutoff_met,
+	// and the unit must read already_satisfied, never cutoff-unmet.
+	profile := movieProfile()
+	profile.Items = profile.Items[4:] // ladder starts at bluray-1080p — no 2160p slots
+	existing := ExistingFile{
+		Quality: "bluray-2160p", PositionFound: false,
+		RevisionVersion: 1, Provenance: "parsed_name",
+	}
+	target := movieTarget(profile, []ExistingFile{existing}, nil)
+	res := Evaluate(target, []Candidate{cand(0, "Dark.Harvest.2023.1080p.BluRay.x264-GROUP", 12)})
+	eval := unitEval(t, res, 0, "movie:42")
+	if code := firstUnitRejection(t, eval); code != CodeCutoffMet {
+		t.Fatalf("code = %s, want cutoff_met (existing 2160p exceeds the 1080p want)", code)
+	}
+	if res.Units[0].Verdict != VerdictAlreadySatisfied {
+		t.Fatalf("verdict = %s, want already_satisfied", res.Units[0].Verdict)
+	}
+}

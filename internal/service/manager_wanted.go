@@ -266,11 +266,14 @@ func (a *App) wantedCutoff(ctx context.Context, p ManagerWantedParams) (ManagerW
 		case best.Uncertain:
 			shortfall = "current quality uncertain (inferred from a mute filename)"
 		case !best.PositionFound:
+			if meets, ok := decision.QualityMeetsCutoffCanonically("movie", profile, best.Quality); ok && meets {
+				continue // above the want (e.g. a 2160p disc under a 1080p profile) — satisfied
+			}
 			qualityLabel := best.Quality
 			if qualityLabel == "" {
 				qualityLabel = "unknown"
 			}
-			shortfall = fmt.Sprintf("current quality %q has no slot in profile %q", qualityLabel, profile.Name)
+			shortfall = fmt.Sprintf("current quality %q is below profile %q (no ladder slot)", qualityLabel, profile.Name)
 		case cutoffFound && best.Position > cutoffPos:
 			shortfall = fmt.Sprintf("below quality cutoff %s", profile.Cutoff)
 		case best.FormatScore < profile.CutoffFormatScore:

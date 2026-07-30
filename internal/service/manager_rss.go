@@ -640,6 +640,11 @@ func targetIsWanted(target decision.Target) bool {
 		}
 		for _, file := range unit.Existing {
 			if !file.PositionFound {
+				// A known quality above the profile's cutoff (canonically)
+				// is satisfied, not wanted; only unknown quality is wanted.
+				if meets, ok := decision.QualityMeetsCutoffCanonically(target.Domain, target.Profile, file.Quality); ok && meets {
+					continue
+				}
 				return true
 			}
 			if cutoffFound && file.Position > cutoffPos {

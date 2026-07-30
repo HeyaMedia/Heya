@@ -313,8 +313,15 @@ func evaluateUnit(profile *Profile, unit *Unit, cand *CandidateResult) *UnitEval
 // the format cutoff, and requires strictly-greater plus the increment.
 func upgradeCheck(profile *Profile, cand *CandidateResult, existing ExistingFile) *Rejection {
 	if !existing.PositionFound {
-		// The existing file's quality has no slot in this profile — treat
-		// as upgradeable (arr treats unknown existing quality as lowest).
+		// No slot in this profile's ladder. A KNOWN quality that canonically
+		// meets or exceeds the cutoff is above the want — a 2160p disc under
+		// a 1080p profile is satisfied, not upgradeable. Only a genuinely
+		// unknown quality is treated as lowest (arr semantics).
+		if meets, ok := QualityMeetsCutoffCanonically(profile.Domain, profile, existing.Quality); ok && meets {
+			return &Rejection{Code: CodeCutoffMet, Stage: "upgrade",
+				Params:  map[string]any{"existing": existing.Quality, "cutoff": profile.Cutoff},
+				Message: fmt.Sprintf("existing %s already meets or exceeds the cutoff %s", existing.Quality, profile.Cutoff)}
+		}
 		return nil
 	}
 	cutoffPos, cutoffFound := profile.CutoffPosition()
