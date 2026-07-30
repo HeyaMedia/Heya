@@ -14463,8 +14463,21 @@
           "already_in_library": {
             "type": "boolean"
           },
+          "confidence": {
+            "format": "double",
+            "type": "number"
+          },
           "description": {
             "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/SearchEvidence"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "existing_item_id": {
             "format": "int64",
@@ -14482,11 +14495,20 @@
           "poster_url": {
             "type": "string"
           },
+          "presentation": {
+            "$ref": "#/components/schemas/SearchPresentation"
+          },
           "provider_id": {
             "type": "string"
           },
           "provider_name": {
             "type": "string"
+          },
+          "recommendation": {
+            "type": "string"
+          },
+          "requires_review": {
+            "type": "boolean"
           },
           "title": {
             "type": "string"
@@ -14961,6 +14983,60 @@
         ],
         "type": "object"
       },
+      "ManagerQueueFileView": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "Path relative to the download folder",
+            "type": "string"
+          },
+          "size_bytes": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "size_bytes"
+        ],
+        "type": "object"
+      },
+      "ManagerQueueFilesView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerQueueFilesView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "error": {
+            "description": "Set when the storage path can't be reached from this server",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerQueueFileView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "path": {
+            "description": "Mapped local folder (or file) of the completed download",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "files"
+        ],
+        "type": "object"
+      },
       "ManagerQueueItemView": {
         "additionalProperties": false,
         "properties": {
@@ -14969,6 +15045,10 @@
           },
           "client": {
             "type": "string"
+          },
+          "client_id": {
+            "format": "int64",
+            "type": "integer"
           },
           "completed_at": {
             "format": "int64",
@@ -14989,6 +15069,9 @@
           "history": {
             "type": "boolean"
           },
+          "library_state": {
+            "type": "string"
+          },
           "matched_item_id": {
             "format": "int64",
             "type": "integer"
@@ -15006,12 +15089,25 @@
           "nzo_id": {
             "type": "string"
           },
+          "parsed": {
+            "description": "Parsed identity label, e.g. \"the ark S03E01\" or \"heat (1995)\"",
+            "type": "string"
+          },
           "percentage": {
             "format": "int64",
             "type": "integer"
           },
           "quality": {
             "type": "string"
+          },
+          "rejections": {
+            "items": {
+              "$ref": "#/components/schemas/Rejection"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "score": {
             "format": "int32",
@@ -15040,6 +15136,7 @@
         },
         "required": [
           "client",
+          "client_id",
           "nzo_id",
           "name",
           "category",
@@ -21214,6 +21311,30 @@
         ],
         "type": "object"
       },
+      "Rejection": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "stage": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "stage",
+          "message"
+        ],
+        "type": "object"
+      },
       "RemoteConfigPayload": {
         "additionalProperties": false,
         "properties": {
@@ -22268,6 +22389,182 @@
         ],
         "type": "object"
       },
+      "SearchPresentation": {
+        "additionalProperties": false,
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "area": {
+            "type": "string"
+          },
+          "artists": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "authors": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "begin_date": {
+            "type": "string"
+          },
+          "catalogue": {
+            "type": "string"
+          },
+          "countries": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "country": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "duration_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "edition_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "end_date": {
+            "type": "string"
+          },
+          "ended": {
+            "type": "boolean"
+          },
+          "episode_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "fan_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "genres": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "image_height": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "image_width": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "isbns": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "languages": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "matched_releases": {
+            "items": {
+              "$ref": "#/components/schemas/SearchRelease"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "network": {
+            "type": "string"
+          },
+          "original_title": {
+            "type": "string"
+          },
+          "popularity": {
+            "format": "double",
+            "type": "number"
+          },
+          "release_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "season": {
+            "type": "string"
+          },
+          "secondary_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "sort_name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "studios": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "SearchProductionCompaniesByNameRow": {
         "additionalProperties": false,
         "properties": {
@@ -22286,6 +22583,25 @@
           "id",
           "name",
           "logo_path"
+        ],
+        "type": "object"
+      },
+      "SearchRelease": {
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "year": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "title"
         ],
         "type": "object"
       },
@@ -22373,6 +22689,9 @@
           },
           "poster_url": {
             "type": "string"
+          },
+          "presentation": {
+            "$ref": "#/components/schemas/SearchPresentation"
           },
           "provider_id": {
             "type": "string"
@@ -37532,6 +37851,128 @@
           }
         ],
         "summary": "Merged download-client queue + recent history, each item annotated with Heya's shadow verdict",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
+    "/api/manager/queue/{client_id}/{nzo_id}": {
+      "delete": {
+        "operationId": "manager-queue-delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "nzo_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "true removes a history record; false cancels an active download (and deletes its partial files)",
+            "explode": false,
+            "in": "query",
+            "name": "history",
+            "schema": {
+              "description": "true removes a history record; false cancels an active download (and deletes its partial files)",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Remove an entry from a download client's queue or history",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
+    "/api/manager/queue/{client_id}/{nzo_id}/files": {
+      "get": {
+        "operationId": "manager-queue-files",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "nzo_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerQueueFilesView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "List the files a finished download produced on disk",
         "tags": [
           "Manager"
         ]

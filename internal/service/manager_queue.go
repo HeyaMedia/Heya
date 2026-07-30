@@ -6,7 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/karbowiak/heya/internal/database/sqlc"
@@ -22,6 +28,7 @@ import (
 // with the release the live arrs grabbed.
 type ManagerQueueItemView struct {
 	Client      string  `json:"client"`
+	ClientID    int64   `json:"client_id"`
 	NzoID       string  `json:"nzo_id"`
 	Name        string  `json:"name"`
 	Category    string  `json:"category"`
@@ -34,11 +41,19 @@ type ManagerQueueItemView struct {
 	CompletedAt int64   `json:"completed_at,omitempty"`
 	FailMessage string  `json:"fail_message,omitempty"`
 
+	// What the auto-tagger made of the release name, and where it landed.
+	Parsed         string `json:"parsed,omitempty" doc:"Parsed identity label, e.g. \"the ark S03E01\" or \"heat (1995)\""`
 	MatchedItemID  *int64 `json:"matched_item_id,omitempty"`
 	MatchedTitle   string `json:"matched_title,omitempty"`
 	MatchedLibrary int64  `json:"matched_library,omitempty"`
-	Verdict        string `json:"verdict"`
-	VerdictDetail  string `json:"verdict_detail,omitempty"`
+	// LibraryState says what the covered units look like on disk right now:
+	// missing (nothing), partial (some), have (all) — with the verdict this
+	// answers "fills a gap" vs "upgrade for something we have".
+	LibraryState  string `json:"library_state,omitempty"`
+	Verdict       string `json:"verdict"`
+	VerdictDetail string `json:"verdict_detail,omitempty"`
+	// Rejections carries every reason, not just the headline detail.
+	Rejections []decision.Rejection `json:"rejections,omitempty"`
 
 	// What the release parses to — quality always (parse is profile-free),
 	// score + matched format labels only when a profile evaluation ran.
@@ -60,7 +75,9 @@ func (a *App) ManagerQueue(ctx context.Context) (*ManagerQueueView, error) {
 	if err != nil {
 		return nil, err
 	}
-	index, _, err := a.buildRSSIdentityIndex(ctx)
+	// The queue recognizes against the WHOLE library — foreign downloads
+	// should resolve to their item even when it isn't monitored.
+	index, _, err := a.buildIdentityIndex(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +98,7 @@ func (a *App) ManagerQueue(ctx context.Context) (*ManagerQueueView, error) {
 		if queue != nil {
 			for _, slot := range queue.Slots {
 				item := ManagerQueueItemView{
-					Client: client.Name, NzoID: slot.NzoID, Name: slot.Filename,
+					Client: client.Name, ClientID: client.ID, NzoID: slot.NzoID, Name: slot.Filename,
 					Category: slot.Category, Status: slot.Status,
 					SizeMB: parseSABFloat(slot.SizeMB), SizeLeftMB: parseSABFloat(slot.SizeLeftMB),
 					Percentage: int(parseSABFloat(slot.Percentage)), TimeLeft: slot.TimeLeft,
@@ -93,7 +110,7 @@ func (a *App) ManagerQueue(ctx context.Context) (*ManagerQueueView, error) {
 		if herr == nil {
 			for _, slot := range history {
 				item := ManagerQueueItemView{
-					Client: client.Name, NzoID: slot.NzoID, Name: slot.Name,
+					Client: client.Name, ClientID: client.ID, NzoID: slot.NzoID, Name: slot.Name,
 					Category: slot.Category, Status: slot.Status,
 					SizeMB: float64(slot.Bytes) / (1024 * 1024), Percentage: 100,
 					History: true, CompletedAt: slot.Completed, FailMessage: slot.FailMessage,
@@ -125,8 +142,15 @@ func (a *App) annotateQueueItem(
 	show := video.FilenameParseShow(item.Name)
 	isTV := len(show.Seasons) > 0 || len(show.EpisodeNumbers) > 0 || show.FullSeason
 	parsedTitle := show.Title
-	if !isTV {
-		parsedTitle = video.FilenameParseMovie(item.Name).Title
+	if isTV {
+		item.Parsed = parsedTitle + " " + tvUnitLabel(show.Seasons, show.EpisodeNumbers, show.FullSeason)
+	} else {
+		parsed := video.FilenameParseMovie(item.Name)
+		parsedTitle = parsed.Title
+		item.Parsed = parsedTitle
+		if parsed.Year != "" {
+			item.Parsed = fmt.Sprintf("%s (%s)", parsedTitle, parsed.Year)
+		}
 	}
 	item.Quality = formats.QualityKey(formats.ParseVideoRelease(item.Name, int64(item.SizeMB*1024*1024), isTV))
 	normalized := matcher.NormalizeTitle(parsedTitle)
@@ -173,6 +197,10 @@ func (a *App) annotateQueueItem(
 				IndexerName: "queue", IndexerPriority: 25,
 			}})
 			verdict = "would_reject"
+			existingByUnit := map[string]bool{}
+			for _, unit := range target.Units {
+				existingByUnit[unit.Key] = len(unit.Existing) > 0
+			}
 			for _, cand := range result.Candidates {
 				if cand.QualityKey != "" {
 					item.Quality = cand.QualityKey
@@ -183,7 +211,12 @@ func (a *App) annotateQueueItem(
 					rejections = cand.RunRejections
 					detail = cand.RunRejections[0].Message
 				}
-				for _, eval := range cand.PerUnit {
+				covered, have := 0, 0
+				for key, eval := range cand.PerUnit {
+					covered++
+					if existingByUnit[key] {
+						have++
+					}
 					if eval.Acceptable {
 						verdict = "would_accept"
 						detail = ""
@@ -192,13 +225,195 @@ func (a *App) annotateQueueItem(
 						detail = eval.Rejections[0].Message
 					}
 				}
+				switch {
+				case covered == 0:
+				case have == 0:
+					item.LibraryState = "missing"
+				case have == covered:
+					item.LibraryState = "have"
+				default:
+					item.LibraryState = "partial"
+				}
 			}
+		}
+	}
+	// A matched-but-unmonitored item keeps its evaluation facts (quality,
+	// score, library state — the modal shows them for reference), but the
+	// verdict is honest: Heya wouldn't act on an unmonitored item.
+	if matchedRef != nil && !matchedRef.Monitored {
+		verdict = "unmonitored"
+		if detail == "" {
+			detail = "matched, but the item is not monitored — Heya wouldn't act on it"
 		}
 	}
 	item.Verdict = verdict
 	item.VerdictDetail = detail
+	item.Rejections = rejections
 
 	a.persistQueueVerdict(ctx, q, client, item, policyHash, rejections)
+}
+
+// tvUnitLabel renders the parsed episode scope: "S03", "S03E01", "S03E01-E03".
+func tvUnitLabel(seasons, episodes []int, fullSeason bool) string {
+	if len(seasons) == 0 {
+		if len(episodes) > 0 {
+			return fmt.Sprintf("E%02d", episodes[0])
+		}
+		return ""
+	}
+	label := fmt.Sprintf("S%02d", seasons[0])
+	if fullSeason || len(episodes) == 0 {
+		return label
+	}
+	label += fmt.Sprintf("E%02d", episodes[0])
+	if len(episodes) > 1 {
+		label += fmt.Sprintf("-E%02d", episodes[len(episodes)-1])
+	}
+	return label
+}
+
+// ManagerQueueFilesView lists what a finished download actually produced on
+// disk — the client's storage path mapped into this server's filesystem.
+type ManagerQueueFilesView struct {
+	Path  string                 `json:"path" doc:"Mapped local folder (or file) of the completed download"`
+	Files []ManagerQueueFileView `json:"files"`
+	Error string                 `json:"error,omitempty" doc:"Set when the storage path can't be reached from this server"`
+}
+
+type ManagerQueueFileView struct {
+	Name      string `json:"name" doc:"Path relative to the download folder"`
+	SizeBytes int64  `json:"size_bytes"`
+}
+
+// ManagerQueueFiles resolves a history entry's storage path through the
+// client's path mappings and lists its files. The walk runs behind a
+// timeout: a stale network mount hangs on stat, and that must degrade to an
+// honest error instead of wedging the request.
+func (a *App) ManagerQueueFiles(ctx context.Context, clientID int64, nzoID string) (*ManagerQueueFilesView, error) {
+	q := sqlc.New(a.db)
+	client, err := q.GetManagerDownloadClient(ctx, clientID)
+	if err != nil {
+		return nil, fmt.Errorf("download client %d: %w", clientID, err)
+	}
+	if client.Kind != "sabnzbd" {
+		return nil, fmt.Errorf("download client %q: file listing not supported for kind %q", client.Name, client.Kind)
+	}
+	sab := sabnzbd.New(client.BaseUrl, client.ApiKey)
+	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	history, err := sab.History(cctx, 200)
+	cancel()
+	if err != nil {
+		return nil, err
+	}
+	var storage string
+	for _, slot := range history {
+		if slot.NzoID == nzoID {
+			storage = slot.Storage
+			break
+		}
+	}
+	if storage == "" {
+		return nil, fmt.Errorf("history entry %q: %w", nzoID, pgx.ErrNoRows)
+	}
+
+	var mappings []ManagerPathMapping
+	_ = json.Unmarshal(client.PathMappings, &mappings)
+	local := mapClientPath(storage, mappings)
+	view := &ManagerQueueFilesView{Path: local, Files: []ManagerQueueFileView{}}
+
+	type listResult struct {
+		files []ManagerQueueFileView
+		err   error
+	}
+	done := make(chan listResult, 1)
+	go func() { // the goroutine may leak on a truly wedged mount — better than the request
+		files, lerr := listDownloadFiles(local)
+		done <- listResult{files, lerr}
+	}()
+	select {
+	case res := <-done:
+		if res.err != nil {
+			view.Error = res.err.Error()
+			return view, nil
+		}
+		view.Files = res.files
+	case <-time.After(4 * time.Second):
+		view.Error = "storage path not reachable from this server (timed out)"
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return view, nil
+}
+
+// mapClientPath rewrites a download-client path into this server's
+// filesystem via the client's configured mappings (longest prefix wins).
+func mapClientPath(remote string, mappings []ManagerPathMapping) string {
+	best := ""
+	local := remote
+	for _, m := range mappings {
+		if m.Remote != "" && strings.HasPrefix(remote, m.Remote) && len(m.Remote) > len(best) {
+			best = m.Remote
+			local = m.Local + strings.TrimPrefix(remote, m.Remote)
+		}
+	}
+	return local
+}
+
+func listDownloadFiles(root string) ([]ManagerQueueFileView, error) {
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return []ManagerQueueFileView{{Name: filepath.Base(root), SizeBytes: info.Size()}}, nil
+	}
+	const maxEntries = 500
+	files := []ManagerQueueFileView{}
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, werr error) error {
+		if werr != nil {
+			return nil //nolint:nilerr // unreadable subpaths are skipped, not fatal
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, rerr := filepath.Rel(root, path)
+		if rerr != nil {
+			rel = d.Name()
+		}
+		var size int64
+		if fi, ierr := d.Info(); ierr == nil {
+			size = fi.Size()
+		}
+		files = append(files, ManagerQueueFileView{Name: rel, SizeBytes: size})
+		if len(files) >= maxEntries {
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
+	return files, err
+}
+
+// ManagerQueueDelete removes one entry from a download client's queue or
+// history. Queue deletions also drop the partially-downloaded files;
+// history deletions only remove the record. The shadow-verdict ledger keeps
+// its rows — accounting survives the cleanup.
+func (a *App) ManagerQueueDelete(ctx context.Context, clientID int64, nzoID string, history bool) error {
+	q := sqlc.New(a.db)
+	client, err := q.GetManagerDownloadClient(ctx, clientID)
+	if err != nil {
+		return fmt.Errorf("download client %d: %w", clientID, err)
+	}
+	if client.Kind != "sabnzbd" {
+		return fmt.Errorf("download client %q: delete not supported for kind %q", client.Name, client.Kind)
+	}
+	sab := sabnzbd.New(client.BaseUrl, client.ApiKey)
+	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if history {
+		return sab.DeleteHistoryItem(cctx, nzoID)
+	}
+	return sab.DeleteQueueItem(cctx, nzoID)
 }
 
 func (a *App) persistQueueVerdict(

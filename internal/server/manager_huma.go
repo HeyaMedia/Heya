@@ -507,6 +507,30 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(*view), nil
 		})
 
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/queue/{client_id}/{nzo_id}/files", "manager-queue-files", "List the files a finished download produced on disk", "Manager")),
+		func(ctx context.Context, in *struct {
+			ClientID int64  `path:"client_id"`
+			NzoID    string `path:"nzo_id" maxLength:"128"`
+		}) (*JSONOutput[service.ManagerQueueFilesView], error) {
+			view, err := app.ManagerQueueFiles(ctx, in.ClientID, in.NzoID)
+			if err != nil {
+				return nil, humaServiceError(err)
+			}
+			return noStoreJSON(*view), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodDelete, "/api/manager/queue/{client_id}/{nzo_id}", "manager-queue-delete", "Remove an entry from a download client's queue or history", "Manager")),
+		func(ctx context.Context, in *struct {
+			ClientID int64  `path:"client_id"`
+			NzoID    string `path:"nzo_id" maxLength:"128"`
+			History  bool   `query:"history" doc:"true removes a history record; false cancels an active download (and deletes its partial files)"`
+		}) (*struct{}, error) {
+			if err := app.ManagerQueueDelete(ctx, in.ClientID, in.NzoID, in.History); err != nil {
+				return nil, humaServiceError(err)
+			}
+			return &struct{}{}, nil
+		})
+
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/media/{id}/metadata", "manager-media-metadata", "Full metadata dump: every known field with per-field provenance", "Manager")),
 		func(ctx context.Context, in *struct{ IDPath }) (*JSONOutput[service.ManagerMetadataView], error) {
 			view, err := app.ManagerMetadata(ctx, in.ID)

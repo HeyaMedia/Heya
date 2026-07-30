@@ -4051,15 +4051,20 @@ export type ManagerLibraryStatsView = {
 
 export type ManagerLookupResult = {
     already_in_library: boolean;
+    confidence?: number;
     description?: string;
+    evidence?: Array<SearchEvidence> | null;
     existing_item_id?: number;
     external_ids?: {
         [key: string]: string;
     };
     heya_slug?: string;
     poster_url?: string;
+    presentation?: SearchPresentation;
     provider_id: string;
     provider_name: string;
+    recommendation?: string;
+    requires_review?: boolean;
     title: string;
     year?: string;
 };
@@ -4211,20 +4216,51 @@ export type ManagerQualityProfileView = {
     upgrades_enabled: boolean;
 };
 
+export type ManagerQueueFileView = {
+    /**
+     * Path relative to the download folder
+     */
+    name: string;
+    size_bytes: number;
+};
+
+export type ManagerQueueFilesView = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    /**
+     * Set when the storage path can't be reached from this server
+     */
+    error?: string;
+    files: Array<ManagerQueueFileView> | null;
+    /**
+     * Mapped local folder (or file) of the completed download
+     */
+    path: string;
+};
+
 export type ManagerQueueItemView = {
     category: string;
     client: string;
+    client_id: number;
     completed_at?: number;
     fail_message?: string;
     format_breakdown?: Array<FormatHit> | null;
     history: boolean;
+    library_state?: string;
     matched_item_id?: number;
     matched_library?: number;
     matched_title?: string;
     name: string;
     nzo_id: string;
+    /**
+     * Parsed identity label, e.g. "the ark S03E01" or "heat (1995)"
+     */
+    parsed?: string;
     percentage: number;
     quality?: string;
+    rejections?: Array<Rejection> | null;
     score?: number;
     size_left_mb: number;
     size_mb: number;
@@ -6018,6 +6054,15 @@ export type RegistrationStatusBody = {
     enabled: boolean;
 };
 
+export type Rejection = {
+    code: string;
+    message: string;
+    params?: {
+        [key: string]: unknown;
+    };
+    stage: string;
+};
+
 export type RemoteConfigPayload = {
     /**
      * A URL to the JSON Schema for this object.
@@ -6342,10 +6387,53 @@ export type SearchPeopleByNameRow = {
     profile_path: string;
 };
 
+export type SearchPresentation = {
+    aliases?: Array<string> | null;
+    area?: string;
+    artists?: Array<string> | null;
+    authors?: Array<string> | null;
+    begin_date?: string;
+    catalogue?: string;
+    countries?: Array<string> | null;
+    country?: string;
+    date?: string;
+    duration_ms?: number;
+    edition_count?: number;
+    end_date?: string;
+    ended?: boolean;
+    episode_count?: number;
+    fan_count?: number;
+    genres?: Array<string> | null;
+    image_height?: number;
+    image_width?: number;
+    isbns?: Array<string> | null;
+    kind?: string;
+    language?: string;
+    languages?: Array<string> | null;
+    matched_releases?: Array<SearchRelease> | null;
+    network?: string;
+    original_title?: string;
+    popularity?: number;
+    release_count?: number;
+    season?: string;
+    secondary_types?: Array<string> | null;
+    sort_name?: string;
+    source?: string;
+    status?: string;
+    studios?: Array<string> | null;
+    type?: string;
+};
+
 export type SearchProductionCompaniesByNameRow = {
     id: number;
     logo_path: string;
     name: string;
+};
+
+export type SearchRelease = {
+    title: string;
+    type?: string;
+    year?: number;
 };
 
 export type SearchResponse = {
@@ -6370,6 +6458,7 @@ export type SearchResult = {
     };
     heya_slug?: string;
     poster_url: string;
+    presentation?: SearchPresentation;
     provider_id: string;
     provider_name: string;
     recommendation?: string;
@@ -9115,6 +9204,18 @@ export type ManagerQualityProfileViewWritable = {
     name: string;
     source: string;
     upgrades_enabled: boolean;
+};
+
+export type ManagerQueueFilesViewWritable = {
+    /**
+     * Set when the storage path can't be reached from this server
+     */
+    error?: string;
+    files: Array<ManagerQueueFileView> | null;
+    /**
+     * Mapped local folder (or file) of the completed download
+     */
+    path: string;
 };
 
 export type ManagerQueueViewWritable = {
@@ -15615,6 +15716,67 @@ export type ManagerQueueResponses = {
 };
 
 export type ManagerQueueResponse = ManagerQueueResponses[keyof ManagerQueueResponses];
+
+export type ManagerQueueDeleteData = {
+    body?: never;
+    path: {
+        client_id: number;
+        nzo_id: string;
+    };
+    query?: {
+        /**
+         * true removes a history record; false cancels an active download (and deletes its partial files)
+         */
+        history?: boolean;
+    };
+    url: '/api/manager/queue/{client_id}/{nzo_id}';
+};
+
+export type ManagerQueueDeleteErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerQueueDeleteError = ManagerQueueDeleteErrors[keyof ManagerQueueDeleteErrors];
+
+export type ManagerQueueDeleteResponses = {
+    /**
+     * No Content
+     */
+    204: void;
+};
+
+export type ManagerQueueDeleteResponse = ManagerQueueDeleteResponses[keyof ManagerQueueDeleteResponses];
+
+export type ManagerQueueFilesData = {
+    body?: never;
+    path: {
+        client_id: number;
+        nzo_id: string;
+    };
+    query?: never;
+    url: '/api/manager/queue/{client_id}/{nzo_id}/files';
+};
+
+export type ManagerQueueFilesErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerQueueFilesError = ManagerQueueFilesErrors[keyof ManagerQueueFilesErrors];
+
+export type ManagerQueueFilesResponses = {
+    /**
+     * OK
+     */
+    200: ManagerQueueFilesView;
+};
+
+export type ManagerQueueFilesResponse = ManagerQueueFilesResponses[keyof ManagerQueueFilesResponses];
 
 export type ManagerRssRunData = {
     body?: never;

@@ -166,6 +166,39 @@ func (c *Client) Warnings(ctx context.Context) ([]Warning, error) {
 	return out.Warnings, nil
 }
 
+// DeleteQueueItem removes an active queue entry, including its partially
+// downloaded files.
+func (c *Client) DeleteQueueItem(ctx context.Context, nzoID string) error {
+	var out struct {
+		Status bool `json:"status"`
+	}
+	if err := c.call(ctx, url.Values{
+		"mode": {"queue"}, "name": {"delete"}, "value": {nzoID}, "del_files": {"1"},
+	}, &out); err != nil {
+		return err
+	}
+	if !out.Status {
+		return fmt.Errorf("sabnzbd: queue item %q not deleted (unknown id?)", nzoID)
+	}
+	return nil
+}
+
+// DeleteHistoryItem removes a history record. Completed files stay on disk.
+func (c *Client) DeleteHistoryItem(ctx context.Context, nzoID string) error {
+	var out struct {
+		Status bool `json:"status"`
+	}
+	if err := c.call(ctx, url.Values{
+		"mode": {"history"}, "name": {"delete"}, "value": {nzoID},
+	}, &out); err != nil {
+		return err
+	}
+	if !out.Status {
+		return fmt.Errorf("sabnzbd: history item %q not deleted (unknown id?)", nzoID)
+	}
+	return nil
+}
+
 func (c *Client) call(ctx context.Context, params url.Values, out any) error {
 	params.Set("output", "json")
 	params.Set("apikey", c.APIKey)

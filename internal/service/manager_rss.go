@@ -44,6 +44,7 @@ type ManagerRSSRunView struct {
 type rssTargetRef struct {
 	ItemID    int64
 	MediaType string // movie | tv | anime
+	Monitored bool
 }
 
 type rssIdentityIndex struct {
@@ -365,19 +366,27 @@ func (a *App) ingestRSSRelease(
 // titles, aliases, and provider ids. Domains with zero monitored targets
 // aren't swept at all.
 func (a *App) buildRSSIdentityIndex(ctx context.Context) (*rssIdentityIndex, []string, error) {
+	return a.buildIdentityIndex(ctx, true)
+}
+
+// buildIdentityIndex is the shared identity map. RSS sweeps index monitored
+// items only (they define wantedness); the queue recognizer indexes the
+// WHOLE library — a foreign download should be recognized even when the
+// matched item isn't monitored.
+func (a *App) buildIdentityIndex(ctx context.Context, monitoredOnly bool) (*rssIdentityIndex, []string, error) {
 	index := &rssIdentityIndex{byTitle: map[string][]rssTargetRef{}, byID: map[string]rssTargetRef{}}
 	rows, err := a.db.Query(ctx, `
-		SELECT mi.id, mi.media_type, c.title,
+		SELECT mi.id, mi.media_type, mi.monitored, c.title,
 		       COALESCE(array_agg(DISTINCT mt.title) FILTER (WHERE mt.title IS NOT NULL), '{}'),
 		       COALESCE(array_agg(DISTINCT ei.provider || ':' || ei.external_id) FILTER (WHERE ei.provider IS NOT NULL), '{}')
 		FROM media_items mi
 		JOIN media_item_cards c ON c.id = mi.id
 		LEFT JOIN media_titles mt ON mt.media_item_id = mi.id
 		LEFT JOIN media_item_external_ids ei ON ei.media_item_id = mi.id
-		WHERE mi.monitored AND mi.media_type IN ('movie','tv','anime')
-		GROUP BY mi.id, mi.media_type, c.title`)
+		WHERE (mi.monitored OR NOT $1) AND mi.media_type IN ('movie','tv','anime')
+		GROUP BY mi.id, mi.media_type, mi.monitored, c.title`, monitoredOnly)
 	if err != nil {
-		return nil, nil, fmt.Errorf("building rss identity index: %w", err)
+		return nil, nil, fmt.Errorf("building identity index: %w", err)
 	}
 	defer rows.Close()
 
@@ -389,7 +398,7 @@ func (a *App) buildRSSIdentityIndex(ctx context.Context) (*rssIdentityIndex, []s
 			aliases []string
 			ids     []string
 		)
-		if err := rows.Scan(&ref.ItemID, &ref.MediaType, &title, &aliases, &ids); err != nil {
+		if err := rows.Scan(&ref.ItemID, &ref.MediaType, &ref.Monitored, &title, &aliases, &ids); err != nil {
 			return nil, nil, err
 		}
 		if ref.MediaType == "movie" {
