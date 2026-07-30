@@ -1524,6 +1524,7 @@ type TvEpisode struct {
 	EpisodeType    int32          `json:"episode_type"`
 	ExternalIds    []byte         `json:"external_ids"`
 	Source         string         `json:"source"`
+	Monitored      bool           `json:"monitored"`
 }
 
 type TvSeason struct {
@@ -1538,6 +1539,7 @@ type TvSeason struct {
 	Status        string      `json:"status"`
 	AiredEpisodes int32       `json:"aired_episodes"`
 	ExternalIds   []byte      `json:"external_ids"`
+	Monitored     bool        `json:"monitored"`
 }
 
 type TvSeries struct {

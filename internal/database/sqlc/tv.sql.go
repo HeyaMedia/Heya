@@ -13,10 +13,10 @@ import (
 )
 
 const createTVEpisode = `-- name: CreateTVEpisode :one
-INSERT INTO tv_episodes (season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+INSERT INTO tv_episodes (season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOT $10)
 ON CONFLICT (season_id, episode_number) DO NOTHING
-RETURNING id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source
+RETURNING id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored
 `
 
 type CreateTVEpisodeParams struct {
@@ -70,15 +70,16 @@ func (q *Queries) CreateTVEpisode(ctx context.Context, arg CreateTVEpisodeParams
 		&i.EpisodeType,
 		&i.ExternalIds,
 		&i.Source,
+		&i.Monitored,
 	)
 	return i, err
 }
 
 const createTVSeason = `-- name: CreateTVSeason :one
-INSERT INTO tv_seasons (series_id, season_number, title, overview, poster_path, air_date, end_date, status, aired_episodes, external_ids)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO tv_seasons (series_id, season_number, title, overview, poster_path, air_date, end_date, status, aired_episodes, external_ids, monitored)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $2 <> 0)
 ON CONFLICT (series_id, season_number) DO NOTHING
-RETURNING id, series_id, season_number, title, overview, poster_path, air_date, end_date, status, aired_episodes, external_ids
+RETURNING id, series_id, season_number, title, overview, poster_path, air_date, end_date, status, aired_episodes, external_ids, monitored
 `
 
 type CreateTVSeasonParams struct {
@@ -97,6 +98,9 @@ type CreateTVSeasonParams struct {
 // DO NOTHING preserves an existing season (incl. user edits) on re-enrich; the
 // caller recovers its id via GetTVSeason on the resulting ErrNoRows so new
 // episodes can still be attached. New seasons insert normally.
+// monitored defaults by policy at INSERT (specials/season 0 start off) so
+// future provider rows land with deterministic state; existing rows keep
+// the user's choice via DO NOTHING.
 func (q *Queries) CreateTVSeason(ctx context.Context, arg CreateTVSeasonParams) (TvSeason, error) {
 	row := q.db.QueryRow(ctx, createTVSeason,
 		arg.SeriesID,
@@ -123,6 +127,7 @@ func (q *Queries) CreateTVSeason(ctx context.Context, arg CreateTVSeasonParams) 
 		&i.Status,
 		&i.AiredEpisodes,
 		&i.ExternalIds,
+		&i.Monitored,
 	)
 	return i, err
 }
@@ -233,7 +238,7 @@ func (q *Queries) DeleteEmptyCanonicalTVSeasonsByIDs(ctx context.Context, season
 }
 
 const getTVEpisode = `-- name: GetTVEpisode :one
-SELECT id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source FROM tv_episodes WHERE season_id = $1 AND episode_number = $2
+SELECT id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored FROM tv_episodes WHERE season_id = $1 AND episode_number = $2
 `
 
 type GetTVEpisodeParams struct {
@@ -259,12 +264,13 @@ func (q *Queries) GetTVEpisode(ctx context.Context, arg GetTVEpisodeParams) (TvE
 		&i.EpisodeType,
 		&i.ExternalIds,
 		&i.Source,
+		&i.Monitored,
 	)
 	return i, err
 }
 
 const getTVEpisodeByID = `-- name: GetTVEpisodeByID :one
-SELECT id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source FROM tv_episodes WHERE id = $1
+SELECT id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored FROM tv_episodes WHERE id = $1
 `
 
 func (q *Queries) GetTVEpisodeByID(ctx context.Context, id int64) (TvEpisode, error) {
@@ -285,12 +291,13 @@ func (q *Queries) GetTVEpisodeByID(ctx context.Context, id int64) (TvEpisode, er
 		&i.EpisodeType,
 		&i.ExternalIds,
 		&i.Source,
+		&i.Monitored,
 	)
 	return i, err
 }
 
 const getTVSeason = `-- name: GetTVSeason :one
-SELECT id, series_id, season_number, title, overview, poster_path, air_date, end_date, status, aired_episodes, external_ids FROM tv_seasons WHERE series_id = $1 AND season_number = $2
+SELECT id, series_id, season_number, title, overview, poster_path, air_date, end_date, status, aired_episodes, external_ids, monitored FROM tv_seasons WHERE series_id = $1 AND season_number = $2
 `
 
 type GetTVSeasonParams struct {
@@ -313,12 +320,13 @@ func (q *Queries) GetTVSeason(ctx context.Context, arg GetTVSeasonParams) (TvSea
 		&i.Status,
 		&i.AiredEpisodes,
 		&i.ExternalIds,
+		&i.Monitored,
 	)
 	return i, err
 }
 
 const getTVSeasonByID = `-- name: GetTVSeasonByID :one
-SELECT id, series_id, season_number, title, overview, poster_path, air_date, end_date, status, aired_episodes, external_ids FROM tv_seasons WHERE id = $1
+SELECT id, series_id, season_number, title, overview, poster_path, air_date, end_date, status, aired_episodes, external_ids, monitored FROM tv_seasons WHERE id = $1
 `
 
 func (q *Queries) GetTVSeasonByID(ctx context.Context, id int64) (TvSeason, error) {
@@ -336,6 +344,7 @@ func (q *Queries) GetTVSeasonByID(ctx context.Context, id int64) (TvSeason, erro
 		&i.Status,
 		&i.AiredEpisodes,
 		&i.ExternalIds,
+		&i.Monitored,
 	)
 	return i, err
 }
@@ -555,7 +564,7 @@ func (q *Queries) ListEpisodeNumbersForMediaItems(ctx context.Context, mediaItem
 }
 
 const listTVEpisodesBySeason = `-- name: ListTVEpisodesBySeason :many
-SELECT id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source FROM tv_episodes WHERE season_id = $1 ORDER BY episode_number ASC
+SELECT id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored FROM tv_episodes WHERE season_id = $1 ORDER BY episode_number ASC
 `
 
 func (q *Queries) ListTVEpisodesBySeason(ctx context.Context, seasonID int64) ([]TvEpisode, error) {
@@ -582,6 +591,7 @@ func (q *Queries) ListTVEpisodesBySeason(ctx context.Context, seasonID int64) ([
 			&i.EpisodeType,
 			&i.ExternalIds,
 			&i.Source,
+			&i.Monitored,
 		); err != nil {
 			return nil, err
 		}
@@ -594,7 +604,7 @@ func (q *Queries) ListTVEpisodesBySeason(ctx context.Context, seasonID int64) ([
 }
 
 const listTVEpisodesBySeries = `-- name: ListTVEpisodesBySeries :many
-SELECT e.id, e.season_id, e.episode_number, e.title, e.overview, e.still_path, e.runtime_minutes, e.air_date, e.rating, e.absolute_number, e.is_special, e.episode_type, e.external_ids, e.source FROM tv_episodes e
+SELECT e.id, e.season_id, e.episode_number, e.title, e.overview, e.still_path, e.runtime_minutes, e.air_date, e.rating, e.absolute_number, e.is_special, e.episode_type, e.external_ids, e.source, e.monitored FROM tv_episodes e
 JOIN tv_seasons s ON s.id = e.season_id
 WHERE s.series_id = $1
 ORDER BY s.season_number ASC, e.episode_number ASC
@@ -626,6 +636,7 @@ func (q *Queries) ListTVEpisodesBySeries(ctx context.Context, seriesID int64) ([
 			&i.EpisodeType,
 			&i.ExternalIds,
 			&i.Source,
+			&i.Monitored,
 		); err != nil {
 			return nil, err
 		}
@@ -638,7 +649,7 @@ func (q *Queries) ListTVEpisodesBySeries(ctx context.Context, seriesID int64) ([
 }
 
 const listTVSeasonsBySeries = `-- name: ListTVSeasonsBySeries :many
-SELECT id, series_id, season_number, title, overview, poster_path, air_date, end_date, status, aired_episodes, external_ids FROM tv_seasons WHERE series_id = $1 ORDER BY season_number ASC
+SELECT id, series_id, season_number, title, overview, poster_path, air_date, end_date, status, aired_episodes, external_ids, monitored FROM tv_seasons WHERE series_id = $1 ORDER BY season_number ASC
 `
 
 func (q *Queries) ListTVSeasonsBySeries(ctx context.Context, seriesID int64) ([]TvSeason, error) {
@@ -662,6 +673,7 @@ func (q *Queries) ListTVSeasonsBySeries(ctx context.Context, seriesID int64) ([]
 			&i.Status,
 			&i.AiredEpisodes,
 			&i.ExternalIds,
+			&i.Monitored,
 		); err != nil {
 			return nil, err
 		}
@@ -891,12 +903,37 @@ func (q *Queries) PersistTVStructure(ctx context.Context, arg PersistTVStructure
 	return i, err
 }
 
+const transferTVEpisodeMonitored = `-- name: TransferTVEpisodeMonitored :execrows
+UPDATE tv_episodes survivor
+SET monitored = doomed.monitored
+FROM tv_episodes doomed
+JOIN tv_seasons doomed_season ON doomed_season.id = doomed.season_id
+JOIN tv_seasons survivor_season
+  ON survivor_season.series_id = doomed_season.series_id
+ AND survivor_season.season_number = doomed_season.season_number
+WHERE doomed.id = ANY($1::bigint[])
+  AND survivor.season_id = survivor_season.id
+  AND survivor.episode_number = doomed.episode_number
+  AND survivor.id <> doomed.id
+`
+
+// Monitoring is decision-policy data: before canonical rekey deletes a
+// superseded row, its flag transfers to the surviving same-numbered row
+// (season_number, episode_number natural identity within the series).
+func (q *Queries) TransferTVEpisodeMonitored(ctx context.Context, episodeIds []int64) (int64, error) {
+	result, err := q.db.Exec(ctx, transferTVEpisodeMonitored, episodeIds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateTVEpisode = `-- name: UpdateTVEpisode :one
 UPDATE tv_episodes
 SET title = $2, overview = $3, still_path = $4, runtime_minutes = $5, air_date = $6, rating = $7,
     absolute_number = $8, is_special = $9, episode_type = $10, external_ids = $11, source = $12
 WHERE id = $1
-RETURNING id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source
+RETURNING id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored
 `
 
 type UpdateTVEpisodeParams struct {
@@ -945,6 +982,7 @@ func (q *Queries) UpdateTVEpisode(ctx context.Context, arg UpdateTVEpisodeParams
 		&i.EpisodeType,
 		&i.ExternalIds,
 		&i.Source,
+		&i.Monitored,
 	)
 	return i, err
 }
@@ -954,7 +992,7 @@ UPDATE tv_seasons
 SET title = $2, overview = $3, poster_path = $4, air_date = $5,
     end_date = $6, status = $7, aired_episodes = $8, external_ids = $9
 WHERE id = $1
-RETURNING id, series_id, season_number, title, overview, poster_path, air_date, end_date, status, aired_episodes, external_ids
+RETURNING id, series_id, season_number, title, overview, poster_path, air_date, end_date, status, aired_episodes, external_ids, monitored
 `
 
 type UpdateTVSeasonParams struct {
@@ -994,6 +1032,7 @@ func (q *Queries) UpdateTVSeason(ctx context.Context, arg UpdateTVSeasonParams) 
 		&i.Status,
 		&i.AiredEpisodes,
 		&i.ExternalIds,
+		&i.Monitored,
 	)
 	return i, err
 }

@@ -994,15 +994,24 @@ var managerCalendarCmd = &cobra.Command{
 
 var managerSearchCmd = &cobra.Command{
 	Use:   "search <media-item-id>",
-	Short: "Shadow-search a movie: evaluate every candidate and show what would be grabbed and why (no download)",
+	Short: "Shadow-search a movie or TV season/episode: evaluate every candidate and show what would be grabbed and why (no download)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		itemID, err := strconv.ParseInt(args[0], 10, 64)
 		if err != nil {
 			return fmt.Errorf("media item id must be numeric")
 		}
+		seasonFlag, _ := cmd.Flags().GetInt("season")
+		episodeFlag, _ := cmd.Flags().GetInt64("episode-id")
+		scope := service.ManagerSearchScope{}
+		if cmd.Flags().Changed("season") {
+			scope.Season = &seasonFlag
+		}
+		if cmd.Flags().Changed("episode-id") {
+			scope.EpisodeID = &episodeFlag
+		}
 		return withApp(func(ctx context.Context, app *service.App) error {
-			view, err := app.SearchManagerMovie(ctx, itemID, "cli")
+			view, err := app.SearchManagerMedia(ctx, itemID, scope, "cli")
 			if err != nil {
 				return err
 			}
@@ -1075,6 +1084,8 @@ func init() {
 	managerCalendarCmd.Flags().Int64Slice("library", nil, "Restrict to library ids (repeatable)")
 	managerCalendarCmd.Flags().Bool("monitored", false, "Monitored items only")
 	managerHistoryCmd.Flags().Int("limit", 50, "Max decisions to list")
+	managerSearchCmd.Flags().Int("season", 0, "TV: search this season's wanted episodes")
+	managerSearchCmd.Flags().Int64("episode-id", 0, "TV: search one episode by its id")
 
 	managerIndexerAddCmd.Flags().String("name", "", "Display name")
 	managerIndexerAddCmd.Flags().String("kind", "prowlarr", "prowlarr | torznab | newznab")

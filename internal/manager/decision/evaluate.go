@@ -6,6 +6,7 @@ import (
 
 	"github.com/karbowiak/heya/internal/manager/formats"
 	"github.com/karbowiak/heya/internal/matcher"
+	"github.com/karbowiak/heya/internal/parser/video"
 )
 
 // ResolveUnits resolves every existing file and queued release in the
@@ -140,8 +141,15 @@ func evaluateCandidate(target Target, cand Candidate) CandidateResult {
 		return res
 	}
 
-	// Stage: size bounds (runtime-scaled; unknown runtime or size skips).
-	if rej := checkSize(profile, res.QualityKey, cand.SizeBytes, target.RuntimeMinutes); rej != nil {
+	// Stage: size bounds — runtime-scaled, and a multi-episode release
+	// scales by how many units it covers (a season pack is N episodes of
+	// runtime, arr-style).
+	coverage := coveredUnits(target, cand.Title, attrs)
+	runtimeUnits := 1
+	if len(coverage) > 1 {
+		runtimeUnits = len(coverage)
+	}
+	if rej := checkSize(profile, res.QualityKey, cand.SizeBytes, target.RuntimeMinutes*runtimeUnits); rej != nil {
 		res.RunRejections = append(res.RunRejections, *rej)
 		return res
 	}
@@ -173,12 +181,72 @@ func evaluateCandidate(target Target, cand Candidate) CandidateResult {
 		return res
 	}
 
-	// Per-unit stages: queue + upgrade.
+	// Per-unit stages: queue + upgrade. TV candidates are evaluated only
+	// against the units they COVER (a single-episode release neither
+	// accepts nor rejects the season's other episodes); everything else
+	// covers every unit of its single-target run.
 	for i := range target.Units {
 		unit := &target.Units[i]
+		if coverage != nil && !coverage[unitNumberKey(unit)] {
+			continue
+		}
 		res.PerUnit[unit.Key] = evaluateUnit(profile, unit, &res)
 	}
 	return res
+}
+
+// coveredUnits resolves which units a TV release spans, keyed by
+// season×episode (absolute numbers resolve through the unit's mapping).
+// nil means "covers everything" (non-TV domains).
+func coveredUnits(target Target, title string, attrs formats.Attrs) map[string]bool {
+	if target.Domain != "tv" {
+		return nil
+	}
+	show := video.FilenameParseShow(title)
+	covered := map[string]bool{}
+	if show.FullSeason && len(show.Seasons) > 0 {
+		for _, unit := range target.Units {
+			for _, season := range show.Seasons {
+				if unit.SeasonNumber == season {
+					covered[unitNumberKey(&unit)] = true
+				}
+			}
+		}
+		return covered
+	}
+	if len(show.Seasons) > 0 && len(show.EpisodeNumbers) > 0 {
+		season := show.Seasons[0]
+		for _, unit := range target.Units {
+			if unit.SeasonNumber != season {
+				continue
+			}
+			for _, episode := range show.EpisodeNumbers {
+				if unit.EpisodeNumber == episode {
+					covered[unitNumberKey(&unit)] = true
+				}
+			}
+		}
+		return covered
+	}
+	// Anime absolute numbering: no explicit season — resolve through the
+	// units' absolute numbers.
+	if target.Anime && len(show.EpisodeNumbers) > 0 {
+		for _, unit := range target.Units {
+			if unit.AbsoluteNumber == 0 {
+				continue
+			}
+			for _, episode := range show.EpisodeNumbers {
+				if unit.AbsoluteNumber == episode {
+					covered[unitNumberKey(&unit)] = true
+				}
+			}
+		}
+	}
+	return covered
+}
+
+func unitNumberKey(unit *Unit) string {
+	return fmt.Sprintf("%dx%d", unit.SeasonNumber, unit.EpisodeNumber)
 }
 
 // evaluateUnit applies the wanted/queue/upgrade gates of one candidate

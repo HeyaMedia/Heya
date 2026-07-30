@@ -1,6 +1,7 @@
 package decision
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -360,5 +361,82 @@ func TestNoProfileConfigurationError(t *testing.T) {
 	}
 	if code := runRejectionCode(t, res, 0); code != CodeConfigNoProfile {
 		t.Fatalf("code = %s, want config_no_profile", code)
+	}
+}
+
+// ── TV ───────────────────────────────────────────────────────────────────
+
+func tvTarget(profile *Profile, units []Unit) Target {
+	return Target{
+		Domain: "tv", MediaItemID: 77,
+		// Already matcher-normalized (articles stripped) — the service layer
+		// runs NormalizeTitle before building the target.
+		NormalizedTitles: []string{"expanse"},
+		IDs:              map[string]string{"tvdbid": "280619"},
+		RuntimeMinutes:   45,
+		Units:            units,
+		Profile:          profile,
+	}
+}
+
+func tvUnit(season, episode int, existing []ExistingFile) Unit {
+	return Unit{
+		Key:          fmt.Sprintf("ep:%dx%d@77", season, episode),
+		SeasonNumber: season, EpisodeNumber: episode,
+		Monitored: true, Released: true, Existing: existing,
+	}
+}
+
+func TestTVCoverageAndPacks(t *testing.T) {
+	profile := movieProfile()
+	profile.Domain = "tv"
+
+	units := []Unit{
+		tvUnit(2, 1, nil),
+		tvUnit(2, 2, nil),
+		tvUnit(2, 3, []ExistingFile{{
+			Quality: "bluray-1080p", Position: 4, PositionFound: true,
+			RevisionVersion: 1, Provenance: "parsed_name",
+		}}),
+	}
+	target := tvTarget(profile, units)
+
+	single := cand(0, "The.Expanse.S02E01.1080p.WEB-DL.x264-GROUP", 3)
+	pack := cand(1, "The.Expanse.S02.1080p.WEB-DL.x264-GROUP", 12)
+	res := Evaluate(target, []Candidate{single, pack})
+
+	// The single covers only E01: no eval rows for E02/E03.
+	singleRes := res.Candidates[0]
+	if len(singleRes.PerUnit) != 1 {
+		t.Fatalf("single episode evaluated against %d units, want 1", len(singleRes.PerUnit))
+	}
+	// The pack covers all three; E03 already has bluray (better than webdl)
+	// so the pack is a downgrade for that unit.
+	packRes := res.Candidates[1]
+	if len(packRes.PerUnit) != 3 {
+		t.Fatalf("pack evaluated against %d units, want 3", len(packRes.PerUnit))
+	}
+	e3 := packRes.PerUnit["ep:2x3@77"]
+	if e3 == nil || e3.Acceptable {
+		t.Fatalf("pack must be rejected for E03 (downgrade), got %+v", e3)
+	}
+	// E01: both acceptable; the pack outranks the single (full season wins
+	// the coverage comparer at equal quality/score).
+	for _, unit := range res.Units {
+		if unit.UnitKey == "ep:2x1@77" {
+			if unit.Verdict != VerdictWouldGrab || unit.ChosenCandidate != 1 {
+				t.Fatalf("E01: verdict=%s chosen=%d, want would_grab by pack", unit.Verdict, unit.ChosenCandidate)
+			}
+		}
+	}
+}
+
+func TestTVMultiSeasonRejected(t *testing.T) {
+	profile := movieProfile()
+	profile.Domain = "tv"
+	target := tvTarget(profile, []Unit{tvUnit(1, 1, nil)})
+	res := Evaluate(target, []Candidate{cand(0, "The.Expanse.S01-S03.1080p.WEB-DL.x264-GROUP", 90)})
+	if code := runRejectionCode(t, res, 0); code != CodeMultiSeason {
+		t.Fatalf("code = %s, want multi_season", code)
 	}
 }

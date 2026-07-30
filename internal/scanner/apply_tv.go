@@ -639,6 +639,11 @@ func pruneStaleCanonicalTVStructure(ctx context.Context, q *sqlc.Queries, series
 		return err
 	}
 	if stale := staleCanonicalTVEpisodeIDs(detail, episodeRows); len(stale) > 0 {
+		// Monitoring survives provider rekeys: copy each doomed row's flag to
+		// its same-numbered survivor before the delete.
+		if _, err := q.TransferTVEpisodeMonitored(ctx, stale); err != nil {
+			return err
+		}
 		if _, err := q.DeleteCanonicalTVEpisodesByIDs(ctx, stale); err != nil {
 			return err
 		}

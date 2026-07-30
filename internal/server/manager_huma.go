@@ -311,11 +311,15 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 
 	// ── Acquisition (dry-run) ────────────────────────────────────────────
 
-	huma.Register(api, adminSecured(op(http.MethodPost, "/api/manager/media/{id}/search", "manager-media-search", "Shadow-search a movie across enabled indexers: evaluate, rank, and record what would be grabbed and why (no download)", "Manager")),
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/manager/media/{id}/search", "manager-media-search", "Shadow-search a movie or TV season/episode across enabled indexers: evaluate, rank, and record what would be grabbed and why (no download)", "Manager")),
 		func(ctx context.Context, in *struct {
 			IDPath
+			Season    *int   `query:"season" doc:"TV: search this season's wanted episodes"`
+			EpisodeID *int64 `query:"episode_id" doc:"TV: search one episode by its id"`
 		}) (*JSONOutput[service.ManagerSearchRunView], error) {
-			view, err := app.SearchManagerMovie(ctx, in.ID, "api")
+			view, err := app.SearchManagerMedia(ctx, in.ID, service.ManagerSearchScope{
+				Season: in.Season, EpisodeID: in.EpisodeID,
+			}, "api")
 			if err != nil {
 				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
 			}

@@ -185,20 +185,23 @@ func (a *App) buildDecisionPolicy(ctx context.Context, q *sqlc.Queries, profileI
 
 // ── Movie target ─────────────────────────────────────────────────────────
 
-type movieTargetMeta struct {
+type searchTargetMeta struct {
 	LibraryID int64
+	Domain    string
 	Title     string
 	Year      int
 	ProfileID int64
+	// Scope labels for the run + view ("S02", "S02E05").
+	ScopeLabel string
 }
 
 // buildMovieTarget assembles the full decision target for one movie:
 // identity (title + aliases + provider ids), existing files with parsed
 // quality + provenance, and live queue coverage.
-func (a *App) buildMovieTarget(ctx context.Context, itemID int64) (decision.Target, movieTargetMeta, error) {
+func (a *App) buildMovieTarget(ctx context.Context, itemID int64) (decision.Target, searchTargetMeta, error) {
 	var (
 		target decision.Target
-		meta   movieTargetMeta
+		meta   searchTargetMeta
 	)
 	var (
 		title, originalTitle, originalLanguage string
@@ -222,6 +225,7 @@ func (a *App) buildMovieTarget(ctx context.Context, itemID int64) (decision.Targ
 	if err != nil {
 		return target, meta, fmt.Errorf("loading movie %d: %w", itemID, err)
 	}
+	meta.Domain = "movie"
 	meta.Title, meta.Year = title, year
 	if profileID.Valid {
 		meta.ProfileID = profileID.Int64
@@ -284,6 +288,255 @@ func (a *App) buildMovieTarget(ctx context.Context, itemID int64) (decision.Targ
 	unit.Queued = a.queueCoverage(ctx, target.NormalizedTitles, year)
 	target.Units = []decision.Unit{unit}
 	return target, meta, nil
+}
+
+// buildTVTarget assembles the decision target for one TV season or episode.
+// Units are episodes: monitored (effective: item AND season AND episode),
+// aired, with their linked files snapshotted.
+func (a *App) buildTVTarget(ctx context.Context, itemID int64, anime bool, scope ManagerSearchScope) (decision.Target, searchTargetMeta, error) {
+	var (
+		target decision.Target
+		meta   searchTargetMeta
+	)
+	var (
+		title, originalName, originalLanguage string
+		year                                  int
+		profileID                             pgtype.Int8
+		itemMonitored                         bool
+		runtime                               int
+	)
+	err := a.db.QueryRow(ctx, `
+		SELECT c.title,
+		       COALESCE(CASE WHEN c.year ~ '^\d{4}' THEN left(c.year, 4)::int END, 0),
+		       mi.monitored, mi.quality_profile_id, c.library_id,
+		       COALESCE(s.original_name, ''), COALESCE(s.original_language, ''),
+		       COALESCE((SELECT round(avg(e.runtime_minutes))::int
+		                 FROM tv_episodes e
+		                 JOIN tv_seasons se ON se.id = e.season_id
+		                 WHERE se.series_id = s.id AND e.runtime_minutes > 0), 0)
+		FROM media_item_cards c
+		JOIN media_items mi ON mi.id = c.id
+		LEFT JOIN tv_series s ON s.media_item_id = c.id
+		WHERE c.id = $1 AND c.media_type IN ('tv','anime')`,
+		itemID,
+	).Scan(&title, &year, &itemMonitored, &profileID, &meta.LibraryID, &originalName, &originalLanguage, &runtime)
+	if err != nil {
+		return target, meta, fmt.Errorf("loading series %d: %w", itemID, err)
+	}
+	meta.Domain = "tv"
+	meta.Title, meta.Year = title, year
+	if profileID.Valid {
+		meta.ProfileID = profileID.Int64
+	}
+	if runtime <= 0 {
+		runtime = 45
+	}
+
+	target.Domain = "tv"
+	target.MediaItemID = itemID
+	target.Year = year
+	target.OriginalLanguage = strings.ToLower(originalLanguage)
+	target.RuntimeMinutes = runtime
+	target.Anime = anime
+	target.IDs = map[string]string{}
+
+	titles := map[string]bool{}
+	addTitle := func(s string) {
+		if n := matcher.NormalizeTitle(s); n != "" && !titles[n] {
+			titles[n] = true
+			target.NormalizedTitles = append(target.NormalizedTitles, n)
+		}
+	}
+	addTitle(title)
+	addTitle(originalName)
+	aliasRows, err := a.db.Query(ctx, `SELECT title FROM media_titles WHERE media_item_id = $1`, itemID)
+	if err == nil {
+		for aliasRows.Next() {
+			var alias string
+			if aliasRows.Scan(&alias) == nil {
+				addTitle(alias)
+			}
+		}
+		aliasRows.Close()
+	}
+	idRows, err := a.db.Query(ctx, `SELECT provider, external_id FROM media_item_external_ids WHERE media_item_id = $1`, itemID)
+	if err == nil {
+		for idRows.Next() {
+			var provider, id string
+			if idRows.Scan(&provider, &id) == nil {
+				switch strings.ToLower(provider) {
+				case "tvdb":
+					target.IDs["tvdbid"] = id
+				case "imdb":
+					target.IDs["imdbid"] = id
+				case "tmdb":
+					target.IDs["tmdbid"] = id
+				}
+			}
+		}
+		idRows.Close()
+	}
+	// Queue coverage is matched per-episode inside the engine's containment
+	// logic in a later slice; series-level queue parsing lands with the
+	// queue-verdicts slice.
+
+	// Scope: one episode, or a whole season's episodes.
+	episodeFilter := ""
+	args := []any{itemID}
+	switch {
+	case scope.EpisodeID != nil:
+		episodeFilter = "AND e.id = $2"
+		args = append(args, *scope.EpisodeID)
+	case scope.Season != nil:
+		episodeFilter = "AND s.season_number = $2"
+		args = append(args, *scope.Season)
+	default:
+		return target, meta, fmt.Errorf("tv search needs a season or episode scope")
+	}
+	rows, err := a.db.Query(ctx, fmt.Sprintf(`
+		SELECT e.id, s.season_number, e.episode_number, COALESCE(e.absolute_number, 0),
+		       (%t AND s.monitored AND e.monitored),
+		       e.air_date IS NOT NULL AND e.air_date <= CURRENT_DATE
+		FROM tv_episodes e
+		JOIN tv_seasons s ON s.id = e.season_id
+		JOIN tv_series ser ON ser.id = s.series_id
+		WHERE ser.media_item_id = $1 %s
+		ORDER BY s.season_number, e.episode_number`, itemMonitored, episodeFilter), args...)
+	if err != nil {
+		return target, meta, fmt.Errorf("loading episodes: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			episodeID                 int64
+			season, episode, absolute int
+			monitored, released       bool
+		)
+		if err := rows.Scan(&episodeID, &season, &episode, &absolute, &monitored, &released); err != nil {
+			return target, meta, err
+		}
+		unit := decision.Unit{
+			Key:            fmt.Sprintf("ep:%dx%d@%d", season, episode, itemID),
+			EpisodeID:      episodeID,
+			SeasonNumber:   season,
+			EpisodeNumber:  episode,
+			AbsoluteNumber: absolute,
+			Monitored:      monitored,
+			Released:       released,
+		}
+		unit.Existing, err = a.episodeExistingFiles(ctx, episodeID)
+		if err != nil {
+			return target, meta, err
+		}
+		target.Units = append(target.Units, unit)
+	}
+	if err := rows.Err(); err != nil {
+		return target, meta, err
+	}
+	if len(target.Units) == 0 {
+		return target, meta, fmt.Errorf("no episodes found for the requested scope")
+	}
+	if scope.EpisodeID != nil {
+		unit := target.Units[0]
+		meta.ScopeLabel = fmt.Sprintf("S%02dE%02d", unit.SeasonNumber, unit.EpisodeNumber)
+	} else {
+		meta.ScopeLabel = fmt.Sprintf("S%02d", *scope.Season)
+	}
+	return target, meta, nil
+}
+
+func (a *App) episodeExistingFiles(ctx context.Context, episodeID int64) ([]decision.ExistingFile, error) {
+	rows, err := a.db.Query(ctx, `
+		SELECT lf.id, lf.path, COALESCE(lf.video_height, 0)
+		FROM library_file_links lfl
+		JOIN library_files lf ON lf.id = lfl.library_file_id
+		WHERE lfl.tv_episode_id = $1 AND lf.deleted_at IS NULL`, episodeID)
+	if err != nil {
+		return nil, fmt.Errorf("loading episode files: %w", err)
+	}
+	defer rows.Close()
+	var files []decision.ExistingFile
+	for rows.Next() {
+		var (
+			fileID      int64
+			path        string
+			videoHeight int
+		)
+		if err := rows.Scan(&fileID, &path, &videoHeight); err != nil {
+			return nil, err
+		}
+		files = append(files, existingFileSnapshot(fileID, filepath.Base(path), videoHeight))
+	}
+	return files, rows.Err()
+}
+
+// buildSearchQuery constructs the primary torznab query per domain.
+func buildSearchQuery(meta searchTargetMeta, target decision.Target, cats []int) (torznab.Query, map[string]string) {
+	query := torznab.Query{Cats: cats, Limit: 100}
+	params := map[string]string{"cats": intsCSV(cats)}
+	switch meta.Domain {
+	case "tv":
+		query.Type = "tvsearch"
+		params["t"] = "tvsearch"
+		var season, episode *int
+		if len(target.Units) > 0 {
+			s := target.Units[0].SeasonNumber
+			season = &s
+			if len(target.Units) == 1 {
+				e := target.Units[0].EpisodeNumber
+				episode = &e
+			}
+		}
+		if tvdb := target.IDs["tvdbid"]; tvdb != "" {
+			query.TvdbID = tvdb
+			params["tvdbid"] = tvdb
+		} else {
+			query.Q = meta.Title
+			params["q"] = query.Q
+		}
+		query.Season = season
+		if season != nil {
+			params["season"] = fmt.Sprintf("%d", *season)
+		}
+		query.Episode = episode
+		if episode != nil {
+			params["ep"] = fmt.Sprintf("%d", *episode)
+		}
+	default:
+		query.Type = "movie"
+		params["t"] = "movie"
+		if imdb := target.IDs["imdbid"]; imdb != "" {
+			query.ImdbID = imdb
+			params["imdbid"] = imdb
+		} else {
+			query.Type = "search"
+			params["t"] = "search"
+			query.Q = fmt.Sprintf("%s %d", meta.Title, meta.Year)
+			params["q"] = query.Q
+		}
+	}
+	return query, params
+}
+
+// fallbackQ is the text query used when an id-based search returns nothing.
+func fallbackQ(meta searchTargetMeta) string {
+	if meta.Domain == "tv" && meta.ScopeLabel != "" {
+		return fmt.Sprintf("%s %s", meta.Title, meta.ScopeLabel)
+	}
+	return fmt.Sprintf("%s %d", meta.Title, meta.Year)
+}
+
+func domainDefaultCats(domain string) []int {
+	switch domain {
+	case "tv":
+		return []int{5000}
+	case "music":
+		return []int{3000}
+	case "book":
+		return []int{7000}
+	default:
+		return []int{2000}
+	}
 }
 
 // movieExistingFiles snapshots the live files with parsed quality and
@@ -425,13 +678,36 @@ type requestRecord struct {
 
 const searchConcurrency = 4
 
-// SearchManagerMovie runs the full shadow search for one movie: fan out
-// across enabled usenet indexers, evaluate every candidate, persist the run
-// as the accountability record, and return the interactive view.
-func (a *App) SearchManagerMovie(ctx context.Context, mediaItemID int64, source string) (*ManagerSearchRunView, error) {
+// ManagerSearchScope narrows a TV search to one season or one episode.
+type ManagerSearchScope struct {
+	Season    *int
+	EpisodeID *int64
+}
+
+// SearchManagerMedia runs the full shadow search for one item (movie, or a
+// TV season/episode): fan out across enabled usenet indexers, evaluate every
+// candidate, persist the run as the accountability record, and return the
+// interactive view.
+func (a *App) SearchManagerMedia(ctx context.Context, mediaItemID int64, scope ManagerSearchScope, source string) (*ManagerSearchRunView, error) {
 	q := sqlc.New(a.db)
 
-	target, meta, err := a.buildMovieTarget(ctx, mediaItemID)
+	var mediaType string
+	if err := a.db.QueryRow(ctx, `SELECT media_type FROM media_items WHERE id = $1`, mediaItemID).Scan(&mediaType); err != nil {
+		return nil, fmt.Errorf("loading media item %d: %w", mediaItemID, err)
+	}
+	var (
+		target decision.Target
+		meta   searchTargetMeta
+		err    error
+	)
+	switch mediaType {
+	case "movie":
+		target, meta, err = a.buildMovieTarget(ctx, mediaItemID)
+	case "tv", "anime":
+		target, meta, err = a.buildTVTarget(ctx, mediaItemID, mediaType == "anime", scope)
+	default:
+		return nil, fmt.Errorf("search is not supported for %s items yet", mediaType)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -442,8 +718,8 @@ func (a *App) SearchManagerMovie(ctx context.Context, mediaItemID int64, source 
 		if err != nil {
 			return nil, err
 		}
-		if profile.Domain != "movie" {
-			return nil, fmt.Errorf("profile %q is a %s profile, not movie", profile.Name, profile.Domain)
+		if profile.Domain != meta.Domain {
+			return nil, fmt.Errorf("profile %q is a %s profile, not %s", profile.Name, profile.Domain, meta.Domain)
 		}
 		target.Profile = profile
 		policyHash = hash
@@ -452,17 +728,18 @@ func (a *App) SearchManagerMovie(ctx context.Context, mediaItemID int64, source 
 		decision.ResolveUnits(&target)
 	}
 
-	scope, _ := json.Marshal(map[string]any{
-		"media_item_id": mediaItemID, "title": meta.Title, "year": meta.Year, "domain": "movie",
+	scopeDoc, _ := json.Marshal(map[string]any{
+		"media_item_id": mediaItemID, "title": meta.Title, "year": meta.Year,
+		"domain": meta.Domain, "scope": meta.ScopeLabel,
 	})
 	run, err := q.CreateManagerRun(ctx, sqlc.CreateManagerRunParams{
-		Kind: "interactive", Source: source, Scope: scope,
+		Kind: "interactive", Source: source, Scope: scopeDoc,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating run: %w", err)
 	}
 
-	fetches := a.fanOutMovieSearch(ctx, q, meta, target)
+	fetches := a.fanOutSearch(ctx, q, meta, target)
 
 	// Record per-indexer accounting and collect candidates.
 	var (
@@ -476,7 +753,7 @@ func (a *App) SearchManagerMovie(ctx context.Context, mediaItemID int64, source 
 	for _, fetch := range fetches {
 		runIdx, err := q.CreateManagerRunIndexer(ctx, sqlc.CreateManagerRunIndexerParams{
 			RunID: run.ID, IndexerID: pgtype.Int8{Int64: fetch.row.ID, Valid: true},
-			IndexerName: fetch.row.Name, Domain: "movie", Status: fetch.status,
+			IndexerName: fetch.row.Name, Domain: meta.Domain, Status: fetch.status,
 			PagesFetched: int32(len(fetch.requests)), Fetched: int32(len(fetch.releases)),
 			DurationMs: fetch.duration.Milliseconds(), Error: fetch.err,
 		})
@@ -502,13 +779,13 @@ func (a *App) SearchManagerMovie(ctx context.Context, mediaItemID int64, source 
 			anyFailed = true
 		}
 		indexerViews = append(indexerViews, ManagerRunIndexerView{
-			Indexer: fetch.row.Name, Domain: "movie", Status: fetch.status,
+			Indexer: fetch.row.Name, Domain: meta.Domain, Status: fetch.status,
 			Fetched: len(fetch.releases), DurationMs: fetch.duration.Milliseconds(), Error: fetch.err,
 		})
 
 		for _, rel := range fetch.releases {
 			idx := len(candidates)
-			releaseRow, err := a.persistRelease(ctx, q, fetch.row, "movie", rel, run.ID, lastRequestID, policyHash)
+			releaseRow, err := a.persistRelease(ctx, q, fetch.row, meta.Domain, rel, run.ID, lastRequestID, policyHash)
 			if err != nil {
 				return nil, err
 			}
@@ -542,10 +819,10 @@ func (a *App) SearchManagerMovie(ctx context.Context, mediaItemID int64, source 
 	return view, nil
 }
 
-// fanOutMovieSearch queries every enabled usenet indexer (bounded
+// fanOutSearch queries every enabled usenet indexer (bounded
 // concurrency, per-indexer timeout). Prowlarr parent rows don't search —
 // their materialized torznab children do.
-func (a *App) fanOutMovieSearch(ctx context.Context, q *sqlc.Queries, meta movieTargetMeta, target decision.Target) []indexerFetch {
+func (a *App) fanOutSearch(ctx context.Context, q *sqlc.Queries, meta searchTargetMeta, target decision.Target) []indexerFetch {
 	rows, err := q.ListManagerIndexers(ctx)
 	if err != nil {
 		return nil
@@ -581,13 +858,13 @@ func (a *App) fanOutMovieSearch(ctx context.Context, q *sqlc.Queries, meta movie
 	return append(results, skipped...)
 }
 
-func (a *App) searchOneIndexer(ctx context.Context, row sqlc.ManagerIndexer, meta movieTargetMeta, target decision.Target) indexerFetch {
+func (a *App) searchOneIndexer(ctx context.Context, row sqlc.ManagerIndexer, meta searchTargetMeta, target decision.Target) indexerFetch {
 	fetch := indexerFetch{row: row, status: "ok"}
 	client := torznab.New(row.BaseUrl, row.ApiKey)
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	cats := []int{2000}
+	cats := domainDefaultCats(meta.Domain)
 	if len(row.Categories) > 0 {
 		cats = make([]int, 0, len(row.Categories))
 		for _, c := range row.Categories {
@@ -595,19 +872,10 @@ func (a *App) searchOneIndexer(ctx context.Context, row sqlc.ManagerIndexer, met
 		}
 	}
 
-	// IDs first, q-fallback: an imdb-capable query is precise; the fallback
-	// carries the year to keep same-title candidates distinguishable.
-	query := torznab.Query{Type: "movie", Cats: cats, Limit: 100}
-	params := map[string]string{"t": "movie", "cats": intsCSV(cats)}
-	if imdb := target.IDs["imdbid"]; imdb != "" {
-		query.ImdbID = imdb
-		params["imdbid"] = imdb
-	} else {
-		query.Type = "search"
-		params["t"] = "search"
-		query.Q = fmt.Sprintf("%s %d", meta.Title, meta.Year)
-		params["q"] = query.Q
-	}
+	// IDs first, q-fallback: an id-capable query is precise; the fallback
+	// carries year (movies) or season markers (tv) to keep candidates
+	// distinguishable.
+	query, params := buildSearchQuery(meta, target, cats)
 
 	start := time.Now()
 	releases, err := client.Search(cctx, query)
@@ -623,8 +891,8 @@ func (a *App) searchOneIndexer(ctx context.Context, row sqlc.ManagerIndexer, met
 
 	// ID search that returns nothing falls back to a text query — some
 	// indexers index sparse id attributes.
-	if err == nil && len(releases) == 0 && query.ImdbID != "" {
-		fallback := torznab.Query{Type: "search", Q: fmt.Sprintf("%s %d", meta.Title, meta.Year), Cats: cats, Limit: 100}
+	if err == nil && len(releases) == 0 && (query.ImdbID != "" || query.TvdbID != "") {
+		fallback := torznab.Query{Type: "search", Q: fallbackQ(meta), Cats: cats, Limit: 100}
 		fparams := map[string]string{"t": "search", "q": fallback.Q, "cats": intsCSV(cats)}
 		start = time.Now()
 		fbReleases, fbErr := client.Search(cctx, fallback)
@@ -691,7 +959,7 @@ func (a *App) persistSearchRun(
 	ctx context.Context,
 	run sqlc.ManagerRun,
 	target decision.Target,
-	meta movieTargetMeta,
+	meta searchTargetMeta,
 	policyHash string,
 	result decision.Result,
 	releaseIDs map[int]pgtype.Int8,
@@ -743,15 +1011,23 @@ func (a *App) persistSearchRun(
 		candidateRowIDs[i] = row.ID
 	}
 
+	unitByKey := map[string]*decision.Unit{}
+	for i := range target.Units {
+		unitByKey[target.Units[i].Key] = &target.Units[i]
+	}
 	var (
 		chosenTitle string
 		verdict     = decision.VerdictNoAcceptableCandidate
 	)
 	for _, unit := range result.Units {
 		verdict = unit.Verdict
+		srcUnit := unitByKey[unit.UnitKey]
+		if srcUnit == nil {
+			return nil, fmt.Errorf("decision for unknown unit %s", unit.UnitKey)
+		}
 		contextDoc, _ := json.Marshal(map[string]any{
-			"existing": existingContext(target.Units[0].Existing),
-			"queued":   queuedContext(target.Units[0].Queued),
+			"existing": existingContext(srcUnit.Existing),
+			"queued":   queuedContext(srcUnit.Queued),
 		})
 		var profileID pgtype.Int8
 		profileName := ""
@@ -770,11 +1046,29 @@ func (a *App) persistSearchRun(
 		if insertVerdict == decision.VerdictWouldGrab {
 			insertVerdict = decision.VerdictNoAcceptableCandidate
 		}
+		targetKind := "movie"
+		var (
+			episodeID                   pgtype.Int8
+			seasonNumber, episodeNumber pgtype.Int4
+			absoluteNumber              pgtype.Int4
+		)
+		switch meta.Domain {
+		case "tv":
+			targetKind = "episode"
+			episodeID = pgtype.Int8{Int64: srcUnit.EpisodeID, Valid: srcUnit.EpisodeID != 0}
+			seasonNumber = pgtype.Int4{Int32: int32(srcUnit.SeasonNumber), Valid: true}
+			episodeNumber = pgtype.Int4{Int32: int32(srcUnit.EpisodeNumber), Valid: true}
+			absoluteNumber = pgtype.Int4{Int32: int32(srcUnit.AbsoluteNumber), Valid: srcUnit.AbsoluteNumber != 0}
+		case "book":
+			targetKind = "book"
+		}
 		decisionRow, err := qtx.CreateManagerDecision(ctx, sqlc.CreateManagerDecisionParams{
-			RunID: run.ID, TargetKind: "movie", TargetKey: unit.UnitKey,
+			RunID: run.ID, TargetKind: targetKind, TargetKey: unit.UnitKey,
 			MediaItemID: pgtype.Int8{Int64: target.MediaItemID, Valid: true},
-			LibraryID:   meta.LibraryID, Domain: "movie",
+			TvEpisodeID: episodeID,
+			LibraryID:   meta.LibraryID, Domain: meta.Domain,
 			TargetTitle: meta.Title, TargetYear: int32(meta.Year),
+			SeasonNumber: seasonNumber, EpisodeNumber: episodeNumber, AbsoluteNumber: absoluteNumber,
 			ProfileID: profileID, ProfileName: profileName, PolicyHash: hash,
 			EvaluatorVersion: decision.EvaluatorVersion, ParserVersion: decision.ParserVersion,
 			Verdict: insertVerdict, Context: contextDoc,
@@ -844,9 +1138,11 @@ func (a *App) persistSearchRun(
 	if target.Profile != nil {
 		view.Profile = target.Profile.Name
 	}
-	unitKey := ""
-	if len(result.Units) > 0 {
-		unitKey = result.Units[0].UnitKey
+	chosenBy := map[int]bool{}
+	for _, unit := range result.Units {
+		if unit.Verdict == decision.VerdictWouldGrab {
+			chosenBy[unit.ChosenCandidate] = true
+		}
 	}
 	for _, cand := range result.Candidates {
 		cv := ManagerSearchCandidateView{
@@ -861,12 +1157,25 @@ func (a *App) persistSearchRun(
 			t := cand.Input.PublishDate
 			cv.PublishDate = &t
 		}
-		if eval, ok := cand.PerUnit[unitKey]; ok {
-			cv.Acceptable = eval.Acceptable
-			cv.SelectionRank = eval.SelectionRank
-			cv.Rejections = append(cv.Rejections, rejectionViews(eval.Rejections)...)
-			cv.Chosen = len(result.Units) > 0 && result.Units[0].ChosenCandidate == cand.Input.Index && result.Units[0].Verdict == decision.VerdictWouldGrab
+		// Across units the view shows the candidate's BEST outcome: chosen
+		// anywhere > best selection rank > the first per-unit rejection.
+		bestRank := 0
+		var unitRejections []decision.Rejection
+		for _, eval := range cand.PerUnit {
+			if eval.Acceptable {
+				cv.Acceptable = true
+				if bestRank == 0 || (eval.SelectionRank > 0 && eval.SelectionRank < bestRank) {
+					bestRank = eval.SelectionRank
+				}
+			} else if unitRejections == nil {
+				unitRejections = eval.Rejections
+			}
 		}
+		cv.SelectionRank = bestRank
+		if !cv.Acceptable {
+			cv.Rejections = append(cv.Rejections, rejectionViews(unitRejections)...)
+		}
+		cv.Chosen = chosenBy[cand.Input.Index]
 		view.Candidates = append(view.Candidates, cv)
 	}
 	sortCandidateViews(view.Candidates)
