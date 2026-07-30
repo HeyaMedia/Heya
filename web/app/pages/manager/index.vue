@@ -67,7 +67,7 @@ function runSummary(run: ManagerActivityRun): string {
   }
   const scope = run.scope as Record<string, unknown> | undefined
   const target = scope?.title ? `${scope.title}${scope.scope ? ' ' + scope.scope : ''}` : ''
-  return [target, stats.verdict ? String(stats.verdict).replaceAll('_', ' ') : ''].filter(Boolean).join(' — ')
+  return [target, stats.verdict ? managerVerdictLabel(String(stats.verdict)) : ''].filter(Boolean).join(' — ')
 }
 
 function fmtWhen(iso: string): string {
@@ -96,7 +96,7 @@ function fmtWhen(iso: string): string {
       <button type="button" class="mgr-btn" @click="refetch()">Retry</button>
     </div>
     <div v-else-if="asyncStatus === 'loading' && !data" class="a-empty">
-      <span class="mgr-loading" /> Loading runs…
+      <span class="mgr-spin" /> Loading runs…
     </div>
 
     <template v-else-if="data">

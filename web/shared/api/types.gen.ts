@@ -4145,6 +4145,7 @@ export type ManagerQueueItemView = {
     client: string;
     completed_at?: number;
     fail_message?: string;
+    format_breakdown?: Array<FormatHit> | null;
     history: boolean;
     matched_item_id?: number;
     matched_library?: number;
@@ -4152,6 +4153,8 @@ export type ManagerQueueItemView = {
     name: string;
     nzo_id: string;
     percentage: number;
+    quality?: string;
+    score?: number;
     size_left_mb: number;
     size_mb: number;
     status: string;
@@ -4365,13 +4368,17 @@ export type ManagerWantedPage = {
 
 export type ManagerWantedRow = {
     air_date?: string;
+    album_title?: string;
     current_quality?: string;
     current_score?: number;
+    discography_id?: number;
     episode?: number;
     episode_id?: number;
     episode_name?: string;
     kind: string;
     last_decision_at?: string;
+    last_decision_kind?: string;
+    last_decision_run_id?: number;
     last_decision_verdict?: string;
     library_id: number;
     media_item_id: number;

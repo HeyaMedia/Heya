@@ -225,7 +225,7 @@ function toggleSeason(number: number) {
   else next.add(number)
   expandedSeasons.value = next
 }
-function seasonTone(s: ManagerSeasonView): string {
+function seasonTone(s: ManagerSeasonView): 'good' | 'warn' | 'bad' | 'none' {
   if (s.aired <= 0) return 'none'
   if (s.have <= 0) return 'bad'
   if (s.have < s.aired) return 'warn'
@@ -351,7 +351,7 @@ function albumCoverSrc(al: ManagerAlbumView): string | null {
   return proxied || null
 }
 
-function albumTone(al: ManagerAlbumView): string {
+function albumTone(al: ManagerAlbumView): 'good' | 'warn' | 'bad' | 'none' {
   if (al.tracks_total <= 0) return 'none'
   if (al.tracks_have <= 0) return 'bad'
   if (al.tracks_have < al.tracks_total) return 'warn'
@@ -449,7 +449,7 @@ const FILE_KIND_LABELS: Record<string, string> = {
             <button type="button" class="det-section-head" @click="toggleSeason(season.number)">
               <Icon :name="expandedSeasons.has(season.number) ? 'chevdown' : 'chevright'" :size="14" />
               <span class="det-section-title">{{ season.number === 0 ? 'Specials' : `Season ${season.number}` }}</span>
-              <span class="det-badge" :class="`tone-${seasonTone(season)}`">{{ season.have }} / {{ season.aired }}</span>
+              <ManagerCountPill :have="season.have" :total="season.aired" :tone="seasonTone(season)" />
               <span class="det-section-sub mono">{{ season.episodes?.length ?? 0 }} episodes · {{ fmtBytes(season.size_on_disk) }}</span>
             </button>
             <AppTooltip label="Interactive search for this season (dry run)">
@@ -518,7 +518,7 @@ const FILE_KIND_LABELS: Record<string, string> = {
           <button type="button" class="det-section-head" @click="toggleGroup(group.type)">
             <Icon :name="collapsedGroups.has(group.type) ? 'chevright' : 'chevdown'" :size="14" />
             <span class="det-section-title">{{ group.label }}</span>
-            <span class="det-badge" :class="group.releasesHave >= group.releasesTotal ? 'tone-good' : 'tone-warn'">{{ group.releasesHave }} / {{ group.releasesTotal }}</span>
+            <ManagerCountPill :have="group.releasesHave" :total="group.releasesTotal" />
             <span class="det-section-sub mono">{{ group.tracksHave }}/{{ group.tracksTotal }} tracks · {{ fmtBytes(group.size) }}</span>
           </button>
           <div v-if="!collapsedGroups.has(group.type)" class="det-tablewrap">
@@ -552,7 +552,7 @@ const FILE_KIND_LABELS: Record<string, string> = {
                     <td class="mono">{{ releaseDateLabel(release.primary.release_date, release.primary.year) || '—' }}</td>
                     <td class="num">
                       <span v-if="!release.primary.in_library && !release.primary.tracks_total" class="det-badge tone-bad">Missing</span>
-                      <span v-else class="det-badge" :class="`tone-${albumTone(release.primary)}`">{{ release.primary.tracks_have }} / {{ release.primary.tracks_total }}</span>
+                      <ManagerCountPill v-else :have="release.primary.tracks_have" :total="release.primary.tracks_total" :tone="albumTone(release.primary)" />
                     </td>
                     <td class="num mono">{{ release.primary.in_library ? fmtBytes(release.primary.size_bytes) : '—' }}</td>
                   </tr>
@@ -574,7 +574,7 @@ const FILE_KIND_LABELS: Record<string, string> = {
                       <td class="mono">{{ releaseDateLabel(edition.release_date, edition.year) || '—' }}</td>
                       <td class="num">
                         <span v-if="!edition.in_library && !edition.tracks_total" class="det-badge tone-bad">Missing</span>
-                        <span v-else class="det-badge" :class="`tone-${albumTone(edition)}`">{{ edition.tracks_have }} / {{ edition.tracks_total }}</span>
+                        <ManagerCountPill v-else :have="edition.tracks_have" :total="edition.tracks_total" :tone="albumTone(edition)" />
                       </td>
                       <td class="num mono">{{ edition.in_library ? fmtBytes(edition.size_bytes) : '—' }}</td>
                     </tr>

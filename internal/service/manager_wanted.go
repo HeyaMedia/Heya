@@ -3,16 +3,20 @@ package service
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
+
+	"strings"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
 	"github.com/karbowiak/heya/internal/manager/decision"
 )
 
 // ManagerWantedRow is one unit the pipeline still owes: a missing movie, a
-// missing episode, a below-cutoff file, or a configuration problem.
+// missing episode, a missing album, a below-cutoff file, or a configuration
+// problem.
 type ManagerWantedRow struct {
-	Kind        string `json:"kind"` // movie | episode
+	Kind        string `json:"kind"` // movie | episode | album
 	MediaItemID int64  `json:"media_item_id"`
 	LibraryID   int64  `json:"library_id"`
 	Title       string `json:"title"`
@@ -21,8 +25,11 @@ type ManagerWantedRow struct {
 	Episode     *int   `json:"episode,omitempty"`
 	EpisodeName string `json:"episode_name,omitempty"`
 	EpisodeID   *int64 `json:"episode_id,omitempty"`
-	AirDate     string `json:"air_date,omitempty"`
-	ProfileName string `json:"profile_name,omitempty"`
+	// Music: the catalog release the library is missing.
+	AlbumTitle    string `json:"album_title,omitempty"`
+	DiscographyID int64  `json:"discography_id,omitempty"`
+	AirDate       string `json:"air_date,omitempty"`
+	ProfileName   string `json:"profile_name,omitempty"`
 	// Cutoff tab: what's on disk and why it falls short.
 	CurrentQuality string `json:"current_quality,omitempty"`
 	CurrentScore   int32  `json:"current_score,omitempty"`
@@ -30,9 +37,12 @@ type ManagerWantedRow struct {
 	Uncertain      bool   `json:"uncertain,omitempty"`
 	// Problems tab.
 	Problem string `json:"problem,omitempty"`
-	// Last decision for this unit, if any.
+	// Last decision covering this unit, if any — how the pipeline last saw
+	// it (rss sweep vs interactive search) and what it concluded.
 	LastDecisionAt      *time.Time `json:"last_decision_at,omitempty"`
 	LastDecisionVerdict string     `json:"last_decision_verdict,omitempty"`
+	LastDecisionKind    string     `json:"last_decision_kind,omitempty"`
+	LastDecisionRunID   int64      `json:"last_decision_run_id,omitempty"`
 }
 
 type ManagerWantedPage struct {
@@ -47,10 +57,11 @@ type ManagerWantedParams struct {
 	PerPage   int
 }
 
-// ManagerWanted computes the wanted surface. Missing and problems are pure
-// SQL; cutoff-unmet parses on-disk basenames under each item's profile
-// (movies fully; TV cutoff analysis lands with a denormalized parse pass —
-// recorded as a documented v1 gap).
+// ManagerWanted computes the wanted surface. Missing covers movies,
+// episodes, and albums (catalog releases of monitored artists); cutoff-unmet
+// parses on-disk basenames under each item's profile (movies fully; TV
+// cutoff analysis lands with a denormalized parse pass — recorded as a
+// documented v1 gap).
 func (a *App) ManagerWanted(ctx context.Context, p ManagerWantedParams) (ManagerWantedPage, error) {
 	if p.PerPage <= 0 || p.PerPage > 200 {
 		p.PerPage = 50
@@ -78,90 +89,58 @@ func libraryFilterArgs(libraries []int64) []int64 {
 }
 
 // wantedMissing: monitored + released/aired units with nothing on disk.
-// Movies and episodes union under one keyset-ish pagination (offset-based;
-// the sets are small enough and filters bound them).
+// Movies and episodes come from one SQL union; missing albums resolve their
+// release-type bucket through the same effectiveReleaseType the entity page
+// uses (secondary types + title hints), so the two surfaces agree on what
+// counts as a real album. The merged set sorts and paginates in Go — the
+// candidate pools are personal-library sized.
 func (a *App) wantedMissing(ctx context.Context, p ManagerWantedParams) (ManagerWantedPage, error) {
 	page := ManagerWantedPage{Rows: []ManagerWantedRow{}}
 	libs := libraryFilterArgs(p.Libraries)
-	offset := (p.Page - 1) * p.PerPage
 
-	err := a.db.QueryRow(ctx, `
-		WITH missing_movies AS (
-			SELECT mi.id FROM media_items mi
-			LEFT JOIN movies m ON m.media_item_id = mi.id
-			WHERE mi.monitored AND mi.media_type = 'movie'
-			  AND (cardinality($1::bigint[]) = 0 OR mi.library_id = ANY($1))
-			  AND (m.release_date IS NULL OR m.release_date <= CURRENT_DATE)
-			  AND NOT EXISTS (
-				SELECT 1 FROM library_file_links lfl
-				JOIN library_files lf ON lf.id = lfl.library_file_id
-				WHERE lfl.media_item_id = mi.id AND lfl.relation_type IN ('primary','part')
-				  AND lf.deleted_at IS NULL)
-		), missing_episodes AS (
-			SELECT e.id FROM tv_episodes e
-			JOIN tv_seasons s ON s.id = e.season_id
-			JOIN tv_series ser ON ser.id = s.series_id
-			JOIN media_items mi ON mi.id = ser.media_item_id
-			WHERE mi.monitored AND s.monitored AND e.monitored
-			  AND (cardinality($1::bigint[]) = 0 OR mi.library_id = ANY($1))
-			  AND e.air_date IS NOT NULL AND e.air_date <= CURRENT_DATE
-			  AND NOT EXISTS (
-				SELECT 1 FROM library_file_links lfl
-				JOIN library_files lf ON lf.id = lfl.library_file_id
-				WHERE lfl.tv_episode_id = e.id AND lf.deleted_at IS NULL)
-		)
-		SELECT (SELECT count(*) FROM missing_movies) + (SELECT count(*) FROM missing_episodes)`,
-		libs,
-	).Scan(&page.Total)
-	if err != nil {
-		return page, fmt.Errorf("counting missing: %w", err)
-	}
+	var all []datedWantedRow
 
 	rows, err := a.db.Query(ctx, `
-		SELECT * FROM (
-			SELECT 'movie'::text AS kind, mi.id AS item_id, mi.library_id, c.title,
-			       COALESCE(CASE WHEN c.year ~ '^\d{4}' THEN left(c.year, 4)::int END, 0) AS year,
-			       NULL::int AS season, NULL::int AS episode, ''::text AS episode_name,
-			       NULL::bigint AS episode_id,
-			       COALESCE(m.release_date::text, '') AS air_date,
-			       COALESCE(qp.name, '') AS profile_name,
-			       COALESCE(m.release_date, '1900-01-01'::date) AS sort_date
-			FROM media_items mi
-			JOIN media_item_cards c ON c.id = mi.id
-			LEFT JOIN movies m ON m.media_item_id = mi.id
-			LEFT JOIN manager_quality_profiles qp ON qp.id = mi.quality_profile_id
-			WHERE mi.monitored AND mi.media_type = 'movie'
-			  AND (cardinality($1::bigint[]) = 0 OR mi.library_id = ANY($1))
-			  AND (m.release_date IS NULL OR m.release_date <= CURRENT_DATE)
-			  AND NOT EXISTS (
-				SELECT 1 FROM library_file_links lfl
-				JOIN library_files lf ON lf.id = lfl.library_file_id
-				WHERE lfl.media_item_id = mi.id AND lfl.relation_type IN ('primary','part')
-				  AND lf.deleted_at IS NULL)
-			UNION ALL
-			SELECT 'episode', mi.id, mi.library_id, c.title,
-			       COALESCE(CASE WHEN c.year ~ '^\d{4}' THEN left(c.year, 4)::int END, 0),
-			       s.season_number, e.episode_number, e.title, e.id,
-			       COALESCE(e.air_date::text, ''),
-			       COALESCE(qp.name, ''),
-			       COALESCE(e.air_date, '1900-01-01'::date)
-			FROM tv_episodes e
-			JOIN tv_seasons s ON s.id = e.season_id
-			JOIN tv_series ser ON ser.id = s.series_id
-			JOIN media_items mi ON mi.id = ser.media_item_id
-			JOIN media_item_cards c ON c.id = mi.id
-			LEFT JOIN manager_quality_profiles qp ON qp.id = mi.quality_profile_id
-			WHERE mi.monitored AND s.monitored AND e.monitored
-			  AND (cardinality($1::bigint[]) = 0 OR mi.library_id = ANY($1))
-			  AND e.air_date IS NOT NULL AND e.air_date <= CURRENT_DATE
-			  AND NOT EXISTS (
-				SELECT 1 FROM library_file_links lfl
-				JOIN library_files lf ON lf.id = lfl.library_file_id
-				WHERE lfl.tv_episode_id = e.id AND lf.deleted_at IS NULL)
-		) wanted
-		ORDER BY sort_date DESC, title, season NULLS FIRST, episode NULLS FIRST
-		LIMIT $2 OFFSET $3`,
-		libs, p.PerPage, offset,
+		SELECT 'movie'::text AS kind, mi.id AS item_id, mi.library_id, c.title,
+		       COALESCE(CASE WHEN c.year ~ '^\d{4}' THEN left(c.year, 4)::int END, 0) AS year,
+		       NULL::int AS season, NULL::int AS episode, ''::text AS episode_name,
+		       NULL::bigint AS episode_id,
+		       COALESCE(m.release_date::text, '') AS air_date,
+		       COALESCE(qp.name, '') AS profile_name,
+		       COALESCE(m.release_date, '1900-01-01'::date) AS sort_date
+		FROM media_items mi
+		JOIN media_item_cards c ON c.id = mi.id
+		LEFT JOIN movies m ON m.media_item_id = mi.id
+		LEFT JOIN manager_quality_profiles qp ON qp.id = mi.quality_profile_id
+		WHERE mi.monitored AND mi.media_type = 'movie'
+		  AND (cardinality($1::bigint[]) = 0 OR mi.library_id = ANY($1))
+		  AND (m.release_date IS NULL OR m.release_date <= CURRENT_DATE)
+		  AND NOT EXISTS (
+			SELECT 1 FROM library_file_links lfl
+			JOIN library_files lf ON lf.id = lfl.library_file_id
+			WHERE lfl.media_item_id = mi.id AND lfl.relation_type IN ('primary','part')
+			  AND lf.deleted_at IS NULL)
+		UNION ALL
+		SELECT 'episode', mi.id, mi.library_id, c.title,
+		       COALESCE(CASE WHEN c.year ~ '^\d{4}' THEN left(c.year, 4)::int END, 0),
+		       s.season_number, e.episode_number, e.title, e.id,
+		       COALESCE(e.air_date::text, ''),
+		       COALESCE(qp.name, ''),
+		       COALESCE(e.air_date, '1900-01-01'::date)
+		FROM tv_episodes e
+		JOIN tv_seasons s ON s.id = e.season_id
+		JOIN tv_series ser ON ser.id = s.series_id
+		JOIN media_items mi ON mi.id = ser.media_item_id
+		JOIN media_item_cards c ON c.id = mi.id
+		LEFT JOIN manager_quality_profiles qp ON qp.id = mi.quality_profile_id
+		WHERE mi.monitored AND s.monitored AND e.monitored
+		  AND (cardinality($1::bigint[]) = 0 OR mi.library_id = ANY($1))
+		  AND e.air_date IS NOT NULL AND e.air_date <= CURRENT_DATE
+		  AND NOT EXISTS (
+			SELECT 1 FROM library_file_links lfl
+			JOIN library_files lf ON lf.id = lfl.library_file_id
+			WHERE lfl.tv_episode_id = e.id AND lf.deleted_at IS NULL)`,
+		libs,
 	)
 	if err != nil {
 		return page, fmt.Errorf("listing missing: %w", err)
@@ -180,13 +159,113 @@ func (a *App) wantedMissing(ctx context.Context, p ManagerWantedParams) (Manager
 			return page, err
 		}
 		row.Season, row.Episode, row.EpisodeID = season, episode, epID
-		page.Rows = append(page.Rows, row)
+		all = append(all, datedWantedRow{row, sortDate})
 	}
 	if err := rows.Err(); err != nil {
 		return page, err
 	}
+
+	albums, err := a.wantedMissingAlbums(ctx, libs)
+	if err != nil {
+		return page, err
+	}
+	all = append(all, albums...)
+
+	sort.SliceStable(all, func(i, j int) bool {
+		if !all[i].date.Equal(all[j].date) {
+			return all[i].date.After(all[j].date)
+		}
+		if all[i].row.Title != all[j].row.Title {
+			return all[i].row.Title < all[j].row.Title
+		}
+		si, sj := intOr(all[i].row.Season, -1), intOr(all[j].row.Season, -1)
+		if si != sj {
+			return si < sj
+		}
+		return intOr(all[i].row.Episode, -1) < intOr(all[j].row.Episode, -1)
+	})
+
+	page.Total = int64(len(all))
+	start := min((p.Page-1)*p.PerPage, len(all))
+	end := min(start+p.PerPage, len(all))
+	for _, d := range all[start:end] {
+		page.Rows = append(page.Rows, d.row)
+	}
 	a.attachLastDecisions(ctx, page.Rows)
 	return page, nil
+}
+
+func intOr(v *int, fallback int) int {
+	if v == nil {
+		return fallback
+	}
+	return *v
+}
+
+// datedWantedRow pairs a row with its sort key for the in-Go merge.
+type datedWantedRow struct {
+	row  ManagerWantedRow
+	date time.Time
+}
+
+// wantedMissingAlbums: catalog releases of monitored artists with no linked
+// local album — edition-group aware (a Deluxe on disk satisfies the base
+// title), filtered to real albums and EPs via effectiveReleaseType. Singles,
+// remixes, live records, and broadcasts stay off the wanted list; they still
+// show on the artist's manager page.
+func (a *App) wantedMissingAlbums(ctx context.Context, libs []int64) ([]datedWantedRow, error) {
+	rows, err := a.db.Query(ctx, `
+		SELECT DISTINCT ON (dd.artist_id, COALESCE(NULLIF(dd.edition_key, ''), lower(dd.title)))
+		       mi.id, mi.library_id, c.title,
+		       COALESCE(CASE WHEN c.year ~ '^\d{4}' THEN left(c.year, 4)::int END, 0),
+		       dd.id, dd.title, dd.album_type, COALESCE(dd.secondary_types, '{}'),
+		       COALESCE(dd.release_date::text, NULLIF(dd.year, ''), ''),
+		       COALESCE(qp.name, ''),
+		       COALESCE(dd.release_date,
+		                CASE WHEN dd.year ~ '^\d{4}' THEN make_date(left(dd.year, 4)::int, 1, 1) END,
+		                '1900-01-01'::date)
+		FROM artist_discography dd
+		JOIN artists ar ON ar.id = dd.artist_id
+		JOIN media_items mi ON mi.id = ar.media_item_id
+		JOIN media_item_cards c ON c.id = mi.id
+		LEFT JOIN manager_quality_profiles qp ON qp.id = mi.quality_profile_id
+		WHERE mi.monitored AND mi.media_type = 'music'
+		  AND (cardinality($1::bigint[]) = 0 OR mi.library_id = ANY($1))
+		  AND dd.album_id IS NULL
+		  AND (dd.release_date IS NULL OR dd.release_date <= CURRENT_DATE)
+		  AND NOT EXISTS (
+			SELECT 1 FROM artist_discography d2
+			WHERE d2.artist_id = dd.artist_id AND d2.album_id IS NOT NULL
+			  AND COALESCE(NULLIF(d2.edition_key, ''), lower(d2.title))
+				= COALESCE(NULLIF(dd.edition_key, ''), lower(dd.title)))
+		ORDER BY dd.artist_id, COALESCE(NULLIF(dd.edition_key, ''), lower(dd.title)), length(dd.title)`,
+		libs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing missing albums: %w", err)
+	}
+	defer rows.Close()
+
+	var out []datedWantedRow
+	for rows.Next() {
+		var (
+			row       ManagerWantedRow
+			albumType string
+			secondary []string
+			sortDate  time.Time
+		)
+		row.Kind = "album"
+		if err := rows.Scan(&row.MediaItemID, &row.LibraryID, &row.Title, &row.Year,
+			&row.DiscographyID, &row.AlbumTitle, &albumType, &secondary,
+			&row.AirDate, &row.ProfileName, &sortDate); err != nil {
+			return nil, err
+		}
+		switch effectiveReleaseType(albumType, secondary, row.AlbumTitle) {
+		case "album", "ep":
+			out = append(out, datedWantedRow{row, sortDate})
+		}
+	}
+	return out, rows.Err()
 }
 
 // wantedCutoff: on-disk movies whose best file sits below the profile
@@ -341,7 +420,11 @@ func (a *App) wantedProblems(ctx context.Context, p ManagerWantedParams) (Manage
 	return page, err
 }
 
-// attachLastDecisions annotates rows with their latest decision (batch).
+// attachLastDecisions annotates rows with the latest decision COVERING each
+// unit (batch): an episode row only claims a decision that evaluated that
+// episode (or its season), never an unrelated unit of the same show. The run
+// kind rides along so the UI can say HOW the unit was last seen — an RSS
+// sweep versus an explicit search.
 func (a *App) attachLastDecisions(ctx context.Context, rows []ManagerWantedRow) {
 	ids := make([]int64, 0, len(rows))
 	for _, row := range rows {
@@ -351,34 +434,67 @@ func (a *App) attachLastDecisions(ctx context.Context, rows []ManagerWantedRow) 
 		return
 	}
 	dbRows, err := a.db.Query(ctx, `
-		SELECT DISTINCT ON (media_item_id) media_item_id, decided_at, verdict
-		FROM manager_decisions
-		WHERE media_item_id = ANY($1)
-		ORDER BY media_item_id, decided_at DESC`, ids)
+		SELECT d.media_item_id, d.decided_at, d.verdict, d.target_kind,
+		       d.season_number, d.episode_number, d.album_title, r.kind, d.run_id
+		FROM manager_decisions d
+		JOIN manager_runs r ON r.id = d.run_id
+		WHERE d.media_item_id = ANY($1)
+		ORDER BY d.decided_at DESC
+		LIMIT 5000`, ids)
 	if err != nil {
 		return
 	}
 	defer dbRows.Close()
-	latest := map[int64]struct {
-		at      time.Time
-		verdict string
-	}{}
+	type dec struct {
+		at              time.Time
+		verdict         string
+		targetKind      string
+		season, episode *int32
+		albumTitle      string
+		runKind         string
+		runID           int64
+	}
+	byItem := map[int64][]dec{}
 	for dbRows.Next() {
-		var id int64
-		var at time.Time
-		var verdict string
-		if dbRows.Scan(&id, &at, &verdict) == nil {
-			latest[id] = struct {
-				at      time.Time
-				verdict string
-			}{at, verdict}
+		var itemID int64
+		var d dec
+		if dbRows.Scan(&itemID, &d.at, &d.verdict, &d.targetKind,
+			&d.season, &d.episode, &d.albumTitle, &d.runKind, &d.runID) == nil {
+			byItem[itemID] = append(byItem[itemID], d)
+		}
+	}
+	covers := func(row ManagerWantedRow, d dec) bool {
+		switch row.Kind {
+		case "episode":
+			if row.Season == nil {
+				return false
+			}
+			switch d.targetKind {
+			case "episode":
+				return d.season != nil && d.episode != nil && row.Episode != nil &&
+					int(*d.season) == *row.Season && int(*d.episode) == *row.Episode
+			case "season":
+				return d.season != nil && int(*d.season) == *row.Season
+			default:
+				return false
+			}
+		case "album":
+			return d.targetKind == "music_release" && strings.EqualFold(d.albumTitle, row.AlbumTitle)
+		default: // movie / whole-item rows: any decision on the item counts
+			return true
 		}
 	}
 	for i := range rows {
-		if l, ok := latest[rows[i].MediaItemID]; ok {
-			at := l.at
+		for _, d := range byItem[rows[i].MediaItemID] {
+			if !covers(rows[i], d) {
+				continue
+			}
+			at := d.at
 			rows[i].LastDecisionAt = &at
-			rows[i].LastDecisionVerdict = l.verdict
+			rows[i].LastDecisionVerdict = d.verdict
+			rows[i].LastDecisionKind = d.runKind
+			rows[i].LastDecisionRunID = d.runID
+			break
 		}
 	}
 }

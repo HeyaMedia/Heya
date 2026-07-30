@@ -1,7 +1,9 @@
 <script setup lang="ts">
 // One evaluated release, in full: the complete release name (wrapping, never
 // truncated), every matched custom-format label, and the evaluation facts.
-// Shared by the interactive search modal and the History expansion.
+// Shared by the interactive search modal and the History expansion. Quality
+// and format chips use the shared .mgr-quality / .mgr-cf vocabulary from the
+// manager layout.
 type FormatHit = { id?: number, name?: string, score?: number }
 type Rejection = { code: string, message: string }
 
@@ -49,15 +51,15 @@ const labels = computed(() => (props.breakdown ?? []).filter(hit => hit.name))
       <div class="mcr-title mono">{{ title }}</div>
       <div class="mcr-meta">
         <span class="mcr-fact">{{ indexer }}</span>
-        <span v-if="quality" class="mcr-fact mono">{{ quality }}</span>
-        <span class="mcr-fact mono">score {{ score }}</span>
+        <span v-if="quality" class="mgr-quality">{{ quality }}</span>
+        <span class="mcr-score mono" :class="{ neg: score < 0 }">{{ score }}</span>
         <span class="mcr-fact mono">{{ fmtSize(sizeBytes) }}</span>
         <span v-if="age" class="mcr-fact mono">{{ age }}</span>
         <span v-if="acceptable" class="mcr-ok"><Icon name="check" :size="11" /> acceptable</span>
       </div>
       <div v-if="labels.length" class="mcr-labels">
         <span
-          v-for="hit in labels" :key="hit.id ?? hit.name" class="mcr-label"
+          v-for="hit in labels" :key="hit.id ?? hit.name" class="mgr-cf"
           :class="{ pos: (hit.score ?? 0) > 0, neg: (hit.score ?? 0) < 0 }"
         >
           {{ hit.name }}<template v-if="hit.score"> {{ hit.score! > 0 ? '+' : '' }}{{ hit.score }}</template>
@@ -103,31 +105,17 @@ const labels = computed(() => (props.breakdown ?? []).filter(hit => hit.name))
 }
 .mcr-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .mcr-fact { font-size: 11px; color: var(--fg-2); }
+.mcr-score { font-size: 11px; font-weight: 700; color: var(--fg-0); }
+.mcr-score.neg { color: var(--bad); }
+.mcr-score::before {
+  content: 'score';
+  margin-right: 4px;
+  font-weight: 400;
+  color: var(--fg-3);
+}
 .mcr-ok { display: inline-flex; align-items: center; gap: 4px; color: var(--good); font-size: 11px; }
 
 .mcr-labels { display: flex; gap: 5px; flex-wrap: wrap; }
-.mcr-label {
-  display: inline-flex;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  background: rgb(var(--ink) / 0.05);
-  border: 1px solid var(--border);
-  color: var(--fg-2);
-  white-space: nowrap;
-}
-.mcr-label.pos {
-  color: var(--good);
-  background: color-mix(in srgb, var(--good) 9%, transparent);
-  border-color: color-mix(in srgb, var(--good) 28%, transparent);
-}
-.mcr-label.neg {
-  color: var(--bad);
-  background: color-mix(in srgb, var(--bad) 9%, transparent);
-  border-color: color-mix(in srgb, var(--bad) 28%, transparent);
-}
 
 .mcr-rejections { display: flex; flex-direction: column; gap: 2px; }
 .mcr-rej { font-size: 11px; color: var(--fg-3); overflow-wrap: anywhere; }

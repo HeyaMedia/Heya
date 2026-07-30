@@ -113,7 +113,7 @@ async function confirmAdd() {
         aria-label="Search query"
       >
       <button type="submit" class="mgr-btn gold" :disabled="searching || !query.trim()">
-        <span v-if="searching" class="mgr-loading sm" />
+        <span v-if="searching" class="mgr-spin" />
         <Icon v-else name="search" :size="14" />
         Search
       </button>

@@ -216,6 +216,47 @@ watch(() => route.path, () => { navOpen.value = false })
 .mgr-btn-icon.danger:hover { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
 .mgr-btn-icon:disabled { opacity: 0.4; pointer-events: none; }
 
+/* Release-fact vocabulary shared by every manager surface (queue, history,
+   search modal, wanted, entity pages): the grey quality pill and the signed
+   custom-format label chips. One look everywhere — a quality or a format
+   label must read the same no matter which page shows it. */
+.mgr-quality {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: rgb(var(--ink) / 0.08);
+  border: 1px solid var(--border-strong);
+  color: var(--fg-1);
+  white-space: nowrap;
+}
+.mgr-cf {
+  display: inline-flex;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid var(--border);
+  color: var(--fg-2);
+  white-space: nowrap;
+}
+.mgr-cf.pos {
+  color: var(--good);
+  background: color-mix(in srgb, var(--good) 9%, transparent);
+  border-color: color-mix(in srgb, var(--good) 28%, transparent);
+}
+.mgr-cf.neg {
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 9%, transparent);
+  border-color: color-mix(in srgb, var(--bad) 28%, transparent);
+}
+
 .mgr-flash {
   display: flex;
   align-items: center;
@@ -238,5 +279,20 @@ watch(() => route.path, () => { navOpen.value = false })
   background: var(--bg-2);
   border: 1px dashed var(--border);
   border-radius: var(--r-md);
+}
+
+/* Small inline spinner — for buttons, flashes, and loading lines. */
+.mgr-spin {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid rgb(var(--ink) / 0.15);
+  border-top-color: var(--gold);
+  animation: mgr-spin 0.7s linear infinite;
+}
+@keyframes mgr-spin {
+  to { transform: rotate(360deg); }
 }
 </style>

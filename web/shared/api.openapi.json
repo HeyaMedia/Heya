@@ -14785,6 +14785,15 @@
           "fail_message": {
             "type": "string"
           },
+          "format_breakdown": {
+            "items": {
+              "$ref": "#/components/schemas/FormatHit"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "history": {
             "type": "boolean"
           },
@@ -14807,6 +14816,13 @@
           },
           "percentage": {
             "format": "int64",
+            "type": "integer"
+          },
+          "quality": {
+            "type": "string"
+          },
+          "score": {
+            "format": "int32",
             "type": "integer"
           },
           "size_left_mb": {
@@ -15641,11 +15657,18 @@
           "air_date": {
             "type": "string"
           },
+          "album_title": {
+            "type": "string"
+          },
           "current_quality": {
             "type": "string"
           },
           "current_score": {
             "format": "int32",
+            "type": "integer"
+          },
+          "discography_id": {
+            "format": "int64",
             "type": "integer"
           },
           "episode": {
@@ -15665,6 +15688,13 @@
           "last_decision_at": {
             "format": "date-time",
             "type": "string"
+          },
+          "last_decision_kind": {
+            "type": "string"
+          },
+          "last_decision_run_id": {
+            "format": "int64",
+            "type": "integer"
           },
           "last_decision_verdict": {
             "type": "string"

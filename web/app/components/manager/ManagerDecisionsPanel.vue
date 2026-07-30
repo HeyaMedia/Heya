@@ -9,14 +9,6 @@ const props = defineProps<{ mediaItemId: number }>()
 
 const { data, asyncStatus } = useQuery(() => managerItemDecisionsQuery(props.mediaItemId))
 
-const VERDICT_META: Record<string, { label: string, state: 'ok' | 'warn' | 'error' | 'idle' }> = {
-  would_grab: { label: 'would grab', state: 'ok' },
-  already_satisfied: { label: 'satisfied', state: 'idle' },
-  no_acceptable_candidate: { label: 'nothing acceptable', state: 'error' },
-  comparison_uncertain: { label: 'uncertain', state: 'warn' },
-  configuration_error: { label: 'config error', state: 'error' },
-}
-
 function fmtWhen(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
@@ -38,10 +30,12 @@ function unitLabel(d: { target_kind: string, season_number?: number, episode_num
 <template>
   <section v-if="(data?.decisions?.length ?? 0) > 0 || asyncStatus === 'loading'" class="mdp">
     <h2 class="mdp-head">Acquisition decisions</h2>
-    <div v-if="asyncStatus === 'loading' && !data" class="mdp-loading"><span class="mgr-loading" /> Loading decisions…</div>
+    <div v-if="asyncStatus === 'loading' && !data" class="mdp-loading"><span class="mgr-spin" /> Loading decisions…</div>
     <ul v-else class="mdp-list">
       <li v-for="d in data?.decisions ?? []" :key="d.id" class="mdp-row">
-        <StatusBadge :state="VERDICT_META[d.verdict]?.state ?? 'idle'">{{ VERDICT_META[d.verdict]?.label ?? d.verdict }}</StatusBadge>
+        <span class="mdp-badge-col">
+          <StatusBadge :state="managerVerdictState(d.verdict)">{{ managerVerdictLabel(d.verdict) }}</StatusBadge>
+        </span>
         <div class="mdp-body">
           <div class="mdp-line">
             <span v-if="unitLabel(d)" class="mdp-unit mono">{{ unitLabel(d) }}</span>
@@ -49,11 +43,11 @@ function unitLabel(d: { target_kind: string, season_number?: number, episode_num
             <span v-else class="mdp-none">no release selected</span>
           </div>
           <div v-if="d.chosen_title" class="mdp-facts">
-            <span v-if="d.chosen_quality" class="mdp-fact mono">{{ d.chosen_quality }}</span>
-            <span class="mdp-fact mono">score {{ d.chosen_score ?? 0 }}</span>
+            <span v-if="d.chosen_quality" class="mgr-quality">{{ d.chosen_quality }}</span>
+            <span class="mdp-score mono">score <b>{{ d.chosen_score ?? 0 }}</b></span>
             <span v-if="d.chosen_size_bytes" class="mdp-fact mono">{{ fmtSize(d.chosen_size_bytes) }}</span>
             <template v-for="hit in ((d.chosen_breakdown as any[]) ?? [])" :key="hit.name">
-              <span class="mdp-cf" :class="{ pos: (hit.score ?? 0) > 0, neg: (hit.score ?? 0) < 0 }">
+              <span class="mgr-cf" :class="{ pos: (hit.score ?? 0) > 0, neg: (hit.score ?? 0) < 0 }">
                 {{ hit.name }}<template v-if="hit.score"> {{ hit.score > 0 ? '+' : '' }}{{ hit.score }}</template>
               </span>
             </template>
@@ -79,8 +73,10 @@ function unitLabel(d: { target_kind: string, season_number?: number, episode_num
 }
 .mdp-loading { display: flex; align-items: center; gap: 8px; color: var(--fg-3); font-size: 12.5px; }
 .mdp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+/* Fixed verdict column so the release names align down the list. */
 .mdp-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 148px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
@@ -88,29 +84,23 @@ function unitLabel(d: { target_kind: string, season_number?: number, episode_num
   border: 1px solid var(--border);
   border-radius: var(--r-md);
 }
-.mdp-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.mdp-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mdp-badge-col { display: flex; justify-content: flex-start; }
+.mdp-body { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.mdp-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .mdp-unit { font-size: 11px; color: var(--fg-2); flex-shrink: 0; }
 .mdp-chosen { font-size: 12px; color: var(--fg-1); overflow-wrap: anywhere; }
 .mdp-facts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .mdp-fact { font-size: 10.5px; color: var(--fg-2); }
-.mdp-cf {
-  display: inline-flex;
-  padding: 0 6px;
-  border-radius: 999px;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  font-weight: 600;
-  background: rgb(var(--ink) / 0.05);
-  border: 1px solid var(--border);
-  color: var(--fg-2);
-  white-space: nowrap;
-}
-.mdp-cf.pos { color: var(--good); border-color: color-mix(in srgb, var(--good) 28%, transparent); }
-.mdp-cf.neg { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 28%, transparent); }
+.mdp-score { font-size: 10.5px; color: var(--fg-3); }
+.mdp-score b { color: var(--fg-0); font-weight: 700; }
 .mdp-none { font-size: 12px; color: var(--fg-3); }
 .mdp-sub { font-size: 11px; color: var(--fg-3); }
 .mdp-link { flex-shrink: 0; font-size: 11px; color: var(--fg-3); text-decoration: none; }
 .mdp-link:hover { color: var(--gold-bright); }
 .mono { font-family: var(--font-mono); }
+
+@media (max-width: 720px) {
+  .mdp-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; }
+  .mdp-badge-col { order: -1; }
+}
 </style>

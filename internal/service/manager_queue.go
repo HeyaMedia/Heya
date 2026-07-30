@@ -39,6 +39,12 @@ type ManagerQueueItemView struct {
 	MatchedLibrary int64  `json:"matched_library,omitempty"`
 	Verdict        string `json:"verdict"`
 	VerdictDetail  string `json:"verdict_detail,omitempty"`
+
+	// What the release parses to — quality always (parse is profile-free),
+	// score + matched format labels only when a profile evaluation ran.
+	Quality         string               `json:"quality,omitempty"`
+	Score           int32                `json:"score,omitempty"`
+	FormatBreakdown []decision.FormatHit `json:"format_breakdown,omitempty"`
 }
 
 type ManagerQueueView struct {
@@ -122,6 +128,7 @@ func (a *App) annotateQueueItem(
 	if !isTV {
 		parsedTitle = video.FilenameParseMovie(item.Name).Title
 	}
+	item.Quality = formats.QualityKey(formats.ParseVideoRelease(item.Name, int64(item.SizeMB*1024*1024), isTV))
 	normalized := matcher.NormalizeTitle(parsedTitle)
 	if refs := index.byTitle[normalized]; len(refs) >= 1 {
 		matchedRef = &refs[0]
@@ -167,6 +174,11 @@ func (a *App) annotateQueueItem(
 			}})
 			verdict = "would_reject"
 			for _, cand := range result.Candidates {
+				if cand.QualityKey != "" {
+					item.Quality = cand.QualityKey
+				}
+				item.Score = cand.FormatScore
+				item.FormatBreakdown = cand.FormatBreakdown
 				if len(cand.RunRejections) > 0 {
 					rejections = cand.RunRejections
 					detail = cand.RunRejections[0].Message

@@ -618,10 +618,7 @@ function headerSort(key: string) {
               <span v-if="!isPhone" class="libt-cell profile">{{ item.quality_profile_id ? (profileNames[item.quality_profile_id] ?? `#${item.quality_profile_id}`) : '—' }}</span>
               <span v-if="vocab!.group && !isPhone" class="libt-cell mono num">{{ item.group_count }}</span>
               <span class="libt-cell">
-                <span class="lib-progress table" :class="`tone-${progressTone(item)}`">
-                  <span class="lib-progress-fill" :style="{ width: `${progressPct(item)}%` }" />
-                </span>
-                <span class="lib-progress-label mono">{{ item.have_count }}/{{ item.total_count }}</span>
+                <ManagerCountPill :have="item.have_count" :total="item.total_count" :tone="progressTone(item)" />
               </span>
               <span class="libt-cell mono num" :class="{ 'has-missing': item.missing_count > 0 }">{{ item.missing_count || '' }}</span>
               <span v-if="!isPhone" class="libt-cell mono num">{{ fmtBytes(item.size_on_disk) }}</span>
@@ -950,18 +947,6 @@ function headerSort(key: string) {
   text-transform: uppercase;
   color: var(--fg-2);
 }
-.lib-progress.table {
-  position: relative;
-  display: inline-block;
-  vertical-align: middle;
-  width: 70px;
-  height: 5px;
-  border-radius: 999px;
-  overflow: hidden;
-  margin-right: 8px;
-  background: rgb(var(--ink) / 0.25);
-}
-.lib-progress-label { font-size: 11px; color: var(--fg-2); }
 .lib-row-select,
 .lib-row-monitor {
   display: inline-flex;

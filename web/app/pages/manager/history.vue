@@ -19,14 +19,6 @@ const VERDICTS = [
   { value: 'configuration_error', label: 'Config error' },
 ]
 
-const VERDICT_META: Record<string, { label: string, state: 'ok' | 'warn' | 'error' | 'idle' }> = {
-  would_grab: { label: 'would grab', state: 'ok' },
-  already_satisfied: { label: 'satisfied', state: 'idle' },
-  no_acceptable_candidate: { label: 'nothing acceptable', state: 'error' },
-  comparison_uncertain: { label: 'uncertain', state: 'warn' },
-  configuration_error: { label: 'config error', state: 'error' },
-}
-
 const librariesData = useQuery(librariesQuery)
 const libraries = computed(() => librariesData.data.value ?? [])
 
@@ -169,37 +161,39 @@ function fmtSize(bytes?: number): string {
     </div>
 
     <div v-else-if="asyncStatus === 'loading' && !data" class="h-empty">
-      <span class="mgr-loading" /> Loading the ledger…
+      <span class="mgr-spin" /> Loading the ledger…
     </div>
 
     <template v-else>
       <ul class="h-feed">
         <li v-for="d in decisions" :key="d.id">
           <button type="button" class="h-row" :aria-expanded="expandedDecision === d.id" @click="toggleDecision(d)">
-            <StatusBadge :state="VERDICT_META[d.verdict]?.state ?? 'idle'">{{ VERDICT_META[d.verdict]?.label ?? d.verdict }}</StatusBadge>
+            <span class="h-badge-col">
+              <StatusBadge :state="managerVerdictState(d.verdict)">{{ managerVerdictLabel(d.verdict) }}</StatusBadge>
+            </span>
             <div class="h-body">
               <div class="h-title">
                 {{ targetLabel(d) }}
                 <span class="h-domain mono">{{ d.domain }}</span>
               </div>
               <div class="h-detail">
-                <template v-if="d.chosen_title">would have grabbed <span class="mono">{{ d.chosen_title }}</span></template>
-                <template v-else>{{ VERDICT_META[d.verdict]?.label ?? d.verdict }}<template v-if="d.profile_name"> · profile {{ d.profile_name }}</template></template>
+                <template v-if="d.chosen_title">would have grabbed <span class="mono h-chosen">{{ d.chosen_title }}</span></template>
+                <template v-else>{{ managerVerdictLabel(d.verdict) }}<template v-if="d.profile_name"> · profile {{ d.profile_name }}</template></template>
               </div>
               <div v-if="d.chosen_title" class="h-facts">
-                <span v-if="d.chosen_quality" class="h-fact mono">{{ d.chosen_quality }}</span>
-                <span class="h-fact mono">score {{ d.chosen_score ?? 0 }}</span>
+                <span v-if="d.chosen_quality" class="mgr-quality">{{ d.chosen_quality }}</span>
+                <span class="h-score mono">score <b>{{ d.chosen_score ?? 0 }}</b></span>
                 <span v-if="d.chosen_size_bytes" class="h-fact mono">{{ fmtSize(d.chosen_size_bytes) }}</span>
                 <span v-if="d.profile_name" class="h-fact">{{ d.profile_name }}</span>
                 <template v-for="hit in ((d.chosen_breakdown as any[]) ?? [])" :key="hit.name">
-                  <span class="h-cf" :class="{ pos: (hit.score ?? 0) > 0, neg: (hit.score ?? 0) < 0 }">
+                  <span class="mgr-cf" :class="{ pos: (hit.score ?? 0) > 0, neg: (hit.score ?? 0) < 0 }">
                     {{ hit.name }}<template v-if="hit.score"> {{ hit.score > 0 ? '+' : '' }}{{ hit.score }}</template>
                   </span>
                 </template>
               </div>
             </div>
             <div class="h-meta">
-              <span class="h-time">{{ fmtWhen(d.decided_at) }}</span>
+              <span class="h-time" :title="fmtWhen(d.decided_at)">{{ timeAgoShort(d.decided_at) }}</span>
               <span class="h-via mono">{{ d.run_kind }} · run #{{ d.run_id }}</span>
             </div>
             <Icon :name="expandedDecision === d.id ? 'chevdown' : 'chevright'" :size="14" class="h-chev" />
@@ -207,7 +201,7 @@ function fmtSize(bytes?: number): string {
 
           <div v-if="expandedDecision === d.id" class="h-expand">
             <div v-if="runDetail.asyncStatus.value === 'loading' && !runDetail.data.value" class="h-expand-loading">
-              <span class="mgr-loading" /> Loading run…
+              <span class="mgr-spin" /> Loading run…
             </div>
             <template v-else-if="runDetail.data.value">
               <div class="h-indexers">
@@ -285,8 +279,11 @@ function fmtSize(bytes?: number): string {
 }
 
 .h-feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+/* Grid, not flex: a fixed verdict column left-aligns every title so the list
+   reads as a table even though rows are cards. */
 .h-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 148px minmax(0, 1fr) auto 16px;
   align-items: center;
   gap: 12px;
   width: 100%;
@@ -301,14 +298,22 @@ function fmtSize(bytes?: number): string {
   transition: background 0.12s, border-color 0.12s;
 }
 .h-row:hover { background: var(--bg-3); border-color: color-mix(in srgb, var(--gold) 30%, var(--border)); }
-.h-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.h-badge-col { display: flex; justify-content: flex-start; }
+.h-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .h-title { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 500; color: var(--fg-0); }
 .h-domain { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-3); }
-.h-detail { font-size: 12px; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h-detail { font-size: 12px; color: var(--fg-2); }
+.h-chosen { overflow-wrap: anywhere; color: var(--fg-1); }
 .h-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; }
 .h-time { font-size: 11.5px; color: var(--fg-2); }
 .h-via { font-size: 10.5px; color: var(--fg-3); }
 .h-chev { color: var(--fg-3); flex-shrink: 0; }
+
+@media (max-width: 720px) {
+  .h-row { grid-template-columns: minmax(0, 1fr) 16px; row-gap: 6px; }
+  .h-badge-col { order: -1; }
+  .h-meta { grid-column: 1; flex-direction: row; align-items: center; gap: 8px; }
+}
 
 .h-expand {
   margin: 4px 0 8px;
@@ -323,20 +328,8 @@ function fmtSize(bytes?: number): string {
 .h-candlist { max-height: 480px; overflow-y: auto; border: 1px solid var(--hair); border-radius: var(--r-sm); background: var(--bg-1); }
 .h-facts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
 .h-fact { font-size: 10.5px; color: var(--fg-2); }
-.h-cf {
-  display: inline-flex;
-  padding: 0 6px;
-  border-radius: 999px;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  font-weight: 600;
-  background: rgb(var(--ink) / 0.05);
-  border: 1px solid var(--border);
-  color: var(--fg-2);
-  white-space: nowrap;
-}
-.h-cf.pos { color: var(--good); border-color: color-mix(in srgb, var(--good) 28%, transparent); }
-.h-cf.neg { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 28%, transparent); }
+.h-score { font-size: 10.5px; color: var(--fg-3); }
+.h-score b { color: var(--fg-0); font-weight: 700; }
 
 .h-empty {
   display: flex; align-items: center; gap: 8px;

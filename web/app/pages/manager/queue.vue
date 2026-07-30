@@ -57,7 +57,7 @@ function fmtSize(mb: number): string {
       <button type="button" class="mgr-btn" @click="refetch()">Retry</button>
     </div>
     <div v-else-if="asyncStatus === 'loading' && !data" class="q-empty">
-      <span class="mgr-loading" /> Loading queues…
+      <span class="mgr-spin" /> Loading queues…
     </div>
 
     <template v-else-if="data">
@@ -72,7 +72,16 @@ function fmtSize(mb: number): string {
         </div>
         <div v-for="item in active" :key="`${item.client}-${item.nzo_id}`" class="q-row">
           <div class="q-release">
-            <div class="q-title mono" :title="item.name">{{ item.name }}</div>
+            <div class="q-title mono">{{ item.name }}</div>
+            <div class="q-facts">
+              <span v-if="item.quality" class="mgr-quality">{{ item.quality }}</span>
+              <span v-if="item.score" class="q-score mono">score <b>{{ item.score }}</b></span>
+              <template v-for="hit in item.format_breakdown ?? []" :key="hit.name">
+                <span class="mgr-cf" :class="{ pos: (hit.score ?? 0) > 0, neg: (hit.score ?? 0) < 0 }">
+                  {{ hit.name }}<template v-if="hit.score"> {{ hit.score > 0 ? '+' : '' }}{{ hit.score }}</template>
+                </span>
+              </template>
+            </div>
             <div class="q-sub">
               <template v-if="item.matched_title">
                 <NuxtLink v-if="item.matched_item_id" :to="`/manager/library/${item.matched_library}/${item.matched_item_id}`" class="q-matchlink">{{ item.matched_title }}</NuxtLink>
@@ -103,7 +112,16 @@ function fmtSize(mb: number): string {
         <div class="q-table">
           <div v-for="item in finished" :key="`${item.client}-${item.nzo_id}`" class="q-row done">
             <div class="q-release">
-              <div class="q-title mono" :title="item.name">{{ item.name }}</div>
+              <div class="q-title mono">{{ item.name }}</div>
+              <div class="q-facts">
+                <span v-if="item.quality" class="mgr-quality">{{ item.quality }}</span>
+                <span v-if="item.score" class="q-score mono">score <b>{{ item.score }}</b></span>
+                <template v-for="hit in item.format_breakdown ?? []" :key="hit.name">
+                  <span class="mgr-cf" :class="{ pos: (hit.score ?? 0) > 0, neg: (hit.score ?? 0) < 0 }">
+                    {{ hit.name }}<template v-if="hit.score"> {{ hit.score > 0 ? '+' : '' }}{{ hit.score }}</template>
+                  </span>
+                </template>
+              </div>
               <div class="q-sub">
                 <template v-if="item.matched_title">
                   <NuxtLink v-if="item.matched_item_id" :to="`/manager/library/${item.matched_library}/${item.matched_item_id}`" class="q-matchlink">{{ item.matched_title }}</NuxtLink>
@@ -151,11 +169,16 @@ function fmtSize(mb: number): string {
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
+  align-items: start;
 }
 .q-row.done { opacity: 0.85; }
 
-.q-release { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.q-title { font-size: 12.5px; color: var(--fg-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.q-release { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+/* Full release names, wrapped — never truncated (manager legibility rule). */
+.q-title { font-size: 12.5px; color: var(--fg-0); overflow-wrap: anywhere; line-height: 1.45; }
+.q-facts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.q-score { font-size: 10.5px; color: var(--fg-3); }
+.q-score b { color: var(--fg-0); font-weight: 700; }
 .q-sub { font-size: 11.5px; color: var(--fg-2); }
 .q-matchlink { color: var(--gold-bright); text-decoration: none; }
 .q-fail { color: var(--bad); }

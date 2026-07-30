@@ -45,19 +45,12 @@ async function search() {
   }
 }
 
-const VERDICT_META: Record<string, { label: string, state: 'ok' | 'warn' | 'error' | 'idle' }> = {
-  would_grab: { label: 'would grab', state: 'ok' },
-  already_satisfied: { label: 'already satisfied', state: 'idle' },
-  no_acceptable_candidate: { label: 'no acceptable candidate', state: 'error' },
-  comparison_uncertain: { label: 'comparison uncertain', state: 'warn' },
-  configuration_error: { label: 'configuration error', state: 'error' },
-}
 </script>
 
 <template>
   <AppDialog v-model="open" :title="`Search · ${title}${scopeLabel ? ' ' + scopeLabel : ''}`" size="xl">
     <div v-if="loading" class="msm-loading">
-      <span class="mgr-loading" /> Querying indexers and evaluating candidates…
+      <span class="mgr-spin" /> Querying indexers and evaluating candidates…
     </div>
 
     <div v-else-if="error" class="msm-error">
@@ -67,8 +60,8 @@ const VERDICT_META: Record<string, { label: string, state: 'ok' | 'warn' | 'erro
 
     <template v-else-if="run">
       <div class="msm-summary">
-        <StatusBadge :state="VERDICT_META[run.verdict]?.state ?? 'idle'">
-          {{ VERDICT_META[run.verdict]?.label ?? run.verdict }}
+        <StatusBadge :state="managerVerdictState(run.verdict)">
+          {{ managerVerdictLabel(run.verdict) }}
         </StatusBadge>
         <span v-if="run.chosen_title" class="msm-chosen mono">{{ run.chosen_title }}</span>
         <span class="msm-meta">
