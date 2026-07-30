@@ -77,13 +77,47 @@ async function loadMore() {
   }
 }
 
-// Row expansion loads the run's full candidate record lazily.
-const expandedRun = ref<number | null>(null)
-const runDetail = useQuery(() => managerRunDetailQuery(expandedRun.value ?? 0))
+// Row expansion is per DECISION (a season search shares one run across many
+// episode decisions — expanding one row must not unfold them all); the run
+// detail loads once and the table filters to the expanded decision.
+const expandedDecision = ref<number | null>(null)
+const expandedRunId = ref(0)
+const runDetail = useQuery(() => managerRunDetailQuery(expandedRunId.value))
 
-function toggleRun(runId: number) {
-  expandedRun.value = expandedRun.value === runId ? null : runId
+function toggleDecision(d: ManagerDecisionView) {
+  if (expandedDecision.value === d.id) {
+    expandedDecision.value = null
+    return
+  }
+  expandedDecision.value = d.id
+  expandedRunId.value = d.run_id
 }
+
+// Candidates relevant to the expanded decision: rows with a per-target
+// verdict for it, plus run-level rejects (parse/identity failures that never
+// reached any target). Chosen first, then rank, then score.
+const decisionCandidates = computed(() => {
+  const detail = runDetail.data.value
+  const decisionId = expandedDecision.value
+  if (!detail || !decisionId) return []
+  const rows = (detail.candidates ?? [])
+    .map((cand) => {
+      const target = cand.per_target?.find(t => t.decision_id === decisionId)
+      if (!target && cand.per_target?.length) return null // covers other units only
+      return { cand, target }
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null)
+  rows.sort((a, b) => {
+    const aChosen = a.target?.chosen ? 1 : 0
+    const bChosen = b.target?.chosen ? 1 : 0
+    if (aChosen !== bChosen) return bChosen - aChosen
+    const aRank = a.target?.verdict === 'acceptable' ? (a.target?.selection_rank || 1e9) : 1e9 + 1
+    const bRank = b.target?.verdict === 'acceptable' ? (b.target?.selection_rank || 1e9) : 1e9 + 1
+    if (aRank !== bRank) return aRank - bRank
+    return (b.cand.format_score ?? 0) - (a.cand.format_score ?? 0)
+  })
+  return rows
+})
 
 function fmtWhen(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
@@ -141,7 +175,7 @@ function fmtSize(bytes?: number): string {
     <template v-else>
       <ul class="h-feed">
         <li v-for="d in decisions" :key="d.id">
-          <button type="button" class="h-row" :aria-expanded="expandedRun === d.run_id" @click="toggleRun(d.run_id)">
+          <button type="button" class="h-row" :aria-expanded="expandedDecision === d.id" @click="toggleDecision(d)">
             <StatusBadge :state="VERDICT_META[d.verdict]?.state ?? 'idle'">{{ VERDICT_META[d.verdict]?.label ?? d.verdict }}</StatusBadge>
             <div class="h-body">
               <div class="h-title">
@@ -150,17 +184,17 @@ function fmtSize(bytes?: number): string {
               </div>
               <div class="h-detail">
                 <template v-if="d.chosen_title">would have grabbed <span class="mono">{{ d.chosen_title }}</span></template>
-                <template v-else>{{ VERDICT_META[d.verdict]?.label ?? d.verdict }}<template v-if="d.profile_name"> under {{ d.profile_name }}</template></template>
+                <template v-else>{{ VERDICT_META[d.verdict]?.label ?? d.verdict }}<template v-if="d.profile_name"> · profile {{ d.profile_name }}</template></template>
               </div>
             </div>
             <div class="h-meta">
               <span class="h-time">{{ fmtWhen(d.decided_at) }}</span>
               <span class="h-via mono">{{ d.run_kind }} · run #{{ d.run_id }}</span>
             </div>
-            <Icon :name="expandedRun === d.run_id ? 'chevdown' : 'chevright'" :size="14" class="h-chev" />
+            <Icon :name="expandedDecision === d.id ? 'chevdown' : 'chevright'" :size="14" class="h-chev" />
           </button>
 
-          <div v-if="expandedRun === d.run_id" class="h-expand">
+          <div v-if="expandedDecision === d.id" class="h-expand">
             <div v-if="runDetail.asyncStatus.value === 'loading' && !runDetail.data.value" class="h-expand-loading">
               <span class="mgr-loading" /> Loading run…
             </div>
@@ -176,17 +210,21 @@ function fmtSize(bytes?: number): string {
                     <tr><th>Release</th><th>Indexer</th><th>Quality</th><th class="num">Score</th><th class="num">Size</th><th>Verdict</th></tr>
                   </thead>
                   <tbody>
-                    <tr v-for="cand in runDetail.data.value.candidates ?? []" :key="cand.id" :class="{ chosen: cand.per_target?.some(t => t.chosen) }">
-                      <td class="h-rel mono" :title="cand.title">{{ cand.title }}</td>
-                      <td>{{ cand.indexer }}</td>
-                      <td class="mono">{{ cand.quality || '—' }}</td>
-                      <td class="num mono">{{ cand.format_score }}</td>
-                      <td class="num mono">{{ fmtSize(cand.size_bytes) }}</td>
+                    <tr v-for="row in decisionCandidates" :key="row.cand.id" :class="{ chosen: row.target?.chosen }">
+                      <td class="h-rel mono" :title="row.cand.title">{{ row.cand.title }}</td>
+                      <td>{{ row.cand.indexer }}</td>
+                      <td class="mono">{{ row.cand.quality || '—' }}</td>
+                      <td class="num mono">{{ row.cand.format_score }}</td>
+                      <td class="num mono">{{ fmtSize(row.cand.size_bytes) }}</td>
                       <td class="h-why">
-                        <template v-if="cand.per_target?.some(t => t.chosen)"><span class="h-star">★ chosen</span></template>
-                        <template v-else-if="cand.per_target?.[0]?.verdict === 'acceptable'">#{{ cand.per_target[0]?.selection_rank }}</template>
-                        <template v-else-if="cand.per_target?.[0]?.rejections?.length">{{ cand.per_target[0].rejections[0]!.code }}</template>
-                        <template v-else-if="cand.rejections?.length">{{ cand.rejections[0]!.code }}</template>
+                        <template v-if="row.target?.chosen"><span class="h-star">★ chosen</span></template>
+                        <template v-else-if="row.target?.verdict === 'acceptable'">#{{ row.target?.selection_rank }}</template>
+                        <AppTooltip v-else-if="row.target?.rejections?.length" :label="row.target.rejections.map(r => r.message).join(' · ')">
+                          <span class="h-rejcode">{{ row.target.rejections[0]!.code }}</span>
+                        </AppTooltip>
+                        <AppTooltip v-else-if="row.cand.rejections?.length" :label="row.cand.rejections.map(r => r.message).join(' · ')">
+                          <span class="h-rejcode">{{ row.cand.rejections[0]!.code }}</span>
+                        </AppTooltip>
                       </td>
                     </tr>
                   </tbody>
@@ -305,6 +343,7 @@ function fmtSize(bytes?: number): string {
 .h-rel { max-width: 480px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .h-why { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-2); white-space: nowrap; }
 .h-star { color: var(--gold-bright); }
+.h-rejcode { cursor: help; color: var(--bad); }
 
 .h-empty {
   display: flex; align-items: center; gap: 8px;

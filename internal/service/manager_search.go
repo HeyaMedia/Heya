@@ -388,7 +388,9 @@ func (a *App) buildTVTarget(ctx context.Context, itemID int64, anime bool, scope
 		episodeFilter = "AND e.id = $2"
 		args = append(args, *scope.EpisodeID)
 	case scope.Season != nil:
-		episodeFilter = "AND s.season_number = $2"
+		// Aired episodes only: an unaired episode cannot have an acceptable
+		// candidate, and recording "nothing acceptable" for it is noise.
+		episodeFilter = "AND s.season_number = $2 AND e.air_date IS NOT NULL AND e.air_date <= CURRENT_DATE"
 		args = append(args, *scope.Season)
 	default:
 		return target, meta, fmt.Errorf("tv search needs a season or episode scope")

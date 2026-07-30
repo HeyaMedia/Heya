@@ -84,9 +84,31 @@ function statusLabel(value: string): string {
 const isMusic = computed(() => detail.value?.library.media_type === 'music')
 const posterAspect = computed(() => isMusic.value ? '1/1' : '2/3')
 
-// Interactive shadow search — movies only until the TV/music slices land.
+// Interactive shadow search: movies at item level; TV per season/episode.
 const isMovie = computed(() => item.value?.media_type === 'movie')
 const searchOpen = ref(false)
+const searchSeason = ref<number | undefined>(undefined)
+const searchEpisodeId = ref<number | undefined>(undefined)
+const searchScopeLabel = ref('')
+
+function openItemSearch() {
+  searchSeason.value = undefined
+  searchEpisodeId.value = undefined
+  searchScopeLabel.value = ''
+  searchOpen.value = true
+}
+function openSeasonSearch(seasonNumber: number) {
+  searchSeason.value = seasonNumber
+  searchEpisodeId.value = undefined
+  searchScopeLabel.value = `S${String(seasonNumber).padStart(2, '0')}`
+  searchOpen.value = true
+}
+function openEpisodeSearch(seasonNumber: number, episodeNumber: number, episodeId: number) {
+  searchSeason.value = undefined
+  searchEpisodeId.value = episodeId
+  searchScopeLabel.value = `S${String(seasonNumber).padStart(2, '0')}E${String(episodeNumber).padStart(2, '0')}`
+  searchOpen.value = true
+}
 
 const publicLink = computed(() => {
   const it = item.value
@@ -404,7 +426,7 @@ const FILE_KIND_LABELS: Record<string, string> = {
                 <option value="">No profile</option>
                 <option v-for="p in domainProfiles" :key="p.id" :value="p.id">{{ p.name }}</option>
               </select>
-              <button v-if="isMovie" type="button" class="mgr-btn" @click="searchOpen = true">
+              <button v-if="isMovie" type="button" class="mgr-btn" @click="openItemSearch">
                 <Icon name="search" :size="13" /> Search releases
               </button>
               <NuxtLink :to="publicLink" class="mgr-btn"><Icon name="play" :size="13" /> View in library</NuxtLink>
@@ -413,23 +435,33 @@ const FILE_KIND_LABELS: Record<string, string> = {
         </div>
       </div>
 
-      <ManagerSearchModal v-if="item" v-model="searchOpen" :media-item-id="item.id" :title="item.title" />
+      <ManagerSearchModal
+        v-if="item" v-model="searchOpen" :media-item-id="item.id" :title="item.title"
+        :season="searchSeason" :episode-id="searchEpisodeId" :scope-label="searchScopeLabel"
+      />
 
       <div v-if="flash" class="mgr-flash" :class="flashError ? 'err' : 'ok'">{{ flash }}</div>
 
       <!-- ── TV: seasons ─────────────────────────────────────────────── -->
       <div v-if="detail.seasons?.length" class="det-sections">
         <section v-for="season in detail.seasons" :key="season.number" class="det-section">
-          <button type="button" class="det-section-head" @click="toggleSeason(season.number)">
-            <Icon :name="expandedSeasons.has(season.number) ? 'chevdown' : 'chevright'" :size="14" />
-            <span class="det-section-title">{{ season.number === 0 ? 'Specials' : `Season ${season.number}` }}</span>
-            <span class="det-badge" :class="`tone-${seasonTone(season)}`">{{ season.have }} / {{ season.aired }}</span>
-            <span class="det-section-sub mono">{{ season.episodes?.length ?? 0 }} episodes · {{ fmtBytes(season.size_on_disk) }}</span>
-          </button>
+          <div class="det-season-row">
+            <button type="button" class="det-section-head" @click="toggleSeason(season.number)">
+              <Icon :name="expandedSeasons.has(season.number) ? 'chevdown' : 'chevright'" :size="14" />
+              <span class="det-section-title">{{ season.number === 0 ? 'Specials' : `Season ${season.number}` }}</span>
+              <span class="det-badge" :class="`tone-${seasonTone(season)}`">{{ season.have }} / {{ season.aired }}</span>
+              <span class="det-section-sub mono">{{ season.episodes?.length ?? 0 }} episodes · {{ fmtBytes(season.size_on_disk) }}</span>
+            </button>
+            <AppTooltip label="Interactive search for this season (dry run)">
+              <button type="button" class="det-search-btn" @click="openSeasonSearch(season.number)">
+                <Icon name="search" :size="13" />
+              </button>
+            </AppTooltip>
+          </div>
           <div v-if="expandedSeasons.has(season.number)" class="det-tablewrap">
             <table class="det-table">
               <thead>
-                <tr><th class="num">#</th><th>Title</th><th>Air date</th><th class="num">Size</th><th class="det-right">Status</th></tr>
+                <tr><th class="num">#</th><th>Title</th><th>Air date</th><th class="num">Size</th><th class="det-right">Status</th><th class="det-right" aria-label="Search" /></tr>
               </thead>
               <tbody>
                 <tr v-for="episode in season.episodes ?? []" :key="episode.id">
@@ -438,6 +470,13 @@ const FILE_KIND_LABELS: Record<string, string> = {
                   <td class="mono">{{ episode.air_date || '—' }}</td>
                   <td class="num mono">{{ episode.size_bytes ? fmtBytes(episode.size_bytes) : '' }}</td>
                   <td class="det-right"><span class="det-badge" :class="`tone-${episodeState(episode).tone}`">{{ episodeState(episode).label }}</span></td>
+                  <td class="det-right">
+                    <AppTooltip label="Interactive search for this episode (dry run)">
+                      <button type="button" class="det-search-btn sm" @click="openEpisodeSearch(season.number, episode.number, episode.id)">
+                        <Icon name="search" :size="12" />
+                      </button>
+                    </AppTooltip>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -707,6 +746,21 @@ const FILE_KIND_LABELS: Record<string, string> = {
 
 /* ── Sections ────────────────────────────────────────────────────────── */
 .det-sections { display: flex; flex-direction: column; gap: 12px; }
+.det-season-row { display: flex; align-items: center; gap: 8px; }
+.det-season-row .det-section-head { flex: 1; }
+.det-search-btn {
+  flex-shrink: 0;
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--r-sm);
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid var(--border);
+  color: var(--fg-2);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.det-search-btn:hover { background: rgb(var(--ink) / 0.1); color: var(--fg-0); }
+.det-search-btn.sm { width: 26px; height: 26px; }
 .det-section {
   background: var(--bg-2);
   border: 1px solid var(--border);

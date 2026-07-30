@@ -7,6 +7,10 @@ import type { ManagerSearchRunView, ManagerSearchCandidateView } from '~/queries
 const props = defineProps<{
   mediaItemId: number
   title: string
+  /** TV: narrow the search to one season or one episode. */
+  season?: number
+  episodeId?: number
+  scopeLabel?: string
 }>()
 
 const open = defineModel<boolean>({ default: false })
@@ -20,13 +24,20 @@ watch(open, (isOpen) => {
   if (isOpen && !run.value && !loading.value) search()
   if (!isOpen) error.value = ''
 })
+watch(() => [props.season, props.episodeId], () => { run.value = null })
 
 async function search() {
   loading.value = true
   error.value = ''
   run.value = null
   try {
-    run.value = await $heya(`/api/manager/media/${props.mediaItemId}/search`, { method: 'POST' }) as ManagerSearchRunView
+    run.value = await $heya(`/api/manager/media/${props.mediaItemId}/search`, {
+      method: 'POST',
+      query: {
+        season: props.episodeId == null ? props.season : undefined,
+        episode_id: props.episodeId,
+      },
+    }) as ManagerSearchRunView
   } catch (e: any) {
     error.value = e?.data?.detail ?? e?.message ?? 'Search failed'
   } finally {
@@ -68,7 +79,7 @@ const VERDICT_META: Record<string, { label: string, state: 'ok' | 'warn' | 'erro
 </script>
 
 <template>
-  <AppDialog v-model="open" :title="`Search · ${title}`" size="xl">
+  <AppDialog v-model="open" :title="`Search · ${title}${scopeLabel ? ' ' + scopeLabel : ''}`" size="xl">
     <div v-if="loading" class="msm-loading">
       <span class="mgr-loading" /> Querying indexers and evaluating candidates…
     </div>
