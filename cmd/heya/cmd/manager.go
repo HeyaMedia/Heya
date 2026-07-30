@@ -1051,6 +1051,38 @@ var managerSearchCmd = &cobra.Command{
 	},
 }
 
+var managerRSSCmd = &cobra.Command{
+	Use:   "rss",
+	Short: "RSS sweep controls",
+}
+
+var managerRSSRunCmd = &cobra.Command{
+	Use:   "run",
+	Short: "Run an RSS sweep now (dry-run: records decisions, downloads nothing)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return withApp(func(ctx context.Context, app *service.App) error {
+			view, err := app.RunManagerRSS(ctx, "cli")
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(view)
+			}
+			for _, idx := range view.Indexers {
+				line := fmt.Sprintf("%s · %s · %d releases · %dms", idx.Domain, idx.Status, idx.Fetched, idx.DurationMs)
+				if idx.Error != "" {
+					line += " · " + idx.Error
+				}
+				ui.Info(idx.Indexer, line)
+			}
+			ui.Info("Run", fmt.Sprintf("#%d · %s", view.RunID, view.Status))
+			ui.Info("Releases", fmt.Sprintf("%d fetched · %d fresh · %d matched · %d evaluated · %d would grab",
+				view.Fetched, view.Fresh, view.Matched, view.Evaluated, view.WouldGrabs))
+			return nil
+		})
+	},
+}
+
 var managerHistoryCmd = &cobra.Command{
 	Use:   "history",
 	Short: "The decision ledger: what the pipeline would have done, and why",
@@ -1132,6 +1164,7 @@ func init() {
 	managerLibrarySetCmd.Flags().Int64("profile", 0, "Quality profile id to assign (0 clears it)")
 	managerLibraryCmd.AddCommand(managerLibraryItemsCmd, managerLibraryShowCmd, managerLibraryAlbumCmd, managerLibrarySetCmd, managerLibraryRefreshCmd)
 
-	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd, managerFormatCmd, managerLibraryCmd, managerCalendarCmd, managerSearchCmd, managerHistoryCmd)
+	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd, managerFormatCmd, managerLibraryCmd, managerCalendarCmd, managerSearchCmd, managerHistoryCmd, managerRSSCmd)
+	managerRSSCmd.AddCommand(managerRSSRunCmd)
 	rootCmd.AddCommand(managerCmd)
 }

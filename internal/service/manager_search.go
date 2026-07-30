@@ -973,6 +973,47 @@ func (a *App) persistSearchRun(
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback-on-error path
 
 	qtx := sqlc.New(tx)
+	chosenTitle, verdict, err := a.persistEvaluationTx(ctx, qtx, run.ID, target, meta, policyHash, result, releaseIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	status := "completed"
+	partial := anyFailed && anyOK
+	if anyFailed && !anyOK {
+		status = "failed"
+	}
+	stats, _ := json.Marshal(map[string]any{
+		"candidates": len(result.Candidates), "verdict": verdict,
+	})
+	if _, err := qtx.FinishManagerRun(ctx, sqlc.FinishManagerRunParams{
+		ID: run.ID, Status: status, Partial: partial, Truncated: false,
+		Stats: stats, Errors: []byte("[]"),
+	}); err != nil {
+		return nil, fmt.Errorf("finishing run: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	return buildSearchRunView(run.ID, status, partial, verdict, chosenTitle, target, meta, result, indexerViews), nil
+}
+
+// persistEvaluationTx writes one evaluation's candidates + per-unit
+// decisions + the coverage matrix inside the caller's transaction. Reused by
+// interactive/automatic search (one target per run) and the RSS runner
+// (several matched targets under one run). Returns the chosen release title
+// (if any unit would grab) and the last unit's verdict.
+func (a *App) persistEvaluationTx(
+	ctx context.Context,
+	qtx *sqlc.Queries,
+	runID int64,
+	target decision.Target,
+	meta searchTargetMeta,
+	policyHash string,
+	result decision.Result,
+	releaseIDs map[int]pgtype.Int8,
+) (string, string, error) {
 	candidateRowIDs := make([]int64, len(result.Candidates))
 	for i, cand := range result.Candidates {
 		parsed, _ := json.Marshal(map[string]any{
@@ -997,7 +1038,7 @@ func (a *App) persistSearchRun(
 			publishDate = pgtype.Timestamptz{Time: cand.Input.PublishDate, Valid: true}
 		}
 		row, err := qtx.CreateManagerCandidate(ctx, sqlc.CreateManagerCandidateParams{
-			RunID: run.ID, ReleaseID: releaseIDs[cand.Input.Index],
+			RunID: runID, ReleaseID: releaseIDs[cand.Input.Index],
 			IndexerID:   pgtype.Int8{Int64: cand.Input.IndexerID, Valid: cand.Input.IndexerID != 0},
 			IndexerName: cand.Input.IndexerName, IndexerPriority: cand.Input.IndexerPriority,
 			Title: cand.Input.Title, SizeBytes: max64(cand.Input.SizeBytes, 0),
@@ -1006,7 +1047,7 @@ func (a *App) persistSearchRun(
 			FormatScore: cand.FormatScore, FormatBreakdown: breakdown, Rejections: rejections,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("persisting candidate %q: %w", cand.Input.Title, err)
+			return "", "", fmt.Errorf("persisting candidate %q: %w", cand.Input.Title, err)
 		}
 		candidateRowIDs[i] = row.ID
 	}
@@ -1023,7 +1064,7 @@ func (a *App) persistSearchRun(
 		verdict = unit.Verdict
 		srcUnit := unitByKey[unit.UnitKey]
 		if srcUnit == nil {
-			return nil, fmt.Errorf("decision for unknown unit %s", unit.UnitKey)
+			return "", "", fmt.Errorf("decision for unknown unit %s", unit.UnitKey)
 		}
 		contextDoc, _ := json.Marshal(map[string]any{
 			"existing": existingContext(srcUnit.Existing),
@@ -1063,7 +1104,7 @@ func (a *App) persistSearchRun(
 			targetKind = "book"
 		}
 		decisionRow, err := qtx.CreateManagerDecision(ctx, sqlc.CreateManagerDecisionParams{
-			RunID: run.ID, TargetKind: targetKind, TargetKey: unit.UnitKey,
+			RunID: runID, TargetKind: targetKind, TargetKey: unit.UnitKey,
 			MediaItemID: pgtype.Int8{Int64: target.MediaItemID, Valid: true},
 			TvEpisodeID: episodeID,
 			LibraryID:   meta.LibraryID, Domain: meta.Domain,
@@ -1074,7 +1115,7 @@ func (a *App) persistSearchRun(
 			Verdict: insertVerdict, Context: contextDoc,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("persisting decision: %w", err)
+			return "", "", fmt.Errorf("persisting decision: %w", err)
 		}
 
 		var chosenRowID int64
@@ -1091,11 +1132,11 @@ func (a *App) persistSearchRun(
 			}
 			rejections, _ := json.Marshal(orEmptyRejections(eval.Rejections))
 			ctRow, err := qtx.CreateManagerCandidateTarget(ctx, sqlc.CreateManagerCandidateTargetParams{
-				CandidateID: candidateRowIDs[i], DecisionID: decisionRow.ID, RunID: run.ID,
+				CandidateID: candidateRowIDs[i], DecisionID: decisionRow.ID, RunID: runID,
 				Verdict: ctVerdict, Rejections: rejections, SelectionRank: rank,
 			})
 			if err != nil {
-				return nil, fmt.Errorf("persisting candidate target: %w", err)
+				return "", "", fmt.Errorf("persisting candidate target: %w", err)
 			}
 			if unit.Verdict == decision.VerdictWouldGrab && cand.Input.Index == unit.ChosenCandidate {
 				chosenRowID = ctRow.ID
@@ -1106,34 +1147,24 @@ func (a *App) persistSearchRun(
 			if err := qtx.MarkManagerDecisionGrab(ctx, sqlc.MarkManagerDecisionGrabParams{
 				ID: decisionRow.ID, ChosenTargetRow: pgtype.Int8{Int64: chosenRowID, Valid: true},
 			}); err != nil {
-				return nil, fmt.Errorf("setting chosen candidate: %w", err)
+				return "", "", fmt.Errorf("setting chosen candidate: %w", err)
 			}
 		}
 	}
+	return chosenTitle, verdict, nil
+}
 
-	status := "completed"
-	partial := anyFailed && anyOK
-	if anyFailed && !anyOK {
-		status = "failed"
-	}
-	stats, _ := json.Marshal(map[string]any{
-		"candidates": len(result.Candidates), "verdict": verdict,
-	})
-	if _, err := qtx.FinishManagerRun(ctx, sqlc.FinishManagerRunParams{
-		ID: run.ID, Status: status, Partial: partial, Truncated: false,
-		Stats: stats, Errors: []byte("[]"),
-	}); err != nil {
-		return nil, fmt.Errorf("finishing run: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, err
-	}
-
+// buildSearchRunView assembles the interactive view from an in-memory
+// evaluation result.
+func buildSearchRunView(runID int64, status string, partial bool, verdict, chosenTitle string, target decision.Target, meta searchTargetMeta, result decision.Result, indexerViews []ManagerRunIndexerView) *ManagerSearchRunView {
 	view := &ManagerSearchRunView{
-		RunID: run.ID, Status: status, Partial: partial,
+		RunID: runID, Status: status, Partial: partial,
 		Verdict: verdict, ChosenTitle: chosenTitle,
 		Target:   fmt.Sprintf("%s (%d)", meta.Title, meta.Year),
 		Indexers: indexerViews,
+	}
+	if meta.ScopeLabel != "" {
+		view.Target = fmt.Sprintf("%s %s", meta.Title, meta.ScopeLabel)
 	}
 	if target.Profile != nil {
 		view.Profile = target.Profile.Name
@@ -1179,7 +1210,7 @@ func (a *App) persistSearchRun(
 		view.Candidates = append(view.Candidates, cv)
 	}
 	sortCandidateViews(view.Candidates)
-	return view, nil
+	return view
 }
 
 // sortCandidateViews: chosen first, then ranked accepted, then rejected by

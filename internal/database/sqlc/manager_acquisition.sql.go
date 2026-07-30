@@ -492,6 +492,60 @@ func (q *Queries) GetManagerPolicySnapshot(ctx context.Context, policyHash strin
 	return i, err
 }
 
+const getManagerRSSCursor = `-- name: GetManagerRSSCursor :one
+
+SELECT indexer_id, domain, last_release_key, last_publish_date, last_run_id, updated_at FROM manager_rss_cursors WHERE indexer_id = $1 AND domain = $2
+`
+
+type GetManagerRSSCursorParams struct {
+	IndexerID int64  `json:"indexer_id"`
+	Domain    string `json:"domain"`
+}
+
+// ── RSS cursors ──────────────────────────────────────────────────────────
+func (q *Queries) GetManagerRSSCursor(ctx context.Context, arg GetManagerRSSCursorParams) (ManagerRssCursor, error) {
+	row := q.db.QueryRow(ctx, getManagerRSSCursor, arg.IndexerID, arg.Domain)
+	var i ManagerRssCursor
+	err := row.Scan(
+		&i.IndexerID,
+		&i.Domain,
+		&i.LastReleaseKey,
+		&i.LastPublishDate,
+		&i.LastRunID,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getManagerRelease = `-- name: GetManagerRelease :one
+SELECT id, indexer_id, indexer_name, domain, release_key, ui_fingerprint, guid, title, size_bytes, publish_date, publish_date_raw, categories, raw_attrs, info_url, first_seen_at, last_seen_at, times_seen FROM manager_releases WHERE id = $1
+`
+
+func (q *Queries) GetManagerRelease(ctx context.Context, id int64) (ManagerRelease, error) {
+	row := q.db.QueryRow(ctx, getManagerRelease, id)
+	var i ManagerRelease
+	err := row.Scan(
+		&i.ID,
+		&i.IndexerID,
+		&i.IndexerName,
+		&i.Domain,
+		&i.ReleaseKey,
+		&i.UiFingerprint,
+		&i.Guid,
+		&i.Title,
+		&i.SizeBytes,
+		&i.PublishDate,
+		&i.PublishDateRaw,
+		&i.Categories,
+		&i.RawAttrs,
+		&i.InfoUrl,
+		&i.FirstSeenAt,
+		&i.LastSeenAt,
+		&i.TimesSeen,
+	)
+	return i, err
+}
+
 const getManagerRun = `-- name: GetManagerRun :one
 SELECT id, kind, source, status, partial, truncated, scope, stats, errors, started_at, finished_at FROM manager_runs WHERE id = $1
 `
@@ -951,6 +1005,45 @@ func (q *Queries) ListManagerRuns(ctx context.Context, arg ListManagerRunsParams
 	return items, nil
 }
 
+const listPendingManagerSightings = `-- name: ListPendingManagerSightings :many
+SELECT id, release_id, run_id, run_request_id, seen_at, response_attrs, status, attempts, error, matched, decision_id, policy_hash FROM manager_release_sightings
+WHERE run_id = $1 AND status = 'pending'
+ORDER BY id
+`
+
+func (q *Queries) ListPendingManagerSightings(ctx context.Context, runID pgtype.Int8) ([]ManagerReleaseSighting, error) {
+	rows, err := q.db.Query(ctx, listPendingManagerSightings, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ManagerReleaseSighting{}
+	for rows.Next() {
+		var i ManagerReleaseSighting
+		if err := rows.Scan(
+			&i.ID,
+			&i.ReleaseID,
+			&i.RunID,
+			&i.RunRequestID,
+			&i.SeenAt,
+			&i.ResponseAttrs,
+			&i.Status,
+			&i.Attempts,
+			&i.Error,
+			&i.Matched,
+			&i.DecisionID,
+			&i.PolicyHash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markManagerDecisionGrab = `-- name: MarkManagerDecisionGrab :exec
 UPDATE manager_decisions SET verdict = 'would_grab', chosen_target_row = $2 WHERE id = $1
 `
@@ -1018,6 +1111,35 @@ func (q *Queries) UpdateManagerReleaseSighting(ctx context.Context, arg UpdateMa
 		arg.Matched,
 		arg.DecisionID,
 		arg.PolicyHash,
+	)
+	return err
+}
+
+const upsertManagerRSSCursor = `-- name: UpsertManagerRSSCursor :exec
+INSERT INTO manager_rss_cursors (indexer_id, domain, last_release_key, last_publish_date, last_run_id, updated_at)
+VALUES ($1, $2, $3, $4, $5, now())
+ON CONFLICT (indexer_id, domain) DO UPDATE
+SET last_release_key = EXCLUDED.last_release_key,
+    last_publish_date = EXCLUDED.last_publish_date,
+    last_run_id = EXCLUDED.last_run_id,
+    updated_at = now()
+`
+
+type UpsertManagerRSSCursorParams struct {
+	IndexerID       int64              `json:"indexer_id"`
+	Domain          string             `json:"domain"`
+	LastReleaseKey  string             `json:"last_release_key"`
+	LastPublishDate pgtype.Timestamptz `json:"last_publish_date"`
+	LastRunID       pgtype.Int8        `json:"last_run_id"`
+}
+
+func (q *Queries) UpsertManagerRSSCursor(ctx context.Context, arg UpsertManagerRSSCursorParams) error {
+	_, err := q.db.Exec(ctx, upsertManagerRSSCursor,
+		arg.IndexerID,
+		arg.Domain,
+		arg.LastReleaseKey,
+		arg.LastPublishDate,
+		arg.LastRunID,
 	)
 	return err
 }

@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -96,6 +99,10 @@ user-targeted live events are currently process-local.`,
 		app.StartSonicAnalysis(workerCtx)
 		app.StartRecommendationsML(workerCtx)
 		app.StartAbsoluteEpisodeBackfill(workerCtx)
+		// Manager RSS sweep: minute-granular, so it lives beside the
+		// hour-granular scheduler rather than inside it. Advisory-locked
+		// against manual runs from the API process.
+		app.StartManagerRSSLoop(workerCtx, managerRSSIntervalMinutes())
 
 		shutdownErr := waitForWorkerShutdown(ctx, leaseFailure)
 		log.Info().Msg("shutting down dedicated worker")
@@ -156,4 +163,18 @@ func stopRiverWorkers(app *service.App, cancelRiver context.CancelFunc) error {
 func init() {
 	workerCmd.Flags().BoolVar(&workerIdleInPassive, "idle-in-passive", false,
 		"Stay running but process no work when HEYA_PASSIVE_MODE=true (development supervisor use)")
+}
+
+// managerRSSIntervalMinutes reads HEYA_MANAGER_RSS_INTERVAL_MINUTES
+// (default 15; negative disables the loop).
+func managerRSSIntervalMinutes() int {
+	raw := strings.TrimSpace(os.Getenv("HEYA_MANAGER_RSS_INTERVAL_MINUTES"))
+	if raw == "" {
+		return 15
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 15
+	}
+	return n
 }

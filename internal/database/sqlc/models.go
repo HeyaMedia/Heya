@@ -760,6 +760,15 @@ type ManagerReleaseSighting struct {
 	PolicyHash    pgtype.Text        `json:"policy_hash"`
 }
 
+type ManagerRssCursor struct {
+	IndexerID       int64              `json:"indexer_id"`
+	Domain          string             `json:"domain"`
+	LastReleaseKey  string             `json:"last_release_key"`
+	LastPublishDate pgtype.Timestamptz `json:"last_publish_date"`
+	LastRunID       pgtype.Int8        `json:"last_run_id"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ManagerRun struct {
 	ID         int64              `json:"id"`
 	Kind       string             `json:"kind"`

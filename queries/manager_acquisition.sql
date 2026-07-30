@@ -147,3 +147,25 @@ DELETE FROM manager_runs WHERE started_at < $1;
 
 -- name: PruneManagerReleases :execrows
 DELETE FROM manager_releases WHERE last_seen_at < $1;
+
+-- ── RSS cursors ──────────────────────────────────────────────────────────
+
+-- name: GetManagerRSSCursor :one
+SELECT * FROM manager_rss_cursors WHERE indexer_id = $1 AND domain = $2;
+
+-- name: UpsertManagerRSSCursor :exec
+INSERT INTO manager_rss_cursors (indexer_id, domain, last_release_key, last_publish_date, last_run_id, updated_at)
+VALUES ($1, $2, $3, $4, $5, now())
+ON CONFLICT (indexer_id, domain) DO UPDATE
+SET last_release_key = EXCLUDED.last_release_key,
+    last_publish_date = EXCLUDED.last_publish_date,
+    last_run_id = EXCLUDED.last_run_id,
+    updated_at = now();
+
+-- name: ListPendingManagerSightings :many
+SELECT * FROM manager_release_sightings
+WHERE run_id = $1 AND status = 'pending'
+ORDER BY id;
+
+-- name: GetManagerRelease :one
+SELECT * FROM manager_releases WHERE id = $1;

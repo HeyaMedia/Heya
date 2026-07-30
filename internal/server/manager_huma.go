@@ -326,6 +326,15 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(*view), nil
 		})
 
+	huma.Register(api, adminSecured(op(http.MethodPost, "/api/manager/rss/run", "manager-rss-run", "Run an RSS sweep now: ingest recent releases, match monitored items, record dry-run decisions", "Manager")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[service.ManagerRSSRunView], error) {
+			view, err := app.RunManagerRSS(ctx, "api")
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusConflict)
+			}
+			return noStoreJSON(*view), nil
+		})
+
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/history", "manager-history", "The decision ledger: every evaluation run's verdicts, newest first", "Manager")),
 		func(ctx context.Context, in *struct {
 			Verdicts []string `query:"verdicts" doc:"Verdict filter, comma-separated"`
