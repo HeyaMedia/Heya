@@ -223,3 +223,68 @@ export const managerMediaDetailQuery = defineQueryOptions((id: number) => ({
   staleTime: 1000 * 15,
   meta: { prefetch: 'none', sensitivity: 'private' },
 }))
+
+// ── Acquisition (dry-run) ────────────────────────────────────────────────
+
+export type {
+  ManagerDecisionView,
+  ManagerHistoryPage,
+  ManagerItemDecisionsPage,
+  ManagerRejectionView,
+  ManagerRunDetailView,
+  ManagerSearchCandidateView,
+  ManagerSearchRunView,
+} from '~~/shared/api/types.gen'
+import type {
+  ManagerHistoryPage,
+  ManagerItemDecisionsPage,
+  ManagerRunDetailView,
+} from '~~/shared/api/types.gen'
+
+export type ManagerHistoryParams = {
+  verdicts?: string[]
+  domains?: string[]
+  library?: number
+}
+
+// Keyset-paged ledger: the page carries next_before/next_id cursors; the
+// page component accumulates pages client-side and refetches from the top
+// on invalidation.
+export const managerHistoryQuery = defineQueryOptions((p: ManagerHistoryParams) => ({
+  key: ['manager', 'history', (p.verdicts ?? []).join(','), (p.domains ?? []).join(','), p.library ?? 0],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya('/api/manager/history', {
+      query: {
+        // Comma-joined on purpose — huma keeps only the first repeated param.
+        verdicts: p.verdicts?.length ? p.verdicts.join(',') : undefined,
+        domains: p.domains?.length ? p.domains.join(',') : undefined,
+        library: p.library || undefined,
+      },
+    }) as ManagerHistoryPage
+  },
+  placeholderData: (prev: ManagerHistoryPage | undefined) => prev,
+  staleTime: 1000 * 15,
+  meta: { prefetch: 'none', sensitivity: 'private' },
+}))
+
+export const managerRunDetailQuery = defineQueryOptions((id: number) => ({
+  key: ['manager', 'run', id],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya(`/api/manager/runs/${id}`) as ManagerRunDetailView
+  },
+  // Runs are immutable once finished — cache aggressively.
+  staleTime: 1000 * 60 * 10,
+  meta: { prefetch: 'none', sensitivity: 'private' },
+}))
+
+export const managerItemDecisionsQuery = defineQueryOptions((id: number) => ({
+  key: ['manager', 'item-decisions', id],
+  query: async () => {
+    const { $heya } = useNuxtApp()
+    return await $heya(`/api/manager/media/${id}/decisions`) as ManagerItemDecisionsPage
+  },
+  staleTime: 1000 * 15,
+  meta: { prefetch: 'none', sensitivity: 'private' },
+}))

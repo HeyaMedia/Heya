@@ -84,6 +84,10 @@ function statusLabel(value: string): string {
 const isMusic = computed(() => detail.value?.library.media_type === 'music')
 const posterAspect = computed(() => isMusic.value ? '1/1' : '2/3')
 
+// Interactive shadow search — movies only until the TV/music slices land.
+const isMovie = computed(() => item.value?.media_type === 'movie')
+const searchOpen = ref(false)
+
 const publicLink = computed(() => {
   const it = item.value
   if (!it) return '#'
@@ -400,11 +404,16 @@ const FILE_KIND_LABELS: Record<string, string> = {
                 <option value="">No profile</option>
                 <option v-for="p in domainProfiles" :key="p.id" :value="p.id">{{ p.name }}</option>
               </select>
+              <button v-if="isMovie" type="button" class="mgr-btn" @click="searchOpen = true">
+                <Icon name="search" :size="13" /> Search releases
+              </button>
               <NuxtLink :to="publicLink" class="mgr-btn"><Icon name="play" :size="13" /> View in library</NuxtLink>
             </div>
           </div>
         </div>
       </div>
+
+      <ManagerSearchModal v-if="item" v-model="searchOpen" :media-item-id="item.id" :title="item.title" />
 
       <div v-if="flash" class="mgr-flash" :class="flashError ? 'err' : 'ok'">{{ flash }}</div>
 
@@ -537,6 +546,8 @@ const FILE_KIND_LABELS: Record<string, string> = {
           </div>
         </section>
       </div>
+
+      <ManagerDecisionsPanel v-if="item" :media-item-id="item.id" />
     </template>
   </div>
 </template>
