@@ -1,17 +1,87 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'manager', middleware: 'admin' })
 
-import { MOCK_LIBRARY_OPTIONS, MOCK_WANTED } from '~/utils/managerMock'
+import { useQuery } from '@pinia/colada'
+import { defineQueryOptions } from '@pinia/colada'
+import { librariesQuery } from '~/queries/catalog'
+import type { ManagerWantedPage, ManagerWantedRow } from '~~/shared/api/types.gen'
 
-const filter = ref<string[]>([])
-const tab = ref<'missing' | 'cutoff'>('missing')
+const { $heya } = useNuxtApp()
 
-const rows = computed(() => MOCK_WANTED
-  .filter(w => w.reason === tab.value)
-  .filter(w => filter.value.length === 0 || filter.value.includes(w.library)))
+const tab = ref<'missing' | 'cutoff' | 'problems'>('missing')
+const libraryFilter = ref<number>(0)
+const page = ref(1)
 
-const missingCount = MOCK_WANTED.filter(w => w.reason === 'missing').length
-const cutoffCount = MOCK_WANTED.filter(w => w.reason === 'cutoff').length
+const librariesData = useQuery(librariesQuery)
+const libraries = computed(() => librariesData.data.value ?? [])
+
+const wantedQuery = defineQueryOptions((p: { tab: string, library: number, page: number }) => ({
+  key: ['manager', 'wanted', p.tab, p.library, p.page],
+  query: async () => {
+    const { $heya: heya } = useNuxtApp()
+    return await heya('/api/manager/wanted', {
+      query: {
+        tab: p.tab,
+        libraries: p.library ? String(p.library) : undefined,
+        page: p.page,
+        per_page: 50,
+      },
+    }) as ManagerWantedPage
+  },
+  placeholderData: (prev: ManagerWantedPage | undefined) => prev,
+  staleTime: 1000 * 30,
+  meta: { prefetch: 'none', sensitivity: 'private' },
+}))
+
+const { data, asyncStatus, error, refetch } = useQuery(() => wantedQuery({
+  tab: tab.value, library: libraryFilter.value, page: page.value,
+}))
+watch([tab, libraryFilter], () => { page.value = 1 })
+
+const rows = computed(() => data.value?.rows ?? [])
+const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / 50)))
+
+function unitLabel(row: ManagerWantedRow): string {
+  if (row.season != null && row.episode != null) {
+    const ep = `S${String(row.season).padStart(2, '0')}E${String(row.episode).padStart(2, '0')}`
+    return row.episode_name ? `${ep} · ${row.episode_name}` : ep
+  }
+  return ''
+}
+
+function whyLabel(row: ManagerWantedRow): string {
+  return row.shortfall || row.problem || ''
+}
+
+// Per-row shadow search → run the interactive pipeline and jump to History.
+const searching = ref<number | null>(null)
+const flash = ref('')
+async function searchRow(row: ManagerWantedRow, index: number) {
+  searching.value = index
+  flash.value = ''
+  try {
+    const query: Record<string, unknown> = {}
+    if (row.episode_id) query.episode_id = row.episode_id
+    else if (row.season != null) query.season = row.season
+    const run = await $heya(`/api/manager/media/${row.media_item_id}/search`, {
+      method: 'POST', query,
+    }) as { run_id: number, verdict: string, chosen_title?: string }
+    flash.value = run.verdict === 'would_grab'
+      ? `Run #${run.run_id}: would grab ${run.chosen_title}`
+      : `Run #${run.run_id}: ${run.verdict.replaceAll('_', ' ')}`
+    refetch()
+  } catch (e: any) {
+    flash.value = e?.data?.detail ?? 'Search failed'
+  } finally {
+    searching.value = null
+  }
+}
+
+const TABS = [
+  { value: 'missing' as const, label: 'Missing' },
+  { value: 'cutoff' as const, label: 'Cutoff unmet' },
+  { value: 'problems' as const, label: 'Problems' },
+]
 </script>
 
 <template>
@@ -19,56 +89,88 @@ const cutoffCount = MOCK_WANTED.filter(w => w.reason === 'cutoff').length
     <SettingsContextHero
       title="Wanted"
       icon="target"
-      eyebrow="Manager · Preview — mock data"
-      description="Monitored items the pipeline still owes you — missing entirely, or on disk below the quality cutoff."
+      eyebrow="Manager · Dry run"
+      description="Monitored units the pipeline still owes you — missing entirely, on disk below the quality cutoff, or misconfigured so it can't act."
     />
 
     <div class="w-toolbar">
       <div class="w-tabs" role="tablist" aria-label="Wanted category">
         <button
+          v-for="t in TABS" :key="t.value"
           type="button" role="tab" class="w-tab"
-          :aria-selected="tab === 'missing'" :class="{ active: tab === 'missing' }"
-          @click="tab = 'missing'"
-        >Missing <span class="w-count">{{ missingCount }}</span></button>
-        <button
-          type="button" role="tab" class="w-tab"
-          :aria-selected="tab === 'cutoff'" :class="{ active: tab === 'cutoff' }"
-          @click="tab = 'cutoff'"
-        >Cutoff unmet <span class="w-count">{{ cutoffCount }}</span></button>
+          :aria-selected="tab === t.value" :class="{ active: tab === t.value }"
+          @click="tab = t.value"
+        >{{ t.label }}<span v-if="tab === t.value && data" class="w-count">{{ data.total }}</span></button>
       </div>
-      <ManagerLibraryFilter v-model="filter" :options="MOCK_LIBRARY_OPTIONS" />
+      <select v-model.number="libraryFilter" class="w-select" aria-label="Library filter">
+        <option :value="0">All libraries</option>
+        <option v-for="lib in libraries" :key="lib.id" :value="lib.id">{{ lib.name }}</option>
+      </select>
     </div>
 
-    <div class="w-table">
-      <div class="w-head">
-        <span>Item</span>
-        <span>Profile</span>
-        <span>Status</span>
-        <span>Last search</span>
-        <span class="w-col-actions" aria-hidden="true" />
-      </div>
-      <div v-for="row in rows" :key="row.id" class="w-row">
-        <div class="w-item">
-          <div class="w-title">{{ row.title }} <ManagerLibraryChip :library="row.library" /></div>
-          <div class="w-sub">{{ row.subtitle }}</div>
-        </div>
-        <span class="w-profile">{{ row.profile }}</span>
-        <span class="w-since">{{ row.since }}</span>
-        <span class="w-search">{{ row.lastSearch }}</span>
-        <div class="w-actions">
-          <AppTooltip label="Search now">
-            <button type="button" class="w-btn"><Icon name="search" :size="14" /></button>
-          </AppTooltip>
-          <AppTooltip label="Interactive search">
-            <button type="button" class="w-btn"><Icon name="list" :size="14" /></button>
-          </AppTooltip>
-        </div>
-      </div>
+    <div v-if="flash" class="mgr-flash ok">{{ flash }}</div>
+
+    <div v-if="error" class="w-empty">
+      <Icon name="warning" :size="14" /> Couldn't load wanted items.
+      <button type="button" class="mgr-btn" @click="refetch()">Retry</button>
+    </div>
+    <div v-else-if="asyncStatus === 'loading' && !data" class="w-empty">
+      <span class="mgr-loading" /> Computing wanted…
     </div>
 
-    <div v-if="rows.length === 0" class="w-empty">
-      <Icon name="check" :size="14" /> Nothing {{ tab === 'missing' ? 'missing' : 'below cutoff' }} for the selected libraries.
-    </div>
+    <template v-else>
+      <div class="w-table">
+        <div class="w-head">
+          <span>Item</span>
+          <span>Profile</span>
+          <span>{{ tab === 'cutoff' ? 'Current' : 'Aired' }}</span>
+          <span>{{ tab === 'missing' ? 'Last decision' : 'Why' }}</span>
+          <span class="w-col-actions" aria-hidden="true" />
+        </div>
+        <div v-for="(row, i) in rows" :key="`${row.media_item_id}-${row.episode_id ?? 0}`" class="w-row">
+          <div class="w-item">
+            <div class="w-title">
+              <NuxtLink :to="`/manager/library/${row.library_id}/${row.media_item_id}`" class="w-link">
+                {{ row.title }}<template v-if="row.year"> ({{ row.year }})</template>
+              </NuxtLink>
+            </div>
+            <div v-if="unitLabel(row)" class="w-sub mono">{{ unitLabel(row) }}</div>
+          </div>
+          <span class="w-profile mono">{{ row.profile_name || '—' }}</span>
+          <span v-if="tab === 'cutoff'" class="w-since mono">{{ row.current_quality || '?' }} · {{ row.current_score }}</span>
+          <span v-else class="w-since mono">{{ row.air_date || '—' }}</span>
+          <span v-if="tab === 'missing'" class="w-search">
+            <template v-if="row.last_decision_at">{{ new Date(row.last_decision_at).toLocaleDateString() }} · {{ row.last_decision_verdict?.replaceAll('_', ' ') }}</template>
+            <template v-else>never evaluated</template>
+          </span>
+          <span v-else class="w-search" :title="whyLabel(row)">{{ whyLabel(row) }}</span>
+          <div class="w-actions">
+            <AppTooltip label="Shadow search now (dry run)">
+              <button
+                type="button" class="w-btn" :disabled="searching !== null || tab === 'problems'"
+                @click="searchRow(row, i)"
+              >
+                <span v-if="searching === i" class="mgr-loading sm" />
+                <Icon v-else name="search" :size="14" />
+              </button>
+            </AppTooltip>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="rows.length === 0" class="w-empty">
+        <Icon name="check" :size="14" />
+        <template v-if="tab === 'missing'">Nothing missing for the selected libraries.</template>
+        <template v-else-if="tab === 'cutoff'">Nothing below cutoff for the selected libraries.</template>
+        <template v-else>No configuration problems.</template>
+      </div>
+
+      <div v-if="totalPages > 1" class="w-pager">
+        <button type="button" class="mgr-btn" :disabled="page <= 1" @click="page--">Previous</button>
+        <span class="w-page mono">{{ page }} / {{ totalPages }}</span>
+        <button type="button" class="mgr-btn" :disabled="page >= totalPages" @click="page++">Next</button>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -109,15 +211,23 @@ const cutoffCount = MOCK_WANTED.filter(w => w.reason === 'cutoff').length
   font-size: 10.5px;
   padding: 1px 7px;
   border-radius: 999px;
-  background: rgb(var(--ink) / 0.08);
+  background: color-mix(in srgb, var(--gold) 22%, transparent);
 }
-.w-tab.active .w-count { background: color-mix(in srgb, var(--gold) 22%, transparent); }
+.w-select {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--fg-1);
+  font-size: 12.5px;
+}
 
 .w-table { display: flex; flex-direction: column; gap: 6px; }
 .w-head,
 .w-row {
   display: grid;
-  grid-template-columns: minmax(220px, 2.4fr) 120px minmax(140px, 1fr) 100px 76px;
+  grid-template-columns: minmax(220px, 2.2fr) 110px minmax(120px, 0.9fr) minmax(160px, 1.4fr) 50px;
   gap: 14px;
   align-items: center;
 }
@@ -138,15 +248,14 @@ const cutoffCount = MOCK_WANTED.filter(w => w.reason === 'cutoff').length
 }
 
 .w-item { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.w-title {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  font-size: 13.5px; font-weight: 500; color: var(--fg-0);
-}
-.w-sub { font-size: 12px; color: var(--fg-2); }
+.w-title { font-size: 13.5px; font-weight: 500; color: var(--fg-0); }
+.w-link { color: inherit; text-decoration: none; }
+.w-link:hover { color: var(--gold-bright); }
+.w-sub { font-size: 11.5px; color: var(--fg-2); }
 
-.w-profile { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-1); }
-.w-since { font-size: 12px; color: var(--fg-2); }
-.w-search { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
+.w-profile { font-size: 11.5px; color: var(--fg-1); }
+.w-since { font-size: 11.5px; color: var(--fg-2); }
+.w-search { font-size: 11.5px; color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .w-actions { display: flex; gap: 4px; justify-content: flex-end; }
 .w-btn {
@@ -159,7 +268,8 @@ const cutoffCount = MOCK_WANTED.filter(w => w.reason === 'cutoff').length
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
 }
-.w-btn:hover { background: rgb(var(--ink) / 0.1); color: var(--fg-0); }
+.w-btn:hover:not(:disabled) { background: rgb(var(--ink) / 0.1); color: var(--fg-0); }
+.w-btn:disabled { opacity: 0.5; cursor: default; }
 
 .w-empty {
   display: flex; align-items: center; gap: 8px;
@@ -171,12 +281,16 @@ const cutoffCount = MOCK_WANTED.filter(w => w.reason === 'cutoff').length
   margin-top: 6px;
 }
 
+.w-pager {
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  margin-top: 14px;
+}
+.w-page { font-size: 12px; color: var(--fg-2); }
+.mono { font-family: var(--font-mono); }
+
 @media (max-width: 960px) {
   .w-head { display: none; }
-  .w-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-    row-gap: 8px;
-  }
+  .w-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 8px; }
   .w-profile, .w-search { display: none; }
   .w-since { grid-column: 1; }
   .w-actions { grid-row: 1; grid-column: 2; }

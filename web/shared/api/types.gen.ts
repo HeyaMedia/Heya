@@ -4069,6 +4069,23 @@ export type ManagerQualityProfileView = {
     upgrades_enabled: boolean;
 };
 
+export type ManagerRssRunView = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    evaluated: number;
+    fetched: number;
+    fresh: number;
+    indexers: Array<ManagerRunIndexerView> | null;
+    matched: number;
+    partial: boolean;
+    run_id: number;
+    status: string;
+    truncated: boolean;
+    would_grabs: number;
+};
+
 export type ManagerRejectionView = {
     code: string;
     message: string;
@@ -4235,6 +4252,36 @@ export type ManagerTrackView = {
     quality?: string;
     size_bytes: number;
     title: string;
+};
+
+export type ManagerWantedPage = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    rows: Array<ManagerWantedRow> | null;
+    total: number;
+};
+
+export type ManagerWantedRow = {
+    air_date?: string;
+    current_quality?: string;
+    current_score?: number;
+    episode?: number;
+    episode_id?: number;
+    episode_name?: string;
+    kind: string;
+    last_decision_at?: string;
+    last_decision_verdict?: string;
+    library_id: number;
+    media_item_id: number;
+    problem?: string;
+    profile_name?: string;
+    season?: number;
+    shortfall?: string;
+    title: string;
+    uncertain?: boolean;
+    year?: number;
 };
 
 export type MarkMediaWatchedRequest = {
@@ -7064,6 +7111,7 @@ export type TvEpisode = {
     external_ids: string;
     id: number;
     is_special: boolean;
+    monitored: boolean;
     overview: string;
     rating: Numeric;
     runtime_minutes: number;
@@ -7083,6 +7131,7 @@ export type TvSeason = {
     end_date: Date;
     external_ids: string;
     id: number;
+    monitored: boolean;
     overview: string;
     poster_path: string;
     season_number: number;
@@ -8803,6 +8852,19 @@ export type ManagerQualityProfileViewWritable = {
     upgrades_enabled: boolean;
 };
 
+export type ManagerRssRunViewWritable = {
+    evaluated: number;
+    fetched: number;
+    fresh: number;
+    indexers: Array<ManagerRunIndexerView> | null;
+    matched: number;
+    partial: boolean;
+    run_id: number;
+    status: string;
+    truncated: boolean;
+    would_grabs: number;
+};
+
 export type ManagerReleaseTestInputWritable = {
     size_bytes?: number;
     title: string;
@@ -8847,6 +8909,11 @@ export type ManagerTestResultWritable = {
     detail?: string;
     error?: string;
     ok: boolean;
+};
+
+export type ManagerWantedPageWritable = {
+    rows: Array<ManagerWantedRow> | null;
+    total: number;
 };
 
 export type MarkMediaWatchedRequestWritable = {
@@ -9984,6 +10051,7 @@ export type TvEpisodeWritable = {
     external_ids: string;
     id: number;
     is_special: boolean;
+    monitored: boolean;
     overview: string;
     rating: Numeric;
     runtime_minutes: number;
@@ -9999,6 +10067,7 @@ export type TvSeasonWritable = {
     end_date: Date;
     external_ids: string;
     id: number;
+    monitored: boolean;
     overview: string;
     poster_path: string;
     season_number: number;
@@ -14913,7 +14982,16 @@ export type ManagerMediaSearchData = {
          */
         id: number;
     };
-    query?: never;
+    query?: {
+        /**
+         * TV: search this season's wanted episodes (-1 = unset)
+         */
+        season?: number;
+        /**
+         * TV: search one episode by its id (0 = unset)
+         */
+        episode_id?: number;
+    };
     url: '/api/manager/media/{id}/search';
 };
 
@@ -15102,6 +15180,31 @@ export type ManagerCloneQualityProfileResponses = {
 
 export type ManagerCloneQualityProfileResponse = ManagerCloneQualityProfileResponses[keyof ManagerCloneQualityProfileResponses];
 
+export type ManagerRssRunData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/manager/rss/run';
+};
+
+export type ManagerRssRunErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerRssRunError = ManagerRssRunErrors[keyof ManagerRssRunErrors];
+
+export type ManagerRssRunResponses = {
+    /**
+     * OK
+     */
+    200: ManagerRssRunView;
+};
+
+export type ManagerRssRunResponse = ManagerRssRunResponses[keyof ManagerRssRunResponses];
+
 export type ManagerRunDetailData = {
     body?: never;
     path: {
@@ -15131,6 +15234,39 @@ export type ManagerRunDetailResponses = {
 };
 
 export type ManagerRunDetailResponse = ManagerRunDetailResponses[keyof ManagerRunDetailResponses];
+
+export type ManagerWantedData = {
+    body?: never;
+    path?: never;
+    query?: {
+        tab?: '' | 'missing' | 'cutoff' | 'problems';
+        /**
+         * Library ids, comma-separated; omit for all
+         */
+        libraries?: Array<number> | null;
+        page?: number;
+        per_page?: number;
+    };
+    url: '/api/manager/wanted';
+};
+
+export type ManagerWantedErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerWantedError = ManagerWantedErrors[keyof ManagerWantedErrors];
+
+export type ManagerWantedResponses = {
+    /**
+     * OK
+     */
+    200: ManagerWantedPage;
+};
+
+export type ManagerWantedResponse = ManagerWantedResponses[keyof ManagerWantedResponses];
 
 export type ListApiTokensData = {
     body?: never;

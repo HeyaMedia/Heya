@@ -1083,6 +1083,46 @@ var managerRSSRunCmd = &cobra.Command{
 	},
 }
 
+var managerWantedCmd = &cobra.Command{
+	Use:   "wanted",
+	Short: "Monitored units the pipeline still owes: missing, below cutoff, or misconfigured",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		tab, _ := cmd.Flags().GetString("tab")
+		return withApp(func(ctx context.Context, app *service.App) error {
+			page, err := app.ManagerWanted(ctx, service.ManagerWantedParams{Tab: tab, PerPage: 50})
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(page)
+			}
+			table := ui.NewTable("Kind", "Title", "Unit", "Aired", "Profile", "Why", "Last decision")
+			for _, row := range page.Rows {
+				unit := ""
+				if row.Season != nil && row.Episode != nil {
+					unit = fmt.Sprintf("S%02dE%02d %s", *row.Season, *row.Episode, row.EpisodeName)
+				}
+				why := row.Shortfall
+				if why == "" {
+					why = row.Problem
+				}
+				last := ""
+				if row.LastDecisionAt != nil {
+					last = fmt.Sprintf("%s (%s)", row.LastDecisionAt.Format("01-02 15:04"), row.LastDecisionVerdict)
+				}
+				title := row.Title
+				if row.Year > 0 {
+					title = fmt.Sprintf("%s (%d)", row.Title, row.Year)
+				}
+				table.AddRow(row.Kind, title, unit, row.AirDate, row.ProfileName, why, last)
+			}
+			fmt.Println(table.Render())
+			ui.Info("Total", fmt.Sprintf("%d", page.Total))
+			return nil
+		})
+	},
+}
+
 var managerHistoryCmd = &cobra.Command{
 	Use:   "history",
 	Short: "The decision ledger: what the pipeline would have done, and why",
@@ -1116,6 +1156,7 @@ func init() {
 	managerCalendarCmd.Flags().Int64Slice("library", nil, "Restrict to library ids (repeatable)")
 	managerCalendarCmd.Flags().Bool("monitored", false, "Monitored items only")
 	managerHistoryCmd.Flags().Int("limit", 50, "Max decisions to list")
+	managerWantedCmd.Flags().String("tab", "missing", "missing | cutoff | problems")
 	managerSearchCmd.Flags().Int("season", 0, "TV: search this season's wanted episodes")
 	managerSearchCmd.Flags().Int64("episode-id", 0, "TV: search one episode by its id")
 
@@ -1164,7 +1205,7 @@ func init() {
 	managerLibrarySetCmd.Flags().Int64("profile", 0, "Quality profile id to assign (0 clears it)")
 	managerLibraryCmd.AddCommand(managerLibraryItemsCmd, managerLibraryShowCmd, managerLibraryAlbumCmd, managerLibrarySetCmd, managerLibraryRefreshCmd)
 
-	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd, managerFormatCmd, managerLibraryCmd, managerCalendarCmd, managerSearchCmd, managerHistoryCmd, managerRSSCmd)
+	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd, managerFormatCmd, managerLibraryCmd, managerCalendarCmd, managerSearchCmd, managerHistoryCmd, managerRSSCmd, managerWantedCmd)
 	managerRSSCmd.AddCommand(managerRSSRunCmd)
 	rootCmd.AddCommand(managerCmd)
 }

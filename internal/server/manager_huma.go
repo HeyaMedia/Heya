@@ -314,16 +314,41 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 	huma.Register(api, adminSecured(op(http.MethodPost, "/api/manager/media/{id}/search", "manager-media-search", "Shadow-search a movie or TV season/episode across enabled indexers: evaluate, rank, and record what would be grabbed and why (no download)", "Manager")),
 		func(ctx context.Context, in *struct {
 			IDPath
-			Season    *int   `query:"season" doc:"TV: search this season's wanted episodes"`
-			EpisodeID *int64 `query:"episode_id" doc:"TV: search one episode by its id"`
+			// Huma rejects pointer query params; -1 = unset (season 0 is a
+			// real season — specials).
+			Season    int   `query:"season" default:"-1" doc:"TV: search this season's wanted episodes (-1 = unset)"`
+			EpisodeID int64 `query:"episode_id" doc:"TV: search one episode by its id (0 = unset)"`
 		}) (*JSONOutput[service.ManagerSearchRunView], error) {
-			view, err := app.SearchManagerMedia(ctx, in.ID, service.ManagerSearchScope{
-				Season: in.Season, EpisodeID: in.EpisodeID,
-			}, "api")
+			scope := service.ManagerSearchScope{}
+			if in.Season >= 0 {
+				season := in.Season
+				scope.Season = &season
+			}
+			if in.EpisodeID > 0 {
+				episodeID := in.EpisodeID
+				scope.EpisodeID = &episodeID
+			}
+			view, err := app.SearchManagerMedia(ctx, in.ID, scope, "api")
 			if err != nil {
 				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
 			}
 			return noStoreJSON(*view), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/wanted", "manager-wanted", "Monitored units the pipeline still owes: missing, below cutoff, or misconfigured", "Manager")),
+		func(ctx context.Context, in *struct {
+			Tab       string  `query:"tab" enum:",missing,cutoff,problems" required:"false"`
+			Libraries []int64 `query:"libraries" doc:"Library ids, comma-separated; omit for all"`
+			Page      int     `query:"page" minimum:"1" default:"1"`
+			PerPage   int     `query:"per_page" minimum:"1" maximum:"200" default:"50"`
+		}) (*JSONOutput[service.ManagerWantedPage], error) {
+			page, err := app.ManagerWanted(ctx, service.ManagerWantedParams{
+				Tab: in.Tab, Libraries: in.Libraries, Page: in.Page, PerPage: in.PerPage,
+			})
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return noStoreJSON(page), nil
 		})
 
 	huma.Register(api, adminSecured(op(http.MethodPost, "/api/manager/rss/run", "manager-rss-run", "Run an RSS sweep now: ingest recent releases, match monitored items, record dry-run decisions", "Manager")),
