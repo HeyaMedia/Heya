@@ -13,6 +13,7 @@ type Disposition struct {
 	HearingImpaired int `json:"hearing_impaired"`
 	VisualImpaired  int `json:"visual_impaired"`
 	Comment         int `json:"comment"`
+	AttachedPic     int `json:"attached_pic"`
 }
 
 type MediaInfo struct {

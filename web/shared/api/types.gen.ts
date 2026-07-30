@@ -3800,6 +3800,10 @@ export type ManagerDownloadClientView = {
 
 export type ManagerEpisodeView = {
     air_date?: string;
+    /**
+     * library_files id of the linked file — feeds the file-detail expander
+     */
+    file_id?: number;
     has_file: boolean;
     id: number;
     number: number;
@@ -3810,6 +3814,27 @@ export type ManagerEpisodeView = {
     size_bytes: number;
     special: boolean;
     title: string;
+};
+
+export type ManagerFileDetailView = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    added_at: string;
+    /**
+     * Overall container bitrate
+     */
+    bitrate_kbps?: number;
+    container?: string;
+    duration_sec?: number;
+    id: number;
+    /**
+     * Absolute on-disk path
+     */
+    path: string;
+    size_bytes: number;
+    streams: Array<ManagerStreamView> | null;
 };
 
 export type ManagerFileView = {
@@ -4333,6 +4358,37 @@ export type ManagerSeasonView = {
     title: string;
 };
 
+export type ManagerStreamView = {
+    bit_depth?: number;
+    bitrate_kbps?: number;
+    channels?: number;
+    codec?: string;
+    default?: boolean;
+    forced?: boolean;
+    /**
+     * e.g. 23.976
+     */
+    frame_rate?: string;
+    /**
+     * Dolby Vision / HDR10 / HLG
+     */
+    hdr?: string;
+    height?: number;
+    /**
+     * video | audio | subtitle | other
+     */
+    kind: string;
+    language?: string;
+    /**
+     * 5.1(side), stereo, ...
+     */
+    layout?: string;
+    profile?: string;
+    sample_rate_hz?: number;
+    title?: string;
+    width?: number;
+};
+
 export type ManagerTestResult = {
     /**
      * A URL to the JSON Schema for this object.
@@ -4346,6 +4402,10 @@ export type ManagerTestResult = {
 export type ManagerTrackView = {
     disc: number;
     duration_seconds: number;
+    /**
+     * library_files id of the best file — feeds the file-detail expander
+     */
+    file_id?: number;
     has_file: boolean;
     id: number;
     number: number;
@@ -8825,6 +8885,23 @@ export type ManagerDownloadClientViewWritable = {
     priority: number;
     protocol: string;
     username: string;
+};
+
+export type ManagerFileDetailViewWritable = {
+    added_at: string;
+    /**
+     * Overall container bitrate
+     */
+    bitrate_kbps?: number;
+    container?: string;
+    duration_sec?: number;
+    id: number;
+    /**
+     * Absolute on-disk path
+     */
+    path: string;
+    size_bytes: number;
+    streams: Array<ManagerStreamView> | null;
 };
 
 export type ManagerFormatImportInputWritable = {
@@ -14780,6 +14857,36 @@ export type ManagerTestDownloadClientResponses = {
 };
 
 export type ManagerTestDownloadClientResponse = ManagerTestDownloadClientResponses[keyof ManagerTestDownloadClientResponses];
+
+export type ManagerFileDetailData = {
+    body?: never;
+    path: {
+        /**
+         * Numeric ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/api/manager/file/{id}';
+};
+
+export type ManagerFileDetailErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerFileDetailError = ManagerFileDetailErrors[keyof ManagerFileDetailErrors];
+
+export type ManagerFileDetailResponses = {
+    /**
+     * OK
+     */
+    200: ManagerFileDetailView;
+};
+
+export type ManagerFileDetailResponse = ManagerFileDetailResponses[keyof ManagerFileDetailResponses];
 
 export type ManagerHistoryData = {
     body?: never;

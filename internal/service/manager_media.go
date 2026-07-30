@@ -28,6 +28,7 @@ type ManagerEpisodeView struct {
 	HasFile   bool   `json:"has_file"`
 	Quality   string `json:"quality,omitempty" doc:"Resolution label of the best on-disk file, e.g. 1080p"`
 	SizeBytes int64  `json:"size_bytes"`
+	FileID    int64  `json:"file_id,omitempty" doc:"library_files id of the linked file — feeds the file-detail expander"`
 }
 
 type ManagerSeasonView struct {
@@ -323,10 +324,12 @@ func (a *App) managerMediaFiles(ctx context.Context, id int64, basePath string) 
 		       COALESCE(NULLIF(lfl.extra_type, ''), lfl.relation_type, 'file') AS kind,
 		       CASE WHEN jsonb_typeof(lf.media_info->'streams') = 'array' THEN
 		         (SELECT s->>'codec_name' FROM jsonb_array_elements(lf.media_info->'streams') s
-		          WHERE s->>'codec_type' = 'video' LIMIT 1) END,
+		          WHERE s->>'codec_type' = 'video'
+		            AND COALESCE((s->'disposition'->>'attached_pic')::int, 0) = 0 LIMIT 1) END,
 		       COALESCE(CASE WHEN jsonb_typeof(lf.media_info->'streams') = 'array' THEN
 		         (SELECT (s->>'width')::int FROM jsonb_array_elements(lf.media_info->'streams') s
-		          WHERE s->>'codec_type' = 'video' LIMIT 1) END, 0),
+		          WHERE s->>'codec_type' = 'video'
+		            AND COALESCE((s->'disposition'->>'attached_pic')::int, 0) = 0 LIMIT 1) END, 0),
 		       CASE WHEN jsonb_typeof(lf.media_info->'streams') = 'array' THEN
 		         (SELECT s->>'codec_name' FROM jsonb_array_elements(lf.media_info->'streams') s
 		          WHERE s->>'codec_type' = 'audio' LIMIT 1) END,
@@ -448,7 +451,8 @@ func (a *App) managerSeriesSeasons(ctx context.Context, id int64) ([]ManagerSeas
 		       (e.air_date IS NOT NULL AND e.air_date <= now()::date),
 		       bool_or(lf.id IS NOT NULL),
 		       COALESCE(max(lf.video_height), 0),
-		       COALESCE(sum(lf.size) FILTER (WHERE lf.id IS NOT NULL), 0)
+		       COALESCE(sum(lf.size) FILTER (WHERE lf.id IS NOT NULL), 0),
+		       COALESCE(max(lf.id), 0)
 		FROM tv_series sr
 		JOIN tv_seasons s ON s.series_id = sr.id
 		JOIN tv_episodes e ON e.season_id = s.id
@@ -472,7 +476,7 @@ func (a *App) managerSeriesSeasons(ctx context.Context, id int64) ([]ManagerSeas
 		var aired bool
 		var height int32
 		if err := rows.Scan(&seasonNumber, &seasonTitle, &e.ID, &e.Number, &e.Title,
-			&airDate, &e.Special, &aired, &e.HasFile, &height, &e.SizeBytes); err != nil {
+			&airDate, &e.Special, &aired, &e.HasFile, &height, &e.SizeBytes, &e.FileID); err != nil {
 			return nil, err
 		}
 		e.AirDate = dateToString(airDate)

@@ -27,6 +27,7 @@ type ManagerTrackView struct {
 	HasFile   bool   `json:"has_file"`
 	Quality   string `json:"quality,omitempty" doc:"Best on-disk file: format + bit depth/rate, e.g. 'FLAC 24/96' or 'MP3 320'"`
 	SizeBytes int64  `json:"size_bytes"`
+	FileID    int64  `json:"file_id,omitempty" doc:"library_files id of the best file — feeds the file-detail expander"`
 }
 
 type ManagerAlbumDetailView struct {
@@ -113,10 +114,11 @@ func (a *App) managerAlbumFromLocal(ctx context.Context, albumID int64) (*Manage
 		       COALESCE((SELECT sum(tf2.size_bytes)
 		                 FROM track_files tf2
 		                 JOIN library_files lf2 ON lf2.id = tf2.library_file_id AND lf2.deleted_at IS NULL
-		                 WHERE tf2.track_id = t.id), 0)::bigint
+		                 WHERE tf2.track_id = t.id), 0)::bigint,
+		       COALESCE(best.library_file_id, 0)
 		FROM tracks t
 		LEFT JOIN LATERAL (
-		  SELECT tf.id, tf.format, tf.bitrate_kbps, tf.bit_depth, tf.sample_rate_hz, tf.size_bytes
+		  SELECT tf.id, tf.library_file_id, tf.format, tf.bitrate_kbps, tf.bit_depth, tf.sample_rate_hz, tf.size_bytes
 		  FROM track_files tf
 		  JOIN library_files lf ON lf.id = tf.library_file_id AND lf.deleted_at IS NULL
 		  WHERE tf.track_id = t.id
@@ -135,7 +137,7 @@ func (a *App) managerAlbumFromLocal(ctx context.Context, albumID int64) (*Manage
 		var bitrate, bitDepth, sampleRate int32
 		var allBytes int64
 		if err := rows.Scan(&t.ID, &t.Disc, &t.Number, &t.Title, &t.Duration,
-			&t.HasFile, &format, &bitrate, &bitDepth, &sampleRate, &t.SizeBytes, &allBytes); err != nil {
+			&t.HasFile, &format, &bitrate, &bitDepth, &sampleRate, &t.SizeBytes, &allBytes, &t.FileID); err != nil {
 			return nil, err
 		}
 		if t.HasFile {

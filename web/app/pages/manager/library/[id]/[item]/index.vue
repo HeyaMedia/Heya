@@ -361,6 +361,16 @@ function albumTone(al: ManagerAlbumView): 'good' | 'warn' | 'bad' | 'none' {
 const FILE_KIND_LABELS: Record<string, string> = {
   primary: 'Movie', part: 'Part', file: 'File',
 }
+
+// File-detail expanders — one shared set across the files and episode
+// tables, keyed by library_file id.
+const expandedFiles = ref(new Set<number>())
+function toggleFile(fileId: number) {
+  const next = new Set(expandedFiles.value)
+  if (next.has(fileId)) next.delete(fileId)
+  else next.add(fileId)
+  expandedFiles.value = next
+}
 </script>
 
 <template>
@@ -404,7 +414,7 @@ const FILE_KIND_LABELS: Record<string, string> = {
               <span v-if="detail.genres?.length">{{ detail.genres.slice(0, 4).join(', ') }}</span>
             </div>
             <div class="det-chips">
-              <span v-if="detail.path" class="det-chip mono" :title="detail.path"><Icon name="folder" :size="12" /> {{ detail.path }}</span>
+              <span v-if="detail.path" class="det-chip mono path"><Icon name="folder" :size="12" /> {{ detail.path }}</span>
               <span class="det-chip"><Icon name="hard-drives" :size="12" /> {{ fmtBytes(item.size_on_disk) }} · {{ item.file_count }} files</span>
               <span v-if="detail.profile_name" class="det-chip gold"><Icon name="sliders" :size="12" /> {{ detail.profile_name }}</span>
               <span v-if="item.status" class="det-chip">{{ statusLabel(item.status) }}</span>
@@ -461,23 +471,37 @@ const FILE_KIND_LABELS: Record<string, string> = {
           <div v-if="expandedSeasons.has(season.number)" class="det-tablewrap">
             <table class="det-table">
               <thead>
-                <tr><th class="num">#</th><th>Title</th><th>Air date</th><th class="num">Size</th><th class="det-right">Status</th><th class="det-right" aria-label="Search" /></tr>
+                <tr><th class="det-expander-col" aria-label="Details" /><th class="num">#</th><th>Title</th><th>Air date</th><th class="num">Size</th><th class="det-right">Status</th><th class="det-right" aria-label="Search" /></tr>
               </thead>
               <tbody>
-                <tr v-for="episode in season.episodes ?? []" :key="episode.id">
-                  <td class="num mono">{{ episode.number }}</td>
-                  <td class="det-ep-title">{{ episode.title || '—' }}</td>
-                  <td class="mono">{{ episode.air_date || '—' }}</td>
-                  <td class="num mono">{{ episode.size_bytes ? fmtBytes(episode.size_bytes) : '' }}</td>
-                  <td class="det-right"><span class="det-badge" :class="`tone-${episodeState(episode).tone}`">{{ episodeState(episode).label }}</span></td>
-                  <td class="det-right">
-                    <AppTooltip label="Interactive search for this episode (dry run)">
-                      <button type="button" class="det-search-btn sm" @click="openEpisodeSearch(season.number, episode.number, episode.id)">
-                        <Icon name="search" :size="12" />
+                <template v-for="episode in season.episodes ?? []" :key="episode.id">
+                  <tr :class="{ 'det-file-row': episode.file_id }" @click="episode.file_id && toggleFile(episode.file_id)">
+                    <td class="det-expander-col">
+                      <button
+                        v-if="episode.file_id" type="button" class="det-expander"
+                        :aria-expanded="expandedFiles.has(episode.file_id)" aria-label="File details"
+                        @click.stop="toggleFile(episode.file_id)"
+                      >
+                        <Icon :name="expandedFiles.has(episode.file_id) ? 'chevdown' : 'chevright'" :size="12" />
                       </button>
-                    </AppTooltip>
-                  </td>
-                </tr>
+                    </td>
+                    <td class="num mono">{{ episode.number }}</td>
+                    <td class="det-ep-title">{{ episode.title || '—' }}</td>
+                    <td class="mono">{{ episode.air_date || '—' }}</td>
+                    <td class="num mono">{{ episode.size_bytes ? fmtBytes(episode.size_bytes) : '' }}</td>
+                    <td class="det-right"><span class="det-badge" :class="`tone-${episodeState(episode).tone}`">{{ episodeState(episode).label }}</span></td>
+                    <td class="det-right">
+                      <AppTooltip label="Interactive search for this episode (dry run)">
+                        <button type="button" class="det-search-btn sm" @click.stop="openEpisodeSearch(season.number, episode.number, episode.id)">
+                          <Icon name="search" :size="12" />
+                        </button>
+                      </AppTooltip>
+                    </td>
+                  </tr>
+                  <tr v-if="episode.file_id && expandedFiles.has(episode.file_id)" class="det-mfi-row">
+                    <td colspan="7"><ManagerFileInfo :file-id="episode.file_id" /></td>
+                  </tr>
+                </template>
               </tbody>
             </table>
           </div>
@@ -494,18 +518,28 @@ const FILE_KIND_LABELS: Record<string, string> = {
           <div class="det-tablewrap">
             <table class="det-table">
               <thead>
-                <tr><th>Relative path</th><th>Type</th><th>Quality</th><th>Video</th><th>Audio</th><th class="num">Size</th><th class="num">Added</th></tr>
+                <tr><th class="det-expander-col" aria-label="Details" /><th>Relative path</th><th>Type</th><th>Quality</th><th>Video</th><th>Audio</th><th class="num">Size</th><th class="num">Added</th></tr>
               </thead>
               <tbody>
-                <tr v-for="file in detail.files" :key="file.id">
-                  <td class="det-file-path mono" :title="file.path">{{ file.path }}</td>
-                  <td><span class="det-badge tone-none">{{ FILE_KIND_LABELS[file.kind] ?? file.kind }}</span></td>
-                  <td><span v-if="file.quality" class="det-badge tone-good">{{ file.quality }}</span></td>
-                  <td class="mono">{{ file.video_codec || '—' }}</td>
-                  <td class="mono">{{ file.audio_codec || '—' }}</td>
-                  <td class="num mono">{{ fmtBytes(file.size_bytes) }}</td>
-                  <td class="num mono">{{ timeAgoShort(file.added_at) }}</td>
-                </tr>
+                <template v-for="file in detail.files" :key="file.id">
+                  <tr class="det-file-row" @click="toggleFile(file.id)">
+                    <td class="det-expander-col">
+                      <button type="button" class="det-expander" :aria-expanded="expandedFiles.has(file.id)" aria-label="File details" @click.stop="toggleFile(file.id)">
+                        <Icon :name="expandedFiles.has(file.id) ? 'chevdown' : 'chevright'" :size="12" />
+                      </button>
+                    </td>
+                    <td class="det-file-path mono">{{ file.path }}</td>
+                    <td><span class="det-badge tone-none">{{ FILE_KIND_LABELS[file.kind] ?? file.kind }}</span></td>
+                    <td><span v-if="file.quality" class="mgr-quality">{{ file.quality }}</span></td>
+                    <td class="mono">{{ file.video_codec || '—' }}</td>
+                    <td class="mono">{{ file.audio_codec || '—' }}</td>
+                    <td class="num mono">{{ fmtBytes(file.size_bytes) }}</td>
+                    <td class="num mono">{{ timeAgoShort(file.added_at) }}</td>
+                  </tr>
+                  <tr v-if="expandedFiles.has(file.id)" class="det-mfi-row">
+                    <td colspan="8"><ManagerFileInfo :file-id="file.id" /></td>
+                  </tr>
+                </template>
               </tbody>
             </table>
           </div>
@@ -710,6 +744,9 @@ const FILE_KIND_LABELS: Record<string, string> = {
   text-decoration: none;
 }
 .det-chip.mono { font-family: var(--font-mono); font-size: 10.5px; }
+/* The path must be READABLE in full — wrap inside the chip instead of
+   ellipsizing at an arbitrary width. */
+.det-chip.path { max-width: none; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
 .det-chip.gold { color: var(--gold-bright); border-color: color-mix(in srgb, var(--gold) 50%, transparent); }
 .det-chip.good { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent); }
 .det-chip.warn { color: var(--gold-bright); border-color: color-mix(in srgb, var(--gold) 45%, transparent); }
@@ -833,7 +870,26 @@ const FILE_KIND_LABELS: Record<string, string> = {
 }
 .det-table td.mono { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-2); }
 .det-ep-title { max-width: 460px; overflow: hidden; text-overflow: ellipsis; color: var(--fg-0); }
-.det-file-path { max-width: 480px; overflow: hidden; text-overflow: ellipsis; }
+/* Full filenames, wrapped — never truncated (manager legibility rule). */
+.det-file-path { white-space: normal; overflow-wrap: anywhere; line-height: 1.45; }
+.det-expander-col { width: 34px; }
+.det-expander {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--fg-3);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.det-expander:hover { color: var(--fg-0); border-color: var(--fg-3); }
+.det-file-row { cursor: pointer; }
+.det-mfi-row td { padding: 4px 12px 10px; white-space: normal; }
+.det-mfi-row { background: transparent; }
 .det-cover-col { width: 48px; }
 .det-cover {
   display: block;

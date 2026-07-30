@@ -707,6 +707,69 @@ var managerLibraryAlbumCmd = &cobra.Command{
 	},
 }
 
+var managerLibraryFileCmd = &cobra.Command{
+	Use:   "file <library file id>",
+	Short: "Full probe detail for one file: absolute path and every stream",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid library file id %q", args[0])
+		}
+		return withApp(func(ctx context.Context, app *service.App) error {
+			detail, err := app.ManagerFile(ctx, id)
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(detail)
+			}
+			ui.Info("Path", detail.Path)
+			ui.Info("Size", humanBytes(detail.SizeBytes))
+			if detail.Container != "" {
+				ui.Info("Container", detail.Container)
+			}
+			if detail.DurationSec > 0 {
+				ui.Info("Duration", fmt.Sprintf("%d:%02d:%02d", detail.DurationSec/3600, (detail.DurationSec%3600)/60, detail.DurationSec%60))
+			}
+			if detail.BitrateKbps > 0 {
+				ui.Info("Bitrate", fmt.Sprintf("%d kbps", detail.BitrateKbps))
+			}
+			if len(detail.Streams) > 0 {
+				table := ui.NewTable("Kind", "Codec", "Detail", "Language", "Bitrate")
+				for _, s := range detail.Streams {
+					var parts []string
+					if s.Width > 0 {
+						parts = append(parts, fmt.Sprintf("%dx%d", s.Width, s.Height))
+					}
+					if s.FrameRate != "" {
+						parts = append(parts, s.FrameRate+" fps")
+					}
+					if s.BitDepth > 0 {
+						parts = append(parts, fmt.Sprintf("%d-bit", s.BitDepth))
+					}
+					if s.HDR != "" {
+						parts = append(parts, s.HDR)
+					}
+					if s.Layout != "" {
+						parts = append(parts, s.Layout)
+					}
+					if s.Profile != "" {
+						parts = append(parts, s.Profile)
+					}
+					bitrate := ""
+					if s.BitrateKbps > 0 {
+						bitrate = fmt.Sprintf("%d kbps", s.BitrateKbps)
+					}
+					table.AddRow(s.Kind, s.Codec, strings.Join(parts, " · "), s.Language, bitrate)
+				}
+				fmt.Println(table.Render())
+			}
+			return nil
+		})
+	},
+}
+
 var managerLibraryRefreshCmd = &cobra.Command{
 	Use:   "refresh <media item id>",
 	Short: "Refresh an artist's metadata inline (incl. discography) — no worker needed",
@@ -1203,7 +1266,7 @@ func init() {
 	managerLibraryItemsCmd.Flags().Int("per-page", 60, "Items per page")
 	managerLibrarySetCmd.Flags().Bool("monitor", false, "Monitored state to set (use --monitor=false to unmonitor)")
 	managerLibrarySetCmd.Flags().Int64("profile", 0, "Quality profile id to assign (0 clears it)")
-	managerLibraryCmd.AddCommand(managerLibraryItemsCmd, managerLibraryShowCmd, managerLibraryAlbumCmd, managerLibrarySetCmd, managerLibraryRefreshCmd)
+	managerLibraryCmd.AddCommand(managerLibraryItemsCmd, managerLibraryShowCmd, managerLibraryAlbumCmd, managerLibraryFileCmd, managerLibrarySetCmd, managerLibraryRefreshCmd)
 
 	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd, managerFormatCmd, managerLibraryCmd, managerCalendarCmd, managerSearchCmd, managerHistoryCmd, managerRSSCmd, managerWantedCmd)
 	managerRSSCmd.AddCommand(managerRSSRunCmd)

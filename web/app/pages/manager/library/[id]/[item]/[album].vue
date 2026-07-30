@@ -61,6 +61,15 @@ function trackLength(seconds: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 
+// Per-track file-detail expanders, keyed by library_file id.
+const expandedFiles = ref(new Set<number>())
+function toggleFile(fileId: number) {
+  const next = new Set(expandedFiles.value)
+  if (next.has(fileId)) next.delete(fileId)
+  else next.add(fileId)
+  expandedFiles.value = next
+}
+
 // Multi-disc albums get one table section per disc.
 const discs = computed(() => {
   const tracks = detail.value?.tracks ?? []
@@ -141,19 +150,33 @@ function albumLink(ref: number | string): string {
           <div class="det-tablewrap">
             <table class="det-table">
               <thead>
-                <tr><th class="num alb-num-col">#</th><th>Title</th><th class="num">Length</th><th>Quality</th><th class="num">Size</th></tr>
+                <tr><th class="alb-expander-col" aria-label="Details" /><th class="num alb-num-col">#</th><th>Title</th><th class="num">Length</th><th>Quality</th><th class="num">Size</th></tr>
               </thead>
               <tbody>
-                <tr v-for="track in disc.tracks" :key="track.id" :class="{ 'det-row-wanted': !track.has_file }">
-                  <td class="num mono">{{ track.number }}</td>
-                  <td class="det-ep-title">{{ track.title }}</td>
-                  <td class="num mono">{{ trackLength(track.duration_seconds) }}</td>
-                  <td>
-                    <span v-if="track.has_file" class="det-badge tone-good">{{ track.quality }}</span>
-                    <span v-else class="det-badge tone-bad">Missing</span>
-                  </td>
-                  <td class="num mono">{{ track.size_bytes ? fmtBytes(track.size_bytes) : '—' }}</td>
-                </tr>
+                <template v-for="track in disc.tracks" :key="track.id">
+                  <tr :class="{ 'det-row-wanted': !track.has_file, 'alb-file-row': track.file_id }" @click="track.file_id && toggleFile(track.file_id)">
+                    <td class="alb-expander-col">
+                      <button
+                        v-if="track.file_id" type="button" class="alb-expander"
+                        :aria-expanded="expandedFiles.has(track.file_id)" aria-label="File details"
+                        @click.stop="toggleFile(track.file_id)"
+                      >
+                        <Icon :name="expandedFiles.has(track.file_id) ? 'chevdown' : 'chevright'" :size="12" />
+                      </button>
+                    </td>
+                    <td class="num mono">{{ track.number }}</td>
+                    <td class="det-ep-title">{{ track.title }}</td>
+                    <td class="num mono">{{ trackLength(track.duration_seconds) }}</td>
+                    <td>
+                      <span v-if="track.has_file" class="mgr-quality">{{ track.quality }}</span>
+                      <span v-else class="det-badge tone-bad">Missing</span>
+                    </td>
+                    <td class="num mono">{{ track.size_bytes ? fmtBytes(track.size_bytes) : '—' }}</td>
+                  </tr>
+                  <tr v-if="track.file_id && expandedFiles.has(track.file_id)" class="alb-mfi-row">
+                    <td colspan="6"><ManagerFileInfo :file-id="track.file_id" /></td>
+                  </tr>
+                </template>
               </tbody>
             </table>
           </div>
@@ -331,6 +354,23 @@ function albumLink(ref: number | string): string {
 .det-table td.mono { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-2); }
 .det-ep-title { max-width: 480px; overflow: hidden; text-overflow: ellipsis; color: var(--fg-0); }
 .det-row-wanted .det-ep-title { color: var(--fg-2); }
+.alb-expander-col { width: 34px; }
+.alb-expander {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--fg-3);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.alb-expander:hover { color: var(--fg-0); border-color: var(--fg-3); }
+.alb-file-row { cursor: pointer; }
+.alb-mfi-row td { padding: 4px 12px 10px; white-space: normal; }
 
 .alb-empty {
   display: flex;

@@ -13608,6 +13608,11 @@
           "air_date": {
             "type": "string"
           },
+          "file_id": {
+            "description": "library_files id of the linked file — feeds the file-detail expander",
+            "format": "int64",
+            "type": "integer"
+          },
           "has_file": {
             "type": "boolean"
           },
@@ -13641,6 +13646,64 @@
           "special",
           "has_file",
           "size_bytes"
+        ],
+        "type": "object"
+      },
+      "ManagerFileDetailView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerFileDetailView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "added_at": {
+            "type": "string"
+          },
+          "bitrate_kbps": {
+            "description": "Overall container bitrate",
+            "format": "int32",
+            "type": "integer"
+          },
+          "container": {
+            "type": "string"
+          },
+          "duration_sec": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "path": {
+            "description": "Absolute on-disk path",
+            "type": "string"
+          },
+          "size_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "streams": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerStreamView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "size_bytes",
+          "added_at",
+          "streams"
         ],
         "type": "object"
       },
@@ -15547,6 +15610,73 @@
         ],
         "type": "object"
       },
+      "ManagerStreamView": {
+        "additionalProperties": false,
+        "properties": {
+          "bit_depth": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "bitrate_kbps": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "channels": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "codec": {
+            "type": "string"
+          },
+          "default": {
+            "type": "boolean"
+          },
+          "forced": {
+            "type": "boolean"
+          },
+          "frame_rate": {
+            "description": "e.g. 23.976",
+            "type": "string"
+          },
+          "hdr": {
+            "description": "Dolby Vision / HDR10 / HLG",
+            "type": "string"
+          },
+          "height": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "video | audio | subtitle | other",
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "layout": {
+            "description": "5.1(side), stereo, ...",
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "sample_rate_hz": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "width": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
       "ManagerTestResult": {
         "additionalProperties": false,
         "properties": {
@@ -15583,6 +15713,11 @@
           },
           "duration_seconds": {
             "format": "int32",
+            "type": "integer"
+          },
+          "file_id": {
+            "description": "library_files id of the best file — feeds the file-detail expander",
+            "format": "int64",
             "type": "integer"
           },
           "has_file": {
@@ -35714,6 +35849,66 @@
           }
         ],
         "summary": "Test a manager download client connection",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
+    "/api/manager/file/{id}": {
+      "get": {
+        "operationId": "manager-file-detail",
+        "parameters": [
+          {
+            "description": "Numeric ID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Numeric ID",
+              "examples": [
+                42
+              ],
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerFileDetailView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Full probe detail for one library file: absolute path and every stream",
         "tags": [
           "Manager"
         ]
