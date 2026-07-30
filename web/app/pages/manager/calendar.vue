@@ -8,35 +8,78 @@ definePageMeta({ layout: 'manager', middleware: 'admin' })
 import { managerCalendarQuery, type CalendarEventView, type CalendarEventDetailView } from '~/queries/manager'
 import { librariesQuery } from '~/queries/catalog'
 import { managerLibraryIcon } from '~/composables/useManagerNav'
-import { toCalendarDate, type CalendarEntry, type CalendarEntryTag } from '~/components/calendar/calendarEntry'
+import { toCalendarDate, parseCalendarDate, type CalendarEntry, type CalendarEntryTag } from '~/components/calendar/calendarEntry'
 import { fmtBytes } from '~/composables/useFormat'
 
 // ── View state ───────────────────────────────────────────────────────────
 
-const view = ref<'agenda' | 'month'>('month')
+type CalendarViewMode = 'week' | 'month' | 'agenda'
+const view = ref<CalendarViewMode>('week')
 onMounted(() => {
-  const saved = localStorage.getItem('heya:manager:calendar-view')
-  if (saved === 'agenda' || saved === 'month') view.value = saved
+  const saved = localStorage.getItem('heya:manager:calendar-view:v2')
+  if (saved === 'agenda' || saved === 'month' || saved === 'week') view.value = saved
 })
-watch(view, value => localStorage.setItem('heya:manager:calendar-view', value))
+watch(view, value => localStorage.setItem('heya:manager:calendar-view:v2', value))
 
 const today = toCalendarDate(new Date())
-// Month cursor, YYYY-MM. Agenda ignores it (rolling window).
+
+function mondayOf(date: Date): Date {
+  const monday = new Date(date)
+  monday.setDate(date.getDate() - ((date.getDay() + 6) % 7))
+  return monday
+}
+
+// Week cursor = the Monday of the visible week; month cursor = YYYY-MM.
+// The nav arrows step whichever period the active view shows.
+const weekCursor = ref(toCalendarDate(mondayOf(new Date())))
 const monthCursor = ref(today.slice(0, 7))
 
-function shiftMonth(delta: number) {
+function shiftPeriod(delta: number) {
+  if (view.value === 'week') {
+    const monday = parseCalendarDate(weekCursor.value)
+    monday.setDate(monday.getDate() + delta * 7)
+    weekCursor.value = toCalendarDate(monday)
+    return
+  }
   const [y, m] = monthCursor.value.split('-').map(Number)
   const d = new Date(y!, (m ?? 1) - 1 + delta, 1)
   monthCursor.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
-const monthLabel = computed(() => {
+function goToday() {
+  weekCursor.value = toCalendarDate(mondayOf(new Date()))
+  monthCursor.value = today.slice(0, 7)
+}
+
+const rangeFormat = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' })
+const periodLabel = computed(() => {
+  if (view.value === 'week') {
+    const monday = parseCalendarDate(weekCursor.value)
+    const sunday = new Date(monday)
+    sunday.setDate(monday.getDate() + 6)
+    return `${rangeFormat.format(monday)} – ${rangeFormat.format(sunday)} ${sunday.getFullYear()}`
+  }
   const [y, m] = monthCursor.value.split('-').map(Number)
   return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(new Date(y!, (m ?? 1) - 1, 1))
 })
 
 const { isPhone } = useViewport()
-// The grid needs ~180px cells to be readable; phones get agenda only.
-const effectiveView = computed(() => (isPhone.value ? 'agenda' : view.value))
+// The grids need wide cells to be readable; phones get agenda only.
+const effectiveView = computed<CalendarViewMode>(() => (isPhone.value ? 'agenda' : view.value))
+
+const VIEW_OPTIONS: { key: CalendarViewMode, label: string }[] = [
+  { key: 'week', label: 'Week' },
+  { key: 'month', label: 'Month' },
+  { key: 'agenda', label: 'Agenda' },
+]
+
+// The legend names the chip dressing — state must be readable without
+// memorizing colors.
+const LEGEND = [
+  { state: 'ok', label: 'Downloaded' },
+  { state: 'error', label: 'Missing' },
+  { state: 'warn', label: 'Today' },
+  { state: 'idle', label: 'Upcoming' },
+] as const
 
 // ── Filters ──────────────────────────────────────────────────────────────
 
@@ -69,6 +112,12 @@ const window_ = computed(() => {
     const to = new Date()
     to.setDate(to.getDate() + 30)
     return { from: toCalendarDate(from), to: toCalendarDate(to) }
+  }
+  if (effectiveView.value === 'week') {
+    const monday = parseCalendarDate(weekCursor.value)
+    const sunday = new Date(monday)
+    sunday.setDate(monday.getDate() + 6)
+    return { from: toCalendarDate(monday), to: toCalendarDate(sunday) }
   }
   const [y, m] = monthCursor.value.split('-').map(Number)
   const first = new Date(y!, (m ?? 1) - 1, 1)
@@ -299,25 +348,33 @@ const emptyText = computed(() => {
           <span>Monitored only</span>
         </label>
         <div v-if="!isPhone" class="calp-view-toggle" role="group" aria-label="Calendar view">
-          <button type="button" class="mgr-btn-icon" :class="{ active: view === 'agenda' }" aria-label="Agenda view" @click="view = 'agenda'">
-            <Icon name="rows" :size="15" />
-          </button>
-          <button type="button" class="mgr-btn-icon" :class="{ active: view === 'month' }" aria-label="Month view" @click="view = 'month'">
-            <Icon name="calendar" :size="15" />
-          </button>
+          <button
+            v-for="option in VIEW_OPTIONS"
+            :key="option.key"
+            type="button"
+            class="calp-view-btn"
+            :class="{ active: view === option.key }"
+            :aria-pressed="view === option.key"
+            @click="view = option.key"
+          >{{ option.label }}</button>
         </div>
       </div>
     </div>
 
-    <div v-if="effectiveView === 'month'" class="calp-monthnav">
-      <button type="button" class="mgr-btn-icon" aria-label="Previous month" @click="shiftMonth(-1)">
+    <div v-if="effectiveView !== 'agenda'" class="calp-monthnav">
+      <button type="button" class="mgr-btn-icon" :aria-label="view === 'week' ? 'Previous week' : 'Previous month'" @click="shiftPeriod(-1)">
         <Icon name="chevleft" :size="14" />
       </button>
-      <button type="button" class="mgr-btn calp-today-btn" @click="monthCursor = today.slice(0, 7)">Today</button>
-      <button type="button" class="mgr-btn-icon" aria-label="Next month" @click="shiftMonth(1)">
+      <button type="button" class="mgr-btn calp-today-btn" @click="goToday">Today</button>
+      <button type="button" class="mgr-btn-icon" :aria-label="view === 'week' ? 'Next week' : 'Next month'" @click="shiftPeriod(1)">
         <Icon name="chevright" :size="14" />
       </button>
-      <span class="calp-month-label">{{ monthLabel }}</span>
+      <span class="calp-month-label">{{ periodLabel }}</span>
+      <div class="calp-legend" aria-hidden="true">
+        <span v-for="item in LEGEND" :key="item.state" class="calp-legend-item">
+          <span class="calp-legend-swatch" :class="`st-${item.state}`" />{{ item.label }}
+        </span>
+      </div>
     </div>
 
     <div v-if="loadError" class="mgr-flash err" role="alert">
@@ -326,6 +383,10 @@ const emptyText = computed(() => {
 
     <div v-else-if="loading" class="calp-skel" role="status" aria-label="Loading calendar">
       <div v-for="i in 6" :key="i" class="calp-skel-row" />
+    </div>
+
+    <div v-else-if="effectiveView === 'week'" :class="{ refreshing }">
+      <CalendarMonthGrid :week="weekCursor" :entries="entries" @select="openEvent" />
     </div>
 
     <div v-else-if="effectiveView === 'month'" :class="{ refreshing }">
@@ -397,12 +458,50 @@ const emptyText = computed(() => {
   cursor: pointer;
 }
 
-.calp-view-toggle { display: flex; gap: 4px; }
-.calp-view-toggle .mgr-btn-icon.active {
+.calp-view-toggle {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: rgb(var(--ink) / 0.05);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+.calp-view-btn {
+  padding: 4px 12px;
+  border: 0;
+  border-radius: calc(var(--r-sm) - 2px);
+  background: none;
+  color: var(--fg-2);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.calp-view-btn:hover { color: var(--fg-0); }
+.calp-view-btn.active {
   color: var(--gold-bright);
   background: var(--gold-soft);
-  border-color: color-mix(in srgb, var(--gold) 45%, transparent);
 }
+
+.calp-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--fg-2);
+}
+.calp-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.calp-legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border-left: 3px solid rgb(var(--ink) / 0.18);
+  background: rgb(var(--ink) / 0.06);
+}
+.calp-legend-swatch.st-ok { border-left-color: var(--good); background: color-mix(in srgb, var(--good) 13%, transparent); }
+.calp-legend-swatch.st-error { border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 13%, transparent); }
+.calp-legend-swatch.st-warn { border-left-color: var(--gold); background: var(--gold-soft); }
 
 .calp-monthnav {
   display: flex;

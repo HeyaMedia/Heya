@@ -9,8 +9,11 @@
 import { parseCalendarDate, toCalendarDate, type CalendarEntry } from '~/components/calendar/calendarEntry'
 
 const props = defineProps<{
-  /** Which month to render, as YYYY-MM. */
-  month: string
+  /** Which month to render, as YYYY-MM. Ignored when `week` is set. */
+  month?: string
+  /** Week mode: render the single Monday-started week containing this
+      YYYY-MM-DD date — one row of seven tall day columns. */
+  week?: string
   entries: CalendarEntry[]
   /** Opt-in day selection (v-model:selected-date + gold highlight). Off by
       default — most consumers act on individual events via @select. */
@@ -49,14 +52,34 @@ const weekdays = computed(() => {
 })
 
 const cells = computed<DayCell[]>(() => {
-  const [y, m] = props.month.split('-').map(Number)
+  const today = toCalendarDate(new Date())
+  const out: DayCell[] = []
+
+  if (props.week) {
+    // Single Monday-started week containing the given date.
+    const anchor = parseCalendarDate(props.week)
+    const cursor = new Date(anchor)
+    cursor.setDate(anchor.getDate() - ((anchor.getDay() + 6) % 7))
+    for (let i = 0; i < 7; i++) {
+      const date = toCalendarDate(cursor)
+      out.push({
+        date,
+        dayOfMonth: cursor.getDate(),
+        inMonth: true,
+        weekend: i >= 5,
+        isToday: date === today,
+        entries: byDate.value.get(date) ?? [],
+      })
+      cursor.setDate(cursor.getDate() + 1)
+    }
+    return out
+  }
+
+  const [y, m] = (props.month ?? toCalendarDate(new Date()).slice(0, 7)).split('-').map(Number)
   const first = new Date(y!, (m ?? 1) - 1, 1)
   // Walk back to Monday (getDay(): 0 = Sunday).
   const start = new Date(first)
   start.setDate(first.getDate() - ((first.getDay() + 6) % 7))
-  const today = toCalendarDate(new Date())
-
-  const out: DayCell[] = []
   const cursor = new Date(start)
   do {
     for (let i = 0; i < 7; i++) {
@@ -82,7 +105,7 @@ function toggleDay(cell: DayCell) {
 </script>
 
 <template>
-  <div class="cmg">
+  <div class="cmg" :class="{ 'cmg-weekmode': !!week }">
     <div class="cmg-weekdays">
       <span v-for="day in weekdays" :key="day" class="cmg-weekday">{{ day }}</span>
     </div>
@@ -110,11 +133,11 @@ function toggleDay(cell: DayCell) {
           :key="entry.id"
           type="button"
           class="cmg-chip"
-          :aria-label="`${entry.title}${entry.subtitle ? ' — ' + entry.subtitle : ''}`"
+          :class="`st-${entry.badge?.state ?? 'idle'}`"
+          :aria-label="`${entry.title}${entry.subtitle ? ' — ' + entry.subtitle : ''}${entry.badge ? ' (' + entry.badge.label + ')' : ''}`"
           @click.stop="emit('select', entry)"
         >
           <span class="cmg-chip-head">
-            <span v-if="entry.badge" class="cmg-dot" :class="`state-${entry.badge.state}`" />
             <Icon v-if="entry.icon" :name="entry.icon" :size="10" class="cmg-chip-icon" />
             <span class="cmg-chip-title">{{ entry.title }}</span>
             <span v-if="entry.tags?.length" class="cmg-chip-tag" :class="`tone-${entry.tags[0]!.tone}`">{{ entry.tags[0]!.label }}</span>
@@ -204,21 +227,37 @@ function toggleDay(cell: DayCell) {
   color: var(--accent-ink, var(--bg-0));
 }
 
+/* State is the chip's whole dress, not a 5px dot: tinted fill + a solid
+   edge. Green = on disk, red = aired and missing, gold = today, neutral =
+   upcoming. The consumer's legend names them. */
 .cmg-chip {
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 1px;
-  padding: 3px 6px;
+  padding: 3px 6px 3px 8px;
   border: 0;
+  border-left: 3px solid rgb(var(--ink) / 0.18);
   border-radius: 4px;
   background: rgb(var(--ink) / 0.06);
   min-width: 0;
   text-align: left;
   cursor: pointer;
-  transition: background 0.12s;
+  transition: background 0.12s, filter 0.12s;
 }
-.cmg-chip:hover { background: rgb(var(--ink) / 0.12); }
+.cmg-chip:hover { filter: brightness(1.25); }
+.cmg-chip.st-ok {
+  border-left-color: var(--good);
+  background: color-mix(in srgb, var(--good) 13%, transparent);
+}
+.cmg-chip.st-error {
+  border-left-color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 13%, transparent);
+}
+.cmg-chip.st-warn {
+  border-left-color: var(--gold);
+  background: var(--gold-soft);
+}
 .cmg-chip-head {
   display: flex;
   align-items: center;
@@ -257,9 +296,6 @@ function toggleDay(cell: DayCell) {
 .cmg-chip-tag.tone-bad { color: var(--bad); }
 .cmg-chip-tag.tone-neutral { color: var(--fg-3); }
 
-.cmg-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
-.cmg-dot.state-ok { background: var(--good); }
-.cmg-dot.state-warn { background: var(--gold-bright); }
-.cmg-dot.state-error { background: var(--bad); }
-.cmg-dot.state-idle { background: var(--fg-3); }
+/* Week mode: one row of seven tall day columns. */
+.cmg-weekmode .cmg-cell { min-height: 320px; }
 </style>
