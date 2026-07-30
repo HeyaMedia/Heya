@@ -551,13 +551,14 @@ func registerMeRoutes(api huma.API, app *service.App) {
 			IDPath
 			Shuffle bool  `query:"shuffle" doc:"Pick a random episode with a file instead of the next unwatched one"`
 			Exclude int64 `query:"exclude" doc:"Episode id to avoid repeating when shuffling"`
+			After   int64 `query:"after" doc:"Anchor episode id: return the episode that follows this one in playback order regardless of watch state (the player's autoplay form). Without it, the first unwatched episode."`
 		},
 		) (*JSONOutput[service.UpNextResult], error) {
 			if in.Shuffle {
 				result, _ := app.GetShuffleEpisode(ctx, in.ID, in.Exclude)
 				return noStoreJSON(result), nil
 			}
-			result, _ := app.GetUpNext(ctx, userFrom(ctx).ID, in.ID)
+			result, _ := app.GetUpNext(ctx, userFrom(ctx).ID, in.ID, in.After)
 			return noStoreJSON(result), nil
 		})
 

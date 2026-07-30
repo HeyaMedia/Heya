@@ -811,13 +811,26 @@ async function startPlayback(startPositionSeconds = pendingSeekTo.value) {
 
   if (props.mediaItemId) {
     // /api/media/{id} accepts slug or numeric ID — spec types id as string.
+    // Sequential mode anchors on the playing episode (`after`) instead of
+    // "first unwatched": this episode isn't completed yet at prefetch time,
+    // so the unwatched form nominates itself — and a full rewatch (everything
+    // watched) would never chain.
     $heya('/api/media/{id}/up-next', {
       path: { id: props.mediaItemId },
-      query: props.shuffle ? { shuffle: true, exclude: props.entityId || undefined } : undefined,
+      query: props.shuffle
+        ? { shuffle: true, exclude: props.entityId || undefined }
+        : (props.entityType === 'episode' && props.entityId ? { after: props.entityId } : undefined),
     })
       .then(data => {
         const ud = data as UpNextData
-        if (ud?.has_next && (ud.file_public_id || ud.file_id)) upNext.value = ud
+        if (!ud?.has_next || !(ud.file_public_id || ud.file_id)) return
+        // Never chain into what's already playing (single-episode shuffle
+        // pool, or a nomination missing its anchor): the /watch URL would be
+        // identical, the navigation no-ops, and the ended player strands.
+        const fileRef = String(props.fileId)
+        if (String(ud.file_public_id) === fileRef || String(ud.file_id) === fileRef) return
+        if (ud.episode_id && props.entityId && ud.episode_id === props.entityId) return
+        upNext.value = ud
       })
       .catch(() => {})
   }

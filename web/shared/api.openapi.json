@@ -43967,6 +43967,17 @@
               "format": "int64",
               "type": "integer"
             }
+          },
+          {
+            "description": "Anchor episode id: return the episode that follows this one in playback order regardless of watch state (the player's autoplay form). Without it, the first unwatched episode.",
+            "explode": false,
+            "in": "query",
+            "name": "after",
+            "schema": {
+              "description": "Anchor episode id: return the episode that follows this one in playback order regardless of watch state (the player's autoplay form). Without it, the first unwatched episode.",
+              "format": "int64",
+              "type": "integer"
+            }
           }
         ],
         "responses": {

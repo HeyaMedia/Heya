@@ -535,15 +535,35 @@ type UpNextResult struct {
 	FilePublicID      string `json:"file_public_id,omitempty"`
 }
 
-// GetUpNext returns the next unwatched episode for a series, including a file ID if available.
-func (a *App) GetUpNext(ctx context.Context, userID, mediaItemID int64) (UpNextResult, error) {
+// GetUpNext returns the next episode for a series, including a file ID if
+// available. With afterEpisodeID == 0 it nominates the first unwatched episode
+// (detail pages, home rail fallback). With afterEpisodeID set it nominates the
+// episode that follows that one in playback order regardless of watch state —
+// the player's autoplay anchor. The player MUST use the anchored form: the
+// episode being played isn't completed yet when the player prefetches, so the
+// unwatched form would nominate the currently-playing episode itself, and a
+// fully-rewatched show would never chain at all.
+func (a *App) GetUpNext(ctx context.Context, userID, mediaItemID, afterEpisodeID int64) (UpNextResult, error) {
 	q := sqlc.New(a.db)
-	ep, err := q.GetNextUnwatchedEpisode(ctx, sqlc.GetNextUnwatchedEpisodeParams{
-		UserID:      userID,
-		MediaItemID: mediaItemID,
-	})
-	if err != nil {
-		return UpNextResult{HasNext: false}, nil
+	var ep sqlc.GetNextUnwatchedEpisodeRow
+	if afterEpisodeID != 0 {
+		after, err := q.GetEpisodeAfter(ctx, sqlc.GetEpisodeAfterParams{
+			AfterEpisodeID: afterEpisodeID,
+			MediaItemID:    mediaItemID,
+		})
+		if err != nil {
+			return UpNextResult{HasNext: false}, nil
+		}
+		ep = sqlc.GetNextUnwatchedEpisodeRow(after)
+	} else {
+		var err error
+		ep, err = q.GetNextUnwatchedEpisode(ctx, sqlc.GetNextUnwatchedEpisodeParams{
+			UserID:      userID,
+			MediaItemID: mediaItemID,
+		})
+		if err != nil {
+			return UpNextResult{HasNext: false}, nil
+		}
 	}
 
 	var fileID int64

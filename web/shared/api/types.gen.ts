@@ -18857,6 +18857,10 @@ export type GetUpNextData = {
          * Episode id to avoid repeating when shuffling
          */
         exclude?: number;
+        /**
+         * Anchor episode id: return the episode that follows this one in playback order regardless of watch state (the player's autoplay form). Without it, the first unwatched episode.
+         */
+        after?: number;
     };
     url: '/api/media/{id}/up-next';
 };

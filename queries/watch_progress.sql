@@ -184,6 +184,27 @@ WHERE ts.media_item_id = $2 AND wp.entity_id IS NULL
 ORDER BY (CASE WHEN s.season_number = 0 THEN 1 ELSE 0 END), s.season_number ASC, e.episode_number ASC
 LIMIT 1;
 
+-- The episode that comes after a given one in playback order, regardless of
+-- watch state — the player's post-episode autoplay anchor. "Next unwatched"
+-- can't serve that role: while an episode is still playing it isn't completed
+-- yet, so it would nominate itself. Same ordering as GetNextUnwatchedEpisode
+-- (specials sort last). The anchor joins verify the episode belongs to the
+-- requested series; a mismatched pair yields no row.
+-- name: GetEpisodeAfter :one
+SELECT e.id AS episode_id, e.episode_number, e.title, e.runtime_minutes,
+       s.id AS season_id, s.season_number,
+       ts.media_item_id
+FROM tv_episodes e
+JOIN tv_seasons s ON s.id = e.season_id
+JOIN tv_series ts ON ts.id = s.series_id
+JOIN tv_seasons cs ON cs.series_id = ts.id
+JOIN tv_episodes ce ON ce.id = sqlc.arg(after_episode_id) AND ce.season_id = cs.id
+WHERE ts.media_item_id = sqlc.arg(media_item_id)
+  AND ((s.season_number = 0), s.season_number, e.episode_number)
+      > ((cs.season_number = 0), cs.season_number, ce.episode_number)
+ORDER BY (CASE WHEN s.season_number = 0 THEN 1 ELSE 0 END), s.season_number ASC, e.episode_number ASC
+LIMIT 1;
+
 -- name: ListWatchedEpisodeNumbersForMediaItems :many
 -- Season/episode numbers of a user's completed episodes across many series —
 -- the watched numerator of presentShowWatchCounts. Numbers (not ids) so the

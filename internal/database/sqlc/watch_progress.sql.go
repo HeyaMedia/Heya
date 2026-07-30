@@ -12,6 +12,58 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getEpisodeAfter = `-- name: GetEpisodeAfter :one
+SELECT e.id AS episode_id, e.episode_number, e.title, e.runtime_minutes,
+       s.id AS season_id, s.season_number,
+       ts.media_item_id
+FROM tv_episodes e
+JOIN tv_seasons s ON s.id = e.season_id
+JOIN tv_series ts ON ts.id = s.series_id
+JOIN tv_seasons cs ON cs.series_id = ts.id
+JOIN tv_episodes ce ON ce.id = $1 AND ce.season_id = cs.id
+WHERE ts.media_item_id = $2
+  AND ((s.season_number = 0), s.season_number, e.episode_number)
+      > ((cs.season_number = 0), cs.season_number, ce.episode_number)
+ORDER BY (CASE WHEN s.season_number = 0 THEN 1 ELSE 0 END), s.season_number ASC, e.episode_number ASC
+LIMIT 1
+`
+
+type GetEpisodeAfterParams struct {
+	AfterEpisodeID int64 `json:"after_episode_id"`
+	MediaItemID    int64 `json:"media_item_id"`
+}
+
+type GetEpisodeAfterRow struct {
+	EpisodeID      int64  `json:"episode_id"`
+	EpisodeNumber  int32  `json:"episode_number"`
+	Title          string `json:"title"`
+	RuntimeMinutes int32  `json:"runtime_minutes"`
+	SeasonID       int64  `json:"season_id"`
+	SeasonNumber   int32  `json:"season_number"`
+	MediaItemID    int64  `json:"media_item_id"`
+}
+
+// The episode that comes after a given one in playback order, regardless of
+// watch state — the player's post-episode autoplay anchor. "Next unwatched"
+// can't serve that role: while an episode is still playing it isn't completed
+// yet, so it would nominate itself. Same ordering as GetNextUnwatchedEpisode
+// (specials sort last). The anchor joins verify the episode belongs to the
+// requested series; a mismatched pair yields no row.
+func (q *Queries) GetEpisodeAfter(ctx context.Context, arg GetEpisodeAfterParams) (GetEpisodeAfterRow, error) {
+	row := q.db.QueryRow(ctx, getEpisodeAfter, arg.AfterEpisodeID, arg.MediaItemID)
+	var i GetEpisodeAfterRow
+	err := row.Scan(
+		&i.EpisodeID,
+		&i.EpisodeNumber,
+		&i.Title,
+		&i.RuntimeMinutes,
+		&i.SeasonID,
+		&i.SeasonNumber,
+		&i.MediaItemID,
+	)
+	return i, err
+}
+
 const getNextUnwatchedEpisode = `-- name: GetNextUnwatchedEpisode :one
 SELECT e.id AS episode_id, e.episode_number, e.title, e.runtime_minutes,
        s.id AS season_id, s.season_number,
