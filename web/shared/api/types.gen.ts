@@ -3903,6 +3903,20 @@ export type ManagerHistoryPage = {
     next_id?: number;
 };
 
+export type ManagerImportView = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    destination: string;
+    matched_item_id: number;
+    matched_title: string;
+    moved: Array<string> | null;
+    run_id: number;
+    scan_queued: boolean;
+    skipped?: Array<string> | null;
+};
+
 export type ManagerIndexerHistoryDay = {
     date: string;
     failed: number;
@@ -9069,6 +9083,16 @@ export type ManagerHistoryPageWritable = {
     decisions: Array<ManagerDecisionView> | null;
     next_before?: string;
     next_id?: number;
+};
+
+export type ManagerImportViewWritable = {
+    destination: string;
+    matched_item_id: number;
+    matched_title: string;
+    moved: Array<string> | null;
+    run_id: number;
+    scan_queued: boolean;
+    skipped?: Array<string> | null;
 };
 
 export type ManagerIndexerHistoryViewWritable = {
@@ -15785,6 +15809,34 @@ export type ManagerQueueFilesResponses = {
 };
 
 export type ManagerQueueFilesResponse = ManagerQueueFilesResponses[keyof ManagerQueueFilesResponses];
+
+export type ManagerQueueImportData = {
+    body?: never;
+    path: {
+        client_id: number;
+        nzo_id: string;
+    };
+    query?: never;
+    url: '/api/manager/queue/{client_id}/{nzo_id}/import';
+};
+
+export type ManagerQueueImportErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerQueueImportError = ManagerQueueImportErrors[keyof ManagerQueueImportErrors];
+
+export type ManagerQueueImportResponses = {
+    /**
+     * OK
+     */
+    200: ManagerImportView;
+};
+
+export type ManagerQueueImportResponse = ManagerQueueImportResponses[keyof ManagerQueueImportResponses];
 
 export type ManagerRssRunData = {
     body?: never;

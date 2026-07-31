@@ -139,6 +139,34 @@ async function toggleFiles(item: ManagerQueueItemView) {
 }
 
 const { confirm } = useConfirm()
+
+// Import: the first real write action — move media files into the matched
+// item's folder and hand off to the library scanner.
+type ImportResult = { run_id: number, matched_title: string, destination: string, moved: string[], skipped?: string[], scan_queued: boolean }
+const importing = ref<string | null>(null)
+const importFlash = ref('')
+const importError = ref('')
+async function importEntry(item: ManagerQueueItemView) {
+  if (!await confirm({
+    title: 'Import this download?',
+    message: `Media files move into ${item.matched_title}'s library folder and a scan runs. This is a real write.`,
+  })) return
+  importing.value = item.nzo_id
+  importFlash.value = ''
+  importError.value = ''
+  try {
+    const res = await $heya(`/api/manager/queue/${item.client_id}/${encodeURIComponent(item.nzo_id)}/import`, {
+      method: 'POST',
+    }) as ImportResult
+    importFlash.value = `Imported ${res.moved.length} file(s) → ${res.destination}${res.scan_queued ? ' · scan queued' : ''} · run #${res.run_id}`
+    refetch()
+  } catch (e: any) {
+    importError.value = e?.data?.detail ?? 'Import failed'
+  } finally {
+    importing.value = null
+  }
+}
+
 const deleting = ref<string | null>(null)
 async function deleteEntry(item: ManagerQueueItemView) {
   const message = item.history
@@ -309,6 +337,16 @@ async function deleteEntry(item: ManagerQueueItemView) {
                 <div v-if="item.fail_message" class="qm-entry-fail">{{ item.fail_message }}</div>
               </div>
               <StatusBadge :state="item.fail_message ? 'error' : item.status.toLowerCase() === 'completed' || item.status.toLowerCase() === 'downloading' ? 'ok' : 'idle'">{{ item.status.toLowerCase() }}</StatusBadge>
+              <AppTooltip v-if="item.history && !item.fail_message" :label="item.matched_item_id ? `Import into ${item.matched_title}` : 'Not recognized — nothing to import into'">
+                <button
+                  type="button" class="mgr-btn-icon qm-import"
+                  :disabled="!item.matched_item_id || importing !== null"
+                  @click="importEntry(item)"
+                >
+                  <span v-if="importing === item.nzo_id" class="mgr-spin" />
+                  <Icon v-else name="download" :size="14" />
+                </button>
+              </AppTooltip>
               <AppTooltip v-if="item.history" label="Show the files this download produced">
                 <button type="button" class="mgr-btn-icon" :class="{ active: entryFiles.has(item.nzo_id) }" @click="toggleFiles(item)">
                   <Icon name="folder" :size="14" />
@@ -337,7 +375,10 @@ async function deleteEntry(item: ManagerQueueItemView) {
           </template>
         </div>
 
-        <p class="qm-note">Dry run — Heya never imports from here yet. Removing an entry acts on the download client itself.</p>
+        <div v-if="importFlash" class="mgr-flash ok qm-import-flash">{{ importFlash }}</div>
+        <div v-if="importError" class="mgr-flash err qm-import-flash">{{ importError }}</div>
+
+        <p class="qm-note">Import moves the media files into the matched item's library folder and queues a scan. Removing an entry acts on the download client itself.</p>
       </template>
     </AppDialog>
   </div>
@@ -551,4 +592,6 @@ async function deleteEntry(item: ManagerQueueItemView) {
 .qm-file-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .qm-file-size { flex-shrink: 0; color: var(--fg-3); }
 .mgr-btn-icon.active { color: var(--gold-bright); border-color: color-mix(in srgb, var(--gold) 45%, transparent); }
+.mgr-btn-icon.qm-import:not(:disabled) { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, transparent); }
+.qm-import-flash { margin-top: 12px; margin-bottom: 0; }
 </style>

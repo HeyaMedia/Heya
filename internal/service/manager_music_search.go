@@ -327,3 +327,19 @@ func (idx *musicQueueIndex) match(name string) (*musicQueueArtist, *musicQueueTa
 	}
 	return best, bestTarget
 }
+
+// hasMonitored reports whether any monitored artist carries a monitored
+// release-group target — the RSS music domain's gate.
+func (idx *musicQueueIndex) hasMonitored() bool {
+	for _, artist := range idx.artists {
+		if !artist.monitored {
+			continue
+		}
+		for _, t := range artist.targets {
+			if t.monitored {
+				return true
+			}
+		}
+	}
+	return false
+}

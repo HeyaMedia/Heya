@@ -79,6 +79,20 @@ func (a *App) RunManagerRSS(ctx context.Context, source string) (*ManagerRSSRunV
 	if err != nil {
 		return nil, err
 	}
+	musicIdx, err := a.buildMusicQueueIndex(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if musicIdx.hasMonitored() {
+		domains = append(domains, "music")
+	}
+	bookIdx, err := a.buildBookIdentityIndex(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	if len(bookIdx.books) > 0 {
+		domains = append(domains, "book")
+	}
 	if len(domains) == 0 {
 		return nil, fmt.Errorf("nothing is monitored — the RSS sweep has no targets")
 	}
@@ -132,7 +146,7 @@ func (a *App) RunManagerRSS(ctx context.Context, source string) (*ManagerRSSRunV
 
 	// Evaluate fresh sightings: identity → wantedness → engine, grouped so
 	// one target's releases from this sweep compete against each other.
-	matched, evaluated, grabs, err := a.evaluateRSSSightings(ctx, q, run.ID, index, freshSightings, releasesByID)
+	matched, evaluated, grabs, err := a.evaluateRSSSightings(ctx, q, run.ID, index, musicIdx, bookIdx, freshSightings, releasesByID)
 	if err != nil {
 		return nil, err
 	}
@@ -483,12 +497,16 @@ func (a *App) evaluateRSSSightings(
 	q *sqlc.Queries,
 	runID int64,
 	index *rssIdentityIndex,
+	musicIdx *musicQueueIndex,
+	bookIdx *bookIdentityIndex,
 	sightings []sqlc.ManagerReleaseSighting,
 	releasesByID map[int64]sqlc.ManagerRelease,
 ) (matched, evaluated, grabs int, err error) {
 	type groupKey struct {
-		itemID int64
-		season int // -1 for movies
+		domain        string
+		itemID        int64
+		season        int   // -1 for movies/books
+		musicTargetID int64 // music groups only
 	}
 	groups := map[groupKey][]sqlc.ManagerRelease{}
 	groupSightings := map[groupKey][]sqlc.ManagerReleaseSighting{}
@@ -514,24 +532,46 @@ func (a *App) evaluateRSSSightings(
 			continue
 		}
 		attrs := attrsMapFromRaw(release.RawAttrs)
-		ref, failure := resolveRSSIdentity(index, release.Domain, release.Title, attrs)
-		if failure != "" {
-			markSighting(sighting, failure, "", nil, 0)
-			continue
-		}
-		matched++
-		key := groupKey{itemID: ref.ItemID, season: -1}
-		if release.Domain == "tv" {
-			show := video.FilenameParseShow(release.Title)
-			if len(show.Seasons) > 0 {
-				key.season = show.Seasons[0]
-			} else {
-				// Absolute-numbered or unparseable season: evaluate against
-				// season -2 marker → resolved per-episode via absolute map
-				// during target build; v1 groups them per item.
-				key.season = -2
+		var key groupKey
+		switch release.Domain {
+		case "music":
+			artist, mTarget := musicIdx.match(release.Title)
+			if artist == nil || !artist.monitored {
+				markSighting(sighting, "unmatched", "", nil, 0)
+				continue
+			}
+			if mTarget == nil || !mTarget.monitored {
+				markSighting(sighting, "unmatched", "no monitored release group matches the name", nil, 0)
+				continue
+			}
+			key = groupKey{domain: "music", itemID: artist.mediaItemID, season: -1, musicTargetID: mTarget.id}
+		case "book":
+			ref := bookIdx.match(release.Title)
+			if ref == nil {
+				markSighting(sighting, "unmatched", "", nil, 0)
+				continue
+			}
+			key = groupKey{domain: "book", itemID: ref.itemID, season: -1}
+		default:
+			ref, failure := resolveRSSIdentity(index, release.Domain, release.Title, attrs)
+			if failure != "" {
+				markSighting(sighting, failure, "", nil, 0)
+				continue
+			}
+			key = groupKey{domain: release.Domain, itemID: ref.ItemID, season: -1}
+			if release.Domain == "tv" {
+				show := video.FilenameParseShow(release.Title)
+				if len(show.Seasons) > 0 {
+					key.season = show.Seasons[0]
+				} else {
+					// Absolute-numbered or unparseable season: evaluate against
+					// season -2 marker → resolved per-episode via absolute map
+					// during target build; v1 groups them per item.
+					key.season = -2
+				}
 			}
 		}
+		matched++
 		groups[key] = append(groups[key], release)
 		groupSightings[key] = append(groupSightings[key], sighting)
 	}
@@ -542,9 +582,14 @@ func (a *App) evaluateRSSSightings(
 			meta   searchTargetMeta
 			err    error
 		)
-		if key.season == -1 {
+		switch {
+		case key.domain == "music":
+			target, meta, err = a.buildMusicTarget(ctx, key.itemID, key.musicTargetID)
+		case key.domain == "book":
+			target, meta, err = a.buildBookTarget(ctx, key.itemID)
+		case key.season == -1:
 			target, meta, err = a.buildMovieTarget(ctx, key.itemID)
-		} else {
+		default:
 			season := key.season
 			scope := ManagerSearchScope{}
 			if season >= 0 {

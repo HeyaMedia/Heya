@@ -176,9 +176,10 @@ type Target struct {
 	Domain           string // movie | tv | music | book
 	MediaItemID      int64
 	NormalizedTitles []string // matcher-normalized title + aliases
-	// AlbumTitles (music only): matcher-normalized album titles of the
-	// edition group — scene names don't segment artist/album, so identity
-	// is verified by containment of artist AND album tokens.
+	// AlbumTitles are secondary containment titles for domains whose release
+	// names don't segment (music: the edition group's album titles; book:
+	// author names). Identity requires the release name to contain a primary
+	// AND a secondary title.
 	AlbumTitles      []string
 	Year             int
 	IDs              map[string]string // imdb / tvdb / tmdb (bare values)

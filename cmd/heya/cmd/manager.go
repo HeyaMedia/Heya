@@ -707,6 +707,41 @@ var managerLibraryAlbumCmd = &cobra.Command{
 	},
 }
 
+var managerImportCmd = &cobra.Command{
+	Use:   "import <client id> <nzo id>",
+	Short: "Import a completed download: move media files to the matched item's folder and queue a scan",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		clientID, err := strconv.ParseInt(args[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid client id %q", args[0])
+		}
+		return withApp(func(ctx context.Context, app *service.App) error {
+			view, err := app.ManagerImport(ctx, clientID, args[1])
+			if err != nil {
+				return err
+			}
+			if ui.JSONMode {
+				return ui.OutputJSON(view)
+			}
+			ui.Info("Matched", fmt.Sprintf("%s (item %d)", view.Title, view.MatchedItem))
+			ui.Info("Destination", view.Destination)
+			ui.Info("Moved", fmt.Sprintf("%d file(s)", len(view.Moved)))
+			for _, f := range view.Moved {
+				ui.Info("  →", f)
+			}
+			if len(view.Skipped) > 0 {
+				ui.Info("Skipped", strings.Join(view.Skipped, ", "))
+			}
+			if view.ScanQueued {
+				ui.Info("Scan", "library scan queued — the pipeline imports from here")
+			}
+			ui.Info("Run", fmt.Sprintf("#%d", view.RunID))
+			return nil
+		})
+	},
+}
+
 var managerLibraryMetadataCmd = &cobra.Command{
 	Use:   "metadata <media item id>",
 	Short: "Full metadata dump: every known field with per-field provenance",
@@ -1318,7 +1353,7 @@ func init() {
 	managerLibrarySetCmd.Flags().Int64("profile", 0, "Quality profile id to assign (0 clears it)")
 	managerLibraryCmd.AddCommand(managerLibraryItemsCmd, managerLibraryShowCmd, managerLibraryAlbumCmd, managerLibraryFileCmd, managerLibraryMetadataCmd, managerLibrarySetCmd, managerLibraryRefreshCmd)
 
-	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd, managerFormatCmd, managerLibraryCmd, managerCalendarCmd, managerSearchCmd, managerHistoryCmd, managerRSSCmd, managerWantedCmd)
+	managerCmd.AddCommand(managerIndexerCmd, managerClientCmd, managerProfileCmd, managerFormatCmd, managerLibraryCmd, managerCalendarCmd, managerSearchCmd, managerHistoryCmd, managerRSSCmd, managerWantedCmd, managerImportCmd)
 	managerRSSCmd.AddCommand(managerRSSRunCmd)
 	rootCmd.AddCommand(managerCmd)
 }

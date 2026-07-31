@@ -13935,6 +13935,64 @@
         ],
         "type": "object"
       },
+      "ManagerImportView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerImportView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "matched_item_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "matched_title": {
+            "type": "string"
+          },
+          "moved": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "run_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "scan_queued": {
+            "type": "boolean"
+          },
+          "skipped": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "run_id",
+          "matched_item_id",
+          "matched_title",
+          "destination",
+          "moved",
+          "scan_queued"
+        ],
+        "type": "object"
+      },
       "ManagerIndexerHistoryDay": {
         "additionalProperties": false,
         "properties": {
@@ -37989,6 +38047,69 @@
           }
         ],
         "summary": "List the files a finished download produced on disk",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
+    "/api/manager/queue/{client_id}/{nzo_id}/import": {
+      "post": {
+        "operationId": "manager-queue-import",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "nzo_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerImportView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Import a completed download: move its media files into the matched library item's folder and queue a scan",
         "tags": [
           "Manager"
         ]

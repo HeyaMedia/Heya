@@ -490,6 +490,11 @@ func buildSearchQuery(meta searchTargetMeta, target decision.Target, cats []int)
 		params["t"] = "search"
 		query.Q = fmt.Sprintf("%s %s", meta.ArtistName, meta.AlbumTitle)
 		params["q"] = query.Q
+	case "book":
+		query.Type = "search"
+		params["t"] = "search"
+		query.Q = strings.TrimSpace(fmt.Sprintf("%s %s", meta.ArtistName, meta.Title))
+		params["q"] = query.Q
 	case "tv":
 		query.Type = "tvsearch"
 		params["t"] = "tvsearch"
@@ -730,6 +735,8 @@ func (a *App) SearchManagerMedia(ctx context.Context, mediaItemID int64, scope M
 			return nil, fmt.Errorf("music searches target one release — pass a music target id")
 		}
 		target, meta, err = a.buildMusicTarget(ctx, mediaItemID, *scope.MusicTargetID)
+	case "book":
+		target, meta, err = a.buildBookTarget(ctx, mediaItemID)
 	default:
 		return nil, fmt.Errorf("search is not supported for %s items yet", mediaType)
 	}
