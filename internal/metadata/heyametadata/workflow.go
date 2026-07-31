@@ -39,10 +39,40 @@ type SummaryDisplay struct {
 	Title          string   `json:"title"`
 	Name           string   `json:"name"`
 	OriginalTitle  string   `json:"original_title"`
+	SortName       string   `json:"sort_name"`
 	Disambiguation string   `json:"disambiguation"`
+	Type           string   `json:"type"`
+	Area           string   `json:"area"`
+	Country        string   `json:"country"`
+	Countries      []string `json:"countries"`
+	Date           string   `json:"date"`
+	BeginDate      string   `json:"begin_date"`
+	EndDate        string   `json:"end_date"`
+	Ended          *bool    `json:"ended"`
 	Year           int      `json:"year"`
 	ImageID        string   `json:"image_id"`
+	ImageURL       string   `json:"image_url"`
+	ImageWidth     int64    `json:"image_width"`
+	ImageHeight    int64    `json:"image_height"`
 	Aliases        []string `json:"aliases"`
+	Genres         []string `json:"genres"`
+	Authors        []string `json:"authors"`
+	Language       string   `json:"language"`
+	Languages      []string `json:"languages"`
+	SecondaryTypes []string `json:"secondary_types"`
+	Network        string   `json:"network"`
+	Status         string   `json:"status"`
+	Season         string   `json:"season"`
+	Source         string   `json:"source"`
+	Studios        []string `json:"studios"`
+	Catalogue      string   `json:"catalogue"`
+	ISBNs          []string `json:"isbns"`
+	ReleaseCount   int64    `json:"release_count"`
+	FanCount       int64    `json:"fan_count"`
+	EpisodeCount   int64    `json:"episode_count"`
+	EditionCount   int64    `json:"edition_count"`
+	DurationMS     int64    `json:"duration_ms"`
+	Popularity     float64  `json:"popularity"`
 }
 
 type ExternalID struct {

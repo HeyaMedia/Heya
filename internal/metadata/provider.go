@@ -84,12 +84,62 @@ type SearchResult struct {
 	// romaji-vs-English anime mismatches get resolved.
 	AltTitles []string `json:"alt_titles,omitempty"`
 	HeyaSlug  string   `json:"heya_slug,omitempty"`
+	// Presentation carries provider-neutral facts that help a person tell
+	// same-named candidates apart. It is deliberately separate from provider
+	// routing identifiers so every search UI can render the same context.
+	Presentation *SearchPresentation `json:"presentation,omitempty"`
 	// Enriched signals whether the metadata server has detail warm-cached.
 	// True means a follow-up enrich (GetDetail) will be fast (~ms); false
 	// means cold-fetch from upstream (seconds). The match step uses this
 	// alongside score and source count to gate auto-match confidence.
 	Enriched bool `json:"enriched,omitempty"`
 	RawData  any  `json:"-"`
+}
+
+// SearchPresentation is the compact, provider-neutral view of an upstream
+// candidate. Fields are optional because each metadata domain and provider
+// knows a different subset.
+type SearchPresentation struct {
+	Kind            string          `json:"kind,omitempty"`
+	Type            string          `json:"type,omitempty"`
+	SortName        string          `json:"sort_name,omitempty"`
+	OriginalTitle   string          `json:"original_title,omitempty"`
+	Area            string          `json:"area,omitempty"`
+	Country         string          `json:"country,omitempty"`
+	Countries       []string        `json:"countries,omitempty"`
+	Date            string          `json:"date,omitempty"`
+	BeginDate       string          `json:"begin_date,omitempty"`
+	EndDate         string          `json:"end_date,omitempty"`
+	Ended           *bool           `json:"ended,omitempty"`
+	Aliases         []string        `json:"aliases,omitempty"`
+	Genres          []string        `json:"genres,omitempty"`
+	Artists         []string        `json:"artists,omitempty"`
+	Authors         []string        `json:"authors,omitempty"`
+	Language        string          `json:"language,omitempty"`
+	Languages       []string        `json:"languages,omitempty"`
+	SecondaryTypes  []string        `json:"secondary_types,omitempty"`
+	Network         string          `json:"network,omitempty"`
+	Status          string          `json:"status,omitempty"`
+	Season          string          `json:"season,omitempty"`
+	Source          string          `json:"source,omitempty"`
+	Studios         []string        `json:"studios,omitempty"`
+	Catalogue       string          `json:"catalogue,omitempty"`
+	ISBNs           []string        `json:"isbns,omitempty"`
+	ReleaseCount    int64           `json:"release_count,omitempty"`
+	FanCount        int64           `json:"fan_count,omitempty"`
+	EpisodeCount    int64           `json:"episode_count,omitempty"`
+	EditionCount    int64           `json:"edition_count,omitempty"`
+	DurationMS      int64           `json:"duration_ms,omitempty"`
+	Popularity      float64         `json:"popularity,omitempty"`
+	ImageWidth      int64           `json:"image_width,omitempty"`
+	ImageHeight     int64           `json:"image_height,omitempty"`
+	MatchedReleases []SearchRelease `json:"matched_releases,omitempty"`
+}
+
+type SearchRelease struct {
+	Title string `json:"title"`
+	Year  int64  `json:"year,omitempty"`
+	Type  string `json:"type,omitempty"`
 }
 
 type SearchEvidence struct {

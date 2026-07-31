@@ -336,6 +336,9 @@ func mergeEquivalentSearchResult(existing, incoming metadata.SearchResult) metad
 	if preferred.RawData == nil {
 		preferred.RawData = other.RawData
 	}
+	if preferred.Presentation == nil {
+		preferred.Presentation = other.Presentation
+	}
 	preferred.ExternalIDs = mergeStringMaps(preferred.ExternalIDs, other.ExternalIDs)
 	preferred.AltTitles = mergeStrings(preferred.AltTitles, other.AltTitles)
 	preferred.Evidence = mergeEvidence(preferred.Evidence, other.Evidence)
@@ -547,9 +550,13 @@ func (p *HeyaProvider) mapSummaries(summaries []Summary) []metadata.SearchResult
 		}
 		result = append(result, metadata.SearchResult{
 			ProviderID: EncodeEntityProviderID(summary.ID), ProviderName: p.Name(),
-			Title: label, Year: yearString(summary.Display.Year), PosterURL: p.client.ImageURL(summary.Display.ImageID),
-			Confidence: 1, ExternalIDs: external, AltTitles: altTitles,
-			HeyaSlug: summary.ID, Enriched: true, RawData: summary,
+			Title: label, Year: yearString(summary.Display.Year),
+			Description: summary.Display.Disambiguation,
+			PosterURL:   firstNonEmpty(summary.Display.ImageURL, p.client.ImageURL(summary.Display.ImageID)),
+			Confidence:  1, ExternalIDs: external, AltTitles: altTitles,
+			HeyaSlug: summary.ID, Enriched: true,
+			Presentation: presentationFromSummary(summary),
+			RawData:      summary,
 		})
 	}
 	return result
@@ -591,13 +598,76 @@ func mapDiscovery(resource *gen.DiscoveryResource, query metadata.SearchQuery) (
 		results = append(results, metadata.SearchResult{
 			ProviderID: providerID, ProviderName: "heya", Title: label,
 			Year: yearPtrString(candidate.Display.Year), Description: stringValue(candidate.Display.Disambiguation),
+			PosterURL:  stringValue(candidate.Display.ImageUrl),
 			Confidence: candidate.Confidence, Recommendation: recommendation,
 			Evidence: evidence, RequiresReview: requiresReview,
-			AltTitles: sliceValue(candidate.Display.Aliases), Enriched: false,
-			RawData: candidate,
+			AltTitles:    sliceValue(candidate.Display.Aliases),
+			Presentation: presentationFromCandidate(resource.Result.Kind, candidate),
+			Enriched:     false,
+			RawData:      candidate,
 		})
 	}
 	return results, nil
+}
+
+func presentationFromSummary(summary Summary) *metadata.SearchPresentation {
+	display := summary.Display
+	return &metadata.SearchPresentation{
+		Kind: summary.Kind, Type: display.Type, SortName: display.SortName,
+		OriginalTitle: display.OriginalTitle, Area: display.Area, Country: display.Country,
+		Countries: append([]string(nil), display.Countries...), Date: display.Date,
+		BeginDate: display.BeginDate, EndDate: display.EndDate, Ended: display.Ended,
+		Aliases: append([]string(nil), display.Aliases...), Genres: append([]string(nil), display.Genres...),
+		Authors: append([]string(nil), display.Authors...), Language: display.Language,
+		Languages:      append([]string(nil), display.Languages...),
+		SecondaryTypes: append([]string(nil), display.SecondaryTypes...),
+		Network:        display.Network, Status: display.Status, Season: display.Season, Source: display.Source,
+		Studios: append([]string(nil), display.Studios...), Catalogue: display.Catalogue,
+		ISBNs: append([]string(nil), display.ISBNs...), ReleaseCount: display.ReleaseCount,
+		FanCount: display.FanCount, EpisodeCount: display.EpisodeCount, EditionCount: display.EditionCount,
+		DurationMS: display.DurationMS, Popularity: display.Popularity,
+		ImageWidth: display.ImageWidth, ImageHeight: display.ImageHeight,
+	}
+}
+
+func presentationFromCandidate(kind string, candidate gen.Candidate) *metadata.SearchPresentation {
+	display := candidate.Display
+	artists := make([]string, 0)
+	if display.Artists != nil {
+		artists = make([]string, 0, len(*display.Artists))
+		for _, artist := range *display.Artists {
+			if name := strings.TrimSpace(artist.Name); name != "" {
+				artists = append(artists, name)
+			}
+		}
+	}
+	matchedReleases := make([]metadata.SearchRelease, 0)
+	if candidate.MatchedReleases != nil {
+		matchedReleases = make([]metadata.SearchRelease, 0, len(*candidate.MatchedReleases))
+		for _, release := range *candidate.MatchedReleases {
+			matchedReleases = append(matchedReleases, metadata.SearchRelease{
+				Title: release.Title, Year: int64Value(release.Year), Type: stringValue(release.Type),
+			})
+		}
+	}
+	return &metadata.SearchPresentation{
+		Kind: kind, Type: stringValue(display.Type), SortName: stringValue(display.SortName),
+		OriginalTitle: stringValue(display.OriginalTitle), Area: stringValue(display.Area),
+		Country: stringValue(display.Country), Countries: sliceValue(display.Countries),
+		Date: stringValue(display.Date), BeginDate: stringValue(display.BeginDate),
+		EndDate: stringValue(display.EndDate), Ended: display.Ended,
+		Aliases: sliceValue(display.Aliases), Genres: sliceValue(display.Genres),
+		Artists: artists, Authors: sliceValue(display.Authors), Language: stringValue(display.Language),
+		Languages: sliceValue(display.Languages), SecondaryTypes: sliceValue(display.SecondaryTypes),
+		Network: stringValue(display.Network), Status: stringValue(display.Status),
+		Season: stringValue(display.Season), Source: stringValue(display.Source),
+		Studios: sliceValue(display.Studios), Catalogue: stringValue(display.Catalogue),
+		ISBNs: sliceValue(display.Isbns), ReleaseCount: int64Value(display.ReleaseCount),
+		FanCount: int64Value(display.FanCount), EpisodeCount: int64Value(display.EpisodeCount),
+		EditionCount: int64Value(display.EditionCount), DurationMS: int64Value(display.DurationMs),
+		Popularity: float64Value(display.Popularity), ImageWidth: int64Value(display.ImageWidth),
+		ImageHeight: int64Value(display.ImageHeight), MatchedReleases: matchedReleases,
+	}
 }
 
 func mapIdentifierEvidence(items *[]gen.IdentifierEvidence) []metadata.SearchEvidence {
@@ -1185,6 +1255,12 @@ func firstNonEmpty(values ...string) string {
 func stringValue(value *string) string {
 	if value == nil {
 		return ""
+	}
+	return *value
+}
+func float64Value(value *float64) float64 {
+	if value == nil {
+		return 0
 	}
 	return *value
 }

@@ -15,6 +15,15 @@ const PROVIDER_LABELS: Record<string, string> = {
   spotify: 'Spotify',
   tmdb: 'TMDB',
   tvdb: 'TheTVDB',
+  imdb: 'IMDb',
+  tvmaze: 'TVmaze',
+  openlibrary: 'Open Library',
+  isbn: 'ISBN',
+  audible: 'Audible',
+  googlebooks: 'Google Books',
+  myanimelist: 'MyAnimeList',
+  anidb: 'AniDB',
+  comicvine: 'Comic Vine',
 }
 
 export function providerLabel(slug: string): string {

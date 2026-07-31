@@ -15,40 +15,26 @@
     <div class="ssd-results scroll">
       <div v-if="searching" class="ssd-empty">Searching providers...</div>
       <div v-else-if="searched && !results.length" class="ssd-empty">No results found</div>
-      <div
+      <MetadataCandidateCard
         v-for="r in results"
         :key="r.provider_id"
-        class="ssd-result"
+        :result="r"
+        compact
       >
-        <LoadingImage v-if="r.poster_url" :src="r.poster_url" class="ssd-poster" />
-        <div v-else class="ssd-poster ssd-poster-empty" />
-        <div class="ssd-info">
-          <div class="ssd-result-head">
-            <span class="ssd-result-title">{{ r.title }}</span>
-            <span v-if="r.year" class="ssd-result-year">{{ r.year }}</span>
-          </div>
-          <div class="ssd-result-provider">
-            <span class="ssd-badge">{{ r.provider_name }}</span>
-            <span class="ssd-provider-id">{{ r.provider_id }}</span>
-          </div>
-          <div v-if="r.description" class="ssd-desc">{{ r.description }}</div>
-        </div>
-        <button class="btn btn-secondary ssd-apply-btn" :disabled="assigning" @click="assign(r)">
-          {{ assigning ? 'Matching...' : 'Use this' }}
-        </button>
-      </div>
+        <template #actions>
+          <button class="btn btn-secondary ssd-apply-btn" :disabled="assigning" @click="assign(r)">
+            {{ assigning ? 'Matching...' : 'Use this' }}
+          </button>
+        </template>
+      </MetadataCandidateCard>
     </div>
   </AppDialog>
 </template>
 
 <script setup lang="ts">
-import type { ProviderSearchResult } from '~~/shared/types'
+import type { SearchResult } from '~~/shared/api/types.gen'
 
-type ScannerSearchResult = ProviderSearchResult & {
-  confidence?: number
-  external_ids?: Record<string, string>
-  heya_slug?: string
-}
+type ScannerSearchResult = SearchResult
 
 const props = defineProps<{
   libraryId: number
@@ -156,33 +142,6 @@ async function assign(r: ScannerSearchResult) {
 .ssd-empty {
   display: flex; align-items: center; justify-content: center;
   padding: 48px 0; color: var(--fg-3); font-size: 13px;
-}
-.ssd-result {
-  display: flex; align-items: flex-start; gap: 14px;
-  padding: 14px 20px; transition: background 0.12s;
-  border-bottom: 1px solid rgb(var(--ink) / 0.03);
-}
-.ssd-result:hover { background: rgb(var(--ink) / 0.02); }
-.ssd-poster {
-  width: 56px; height: 84px; border-radius: var(--r-sm); object-fit: cover;
-  flex-shrink: 0; background: var(--bg-3);
-}
-.ssd-poster-empty { display: flex; align-items: center; justify-content: center; }
-.ssd-info { flex: 1; min-width: 0; }
-.ssd-result-head { display: flex; align-items: baseline; gap: 8px; }
-.ssd-result-title { font-size: 15px; font-weight: 600; color: var(--fg-0); }
-.ssd-result-year { font-size: 13px; color: var(--fg-2); }
-.ssd-result-provider {
-  display: flex; align-items: center; gap: 8px; margin-top: 4px;
-}
-.ssd-badge {
-  padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700;
-  text-transform: uppercase; background: rgba(100,150,230,0.15); color: rgb(100,150,230);
-}
-.ssd-provider-id { font-size: 11px; color: var(--fg-3); font-family: var(--font-mono); }
-.ssd-desc {
-  font-size: 12px; color: var(--fg-3); margin-top: 6px; line-height: 1.4;
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
 .ssd-apply-btn { flex-shrink: 0; align-self: center; }
 </style>

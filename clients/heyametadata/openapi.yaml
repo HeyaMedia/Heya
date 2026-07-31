@@ -741,6 +741,23 @@ components:
         episode_count:
           format: int64
           type: integer
+        fan_count:
+          format: int64
+          type: integer
+        genres:
+          items:
+            type: string
+          nullable: true
+          type: array
+        image_height:
+          format: int64
+          type: integer
+        image_url:
+          format: uri
+          type: string
+        image_width:
+          format: int64
+          type: integer
         isbns:
           items:
             type: string
@@ -767,6 +784,9 @@ components:
         popularity:
           format: double
           type: number
+        release_count:
+          format: int64
+          type: integer
         releases:
           items:
             $ref: "#/components/schemas/ReleaseHint"

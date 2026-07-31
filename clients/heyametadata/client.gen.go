@@ -789,6 +789,11 @@ type Display struct {
 	EndDate        *string          `json:"end_date,omitempty"`
 	Ended          *bool            `json:"ended,omitempty"`
 	EpisodeCount   *int64           `json:"episode_count,omitempty"`
+	FanCount       *int64           `json:"fan_count,omitempty"`
+	Genres         *[]string        `json:"genres,omitempty"`
+	ImageHeight    *int64           `json:"image_height,omitempty"`
+	ImageUrl       *string          `json:"image_url,omitempty"`
+	ImageWidth     *int64           `json:"image_width,omitempty"`
 	Isbns          *[]string        `json:"isbns,omitempty"`
 	Isrcs          *[]string        `json:"isrcs,omitempty"`
 	Language       *string          `json:"language,omitempty"`
@@ -797,6 +802,7 @@ type Display struct {
 	Network        *string          `json:"network,omitempty"`
 	OriginalTitle  *string          `json:"original_title,omitempty"`
 	Popularity     *float64         `json:"popularity,omitempty"`
+	ReleaseCount   *int64           `json:"release_count,omitempty"`
 	Releases       *[]ReleaseHint   `json:"releases,omitempty"`
 	Season         *string          `json:"season,omitempty"`
 	SecondaryTypes *[]string        `json:"secondary_types,omitempty"`

@@ -117,6 +117,67 @@ func TestMapDiscoveryPreservesRecommendationEvidenceAndReviewGate(t *testing.T) 
 	}
 }
 
+func TestMapDiscoveryCarriesCandidatePresentation(t *testing.T) {
+	aliases := []string{"Ankimo"}
+	genres := []string{"j-rock", "metal"}
+	imageURL := "https://images.example/unlucky-morpheus.jpg"
+	imageSize := int64(1000)
+	releaseCount := int64(28)
+	fanCount := int64(4707)
+	artistType := "group"
+	country := "JP"
+	area := "Japan"
+	beginDate := "2008"
+	disambiguation := "Japanese power metal band"
+	matched := []gen.ReleaseHint{{Title: "Affected", Year: int64Pointer(2014)}}
+	candidates := []gen.Candidate{{
+		CandidateRef: uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+		Rank:         1,
+		Confidence:   .92,
+		Match:        "likely",
+		Display: gen.Display{
+			Name: strPointer("Unlucky Morpheus"), Type: &artistType,
+			Country: &country, Area: &area, BeginDate: &beginDate,
+			Disambiguation: &disambiguation, Aliases: &aliases, Genres: &genres,
+			ImageUrl: &imageURL, ImageWidth: &imageSize, ImageHeight: &imageSize,
+			ReleaseCount: &releaseCount, FanCount: &fanCount,
+		},
+		MatchedReleases: &matched,
+	}}
+	resource := &gen.DiscoveryResource{Result: &gen.Result{
+		Kind: "artist", Recommendation: "likely_match", Candidates: &candidates,
+	}}
+
+	results, err := mapDiscovery(resource, metadata.SearchQuery{Title: "Unlucky Morpheus"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %#v", results)
+	}
+	got := results[0]
+	if got.PosterURL != imageURL || got.Description != disambiguation {
+		t.Fatalf("candidate image/description = %#v", got)
+	}
+	if got.Presentation == nil {
+		t.Fatal("candidate presentation is nil")
+	}
+	presentation := got.Presentation
+	if presentation.Kind != "artist" || presentation.Type != "group" ||
+		presentation.Country != "JP" || presentation.Area != "Japan" ||
+		presentation.BeginDate != "2008" {
+		t.Fatalf("candidate identity context = %#v", presentation)
+	}
+	if presentation.ReleaseCount != 28 || presentation.FanCount != 4707 ||
+		presentation.ImageWidth != 1000 || presentation.ImageHeight != 1000 {
+		t.Fatalf("candidate catalog/image context = %#v", presentation)
+	}
+	if len(presentation.Genres) != 2 || len(presentation.Aliases) != 1 ||
+		len(presentation.MatchedReleases) != 1 || presentation.MatchedReleases[0].Title != "Affected" {
+		t.Fatalf("candidate distinguishing context = %#v", presentation)
+	}
+}
+
 func TestUnresolvedDiscographyAlbumRetainsOnlyMatchingEvidence(t *testing.T) {
 	album, ok := unresolvedDiscographyAlbum(map[string]any{
 		"title":              "Da Funk",
@@ -1160,6 +1221,7 @@ func mustMapDocument(t *testing.T, provider *HeyaProvider, raw string) *metadata
 }
 
 func strPointer(value string) *string { return &value }
+func int64Pointer(value int64) *int64 { return &value }
 
 // V2 emits existing_entity / corroborated_identity when a discovery resolves
 // to an already-linked canonical entity; the switch used to fall through to

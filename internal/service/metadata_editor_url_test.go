@@ -65,3 +65,36 @@ func TestParseIdentifyURL(t *testing.T) {
 		})
 	}
 }
+
+func TestSearchPresentationFromDetail(t *testing.T) {
+	detail := &metadata.MediaDetail{
+		CanonicalKind:        "artist",
+		Title:                "Unlucky Morpheus",
+		SortTitle:            "Unlucky Morpheus",
+		PosterURL:            "https://images.example/artist.jpg",
+		ArtistType:           "Group",
+		ArtistCountry:        "JP",
+		ArtistBeginDate:      "2008",
+		ArtistAliases:        []string{"Ankimo"},
+		ArtistTags:           []string{"j-rock", "metal"},
+		Albums:               []metadata.AlbumEntry{{Title: "Affected"}, {Title: "Vampir"}},
+		ArtistEnded:          false,
+		ArtistDisambiguation: "Japanese power metal band",
+		Artwork: []metadata.ArtworkResult{{
+			URL: "https://images.example/artist.jpg", Width: 1000, Height: 1000,
+		}},
+	}
+
+	got := searchPresentationFromDetail(detail)
+	if got == nil {
+		t.Fatal("presentation is nil")
+	}
+	if got.Kind != "artist" || got.Type != "Group" || got.Country != "JP" ||
+		got.BeginDate != "2008" || got.Ended == nil || *got.Ended ||
+		got.ReleaseCount != 2 || got.ImageWidth != 1000 || got.ImageHeight != 1000 {
+		t.Fatalf("presentation = %#v", got)
+	}
+	if len(got.Aliases) != 1 || len(got.Genres) != 2 {
+		t.Fatalf("presentation distinguishing context = %#v", got)
+	}
+}

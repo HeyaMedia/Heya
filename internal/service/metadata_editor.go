@@ -709,9 +709,78 @@ func (a *App) searchIdentifyReference(ctx context.Context, kind metadata.MediaKi
 		PosterURL:    detail.PosterURL,
 		HeyaSlug:     detail.CanonicalID,
 		ExternalIDs:  detail.ExternalIDs,
+		Presentation: searchPresentationFromDetail(detail),
 		Enriched:     true,
 		Confidence:   1,
 	}}, nil
+}
+
+func searchPresentationFromDetail(detail *metadata.MediaDetail) *metadata.SearchPresentation {
+	if detail == nil {
+		return nil
+	}
+	presentation := &metadata.SearchPresentation{
+		Kind:          firstPopulated(detail.CanonicalKind, detail.ProviderKind),
+		SortName:      detail.SortTitle,
+		OriginalTitle: firstPopulated(detail.OriginalTitle, detail.OriginalName),
+		Country:       firstPopulated(detail.ArtistCountry, detail.Country),
+		Countries:     append([]string(nil), detail.OriginCountry...),
+		Date:          firstPopulated(detail.ReleaseDate, detail.FirstAirDate, detail.PublishDate),
+		BeginDate:     detail.ArtistBeginDate,
+		EndDate:       detail.ArtistEndDate,
+		Aliases:       append([]string(nil), detail.ArtistAliases...),
+		Genres:        append(append([]string(nil), detail.Genres...), detail.ArtistTags...),
+		Language:      firstPopulated(detail.OriginalLanguage, detail.Language),
+		Status:        firstPopulated(detail.MovieStatus, detail.Status),
+		EpisodeCount:  int64(detail.NumberOfEpisodes),
+		Popularity:    detail.Popularity,
+	}
+	if detail.ArtistType != "" {
+		presentation.Type = detail.ArtistType
+	} else if detail.AlbumType != "" {
+		presentation.Type = detail.AlbumType
+	}
+	if detail.ArtistName != "" && detail.ArtistName != detail.Title {
+		presentation.Artists = []string{detail.ArtistName}
+	}
+	if detail.AuthorName != "" {
+		presentation.Authors = []string{detail.AuthorName}
+	}
+	if len(detail.Networks) > 0 {
+		presentation.Network = detail.Networks[0].Name
+	}
+	for _, company := range detail.ProductionCompanies {
+		if company.Name != "" {
+			presentation.Studios = append(presentation.Studios, company.Name)
+		}
+	}
+	if detail.ISBN != "" {
+		presentation.ISBNs = []string{detail.ISBN}
+	}
+	if len(detail.Albums) > 0 {
+		presentation.ReleaseCount = int64(len(detail.Albums))
+	}
+	if presentation.BeginDate != "" || presentation.EndDate != "" {
+		ended := detail.ArtistEnded
+		presentation.Ended = &ended
+	}
+	for _, artwork := range detail.Artwork {
+		if artwork.URL == detail.PosterURL {
+			presentation.ImageWidth = int64(artwork.Width)
+			presentation.ImageHeight = int64(artwork.Height)
+			break
+		}
+	}
+	return presentation
+}
+
+func firstPopulated(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // parseIdentifyURL inspects a user-pasted string and returns the heya provider

@@ -122,15 +122,13 @@ async function confirmAdd() {
     <div v-if="searchError" class="mgr-flash err">{{ searchError }}</div>
 
     <div v-if="results.length" class="add-grid">
-      <div v-for="result in results" :key="`${result.provider_name}-${result.provider_id}`" class="add-card">
-        <NuxtImg
-          v-if="result.poster_url"
-          :src="result.poster_url" class="add-poster" width="120" loading="lazy" :alt="''"
-        />
-        <div v-else class="add-poster empty" aria-hidden="true"><Icon name="image" :size="20" /></div>
-        <div class="add-body">
-          <div class="add-title">{{ result.title }}<span v-if="result.year" class="add-year"> ({{ result.year }})</span></div>
-          <p v-if="result.description" class="add-overview">{{ result.description }}</p>
+      <MetadataCandidateCard
+        v-for="result in results"
+        :key="`${result.provider_name}-${result.provider_id}`"
+        :result="result"
+        :kind="selectedLibrary?.media_type"
+      >
+        <template #actions>
           <div class="add-actions">
             <NuxtLink
               v-if="result.already_in_library"
@@ -141,8 +139,8 @@ async function confirmAdd() {
               <Icon name="plus" :size="13" /> Add
             </button>
           </div>
-        </div>
-      </div>
+        </template>
+      </MetadataCandidateCard>
     </div>
     <div v-else-if="searched && !searching" class="add-empty">
       <Icon name="info" :size="14" /> No catalog matches for “{{ query }}”.
@@ -204,39 +202,7 @@ async function confirmAdd() {
 .add-input:focus { outline: none; border-color: color-mix(in srgb, var(--gold) 50%, var(--border)); }
 
 .add-grid { display: flex; flex-direction: column; gap: 10px; }
-.add-card {
-  display: flex;
-  gap: 14px;
-  padding: 14px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-}
-.add-poster {
-  width: 68px;
-  aspect-ratio: 2/3;
-  object-fit: cover;
-  border-radius: var(--r-sm);
-  flex-shrink: 0;
-}
-.add-poster.empty {
-  display: flex; align-items: center; justify-content: center;
-  background: rgb(var(--ink) / 0.06);
-  color: var(--fg-3);
-}
-.add-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.add-title { font-size: 14.5px; font-weight: 600; color: var(--fg-0); }
-.add-year { color: var(--fg-2); font-weight: 400; }
-.add-overview {
-  margin: 0;
-  font-size: 12.5px;
-  color: var(--fg-2);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.add-actions { display: flex; gap: 8px; margin-top: auto; }
+.add-actions { display: flex; gap: 8px; }
 
 .add-empty {
   display: flex; align-items: center; gap: 8px;

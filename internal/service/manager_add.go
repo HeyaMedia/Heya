@@ -16,16 +16,21 @@ import (
 // ManagerLookupResult is one provider search hit for the add-new flow,
 // annotated with whether the library already has it.
 type ManagerLookupResult struct {
-	ProviderName     string            `json:"provider_name"`
-	ProviderID       string            `json:"provider_id"`
-	Title            string            `json:"title"`
-	Year             string            `json:"year,omitempty"`
-	Description      string            `json:"description,omitempty"`
-	PosterURL        string            `json:"poster_url,omitempty"`
-	HeyaSlug         string            `json:"heya_slug,omitempty"`
-	ExternalIDs      map[string]string `json:"external_ids,omitempty"`
-	AlreadyInLibrary bool              `json:"already_in_library"`
-	ExistingItemID   int64             `json:"existing_item_id,omitempty"`
+	ProviderName     string                       `json:"provider_name"`
+	ProviderID       string                       `json:"provider_id"`
+	Title            string                       `json:"title"`
+	Year             string                       `json:"year,omitempty"`
+	Description      string                       `json:"description,omitempty"`
+	PosterURL        string                       `json:"poster_url,omitempty"`
+	HeyaSlug         string                       `json:"heya_slug,omitempty"`
+	ExternalIDs      map[string]string            `json:"external_ids,omitempty"`
+	Confidence       float64                      `json:"confidence,omitempty"`
+	Recommendation   string                       `json:"recommendation,omitempty"`
+	Evidence         []metadata.SearchEvidence    `json:"evidence,omitempty"`
+	RequiresReview   bool                         `json:"requires_review,omitempty"`
+	Presentation     *metadata.SearchPresentation `json:"presentation,omitempty"`
+	AlreadyInLibrary bool                         `json:"already_in_library"`
+	ExistingItemID   int64                        `json:"existing_item_id,omitempty"`
 }
 
 // ManagerLookup searches the metadata provider for new items to add,
@@ -65,6 +70,9 @@ func (a *App) ManagerLookup(ctx context.Context, libraryID int64, query string) 
 			ProviderName: hit.ProviderName, ProviderID: hit.ProviderID,
 			Title: hit.Title, Year: hit.Year, Description: hit.Description,
 			PosterURL: hit.PosterURL, HeyaSlug: hit.HeyaSlug, ExternalIDs: hit.ExternalIDs,
+			Confidence: hit.Confidence, Recommendation: hit.Recommendation,
+			Evidence: hit.Evidence, RequiresReview: hit.RequiresReview,
+			Presentation: hit.Presentation,
 		}
 		// Already-in-library only when confidently resolvable: match by
 		// heya_slug, else by any shared external id.
