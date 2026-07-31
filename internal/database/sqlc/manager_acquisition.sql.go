@@ -503,6 +503,27 @@ func (q *Queries) GetLatestManagerDecisionForItem(ctx context.Context, mediaItem
 	return i, err
 }
 
+const getManagerMusicTarget = `-- name: GetManagerMusicTarget :one
+SELECT id, artist_id, album_type, edition_key, title, year, monitored, monitor_updated_at, created_at FROM manager_music_targets WHERE id = $1
+`
+
+func (q *Queries) GetManagerMusicTarget(ctx context.Context, id int64) (ManagerMusicTarget, error) {
+	row := q.db.QueryRow(ctx, getManagerMusicTarget, id)
+	var i ManagerMusicTarget
+	err := row.Scan(
+		&i.ID,
+		&i.ArtistID,
+		&i.AlbumType,
+		&i.EditionKey,
+		&i.Title,
+		&i.Year,
+		&i.Monitored,
+		&i.MonitorUpdatedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getManagerPolicySnapshot = `-- name: GetManagerPolicySnapshot :one
 SELECT policy_hash, snapshot, created_at FROM manager_policy_snapshots WHERE policy_hash = $1
 `
@@ -1142,6 +1163,22 @@ func (q *Queries) PruneManagerRuns(ctx context.Context, startedAt pgtype.Timesta
 	return result.RowsAffected(), nil
 }
 
+const setManagerMusicTargetMonitored = `-- name: SetManagerMusicTargetMonitored :exec
+UPDATE manager_music_targets
+SET monitored = $2, monitor_updated_at = now()
+WHERE id = $1
+`
+
+type SetManagerMusicTargetMonitoredParams struct {
+	ID        int64 `json:"id"`
+	Monitored bool  `json:"monitored"`
+}
+
+func (q *Queries) SetManagerMusicTargetMonitored(ctx context.Context, arg SetManagerMusicTargetMonitoredParams) error {
+	_, err := q.db.Exec(ctx, setManagerMusicTargetMonitored, arg.ID, arg.Monitored)
+	return err
+}
+
 const updateManagerReleaseSighting = `-- name: UpdateManagerReleaseSighting :exec
 UPDATE manager_release_sightings
 SET status = $2, attempts = attempts + 1, error = $3, matched = $4,
@@ -1166,6 +1203,33 @@ func (q *Queries) UpdateManagerReleaseSighting(ctx context.Context, arg UpdateMa
 		arg.Matched,
 		arg.DecisionID,
 		arg.PolicyHash,
+	)
+	return err
+}
+
+const upsertManagerMusicTarget = `-- name: UpsertManagerMusicTarget :exec
+INSERT INTO manager_music_targets (artist_id, album_type, edition_key, title, year, monitored)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (artist_id, album_type, edition_key) DO NOTHING
+`
+
+type UpsertManagerMusicTargetParams struct {
+	ArtistID   int64  `json:"artist_id"`
+	AlbumType  string `json:"album_type"`
+	EditionKey string `json:"edition_key"`
+	Title      string `json:"title"`
+	Year       string `json:"year"`
+	Monitored  bool   `json:"monitored"`
+}
+
+func (q *Queries) UpsertManagerMusicTarget(ctx context.Context, arg UpsertManagerMusicTargetParams) error {
+	_, err := q.db.Exec(ctx, upsertManagerMusicTarget,
+		arg.ArtistID,
+		arg.AlbumType,
+		arg.EditionKey,
+		arg.Title,
+		arg.Year,
+		arg.Monitored,
 	)
 	return err
 }

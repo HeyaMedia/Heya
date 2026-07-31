@@ -451,6 +451,46 @@ func checkIdentity(target Target, cand Candidate, attrs formats.Attrs) *Rejectio
 		}
 	}
 
+	// Music: scene names ("Artist-Album-CD-FLAC-2006-GRP") don't segment
+	// into artist/album, so identity is containment-verified — the release
+	// name must carry the artist AND one of the group's album titles, with
+	// year corroboration when both sides know one (round-2: album+year
+	// alone let same-title albums through; artist+album is the floor).
+	if target.Domain == "music" {
+		compact := compactTitle(cand.Title)
+		artistOK := false
+		for _, artist := range target.NormalizedTitles {
+			if artist != "" && strings.Contains(compact, strings.ReplaceAll(artist, " ", "")) {
+				artistOK = true
+				break
+			}
+		}
+		if !artistOK {
+			return &Rejection{Code: CodeIdentityMismatch, Stage: "identity",
+				Message: "release name does not contain the artist name or an alias"}
+		}
+		albumOK := false
+		for _, album := range target.AlbumTitles {
+			if album != "" && strings.Contains(compact, strings.ReplaceAll(album, " ", "")) {
+				albumOK = true
+				break
+			}
+		}
+		if !albumOK {
+			return &Rejection{Code: CodeIdentityMismatch, Stage: "identity",
+				Message: "release name does not contain the album title"}
+		}
+		if target.Year > 0 && attrs.Year > 0 {
+			diff := attrs.Year - target.Year
+			if diff < -1 || diff > 1 {
+				return &Rejection{Code: CodeIdentityMismatch, Stage: "identity",
+					Params:  map[string]any{"target_year": target.Year, "release_year": attrs.Year},
+					Message: fmt.Sprintf("release year %d does not corroborate the album year %d", attrs.Year, target.Year)}
+			}
+		}
+		return nil
+	}
+
 	parsedTitle := releaseTitle(target.Domain, cand.Title)
 	if parsedTitle == "" {
 		return &Rejection{Code: CodeUnparseable, Stage: "identity",
@@ -481,6 +521,12 @@ func checkIdentity(target Target, cand Candidate, attrs formats.Attrs) *Rejectio
 		}
 	}
 	return nil
+}
+
+// compactTitle collapses a release name into normalized, space-free form
+// for containment checks.
+func compactTitle(title string) string {
+	return strings.ReplaceAll(matcher.NormalizeTitle(title), " ", "")
 }
 
 func qualityKeyFor(domain, title string, attrs formats.Attrs) string {

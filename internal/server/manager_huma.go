@@ -316,8 +316,9 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 			IDPath
 			// Huma rejects pointer query params; -1 = unset (season 0 is a
 			// real season — specials).
-			Season    int   `query:"season" default:"-1" doc:"TV: search this season's wanted episodes (-1 = unset)"`
-			EpisodeID int64 `query:"episode_id" doc:"TV: search one episode by its id (0 = unset)"`
+			Season        int   `query:"season" default:"-1" doc:"TV: search this season's wanted episodes (-1 = unset)"`
+			EpisodeID     int64 `query:"episode_id" doc:"TV: search one episode by its id (0 = unset)"`
+			MusicTargetID int64 `query:"music_target_id" doc:"Music: search one release group by its manager_music_targets id (0 = unset)"`
 		}) (*JSONOutput[service.ManagerSearchRunView], error) {
 			scope := service.ManagerSearchScope{}
 			if in.Season >= 0 {
@@ -327,6 +328,10 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 			if in.EpisodeID > 0 {
 				episodeID := in.EpisodeID
 				scope.EpisodeID = &episodeID
+			}
+			if in.MusicTargetID > 0 {
+				musicTargetID := in.MusicTargetID
+				scope.MusicTargetID = &musicTargetID
 			}
 			view, err := app.SearchManagerMedia(ctx, in.ID, scope, "api")
 			if err != nil {

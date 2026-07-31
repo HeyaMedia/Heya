@@ -107,6 +107,36 @@ func Sync(ctx context.Context, q *sqlc.Queries, artistID int64, entries []metada
 	}); err != nil {
 		return fmt.Errorf("discography: prune stale: %w", err)
 	}
+
+	// Project edition groups into manager_music_targets — the durable
+	// monitoring/decision entity. Insert-only: existing rows keep their
+	// (possibly user-set) monitoring, and targets are never stale-deleted,
+	// so rekeyed discography rows can't lose user intent.
+	seenGroups := map[string]bool{}
+	for _, entry := range deduped {
+		title := strings.TrimSpace(entry.Title)
+		albumType := firstNonEmpty(entry.Type, "album")
+		key := EditionKey(title)
+		if key == "" {
+			key = strings.ToLower(title)
+		}
+		groupKey := albumType + "\x00" + key
+		if seenGroups[groupKey] {
+			continue
+		}
+		seenGroups[groupKey] = true
+		year := ""
+		if entry.Year > 0 {
+			year = strconv.Itoa(entry.Year)
+		}
+		if err := q.UpsertManagerMusicTarget(ctx, sqlc.UpsertManagerMusicTargetParams{
+			ArtistID: artistID, AlbumType: albumType, EditionKey: key,
+			Title: title, Year: year,
+			Monitored: albumType == "album" || albumType == "ep",
+		}); err != nil {
+			return fmt.Errorf("discography: upsert music target %q: %w", title, err)
+		}
+	}
 	return nil
 }
 

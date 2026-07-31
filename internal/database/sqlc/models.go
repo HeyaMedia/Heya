@@ -702,6 +702,18 @@ type ManagerIndexer struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ManagerMusicTarget struct {
+	ID               int64              `json:"id"`
+	ArtistID         int64              `json:"artist_id"`
+	AlbumType        string             `json:"album_type"`
+	EditionKey       string             `json:"edition_key"`
+	Title            string             `json:"title"`
+	Year             string             `json:"year"`
+	Monitored        bool               `json:"monitored"`
+	MonitorUpdatedAt pgtype.Timestamptz `json:"monitor_updated_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
 type ManagerPolicySnapshot struct {
 	PolicyHash string             `json:"policy_hash"`
 	Snapshot   []byte             `json:"snapshot"`

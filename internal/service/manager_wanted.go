@@ -28,6 +28,7 @@ type ManagerWantedRow struct {
 	// Music: the catalog release the library is missing.
 	AlbumTitle    string `json:"album_title,omitempty"`
 	DiscographyID int64  `json:"discography_id,omitempty"`
+	MusicTargetID int64  `json:"music_target_id,omitempty" doc:"manager_music_targets id — feeds the music search"`
 	AirDate       string `json:"air_date,omitempty"`
 	ProfileName   string `json:"profile_name,omitempty"`
 	// Cutoff tab: what's on disk and why it falls short.
@@ -208,37 +209,43 @@ type datedWantedRow struct {
 	date time.Time
 }
 
-// wantedMissingAlbums: catalog releases of monitored artists with no linked
-// local album — edition-group aware (a Deluxe on disk satisfies the base
-// title), filtered to real albums and EPs via effectiveReleaseType. Singles,
-// remixes, live records, and broadcasts stay off the wanted list; they still
-// show on the artist's manager page.
+// wantedMissingAlbums: MONITORED music targets (edition groups) of
+// monitored artists with no linked local album. Monitoring lives on
+// manager_music_targets — albums/EPs default on, singles/live default off,
+// and user toggles survive catalog churn. The effectiveReleaseType filter
+// still prunes untagged live/remix noise that defaulted monitored.
 func (a *App) wantedMissingAlbums(ctx context.Context, libs []int64) ([]datedWantedRow, error) {
 	rows, err := a.db.Query(ctx, `
-		SELECT DISTINCT ON (dd.artist_id, COALESCE(NULLIF(dd.edition_key, ''), lower(dd.title)))
+		SELECT t.id, t.title, t.album_type,
 		       mi.id, mi.library_id, c.title,
 		       COALESCE(CASE WHEN c.year ~ '^\d{4}' THEN left(c.year, 4)::int END, 0),
-		       dd.id, dd.title, dd.album_type, COALESCE(dd.secondary_types, '{}'),
-		       COALESCE(dd.release_date::text, NULLIF(dd.year, ''), ''),
 		       COALESCE(qp.name, ''),
-		       COALESCE(dd.release_date,
-		                CASE WHEN dd.year ~ '^\d{4}' THEN make_date(left(dd.year, 4)::int, 1, 1) END,
+		       COALESCE(d.id, 0), COALESCE(d.secondary_types, '{}'),
+		       COALESCE(d.release_date::text, NULLIF(t.year, ''), ''),
+		       COALESCE(d.release_date,
+		                CASE WHEN t.year ~ '^\d{4}' THEN make_date(left(t.year, 4)::int, 1, 1) END,
 		                '1900-01-01'::date)
-		FROM artist_discography dd
-		JOIN artists ar ON ar.id = dd.artist_id
+		FROM manager_music_targets t
+		JOIN artists ar ON ar.id = t.artist_id
 		JOIN media_items mi ON mi.id = ar.media_item_id
 		JOIN media_item_cards c ON c.id = mi.id
 		LEFT JOIN manager_quality_profiles qp ON qp.id = mi.quality_profile_id
-		WHERE mi.monitored AND mi.media_type = 'music'
+		LEFT JOIN LATERAL (
+			SELECT dd.id, dd.secondary_types, dd.release_date
+			FROM artist_discography dd
+			WHERE dd.artist_id = t.artist_id AND dd.album_type = t.album_type
+			  AND COALESCE(NULLIF(dd.edition_key, ''), lower(dd.title)) = t.edition_key
+			ORDER BY length(dd.title)
+			LIMIT 1
+		) d ON true
+		WHERE mi.monitored AND mi.media_type = 'music' AND t.monitored
 		  AND (cardinality($1::bigint[]) = 0 OR mi.library_id = ANY($1))
-		  AND dd.album_id IS NULL
-		  AND (dd.release_date IS NULL OR dd.release_date <= CURRENT_DATE)
+		  AND (d.release_date IS NULL OR d.release_date <= CURRENT_DATE)
 		  AND NOT EXISTS (
 			SELECT 1 FROM artist_discography d2
-			WHERE d2.artist_id = dd.artist_id AND d2.album_id IS NOT NULL
-			  AND COALESCE(NULLIF(d2.edition_key, ''), lower(d2.title))
-				= COALESCE(NULLIF(dd.edition_key, ''), lower(dd.title)))
-		ORDER BY dd.artist_id, COALESCE(NULLIF(dd.edition_key, ''), lower(dd.title)), length(dd.title)`,
+			WHERE d2.artist_id = t.artist_id AND d2.album_type = t.album_type
+			  AND d2.album_id IS NOT NULL
+			  AND COALESCE(NULLIF(d2.edition_key, ''), lower(d2.title)) = t.edition_key)`,
 		libs,
 	)
 	if err != nil {
@@ -255,9 +262,10 @@ func (a *App) wantedMissingAlbums(ctx context.Context, libs []int64) ([]datedWan
 			sortDate  time.Time
 		)
 		row.Kind = "album"
-		if err := rows.Scan(&row.MediaItemID, &row.LibraryID, &row.Title, &row.Year,
-			&row.DiscographyID, &row.AlbumTitle, &albumType, &secondary,
-			&row.AirDate, &row.ProfileName, &sortDate); err != nil {
+		if err := rows.Scan(&row.MusicTargetID, &row.AlbumTitle, &albumType,
+			&row.MediaItemID, &row.LibraryID, &row.Title, &row.Year,
+			&row.ProfileName, &row.DiscographyID, &secondary,
+			&row.AirDate, &sortDate); err != nil {
 			return nil, err
 		}
 		switch effectiveReleaseType(albumType, secondary, row.AlbumTitle) {
@@ -435,7 +443,8 @@ func (a *App) attachLastDecisions(ctx context.Context, rows []ManagerWantedRow) 
 	}
 	dbRows, err := a.db.Query(ctx, `
 		SELECT d.media_item_id, d.decided_at, d.verdict, d.target_kind,
-		       d.season_number, d.episode_number, d.album_title, r.kind, d.run_id
+		       d.season_number, d.episode_number, d.album_title,
+		       COALESCE(d.music_target_id, 0), r.kind, d.run_id
 		FROM manager_decisions d
 		JOIN manager_runs r ON r.id = d.run_id
 		WHERE d.media_item_id = ANY($1)
@@ -451,6 +460,7 @@ func (a *App) attachLastDecisions(ctx context.Context, rows []ManagerWantedRow) 
 		targetKind      string
 		season, episode *int32
 		albumTitle      string
+		musicTargetID   int64
 		runKind         string
 		runID           int64
 	}
@@ -459,7 +469,7 @@ func (a *App) attachLastDecisions(ctx context.Context, rows []ManagerWantedRow) 
 		var itemID int64
 		var d dec
 		if dbRows.Scan(&itemID, &d.at, &d.verdict, &d.targetKind,
-			&d.season, &d.episode, &d.albumTitle, &d.runKind, &d.runID) == nil {
+			&d.season, &d.episode, &d.albumTitle, &d.musicTargetID, &d.runKind, &d.runID) == nil {
 			byItem[itemID] = append(byItem[itemID], d)
 		}
 	}
@@ -479,7 +489,13 @@ func (a *App) attachLastDecisions(ctx context.Context, rows []ManagerWantedRow) 
 				return false
 			}
 		case "album":
-			return d.targetKind == "music_release" && strings.EqualFold(d.albumTitle, row.AlbumTitle)
+			if d.targetKind != "music_release" {
+				return false
+			}
+			if row.MusicTargetID != 0 && d.musicTargetID != 0 {
+				return d.musicTargetID == row.MusicTargetID
+			}
+			return strings.EqualFold(d.albumTitle, row.AlbumTitle)
 		default: // movie / whole-item rows: any decision on the item counts
 			return true
 		}

@@ -4528,6 +4528,10 @@ export type ManagerWantedRow = {
     last_decision_verdict?: string;
     library_id: number;
     media_item_id: number;
+    /**
+     * manager_music_targets id — feeds the music search
+     */
+    music_target_id?: number;
     problem?: string;
     profile_name?: string;
     season?: number;
@@ -15503,6 +15507,10 @@ export type ManagerMediaSearchData = {
          * TV: search one episode by its id (0 = unset)
          */
         episode_id?: number;
+        /**
+         * Music: search one release group by its manager_music_targets id (0 = unset)
+         */
+        music_target_id?: number;
     };
     url: '/api/manager/media/{id}/search';
 };

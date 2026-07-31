@@ -81,6 +81,10 @@ func (a *App) ManagerQueue(ctx context.Context) (*ManagerQueueView, error) {
 	if err != nil {
 		return nil, err
 	}
+	musicIndex, err := a.buildMusicQueueIndex(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	view := &ManagerQueueView{Items: []ManagerQueueItemView{}}
 	for _, client := range clients {
@@ -103,7 +107,7 @@ func (a *App) ManagerQueue(ctx context.Context) (*ManagerQueueView, error) {
 					SizeMB: parseSABFloat(slot.SizeMB), SizeLeftMB: parseSABFloat(slot.SizeLeftMB),
 					Percentage: int(parseSABFloat(slot.Percentage)), TimeLeft: slot.TimeLeft,
 				}
-				a.annotateQueueItem(ctx, q, client, index, &item)
+				a.annotateQueueItem(ctx, q, client, index, musicIndex, &item)
 				view.Items = append(view.Items, item)
 			}
 		}
@@ -115,7 +119,7 @@ func (a *App) ManagerQueue(ctx context.Context) (*ManagerQueueView, error) {
 					SizeMB: float64(slot.Bytes) / (1024 * 1024), Percentage: 100,
 					History: true, CompletedAt: slot.Completed, FailMessage: slot.FailMessage,
 				}
-				a.annotateQueueItem(ctx, q, client, index, &item)
+				a.annotateQueueItem(ctx, q, client, index, musicIndex, &item)
 				view.Items = append(view.Items, item)
 			}
 		}
@@ -131,6 +135,7 @@ func (a *App) annotateQueueItem(
 	q *sqlc.Queries,
 	client sqlc.ManagerDownloadClient,
 	index *rssIdentityIndex,
+	musicIndex *musicQueueIndex,
 	item *ManagerQueueItemView,
 ) {
 	// Identity: try tv first (SxxExx markers are unambiguous), then movie.
@@ -196,43 +201,47 @@ func (a *App) annotateQueueItem(
 				Index: 0, Title: item.Name, SizeBytes: int64(item.SizeMB * 1024 * 1024),
 				IndexerName: "queue", IndexerPriority: 25,
 			}})
-			verdict = "would_reject"
-			existingByUnit := map[string]bool{}
-			for _, unit := range target.Units {
-				existingByUnit[unit.Key] = len(unit.Existing) > 0
+			verdict, detail, rejections = applyQueueEvaluation(item, target, result)
+		}
+	}
+
+	// Music: video parsing found nothing in the library — scene music names
+	// ("Artist-Album-CD-FLAC-2006-GRP") lead with the artist, so try a
+	// prefix match against every artist, then the artist's release groups.
+	var musicUnmonitored bool
+	if matchedRef == nil && musicIndex != nil {
+		if artist, mTarget := musicIndex.match(item.Name); artist != nil {
+			item.MatchedItemID = &artist.mediaItemID
+			item.MatchedTitle = artist.name
+			item.MatchedLibrary = artist.libraryID
+			if q := formats.MusicQualityKey(item.Name); q != "" {
+				item.Quality = q
 			}
-			for _, cand := range result.Candidates {
-				if cand.QualityKey != "" {
-					item.Quality = cand.QualityKey
-				}
-				item.Score = cand.FormatScore
-				item.FormatBreakdown = cand.FormatBreakdown
-				if len(cand.RunRejections) > 0 {
-					rejections = cand.RunRejections
-					detail = cand.RunRejections[0].Message
-				}
-				covered, have := 0, 0
-				for key, eval := range cand.PerUnit {
-					covered++
-					if existingByUnit[key] {
-						have++
-					}
-					if eval.Acceptable {
-						verdict = "would_accept"
-						detail = ""
-					} else if len(eval.Rejections) > 0 && detail == "" {
-						rejections = eval.Rejections
-						detail = eval.Rejections[0].Message
-					}
-				}
+			musicUnmonitored = !artist.monitored || (mTarget != nil && !mTarget.monitored)
+			if mTarget == nil {
+				verdict, detail = "unknown_identity", "artist matched, but no catalog release group matches the name"
+			} else {
+				item.Parsed = fmt.Sprintf("%s — %s", artist.name, mTarget.title)
+				target, meta, err := a.buildMusicTarget(ctx, artist.mediaItemID, mTarget.id)
 				switch {
-				case covered == 0:
-				case have == 0:
-					item.LibraryState = "missing"
-				case have == covered:
-					item.LibraryState = "have"
+				case err != nil:
+					verdict, detail = "unknown_identity", err.Error()
+				case meta.ProfileID == 0:
+					verdict = "no_profile"
 				default:
-					item.LibraryState = "partial"
+					profile, hash, perr := a.buildDecisionPolicy(ctx, q, meta.ProfileID)
+					if perr != nil || profile.Domain != "music" {
+						verdict, detail = "no_profile", "profile could not be resolved"
+						break
+					}
+					policyHash = hash
+					target.Profile = profile
+					decision.ResolveUnits(&target)
+					result := decision.Evaluate(target, []decision.Candidate{{
+						Index: 0, Title: item.Name, SizeBytes: int64(item.SizeMB * 1024 * 1024),
+						IndexerName: "queue", IndexerPriority: 25,
+					}})
+					verdict, detail, rejections = applyQueueEvaluation(item, target, result)
 				}
 			}
 		}
@@ -240,7 +249,7 @@ func (a *App) annotateQueueItem(
 	// A matched-but-unmonitored item keeps its evaluation facts (quality,
 	// score, library state — the modal shows them for reference), but the
 	// verdict is honest: Heya wouldn't act on an unmonitored item.
-	if matchedRef != nil && !matchedRef.Monitored {
+	if (matchedRef != nil && !matchedRef.Monitored) || musicUnmonitored {
 		verdict = "unmonitored"
 		if detail == "" {
 			detail = "matched, but the item is not monitored — Heya wouldn't act on it"
@@ -471,4 +480,50 @@ func orZero(v *int64) int64 {
 		return 0
 	}
 	return *v
+}
+
+// applyQueueEvaluation folds a single-candidate evaluation into the item
+// view: quality facts, library state, and the derived verdict.
+func applyQueueEvaluation(item *ManagerQueueItemView, target decision.Target, result decision.Result) (string, string, []decision.Rejection) {
+	verdict, detail := "would_reject", ""
+	var rejections []decision.Rejection
+	existingByUnit := map[string]bool{}
+	for _, unit := range target.Units {
+		existingByUnit[unit.Key] = len(unit.Existing) > 0
+	}
+	for _, cand := range result.Candidates {
+		if cand.QualityKey != "" {
+			item.Quality = cand.QualityKey
+		}
+		item.Score = cand.FormatScore
+		item.FormatBreakdown = cand.FormatBreakdown
+		if len(cand.RunRejections) > 0 {
+			rejections = cand.RunRejections
+			detail = cand.RunRejections[0].Message
+		}
+		covered, have := 0, 0
+		for key, eval := range cand.PerUnit {
+			covered++
+			if existingByUnit[key] {
+				have++
+			}
+			if eval.Acceptable {
+				verdict = "would_accept"
+				detail = ""
+			} else if len(eval.Rejections) > 0 && detail == "" {
+				rejections = eval.Rejections
+				detail = eval.Rejections[0].Message
+			}
+		}
+		switch {
+		case covered == 0:
+		case have == 0:
+			item.LibraryState = "missing"
+		case have == covered:
+			item.LibraryState = "have"
+		default:
+			item.LibraryState = "partial"
+		}
+	}
+	return verdict, detail, rejections
 }

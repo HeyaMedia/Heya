@@ -85,9 +85,9 @@ function seenVia(row: ManagerWantedRow): string {
   }
 }
 
-// Music release search isn't wired yet (music targets are the recorded
-// deferred slice) — albums list for visibility, search stays off.
-const searchable = (row: ManagerWantedRow) => row.kind !== 'album'
+// Music rows search their release group via manager_music_targets.
+const searchable = (row: ManagerWantedRow) =>
+  row.kind !== 'album' || !!row.music_target_id
 
 // Per-row shadow search → run the interactive pipeline and jump to History.
 const searching = ref<number | null>(null)
@@ -97,7 +97,8 @@ async function searchRow(row: ManagerWantedRow, index: number) {
   flash.value = ''
   try {
     const query: Record<string, unknown> = {}
-    if (row.episode_id) query.episode_id = row.episode_id
+    if (row.kind === 'album' && row.music_target_id) query.music_target_id = row.music_target_id
+    else if (row.episode_id) query.episode_id = row.episode_id
     else if (row.season != null) query.season = row.season
     const run = await $heya(`/api/manager/media/${row.media_item_id}/search`, {
       method: 'POST', query,
@@ -120,18 +121,20 @@ const searchingAll = ref<number | null>(null)
 const searchAllProgress = ref('')
 async function searchAllGroup(group: { id: number, name: string, rows: ManagerWantedRow[] }) {
   if (searching.value !== null || searchingAll.value !== null) return
-  const scopes: { itemID: number, season?: number, label: string }[] = []
+  const scopes: { itemID: number, season?: number, musicTargetID?: number, label: string }[] = []
   const seen = new Set<string>()
   for (const row of group.rows) {
     if (!searchable(row)) continue
     const isEpisode = row.kind === 'episode' && row.season != null
-    const key = isEpisode ? `${row.media_item_id}:s${row.season}` : `m${row.media_item_id}`
+    const isAlbum = row.kind === 'album' && !!row.music_target_id
+    const key = isAlbum ? `t${row.music_target_id}` : isEpisode ? `${row.media_item_id}:s${row.season}` : `m${row.media_item_id}`
     if (seen.has(key)) continue
     seen.add(key)
     scopes.push({
       itemID: row.media_item_id,
       season: isEpisode ? row.season! : undefined,
-      label: isEpisode ? `${row.title} S${String(row.season).padStart(2, '0')}` : row.title,
+      musicTargetID: isAlbum ? row.music_target_id : undefined,
+      label: isAlbum ? `${row.title} — ${row.album_title}` : isEpisode ? `${row.title} S${String(row.season).padStart(2, '0')}` : row.title,
     })
   }
   if (!scopes.length) return
@@ -142,9 +145,11 @@ async function searchAllGroup(group: { id: number, name: string, rows: ManagerWa
     for (const [i, scope] of scopes.entries()) {
       searchAllProgress.value = `Searching ${i + 1}/${scopes.length} — ${scope.label}`
       try {
+        const query: Record<string, unknown> = {}
+        if (scope.musicTargetID) query.music_target_id = scope.musicTargetID
+        else if (scope.season != null) query.season = scope.season
         const run = await $heya(`/api/manager/media/${scope.itemID}/search`, {
-          method: 'POST',
-          query: scope.season != null ? { season: scope.season } : {},
+          method: 'POST', query,
         }) as { verdict: string }
         if (run.verdict === 'would_grab') grabs++
       } catch {
@@ -207,11 +212,8 @@ const TABS = [
           <Icon :name="managerLibraryIcon(group.mediaType)" :size="15" class="w-group-icon" />
           <span class="w-group-name">{{ group.name }}</span>
           <span class="w-group-count mono">{{ group.rows.length }}<template v-if="totalPages > 1"> on this page</template></span>
-          <AppTooltip v-if="group.mediaType === 'music'" label="Albums are listed for visibility — music release search lands with music targets">
-            <span class="w-group-note mono">list only</span>
-          </AppTooltip>
           <button
-            v-else-if="tab !== 'problems'"
+            v-if="tab !== 'problems'"
             type="button" class="mgr-btn w-group-search"
             :disabled="searching !== null || searchingAll !== null"
             @click="searchAllGroup(group)"
@@ -254,7 +256,7 @@ const TABS = [
             </span>
             <span v-else class="w-search w-why" :title="whyLabel(row)">{{ whyLabel(row) }}</span>
             <div class="w-actions">
-              <AppTooltip :label="searchable(row) ? 'Shadow search now (dry run)' : 'Music release search lands with music targets'">
+              <AppTooltip :label="searchable(row) ? 'Shadow search now (dry run)' : 'No release-group target yet — refresh the artist to sync its catalog'">
                 <button
                   type="button" class="w-btn"
                   :disabled="searching !== null || searchingAll !== null || tab === 'problems' || !searchable(row)"

@@ -16074,6 +16074,11 @@
             "format": "int64",
             "type": "integer"
           },
+          "music_target_id": {
+            "description": "manager_music_targets id — feeds the music search",
+            "format": "int64",
+            "type": "integer"
+          },
           "problem": {
             "type": "string"
           },
@@ -37435,6 +37440,17 @@
             "name": "episode_id",
             "schema": {
               "description": "TV: search one episode by its id (0 = unset)",
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Music: search one release group by its manager_music_targets id (0 = unset)",
+            "explode": false,
+            "in": "query",
+            "name": "music_target_id",
+            "schema": {
+              "description": "Music: search one release group by its manager_music_targets id (0 = unset)",
               "format": "int64",
               "type": "integer"
             }

@@ -191,8 +191,14 @@ type searchTargetMeta struct {
 	Title     string
 	Year      int
 	ProfileID int64
-	// Scope labels for the run + view ("S02", "S02E05").
+	// Scope labels for the run + view ("S02", "S02E05", album title).
 	ScopeLabel string
+	// Music (single-unit edition-group targets): decision snapshot identity.
+	MusicTargetID int64
+	ArtistName    string
+	AlbumType     string
+	EditionKey    string
+	AlbumTitle    string
 }
 
 // buildMovieTarget assembles the full decision target for one movie:
@@ -477,6 +483,13 @@ func buildSearchQuery(meta searchTargetMeta, target decision.Target, cats []int)
 	query := torznab.Query{Cats: cats, Limit: 100}
 	params := map[string]string{"cats": intsCSV(cats)}
 	switch meta.Domain {
+	case "music":
+		// Usenet music indexers rarely honor artist/album params — plain
+		// text search with both is the reliable path.
+		query.Type = "search"
+		params["t"] = "search"
+		query.Q = fmt.Sprintf("%s %s", meta.ArtistName, meta.AlbumTitle)
+		params["q"] = query.Q
 	case "tv":
 		query.Type = "tvsearch"
 		params["t"] = "tvsearch"
@@ -522,6 +535,9 @@ func buildSearchQuery(meta searchTargetMeta, target decision.Target, cats []int)
 
 // fallbackQ is the text query used when an id-based search returns nothing.
 func fallbackQ(meta searchTargetMeta) string {
+	if meta.Domain == "music" {
+		return fmt.Sprintf("%s %s", meta.ArtistName, meta.AlbumTitle)
+	}
 	if meta.Domain == "tv" && meta.ScopeLabel != "" {
 		return fmt.Sprintf("%s %s", meta.Title, meta.ScopeLabel)
 	}
@@ -684,6 +700,8 @@ const searchConcurrency = 4
 type ManagerSearchScope struct {
 	Season    *int
 	EpisodeID *int64
+	// MusicTargetID scopes a music search to one edition group.
+	MusicTargetID *int64
 }
 
 // SearchManagerMedia runs the full shadow search for one item (movie, or a
@@ -707,6 +725,11 @@ func (a *App) SearchManagerMedia(ctx context.Context, mediaItemID int64, scope M
 		target, meta, err = a.buildMovieTarget(ctx, mediaItemID)
 	case "tv", "anime":
 		target, meta, err = a.buildTVTarget(ctx, mediaItemID, mediaType == "anime", scope)
+	case "music":
+		if scope.MusicTargetID == nil {
+			return nil, fmt.Errorf("music searches target one release — pass a music target id")
+		}
+		target, meta, err = a.buildMusicTarget(ctx, mediaItemID, *scope.MusicTargetID)
 	default:
 		return nil, fmt.Errorf("search is not supported for %s items yet", mediaType)
 	}
@@ -1092,8 +1115,11 @@ func (a *App) persistEvaluationTx(
 		targetKind := "movie"
 		var (
 			episodeID                   pgtype.Int8
+			musicTargetID               pgtype.Int8
 			seasonNumber, episodeNumber pgtype.Int4
 			absoluteNumber              pgtype.Int4
+			artistName, albumType       string
+			editionKey, albumTitle      string
 		)
 		switch meta.Domain {
 		case "tv":
@@ -1102,16 +1128,24 @@ func (a *App) persistEvaluationTx(
 			seasonNumber = pgtype.Int4{Int32: int32(srcUnit.SeasonNumber), Valid: true}
 			episodeNumber = pgtype.Int4{Int32: int32(srcUnit.EpisodeNumber), Valid: true}
 			absoluteNumber = pgtype.Int4{Int32: int32(srcUnit.AbsoluteNumber), Valid: srcUnit.AbsoluteNumber != 0}
+		case "music":
+			targetKind = "music_release"
+			musicTargetID = pgtype.Int8{Int64: meta.MusicTargetID, Valid: meta.MusicTargetID != 0}
+			artistName, albumType = meta.ArtistName, meta.AlbumType
+			editionKey, albumTitle = meta.EditionKey, meta.AlbumTitle
 		case "book":
 			targetKind = "book"
 		}
 		decisionRow, err := qtx.CreateManagerDecision(ctx, sqlc.CreateManagerDecisionParams{
 			RunID: runID, TargetKind: targetKind, TargetKey: unit.UnitKey,
-			MediaItemID: pgtype.Int8{Int64: target.MediaItemID, Valid: true},
-			TvEpisodeID: episodeID,
-			LibraryID:   meta.LibraryID, Domain: meta.Domain,
+			MediaItemID:   pgtype.Int8{Int64: target.MediaItemID, Valid: true},
+			TvEpisodeID:   episodeID,
+			MusicTargetID: musicTargetID,
+			LibraryID:     meta.LibraryID, Domain: meta.Domain,
 			TargetTitle: meta.Title, TargetYear: int32(meta.Year),
 			SeasonNumber: seasonNumber, EpisodeNumber: episodeNumber, AbsoluteNumber: absoluteNumber,
+			ArtistName: artistName, AlbumType: albumType,
+			EditionKey: editionKey, AlbumTitle: albumTitle,
 			ProfileID: profileID, ProfileName: profileName, PolicyHash: hash,
 			EvaluatorVersion: decision.EvaluatorVersion, ParserVersion: decision.ParserVersion,
 			Verdict: insertVerdict, Context: contextDoc,

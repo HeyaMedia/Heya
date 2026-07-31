@@ -1111,7 +1111,11 @@ var managerSearchCmd = &cobra.Command{
 		}
 		seasonFlag, _ := cmd.Flags().GetInt("season")
 		episodeFlag, _ := cmd.Flags().GetInt64("episode-id")
+		musicTargetFlag, _ := cmd.Flags().GetInt64("music-target")
 		scope := service.ManagerSearchScope{}
+		if cmd.Flags().Changed("music-target") {
+			scope.MusicTargetID = &musicTargetFlag
+		}
 		if cmd.Flags().Changed("season") {
 			scope.Season = &seasonFlag
 		}
@@ -1267,6 +1271,7 @@ func init() {
 	managerWantedCmd.Flags().String("tab", "missing", "missing | cutoff | problems")
 	managerSearchCmd.Flags().Int("season", 0, "TV: search this season's wanted episodes")
 	managerSearchCmd.Flags().Int64("episode-id", 0, "TV: search one episode by its id")
+	managerSearchCmd.Flags().Int64("music-target", 0, "Music: search one release group by its manager_music_targets id")
 
 	managerIndexerAddCmd.Flags().String("name", "", "Display name")
 	managerIndexerAddCmd.Flags().String("kind", "prowlarr", "prowlarr | torznab | newznab")

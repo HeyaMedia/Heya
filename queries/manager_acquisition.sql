@@ -192,3 +192,16 @@ SELECT * FROM manager_queue_verdicts WHERE download_client_id = $1 AND nzo_id = 
 -- name: AppendManagerQueueVerdictHistory :exec
 INSERT INTO manager_queue_verdict_history (verdict_id, verdict, rejections, input_hash)
 VALUES ($1, $2, $3, $4);
+
+-- name: UpsertManagerMusicTarget :exec
+INSERT INTO manager_music_targets (artist_id, album_type, edition_key, title, year, monitored)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (artist_id, album_type, edition_key) DO NOTHING;
+
+-- name: GetManagerMusicTarget :one
+SELECT * FROM manager_music_targets WHERE id = $1;
+
+-- name: SetManagerMusicTargetMonitored :exec
+UPDATE manager_music_targets
+SET monitored = $2, monitor_updated_at = now()
+WHERE id = $1;
