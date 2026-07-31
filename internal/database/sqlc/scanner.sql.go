@@ -2686,18 +2686,31 @@ func (q *Queries) MarkScannerEntitySearched(ctx context.Context, arg MarkScanner
 }
 
 const pruneUnclaimedScannerReviewIdentities = `-- name: PruneUnclaimedScannerReviewIdentities :execrows
+WITH doomed AS (
+    SELECT identity.id
+    FROM local_media_identities identity
+    WHERE identity.library_id = $1
+      AND identity.media_type = $2
+      AND identity.media_item_id IS NULL
+      AND identity.review_status IN ('needs_review', 'review', 'suspicious', 'rejected', 'ignored')
+      AND NOT EXISTS (
+          SELECT 1
+          FROM scanner_entities entity
+          WHERE entity.library_id = identity.library_id
+            AND entity.media_type = identity.media_type
+            AND entity.identity_key = identity.identity_key
+      )
+    FOR UPDATE
+),
+resolve_findings AS (
+    UPDATE scan_findings finding
+    SET resolved_at = now()
+    WHERE finding.identity_id IN (SELECT id FROM doomed)
+      AND finding.resolved_at IS NULL
+)
 DELETE FROM local_media_identities identity
-WHERE identity.library_id = $1
-  AND identity.media_type = $2
-  AND identity.media_item_id IS NULL
-  AND identity.review_status IN ('needs_review', 'review', 'suspicious', 'rejected', 'ignored')
-  AND NOT EXISTS (
-      SELECT 1
-      FROM scanner_entities entity
-      WHERE entity.library_id = identity.library_id
-        AND entity.media_type = identity.media_type
-        AND entity.identity_key = identity.identity_key
-  )
+USING doomed
+WHERE identity.id = doomed.id
 `
 
 type PruneUnclaimedScannerReviewIdentitiesParams struct {
@@ -2708,6 +2721,9 @@ type PruneUnclaimedScannerReviewIdentitiesParams struct {
 // Scope reconciliation can remove or rename the last scanner entity that
 // claimed a review row. Keep accepted/bound history, but remove unbound
 // terminal review decisions once no current scanner scope owns the key.
+// Open findings must be resolved before the delete: the FK is ON DELETE
+// SET NULL, and rewriting identity_id to NULL on a still-open finding can
+// collide with an existing NULL-identity row under idx_scan_findings_open_key.
 func (q *Queries) PruneUnclaimedScannerReviewIdentities(ctx context.Context, arg PruneUnclaimedScannerReviewIdentitiesParams) (int64, error) {
 	result, err := q.db.Exec(ctx, pruneUnclaimedScannerReviewIdentities, arg.LibraryID, arg.MediaType)
 	if err != nil {

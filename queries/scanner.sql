@@ -66,18 +66,34 @@ RETURNING id;
 -- Scope reconciliation can remove or rename the last scanner entity that
 -- claimed a review row. Keep accepted/bound history, but remove unbound
 -- terminal review decisions once no current scanner scope owns the key.
+-- Open findings must be resolved before the delete: the FK is ON DELETE
+-- SET NULL, and rewriting identity_id to NULL on a still-open finding can
+-- collide with an existing NULL-identity row under idx_scan_findings_open_key.
+WITH doomed AS (
+    SELECT identity.id
+    FROM local_media_identities identity
+    WHERE identity.library_id = sqlc.arg(library_id)
+      AND identity.media_type = sqlc.arg(media_type)
+      AND identity.media_item_id IS NULL
+      AND identity.review_status IN ('needs_review', 'review', 'suspicious', 'rejected', 'ignored')
+      AND NOT EXISTS (
+          SELECT 1
+          FROM scanner_entities entity
+          WHERE entity.library_id = identity.library_id
+            AND entity.media_type = identity.media_type
+            AND entity.identity_key = identity.identity_key
+      )
+    FOR UPDATE
+),
+resolve_findings AS (
+    UPDATE scan_findings finding
+    SET resolved_at = now()
+    WHERE finding.identity_id IN (SELECT id FROM doomed)
+      AND finding.resolved_at IS NULL
+)
 DELETE FROM local_media_identities identity
-WHERE identity.library_id = sqlc.arg(library_id)
-  AND identity.media_type = sqlc.arg(media_type)
-  AND identity.media_item_id IS NULL
-  AND identity.review_status IN ('needs_review', 'review', 'suspicious', 'rejected', 'ignored')
-  AND NOT EXISTS (
-      SELECT 1
-      FROM scanner_entities entity
-      WHERE entity.library_id = identity.library_id
-        AND entity.media_type = identity.media_type
-        AND entity.identity_key = identity.identity_key
-  );
+USING doomed
+WHERE identity.id = doomed.id;
 
 -- name: GetScannerEntity :one
 SELECT * FROM scanner_entities

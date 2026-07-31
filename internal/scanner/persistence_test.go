@@ -707,6 +707,63 @@ func listScanFindingRows(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 	return out
 }
 
+// TestPruneUnclaimedIdentitiesResolvesOpenFindings: the identity FK on
+// scan_findings is ON DELETE SET NULL, so pruning an unclaimed identity
+// rewrites its findings to identity_id NULL. If an identical open finding
+// already sits at NULL, the rewrite collides with idx_scan_findings_open_key
+// and aborts the whole persist transaction. The prune must resolve the doomed
+// identity's open findings before deleting it.
+func TestPruneUnclaimedIdentitiesResolvesOpenFindings(t *testing.T) {
+	pool := testutil.SetupDB(t)
+	ctx := context.Background()
+	q := sqlc.New(pool)
+
+	userID := testutil.TestUserID(t, pool)
+	lib, err := q.CreateLibrary(ctx, sqlc.CreateLibraryParams{
+		Name:         "scanner-prune-findings-test",
+		MediaType:    sqlc.MediaTypeMusic,
+		Paths:        []string{"/tmp/music-prune-findings"},
+		ScanInterval: pgtype.Interval{Microseconds: 3600000000, Valid: true},
+		CreatedBy:    userID,
+		Settings:     []byte("{}"),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { testutil.CleanupLibrary(t, pool, lib.ID) })
+
+	var identityID int64
+	require.NoError(t, pool.QueryRow(ctx, `
+		INSERT INTO local_media_identities (library_id, media_type, identity_key, title, review_status)
+		VALUES ($1, $2, 'artist:ghost', 'Ghost', 'rejected')
+		RETURNING id`, lib.ID, lib.MediaType).Scan(&identityID))
+
+	const code, relPath = "music_track_issue", "Ghost/Album/a.mp3"
+	_, err = pool.Exec(ctx, `
+		INSERT INTO scan_findings (library_id, media_type, identity_id, code, rel_path)
+		VALUES ($1, $2, $3, $4, $5), ($1, $2, NULL, $4, $5)`,
+		lib.ID, lib.MediaType, identityID, code, relPath)
+	require.NoError(t, err)
+
+	pruned, err := q.PruneUnclaimedScannerReviewIdentities(ctx, sqlc.PruneUnclaimedScannerReviewIdentitiesParams{
+		LibraryID: lib.ID,
+		MediaType: lib.MediaType,
+	})
+	require.NoError(t, err, "prune must not trip idx_scan_findings_open_key via the FK SET NULL rewrite")
+	require.EqualValues(t, 1, pruned)
+
+	rows := listScanFindingRows(t, ctx, pool, lib.ID, code)
+	require.Len(t, rows, 2)
+	var open, resolved int
+	for _, row := range rows {
+		if row.Resolved {
+			resolved++
+		} else {
+			open++
+		}
+	}
+	require.Equal(t, 1, open, "the pre-existing NULL-identity finding stays open")
+	require.Equal(t, 1, resolved, "the pruned identity's finding is swept to resolved")
+}
+
 // TestPersistScanFindingsReconcile locks in the set-reconciliation contract:
 // re-persisting an unchanged result writes zero new finding rows (same ids,
 // no resolved churn copies), a finding that stops being drafted is swept to
