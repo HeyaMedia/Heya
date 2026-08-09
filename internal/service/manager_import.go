@@ -212,6 +212,9 @@ func (a *App) prepareManagerImport(ctx context.Context, clientID int64, nzoID st
 	item := ManagerQueueItemView{Client: client.Name, ClientID: client.ID, NzoID: nzoID, Name: slot.Name,
 		Category: slot.Category, Status: slot.Status, SizeMB: float64(slot.Bytes) / (1024 * 1024), History: true}
 	a.annotateQueueItem(ctx, q, client, index, musicIdx, &item)
+	if item.Verdict == "unknown_identity" && item.MatchedItemID != nil {
+		return nil, fmt.Errorf("release %q was only partially recognized and is unsafe to import: %s", slot.Name, item.VerdictDetail)
+	}
 	if item.MatchedItemID == nil {
 		if bookIdx, berr := a.buildBookIdentityIndex(ctx, false); berr == nil {
 			if ref := bookIdx.match(slot.Name); ref != nil {

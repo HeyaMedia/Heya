@@ -267,7 +267,7 @@ func (a *App) buildMusicQueueIndex(ctx context.Context) (*musicQueueIndex, error
 				name: name, monitored: artistMonitored,
 			}
 			for _, alias := range append([]string{name}, aliases...) {
-				if c := compactQueueTitle(alias); len(c) >= 3 {
+				if c := matcher.NormalizeTitle(alias); len(c) >= 3 {
 					artist.compact = append(artist.compact, c)
 				}
 			}
@@ -275,7 +275,7 @@ func (a *App) buildMusicQueueIndex(ctx context.Context) (*musicQueueIndex, error
 			index.artists = append(index.artists, artist)
 		}
 		if targetID != 0 {
-			if c := compactQueueTitle(targetTitle); len(c) >= 3 {
+			if c := matcher.NormalizeTitle(targetTitle); len(c) >= 3 {
 				artist.targets = append(artist.targets, musicQueueTarget{
 					id: targetID, title: targetTitle, compact: c, monitored: targetMonitored,
 				})
@@ -294,8 +294,8 @@ func compactQueueTitle(s string) string {
 // wins; a length tie between different artists is ambiguous and never
 // guesses. The longest release-group title contained in the name follows.
 func (idx *musicQueueIndex) match(name string) (*musicQueueArtist, *musicQueueTarget) {
-	compact := compactQueueTitle(name)
-	if compact == "" {
+	normalized := matcher.NormalizeTitle(name)
+	if normalized == "" {
 		return nil, nil
 	}
 	var best *musicQueueArtist
@@ -303,7 +303,7 @@ func (idx *musicQueueIndex) match(name string) (*musicQueueArtist, *musicQueueTa
 	ambiguous := false
 	for _, artist := range idx.artists {
 		for _, cn := range artist.compact {
-			if !strings.HasPrefix(compact, cn) {
+			if !queuePhrasePrefix(normalized, cn) {
 				continue
 			}
 			switch {
@@ -321,11 +321,19 @@ func (idx *musicQueueIndex) match(name string) (*musicQueueArtist, *musicQueueTa
 	bestTargetLen := 0
 	for i := range best.targets {
 		t := &best.targets[i]
-		if strings.Contains(compact, t.compact) && len(t.compact) > bestTargetLen {
+		if queueContainsPhrase(normalized, t.compact) && len(t.compact) > bestTargetLen {
 			bestTarget, bestTargetLen = t, len(t.compact)
 		}
 	}
 	return best, bestTarget
+}
+
+func queuePhrasePrefix(value, phrase string) bool {
+	return value == phrase || strings.HasPrefix(value, phrase+" ")
+}
+
+func queueContainsPhrase(value, phrase string) bool {
+	return strings.Contains(" "+value+" ", " "+phrase+" ")
 }
 
 // hasMonitored reports whether any monitored artist carries a monitored
