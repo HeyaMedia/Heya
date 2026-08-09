@@ -39,6 +39,7 @@ import {
   PhEyeSlash,
   PhFilmSlate,
   PhFingerprint,
+  PhFileCode,
   PhFolder,
   PhFunnel,
   PhGearSix,
@@ -173,6 +174,7 @@ const nameMap: Record<string, string> = {
   user: 'user',
   bell: 'bell',
   folder: 'folder',
+  'file-naming': 'file-code',
   network: 'tree-structure',
   bookmark: 'bookmark-simple',
   calendar: 'calendar-blank',
@@ -340,6 +342,7 @@ const iconComponents: Record<string, Component> = {
   'speaker-none': PhSpeakerNone,
   subtitles: PhSubtitles,
   'closed-captioning': PhClosedCaptioning,
+  'file-code': PhFileCode,
   translate: PhTranslate,
 }
 

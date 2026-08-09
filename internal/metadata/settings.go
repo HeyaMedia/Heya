@@ -13,6 +13,9 @@ type LibrarySettings struct {
 	SaveImages         bool   `json:"save_images"`
 	EnableTrickplay    bool   `json:"enable_trickplay"`
 	GenerateThumbnails bool   `json:"generate_thumbnails"`
+	// DefaultImportPath selects the writable destination when a library has
+	// multiple roots. Empty means the library's first configured path.
+	DefaultImportPath string `json:"default_import_path,omitempty"`
 	// MatchThreshold is the scanner's auto-accept confidence floor for this
 	// library. 0 means "use the built-in default" (0.85; books 0.70).
 	MatchThreshold float64 `json:"match_threshold,omitempty"`
@@ -85,6 +88,7 @@ func (s LibrarySettings) Merge(other LibrarySettings) LibrarySettings {
 	s.SaveImages = other.SaveImages
 	s.EnableTrickplay = other.EnableTrickplay
 	s.GenerateThumbnails = other.GenerateThumbnails
+	s.DefaultImportPath = other.DefaultImportPath
 	if other.MatchThreshold > 0 {
 		s.MatchThreshold = other.MatchThreshold
 	}

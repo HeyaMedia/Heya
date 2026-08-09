@@ -61,6 +61,7 @@ export function useManagerNav() {
         { to: '/manager/system/download-clients', label: 'Download clients', icon: 'download' },
         { to: '/manager/system/quality-profiles', label: 'Quality profiles', icon: 'eq' },
         { to: '/manager/system/custom-formats', label: 'Custom formats', icon: 'hash' },
+        { to: '/manager/system/file-naming', label: 'File naming', icon: 'file-naming' },
         { to: '/manager/system/lists', label: 'Import lists', icon: 'list' },
       ],
     },

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -707,6 +708,8 @@ var managerLibraryAlbumCmd = &cobra.Command{
 	},
 }
 
+var managerImportForce bool
+
 var managerImportCmd = &cobra.Command{
 	Use:   "import <client id> <nzo id>",
 	Short: "Import a completed download: move media files to the matched item's folder and queue a scan",
@@ -717,7 +720,23 @@ var managerImportCmd = &cobra.Command{
 			return fmt.Errorf("invalid client id %q", args[0])
 		}
 		return withApp(func(ctx context.Context, app *service.App) error {
-			view, err := app.ManagerImport(ctx, clientID, args[1])
+			plan, err := app.ManagerImportPlan(ctx, clientID, args[1])
+			if err != nil {
+				return err
+			}
+			if !managerImportForce {
+				if ui.JSONMode {
+					return ui.OutputJSON(plan)
+				}
+				ui.Info("Matched", plan.Title)
+				ui.Info("Destination", plan.Destination)
+				for _, file := range plan.Files {
+					ui.Info("  from", file.Source)
+					ui.Info("    to", file.Destination)
+				}
+				return errors.New("preview only — review the paths, then repeat with --force to import")
+			}
+			view, err := app.ManagerImport(ctx, clientID, args[1], plan.PlanID)
 			if err != nil {
 				return err
 			}
@@ -1298,6 +1317,7 @@ var managerHistoryCmd = &cobra.Command{
 }
 
 func init() {
+	managerImportCmd.Flags().BoolVar(&managerImportForce, "force", false, "Confirm and execute the previewed file moves")
 	managerCalendarCmd.Flags().String("from", "", "Window start (YYYY-MM-DD; default one week back)")
 	managerCalendarCmd.Flags().String("to", "", "Window end (YYYY-MM-DD; default 30 days ahead)")
 	managerCalendarCmd.Flags().Int64Slice("library", nil, "Restrict to library ids (repeatable)")

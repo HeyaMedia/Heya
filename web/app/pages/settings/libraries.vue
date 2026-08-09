@@ -316,6 +316,10 @@ async function addLibrary() {
   addError.value = ''
   const paths = newLib.value.paths.filter(p => p.trim())
   if (!paths.length) { addError.value = 'At least one folder is required.'; return }
+  if (paths.length === 1) newLib.value.settings.default_import_path = undefined
+  else if (!newLib.value.settings.default_import_path || !paths.includes(newLib.value.settings.default_import_path)) {
+    newLib.value.settings.default_import_path = paths[0]
+  }
   try {
     await $heya('/api/libraries', {
       method: 'POST',
@@ -337,6 +341,9 @@ async function openEdit(lib: Library) {
     editLib.value = editable
     editSettings.value = { ...defaultSettings(editable.media_type), ...editable.settings }
     editPaths.value = [...editable.paths]
+    if (!editSettings.value.default_import_path || !editPaths.value.includes(editSettings.value.default_import_path)) {
+      editSettings.value.default_import_path = editPaths.value[0]
+    }
     saveError.value = ''
   } catch (e: any) {
     flash.value = { kind: 'err', text: e?.message ?? 'Could not open library editor.' }
@@ -349,6 +356,10 @@ async function saveEditSettings() {
   saveError.value = ''
   try {
     const paths = editPaths.value.filter(p => p.trim())
+    if (paths.length === 1) editSettings.value.default_import_path = undefined
+    else if (!editSettings.value.default_import_path || !paths.includes(editSettings.value.default_import_path)) {
+      editSettings.value.default_import_path = paths[0]
+    }
     const pathsChanged = paths.length && paths.join(',') !== editLib.value.paths.join(',')
     if (pathsChanged && !editLib.value.sources?.paths) {
       await $heya('/api/libraries/{id}', {
@@ -713,6 +724,14 @@ watch(() => route.query.library, () => syncScannerFromRoute())
           </button>
         </div>
 
+        <div v-if="newLib.paths.filter(p => p.trim()).length > 1" class="form-field">
+          <label class="form-label">Default import path</label>
+          <select v-model="newLib.settings.default_import_path" class="sv2-select">
+            <option v-for="path in newLib.paths.filter(p => p.trim())" :key="path" :value="path">{{ path }}</option>
+          </select>
+          <p class="form-hint">New manager imports are written here.</p>
+        </div>
+
         <div class="dialog-divider" />
 
         <LibrarySettingsPanel v-model="newLib.settings" :media-type="newLib.media_type" />
@@ -772,6 +791,16 @@ watch(() => route.query.library, () => syncScannerFromRoute())
         </div>
 
         <div class="dialog-divider" />
+
+        <div v-if="editPaths.filter(p => p.trim()).length > 1" class="form-field">
+          <label class="form-label">Default import path</label>
+          <select v-model="editSettings.default_import_path" class="sv2-select">
+            <option v-for="path in editPaths.filter(p => p.trim())" :key="path" :value="path">{{ path }}</option>
+          </select>
+          <p class="form-hint">New manager imports are written here. Existing media in the other paths remains available.</p>
+        </div>
+
+        <div v-if="editPaths.filter(p => p.trim()).length > 1" class="dialog-divider" />
 
         <LibrarySettingsPanel v-model="editSettings" :media-type="editLib.media_type" />
 

@@ -143,22 +143,49 @@ const { confirm } = useConfirm()
 // Import: the first real write action — move media files into the matched
 // item's folder and hand off to the library scanner.
 type ImportResult = { run_id: number, matched_title: string, destination: string, moved: string[], skipped?: string[], scan_queued: boolean }
+type ImportPlan = {
+  plan_id: string
+  matched_item_id: number
+  matched_title: string
+  destination: string
+  files: { source: string, destination: string, size_bytes: number, collision?: boolean }[]
+  skipped?: string[]
+}
 const importing = ref<string | null>(null)
+const planning = ref<string | null>(null)
+const importPlanOpen = ref(false)
+const importPlan = ref<ImportPlan | null>(null)
+const importPlanItem = ref<ManagerQueueItemView | null>(null)
 const importFlash = ref('')
 const importError = ref('')
 async function importEntry(item: ManagerQueueItemView) {
-  if (!await confirm({
-    title: 'Import this download?',
-    message: `Media files move into ${item.matched_title}'s library folder and a scan runs. This is a real write.`,
-  })) return
+
+  planning.value = item.nzo_id
+  importError.value = ''
+  try {
+    importPlan.value = await $heya(`/api/manager/queue/${item.client_id}/${encodeURIComponent(item.nzo_id)}/import-plan`) as ImportPlan
+    importPlanItem.value = item
+    importPlanOpen.value = true
+  } catch (e: any) {
+    importError.value = e?.data?.detail ?? 'Could not build the import plan'
+  } finally {
+    planning.value = null
+  }
+}
+
+async function executeImport() {
+  const item = importPlanItem.value
+  if (!item) return
   importing.value = item.nzo_id
   importFlash.value = ''
   importError.value = ''
   try {
     const res = await $heya(`/api/manager/queue/${item.client_id}/${encodeURIComponent(item.nzo_id)}/import`, {
       method: 'POST',
+      body: { plan_id: importPlan.value?.plan_id ?? '' },
     }) as ImportResult
     importFlash.value = `Imported ${res.moved.length} file(s) → ${res.destination}${res.scan_queued ? ' · scan queued' : ''} · run #${res.run_id}`
+    importPlanOpen.value = false
     refetch()
   } catch (e: any) {
     importError.value = e?.data?.detail ?? 'Import failed'
@@ -340,10 +367,10 @@ async function deleteEntry(item: ManagerQueueItemView) {
               <AppTooltip v-if="item.history && !item.fail_message" :label="item.matched_item_id ? `Import into ${item.matched_title}` : 'Not recognized — nothing to import into'">
                 <button
                   type="button" class="mgr-btn-icon qm-import"
-                  :disabled="!item.matched_item_id || importing !== null"
+                  :disabled="!item.matched_item_id || importing !== null || planning !== null"
                   @click="importEntry(item)"
                 >
-                  <span v-if="importing === item.nzo_id" class="mgr-spin" />
+                  <span v-if="importing === item.nzo_id || planning === item.nzo_id" class="mgr-spin" />
                   <Icon v-else name="download" :size="14" />
                 </button>
               </AppTooltip>
@@ -379,6 +406,37 @@ async function deleteEntry(item: ManagerQueueItemView) {
         <div v-if="importError" class="mgr-flash err qm-import-flash">{{ importError }}</div>
 
         <p class="qm-note">Import moves the media files into the matched item's library folder and queues a scan. Removing an entry acts on the download client itself.</p>
+      </template>
+    </AppDialog>
+
+    <AppDialog v-model="importPlanOpen" title="Review import plan" size="xl">
+      <template v-if="importPlan">
+        <div class="ip-summary">
+          <div><span class="ip-label mono">Matched</span><strong>{{ importPlan.matched_title }}</strong></div>
+          <div><span class="ip-label mono">Import root</span><code>{{ importPlan.destination }}</code></div>
+        </div>
+        <div class="ip-warning"><Icon name="info" :size="13" /> Nothing has moved yet. Review every rename below.</div>
+        <div class="ip-files">
+          <div v-for="file in importPlan.files" :key="file.source" class="ip-file" :class="{ collision: file.collision }">
+            <div class="ip-path"><span class="ip-label mono">From</span><code>{{ file.source }}</code></div>
+            <div class="ip-arrow"><Icon name="arrow-right" :size="13" /></div>
+            <div class="ip-path"><span class="ip-label mono">To</span><code>{{ file.destination }}</code></div>
+            <span v-if="file.collision" class="ip-collision mono">already exists · skipped</span>
+            <span v-else class="ip-size mono">{{ fmtSize(file.size_bytes / (1024 * 1024)) }}</span>
+          </div>
+        </div>
+        <div v-if="importPlan.skipped?.length" class="ip-skipped">
+          <span class="ip-label mono">Ignored support files</span>
+          <span>{{ importPlan.skipped.join(', ') }}</span>
+        </div>
+      </template>
+      <template #footer="{ close }">
+        <button class="mgr-btn" :disabled="importing !== null" @click="close()">Cancel</button>
+        <button class="mgr-btn primary" :disabled="importing !== null || !importPlan?.files.some(file => !file.collision)" @click="executeImport">
+          <span v-if="importing" class="mgr-spin" />
+          <Icon v-else name="download" :size="13" />
+          Go ahead and import
+        </button>
       </template>
     </AppDialog>
   </div>
@@ -594,4 +652,21 @@ async function deleteEntry(item: ManagerQueueItemView) {
 .mgr-btn-icon.active { color: var(--gold-bright); border-color: color-mix(in srgb, var(--gold) 45%, transparent); }
 .mgr-btn-icon.qm-import:not(:disabled) { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, transparent); }
 .qm-import-flash { margin-top: 12px; margin-bottom: 0; }
+.ip-summary { display: grid; gap: 7px; margin-bottom: 10px; }
+.ip-summary > div, .ip-path { display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.ip-summary code, .ip-path code { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-1); overflow-wrap: anywhere; }
+.ip-label { font-size: 9px; font-weight: 650; letter-spacing: .12em; text-transform: uppercase; color: var(--fg-3); }
+.ip-warning { display: flex; align-items: center; gap: 7px; padding: 9px 11px; margin-bottom: 10px; border: 1px solid color-mix(in srgb, var(--gold) 35%, var(--border)); border-radius: var(--r-sm); color: var(--gold-bright); background: var(--gold-soft); font-size: 11.5px; }
+.ip-files { display: grid; gap: 6px; max-height: 52vh; overflow: auto; }
+.ip-file { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 22px minmax(0, 1fr) auto; gap: 7px; align-items: center; padding: 9px 11px; border: 1px solid var(--hair); border-radius: var(--r-sm); background: var(--bg-2); }
+.ip-file.collision { opacity: .62; }
+.ip-arrow { display: flex; justify-content: center; color: var(--gold); }
+.ip-size, .ip-collision { font-size: 9.5px; white-space: nowrap; color: var(--fg-3); }
+.ip-collision { color: var(--bad); }
+.ip-skipped { display: grid; gap: 5px; margin-top: 10px; padding: 9px 11px; border-top: 1px solid var(--hair); font-size: 10.5px; color: var(--fg-3); overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .ip-file { grid-template-columns: minmax(0, 1fr); }
+  .ip-arrow { transform: rotate(90deg); }
+  .ip-path { grid-template-columns: 56px minmax(0, 1fr); }
+}
 </style>

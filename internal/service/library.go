@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -43,6 +44,9 @@ func ParseMediaType(s string) (sqlc.MediaType, error) {
 func (a *App) CreateLibrary(ctx context.Context, name string, mediaType sqlc.MediaType, paths []string, userID int64, settings *metadata.LibrarySettings) (sqlc.Library, error) {
 	if err := validateLibraryPaths(paths); err != nil {
 		return sqlc.Library{}, err
+	}
+	if settings != nil && settings.DefaultImportPath != "" && !libraryContainsPath(paths, settings.DefaultImportPath) {
+		return sqlc.Library{}, errors.New("default import path must be one of the library's configured paths")
 	}
 
 	var settingsJSON []byte
@@ -141,9 +145,16 @@ func (a *App) ReportUnsupportedLibraryPaths(ctx context.Context) {
 }
 
 func (a *App) UpdateLibrarySettings(ctx context.Context, id int64, settings metadata.LibrarySettings) (sqlc.Library, error) {
+	lib, err := a.GetLibrary(ctx, id)
+	if err != nil {
+		return sqlc.Library{}, err
+	}
+	if settings.DefaultImportPath != "" && !libraryContainsPath(lib.Paths, settings.DefaultImportPath) {
+		return sqlc.Library{}, errors.New("default import path must be one of the library's configured paths")
+	}
 	settingsJSON, _ := json.Marshal(settings)
 	q := sqlc.New(a.db)
-	lib, err := q.UpdateLibrarySettings(ctx, sqlc.UpdateLibrarySettingsParams{
+	lib, err = q.UpdateLibrarySettings(ctx, sqlc.UpdateLibrarySettingsParams{
 		ID:       id,
 		Settings: settingsJSON,
 	})
@@ -152,6 +163,16 @@ func (a *App) UpdateLibrarySettings(ctx context.Context, id int64, settings meta
 	}
 	a.notifyLibraryChanged(ctx, lib)
 	return lib, nil
+}
+
+func libraryContainsPath(paths []string, candidate string) bool {
+	candidate = filepath.Clean(candidate)
+	for _, path := range paths {
+		if filepath.Clean(path) == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) notifyLibraryChanged(ctx context.Context, lib sqlc.Library) {

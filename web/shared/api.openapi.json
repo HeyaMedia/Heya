@@ -8275,6 +8275,9 @@
           "auto_collections": {
             "type": "boolean"
           },
+          "default_import_path": {
+            "type": "string"
+          },
           "enable_trickplay": {
             "type": "boolean"
           },
@@ -12726,6 +12729,29 @@
         ],
         "type": "object"
       },
+      "Manager-queue-importRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Manager-queue-importRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "plan_id": {
+            "maxLength": 64,
+            "minLength": 64,
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_id"
+        ],
+        "type": "object"
+      },
       "ManagerActivityPage": {
         "additionalProperties": false,
         "properties": {
@@ -13731,6 +13757,85 @@
         ],
         "type": "object"
       },
+      "ManagerFileNamingSettings": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerFileNamingSettings.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "anime": {
+            "type": "string"
+          },
+          "daily_tv": {
+            "type": "string"
+          },
+          "movie": {
+            "type": "string"
+          },
+          "music": {
+            "type": "string"
+          },
+          "music_multi": {
+            "type": "string"
+          },
+          "tv": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "movie",
+          "tv",
+          "daily_tv",
+          "anime",
+          "music",
+          "music_multi"
+        ],
+        "type": "object"
+      },
+      "ManagerFileNamingView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerFileNamingView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "examples": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/ManagerFileNamingSettings"
+          },
+          "tokens": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerNamingTokenView"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "settings",
+          "tokens",
+          "examples"
+        ],
+        "type": "object"
+      },
       "ManagerFileView": {
         "additionalProperties": false,
         "properties": {
@@ -13932,6 +14037,83 @@
         },
         "required": [
           "decisions"
+        ],
+        "type": "object"
+      },
+      "ManagerImportPlanFile": {
+        "additionalProperties": false,
+        "properties": {
+          "collision": {
+            "type": "boolean"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "destination",
+          "size_bytes"
+        ],
+        "type": "object"
+      },
+      "ManagerImportPlanView": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ManagerImportPlanView.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/ManagerImportPlanFile"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "matched_item_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "matched_title": {
+            "type": "string"
+          },
+          "plan_id": {
+            "type": "string"
+          },
+          "skipped": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "plan_id",
+          "matched_item_id",
+          "matched_title",
+          "destination",
+          "files"
         ],
         "type": "object"
       },
@@ -14843,6 +15025,26 @@
         },
         "required": [
           "sections"
+        ],
+        "type": "object"
+      },
+      "ManagerNamingTokenView": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "example": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "description",
+          "example"
         ],
         "type": "object"
       },
@@ -36371,6 +36573,100 @@
         ]
       }
     },
+    "/api/manager/file-naming": {
+      "get": {
+        "operationId": "manager-file-naming",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerFileNamingView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Get file naming templates, token vocabulary, and examples",
+        "tags": [
+          "Manager"
+        ]
+      },
+      "put": {
+        "operationId": "manager-save-file-naming",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagerFileNamingSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerFileNamingView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Save file naming templates",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
     "/api/manager/file/{id}": {
       "get": {
         "operationId": "manager-file-detail",
@@ -38075,6 +38371,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Manager-queue-importRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -38110,6 +38416,69 @@
           }
         ],
         "summary": "Import a completed download: move its media files into the matched library item's folder and queue a scan",
+        "tags": [
+          "Manager"
+        ]
+      }
+    },
+    "/api/manager/queue/{client_id}/{nzo_id}/import-plan": {
+      "get": {
+        "operationId": "manager-queue-import-plan",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "nzo_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagerImportPlanView"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Preview every source and destination path for an import without changing files",
         "tags": [
           "Manager"
         ]

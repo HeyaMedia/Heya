@@ -524,12 +524,43 @@ func registerManagerRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(*view), nil
 		})
 
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/file-naming", "manager-file-naming", "Get file naming templates, token vocabulary, and examples", "Manager")),
+		func(ctx context.Context, _ *struct{}) (*JSONOutput[service.ManagerFileNamingView], error) {
+			return noStoreJSON(app.GetManagerFileNaming(ctx)), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodPut, "/api/manager/file-naming", "manager-save-file-naming", "Save file naming templates", "Manager")),
+		func(ctx context.Context, in *struct {
+			Body service.ManagerFileNamingSettings
+		}) (*JSONOutput[service.ManagerFileNamingView], error) {
+			view, err := app.SaveManagerFileNaming(ctx, in.Body)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return &JSONOutput[service.ManagerFileNamingView]{Body: view}, nil
+		})
+
 	huma.Register(api, adminSecured(op(http.MethodPost, "/api/manager/queue/{client_id}/{nzo_id}/import", "manager-queue-import", "Import a completed download: move its media files into the matched library item's folder and queue a scan", "Manager")),
 		func(ctx context.Context, in *struct {
 			ClientID int64  `path:"client_id"`
 			NzoID    string `path:"nzo_id" maxLength:"128"`
+			Body     struct {
+				PlanID string `json:"plan_id" minLength:"64" maxLength:"64"`
+			}
 		}) (*JSONOutput[service.ManagerImportView], error) {
-			view, err := app.ManagerImport(ctx, in.ClientID, in.NzoID)
+			view, err := app.ManagerImport(ctx, in.ClientID, in.NzoID, in.Body.PlanID)
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
+			}
+			return noStoreJSON(*view), nil
+		})
+
+	huma.Register(api, adminSecured(op(http.MethodGet, "/api/manager/queue/{client_id}/{nzo_id}/import-plan", "manager-queue-import-plan", "Preview every source and destination path for an import without changing files", "Manager")),
+		func(ctx context.Context, in *struct {
+			ClientID int64  `path:"client_id"`
+			NzoID    string `path:"nzo_id" maxLength:"128"`
+		}) (*JSONOutput[service.ManagerImportPlanView], error) {
+			view, err := app.ManagerImportPlan(ctx, in.ClientID, in.NzoID)
 			if err != nil {
 				return nil, humaServiceErrorStatus(err, http.StatusBadRequest)
 			}

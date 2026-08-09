@@ -2509,6 +2509,7 @@ export type LibrarySettings = {
      */
     readonly $schema?: string;
     auto_collections: boolean;
+    default_import_path?: string;
     enable_trickplay: boolean;
     fetch_ratings: boolean;
     generate_thumbnails: boolean;
@@ -3544,6 +3545,14 @@ export type LyricsResponse = {
     synced: boolean;
 };
 
+export type ManagerQueueImportRequest = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    plan_id: string;
+};
+
 export type ManagerActivityPage = {
     /**
      * A URL to the JSON Schema for this object.
@@ -3845,6 +3854,31 @@ export type ManagerFileDetailView = {
     streams: Array<ManagerStreamView> | null;
 };
 
+export type ManagerFileNamingSettings = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    anime: string;
+    daily_tv: string;
+    movie: string;
+    music: string;
+    music_multi: string;
+    tv: string;
+};
+
+export type ManagerFileNamingView = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    examples: {
+        [key: string]: string;
+    };
+    settings: ManagerFileNamingSettings;
+    tokens: Array<ManagerNamingTokenView> | null;
+};
+
 export type ManagerFileView = {
     added_at: string;
     audio_codec?: string;
@@ -3901,6 +3935,26 @@ export type ManagerHistoryPage = {
     decisions: Array<ManagerDecisionView> | null;
     next_before?: string;
     next_id?: number;
+};
+
+export type ManagerImportPlanFile = {
+    collision?: boolean;
+    destination: string;
+    size_bytes: number;
+    source: string;
+};
+
+export type ManagerImportPlanView = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    destination: string;
+    files: Array<ManagerImportPlanFile> | null;
+    matched_item_id: number;
+    matched_title: string;
+    plan_id: string;
+    skipped?: Array<string> | null;
 };
 
 export type ManagerImportView = {
@@ -4179,6 +4233,12 @@ export type ManagerMetadataView = {
     readonly $schema?: string;
     alt_titles?: Array<ManagerAltTitleView> | null;
     sections: Array<ManagerMetadataSection> | null;
+};
+
+export type ManagerNamingTokenView = {
+    description: string;
+    example: string;
+    token: string;
 };
 
 export type ManagerPathMapping = {
@@ -8870,6 +8930,7 @@ export type LibraryScannerRejectIdentityRequestWritable = {
 
 export type LibrarySettingsWritable = {
     auto_collections: boolean;
+    default_import_path?: string;
     enable_trickplay: boolean;
     fetch_ratings: boolean;
     generate_thumbnails: boolean;
@@ -8933,6 +8994,10 @@ export type LovedBodyWritable = {
 export type LyricsResponseWritable = {
     lines: Array<LyricsLine> | null;
     synced: boolean;
+};
+
+export type ManagerQueueImportRequestWritable = {
+    plan_id: string;
 };
 
 export type ManagerActivityPageWritable = {
@@ -9061,6 +9126,23 @@ export type ManagerFileDetailViewWritable = {
     streams: Array<ManagerStreamView> | null;
 };
 
+export type ManagerFileNamingSettingsWritable = {
+    anime: string;
+    daily_tv: string;
+    movie: string;
+    music: string;
+    music_multi: string;
+    tv: string;
+};
+
+export type ManagerFileNamingViewWritable = {
+    examples: {
+        [key: string]: string;
+    };
+    settings: ManagerFileNamingSettingsWritable;
+    tokens: Array<ManagerNamingTokenView> | null;
+};
+
 export type ManagerFormatImportInputWritable = {
     api_key?: string;
     base_url?: string;
@@ -9083,6 +9165,15 @@ export type ManagerHistoryPageWritable = {
     decisions: Array<ManagerDecisionView> | null;
     next_before?: string;
     next_id?: number;
+};
+
+export type ManagerImportPlanViewWritable = {
+    destination: string;
+    files: Array<ManagerImportPlanFile> | null;
+    matched_item_id: number;
+    matched_title: string;
+    plan_id: string;
+    skipped?: Array<string> | null;
 };
 
 export type ManagerImportViewWritable = {
@@ -15042,6 +15133,56 @@ export type ManagerTestDownloadClientResponses = {
 
 export type ManagerTestDownloadClientResponse = ManagerTestDownloadClientResponses[keyof ManagerTestDownloadClientResponses];
 
+export type ManagerFileNamingData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/manager/file-naming';
+};
+
+export type ManagerFileNamingErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerFileNamingError = ManagerFileNamingErrors[keyof ManagerFileNamingErrors];
+
+export type ManagerFileNamingResponses = {
+    /**
+     * OK
+     */
+    200: ManagerFileNamingView;
+};
+
+export type ManagerFileNamingResponse = ManagerFileNamingResponses[keyof ManagerFileNamingResponses];
+
+export type ManagerSaveFileNamingData = {
+    body: ManagerFileNamingSettingsWritable;
+    path?: never;
+    query?: never;
+    url: '/api/manager/file-naming';
+};
+
+export type ManagerSaveFileNamingErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerSaveFileNamingError = ManagerSaveFileNamingErrors[keyof ManagerSaveFileNamingErrors];
+
+export type ManagerSaveFileNamingResponses = {
+    /**
+     * OK
+     */
+    200: ManagerFileNamingView;
+};
+
+export type ManagerSaveFileNamingResponse = ManagerSaveFileNamingResponses[keyof ManagerSaveFileNamingResponses];
+
 export type ManagerFileDetailData = {
     body?: never;
     path: {
@@ -15811,7 +15952,7 @@ export type ManagerQueueFilesResponses = {
 export type ManagerQueueFilesResponse = ManagerQueueFilesResponses[keyof ManagerQueueFilesResponses];
 
 export type ManagerQueueImportData = {
-    body?: never;
+    body: ManagerQueueImportRequestWritable;
     path: {
         client_id: number;
         nzo_id: string;
@@ -15837,6 +15978,34 @@ export type ManagerQueueImportResponses = {
 };
 
 export type ManagerQueueImportResponse = ManagerQueueImportResponses[keyof ManagerQueueImportResponses];
+
+export type ManagerQueueImportPlanData = {
+    body?: never;
+    path: {
+        client_id: number;
+        nzo_id: string;
+    };
+    query?: never;
+    url: '/api/manager/queue/{client_id}/{nzo_id}/import-plan';
+};
+
+export type ManagerQueueImportPlanErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type ManagerQueueImportPlanError = ManagerQueueImportPlanErrors[keyof ManagerQueueImportPlanErrors];
+
+export type ManagerQueueImportPlanResponses = {
+    /**
+     * OK
+     */
+    200: ManagerImportPlanView;
+};
+
+export type ManagerQueueImportPlanResponse = ManagerQueueImportPlanResponses[keyof ManagerQueueImportPlanResponses];
 
 export type ManagerRssRunData = {
     body?: never;
