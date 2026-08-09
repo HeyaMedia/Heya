@@ -55,10 +55,12 @@
               :idx="index"
               :src="item.poster_src ?? usePosterUrl(item)"
               :title="item.title"
-              :subtitle="item.year || item.sub"
+              :subtitle="showAdded ? item.sub : (item.year || item.sub)"
               :aspect="aspect || '2/3'"
               :missing="item.available === false"
-              :badge-br="showAdded ? timeAgoShort(item.added_at ?? item.created_at) : ''"
+              :badge-tl="showAdded ? item.year : ''"
+              :badge-tr="showAdded ? timeAgoShort(item.added_at ?? item.created_at) : ''"
+              :badge-tr-gold="false"
             />
           </div>
         </AppContextMenu>
@@ -99,7 +101,7 @@ const props = defineProps<{
   loadingMore?: boolean
   /** Cold-cache fetch in flight — renders ghost tiles instead of collapsing. */
   pending?: boolean
-  /** Paint a "3d ago" chip (added_at ?? created_at) on each poster. */
+  /** Paint year + age at the top and use sub as the lower caption. */
   showAdded?: boolean
 }>()
 

@@ -219,7 +219,18 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit, offset int32) ([]R
 		}
 	}
 
-	sort.Slice(entries, func(i, j int) bool { return entries[i].AddedAt.After(entries[j].AddedAt) })
+	sort.Slice(entries, func(i, j int) bool {
+		if !entries[i].AddedAt.Equal(entries[j].AddedAt) {
+			return entries[i].AddedAt.After(entries[j].AddedAt)
+		}
+		if entries[i].MediaItemID != entries[j].MediaItemID {
+			return entries[i].MediaItemID > entries[j].MediaItemID
+		}
+		if entries[i].SeasonNumber != entries[j].SeasonNumber {
+			return entries[i].SeasonNumber > entries[j].SeasonNumber
+		}
+		return entries[i].EpisodeNumber > entries[j].EpisodeNumber
+	})
 	if int(offset) >= len(entries) {
 		return []RecentlyAddedTVEntry{}, nil
 	}

@@ -3149,21 +3149,27 @@ func (q *Queries) ListMusicTracks(ctx context.Context, arg ListMusicTracksParams
 }
 
 const listRecentlyAddedAlbums = `-- name: ListRecentlyAddedAlbums :many
+WITH additions AS (
+  SELECT t.album_id, (MIN(lf.created_at))::timestamptz AS added_at
+  FROM tracks t
+  JOIN track_files tf ON tf.track_id = t.id
+  JOIN library_files lf ON lf.id = tf.library_file_id
+  GROUP BY t.album_id
+  ORDER BY added_at DESC, t.album_id DESC
+  LIMIT $2 OFFSET $1
+)
 SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork,
        a.name           AS artist_name,
        mi.slug          AS artist_slug,
        (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
        EXISTS (SELECT 1 FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = al.id AND lf.deleted_at IS NULL) AS available,
-       -- When the album's files actually landed (albums carry no created_at
-       -- of their own) — feeds the "3d ago" chip on the Recently Added rail.
-       (SELECT MIN(lf.created_at) FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = al.id)::timestamptz AS added_at
-FROM (
-  SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork FROM albums ORDER BY id DESC LIMIT $2 OFFSET $1
-) al
+       additions.added_at
+FROM additions
+JOIN albums      al ON al.id = additions.album_id
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE mi.media_type = 'music'
-ORDER BY al.id DESC
+ORDER BY additions.added_at DESC, al.id DESC
 `
 
 type ListRecentlyAddedAlbumsParams struct {
@@ -3225,12 +3231,9 @@ type ListRecentlyAddedAlbumsRow struct {
 	AddedAt            pgtype.Timestamptz `json:"added_at"`
 }
 
-// Newest albums across every music library. Newest = highest album id since
-// albums get IDENTITY-generated IDs in insert order. The derived table pins
-// the plan to a backward albums_pkey scan (LIMIT before joins) AND keeps the
-// EXISTS below a cheap per-row probe — without it the planner hashes the
-// entire track_files x library_files join (measured 1.26s vs 1.9ms). Keep the
-// outer ORDER BY: plan-order preservation through the joins is not guaranteed.
+// Newest albums across every music library, ordered by when the first file
+// belonging to the album landed. Album IDs reflect metadata insertion order,
+// which can differ substantially from file arrival order during enrichment.
 func (q *Queries) ListRecentlyAddedAlbums(ctx context.Context, arg ListRecentlyAddedAlbumsParams) ([]ListRecentlyAddedAlbumsRow, error) {
 	rows, err := q.db.Query(ctx, listRecentlyAddedAlbums, arg.Off, arg.Lim)
 	if err != nil {

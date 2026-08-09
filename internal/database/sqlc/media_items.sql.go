@@ -717,7 +717,9 @@ const listMediaItemsByTypeRecent = `-- name: ListMediaItemsByTypeRecent :many
 SELECT id, library_id, media_type, title, sort_title, year, description, poster_path, backdrop_path, external_ids, slug, homepage, tagline, original_title, original_language, status, provider_kind, heya_slug, heya_enriched_at, metadata_refreshed_at, created_at, updated_at, search_vector, matched_at, enrichment_status, base_enriched_at, people_enriched_at, extras_enriched_at, images_enriched_at, structure_enriched_at, last_enrich_attempt_at, last_enrich_error, field_provenance, match_confidence, slug_locked, public_id FROM media_item_cards c
 WHERE (c.media_type = $1 OR ($1::text = 'tv' AND c.media_type = 'anime'))
   AND EXISTS (SELECT 1 FROM media_items mm WHERE mm.id = c.id AND mm.materialized_at IS NOT NULL)
-ORDER BY c.created_at DESC, c.id DESC
+  AND EXISTS (SELECT 1 FROM library_files lf WHERE lf.media_item_id = c.id)
+ORDER BY (SELECT MIN(lf.created_at) FROM library_files lf WHERE lf.media_item_id = c.id) DESC,
+         c.id DESC
 LIMIT $2 OFFSET $3
 `
 
@@ -727,8 +729,9 @@ type ListMediaItemsByTypeRecentParams struct {
 	Offset    int32     `json:"offset"`
 }
 
-// Same page shape as ListMediaItemsByType but newest-first — powers the
-// home "Recently Added" rails (created_at is when the first file matched).
+// Same page shape as ListMediaItemsByType but newest-first by actual file
+// arrival. media_items.created_at is metadata insertion time and can be much
+// earlier or later than the files it eventually represents.
 func (q *Queries) ListMediaItemsByTypeRecent(ctx context.Context, arg ListMediaItemsByTypeRecentParams) ([]MediaItemCard, error) {
 	rows, err := q.db.Query(ctx, listMediaItemsByTypeRecent, arg.MediaType, arg.Limit, arg.Offset)
 	if err != nil {

@@ -937,27 +937,30 @@ LIMIT 1;
 SELECT * FROM track_files WHERE id = $1;
 
 -- name: ListRecentlyAddedAlbums :many
--- Newest albums across every music library. Newest = highest album id since
--- albums get IDENTITY-generated IDs in insert order. The derived table pins
--- the plan to a backward albums_pkey scan (LIMIT before joins) AND keeps the
--- EXISTS below a cheap per-row probe — without it the planner hashes the
--- entire track_files x library_files join (measured 1.26s vs 1.9ms). Keep the
--- outer ORDER BY: plan-order preservation through the joins is not guaranteed.
+-- Newest albums across every music library, ordered by when the first file
+-- belonging to the album landed. Album IDs reflect metadata insertion order,
+-- which can differ substantially from file arrival order during enrichment.
+WITH additions AS (
+  SELECT t.album_id, (MIN(lf.created_at))::timestamptz AS added_at
+  FROM tracks t
+  JOIN track_files tf ON tf.track_id = t.id
+  JOIN library_files lf ON lf.id = tf.library_file_id
+  GROUP BY t.album_id
+  ORDER BY added_at DESC, t.album_id DESC
+  LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off)
+)
 SELECT al.*,
        a.name           AS artist_name,
        mi.slug          AS artist_slug,
        (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
        EXISTS (SELECT 1 FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = al.id AND lf.deleted_at IS NULL) AS available,
-       -- When the album's files actually landed (albums carry no created_at
-       -- of their own) — feeds the "3d ago" chip on the Recently Added rail.
-       (SELECT MIN(lf.created_at) FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = al.id)::timestamptz AS added_at
-FROM (
-  SELECT * FROM albums ORDER BY id DESC LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off)
-) al
+       additions.added_at
+FROM additions
+JOIN albums      al ON al.id = additions.album_id
 JOIN artists     a  ON a.id  = al.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
 WHERE mi.media_type = 'music'
-ORDER BY al.id DESC;
+ORDER BY additions.added_at DESC, al.id DESC;
 
 -- name: ListRecentlyAddedArtists :many
 -- Newest artists across every music library — uses discography_enriched_at

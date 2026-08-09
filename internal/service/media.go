@@ -81,6 +81,31 @@ func (a *App) listMedia(ctx context.Context, mediaType sqlc.MediaType, limit, of
 		return nil, fmt.Errorf("listing media items: %w", err)
 	}
 
+	// The recent query is ordered by real file arrival rather than metadata
+	// insertion time. Surface that same timestamp to clients so the relative
+	// age chip and the ordering describe the same event.
+	if recentFirst && len(items) > 0 {
+		ids := make([]int64, len(items))
+		for i, item := range items {
+			ids[i] = item.ID
+		}
+		firstAdded, firstErr := q.ListArtistFirstAdded(ctx, ids)
+		if firstErr != nil {
+			return nil, fmt.Errorf("listing media first-added times: %w", firstErr)
+		}
+		addedByID := make(map[int64]pgtype.Timestamptz, len(firstAdded))
+		for _, added := range firstAdded {
+			if added.MediaItemID.Valid {
+				addedByID[added.MediaItemID.Int64] = added.FirstAdded
+			}
+		}
+		for i := range items {
+			if added, ok := addedByID[items[i].ID]; ok {
+				items[i].CreatedAt = added
+			}
+		}
+	}
+
 	// Availability is only a display flag on the rows we actually return, so
 	// check just this page's IDs — the unscoped variant scanned the whole media
 	// type (twice per dashboard load) to compute a set we then threw all but 20
