@@ -33,6 +33,8 @@ type Head struct {
 	// Done is closed and must only be read after observing Done, which gives
 	// readers a race-free publication edge without another mutex.
 	Err error
+	// Suspended means this same FFmpeg process is paused at the lead cap.
+	Suspended bool
 }
 
 var (
@@ -122,6 +124,12 @@ const (
 // the user may never reach.
 const LeadCapSeconds = 300.0
 
+// Keep a small number of independent viewers/generations per source. A seek
+// generation must not evict another browser that happens to be watching the
+// same file, while the cap still prevents client-supplied session IDs from
+// becoming unbounded process/cache admission.
+const maxSessionsPerFile = 4
+
 // ProgressSnapshot returns a copy of the latest ffmpeg progress block. Safe
 // for concurrent reads. UpdatedAt is the zero time when no data has arrived yet.
 func (s *TranscodeSession) ProgressSnapshot() ProgressStats {
@@ -135,6 +143,7 @@ func (s *TranscodeSession) ProgressSnapshot() ProgressStats {
 // alive; on exit it's set by the head goroutine before Done is closed.
 type HeadInfo struct {
 	Running    bool
+	Suspended  bool
 	StartSeg   int
 	CurrentSeg int
 	StopReason HeadStopReason
@@ -149,7 +158,7 @@ func (s *TranscodeSession) HeadSnapshot() HeadInfo {
 	if s.head == nil {
 		return HeadInfo{StopReason: s.headStopReason}
 	}
-	running := true
+	running := !s.head.Suspended
 	select {
 	case <-s.head.Done:
 		running = false
@@ -163,6 +172,7 @@ func (s *TranscodeSession) HeadSnapshot() HeadInfo {
 	}
 	return HeadInfo{
 		Running:    running,
+		Suspended:  s.head.Suspended,
 		StartSeg:   s.head.StartSeg,
 		CurrentSeg: cur,
 		StopReason: s.headStopReason,
@@ -317,6 +327,16 @@ func (s *TranscodeSession) EnsureSegment(ctx context.Context, idx int) error {
 		if s.closed {
 			s.mu.Unlock()
 			return ErrTranscodeSessionClosed
+		}
+		if s.head != nil && s.head.Suspended && idx > s.head.CurrentSeg {
+			if err := resumeProcess(s.head.Cmd.Process); err == nil {
+				s.head.Suspended = false
+				s.headStopReason = StopReasonRunning
+				s.progress.Running = true
+			} else {
+				log.Warn().Err(err).Str("key", s.Key).Msg("resume lead-capped transcode head")
+				s.killHead()
+			}
 		}
 		for s.needsNewHead(idx) {
 			if s.head != nil {
@@ -746,7 +766,7 @@ func (s *TranscodeSession) runHeadWatch(ctx context.Context, head *Head, cmd *ex
 			}
 			// Lead-cap throttle (fMP4 path). Mirrors the TS path above.
 			s.mu.Lock()
-			exceeded := s.headExceedsLeadCap(head)
+			exceeded := !head.Suspended && s.headExceedsLeadCap(head)
 			lastReq := s.lastRequestedSeg
 			s.mu.Unlock()
 			if exceeded {
@@ -755,9 +775,20 @@ func (s *TranscodeSession) runHeadWatch(ctx context.Context, head *Head, cmd *ex
 					Int("seg", idx).
 					Int("last_requested", lastReq).
 					Float64("lead_cap_seconds", LeadCapSeconds).
-					Msg("head exceeded lead cap, stopping")
-				s.setStopReason(head, StopReasonLeadCap)
-				head.Cancel()
+					Msg("head exceeded lead cap, pausing")
+				if err := suspendProcess(cmd.Process); err != nil {
+					log.Warn().Err(err).Str("key", s.Key).Msg("pause transcode head at lead cap; stopping instead")
+					s.setStopReason(head, StopReasonLeadCap)
+					head.Cancel()
+				} else {
+					s.mu.Lock()
+					if s.head == head {
+						head.Suspended = true
+						s.headStopReason = StopReasonLeadCap
+						s.progress.Running = false
+					}
+					s.mu.Unlock()
+				}
 			}
 
 		case <-fsErrs:
@@ -1064,16 +1095,21 @@ func (m *SessionManager) createSession(ctx context.Context, fileID int64, key, f
 		m.mu.Unlock()
 		return session
 	}
-	// Heya deliberately admits only one live HLS session per source file for
-	// now. Session IDs make segment/status routing exact, but they are supplied
-	// by the client and therefore must not silently become an unbounded ffmpeg
-	// concurrency control. A future multi-viewer implementation should replace
-	// this eviction with explicit global/per-principal admission.
+	// Admit a bounded set of viewers/generations per file. Evict only the least
+	// recently active generation after the cap is reached; opening the same
+	// movie in a second browser must not tear down the first browser's stream.
 	prefix := fmt.Sprintf("%d:", fileID)
 	var evicted []*TranscodeSession
+	var sameFile []*TranscodeSession
 	for existingKey, existing := range m.sessions {
 		if strings.HasPrefix(existingKey, prefix) {
-			delete(m.sessions, existingKey)
+			sameFile = append(sameFile, existing)
+		}
+	}
+	if len(sameFile) >= maxSessionsPerFile {
+		sort.Slice(sameFile, func(i, j int) bool { return sameFile[i].LastAccess.Before(sameFile[j].LastAccess) })
+		for _, existing := range sameFile[:len(sameFile)-maxSessionsPerFile+1] {
+			delete(m.sessions, existing.Key)
 			evicted = append(evicted, existing)
 		}
 	}

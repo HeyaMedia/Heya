@@ -25906,6 +25906,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "head_start_seconds": {
+            "format": "double",
+            "type": "number"
+          },
           "head_start_segment": {
             "format": "int64",
             "type": "integer"
@@ -25970,6 +25974,7 @@
           "total_segments",
           "ready_segments",
           "head_start_segment",
+          "head_start_seconds",
           "head_current_segment",
           "last_requested_segment",
           "lead_cap_seconds",

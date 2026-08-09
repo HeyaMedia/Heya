@@ -9,6 +9,11 @@ export interface BrowserVideoPlaybackLoadRequest {
   bearerToken?: string
 }
 
+export interface BrowserVideoPlaybackBackend extends VideoPlaybackBackend<BrowserVideoPlaybackLoadRequest> {
+  isTimeBuffered: (seconds: number) => boolean
+  trace: (kind: string, positionSeconds: number, detail?: string) => void
+}
+
 const capabilities = Object.freeze({
   backend: 'browser',
   videoSurface: 'html-media-element',
@@ -23,7 +28,7 @@ const capabilities = Object.freeze({
 // while browser/PWA playback remains the unchanged default.
 export function useBrowserVideoPlaybackBackend(
   videoRef: Ref<HTMLVideoElement | undefined>,
-): VideoPlaybackBackend<BrowserVideoPlaybackLoadRequest> {
+): BrowserVideoPlaybackBackend {
   const player = useHeyaPlayer(videoRef)
 
   const controls: VideoPlaybackControls = {
@@ -49,5 +54,7 @@ export function useBrowserVideoPlaybackBackend(
       player.loadSource(request.url, request.bearerToken)
     },
     dispose: player.destroyHLS,
+    isTimeBuffered: player.isTimeBuffered,
+    trace: player.trace,
   }
 }

@@ -3,6 +3,7 @@ package transcoder
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -314,7 +315,7 @@ func TestEnsureSegmentDoesNotRespawnAfterSessionKill(t *testing.T) {
 	assert.Nil(t, s.head, "terminal session cleanup must not be mistaken for a seek replacement")
 }
 
-func TestSessionManagerEvictsPreviousSessionForSameFile(t *testing.T) {
+func TestSessionManagerKeepsConcurrentSessionsForSameFile(t *testing.T) {
 	cache := NewCacheManager(t.TempDir(), 0)
 	manager := NewSessionManager(cache, nil, nil)
 	defer manager.Close()
@@ -326,12 +327,33 @@ func TestSessionManagerEvictsPreviousSessionForSameFile(t *testing.T) {
 	require.NotSame(t, first, second)
 	assert.NotEqual(t, first.Key, second.Key)
 	assert.NotEqual(t, first.OutputDir, second.OutputDir)
-	assert.Nil(t, manager.GetExistingSession(42, 1, "viewer-a"))
+	assert.Same(t, first, manager.GetExistingSession(42, 1, "viewer-a"))
 	assert.Same(t, second, manager.GetExistingSession(42, 1, "viewer-b"))
-	assert.ErrorIs(t, first.EnsureSegment(context.Background(), 0), ErrTranscodeSessionClosed)
-	_, err := os.Stat(first.OutputDir)
-	assert.True(t, os.IsNotExist(err))
+	assert.DirExists(t, first.OutputDir)
 	assert.DirExists(t, second.OutputDir)
+}
+
+func TestSessionManagerCapsOldGenerationsWithoutEvictingActiveViewersEarly(t *testing.T) {
+	cache := NewCacheManager(t.TempDir(), 0)
+	manager := NewSessionManager(cache, nil, nil)
+	defer manager.Close()
+
+	opts := TranscodeOpts{UseFMP4: true}
+	var sessions []*TranscodeSession
+	for i := 0; i < maxSessionsPerFile; i++ {
+		s := manager.GetOrCreate(context.Background(), 73, "/library/movie.mkv", opts, fmt.Sprintf("viewer-%d", i), 12, nil)
+		s.mu.Lock()
+		s.LastAccess = time.Now().Add(time.Duration(i-maxSessionsPerFile) * time.Minute)
+		s.mu.Unlock()
+		sessions = append(sessions, s)
+	}
+	replacement := manager.GetOrCreate(context.Background(), 73, "/library/movie.mkv", opts, "new-generation", 12, nil)
+
+	assert.Nil(t, manager.GetExistingSession(73, 0, "viewer-0"), "only the oldest generation is evicted at the cap")
+	for i := 1; i < maxSessionsPerFile; i++ {
+		assert.Same(t, sessions[i], manager.GetExistingSession(73, 0, fmt.Sprintf("viewer-%d", i)))
+	}
+	assert.Same(t, replacement, manager.GetExistingSession(73, 0, "new-generation"))
 }
 
 func TestDetachedSessionCleanupPreservesRecreatedSameKeyDirectory(t *testing.T) {
@@ -372,6 +394,7 @@ func TestSessionManagerCloseJoinsInFlightEvictionTeardown(t *testing.T) {
 		Key:        "42:a1:old",
 		OutputDir:  oldLease.Path(),
 		cacheLease: oldLease,
+		LastAccess: time.Now().Add(-time.Hour),
 		head: &Head{
 			Cancel: func() { close(cancelled) },
 			Done:   headDone,
@@ -379,6 +402,10 @@ func TestSessionManagerCloseJoinsInFlightEvictionTeardown(t *testing.T) {
 	}
 	manager.mu.Lock()
 	manager.sessions[old.Key] = old
+	for i := 0; i < maxSessionsPerFile-1; i++ {
+		key := fmt.Sprintf("42:a1:viewer-%d", i)
+		manager.sessions[key] = &TranscodeSession{Key: key, LastAccess: time.Now()}
+	}
 	manager.mu.Unlock()
 
 	createDone := make(chan struct{})

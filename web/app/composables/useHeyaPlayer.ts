@@ -1,5 +1,5 @@
 import type HlsType from 'hls.js'
-import type { VideoPlaybackDiagnostics, VideoPlaybackState } from '~/types/video-playback'
+import type { VideoPlaybackDiagnostics, VideoPlaybackState, VideoPlaybackTimelineEvent } from '~/types/video-playback'
 import { isBearerAuthToken } from '~/composables/useAuth'
 
 // HTTP outcomes that mean "the server is bouncing or forgot this session",
@@ -75,12 +75,21 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
       activeVariantIndex: -1,
       lastSegmentBytes: 0,
       lastSegmentMilliseconds: 0,
+      timeline: [],
     },
     health: {
       droppedFrames: 0,
       decodedFrames: 0,
     },
   })
+
+  const timeline: VideoPlaybackTimelineEvent[] = diagnostics.transport!.timeline!
+  let requestedSeek: number | null = null
+  let lastObservedTime = 0
+  function trace(kind: string, positionSeconds: number, detail?: string) {
+    timeline.push({ atMilliseconds: Date.now(), kind, positionSeconds, ...(detail ? { detail } : {}) })
+    if (timeline.length > 80) timeline.splice(0, timeline.length - 80)
+  }
 
   // Sample video element quality stats. Called from the metrics interval —
   // browsers update these on a frame-by-frame basis, so polling is sufficient.
@@ -101,7 +110,11 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
     state.playing = !v.paused && !v.ended
     state.paused = v.paused
     state.ended = v.ended
+    if (v.currentTime < lastObservedTime-1.5 && requestedSeek == null) {
+      trace('unexpected-backward-time', v.currentTime, `from=${lastObservedTime.toFixed(3)}`)
+    }
     state.currentTime = v.currentTime
+    lastObservedTime = v.currentTime
     state.duration = isFinite(v.duration) ? v.duration : state.duration
     state.volume = v.volume
     state.muted = v.muted
@@ -120,7 +133,13 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
   useEventListener(videoRef, 'canplay', () => { state.buffering = false; state.loading = false })
   useEventListener(videoRef, 'playing', () => { state.buffering = false; state.loading = false; state.playing = true; state.paused = false })
   useEventListener(videoRef, 'progress', syncState)
-  useEventListener(videoRef, 'seeked', () => { state.seekRevision += 1; syncState() })
+  useEventListener(videoRef, 'seeking', () => trace('media-seeking', videoRef.value?.currentTime ?? state.currentTime, requestedSeek == null ? 'browser' : `requested=${requestedSeek.toFixed(3)}`))
+  useEventListener(videoRef, 'seeked', () => {
+    trace('media-seeked', videoRef.value?.currentTime ?? state.currentTime, requestedSeek == null ? undefined : `requested=${requestedSeek.toFixed(3)}`)
+    requestedSeek = null
+    state.seekRevision += 1
+    syncState()
+  })
   useEventListener(videoRef, 'error', () => {
     const v = videoRef.value
     const e = v?.error
@@ -164,12 +183,14 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
     state.reconnecting = true
     state.buffering = true
     state.error = null
+    trace('hls-reconnect-scheduled', videoRef.value?.currentTime ?? 0, detail)
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null
       if (generation !== sourceGeneration || !hls) return
       // Resume where the element actually sits. -1 lets hls.js pick (a fresh
       // load that never reached playback has no meaningful position yet).
       const resumeAt = videoRef.value?.currentTime ?? 0
+      trace('hls-reconnect-start', resumeAt, `generation=${generation}`)
       hls.startLoad(resumeAt > 0 ? resumeAt : -1)
       videoRef.value?.play().catch(() => {})
     }, delay)
@@ -184,6 +205,7 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
     state.error = null
     state.loading = true
     state.ended = false
+    const isHLS = src.includes('.m3u8')
     // Reset diagnostics — new source, new measurements.
     diagnostics.sampledAtMilliseconds = undefined
     diagnostics.transport = {
@@ -192,14 +214,13 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
       activeVariantIndex: -1,
       lastSegmentBytes: 0,
       lastSegmentMilliseconds: 0,
+      timeline,
     }
+    trace('source-load', v.currentTime, `generation=${generation} ${isHLS ? 'hls' : 'direct'}`)
     diagnostics.health = {
       droppedFrames: 0,
       decodedFrames: 0,
     }
-
-    const isHLS = src.includes('.m3u8')
-
     // Safari can play HLS natively and never needs the half-megabyte JS
     // engine. Other browsers import hls.js only when an HLS source is
     // actually selected, keeping normal browsing out of the initial bundle.
@@ -282,6 +303,7 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
         transport.lastSegmentMilliseconds = ms
         transport.segmentsLoaded = (transport.segmentsLoaded ?? 0) + 1
         diagnostics.sampledAtMilliseconds = Date.now()
+        trace('hls-fragment', videoRef.value?.currentTime ?? 0, `sn=${String(data.frag?.sn)} start=${Number(data.frag?.start ?? 0).toFixed(3)} duration=${Number(data.frag?.duration ?? 0).toFixed(3)}`)
       })
       hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
         diagnostics.transport!.activeVariantIndex = data.level
@@ -307,7 +329,12 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
     play() { videoRef.value?.play() },
     pause() { videoRef.value?.pause() },
     togglePlay() { videoRef.value?.paused ? videoRef.value?.play() : videoRef.value?.pause() },
-    seek(time: number) { if (videoRef.value) videoRef.value.currentTime = Math.max(0, Math.min(state.duration, time)) },
+    seek(time: number) {
+      if (!videoRef.value) return
+      requestedSeek = Math.max(0, Math.min(state.duration, time))
+      trace('user-seek', state.currentTime, `to=${requestedSeek.toFixed(3)}`)
+      videoRef.value.currentTime = requestedSeek
+    },
     skip(seconds: number) { if (videoRef.value) videoRef.value.currentTime = Math.max(0, Math.min(state.duration, videoRef.value.currentTime + seconds)) },
     setVolume(v: number) { if (videoRef.value) { videoRef.value.volume = Math.max(0, Math.min(1, v)); state.volume = videoRef.value.volume } },
     toggleMute() { if (videoRef.value) { videoRef.value.muted = !videoRef.value.muted; state.muted = videoRef.value.muted } },
@@ -330,7 +357,16 @@ export function useHeyaPlayer(videoRef: Ref<HTMLVideoElement | undefined>) {
     if (metricsInterval) { clearInterval(metricsInterval); metricsInterval = null }
   })
 
-  return { state, diagnostics, controls, loadSource, destroyHLS }
+  function isTimeBuffered(time: number) {
+    const v = videoRef.value
+    if (!v) return false
+    for (let i = 0; i < v.buffered.length; i++) {
+      if (time >= v.buffered.start(i) && time <= v.buffered.end(i)) return true
+    }
+    return false
+  }
+
+  return { state, diagnostics, controls, loadSource, destroyHLS, isTimeBuffered, trace }
 }
 
 export function formatTime(s: number): string {

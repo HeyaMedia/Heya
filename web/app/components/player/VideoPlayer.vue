@@ -3,7 +3,7 @@ import { DropdownMenuItem, DropdownMenuSeparator } from 'reka-ui'
 import type { StreamAudio, StreamSubtitle, QualityOption } from '~~/shared/types'
 import type { CastStateEvent } from '~/composables/useCast'
 import type { NativeVideoPlaybackBackend } from '~/composables/useNativeVideoPlaybackBackend'
-import { isBearerAuthToken } from '~/composables/useAuth'
+import { isBearerAuthToken, withAuthHeaders } from '~/composables/useAuth'
 import { useQuery } from '@pinia/colada'
 import { playbackPreferenceQuery } from '~/queries/playback'
 import { continueWatchingQuery } from '~/queries/activity'
@@ -150,6 +150,10 @@ const controls = {
       return
     }
     if (nativeBackend.value) { void nativeBackend.value.controls.seek(time); return }
+    if (usingHLS.value && !localBackend.isTimeBuffered(time) && Math.abs(time - state.currentTime) > 2) {
+      restartBrowserHLSAt(time)
+      return
+    }
     localControls.seek(time)
   },
   skip(seconds: number) {
@@ -397,7 +401,13 @@ async function loadNativeSource(startPositionSeconds: number, mode: 'direct' | '
   usingHLS.value = mode === 'hls'
 }
 
+let browserSourceGeneration = 0
+let pendingBrowserReadyCleanup: (() => void) | null = null
+
 function loadBrowserPlayback(startPositionSeconds: number, autoplay = true) {
+  const generation = ++browserSourceGeneration
+  pendingBrowserReadyCleanup?.()
+  pendingBrowserReadyCleanup = null
   const action = streamState.streamInfo?.playback?.action
   const needsNonDefaultAudio = activeAudioIdx.value > 0
   if (action === 'direct_play' && !needsNonDefaultAudio) {
@@ -411,11 +421,25 @@ function loadBrowserPlayback(startPositionSeconds: number, autoplay = true) {
   const v = videoEl.value
   if (!v || (startPositionSeconds <= 0 && autoplay)) return
   const onReady = () => {
+    if (generation !== browserSourceGeneration) return
     if (startPositionSeconds > 0) v.currentTime = startPositionSeconds
     if (!autoplay) v.pause()
-    v.removeEventListener('canplay', onReady)
+    cleanup()
   }
+  const cleanup = () => {
+    v.removeEventListener('canplay', onReady)
+    if (pendingBrowserReadyCleanup === cleanup) pendingBrowserReadyCleanup = null
+  }
+  pendingBrowserReadyCleanup = cleanup
   v.addEventListener('canplay', onReady)
+}
+
+function restartBrowserHLSAt(position: number) {
+  const target = Math.max(0, Math.min(knownDuration.value || position, position))
+  const autoplay = state.playing
+  localBackend.trace('hls-generation-seek', state.currentTime, `to=${target.toFixed(3)} old_sid=${sessionId}`)
+  sessionId = Math.random().toString(36).slice(2, 10)
+  loadBrowserPlayback(target, autoplay)
 }
 
 async function switchToNativePlayback() {
@@ -1018,16 +1042,8 @@ function selectAudio(idx: number) {
     return
   }
   const canDirectPlay = streamState.streamInfo?.playback?.action === 'direct_play' && idx === 0
-  const url = canDirectPlay
-    ? `/api/stream/${props.fileId}`
-    : buildHLSUrl()
   usingHLS.value = !canDirectPlay
-  loadBrowserSource(url, currentBearerToken())
-  const v = videoEl.value
-  if (v) {
-    const onReady = () => { v.currentTime = currentTime; v.removeEventListener('canplay', onReady) }
-    v.addEventListener('canplay', onReady)
-  }
+  loadBrowserPlayback(currentTime, state.playing)
 }
 function selectQuality(quality: string) {
   if (quality === activeQuality.value) { showQualityMenu.value = false; return }
@@ -1046,12 +1062,7 @@ function selectQuality(quality: string) {
     return
   }
   usingHLS.value = true
-  loadBrowserSource(buildHLSUrl(), currentBearerToken())
-  const v = videoEl.value
-  if (v) {
-    const onReady = () => { v.currentTime = currentTime; v.removeEventListener('canplay', onReady) }
-    v.addEventListener('canplay', onReady)
-  }
+  loadBrowserPlayback(currentTime, state.playing)
 }
 
 function closeMenus() { showSubMenu.value = false; showAudioMenu.value = false; showQualityMenu.value = false; showCastMenu.value = false }
@@ -1192,6 +1203,24 @@ watch(() => state.playing, (playing) => {
 // Seek emits an immediate update — the user's saved resume position should
 // reflect where they actually are, not where the next 5s tick lands.
 watch(() => state.seekRevision, () => { fireProgress() })
+
+// A paused HLS element stops requesting fragments. Keep its exact transcode
+// session alive so the server does not reap it after two minutes and force a
+// new fMP4 timeline into the existing MediaSource when playback resumes.
+let pausedHLSHeartbeat: ReturnType<typeof setInterval> | null = null
+async function touchPausedHLSSession() {
+  if (!usingHLS.value || nativeBackend.value || videoCastActive.value || !state.paused) return
+  const query = new URLSearchParams({ sid: sessionId })
+  if (activeAudioIdx.value > 0) query.set('audio', String(activeAudioIdx.value))
+  const url = `/api/stream/${props.fileId}/transcode-status?${query}`
+  await fetch(url, { headers: withAuthHeaders(url) }).catch(() => {})
+}
+watch(() => [state.paused, usingHLS.value, nativePlaybackMode.value, videoCastActive.value] as const, ([paused, hls, native, castActive]) => {
+  if (pausedHLSHeartbeat) { clearInterval(pausedHLSHeartbeat); pausedHLSHeartbeat = null }
+  if (!paused || !hls || native || castActive) return
+  void touchPausedHLSSession()
+  pausedHLSHeartbeat = setInterval(() => void touchPausedHLSSession(), 45_000)
+})
 
 // --- Now-Playing presence ---
 // Heartbeats the session every 10s so the activity panel can show what
@@ -1358,6 +1387,7 @@ watch(() => state.paused, () => {
 })
 
 onUnmounted(() => {
+  if (pausedHLSHeartbeat) { clearInterval(pausedHLSHeartbeat); pausedHLSHeartbeat = null }
   if (progressTimer) { clearInterval(progressTimer); progressTimer = null }
   fireProgress()
   nowPlaying.end()

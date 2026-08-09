@@ -106,6 +106,7 @@ func registerStreamRoutes(api huma.API, app *service.App) {
 				TotalSegments:    sess.TotalSegs,
 				ReadySegments:    sess.ReadySegmentCount(),
 				HeadStartSegment: head.StartSeg,
+				HeadStartSeconds: sess.SegmentStartTime(head.StartSeg),
 				HeadCurrentSeg:   head.CurrentSeg,
 				LastRequestedSeg: sess.LastRequestedSegment(),
 				LeadCapSeconds:   transcoder.LeadCapSeconds,

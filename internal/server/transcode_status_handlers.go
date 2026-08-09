@@ -18,6 +18,7 @@ type transcodeProgressResponse struct {
 	TotalSegments    int     `json:"total_segments"`
 	ReadySegments    int     `json:"ready_segments"`
 	HeadStartSegment int     `json:"head_start_segment"`
+	HeadStartSeconds float64 `json:"head_start_seconds"`
 	HeadCurrentSeg   int     `json:"head_current_segment"`
 	LastRequestedSeg int     `json:"last_requested_segment"`
 	LeadCapSeconds   float64 `json:"lead_cap_seconds"`

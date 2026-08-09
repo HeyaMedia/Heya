@@ -78,6 +78,19 @@ const bufferAhead = computed(() => {
 
 const healthDiagnostics = computed(() => props.playerDiagnostics?.health)
 const transportDiagnostics = computed(() => props.playerDiagnostics?.transport)
+const playbackTimeline = computed(() => transportDiagnostics.value?.timeline ?? [])
+const traceCopied = ref(false)
+async function copyPlaybackTrace() {
+  const payload = JSON.stringify({
+    backend: playbackBackendLabel.value,
+    player: props.playerState,
+    transcode: props.transcodeStatus,
+    timeline: playbackTimeline.value,
+  }, null, 2)
+  await navigator.clipboard.writeText(payload)
+  traceCopied.value = true
+  setTimeout(() => { traceCopied.value = false }, 1500)
+}
 const playbackBackendLabel = computed(() => {
   switch (props.playbackBackend) {
     case 'mpv': return 'Native MPV'
@@ -105,7 +118,7 @@ const transcoderLead = computed(() => {
   const t = props.transcodeStatus
   const p = props.playerState
   if (!t || !p || !t.active) return null
-  return t.out_time_seconds - p.currentTime
+  return t.head_start_seconds + t.out_time_seconds - p.currentTime
 })
 
 const eta = computed(() => {
@@ -113,7 +126,7 @@ const eta = computed(() => {
   if (!t || !t.active || t.speed <= 0) return null
   const dur = props.streamInfo?.duration ?? 0
   if (!dur) return null
-  const remaining = Math.max(0, dur - t.out_time_seconds)
+  const remaining = Math.max(0, dur - (t.head_start_seconds + t.out_time_seconds))
   return remaining / t.speed
 })
 
@@ -259,6 +272,19 @@ function stateLabel(state: string): string {
     <!-- Detailed-only sections below -->
     <template v-if="mode === 'detailed'">
 
+      <section v-if="playbackTimeline.length" class="sip-section">
+        <div class="sip-label sip-label-action">
+          Playback trace
+          <button class="sip-copy" @click="copyPlaybackTrace">{{ traceCopied ? 'Copied' : 'Copy trace' }}</button>
+        </div>
+        <div class="sip-trace">
+          <div v-for="event in playbackTimeline.slice(-8).reverse()" :key="`${event.atMilliseconds}-${event.kind}`">
+            <span>{{ event.kind }}</span>
+            <span>{{ fmtTime(event.positionSeconds) }}<template v-if="event.detail"> · {{ event.detail }}</template></span>
+          </div>
+        </div>
+      </section>
+
       <div class="sip-divider" />
 
       <!-- Source file -->
@@ -358,7 +384,7 @@ function stateLabel(state: string): string {
           <div><span class="k">FPS</span><span class="v mono">{{ transcodeStatus.fps > 0 ? transcodeStatus.fps.toFixed(1) : '—' }}</span></div>
           <div><span class="k">Bitrate</span><span class="v mono">{{ fmtKbps(transcodeStatus.bitrate_kbps) }}</span></div>
           <div><span class="k">Frame</span><span class="v mono">{{ fmtNum(transcodeStatus.frame) }}</span></div>
-          <div><span class="k">Output</span><span class="v mono">{{ fmtSize(transcodeStatus.total_size_bytes) }} · {{ fmtTime(transcodeStatus.out_time_seconds) }}</span></div>
+          <div><span class="k">Output</span><span class="v mono">{{ fmtSize(transcodeStatus.total_size_bytes) }} · {{ fmtTime(transcodeStatus.head_start_seconds + transcodeStatus.out_time_seconds) }}</span></div>
           <div v-if="transcoderLead !== null"><span class="k">Lead</span><span class="v mono" :class="{ warn: transcodeStatus.state === 'running' && transcoderLead < 5 }">{{ transcoderLead >= 0 ? '+' : '' }}{{ transcoderLead.toFixed(1) }}s</span></div>
           <div v-if="eta !== null && transcodeStatus.state === 'running'"><span class="k">ETA full</span><span class="v mono">{{ fmtDuration(eta) }}</span></div>
           <div><span class="k">Segments</span><span class="v mono">{{ transcodeStatus.ready_segments }} / {{ transcodeStatus.total_segments }}</span></div>
@@ -381,6 +407,11 @@ function stateLabel(state: string): string {
   max-width: 520px;
 }
 .sip-compact { min-width: 320px; }
+.sip-label-action { display: flex; align-items: center; justify-content: space-between; }
+.sip-copy { border: 1px solid var(--hair); border-radius: var(--r-sm); padding: 3px 7px; background: var(--bg-3); color: var(--fg-2); font: inherit; cursor: pointer; }
+.sip-trace { display: grid; gap: 4px; max-height: 132px; overflow: auto; }
+.sip-trace > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 8px; color: var(--fg-3); }
+.sip-trace > div span:first-child { color: var(--fg-1); }
 
 .sip-header {
   display: flex;

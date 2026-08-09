@@ -34,6 +34,14 @@ export interface VideoPlaybackTransportDiagnostics {
   activeVariantIndex?: number
   lastSegmentBytes?: number
   lastSegmentMilliseconds?: number
+  timeline?: VideoPlaybackTimelineEvent[]
+}
+
+export interface VideoPlaybackTimelineEvent {
+  atMilliseconds: number
+  kind: string
+  positionSeconds: number
+  detail?: string
 }
 
 export interface VideoPlaybackVideoDiagnostics {

@@ -7403,6 +7403,7 @@ export type TranscodeProgressResponse = {
     fps: number;
     frame: number;
     head_current_segment: number;
+    head_start_seconds: number;
     head_start_segment: number;
     head_stop_reason?: string;
     last_requested_segment: number;
@@ -10489,6 +10490,7 @@ export type TranscodeProgressResponseWritable = {
     fps: number;
     frame: number;
     head_current_segment: number;
+    head_start_seconds: number;
     head_start_segment: number;
     head_stop_reason?: string;
     last_requested_segment: number;

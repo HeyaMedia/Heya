@@ -21,6 +21,7 @@ export interface TranscodeStatus {
   total_segments: number
   ready_segments: number
   head_start_segment: number
+  head_start_seconds: number
   head_current_segment: number
   last_requested_segment: number
   lead_cap_seconds: number
