@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	metadataContinuationBatch      = 100
+	metadataContinuationBatch      = 10
 	metadataContinuationAdoptBatch = 10_000
 	metadataContinuationLease      = 5 * time.Minute
 	metadataSearchRetryMinimum     = time.Minute

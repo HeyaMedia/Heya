@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -21,6 +22,13 @@ const (
 	metadataChangeConsumer = "heya-read-models"
 	metadataChangePageSize = int64(500)
 )
+
+// Metadata invalidations are durable but deliberately not interactive work.
+// Fold every upstream burst into the next wall-clock hour; foreground/view
+// refreshes use a different source and continue to run immediately.
+func nextMetadataBatchAt(now time.Time) time.Time {
+	return now.Truncate(time.Hour).Add(time.Hour)
+}
 
 type metadataChangeSource interface {
 	Changes(context.Context, int64, int64, string) (heyametadata.ChangePage, error)
@@ -72,6 +80,7 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 	}
 	pages, changes, enqueued := 0, 0, 0
 	backfillChecked := false
+	batchAt := nextMetadataBatchAt(time.Now())
 
 	for {
 		page, err := w.Source.Changes(ctx, cursor, metadataChangePageSize, streamID)
@@ -176,6 +185,7 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 					seenPeople[target.TargetID] = struct{}{}
 					args := PersonFetchArgs{PersonID: target.TargetID, EntityID: target.EntityID.String(), Force: true}
 					opts := args.InsertOpts()
+					opts.ScheduledAt = batchAt
 					jobs = append(jobs, river.InsertManyParams{Args: args, InsertOpts: &opts})
 				case "media_item":
 					if _, exists := seenMedia[target.TargetID]; exists {
@@ -184,6 +194,7 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 					seenMedia[target.TargetID] = struct{}{}
 					args := EnrichMediaItemArgs{ItemID: target.TargetID, Source: "metadata_change", Force: true}
 					opts := args.InsertOpts()
+					opts.ScheduledAt = batchAt
 					jobs = append(jobs, river.InsertManyParams{Args: args, InsertOpts: &opts})
 					mediaRefreshIDs = append(mediaRefreshIDs, target.TargetID)
 				}
@@ -227,6 +238,7 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 						ProjectionVersion: scopeVersion,
 					}
 					opts := args.InsertOpts()
+					opts.ScheduledAt = batchAt
 					jobs = append(jobs, river.InsertManyParams{Args: args, InsertOpts: &opts})
 				}
 			}
@@ -248,14 +260,14 @@ func (w *SyncMetadataChangesWorker) Work(ctx context.Context, _ *river.Job[SyncM
 				}
 			}
 			if !backfillChecked {
-				queued, backfillErr := enqueueOneMetadataBindingBackfill(ctx, tx, rc)
+				queued, backfillErr := enqueueOneMetadataBindingBackfill(ctx, tx, rc, batchAt)
 				if backfillErr != nil {
 					return backfillErr
 				}
 				if queued {
 					enqueued++
 				}
-				scopeQueued, scopeBackfillErr := enqueueMetadataScopeBackfill(ctx, tx, rc, 25)
+				scopeQueued, scopeBackfillErr := enqueueMetadataScopeBackfill(ctx, tx, rc, 25, batchAt)
 				if scopeBackfillErr != nil {
 					return scopeBackfillErr
 				}
@@ -311,7 +323,7 @@ func metadataChangeStreamUUID(value string) (pgtype.UUID, error) {
 // without recreating the retired blind staleness sweep. Absence of a binding
 // is the durable work marker; active River rows are excluded so each 30-second
 // tick advances to another item instead of piling duplicates onto a slow one.
-func enqueueOneMetadataBindingBackfill(ctx context.Context, tx pgx.Tx, rc *river.Client[pgx.Tx]) (bool, error) {
+func enqueueOneMetadataBindingBackfill(ctx context.Context, tx pgx.Tx, rc *river.Client[pgx.Tx], batchAt time.Time) (bool, error) {
 	var mediaID int64
 	err := tx.QueryRow(ctx, `
 		SELECT media.id
@@ -339,6 +351,7 @@ func enqueueOneMetadataBindingBackfill(ctx context.Context, tx pgx.Tx, rc *river
 	opts := args.InsertOpts()
 	opts.Priority = PriorityAnalysis
 	opts.UniqueOpts = uniqueWhileActive()
+	opts.ScheduledAt = batchAt
 	if _, err := rc.InsertTx(ctx, tx, args, &opts); err != nil {
 		return false, fmt.Errorf("enqueue metadata binding backfill for %d: %w", mediaID, err)
 	}
@@ -349,7 +362,7 @@ func enqueueOneMetadataBindingBackfill(ctx context.Context, tx pgx.Tx, rc *river
 // checkpoints existed, plus any projection that lagged a later parent refresh.
 // Successful empty projections have a checkpoint and naturally fall out of
 // this query. Active jobs and recently discarded River jobs suppress churn.
-func enqueueMetadataScopeBackfill(ctx context.Context, tx pgx.Tx, rc *river.Client[pgx.Tx], limit int) (int, error) {
+func enqueueMetadataScopeBackfill(ctx context.Context, tx pgx.Tx, rc *river.Client[pgx.Tx], limit int, batchAt time.Time) (int, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT binding.local_kind, binding.local_id, binding.entity_id,
 		       binding.entity_kind
@@ -392,6 +405,7 @@ func enqueueMetadataScopeBackfill(ctx context.Context, tx pgx.Tx, rc *river.Clie
 		args.Scope = metadatasync.ArtistTopTracksScope
 		opts := args.InsertOpts()
 		opts.Priority = PriorityAnalysis
+		opts.ScheduledAt = batchAt
 		jobs = append(jobs, river.InsertManyParams{Args: args, InsertOpts: &opts})
 	}
 	if err := rows.Err(); err != nil {

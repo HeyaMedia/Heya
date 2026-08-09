@@ -379,7 +379,7 @@ func Setup(ctx context.Context, cfg Config) (*river.Client[pgx.Tx], error) {
 				&river.PeriodicJobOpts{RunOnStart: false},
 			),
 			river.NewPeriodicJob(
-				river.PeriodicInterval(5*time.Second),
+				river.PeriodicInterval(30*time.Second),
 				func() (river.JobArgs, *river.InsertOpts) {
 					return MetadataContinuationSweepArgs{}, nil
 				},

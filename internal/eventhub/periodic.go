@@ -116,6 +116,9 @@ func queueSnapshotCounts(live []queueops.TaskKindCounts) (QueueStatusPayload, ma
 		if active == 0 {
 			continue
 		}
+		if row.Poll {
+			continue
+		}
 		switch row.Kind {
 		case "process_scan", "search_metadata", "fetch_metadata", "apply_metadata":
 			if row.LibraryID != 0 {

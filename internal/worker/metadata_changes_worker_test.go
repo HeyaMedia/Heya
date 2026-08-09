@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -151,8 +152,13 @@ func TestSyncMetadataChangesEnqueuesTrailingRefreshAcrossPages(t *testing.T) {
 		states = append(states, state)
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, []string{"running", "available"}, states,
+	require.Equal(t, []string{"running", "scheduled"}, states,
 		"the later page must preserve the running refresh and enqueue a trailing one before its cursor commits")
+}
+
+func TestNextMetadataBatchAtUsesNextWallClockHour(t *testing.T) {
+	now := time.Date(2026, time.August, 9, 16, 12, 34, 0, time.FixedZone("test", 2*60*60))
+	require.Equal(t, time.Date(2026, time.August, 9, 17, 0, 0, 0, now.Location()), nextMetadataBatchAt(now))
 }
 
 func TestSyncMetadataChangesKeepsProjectionVersionPerChangedScope(t *testing.T) {

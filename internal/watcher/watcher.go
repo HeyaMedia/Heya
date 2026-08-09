@@ -36,7 +36,10 @@ var (
 	generatedWriteTTL          = 2 * time.Minute
 )
 
-const maxGeneratedWriteSuppressions = 10_000
+const (
+	maxGeneratedWriteSuppressions = 10_000
+	maxPausedWatcherPaths         = 10_000
+)
 
 // watchWalkStallTimeout bounds *stalls* in the recursive directory walk when
 // arming a watcher — not total walk time. A big tree under heavy I/O pressure
@@ -59,6 +62,8 @@ type LibraryWatcher struct {
 	generation uint64
 	pauseDepth atomic.Int32
 	dirty      atomic.Bool
+	pausedMu   sync.Mutex
+	paused     map[string]fsnotify.Op
 	pendingMu  sync.Mutex
 	pending    map[string]*pendingWatcherEvent
 }
@@ -518,6 +523,7 @@ func (m *Manager) Resume(libraryID int64) {
 	type reconcileRequest struct {
 		ctx        context.Context
 		generation uint64
+		watcher    *LibraryWatcher
 	}
 	var reconciles []reconcileRequest
 
@@ -539,18 +545,33 @@ func (m *Manager) Resume(libraryID int64) {
 	for _, lw := range m.watchers {
 		if lw.libraryID == libraryID {
 			lw.pauseDepth.Store(depth)
-			if depth == 0 && lw.dirty.Swap(false) {
+			if depth == 0 {
 				ctx := lw.ctx
 				if ctx == nil {
 					ctx = context.Background()
 				}
-				reconciles = append(reconciles, reconcileRequest{ctx: ctx, generation: lw.generation})
+				reconciles = append(reconciles, reconcileRequest{ctx: ctx, generation: lw.generation, watcher: lw})
 			}
 		}
 	}
 	m.mu.Unlock()
 	for _, reconcile := range reconciles {
-		m.enqueueRescan(reconcile.ctx, libraryID, reconcile.generation)
+		lw := reconcile.watcher
+		lw.pausedMu.Lock()
+		paused := lw.paused
+		lw.paused = nil
+		lw.pausedMu.Unlock()
+		paths := make([]string, 0, len(paused))
+		for path := range paused {
+			paths = append(paths, path)
+		}
+		sort.Strings(paths)
+		for _, path := range paths {
+			m.handleEvent(reconcile.ctx, lw, fsnotify.Event{Name: path, Op: paused[path]})
+		}
+		if lw.dirty.Swap(false) {
+			m.enqueueRescan(reconcile.ctx, libraryID, reconcile.generation)
+		}
 	}
 	log.Debug().Int64("library_id", libraryID).Int32("depth", depth).Msg("watcher resumed")
 }
@@ -753,8 +774,23 @@ func (m *Manager) eventLoop(ctx context.Context, lw *LibraryWatcher) {
 				return
 			}
 			if lw.pauseDepth.Load() > 0 {
-				m.markWatcherDirty(ctx, lw)
-				continue
+				lw.pausedMu.Lock()
+				stillPaused := lw.pauseDepth.Load() > 0
+				if stillPaused {
+					if lw.paused == nil {
+						lw.paused = make(map[string]fsnotify.Op)
+					}
+					if len(lw.paused) >= maxPausedWatcherPaths {
+						clear(lw.paused)
+						lw.dirty.Store(true)
+					} else if !lw.dirty.Load() {
+						lw.paused[event.Name] |= event.Op
+					}
+				}
+				lw.pausedMu.Unlock()
+				if stillPaused {
+					continue
+				}
 			}
 			m.handleEvent(ctx, lw, event)
 
@@ -821,7 +857,7 @@ func (m *Manager) handleEvent(ctx context.Context, lw *LibraryWatcher, event fsn
 				} else {
 					log.Debug().Str("path", vfs.RedactPath(path)).Msg("watching new directory")
 				}
-				m.enqueueScannerRescan(ctx, lw.libraryID, path, lw.generation)
+				m.enqueueScannerRescan(ctx, lw.libraryID, path, lw.generation, true)
 			}
 			return
 		}
@@ -891,7 +927,7 @@ func (m *Manager) handleEvent(ctx context.Context, lw *LibraryWatcher, event fsn
 					log.Debug().Str("path", vfs.RedactPath(triggerPath)).Int64("library_id", lw.libraryID).Msg("suppressed scanner-generated sidecar event")
 					continue
 				}
-				m.enqueueScannerRescan(ctx, lw.libraryID, triggerPath, lw.generation)
+				m.enqueueScannerRescan(ctx, lw.libraryID, triggerPath, lw.generation, false)
 				return
 			}
 		})
@@ -901,6 +937,9 @@ func (m *Manager) handleEvent(ctx context.Context, lw *LibraryWatcher, event fsn
 }
 
 func (lw *LibraryWatcher) stopPendingEvents() {
+	lw.pausedMu.Lock()
+	clear(lw.paused)
+	lw.pausedMu.Unlock()
 	lw.pendingMu.Lock()
 	for key, pending := range lw.pending {
 		if pending.timer != nil {
@@ -1082,7 +1121,7 @@ func scannerScopesForTriggerPaths(lib sqlc.Library, triggerPaths []string) []str
 	return scopes
 }
 
-func (m *Manager) enqueueScannerRescan(ctx context.Context, libraryID int64, triggerPath string, generation uint64) {
+func (m *Manager) enqueueScannerRescan(ctx context.Context, libraryID int64, triggerPath string, generation uint64, directory bool) {
 	if ctx.Err() != nil || !m.generationCurrent(libraryID, generation) {
 		return
 	}
@@ -1100,10 +1139,14 @@ func (m *Manager) enqueueScannerRescan(ctx context.Context, libraryID int64, tri
 		log.Warn().Err(vfs.RedactError(err)).Int64("library_id", libraryID).Str("path", vfs.RedactPath(triggerPath)).Msg("enqueue scanner run failed: library lookup failed")
 		return
 	}
+	scope := worker.ScannerScopeForLibraryPath(lib, triggerPath)
+	if directory {
+		scope = worker.ScannerScopeForLibraryDirectory(lib, triggerPath)
+	}
 	args := worker.ProcessLibraryScanArgs{
 		LibraryID:  libraryID,
 		MediaType:  lib.MediaType,
-		ScopePaths: []string{worker.ScannerScopeForLibraryPath(lib, triggerPath)},
+		ScopePaths: []string{scope},
 	}
 	if err := worker.EnqueueProcessLibraryScan(ctx, m.river, m.db, args, worker.PriorityWatcher, ""); err != nil {
 		log.Warn().Err(vfs.RedactError(err)).Int64("library_id", libraryID).Str("path", vfs.RedactPath(triggerPath)).Msg("enqueue scanner run failed")

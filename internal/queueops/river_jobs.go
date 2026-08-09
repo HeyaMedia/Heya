@@ -238,6 +238,10 @@ func CountByKinds(ctx context.Context, db DB, kinds []string) (RuntimeCounts, er
 type TaskKindCounts struct {
 	Kind            string
 	ScheduledTaskID string
+	// Poll continuations are remote workflow waits, not active filesystem
+	// scanning. They remain visible in queue/task totals without keeping a
+	// library's scan progress indicator permanently active.
+	Poll bool
 	// LibraryID is populated only for scanner pipeline jobs. Keeping it in
 	// this same grouped snapshot lets the event hub derive per-library active
 	// counts without making a second pass over river_job.
@@ -256,6 +260,7 @@ func CountLiveByKindAndTask(ctx context.Context, db DB) ([]TaskKindCounts, error
 	rows, err := db.Query(ctx, `
 		SELECT kind,
 		       COALESCE(args->>'scheduled_task_id', '') AS scheduled_task_id,
+		       queue LIKE '%_poll' AS poll,
 		       CASE
 		         WHEN kind IN ('kickoff_library_scan', 'process_scan', 'search_metadata', 'fetch_metadata', 'apply_metadata')
 		         THEN COALESCE(NULLIF(args->>'library_id', '')::bigint, 0)
@@ -265,7 +270,7 @@ func CountLiveByKindAndTask(ctx context.Context, db DB) ([]TaskKindCounts, error
 		       count(*) FILTER (WHERE state = 'running') AS running
 		FROM river_job
 		WHERE state IN ('available', 'scheduled', 'retryable', 'running')
-		GROUP BY 1, 2, 3
+		GROUP BY 1, 2, 3, 4
 	`)
 	if err != nil {
 		return nil, err
@@ -274,7 +279,7 @@ func CountLiveByKindAndTask(ctx context.Context, db DB) ([]TaskKindCounts, error
 	var out []TaskKindCounts
 	for rows.Next() {
 		var c TaskKindCounts
-		if err := rows.Scan(&c.Kind, &c.ScheduledTaskID, &c.LibraryID, &c.Pending, &c.Running); err != nil {
+		if err := rows.Scan(&c.Kind, &c.ScheduledTaskID, &c.Poll, &c.LibraryID, &c.Pending, &c.Running); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

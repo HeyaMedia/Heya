@@ -3,7 +3,21 @@ package eventhub
 import (
 	"strings"
 	"testing"
+
+	"github.com/karbowiak/heya/internal/queueops"
 )
+
+func TestQueueSnapshotDoesNotPresentRemotePollAsDiskScan(t *testing.T) {
+	status, active, _, _ := queueSnapshotCounts([]queueops.TaskKindCounts{{
+		Kind: "fetch_metadata", LibraryID: 4, Poll: true, Pending: 9, Running: 1,
+	}})
+	if status.Pending != 9 || status.Running != 1 {
+		t.Fatalf("poll work disappeared from queue totals: %+v", status)
+	}
+	if len(active) != 0 {
+		t.Fatalf("remote poll work presented as active disk scan: %+v", active)
+	}
+}
 
 func TestRedactActiveJobArguments(t *testing.T) {
 	t.Parallel()
