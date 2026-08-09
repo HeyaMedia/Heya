@@ -7,8 +7,11 @@
 -- is what proves the episode/album isn't actually new.
 
 -- name: ListRecentlyAddedTVFiles :many
--- Newest N live TV files with the season/episode numbers the parser
--- extracted. The LATERAL takes a per-library top-N off
+-- Newest N TV file arrivals (including replaced files) with the season/episode
+-- numbers the parser extracted. Replacement history must be present so a new
+-- episode whose first file was quickly upgraded still produces one event.
+-- The service filters episodes that have no current live file. The LATERAL
+-- takes a per-library top-N off
 -- idx_library_files_library_created (a pure backward index scan per TV/anime
 -- library) instead of walking the global created_at index filtering on the
 -- joined item's type — mid music-import that walk visited 434k entries to
@@ -18,7 +21,7 @@
 -- timeline. Show descriptions are NOT carried per file row (they'd multiply
 -- a ~1KB blob by every file in the window); the service overlays them per
 -- surfaced entry via ListMediaDescriptionsByIDs below.
-SELECT r.id, r.media_item_id, r.created_at,
+SELECT r.id, r.media_item_id, r.created_at, r.deleted_at,
        mi.public_id, mi.library_id, mi.title, mi.slug,
        (COALESCE((r.parse_result->'parsed'->'release'->'seasons'->>0)::int, -1))::int AS season_number,
        -- Some parser versions wrote a bare number instead of an array for
@@ -31,9 +34,9 @@ SELECT r.id, r.media_item_id, r.created_at,
         END)::jsonb AS episode_numbers
 FROM libraries l
 CROSS JOIN LATERAL (
-  SELECT lf.id, lf.media_item_id, lf.created_at, lf.parse_result
+  SELECT lf.id, lf.media_item_id, lf.created_at, lf.deleted_at, lf.parse_result
   FROM library_files lf
-  WHERE lf.library_id = l.id AND lf.deleted_at IS NULL
+  WHERE lf.library_id = l.id
   ORDER BY lf.created_at DESC
   LIMIT NULLIF(sqlc.arg(file_window)::bigint, 0)
 ) r
@@ -92,20 +95,23 @@ JOIN tv_seasons se ON se.series_id = s.id AND se.season_number = $2
 WHERE s.media_item_id = $1;
 
 -- name: ListRecentlyAddedMusicFiles :many
--- Newest N live music files mapped through their track to the album and
--- artist. Files not yet matched to a track drop out (inner joins) — they
--- can't be attributed to an artist event yet. Per-library LATERAL top-N for
+-- Newest N music file arrivals, including replaced files, mapped through
+-- their track to the album and artist. Replacement history lets the service
+-- retain the original new-album event after a quick quality upgrade; albums
+-- without any current live file are filtered there. Files not yet matched to
+-- a track drop out (inner joins) — they can't be attributed to an artist
+-- event yet. Per-library LATERAL top-N for
 -- the same reason as ListRecentlyAddedTVFiles: the global created_at walk
 -- degrades whenever another library type dominates recent additions.
-SELECT r.created_at, r.media_item_id,
+SELECT r.created_at, r.deleted_at, r.media_item_id,
        t.album_id, al.artist_id,
        al.title AS album_title, al.slug AS album_slug,
        al.album_type
 FROM libraries l
 CROSS JOIN LATERAL (
-  SELECT lf.id, lf.created_at, lf.media_item_id
+  SELECT lf.id, lf.created_at, lf.deleted_at, lf.media_item_id
   FROM library_files lf
-  WHERE lf.library_id = l.id AND lf.deleted_at IS NULL
+  WHERE lf.library_id = l.id
   ORDER BY lf.created_at DESC
   -- 0 is the service's final uncapped fallback for genuinely deep pages;
   -- ordinary pages use a bounded window that expands only as needed.

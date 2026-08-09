@@ -55,6 +55,7 @@ type seasonEpisode struct {
 
 type recentTVFile struct {
 	createdAt time.Time
+	live      bool
 	episodes  []seasonEpisode
 }
 
@@ -95,6 +96,7 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit, offset int32) ([]R
 	}
 	shows := map[int64]*showInfo{}
 	showIDs := []int64{}
+	liveEpisodes := map[int64]map[seasonEpisode]bool{}
 	for _, r := range rows {
 		if !r.MediaItemID.Valid || r.SeasonNumber < 0 {
 			continue
@@ -110,9 +112,16 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit, offset int32) ([]R
 			shows[id] = s
 			showIDs = append(showIDs, id)
 		}
-		f := recentTVFile{createdAt: r.CreatedAt.Time}
+		f := recentTVFile{createdAt: r.CreatedAt.Time, live: !r.DeletedAt.Valid}
 		for _, e := range epNums {
-			f.episodes = append(f.episodes, seasonEpisode{season: r.SeasonNumber, episode: e})
+			ep := seasonEpisode{season: r.SeasonNumber, episode: e}
+			f.episodes = append(f.episodes, ep)
+			if f.live {
+				if liveEpisodes[id] == nil {
+					liveEpisodes[id] = map[seasonEpisode]bool{}
+				}
+				liveEpisodes[id][ep] = true
+			}
 		}
 		s.files = append(s.files, f)
 	}
@@ -157,17 +166,7 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit, offset int32) ([]R
 			// Only episodes whose first-ever file landed in this burst count
 			// as "added" — later files for a known episode are upgrades or
 			// extra versions and shouldn't resurface it.
-			newEps := map[seasonEpisode]time.Time{} // episode -> newest file time in burst
-			for _, f := range burst {
-				for _, ep := range f.episodes {
-					if first, ok := epFirst[id][ep]; ok && first.Before(burstStart) {
-						continue // existed before this burst → upgrade / extra version
-					}
-					if cur, ok := newEps[ep]; !ok || f.createdAt.After(cur) {
-						newEps[ep] = f.createdAt
-					}
-				}
-			}
+			newEps := firstLiveEpisodesInBurst(burst, epFirst[id], liveEpisodes[id])
 			if len(newEps) == 0 {
 				continue
 			}
@@ -302,6 +301,29 @@ func (a *App) ListRecentlyAddedTV(ctx context.Context, limit, offset int32) ([]R
 	return entries, nil
 }
 
+func firstLiveEpisodesInBurst(burst []recentTVFile, firstAdded map[seasonEpisode]time.Time, live map[seasonEpisode]bool) map[seasonEpisode]time.Time {
+	newEpisodes := map[seasonEpisode]time.Time{}
+	if len(burst) == 0 {
+		return newEpisodes
+	}
+	burstStart := burst[0].createdAt
+	for _, file := range burst {
+		for _, episode := range file.episodes {
+			if !live[episode] {
+				continue // the episode was added and subsequently removed
+			}
+			first, ok := firstAdded[episode]
+			if !ok || first.Before(burstStart) {
+				continue // existed before this burst → upgrade / extra version
+			}
+			// Anchor the event to the first arrival, not to a replacement
+			// that happened later in the same burst.
+			newEpisodes[episode] = first
+		}
+	}
+	return newEpisodes
+}
+
 // splitBursts cuts a show's chronologically-sorted file list wherever the
 // gap between consecutive arrivals exceeds recentBurstGap.
 func splitBursts(files []recentTVFile) [][]recentTVFile {
@@ -338,6 +360,7 @@ type RecentArtistEntry struct {
 
 type recentMusicFile struct {
 	createdAt  time.Time
+	live       bool
 	albumID    int64
 	albumTitle string
 	albumSlug  string
@@ -386,6 +409,7 @@ func (a *App) recentArtistEventsFromRows(ctx context.Context, q *sqlc.Queries, r
 	artistIDs := []int64{}
 	mediaItemIDs := []int64{}
 	albumIDSet := map[int64]bool{}
+	liveAlbums := map[int64]bool{}
 	for _, r := range rows {
 		if !r.MediaItemID.Valid {
 			continue
@@ -398,10 +422,13 @@ func (a *App) recentArtistEventsFromRows(ctx context.Context, q *sqlc.Queries, r
 			mediaItemIDs = append(mediaItemIDs, r.MediaItemID.Int64)
 		}
 		ag.files = append(ag.files, recentMusicFile{
-			createdAt: r.CreatedAt.Time, albumID: r.AlbumID,
+			createdAt: r.CreatedAt.Time, live: !r.DeletedAt.Valid, albumID: r.AlbumID,
 			albumTitle: r.AlbumTitle, albumSlug: r.AlbumSlug,
 		})
 		albumIDSet[r.AlbumID] = true
+		if !r.DeletedAt.Valid {
+			liveAlbums[r.AlbumID] = true
+		}
 	}
 	if len(artistIDs) == 0 {
 		return []RecentArtistEntry{}, nil
@@ -433,39 +460,41 @@ func (a *App) recentArtistEventsFromRows(ctx context.Context, q *sqlc.Queries, r
 	entries := map[int64]RecentArtistEntry{} // by artist id
 	for artistID, ag := range artists {
 		sort.Slice(ag.files, func(i, j int) bool { return ag.files[i].createdAt.Before(ag.files[j].createdAt) })
-		// Newest burst only — one card per artist keeps the rail readable.
-		burst := ag.files
-		for i := len(ag.files) - 1; i > 0; i-- {
-			if ag.files[i].createdAt.Sub(ag.files[i-1].createdAt) > recentBurstGap {
-				burst = ag.files[i:]
-				break
-			}
-		}
-		burstStart := burst[0].createdAt
-		threshold := burstStart.Add(-recentBurstGap)
-
-		// Albums whose first-ever file landed in this burst.
 		type albumRef struct {
 			title, slug string
 			newest      time.Time
 		}
-		newAlbums := map[int64]*albumRef{}
-		newest := time.Time{}
-		for _, f := range burst {
-			if f.createdAt.After(newest) {
-				newest = f.createdAt
+		var newAlbums map[int64]*albumRef
+		var newest, threshold time.Time
+		// Walk bursts newest-first and keep the newest one containing an actual
+		// first album arrival. A later replacement-only burst must not erase it.
+		for end := len(ag.files); end > 0 && len(newAlbums) == 0; {
+			start := end - 1
+			for start > 0 && ag.files[start].createdAt.Sub(ag.files[start-1].createdAt) <= recentBurstGap {
+				start--
 			}
-			if first, ok := albumFirst[f.albumID]; !ok || first.Before(burstStart) {
-				continue
+			burstStart := ag.files[start].createdAt
+			candidate := map[int64]*albumRef{}
+			for _, f := range ag.files[start:end] {
+				first, ok := albumFirst[f.albumID]
+				if !ok || first.Before(burstStart) || !liveAlbums[f.albumID] {
+					continue
+				}
+				if candidate[f.albumID] == nil {
+					candidate[f.albumID] = &albumRef{title: f.albumTitle, slug: f.albumSlug, newest: first}
+				}
+				if first.After(newest) {
+					newest = first
+				}
 			}
-			ref := newAlbums[f.albumID]
-			if ref == nil {
-				ref = &albumRef{title: f.albumTitle, slug: f.albumSlug}
-				newAlbums[f.albumID] = ref
+			if len(candidate) > 0 {
+				newAlbums = candidate
+				threshold = burstStart.Add(-recentBurstGap)
 			}
-			if f.createdAt.After(ref.newest) {
-				ref.newest = f.createdAt
-			}
+			end = start
+		}
+		if len(newAlbums) == 0 {
+			continue // upgrades, re-downloads, or removed albums only
 		}
 
 		e := RecentArtistEntry{ID: artistID, MediaItemID: ag.mediaItemID, AddedAt: newest}
@@ -473,9 +502,6 @@ func (a *App) recentArtistEventsFromRows(ctx context.Context, q *sqlc.Queries, r
 			e.Kind = "new"
 			e.NewAlbumCount = int32(len(newAlbums))
 		} else {
-			if len(newAlbums) == 0 {
-				continue // upgrades / re-downloads only — not an event
-			}
 			e.Kind = "updated"
 			e.NewAlbumCount = int32(len(newAlbums))
 		}

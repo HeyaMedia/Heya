@@ -217,15 +217,15 @@ func (q *Queries) ListMediaDescriptionsByIDs(ctx context.Context, ids []int64) (
 }
 
 const listRecentlyAddedMusicFiles = `-- name: ListRecentlyAddedMusicFiles :many
-SELECT r.created_at, r.media_item_id,
+SELECT r.created_at, r.deleted_at, r.media_item_id,
        t.album_id, al.artist_id,
        al.title AS album_title, al.slug AS album_slug,
        al.album_type
 FROM libraries l
 CROSS JOIN LATERAL (
-  SELECT lf.id, lf.created_at, lf.media_item_id
+  SELECT lf.id, lf.created_at, lf.deleted_at, lf.media_item_id
   FROM library_files lf
-  WHERE lf.library_id = l.id AND lf.deleted_at IS NULL
+  WHERE lf.library_id = l.id
   ORDER BY lf.created_at DESC
   -- 0 is the service's final uncapped fallback for genuinely deep pages;
   -- ordinary pages use a bounded window that expands only as needed.
@@ -239,6 +239,7 @@ WHERE l.media_type = 'music'
 
 type ListRecentlyAddedMusicFilesRow struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
 	MediaItemID pgtype.Int8        `json:"media_item_id"`
 	AlbumID     int64              `json:"album_id"`
 	ArtistID    int64              `json:"artist_id"`
@@ -247,9 +248,12 @@ type ListRecentlyAddedMusicFilesRow struct {
 	AlbumType   string             `json:"album_type"`
 }
 
-// Newest N live music files mapped through their track to the album and
-// artist. Files not yet matched to a track drop out (inner joins) — they
-// can't be attributed to an artist event yet. Per-library LATERAL top-N for
+// Newest N music file arrivals, including replaced files, mapped through
+// their track to the album and artist. Replacement history lets the service
+// retain the original new-album event after a quick quality upgrade; albums
+// without any current live file are filtered there. Files not yet matched to
+// a track drop out (inner joins) — they can't be attributed to an artist
+// event yet. Per-library LATERAL top-N for
 // the same reason as ListRecentlyAddedTVFiles: the global created_at walk
 // degrades whenever another library type dominates recent additions.
 func (q *Queries) ListRecentlyAddedMusicFiles(ctx context.Context, fileWindow int32) ([]ListRecentlyAddedMusicFilesRow, error) {
@@ -263,6 +267,7 @@ func (q *Queries) ListRecentlyAddedMusicFiles(ctx context.Context, fileWindow in
 		var i ListRecentlyAddedMusicFilesRow
 		if err := rows.Scan(
 			&i.CreatedAt,
+			&i.DeletedAt,
 			&i.MediaItemID,
 			&i.AlbumID,
 			&i.ArtistID,
@@ -282,7 +287,7 @@ func (q *Queries) ListRecentlyAddedMusicFiles(ctx context.Context, fileWindow in
 
 const listRecentlyAddedTVFiles = `-- name: ListRecentlyAddedTVFiles :many
 
-SELECT r.id, r.media_item_id, r.created_at,
+SELECT r.id, r.media_item_id, r.created_at, r.deleted_at,
        mi.public_id, mi.library_id, mi.title, mi.slug,
        (COALESCE((r.parse_result->'parsed'->'release'->'seasons'->>0)::int, -1))::int AS season_number,
        -- Some parser versions wrote a bare number instead of an array for
@@ -295,9 +300,9 @@ SELECT r.id, r.media_item_id, r.created_at,
         END)::jsonb AS episode_numbers
 FROM libraries l
 CROSS JOIN LATERAL (
-  SELECT lf.id, lf.media_item_id, lf.created_at, lf.parse_result
+  SELECT lf.id, lf.media_item_id, lf.created_at, lf.deleted_at, lf.parse_result
   FROM library_files lf
-  WHERE lf.library_id = l.id AND lf.deleted_at IS NULL
+  WHERE lf.library_id = l.id
   ORDER BY lf.created_at DESC
   LIMIT NULLIF($1::bigint, 0)
 ) r
@@ -311,6 +316,7 @@ type ListRecentlyAddedTVFilesRow struct {
 	ID             int64              `json:"id"`
 	MediaItemID    pgtype.Int8        `json:"media_item_id"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
 	PublicID       uuid.UUID          `json:"public_id"`
 	LibraryID      int64              `json:"library_id"`
 	Title          string             `json:"title"`
@@ -326,8 +332,11 @@ type ListRecentlyAddedTVFilesRow struct {
 // All "first added" queries deliberately include soft-deleted files: a
 // quality upgrade replaces the library_files row, and the old (deleted) row
 // is what proves the episode/album isn't actually new.
-// Newest N live TV files with the season/episode numbers the parser
-// extracted. The LATERAL takes a per-library top-N off
+// Newest N TV file arrivals (including replaced files) with the season/episode
+// numbers the parser extracted. Replacement history must be present so a new
+// episode whose first file was quickly upgraded still produces one event.
+// The service filters episodes that have no current live file. The LATERAL
+// takes a per-library top-N off
 // idx_library_files_library_created (a pure backward index scan per TV/anime
 // library) instead of walking the global created_at index filtering on the
 // joined item's type — mid music-import that walk visited 434k entries to
@@ -350,6 +359,7 @@ func (q *Queries) ListRecentlyAddedTVFiles(ctx context.Context, fileWindow int64
 			&i.ID,
 			&i.MediaItemID,
 			&i.CreatedAt,
+			&i.DeletedAt,
 			&i.PublicID,
 			&i.LibraryID,
 			&i.Title,
