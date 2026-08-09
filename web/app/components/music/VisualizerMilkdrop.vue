@@ -62,6 +62,32 @@ let holdsContextWake = false
 let presetKeys: string[] = []
 let presetIndex = 0
 
+type ButterchurnApi = {
+  createVisualizer(
+    ctx: AudioContext,
+    canvas: HTMLCanvasElement,
+    opts: { width: number; height: number },
+  ): Visualizer
+}
+
+// butterchurn is a webpack-built UMD package whose CommonJS export already
+// contains a `default`. Vite may add another default wrapper when importing it,
+// so the browser shape can be either { default: API } or
+// { default: { default: API } } depending on how the chunk was optimized.
+function resolveButterchurnApi(mod: unknown): ButterchurnApi {
+  let candidate = mod
+  for (let depth = 0; depth < 4; depth++) {
+    if (candidate && typeof candidate === 'object') {
+      const record = candidate as Record<string, unknown>
+      if (typeof record.createVisualizer === 'function') return candidate as ButterchurnApi
+      candidate = record.default ?? record.butterchurn
+      continue
+    }
+    break
+  }
+  throw new TypeError('butterchurn module does not export createVisualizer')
+}
+
 // Native-backend only: a locally-owned AudioContext (butterchurn's
 // constructor requires one to exist, purely to spin up its own internal,
 // never-connected analyser nodes — it's not routed to anything) plus the
@@ -259,7 +285,7 @@ onMounted(async () => {
     ])
     if (cancelled) return
 
-    const butterchurn = bcMod.default ?? bcMod
+    const butterchurn = resolveButterchurnApi(bcMod)
     // Each pack ships as either a flat name→preset Record or an object exposing
     // getPresets(); normalize both, then spread-merge (later packs win on any
     // duplicate name — harmless, same preset).
