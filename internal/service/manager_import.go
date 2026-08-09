@@ -387,21 +387,21 @@ func (a *App) managerImportTarget(ctx context.Context, prep *preparedManagerImpo
 		if facts["medium:00"] != "01" {
 			template = naming.MusicMulti
 		}
-		var paths []string
-		if err := a.db.QueryRow(ctx, `SELECT paths FROM libraries WHERE id = $1`, prep.item.MatchedLibrary).Scan(&paths); err != nil {
-			return "", err
-		}
-		root = filepath.Clean(paths[0])
-		settings, _ := a.GetLibrarySettings(ctx, prep.item.MatchedLibrary)
-		if settings.DefaultImportPath != "" && libraryContainsPath(paths, settings.DefaultImportPath) {
-			root = filepath.Clean(settings.DefaultImportPath)
-		}
+		// prepareManagerImport has already resolved prep.dest through the matched
+		// artist's live files. Keep that artist directory as the base for the
+		// Lidarr-style album/track template instead of resetting to the library
+		// root (which would discard disambiguated existing artist folders).
+		root = musicImportArtistRoot(prep.dest)
 	}
 	rendered := sanitizeImportRelativePath(renderManagerFilename(template, facts))
 	if rendered == "" {
 		return "", errors.New("file naming template rendered an empty path")
 	}
 	return checkedImportDestination(root, filepath.Join(root, rendered+ext))
+}
+
+func musicImportArtistRoot(albumDestination string) string {
+	return filepath.Dir(filepath.Clean(albumDestination))
 }
 
 func firstNamingCharacter(value string) string {

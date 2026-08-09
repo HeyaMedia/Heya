@@ -27,3 +27,9 @@ func TestExistingMusicAlbumDir(t *testing.T) {
 	}
 	require.Equal(t, want, existingMusicAlbumDir(paths, artist, "emails i can't send", "2022"))
 }
+
+func TestMusicImportArtistRootPreservesExistingDisambiguatedFolder(t *testing.T) {
+	artist := "/storage/Music/Catscan (Dutch hardcore DJ, real name Bart Kok)"
+	album := artist + "/Gravedigger (2025)"
+	require.Equal(t, artist, musicImportArtistRoot(album))
+}
