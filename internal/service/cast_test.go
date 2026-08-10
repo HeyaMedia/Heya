@@ -76,4 +76,31 @@ func TestCastVideoCanDirectUsesConservativeBaseline(t *testing.T) {
 	if castVideoCanDirect(hdr, "/media/movie.mp4", 0) {
 		t.Fatal("HDR should use HLS so Heya can tone-map for the baseline receiver")
 	}
+
+	dimensions := base
+	dimensions.Streams = append([]mediaprobe.StreamInfo(nil), base.Streams...)
+	dimensions.Streams[0].Width, dimensions.Streams[0].Height = 3840, 2160
+	if castVideoCanDirect(dimensions, "/media/movie.mp4", 0) {
+		t.Fatal("4K should not be sent as universal direct play")
+	}
+
+	highRate := base
+	highRate.Streams = append([]mediaprobe.StreamInfo(nil), base.Streams...)
+	highRate.Streams[0].AvgFrameRate = "60000/1001"
+	if castVideoCanDirect(highRate, "/media/movie.mp4", 0) {
+		t.Fatal("1080p60 should not be sent as universal direct play")
+	}
+
+	hevc.Streams[0].CodecTagString = "hvc1"
+	if !castVideoCanOptimisticDirect(hevc, "/media/movie.mp4", 0) {
+		t.Fatal("browser Cast should optimistically try HEVC MP4")
+	}
+	if castVideoCanOptimisticDirect(hevc, "/media/movie.mp4", 1) {
+		t.Fatal("alternate audio selection must use HLS")
+	}
+	base.Streams[0].Profile, base.Streams[0].Level = "High", 41
+	base.Container = "mov,mp4,m4a,3gp,3g2,mj2"
+	if got := castVideoContentType(base, 0); got != `video/mp4; codecs="avc1.640029, mp4a.40.2"` {
+		t.Fatalf("Cast content type = %q", got)
+	}
 }

@@ -345,8 +345,10 @@ export const useCastStore = defineStore('cast', () => {
       connecting.value = true
       lastRequestedMediaKey = `audio:${trackId}`
       try {
-        const grant = await ($heya as any)('/api/cast/browser/media', { method: 'POST', body: { origin: location.origin, track_id: trackId } })
-        const remote = await useBrowserCast().load(grant, startSeconds, true)
+        const grantBody = { origin: location.origin, track_id: trackId }
+        const grant = await ($heya as any)('/api/cast/browser/media', { method: 'POST', body: grantBody })
+        const fallback = grant.direct_play ? async () => await ($heya as any)('/api/cast/browser/media', { method: 'POST', body: { ...grantBody, fallback: true } }) : undefined
+        const remote = await useBrowserCast().load(grant, startSeconds, true, fallback)
         const snap: CastSession = { id: `browser:${Date.now()}`, device_id: deviceId, device_name: remote.name, user_id: 0, state: remote.state || 'starting', media_kind: 'audio', track_id: trackId, title: grant.title, artist: grant.artist, album: grant.album, duration_sec: grant.duration_sec, position_sec: startSeconds, volume: remote.volume }
         session.value = snap; lastDeviceVolume.value = snap.volume; samplePosition(startSeconds); ownsPlayback = true
         return snap
@@ -405,7 +407,8 @@ export const useCastStore = defineStore('cast', () => {
         const body: Record<string, unknown> = { origin: location.origin, file_id: String(input.fileId), entity_type: input.entityType, entity_id: input.entityId, title: input.title ?? '', audio_track: input.audioTrack ?? 0, quality: input.quality ?? 'auto' }
         if (input.subtitleTrack != null) body.subtitle_track = input.subtitleTrack
         const grant = await ($heya as any)('/api/cast/browser/media', { method: 'POST', body })
-        const remote = await useBrowserCast().load(grant, input.startSeconds ?? 0, !(input.startPaused ?? false))
+        const fallback = grant.direct_play ? async () => await ($heya as any)('/api/cast/browser/media', { method: 'POST', body: { ...body, fallback: true } }) : undefined
+        const remote = await useBrowserCast().load(grant, input.startSeconds ?? 0, !(input.startPaused ?? false), fallback)
         const snap: CastSession = { id: `browser:${Date.now()}`, device_id: deviceId, device_name: remote.name, user_id: 0, state: remote.state || 'starting', media_kind: 'video', file_id: String(input.fileId), media_item_id: input.mediaItemId, entity_type: input.entityType, entity_id: input.entityId, title: grant.title, audio_track: input.audioTrack ?? 0, subtitle_track: input.subtitleTrack, quality: input.quality ?? 'auto', duration_sec: grant.duration_sec, position_sec: input.startSeconds ?? 0, volume: remote.volume }
         session.value = snap; lastVideoSession = snap; samplePosition(snap.position_sec); ownsPlayback = true
         return snap

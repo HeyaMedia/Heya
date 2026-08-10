@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -686,6 +687,9 @@ func castVideoCanDirect(info mediaprobe.MediaInfo, path string, audioTrack int) 
 	if video == nil || !strings.EqualFold(video.CodecName, "h264") {
 		return false
 	}
+	if video.Width > 1920 || video.Height > 1080 || video.Level > 41 || castFrameRate(video) > 30.01 {
+		return false
+	}
 	pixFmt := strings.ToLower(video.PixFmt)
 	profile := strings.ToLower(video.Profile)
 	if strings.Contains(pixFmt, "10") || strings.Contains(pixFmt, "12") || strings.Contains(profile, "10") {
@@ -704,6 +708,159 @@ func castVideoCanDirect(info mediaprobe.MediaInfo, path string, audioTrack int) 
 		}
 	}
 	return audio == nil || strings.EqualFold(audio.CodecName, "aac")
+}
+
+// Browser casting can optimistically try formats supported by newer Cast
+// generations. A failed LOAD is retried once using castVideoCanDirect's
+// universal H.264/AAC profile.
+func castVideoCanOptimisticDirect(info mediaprobe.MediaInfo, path string, audioTrack int) bool {
+	// Direct files cannot ask the Default Media Receiver to choose a different
+	// embedded audio stream. Alternate selections must go through HLS.
+	if audioTrack != 0 {
+		return false
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext != ".mp4" && ext != ".m4v" && ext != ".webm" {
+		return false
+	}
+	var video *mediaprobe.StreamInfo
+	var audios []*mediaprobe.StreamInfo
+	for i := range info.Streams {
+		s := &info.Streams[i]
+		if s.CodecType == "video" && video == nil {
+			video = s
+		}
+		if s.CodecType == "audio" {
+			audios = append(audios, s)
+		}
+	}
+	if video == nil || audioTrack < 0 || audioTrack >= max(1, len(audios)) {
+		return false
+	}
+	videoCodec := strings.ToLower(video.CodecName)
+	if ext == ".webm" {
+		if videoCodec != "vp8" && videoCodec != "vp9" && videoCodec != "av1" {
+			return false
+		}
+	} else if videoCodec != "h264" && videoCodec != "hevc" && videoCodec != "h265" && videoCodec != "vp9" && videoCodec != "av1" {
+		return false
+	}
+	if len(audios) == 0 {
+		return true
+	}
+	audioCodec := strings.ToLower(audios[audioTrack].CodecName)
+	if ext == ".webm" {
+		return audioCodec == "opus" || audioCodec == "vorbis"
+	}
+	return audioCodec == "aac" || audioCodec == "mp3" || audioCodec == "ac3" || audioCodec == "eac3" || audioCodec == "opus"
+}
+
+func castFrameRate(stream *mediaprobe.StreamInfo) float64 {
+	raw := stream.AvgFrameRate
+	if raw == "" || raw == "0/0" {
+		raw = stream.RFrameRate
+	}
+	n, d, ok := strings.Cut(raw, "/")
+	if !ok {
+		value, _ := strconv.ParseFloat(raw, 64)
+		return value
+	}
+	num, _ := strconv.ParseFloat(n, 64)
+	den, _ := strconv.ParseFloat(d, 64)
+	if den == 0 {
+		return 0
+	}
+	return num / den
+}
+
+func castVideoContentType(info mediaprobe.MediaInfo, audioTrack int) string {
+	container := "video/mp4"
+	if strings.Contains(strings.ToLower(info.Container), "webm") {
+		container = "video/webm"
+	}
+	var codecs []string
+	var audioIndex int
+	for i := range info.Streams {
+		s := &info.Streams[i]
+		switch s.CodecType {
+		case "video":
+			if len(codecs) == 0 {
+				codecs = append(codecs, castVideoCodecString(s))
+			}
+		case "audio":
+			if audioIndex == audioTrack {
+				codecs = append(codecs, castAudioCodecString(s.CodecName))
+			}
+			audioIndex++
+		}
+	}
+	clean := codecs[:0]
+	for _, codec := range codecs {
+		if codec != "" {
+			clean = append(clean, codec)
+		}
+	}
+	if len(clean) == 0 {
+		return container
+	}
+	return fmt.Sprintf(`%s; codecs="%s"`, container, strings.Join(clean, ", "))
+}
+
+func castVideoCodecString(s *mediaprobe.StreamInfo) string {
+	switch strings.ToLower(s.CodecName) {
+	case "h264":
+		profile := "42"
+		constraints := "E0"
+		switch strings.ToLower(s.Profile) {
+		case "main":
+			profile = "4D"
+			constraints = "40"
+		case "high":
+			profile = "64"
+			constraints = "00"
+		case "high 10", "high 10 intra":
+			profile = "6E"
+			constraints = "00"
+		}
+		if s.Level > 0 {
+			return fmt.Sprintf("avc1.%s%s%02X", profile, constraints, s.Level)
+		}
+		return "avc1"
+	case "hevc", "h265":
+		if tag := strings.ToLower(s.CodecTagString); tag == "hvc1" || tag == "hev1" {
+			return tag
+		}
+		return "hev1"
+	case "vp8":
+		return "vp8"
+	case "vp9":
+		return "vp9"
+	case "av1":
+		return "av01"
+	}
+	return ""
+}
+
+func castAudioCodecString(codec string) string {
+	switch strings.ToLower(codec) {
+	case "aac":
+		return "mp4a.40.2"
+	case "mp3":
+		return "mp3"
+	case "ac3":
+		return "ac-3"
+	case "eac3":
+		return "ec-3"
+	case "opus":
+		return "opus"
+	case "vorbis":
+		return "vorbis"
+	}
+	return ""
+}
+
+func castVideoProfileKey(info mediaprobe.MediaInfo, audioTrack int) string {
+	return strings.ToLower(castVideoContentType(info, audioTrack))
 }
 
 func (a *App) castTrackInfo(ctx context.Context, trackID int64, provider string) (cast.TrackInfo, error) {
@@ -758,12 +915,14 @@ type BrowserCastMedia struct {
 	Album       string              `json:"album,omitempty"`
 	Duration    int                 `json:"duration_sec,omitempty"`
 	TextTrack   *cast.TextTrackInfo `json:"text_track,omitempty"`
+	DirectPlay  bool                `json:"direct_play"`
+	ProfileKey  string              `json:"profile_key,omitempty"`
 }
 
 // BrowserCastTrack grants an authenticated user a path-scoped URL for a
 // Chromecast selected by Chrome on that user's LAN. Shared cast permission is
 // deliberately irrelevant; no server-side receiver is exposed or controlled.
-func (a *App) BrowserCastTrack(ctx context.Context, userID, trackID int64, origin string) (BrowserCastMedia, error) {
+func (a *App) BrowserCastTrack(ctx context.Context, userID, trackID int64, origin string, fallback bool) (BrowserCastMedia, error) {
 	if a.castMgr == nil {
 		return BrowserCastMedia{}, fmt.Errorf("casting unavailable")
 	}
@@ -774,14 +933,18 @@ func (a *App) BrowserCastTrack(ctx context.Context, userID, trackID int64, origi
 	if err != nil {
 		return BrowserCastMedia{}, err
 	}
+	if fallback {
+		info.PullQuery = "quality=aac-256"
+		info.ContentType = `audio/mp4; codecs="mp4a.40.2"`
+	}
 	mediaURL, err := a.castMgr.BrowserMediaURL(origin, userID, info)
 	if err != nil {
 		return BrowserCastMedia{}, err
 	}
-	return BrowserCastMedia{URL: mediaURL, ContentType: info.ContentType, MediaKind: "audio", TrackID: info.TrackID, Title: info.Title, Artist: info.Artist, Album: info.Album, Duration: info.Duration}, nil
+	return BrowserCastMedia{URL: mediaURL, ContentType: info.ContentType, MediaKind: "audio", TrackID: info.TrackID, Title: info.Title, Artist: info.Artist, Album: info.Album, Duration: info.Duration, DirectPlay: !fallback, ProfileKey: "audio:" + info.ContentType}, nil
 }
 
-func (a *App) BrowserCastVideo(ctx context.Context, userID int64, origin, fileRef, entityType string, entityID int64, title string, audioTrack int, subtitleTrack *int, quality string) (BrowserCastMedia, error) {
+func (a *App) BrowserCastVideo(ctx context.Context, userID int64, origin, fileRef, entityType string, entityID int64, title string, audioTrack int, subtitleTrack *int, quality string, fallback bool) (BrowserCastMedia, error) {
 	if a.castMgr == nil {
 		return BrowserCastMedia{}, fmt.Errorf("casting unavailable")
 	}
@@ -857,8 +1020,9 @@ func (a *App) BrowserCastVideo(ctx context.Context, userID int64, origin, fileRe
 		info.TextTrack = &cast.TextTrackInfo{SelectionIndex: *subtitleTrack, StreamIndex: selectedSubtitle.Index, TrackID: 1, Name: name, Language: strings.TrimSpace(selectedSubtitle.Tags["language"]), PullPath: fmt.Sprintf("%s/subtitles/%d", root, selectedSubtitle.Index)}
 		info.PullScopePath = root
 	}
-	if info.Quality == "auto" && castVideoCanDirect(mediaInfo, file.Path, audioTrack) {
-		info.PullPath, info.ContentType = root, "video/mp4"
+	direct := !fallback && info.Quality == "auto" && castVideoCanOptimisticDirect(mediaInfo, file.Path, audioTrack)
+	if direct {
+		info.PullPath, info.ContentType = root, castVideoContentType(mediaInfo, audioTrack)
 	} else {
 		if a.TranscoderSessions() == nil {
 			return BrowserCastMedia{}, fmt.Errorf("cast: this video needs HLS delivery but transcoding is unavailable")
@@ -884,7 +1048,7 @@ func (a *App) BrowserCastVideo(ctx context.Context, userID int64, origin, fileRe
 		}
 		info.TextTrack.URL = trackURL
 	}
-	return BrowserCastMedia{URL: mediaURL, ContentType: info.ContentType, MediaKind: "video", FileID: info.FileID, Title: info.Title, Duration: info.Duration, TextTrack: info.TextTrack}, nil
+	return BrowserCastMedia{URL: mediaURL, ContentType: info.ContentType, MediaKind: "video", FileID: info.FileID, Title: info.Title, Duration: info.Duration, TextTrack: info.TextTrack, DirectPlay: direct, ProfileKey: castVideoProfileKey(mediaInfo, audioTrack)}, nil
 }
 
 var chromecastAudioCaps = transcoder.AudioCaps{

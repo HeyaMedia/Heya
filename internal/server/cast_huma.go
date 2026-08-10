@@ -49,6 +49,7 @@ func registerCastRoutes(api huma.API, app *service.App) {
 				AudioTrack    int    `json:"audio_track,omitempty" minimum:"0"`
 				SubtitleTrack *int   `json:"subtitle_track,omitempty" minimum:"0"`
 				Quality       string `json:"quality,omitempty" maxLength:"24"`
+				Fallback      bool   `json:"fallback,omitempty" doc:"Force the conservative H.264/AAC or AAC retry after a receiver rejects direct play"`
 			}
 		}) (*JSONOutput[service.BrowserCastMedia], error) {
 			userID := userFrom(ctx).ID
@@ -56,9 +57,9 @@ func registerCastRoutes(api huma.API, app *service.App) {
 			var err error
 			switch {
 			case in.Body.TrackID > 0 && in.Body.FileID == "":
-				media, err = app.BrowserCastTrack(ctx, userID, in.Body.TrackID, in.Body.Origin)
+				media, err = app.BrowserCastTrack(ctx, userID, in.Body.TrackID, in.Body.Origin, in.Body.Fallback)
 			case in.Body.FileID != "" && in.Body.TrackID == 0:
-				media, err = app.BrowserCastVideo(ctx, userID, in.Body.Origin, in.Body.FileID, in.Body.EntityType, in.Body.EntityID, in.Body.Title, in.Body.AudioTrack, in.Body.SubtitleTrack, in.Body.Quality)
+				media, err = app.BrowserCastVideo(ctx, userID, in.Body.Origin, in.Body.FileID, in.Body.EntityType, in.Body.EntityID, in.Body.Title, in.Body.AudioTrack, in.Body.SubtitleTrack, in.Body.Quality, in.Body.Fallback)
 			default:
 				return nil, huma.Error422UnprocessableEntity("provide exactly one of track_id or file_id")
 			}

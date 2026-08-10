@@ -2,12 +2,14 @@
 // the control channel; Heya only supplies narrowly scoped media URLs.
 const BROWSER_CAST_DEVICE_ID = 'browser:chromecast'
 const CAST_SDK = 'https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1'
+const OBSERVATION_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
 type BrowserCastListener = (event: 'state' | 'ended' | 'failed') => void
 let sdkPromise: Promise<boolean> | null = null
 let listener: BrowserCastListener | null = null
 let mediaSession: any = null
 let stopping = false
+let loadGeneration = 0
 
 function castWindow(): any { return window as any }
 
@@ -61,8 +63,24 @@ export function useBrowserCast() {
     return session()?.getCastDevice?.().friendlyName || 'Nearby Chromecast'
   }
 
-  async function load(grant: any, startSeconds = 0, autoplay = true) {
+  async function load(grant: any, startSeconds = 0, autoplay = true, fallback?: () => Promise<any>) {
     stopping = false
+    const generation = ++loadGeneration
+    const compatibilityKey = grant.direct_play && grant.profile_key ? observedKey(grant.profile_key) : ''
+    if (compatibilityKey && observedFailureIsFresh(compatibilityKey) && fallback) {
+      grant = await fallback()
+      fallback = undefined
+    }
+    try {
+      return await loadOne(grant, startSeconds, autoplay, generation, compatibilityKey, fallback)
+    } catch (error) {
+      if (!fallback) throw error
+      if (compatibilityKey) localStorage.setItem(compatibilityKey, String(Date.now()))
+      return await loadOne(await fallback(), startSeconds, autoplay, generation, '', undefined)
+    }
+  }
+
+  async function loadOne(grant: any, startSeconds: number, autoplay: boolean, generation: number, compatibilityKey: string, fallback?: () => Promise<any>) {
     const w = castWindow()
     const castSession = session()
     if (!castSession) throw new Error('Choose a Chromecast first')
@@ -85,17 +103,43 @@ export function useBrowserCast() {
     request.currentTime = Math.max(0, startSeconds)
     request.autoplay = autoplay
     if (grant.text_track?.url) request.activeTrackIds = [1]
-    mediaSession = await castSession.loadMedia(request)
-    mediaSession.addUpdateListener((alive: boolean) => {
+    const loaded = await castSession.loadMedia(request)
+    mediaSession = loaded
+    loaded.addUpdateListener((alive: boolean) => {
+      if (generation !== loadGeneration) return
       if (!alive) {
         if (stopping) { stopping = false; mediaSession = null; return }
-        const idle = mediaSession?.idleReason
-        listener?.(idle === w.chrome.cast.media.IdleReason.FINISHED ? 'ended' : 'failed')
-        mediaSession = null
-      } else listener?.('state')
+        const idle = loaded.idleReason
+        if (idle === w.chrome.cast.media.IdleReason.FINISHED) listener?.('ended')
+        else if (fallback) {
+          const retry = fallback
+          fallback = undefined
+          if (compatibilityKey) localStorage.setItem(compatibilityKey, String(Date.now()))
+          const position = Number(loaded.currentTime || startSeconds)
+          retry().then(next => loadOne(next, position, autoplay, generation, '', undefined)).catch(() => listener?.('failed'))
+        } else listener?.('failed')
+        if (mediaSession === loaded) mediaSession = null
+      } else {
+        if (compatibilityKey && String(loaded.playerState) === w.chrome.cast.media.PlayerState.PLAYING) {
+          localStorage.removeItem(compatibilityKey)
+        }
+        listener?.('state')
+      }
     })
     listener?.('state')
     return snapshot()
+  }
+
+  function observedKey(profile: string) {
+    const id = session()?.getCastDevice?.().deviceId || session()?.getCastDevice?.().friendlyName || 'receiver'
+    return `heya.cast.compat.v1:${id}:${profile}`
+  }
+
+  function observedFailureIsFresh(key: string) {
+    const failedAt = Number(localStorage.getItem(key) || 0)
+    if (failedAt > 0 && Date.now() - failedAt < OBSERVATION_TTL_MS) return true
+    localStorage.removeItem(key)
+    return false
   }
 
   function snapshot() {
