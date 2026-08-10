@@ -1,6 +1,7 @@
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import type { MediaDetail, StreamInfoResponse } from '~~/shared/types'
 import { withAuthHeaders } from '~/composables/useAuth'
+import { BROWSER_CAST_DEVICE_ID, browserCastSupported, useBrowserCast } from '~/composables/useBrowserCast'
 
 // Server-side casting (docs/cast-plan.md Phase 2). The SERVER is the player:
 // it pushes or exposes scoped media to the receiver and owns the session; this store is the
@@ -191,6 +192,7 @@ export const useCastStore = defineStore('cast', () => {
 
   async function refreshDevices() {
     const { $heya } = useNuxtApp()
+    if (browserCastSupported()) void useBrowserCast().initialize()
     // HeyaConnect devices are user-private and independent of server-side
     // casting permission. Fetch the two sources separately so a 403 from the
     // cast allowlist never hides the user's own Heya clients.
@@ -210,6 +212,7 @@ export const useCastStore = defineStore('cast', () => {
     devices.value = [
       ...clients.filter(d => d.id !== clientDeviceID()).map(d => normalizeClientDevice({ ...d, provider: 'client' })),
       ...castDevices,
+      ...(browserCastSupported() ? [{ id: BROWSER_CAST_DEVICE_ID, provider: 'browser', name: 'Nearby Chromecast', capabilities: ['audio', 'video'] }] : []),
     ]
     devicesLoaded.value = true
     const selectedClient = devices.value.find(d => d.id === engagedDeviceId.value && d.provider === 'client')
@@ -217,6 +220,7 @@ export const useCastStore = defineStore('cast', () => {
   }
 
   const isClientDevice = computed(() => engagedDeviceId.value?.startsWith('client:') ?? false)
+  const isBrowserDevice = computed(() => engagedDeviceId.value === BROWSER_CAST_DEVICE_ID)
 
   function normalizeClientDevice(device: CastDevice): CastDevice {
     const declared = device.capabilities ?? []
@@ -336,6 +340,18 @@ export const useCastStore = defineStore('cast', () => {
   async function playTrack(trackId: number, fallbackVolume: number, startSeconds = 0) {
     const deviceId = engagedDeviceId.value
     if (!deviceId) throw new Error('no cast device engaged')
+    if (deviceId === BROWSER_CAST_DEVICE_ID) {
+      const { $heya } = useNuxtApp()
+      connecting.value = true
+      lastRequestedMediaKey = `audio:${trackId}`
+      try {
+        const grant = await ($heya as any)('/api/cast/browser/media', { method: 'POST', body: { origin: location.origin, track_id: trackId } })
+        const remote = await useBrowserCast().load(grant, startSeconds, true)
+        const snap: CastSession = { id: `browser:${Date.now()}`, device_id: deviceId, device_name: remote.name, user_id: 0, state: remote.state || 'starting', media_kind: 'audio', track_id: trackId, title: grant.title, artist: grant.artist, album: grant.album, duration_sec: grant.duration_sec, position_sec: startSeconds, volume: remote.volume }
+        session.value = snap; lastDeviceVolume.value = snap.volume; samplePosition(startSeconds); ownsPlayback = true
+        return snap
+      } finally { connecting.value = false }
+    }
     if (deviceId.startsWith('client:')) {
       await clientCommand('play', { track_id: trackId, position_seconds: startSeconds })
       return
@@ -381,6 +397,20 @@ export const useCastStore = defineStore('cast', () => {
   }) {
     const deviceId = engagedDeviceId.value
     if (!deviceId) throw new Error('no cast device engaged')
+    if (deviceId === BROWSER_CAST_DEVICE_ID) {
+      const { $heya } = useNuxtApp()
+      connecting.value = true
+      lastRequestedMediaKey = `video:${String(input.fileId)}:${input.entityType}:${input.entityId}`
+      try {
+        const body: Record<string, unknown> = { origin: location.origin, file_id: String(input.fileId), entity_type: input.entityType, entity_id: input.entityId, title: input.title ?? '', audio_track: input.audioTrack ?? 0, quality: input.quality ?? 'auto' }
+        if (input.subtitleTrack != null) body.subtitle_track = input.subtitleTrack
+        const grant = await ($heya as any)('/api/cast/browser/media', { method: 'POST', body })
+        const remote = await useBrowserCast().load(grant, input.startSeconds ?? 0, !(input.startPaused ?? false))
+        const snap: CastSession = { id: `browser:${Date.now()}`, device_id: deviceId, device_name: remote.name, user_id: 0, state: remote.state || 'starting', media_kind: 'video', file_id: String(input.fileId), media_item_id: input.mediaItemId, entity_type: input.entityType, entity_id: input.entityId, title: grant.title, audio_track: input.audioTrack ?? 0, subtitle_track: input.subtitleTrack, quality: input.quality ?? 'auto', duration_sec: grant.duration_sec, position_sec: input.startSeconds ?? 0, volume: remote.volume }
+        session.value = snap; lastVideoSession = snap; samplePosition(snap.position_sec); ownsPlayback = true
+        return snap
+      } finally { connecting.value = false }
+    }
     if (deviceId.startsWith('client:')) {
       const device = devices.value.find(d => d.id === deviceId)
       connecting.value = true
@@ -510,6 +540,10 @@ export const useCastStore = defineStore('cast', () => {
   }
 
   async function pause() {
+    if (isBrowserDevice.value) {
+      samplePosition(livePositionSec()); if (session.value) session.value = { ...session.value, state: 'paused' }
+      await useBrowserCast().pause(); return
+    }
     if (isClientDevice.value) {
       if (session.value) {
         samplePosition(livePositionSec())
@@ -529,6 +563,10 @@ export const useCastStore = defineStore('cast', () => {
   }
 
   async function resume() {
+    if (isBrowserDevice.value) {
+      if (session.value) session.value = { ...session.value, state: 'playing' }
+      samplePosition(session.value?.position_sec ?? 0); await useBrowserCast().resume(); return
+    }
     if (isClientDevice.value) {
       if (session.value) session.value = { ...session.value, state: 'playing' }
       samplePosition(session.value?.position_sec ?? 0)
@@ -546,6 +584,10 @@ export const useCastStore = defineStore('cast', () => {
   }
 
   async function seekTo(seconds: number) {
+    if (isBrowserDevice.value) {
+      samplePosition(seconds); if (session.value) session.value = { ...session.value, position_sec: seconds }
+      await useBrowserCast().seek(seconds); return
+    }
     if (isClientDevice.value) {
       samplePosition(seconds)
       if (session.value) session.value = { ...session.value, position_sec: seconds }
@@ -568,6 +610,11 @@ export const useCastStore = defineStore('cast', () => {
   // Volume drags fire per pixel — debounce the POST, apply optimistically.
   let volumeTimer: ReturnType<typeof setTimeout> | null = null
   function setVolume(level: number) {
+    if (isBrowserDevice.value) {
+      const clamped = Math.max(0, Math.min(100, Math.round(level)))
+      if (session.value) session.value = { ...session.value, volume: clamped }
+      lastDeviceVolume.value = clamped; void useBrowserCast().setVolume(clamped); return
+    }
     if (isClientDevice.value) {
       const clamped = Math.max(0, Math.min(100, Math.round(level)))
       if (session.value) session.value = { ...session.value, volume: clamped }
@@ -599,6 +646,7 @@ export const useCastStore = defineStore('cast', () => {
   // event reads as deliberate, not as a natural end to advance past.
   async function stopSession() {
     ownsPlayback = false
+    if (isBrowserDevice.value) { session.value = null; await useBrowserCast().stop(); return }
     if (isClientDevice.value) {
       session.value = null
       await clientCommand('stop')
@@ -771,7 +819,7 @@ export const useCastStore = defineStore('cast', () => {
     devices, devicesLoaded, session, engagedDeviceId, connecting, lastDeviceVolume,
     videoStreamInfo, videoStreamInfoLoading, videoStreamInfoError,
     videoRemoteOpen, videoQueue, videoQueueLoading,
-    engaged, deviceName, isClientDevice,
+    engaged, deviceName, isClientDevice, isBrowserDevice,
     refreshDevices, adoptExisting,
     playTrack, playVideo, updateVideo, pause, resume, seekTo, setVolume, stopSession, disconnect,
     loadVideoStreamInfo, loadVideoQueue, playVideoQueueItem, playNextVideo,

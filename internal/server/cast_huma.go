@@ -34,6 +34,40 @@ func registerCastRoutes(api huma.API, app *service.App) {
 			return noStoreJSON(devicesBody{Items: app.Cast().Devices()}), nil
 		})
 
+	// Chrome owns nearby receiver discovery and never reveals LAN addresses to
+	// Heya. This endpoint only turns authenticated library media into a
+	// short-lived receiver URL rooted at the browser-visible Heya origin.
+	huma.Register(api, secured(op(http.MethodPost, "/api/cast/browser/media", "browser-cast-media", "Create nearby Chromecast media grant", "Cast")),
+		func(ctx context.Context, in *struct {
+			Body struct {
+				Origin        string `json:"origin" minLength:"8" maxLength:"2048"`
+				TrackID       int64  `json:"track_id,omitempty" minimum:"1"`
+				FileID        string `json:"file_id,omitempty" maxLength:"64"`
+				EntityType    string `json:"entity_type,omitempty" enum:"movie,episode"`
+				EntityID      int64  `json:"entity_id,omitempty" minimum:"1"`
+				Title         string `json:"title,omitempty" maxLength:"500"`
+				AudioTrack    int    `json:"audio_track,omitempty" minimum:"0"`
+				SubtitleTrack *int   `json:"subtitle_track,omitempty" minimum:"0"`
+				Quality       string `json:"quality,omitempty" maxLength:"24"`
+			}
+		}) (*JSONOutput[service.BrowserCastMedia], error) {
+			userID := userFrom(ctx).ID
+			var media service.BrowserCastMedia
+			var err error
+			switch {
+			case in.Body.TrackID > 0 && in.Body.FileID == "":
+				media, err = app.BrowserCastTrack(ctx, userID, in.Body.TrackID, in.Body.Origin)
+			case in.Body.FileID != "" && in.Body.TrackID == 0:
+				media, err = app.BrowserCastVideo(ctx, userID, in.Body.Origin, in.Body.FileID, in.Body.EntityType, in.Body.EntityID, in.Body.Title, in.Body.AudioTrack, in.Body.SubtitleTrack, in.Body.Quality)
+			default:
+				return nil, huma.Error422UnprocessableEntity("provide exactly one of track_id or file_id")
+			}
+			if err != nil {
+				return nil, humaServiceErrorStatus(err, http.StatusUnprocessableEntity)
+			}
+			return noStoreJSON(media), nil
+		})
+
 	// Settings surface: values + provenance (env-locked fields grey out in
 	// the UI) and the network diagnostics behind Settings → Casting.
 	huma.Register(api, adminSecured(op(http.MethodGet, "/api/cast/config", "cast-config", "Casting config", "Cast")),

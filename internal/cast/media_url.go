@@ -28,6 +28,44 @@ type mediaTokenClaims struct {
 	Path    string `json:"p"`
 	Subtree bool   `json:"s,omitempty"`
 	Expires int64  `json:"e"`
+	Browser bool   `json:"b,omitempty"`
+}
+
+// BrowserMediaURL mints a receiver URL against the origin of the browser that
+// selected the Chromecast. Unlike mediaURLFor it deliberately does not try to
+// infer a route from the Heya server to a receiver whose address the browser
+// keeps private.
+func (m *Manager) BrowserMediaURL(origin string, userID int64, track TrackInfo) (string, error) {
+	origin = strings.TrimRight(strings.TrimSpace(origin), "/")
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("cast: invalid browser media origin")
+	}
+	if track.PullPath == "" {
+		return "", fmt.Errorf("cast: media has no receiver-pull path")
+	}
+	scopePath, subtree := track.PullPath, false
+	if track.PullScopePath != "" {
+		scopePath, subtree = strings.TrimRight(track.PullScopePath, "/"), true
+		if track.PullPath != scopePath && !strings.HasPrefix(track.PullPath, scopePath+"/") {
+			return "", fmt.Errorf("cast: media pull path escapes its token scope")
+		}
+	}
+	token, err := m.issueMediaTokenWithAccess(userID, scopePath, track.Duration, subtree, true)
+	if err != nil {
+		return "", err
+	}
+	u, err = url.Parse(origin + track.PullPath)
+	if err != nil {
+		return "", fmt.Errorf("cast: building browser media URL: %w", err)
+	}
+	q, err := url.ParseQuery(track.PullQuery)
+	if err != nil {
+		return "", fmt.Errorf("cast: invalid media query: %w", err)
+	}
+	q.Set("cast_token", token)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }
 
 // SetMediaOrigin configures the receiver-facing Heya origin. Empty baseURL is
@@ -141,7 +179,17 @@ func mediaDependencyURL(primaryURL, dependencyPath string) (string, error) {
 	return primary.String(), nil
 }
 
+// MediaDependencyURL exposes dependency signing to the service layer that
+// prepares browser-owned Google Cast LOAD requests.
+func MediaDependencyURL(primaryURL, dependencyPath string) (string, error) {
+	return mediaDependencyURL(primaryURL, dependencyPath)
+}
+
 func (m *Manager) issueMediaToken(userID int64, path string, durationSec int, subtree bool) (string, error) {
+	return m.issueMediaTokenWithAccess(userID, path, durationSec, subtree, false)
+}
+
+func (m *Manager) issueMediaTokenWithAccess(userID int64, path string, durationSec int, subtree, browser bool) (string, error) {
 	ttl := time.Duration(durationSec)*time.Second + mediaTokenGrace
 	if ttl < mediaTokenGrace {
 		ttl = mediaTokenGrace
@@ -155,6 +203,7 @@ func (m *Manager) issueMediaToken(userID int64, path string, durationSec int, su
 		Path:    path,
 		Subtree: subtree,
 		Expires: time.Now().Add(ttl).Unix(),
+		Browser: browser,
 	}
 	payload, err := json.Marshal(claims)
 	if err != nil {
@@ -162,6 +211,14 @@ func (m *Manager) issueMediaToken(userID int64, path string, durationSec int, su
 	}
 	sig := m.signMediaToken(payload)
 	return base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(sig), nil
+}
+
+// ValidateMediaTokenAccess also reports whether the token came from the
+// authenticated browser-cast grant endpoint. Receiver handlers use this to
+// distinguish personal nearby casting from access to shared server devices.
+func (m *Manager) ValidateMediaTokenAccess(token, expectedPath string) (int64, bool, error) {
+	userID, claims, err := m.validateMediaToken(token, expectedPath)
+	return userID, claims.Browser, err
 }
 
 func (m *Manager) signMediaToken(payload []byte) []byte {
@@ -177,9 +234,14 @@ func (m *Manager) signMediaToken(payload []byte) []byte {
 // (for HLS) its one resource subtree. It returns the owning user so the HTTP
 // handler can recheck the live casting allowlist before serving any bytes.
 func (m *Manager) ValidateMediaToken(token, expectedPath string) (int64, error) {
+	userID, _, err := m.validateMediaToken(token, expectedPath)
+	return userID, err
+}
+
+func (m *Manager) validateMediaToken(token, expectedPath string) (int64, mediaTokenClaims, error) {
 	payloadPart, sigPart, ok := strings.Cut(token, ".")
 	if !ok || payloadPart == "" || sigPart == "" {
-		return 0, fmt.Errorf("invalid cast media token")
+		return 0, mediaTokenClaims{}, fmt.Errorf("invalid cast media token")
 	}
 	// Strict decoding rejects alternate textual encodings that differ only in
 	// unused trailing bits. They decode to the same signed bytes, but accepting
@@ -187,24 +249,24 @@ func (m *Manager) ValidateMediaToken(token, expectedPath string) (int64, error) 
 	// malleable and can defeat string-keyed logging/caching assumptions.
 	payload, err := strictRawURLEncoding.DecodeString(payloadPart)
 	if err != nil {
-		return 0, fmt.Errorf("invalid cast media token")
+		return 0, mediaTokenClaims{}, fmt.Errorf("invalid cast media token")
 	}
 	sig, err := strictRawURLEncoding.DecodeString(sigPart)
 	if err != nil || !hmac.Equal(sig, m.signMediaToken(payload)) {
-		return 0, fmt.Errorf("invalid cast media token")
+		return 0, mediaTokenClaims{}, fmt.Errorf("invalid cast media token")
 	}
 	var claims mediaTokenClaims
 	if err := json.Unmarshal(payload, &claims); err != nil || claims.Version != 1 || claims.UserID <= 0 {
-		return 0, fmt.Errorf("invalid cast media token")
+		return 0, mediaTokenClaims{}, fmt.Errorf("invalid cast media token")
 	}
 	pathMatches := claims.Path == expectedPath
 	if claims.Subtree {
 		pathMatches = pathMatches || strings.HasPrefix(expectedPath, strings.TrimRight(claims.Path, "/")+"/")
 	}
 	if !pathMatches || time.Now().Unix() >= claims.Expires {
-		return 0, fmt.Errorf("expired or mismatched cast media token")
+		return 0, mediaTokenClaims{}, fmt.Errorf("expired or mismatched cast media token")
 	}
-	return claims.UserID, nil
+	return claims.UserID, claims, nil
 }
 
 func newMediaTokenKey() []byte {

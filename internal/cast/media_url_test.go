@@ -78,6 +78,23 @@ func TestScopedMediaURL(t *testing.T) {
 	}
 }
 
+func TestBrowserMediaURLMarksPersonalGrant(t *testing.T) {
+	m := New(t.TempDir())
+	track := TrackInfo{PullPath: "/api/cast/media/music/42", Duration: 120}
+	raw, err := m.BrowserMediaURL("https://heya.example.test", 17, track)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, browser, err := m.ValidateMediaTokenAccess(u.Query().Get("cast_token"), track.PullPath)
+	if err != nil || userID != 17 || !browser {
+		t.Fatalf("browser grant = user %d, browser %v, err %v", userID, browser, err)
+	}
+}
+
 func TestAutomaticMediaOriginUsesHTTPS(t *testing.T) {
 	m := New(t.TempDir())
 	m.SetMediaOrigin("", "8080")

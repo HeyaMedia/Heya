@@ -8,6 +8,7 @@
 // Position is interpolated client-side between events (the server doesn't
 // tick every second) — a 500ms ticker advances the scrubber while playing.
 import type { CastDevice, CastStateEvent } from '~/composables/useCast'
+import { useBrowserCast } from '~/composables/useBrowserCast'
 
 export default defineNuxtPlugin((nuxtApp) => {
   const { on, connected } = useEventBus()
@@ -24,6 +25,27 @@ export default defineNuxtPlugin((nuxtApp) => {
   // before heyaApi.client.ts registers the bearer-token hook: the request
   // goes out unauthenticated, 401s, and the global handler force-logs-out.
   nuxtApp.hook('app:mounted', () => {
+    useBrowserCast().onEvent((event) => {
+      if (!cast.isBrowserDevice) return
+      if (event === 'state') {
+        const remote = useBrowserCast().snapshot()
+        if (cast.session) {
+          cast.session = { ...cast.session, device_name: remote.name, state: remote.state || cast.session.state, position_sec: remote.position, volume: remote.volume }
+        }
+        syncFromSession()
+        return
+      }
+      const wasVideo = cast.session?.media_kind === 'video'
+      cast.session = null
+      if (event === 'failed') {
+        toast.err('Nearby Chromecast playback failed. Check that it can reach this Heya address.')
+        player.playing = false
+      } else if (wasVideo) {
+        void cast.playNextVideo()
+      } else {
+        void player.castTrackEnded()
+      }
+    })
     watch(token, (t) => {
       if (!t) return
       void cast.adoptExisting().then(() => syncFromSession())

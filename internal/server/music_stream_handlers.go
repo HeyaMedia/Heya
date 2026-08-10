@@ -25,8 +25,8 @@ func handleCastMusicStream(app *service.App) http.HandlerFunc {
 			return
 		}
 		expectedPath := fmt.Sprintf("/api/cast/media/music/%d", trackID)
-		userID, err := app.Cast().ValidateMediaToken(r.URL.Query().Get("cast_token"), expectedPath)
-		if err != nil || app.ValidateCastMediaAccess(r.Context(), userID) != nil {
+		userID, browser, err := app.Cast().ValidateMediaTokenAccess(r.URL.Query().Get("cast_token"), expectedPath)
+		if err != nil || app.ValidateReceiverMediaAccess(r.Context(), userID, browser) != nil {
 			writeError(w, http.StatusForbidden, "invalid or expired cast media token")
 			return
 		}

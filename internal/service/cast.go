@@ -219,6 +219,21 @@ func (a *App) ValidateCastMediaAccess(ctx context.Context, userID int64) error {
 	return err
 }
 
+// ValidateReceiverMediaAccess keeps nearby browser casting independent of the
+// shared-receiver allowlist. The grant was minted by an authenticated request
+// and is scoped to one media path; fetch time still verifies that its account
+// exists. Server-owned receiver tokens retain the stricter cast policy.
+func (a *App) ValidateReceiverMediaAccess(ctx context.Context, userID int64, browser bool) error {
+	if !browser {
+		return a.ValidateCastMediaAccess(ctx, userID)
+	}
+	if userID <= 0 || a.db == nil {
+		return ErrCastAccessDenied
+	}
+	_, err := sqlc.New(a.db).GetUserByID(ctx, userID)
+	return err
+}
+
 func (a *App) setCastAllowedUsers(ids []int64) {
 	next := make(map[int64]struct{}, len(ids))
 	for _, id := range ids {
@@ -728,6 +743,148 @@ func (a *App) castTrackInfo(ctx context.Context, trackID int64, provider string)
 		info.ContentType = "audio/mp4"
 	}
 	return info, nil
+}
+
+// BrowserCastMedia is everything Google's Web Sender needs for one LOAD. It
+// intentionally contains no receiver identity: Chrome owns nearby discovery.
+type BrowserCastMedia struct {
+	URL         string              `json:"url"`
+	ContentType string              `json:"content_type"`
+	MediaKind   string              `json:"media_kind"`
+	TrackID     int64               `json:"track_id,omitempty"`
+	FileID      string              `json:"file_id,omitempty"`
+	Title       string              `json:"title"`
+	Artist      string              `json:"artist,omitempty"`
+	Album       string              `json:"album,omitempty"`
+	Duration    int                 `json:"duration_sec,omitempty"`
+	TextTrack   *cast.TextTrackInfo `json:"text_track,omitempty"`
+}
+
+// BrowserCastTrack grants an authenticated user a path-scoped URL for a
+// Chromecast selected by Chrome on that user's LAN. Shared cast permission is
+// deliberately irrelevant; no server-side receiver is exposed or controlled.
+func (a *App) BrowserCastTrack(ctx context.Context, userID, trackID int64, origin string) (BrowserCastMedia, error) {
+	if a.castMgr == nil {
+		return BrowserCastMedia{}, fmt.Errorf("casting unavailable")
+	}
+	if _, err := sqlc.New(a.db).GetUserByID(ctx, userID); err != nil {
+		return BrowserCastMedia{}, ErrCastAccessDenied
+	}
+	info, err := a.castTrackInfo(ctx, trackID, "chromecast")
+	if err != nil {
+		return BrowserCastMedia{}, err
+	}
+	mediaURL, err := a.castMgr.BrowserMediaURL(origin, userID, info)
+	if err != nil {
+		return BrowserCastMedia{}, err
+	}
+	return BrowserCastMedia{URL: mediaURL, ContentType: info.ContentType, MediaKind: "audio", TrackID: info.TrackID, Title: info.Title, Artist: info.Artist, Album: info.Album, Duration: info.Duration}, nil
+}
+
+func (a *App) BrowserCastVideo(ctx context.Context, userID int64, origin, fileRef, entityType string, entityID int64, title string, audioTrack int, subtitleTrack *int, quality string) (BrowserCastMedia, error) {
+	if a.castMgr == nil {
+		return BrowserCastMedia{}, fmt.Errorf("casting unavailable")
+	}
+	if _, err := sqlc.New(a.db).GetUserByID(ctx, userID); err != nil {
+		return BrowserCastMedia{}, ErrCastAccessDenied
+	}
+	if audioTrack < 0 {
+		return BrowserCastMedia{}, fmt.Errorf("cast: invalid video audio track")
+	}
+	if entityType == "" {
+		entityType = "movie"
+	}
+	if entityType != "movie" && entityType != "episode" {
+		return BrowserCastMedia{}, fmt.Errorf("cast: invalid video entity type %q", entityType)
+	}
+	file, err := a.GetLibraryFileByRef(ctx, fileRef)
+	if err != nil || file.DeletedAt.Valid {
+		return BrowserCastMedia{}, fmt.Errorf("cast: video file not found")
+	}
+	file, err = a.EnsureFileProbed(ctx, file.ID)
+	if err != nil {
+		return BrowserCastMedia{}, fmt.Errorf("cast: probing video file: %w", err)
+	}
+	var mediaInfo mediaprobe.MediaInfo
+	if len(file.MediaInfo) > 0 {
+		_ = json.Unmarshal(file.MediaInfo, &mediaInfo)
+	}
+	var audioStreams, subtitleStreams []mediaprobe.StreamInfo
+	for _, stream := range mediaInfo.Streams {
+		if stream.CodecType == "audio" {
+			audioStreams = append(audioStreams, stream)
+		}
+		if stream.CodecType == "subtitle" {
+			subtitleStreams = append(subtitleStreams, stream)
+		}
+	}
+	if audioTrack > 0 && audioTrack >= len(audioStreams) {
+		return BrowserCastMedia{}, fmt.Errorf("cast: video audio track %d does not exist", audioTrack)
+	}
+	var selectedSubtitle *mediaprobe.StreamInfo
+	if subtitleTrack != nil {
+		if *subtitleTrack < 0 || *subtitleTrack >= len(subtitleStreams) {
+			return BrowserCastMedia{}, fmt.Errorf("cast: video subtitle track %d does not exist", *subtitleTrack)
+		}
+		selectedSubtitle = &subtitleStreams[*subtitleTrack]
+		if transcoder.SubtitleDeliveryFor(selectedSubtitle.CodecName) != transcoder.SubDeliveryExternal {
+			return BrowserCastMedia{}, fmt.Errorf("cast: subtitle track %d requires burn-in", *subtitleTrack)
+		}
+	}
+	if entityID <= 0 && file.MediaItemID.Valid {
+		entityID = file.MediaItemID.Int64
+	}
+	if strings.TrimSpace(title) == "" && file.MediaItemID.Valid {
+		if item, itemErr := a.GetMediaItem(ctx, fmt.Sprint(file.MediaItemID.Int64)); itemErr == nil {
+			title = item.Title
+		}
+	}
+	if strings.TrimSpace(title) == "" {
+		title = strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path))
+	}
+	info := cast.TrackInfo{FileID: file.PublicID.String(), MediaItemID: file.MediaItemID.Int64, EntityType: entityType, EntityID: entityID, Path: file.Path, MediaKind: "video", Title: strings.TrimSpace(title), Duration: int(mediaInfo.Duration), AudioTrack: audioTrack, Quality: "auto"}
+	root := fmt.Sprintf("/api/cast/media/video/%s", info.FileID)
+	if quality != "" && quality != "auto" {
+		if _, ok := transcoder.GetProfile(quality); ok {
+			info.Quality = quality
+		}
+	}
+	if selectedSubtitle != nil {
+		name := strings.TrimSpace(selectedSubtitle.Tags["title"])
+		if name == "" {
+			name = strings.ToUpper(strings.TrimSpace(selectedSubtitle.Tags["language"]))
+		}
+		info.TextTrack = &cast.TextTrackInfo{SelectionIndex: *subtitleTrack, StreamIndex: selectedSubtitle.Index, TrackID: 1, Name: name, Language: strings.TrimSpace(selectedSubtitle.Tags["language"]), PullPath: fmt.Sprintf("%s/subtitles/%d", root, selectedSubtitle.Index)}
+		info.PullScopePath = root
+	}
+	if info.Quality == "auto" && castVideoCanDirect(mediaInfo, file.Path, audioTrack) {
+		info.PullPath, info.ContentType = root, "video/mp4"
+	} else {
+		if a.TranscoderSessions() == nil {
+			return BrowserCastMedia{}, fmt.Errorf("cast: this video needs HLS delivery but transcoding is unavailable")
+		}
+		q := url.Values{}
+		q.Set("sid", "cast-"+uuid.NewString())
+		if audioTrack > 0 {
+			q.Set("audio", fmt.Sprint(audioTrack))
+		}
+		if info.Quality != "auto" {
+			q.Set("quality", info.Quality)
+		}
+		info.PullPath, info.PullScopePath, info.PullQuery, info.ContentType = root+"/hls/master.m3u8", root, q.Encode(), "application/vnd.apple.mpegurl"
+	}
+	mediaURL, err := a.castMgr.BrowserMediaURL(origin, userID, info)
+	if err != nil {
+		return BrowserCastMedia{}, err
+	}
+	if info.TextTrack != nil {
+		trackURL, trackErr := cast.MediaDependencyURL(mediaURL, info.TextTrack.PullPath)
+		if trackErr != nil {
+			return BrowserCastMedia{}, trackErr
+		}
+		info.TextTrack.URL = trackURL
+	}
+	return BrowserCastMedia{URL: mediaURL, ContentType: info.ContentType, MediaKind: "video", FileID: info.FileID, Title: info.Title, Duration: info.Duration, TextTrack: info.TextTrack}, nil
 }
 
 var chromecastAudioCaps = transcoder.AudioCaps{

@@ -95,6 +95,7 @@
 <script setup lang="ts">
 import { DropdownMenuItem, DropdownMenuSeparator } from 'reka-ui'
 import type { CastDevice } from '~/composables/useCast'
+import { BROWSER_CAST_DEVICE_ID, useBrowserCast } from '~/composables/useBrowserCast'
 
 const cast = useCastStore()
 const { startCastTo, stopCasting } = usePlayerBindings()
@@ -116,6 +117,14 @@ const connecting = computed(() => cast.connecting || cast.session?.state === 'st
 async function pick(deviceId: string) {
   // Picking the connected device again is the disconnect gesture.
   if (cast.engagedDeviceId === deviceId) { disconnect(); return }
+  if (deviceId === BROWSER_CAST_DEVICE_ID) {
+    try {
+      await useBrowserCast().requestSession()
+    } catch (error) {
+      toast.err(error instanceof Error ? error.message : 'No Chromecast selected')
+      return
+    }
+  }
   const video = videoCastSession.value
   const target = cast.devices.find(device => device.id === deviceId)
   if (video?.file_id && video.entity_type && video.entity_id) {
@@ -157,6 +166,8 @@ function disconnect() {
 
 function deviceSub(d: CastDevice) {
   if (d.provider === 'client') return d.kind ? `HeyaConnect · ${titleCase(d.kind)}` : 'HeyaConnect'
+
+  if (d.provider === 'browser') return 'Google Cast · discovered by this browser'
 
   const provider = d.provider === 'airplay'
     ? 'AirPlay'
