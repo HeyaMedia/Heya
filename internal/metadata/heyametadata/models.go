@@ -474,9 +474,7 @@ type releaseDocument struct {
 		Tags          []weightedTerm               `json:"tags"`
 		Links         []struct{ Type, URL string } `json:"links"`
 		ReleaseEvents []struct {
-			Date struct {
-				Value string `json:"value"`
-			} `json:"date"`
+			Date    string `json:"date"`
 			Country string `json:"country"`
 		} `json:"release_events"`
 		Labels []struct {

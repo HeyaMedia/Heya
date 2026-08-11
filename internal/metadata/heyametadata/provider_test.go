@@ -28,6 +28,19 @@ const (
 	testArtistID  = "99999999-9999-4999-8999-999999999999"
 )
 
+func TestIssuedReleaseDecodesStringReleaseEventDate(t *testing.T) {
+	var release releaseDocument
+	if err := json.Unmarshal([]byte(`{"data":{"release_events":[{"date":"1991-08-13","country":"US"}]}}`), &release); err != nil {
+		t.Fatal(err)
+	}
+
+	album := metadata.AlbumEntry{}
+	mergeIssuedRelease(&album, release)
+	if len(album.ReleaseEvents) != 1 || album.ReleaseEvents[0].Date != "1991-08-13" || album.ReleaseEvents[0].Country != "US" {
+		t.Fatalf("release events = %#v", album.ReleaseEvents)
+	}
+}
+
 func TestLocalBookIndexCannotSuppressAuthorDiscovery(t *testing.T) {
 	query := metadata.SearchQuery{CanonicalKind: "book_work", Title: "Artemis", Author: "Andy Weir", Format: "audiobook"}
 	results := []metadata.SearchResult{{ProviderID: "canonical-book", Title: "Artemis", Confidence: 1}}

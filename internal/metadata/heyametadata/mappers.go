@@ -756,10 +756,10 @@ func mergeIssuedRelease(album *metadata.AlbumEntry, release releaseDocument) {
 		album.ExternalIDs["asin"] = release.Data.ASIN
 	}
 	for _, event := range release.Data.ReleaseEvents {
-		if event.Date.Value == "" {
+		if event.Date == "" {
 			continue
 		}
-		album.ReleaseEvents = append(album.ReleaseEvents, metadata.AlbumReleaseEvent{Date: event.Date.Value, Country: event.Country})
+		album.ReleaseEvents = append(album.ReleaseEvents, metadata.AlbumReleaseEvent{Date: event.Date, Country: event.Country})
 	}
 	mergeWeightedTermNames(&album.Genres, release.Data.Genres)
 	mergeWeightedTermNames(&album.Tags, release.Data.Tags)
