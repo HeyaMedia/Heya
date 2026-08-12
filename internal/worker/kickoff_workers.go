@@ -493,12 +493,18 @@ func (w *ProcessLibraryScanWorker) Work(ctx context.Context, job *river.Job[Proc
 	}
 	log.Info().
 		Int64("library_id", lib.ID).
+		Str("library", lib.Name).
+		Str("media_type", string(lib.MediaType)).
+		Str("scan_scope", libraryScanProgressLabel(lib, job.Args.ScopePaths)).
 		Int("scopes", len(job.Args.ScopePaths)).
 		Int("discovered", outcome.Discovered).
+		Int("new", outcome.New).
+		Int("moved", outcome.Moved).
+		Int("missing", outcome.Deleted).
 		Int("observed_files", observed).
 		Int("entities", len(refs)).
 		Int("enqueued_search", enqueued).
-		Msg("process_scan: library done")
+		Msg("process_scan: analyzed library changes and queued metadata searches")
 	// An empty owner scope has no search/fetch/apply worker to emit the terminal
 	// lifecycle event.
 	if enqueued == 0 {
@@ -737,6 +743,9 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 
 	log.Info().
 		Int64("library_id", lib.ID).
+		Str("library", lib.Name).
+		Str("media_type", string(lib.MediaType)).
+		Str("scan_scope", libraryScanProgressLabel(lib, job.Args.ScopePaths)).
 		Int64("scanner_entity_id", job.Args.ScannerEntityID).
 		Int("scopes", len(job.Args.ScopePaths)).
 		Int("discovered", result.Discovered).
@@ -744,7 +753,7 @@ func (w *FetchLibraryMetadataWorker) Work(ctx context.Context, job *river.Job[Fe
 		Int64("fetch_scan_run_id", fetchScanRunID).
 		Int64("metadata_artifact_id", metadataArtifactID).
 		Dur("duration", time.Since(started)).
-		Msg("fetch_metadata: library done")
+		Msg("fetch_metadata: fetched metadata and queued catalog apply")
 	return nil
 }
 
@@ -912,6 +921,9 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 
 	log.Info().
 		Int64("library_id", lib.ID).
+		Str("library", lib.Name).
+		Str("media_type", string(lib.MediaType)).
+		Str("scan_scope", libraryScanProgressLabel(lib, job.Args.ScopePaths)).
 		Int("scopes", len(job.Args.ScopePaths)).
 		Int("discovered", outcome.Discovered).
 		Int("applied", outcome.New).
@@ -926,7 +938,7 @@ func (w *ApplyLibraryScanWorker) Work(ctx context.Context, job *river.Job[ApplyL
 		Int("rich_metadata_failed", richFailed).
 		Int("fanout_failed", fanout.Failed).
 		Dur("duration", time.Since(started)).
-		Msg("apply_metadata: library done")
+		Msg("apply_metadata: updated catalog and queued file analysis")
 
 	emit(w.Hub, eventhub.EventScanCompleted, eventhub.ScanPayload{
 		LibraryID:   lib.ID,
