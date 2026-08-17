@@ -26,23 +26,23 @@
     "@pinia/colada-nuxt": "^1.0.2",
     "@pinia/colada-plugin-auto-refetch": "^0.2.6",
     "@pinia/colada-plugin-retry": "^1.0.2",
-    "@pinia/nuxt": "^1.0.1",
+    "@pinia/nuxt": "^1.0.2",
     "@vueuse/core": "^14.4.0",
     "@vueuse/nuxt": "^14.4.0",
     "akarisub": "^0.2.2",
     "butterchurn": "^2.6.7",
     "butterchurn-presets": "^2.4.7",
-    "hls.js": "^1.6.16",
-    "nuxt": "^4.5.1",
+    "hls.js": "^1.7.0",
+    "nuxt": "^4.5.2",
     "ofetch": "^1.5.1",
-    "pinia": "^4.0.2",
-    "reka-ui": "^2.10.1",
-    "vue-virtual-scroller": "^3.0.4"
+    "pinia": "^4.0.3",
+    "reka-ui": "^2.10.3",
+    "vue-virtual-scroller": "^3.0.5"
   },
   "devDependencies": {
     "@nuxtjs/tailwindcss": "^6.14.0",
     "@pinia/colada-devtools": "^1.1.2",
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.2.0",
     "@vite-pwa/nuxt": "^1.1.1",
     "typescript": "7.0.2"
   }
