@@ -117,11 +117,11 @@ jobs:
             exit 1
           fi
 
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.12.2
-          args: --new-from-rev=origin/${{ github.base_ref || 'main' }} --timeout=5m
+      # golangci-lint v2.12.2 is built with Go 1.26 and cannot load Go 1.27
+      # packages yet. Keep native static analysis enabled until a compatible
+      # release is available: https://github.com/golangci/golangci-lint/issues/6603
+      - name: Go vet
+        run: go vet ./...
 
       - name: Compile
         run: go build -o /dev/null ./...
