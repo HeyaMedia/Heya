@@ -966,6 +966,45 @@ export type BrowseBucketArtist = {
     public_id: string;
 };
 
+export type BrowserCastMediaRequest = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    audio_track?: number;
+    entity_id?: number;
+    entity_type?: 'movie' | 'episode';
+    /**
+     * Force the conservative H.264/AAC or AAC retry after a receiver rejects direct play
+     */
+    fallback?: boolean;
+    file_id?: string;
+    origin: string;
+    quality?: string;
+    subtitle_track?: number;
+    title?: string;
+    track_id?: number;
+};
+
+export type BrowserCastMedia = {
+    /**
+     * A URL to the JSON Schema for this object.
+     */
+    readonly $schema?: string;
+    album?: string;
+    artist?: string;
+    content_type: string;
+    direct_play: boolean;
+    duration_sec?: number;
+    file_id?: string;
+    media_kind: string;
+    profile_key?: string;
+    text_track?: TextTrackInfo;
+    title: string;
+    track_id?: number;
+    url: string;
+};
+
 export type CalendarEventDetailView = {
     album_ref?: string;
     /**
@@ -7270,6 +7309,16 @@ export type Text = {
     Valid: boolean;
 };
 
+export type TextTrackInfo = {
+    Language: string;
+    Name: string;
+    PullPath: string;
+    SelectionIndex: number;
+    StreamIndex: number;
+    TrackID: number;
+    URL: string;
+};
+
 export type Timestamptz = {
     InfinityModifier: number;
     Time: string;
@@ -8412,6 +8461,37 @@ export type BatchRatingsBodyWritable = {
     ratings: {
         [key: string]: number;
     };
+};
+
+export type BrowserCastMediaRequestWritable = {
+    audio_track?: number;
+    entity_id?: number;
+    entity_type?: 'movie' | 'episode';
+    /**
+     * Force the conservative H.264/AAC or AAC retry after a receiver rejects direct play
+     */
+    fallback?: boolean;
+    file_id?: string;
+    origin: string;
+    quality?: string;
+    subtitle_track?: number;
+    title?: string;
+    track_id?: number;
+};
+
+export type BrowserCastMediaWritable = {
+    album?: string;
+    artist?: string;
+    content_type: string;
+    direct_play: boolean;
+    duration_sec?: number;
+    file_id?: string;
+    media_kind: string;
+    profile_key?: string;
+    text_track?: TextTrackInfo;
+    title: string;
+    track_id?: number;
+    url: string;
 };
 
 export type CancelBodyWritable = {
@@ -12181,6 +12261,31 @@ export type RegistrationStatusResponses = {
 };
 
 export type RegistrationStatusResponse = RegistrationStatusResponses[keyof RegistrationStatusResponses];
+
+export type BrowserCastMediaData = {
+    body: BrowserCastMediaRequestWritable;
+    path?: never;
+    query?: never;
+    url: '/api/cast/browser/media';
+};
+
+export type BrowserCastMediaErrors = {
+    /**
+     * Error
+     */
+    default: ErrorModel;
+};
+
+export type BrowserCastMediaError = BrowserCastMediaErrors[keyof BrowserCastMediaErrors];
+
+export type BrowserCastMediaResponses = {
+    /**
+     * OK
+     */
+    200: BrowserCastMedia;
+};
+
+export type BrowserCastMediaResponse = BrowserCastMediaResponses[keyof BrowserCastMediaResponses];
 
 export type CastConfigData = {
     body?: never;

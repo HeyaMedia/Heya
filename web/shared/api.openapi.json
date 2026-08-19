@@ -3285,6 +3285,132 @@
         ],
         "type": "object"
       },
+      "Browser-cast-mediaRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/Browser-cast-mediaRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "audio_track": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "entity_id": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "entity_type": {
+            "enum": [
+              "movie",
+              "episode"
+            ],
+            "type": "string"
+          },
+          "fallback": {
+            "description": "Force the conservative H.264/AAC or AAC retry after a receiver rejects direct play",
+            "type": "boolean"
+          },
+          "file_id": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "origin": {
+            "maxLength": 2048,
+            "minLength": 8,
+            "type": "string"
+          },
+          "quality": {
+            "maxLength": 24,
+            "type": "string"
+          },
+          "subtitle_track": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": {
+            "maxLength": 500,
+            "type": "string"
+          },
+          "track_id": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "origin"
+        ],
+        "type": "object"
+      },
+      "BrowserCastMedia": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/BrowserCastMedia.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "album": {
+            "type": "string"
+          },
+          "artist": {
+            "type": "string"
+          },
+          "content_type": {
+            "type": "string"
+          },
+          "direct_play": {
+            "type": "boolean"
+          },
+          "duration_sec": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "file_id": {
+            "type": "string"
+          },
+          "media_kind": {
+            "type": "string"
+          },
+          "profile_key": {
+            "type": "string"
+          },
+          "text_track": {
+            "$ref": "#/components/schemas/TextTrackInfo"
+          },
+          "title": {
+            "type": "string"
+          },
+          "track_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "content_type",
+          "media_kind",
+          "title",
+          "direct_play"
+        ],
+        "type": "object"
+      },
       "CalendarEventDetailView": {
         "additionalProperties": false,
         "properties": {
@@ -25425,6 +25551,45 @@
         ],
         "type": "object"
       },
+      "TextTrackInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "Language": {
+            "type": "string"
+          },
+          "Name": {
+            "type": "string"
+          },
+          "PullPath": {
+            "type": "string"
+          },
+          "SelectionIndex": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "StreamIndex": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "TrackID": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "URL": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "SelectionIndex",
+          "StreamIndex",
+          "TrackID",
+          "Name",
+          "Language",
+          "PullPath",
+          "URL"
+        ],
+        "type": "object"
+      },
       "Timestamptz": {
         "additionalProperties": false,
         "properties": {
@@ -30441,6 +30606,59 @@
         "summary": "Whether first-user registration is available",
         "tags": [
           "Authentication"
+        ]
+      }
+    },
+    "/api/cast/browser/media": {
+      "post": {
+        "operationId": "browser-cast-media",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Browser-cast-mediaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserCastMedia"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": null
+          }
+        ],
+        "summary": "Create nearby Chromecast media grant",
+        "tags": [
+          "Cast"
         ]
       }
     },

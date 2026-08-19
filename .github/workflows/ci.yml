@@ -211,7 +211,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/go/bin/govulncheck
-          key: govulncheck-${{ runner.os }}-v1
+          key: govulncheck-${{ runner.os }}-${{ hashFiles('go.mod') }}-v2
 
       - name: govulncheck (Go vuln DB vs import graph)
         run: |
