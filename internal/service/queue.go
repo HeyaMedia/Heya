@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -176,8 +177,7 @@ func (a *App) queueViewWindow(ctx context.Context, q *sqlc.Queries, pq sqlc.Play
 	}
 
 	items := make([]QueueItemView, 0, len(before)+len(after))
-	for i := len(before) - 1; i >= 0; i-- { // DESC → ascend
-		r := before[i]
+	for _, r := range slices.Backward(before) { // DESC → ascend
 		items = append(items, queueItemView(r.ID, r.Ord, r.TrackID, r.DjSession, r.DjMode, r.Title, r.Duration, r.DiscNumber, r.TrackNumber, r.AlbumID, r.AlbumTitle, r.AlbumSlug, r.ArtistID, r.ArtistName, r.ArtistSlug))
 	}
 	for _, r := range after {

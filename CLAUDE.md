@@ -24,7 +24,7 @@ For deeper context, see `docs/`:
 
 ## Toolchain (mandatory)
 
-- **Go**: 1.26+ (`go.mod` pins minimum).
+- **Go**: 1.27+ (`go.mod` pins minimum).
 - **Bun**: the *only* JS package manager and runner. **Never** run `npm`,
   `pnpm`, `yarn`, `npx`. One-shot tooling is `bunx`. The lockfile of record
   is `web/bun.lock` — no `package-lock.json` exists.

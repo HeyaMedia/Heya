@@ -75,7 +75,7 @@ RUN bun run build
 # ────────────────────────────────────────────────────────────────
 # Stage 2 — backend: go build with the SPA embedded into the binary
 # ────────────────────────────────────────────────────────────────
-FROM golang:1.26-bookworm AS backend-build
+FROM golang:1.27-bookworm AS backend-build
 ARG VERSION
 WORKDIR /src
 

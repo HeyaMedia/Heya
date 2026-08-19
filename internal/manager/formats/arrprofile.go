@@ -3,6 +3,7 @@ package formats
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -109,8 +110,7 @@ func ParseArrProfiles(raw []byte) ([]ImportedProfile, error) {
 		if profile.Language != nil && profile.Language.Name != "" {
 			result.Language = strings.ToLower(profile.Language.Name)
 		}
-		for index := len(profile.Items) - 1; index >= 0; index-- {
-			item := profile.Items[index]
+		for _, item := range slices.Backward(profile.Items) {
 			converted, cutoffName := convertProfileItem(item, profile.Cutoff)
 			if cutoffName != "" {
 				result.Cutoff = cutoffName

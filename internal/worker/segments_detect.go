@@ -9,6 +9,7 @@ import (
 	"math/bits"
 	"os/exec"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -502,8 +503,8 @@ func detectMovieCredits(ctx context.Context, path string, durationSecs float64) 
 // — the credits cut, not the final fade-to-black or a black transition
 // mid-scene. Returns ok=false when nothing qualifies.
 func pickCreditsStart(intervals []blackInterval, windowStart, durationSecs float64) (creditsStartSecs float64, ok bool) {
-	for i := len(intervals) - 1; i >= 0; i-- {
-		absEnd := windowStart + intervals[i].End
+	for _, interval := range slices.Backward(intervals) {
+		absEnd := windowStart + interval.End
 		remaining := durationSecs - absEnd
 		if remaining >= movieCreditsMinRemainingSecs && remaining <= movieCreditsMaxRemainingSecs {
 			return absEnd, true

@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/karbowiak/heya/internal/database/sqlc"
 )
@@ -19,11 +20,11 @@ func ShiftMediaAssetSortOrders(ctx context.Context, q *sqlc.Queries, mediaItemID
 	if err != nil {
 		return fmt.Errorf("list %s assets: %w", assetType, err)
 	}
-	for i := len(assets) - 1; i >= 0; i-- {
+	for _, asset := range slices.Backward(assets) {
 		if err := q.SetAssetSortOrder(ctx, sqlc.SetAssetSortOrderParams{
-			ID: assets[i].ID, SortOrder: assets[i].SortOrder + 1,
+			ID: asset.ID, SortOrder: asset.SortOrder + 1,
 		}); err != nil {
-			return fmt.Errorf("shift %s asset %d: %w", assetType, assets[i].ID, err)
+			return fmt.Errorf("shift %s asset %d: %w", assetType, asset.ID, err)
 		}
 	}
 	return nil

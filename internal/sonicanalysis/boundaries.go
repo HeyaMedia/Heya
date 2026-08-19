@@ -3,6 +3,7 @@ package sonicanalysis
 import (
 	"context"
 	"math"
+	"slices"
 )
 
 // Structural boundary detection — finds the intro/outro/fade/silence transition
@@ -97,8 +98,8 @@ func findOutroStart(rms []float64, peak float64, durationMs int) int {
 	}
 	threshold := peak * 0.1
 	minPositionMs := float64(durationMs) * 0.5
-	for i := len(rms) - 1; i >= 0; i-- {
-		if rms[i] >= threshold {
+	for i, sample := range slices.Backward(rms) {
+		if sample >= threshold {
 			outroMs := (i + 1) * boundaryWindowMs
 			if float64(outroMs) < minPositionMs {
 				return durationMs
@@ -165,8 +166,8 @@ func detectFadeOut(rms []float64, peak float64, durationMs int) int {
 
 func findSilenceStart(rms []float64) int {
 	silenceLinear := math.Pow(10, silenceThresholdDB/20) // -60 dBFS ≈ 0.001
-	for i := len(rms) - 1; i >= 0; i-- {
-		if rms[i] >= silenceLinear {
+	for i, sample := range slices.Backward(rms) {
+		if sample >= silenceLinear {
 			return (i + 1) * boundaryWindowMs
 		}
 	}
