@@ -226,7 +226,7 @@ jobs:
       # above stays a hard gate — it only fails on Go vulns actually reachable
       # from our code.
       - name: OSV-Scanner (npm + Go via OSV.dev)
-        uses: google/osv-scanner-action/osv-scanner-action@v2.3.8
+        uses: google/osv-scanner-action/osv-scanner-action@v2.5.0
         continue-on-error: true
         with:
           scan-args: |-
