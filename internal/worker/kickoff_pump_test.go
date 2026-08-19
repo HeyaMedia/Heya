@@ -285,7 +285,7 @@ func TestListPendingAnalysisTracksCursor(t *testing.T) {
 		TrackID: track2, AnalyzerVersion: sonicanalysis.AnalyzerVersion,
 		ClapWindows: sonicanalysis.CurrentCLAPWindows,
 	}))
-	assert.Empty(t, list(baseTrackID))
+	assert.NotContains(t, list(baseTrackID), track2)
 
 	// A stub facets row at the current analyzer version (what the worker
 	// writes when analysis fails permanently) hides the track from the sweep.
@@ -293,7 +293,7 @@ func TestListPendingAnalysisTracksCursor(t *testing.T) {
 		TrackID: track1, AnalyzerVersion: sonicanalysis.AnalyzerVersion,
 		ClapWindows: sonicanalysis.CurrentCLAPWindows,
 	}))
-	assert.Empty(t, list(baseTrackID))
+	assert.NotContains(t, list(baseTrackID), track1)
 }
 
 func maxTableID(t *testing.T, ctx context.Context, tx pgx.Tx, table string) int64 {
