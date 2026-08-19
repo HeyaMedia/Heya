@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"slices"
 	"sort"
 	"strings"
 )
@@ -144,8 +145,7 @@ func findBestReleaseCandidate(segments []string, forcedHint SceneMediaKind, opts
 
 	animeContext := opts.ForceAnimeContext || PathLooksLikeAnime(segments)
 
-	for i := len(segments) - 1; i >= 0; i-- {
-		seg := segments[i]
+	for i, seg := range slices.Backward(segments) {
 		if seg == "" || ShouldSkipSegment(seg) {
 			continue
 		}

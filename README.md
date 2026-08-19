@@ -61,7 +61,7 @@ and the CUDA/OpenVINO image variants are covered in
 
 ## From source
 
-Needs Go 1.26+, [Bun](https://bun.sh), Docker, and `ffmpeg`/`ffprobe` on
+Needs Go 1.27+, [Bun](https://bun.sh), Docker, and `ffmpeg`/`ffprobe` on
 `$PATH`:
 
 ```bash
