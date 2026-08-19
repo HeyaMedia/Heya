@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -174,8 +175,7 @@ func (s *Service) animeMapping(ctx context.Context, ids ExternalIDs, season, epi
 }
 
 func pickMALEntry(entries []animeListEntry, season, episode int) malRef {
-	for index := len(entries) - 1; index >= 0; index-- {
-		entry := entries[index]
+	for _, entry := range slices.Backward(entries) {
 		if entry.SeasonTVDB != nil && *entry.SeasonTVDB != season {
 			continue
 		}
