@@ -32,11 +32,11 @@ export default defineNuxtConfig({
     "vite:extendConfig"(config, { isClient }) {
       if (!isClient || process.env.NODE_ENV !== "production") return
       type RolldownOutput = Record<string, unknown> & { codeSplitting?: unknown }
-      type ClientBuild = typeof config.build & {
+      type ClientBuild = {
         rolldownOptions?: { output?: RolldownOutput | RolldownOutput[] }
       }
-      const environmentBuild = config.environments?.client?.build as ClientBuild | undefined
-      const build = (environmentBuild ?? config.build) as ClientBuild
+      const environmentBuild = config.environments?.client?.build as unknown as ClientBuild | undefined
+      const build = (environmentBuild ?? config.build) as unknown as ClientBuild
       if (!build) return
       build.rolldownOptions ??= {}
       const currentOutput = build.rolldownOptions.output
