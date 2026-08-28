@@ -5256,8 +5256,7 @@ type UpdateTrackFromEnrichmentParams struct {
 	Column3 int32  `json:"column_3"`
 }
 
-// Overwrites track title and duration with enriched data (heya.media wins
-// over filename when present). NFO/path data is the seed; this is the upgrade.
+// Enrichment upgrades the title and retains provider duration as reference.
 func (q *Queries) UpdateTrackFromEnrichment(ctx context.Context, arg UpdateTrackFromEnrichmentParams) error {
 	_, err := q.db.Exec(ctx, updateTrackFromEnrichment, arg.ID, arg.Column2, arg.Column3)
 	return err
@@ -5273,8 +5272,8 @@ type UpdateTrackTitleAndDurationParams struct {
 	MetadataDuration int32  `json:"metadata_duration"`
 }
 
-// Used by the enrichment pass to overwrite path-derived data with NFO /
-// heya.media canonical values once they're known.
+// Used by enrichment to upgrade the title and retain provider duration as
+// reference; the operational duration remains ffprobe-owned.
 func (q *Queries) UpdateTrackTitleAndDuration(ctx context.Context, arg UpdateTrackTitleAndDurationParams) (Track, error) {
 	row := q.db.QueryRow(ctx, updateTrackTitleAndDuration, arg.ID, arg.Title, arg.MetadataDuration)
 	var i Track
