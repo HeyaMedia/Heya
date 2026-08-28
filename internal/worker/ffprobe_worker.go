@@ -94,6 +94,9 @@ func (w *FFProbeWorker) Work(ctx context.Context, job *river.Job[FFProbeArgs]) e
 	}
 
 	if hasVideo {
+		if err := q.RefreshVideoRuntimeFromFiles(ctx, job.Args.LibraryFileID); err != nil {
+			return fmt.Errorf("ffprobe refresh video runtime: %w", err)
+		}
 		if !hasCurrentHLSBoundaryArtifact(file.Keyframes) {
 			args := ScanKeyframesArgs{
 				LibraryFileID:   job.Args.LibraryFileID,

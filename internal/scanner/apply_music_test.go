@@ -292,7 +292,7 @@ func TestApplyMusicFingerprintRecordingEvidenceFillsUnlistedTrack(t *testing.T) 
 	require.NoError(t, err)
 	album, err := q.CreateAlbum(ctx, sqlc.CreateAlbumParams{ArtistID: artist.ID, Title: "Kyougen", Year: "2022", Genres: []string{}, Tags: []string{}})
 	require.NoError(t, err)
-	track, err := q.GetOrCreateTrack(ctx, sqlc.GetOrCreateTrackParams{AlbumID: album.ID, DiscNumber: 1, TrackNumber: 1, Title: "Readymade", Duration: 244})
+	track, err := q.GetOrCreateTrack(ctx, sqlc.GetOrCreateTrackParams{AlbumID: album.ID, DiscNumber: 1, TrackNumber: 1, Title: "Readymade", MetadataDuration: 244})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, cleanupErr := pool.Exec(context.Background(), "DELETE FROM metadata_entity_bindings WHERE local_kind = 'track' AND local_id = $1", track.ID)

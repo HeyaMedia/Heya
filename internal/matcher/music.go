@@ -524,11 +524,11 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 		lyricsPath := findLyricsForTrack(trackFile, lyrics)
 
 		track, err := m.q.GetOrCreateTrack(ctx, sqlc.GetOrCreateTrackParams{
-			AlbumID:     album.ID,
-			DiscNumber:  int32(discNum),
-			TrackNumber: int32(trackNum),
-			Title:       trackTitle,
-			Duration:    int32(duration),
+			AlbumID:          album.ID,
+			DiscNumber:       int32(discNum),
+			TrackNumber:      int32(trackNum),
+			Title:            trackTitle,
+			MetadataDuration: int32(duration),
 		})
 		if err != nil {
 			log.Warn().Err(vfs.RedactError(err)).Str("track", vfs.RedactPath(trackFile.Path)).Msg("get-or-create track failed")
@@ -539,19 +539,19 @@ func (m *Matcher) matchMusicGroup(ctx context.Context, libraryID int64, files []
 
 		// If we now have richer data than what's on the existing track row,
 		// overwrite. Cheap when fields are already correct.
-		if (trackTitle != "" && trackTitle != track.Title) || (duration > 0 && int32(duration) != track.Duration) {
+		if (trackTitle != "" && trackTitle != track.Title) || (duration > 0 && int32(duration) != track.MetadataDuration) {
 			newTitle := track.Title
 			if trackTitle != "" {
 				newTitle = trackTitle
 			}
-			newDuration := track.Duration
+			newDuration := track.MetadataDuration
 			if duration > 0 {
 				newDuration = int32(duration)
 			}
 			if updated, updErr := m.q.UpdateTrackTitleAndDuration(ctx, sqlc.UpdateTrackTitleAndDurationParams{
-				ID:       track.ID,
-				Title:    newTitle,
-				Duration: newDuration,
+				ID:               track.ID,
+				Title:            newTitle,
+				MetadataDuration: newDuration,
 			}); updErr == nil {
 				track = updated
 			}

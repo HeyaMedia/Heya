@@ -1087,6 +1087,50 @@ func (q *Queries) ReapplyLibraryFileParse(ctx context.Context, arg ReapplyLibrar
 	return err
 }
 
+const refreshVideoRuntimeFromFiles = `-- name: RefreshVideoRuntimeFromFiles :exec
+WITH linked AS (
+    SELECT source_link.movie_id, source_link.tv_episode_id
+    FROM library_file_links source_link
+    WHERE source_link.library_file_id = $1
+), movie_duration AS (
+    SELECT l.movie_id,
+           ROUND(COALESCE(
+             SUM((lf.media_info->>'duration')::numeric) FILTER (WHERE l.relation_type = 'part'),
+             MAX((lf.media_info->>'duration')::numeric) FILTER (WHERE l.relation_type = 'primary')
+           ) / 60.0)::integer AS minutes
+    FROM library_file_links l
+    JOIN library_files lf ON lf.id = l.library_file_id AND lf.deleted_at IS NULL
+    WHERE l.movie_id IN (SELECT movie_id FROM linked WHERE movie_id IS NOT NULL)
+      AND l.relation_type IN ('primary', 'part')
+      AND lf.media_info->>'duration' ~ '^[0-9]+(?:\.[0-9]+)?$'
+    GROUP BY l.movie_id
+), refreshed_movies AS (
+    UPDATE movies m SET runtime_minutes = GREATEST(d.minutes, 1)
+    FROM movie_duration d WHERE m.id = d.movie_id AND d.minutes > 0
+), episode_duration AS (
+    SELECT l.tv_episode_id,
+           ROUND(COALESCE(
+             SUM((lf.media_info->>'duration')::numeric) FILTER (WHERE l.relation_type = 'part'),
+             MAX((lf.media_info->>'duration')::numeric) FILTER (WHERE l.relation_type = 'primary')
+           ) / 60.0)::integer AS minutes
+    FROM library_file_links l
+    JOIN library_files lf ON lf.id = l.library_file_id AND lf.deleted_at IS NULL
+    WHERE l.tv_episode_id IN (SELECT tv_episode_id FROM linked WHERE tv_episode_id IS NOT NULL)
+      AND l.relation_type IN ('primary', 'part')
+      AND lf.media_info->>'duration' ~ '^[0-9]+(?:\.[0-9]+)?$'
+    GROUP BY l.tv_episode_id
+)
+UPDATE tv_episodes e SET runtime_minutes = GREATEST(d.minutes, 1)
+FROM episode_duration d WHERE e.id = d.tv_episode_id AND d.minutes > 0
+`
+
+// Recompute linked movie/episode runtimes after any video probe. Provider
+// runtimes remain in metadata_runtime_minutes for comparison only.
+func (q *Queries) RefreshVideoRuntimeFromFiles(ctx context.Context, libraryFileID int64) error {
+	_, err := q.db.Exec(ctx, refreshVideoRuntimeFromFiles, libraryFileID)
+	return err
+}
+
 const relocateLibraryFile = `-- name: RelocateLibraryFile :exec
 UPDATE library_files
 SET path = $2, mtime = $3, deleted_at = NULL, updated_at = now()

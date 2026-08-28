@@ -189,7 +189,7 @@ func (q *Queries) GetUserArtistRatingsForIDs(ctx context.Context, arg GetUserArt
 }
 
 const listUserRatedAlbums = `-- name: ListUserRatedAlbums :many
-SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork,
+SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork, al.metadata_duration_seconds,
        a.name        AS artist_name,
        mi.slug       AS artist_slug,
        uar.rating    AS rating,
@@ -214,56 +214,57 @@ type ListUserRatedAlbumsParams struct {
 }
 
 type ListUserRatedAlbumsRow struct {
-	ID                 int64              `json:"id"`
-	ArtistID           int64              `json:"artist_id"`
-	Title              string             `json:"title"`
-	Slug               string             `json:"slug"`
-	Year               string             `json:"year"`
-	MusicbrainzID      string             `json:"musicbrainz_id"`
-	AlbumType          string             `json:"album_type"`
-	Genres             []string           `json:"genres"`
-	CoverPath          string             `json:"cover_path"`
-	ReleaseDate        pgtype.Date        `json:"release_date"`
-	Label              string             `json:"label"`
-	Country            string             `json:"country"`
-	Barcode            string             `json:"barcode"`
-	TotalTracks        int32              `json:"total_tracks"`
-	TotalDiscs         int32              `json:"total_discs"`
-	Tags               []string           `json:"tags"`
-	IntegratedLufs     pgtype.Numeric     `json:"integrated_lufs"`
-	TruePeakDb         pgtype.Numeric     `json:"true_peak_db"`
-	LoudnessRangeDb    pgtype.Numeric     `json:"loudness_range_db"`
-	LoudnessAnalyzedAt pgtype.Timestamptz `json:"loudness_analyzed_at"`
-	SearchVector       interface{}        `json:"search_vector"`
-	CatalogNo          string             `json:"catalog_no"`
-	Explicit           bool               `json:"explicit"`
-	OriginalTitle      string             `json:"original_title"`
-	SecondaryTypes     []string           `json:"secondary_types"`
-	Styles             []string           `json:"styles"`
-	Language           string             `json:"language"`
-	DurationSeconds    int32              `json:"duration_seconds"`
-	Isrcs              []string           `json:"isrcs"`
-	Rating             pgtype.Numeric     `json:"rating"`
-	Popularity         int32              `json:"popularity"`
-	Listeners          int64              `json:"listeners"`
-	Playcount          int64              `json:"playcount"`
-	ExternalIds        []byte             `json:"external_ids"`
-	ArtistCredits      []byte             `json:"artist_credits"`
-	FieldProvenance    []byte             `json:"field_provenance"`
-	SortArtist         string             `json:"sort_artist"`
-	SortTitle          string             `json:"sort_title"`
-	Description        string             `json:"description"`
-	Review             string             `json:"review"`
-	Ratings            []byte             `json:"ratings"`
-	Editions           []byte             `json:"editions"`
-	Sales              int64              `json:"sales"`
-	ReleaseEvents      []byte             `json:"release_events"`
-	Script             string             `json:"script"`
-	Artwork            []byte             `json:"artwork"`
-	ArtistName         string             `json:"artist_name"`
-	ArtistSlug         string             `json:"artist_slug"`
-	Rating_2           int16              `json:"rating_2"`
-	RatedAt            pgtype.Timestamptz `json:"rated_at"`
+	ID                      int64              `json:"id"`
+	ArtistID                int64              `json:"artist_id"`
+	Title                   string             `json:"title"`
+	Slug                    string             `json:"slug"`
+	Year                    string             `json:"year"`
+	MusicbrainzID           string             `json:"musicbrainz_id"`
+	AlbumType               string             `json:"album_type"`
+	Genres                  []string           `json:"genres"`
+	CoverPath               string             `json:"cover_path"`
+	ReleaseDate             pgtype.Date        `json:"release_date"`
+	Label                   string             `json:"label"`
+	Country                 string             `json:"country"`
+	Barcode                 string             `json:"barcode"`
+	TotalTracks             int32              `json:"total_tracks"`
+	TotalDiscs              int32              `json:"total_discs"`
+	Tags                    []string           `json:"tags"`
+	IntegratedLufs          pgtype.Numeric     `json:"integrated_lufs"`
+	TruePeakDb              pgtype.Numeric     `json:"true_peak_db"`
+	LoudnessRangeDb         pgtype.Numeric     `json:"loudness_range_db"`
+	LoudnessAnalyzedAt      pgtype.Timestamptz `json:"loudness_analyzed_at"`
+	SearchVector            interface{}        `json:"search_vector"`
+	CatalogNo               string             `json:"catalog_no"`
+	Explicit                bool               `json:"explicit"`
+	OriginalTitle           string             `json:"original_title"`
+	SecondaryTypes          []string           `json:"secondary_types"`
+	Styles                  []string           `json:"styles"`
+	Language                string             `json:"language"`
+	DurationSeconds         int32              `json:"duration_seconds"`
+	Isrcs                   []string           `json:"isrcs"`
+	Rating                  pgtype.Numeric     `json:"rating"`
+	Popularity              int32              `json:"popularity"`
+	Listeners               int64              `json:"listeners"`
+	Playcount               int64              `json:"playcount"`
+	ExternalIds             []byte             `json:"external_ids"`
+	ArtistCredits           []byte             `json:"artist_credits"`
+	FieldProvenance         []byte             `json:"field_provenance"`
+	SortArtist              string             `json:"sort_artist"`
+	SortTitle               string             `json:"sort_title"`
+	Description             string             `json:"description"`
+	Review                  string             `json:"review"`
+	Ratings                 []byte             `json:"ratings"`
+	Editions                []byte             `json:"editions"`
+	Sales                   int64              `json:"sales"`
+	ReleaseEvents           []byte             `json:"release_events"`
+	Script                  string             `json:"script"`
+	Artwork                 []byte             `json:"artwork"`
+	MetadataDurationSeconds int32              `json:"metadata_duration_seconds"`
+	ArtistName              string             `json:"artist_name"`
+	ArtistSlug              string             `json:"artist_slug"`
+	Rating_2                int16              `json:"rating_2"`
+	RatedAt                 pgtype.Timestamptz `json:"rated_at"`
 }
 
 // Paginated rated albums. Carries artist context so the FE renders rows
@@ -330,6 +331,7 @@ func (q *Queries) ListUserRatedAlbums(ctx context.Context, arg ListUserRatedAlbu
 			&i.ReleaseEvents,
 			&i.Script,
 			&i.Artwork,
+			&i.MetadataDurationSeconds,
 			&i.ArtistName,
 			&i.ArtistSlug,
 			&i.Rating_2,

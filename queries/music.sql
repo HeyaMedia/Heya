@@ -97,11 +97,10 @@ UPDATE albums
 UPDATE albums SET field_provenance = $2 WHERE id = $1;
 
 -- name: UpdateTrackFromEnrichment :exec
--- Overwrites track title and duration with enriched data (heya.media wins
--- over filename when present). NFO/path data is the seed; this is the upgrade.
+-- Enrichment upgrades the title and retains provider duration as reference.
 UPDATE tracks
    SET title    = CASE WHEN $2::text != '' THEN $2 ELSE title    END,
-       duration = CASE WHEN $3::int  > 0   THEN $3 ELSE duration END
+       metadata_duration = CASE WHEN $3::int > 0 THEN $3 ELSE metadata_duration END
  WHERE id = $1;
 
 -- name: UpdateMediaItemExternalIds :exec
@@ -385,24 +384,24 @@ WHERE id = $1
 RETURNING *;
 
 -- name: CreateTrack :one
-INSERT INTO tracks (album_id, disc_number, track_number, title, duration)
+INSERT INTO tracks (album_id, disc_number, track_number, title, metadata_duration)
 VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: GetOrCreateTrack :one
 -- Idempotent track creation: on conflict, return the existing row unchanged.
 -- Physical file identity and sidecars live exclusively in track_files.
-INSERT INTO tracks (album_id, disc_number, track_number, title, duration)
+INSERT INTO tracks (album_id, disc_number, track_number, title, metadata_duration)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (album_id, disc_number, track_number) DO UPDATE
     SET title = CASE WHEN tracks.title = '' THEN EXCLUDED.title ELSE tracks.title END,
-        duration = CASE WHEN tracks.duration = 0 THEN EXCLUDED.duration ELSE tracks.duration END
+        metadata_duration = CASE WHEN tracks.metadata_duration = 0 THEN EXCLUDED.metadata_duration ELSE tracks.metadata_duration END
 RETURNING *;
 
 -- name: UpdateTrackTitleAndDuration :one
--- Used by the enrichment pass to overwrite path-derived data with NFO /
--- heya.media canonical values once they're known.
-UPDATE tracks SET title = $2, duration = $3 WHERE id = $1 RETURNING *;
+-- Used by enrichment to upgrade the title and retain provider duration as
+-- reference; the operational duration remains ffprobe-owned.
+UPDATE tracks SET title = $2, metadata_duration = $3 WHERE id = $1 RETURNING *;
 
 -- name: UpdateTrackFileLyricsPath :exec
 UPDATE track_files SET lyrics_path = $2 WHERE id = $1;
@@ -495,7 +494,7 @@ UPDATE albums SET
     original_title   = CASE WHEN $3::text   != '' THEN $3 ELSE original_title END,
     language         = CASE WHEN $4::text   != '' THEN $4 ELSE language END,
     explicit         = $5,
-    duration_seconds = CASE WHEN $6::int    != 0  THEN $6 ELSE duration_seconds END,
+    metadata_duration_seconds = CASE WHEN $6::int != 0 THEN $6 ELSE metadata_duration_seconds END,
     rating           = CASE WHEN $7::numeric != 0 THEN $7 ELSE rating END,
     popularity       = $8,
     listeners        = $9,
@@ -665,9 +664,8 @@ SELECT * FROM track_files WHERE library_file_id = $1;
 -- name: UpdateTrackFileProbeData :exec
 -- Called by FFProbeWorker after probing an audio file. Updates the per-file
 -- physical properties and the refined quality_score that incorporates real
--- bitrate / sample rate / bit depth. Also backfills tracks.duration when
--- upstream metadata left it 0 — ffprobe is ground truth, and the FE renders
--- tracks.duration everywhere (0 shows as "0:00").
+-- bitrate / sample rate / bit depth. The best live file owns tracks.duration;
+-- album duration is always the sum of those canonical track durations.
 WITH updated AS (
     UPDATE track_files
        SET bitrate_kbps   = $2,
@@ -678,13 +676,28 @@ WITH updated AS (
            quality_score  = $7
      WHERE track_files.id = $1
      RETURNING track_files.track_id, track_files.duration
+), preferred AS (
+    UPDATE tracks t
+       SET duration = best.duration
+      FROM updated u
+      JOIN LATERAL (
+          SELECT tf.duration
+          FROM track_files tf
+          JOIN library_files lf ON lf.id = tf.library_file_id AND lf.deleted_at IS NULL
+          WHERE tf.track_id = u.track_id AND tf.duration > 0
+          ORDER BY tf.quality_score DESC, tf.id ASC
+          LIMIT 1
+      ) best ON true
+     WHERE t.id = u.track_id
+     RETURNING t.album_id
 )
-UPDATE tracks t
-   SET duration = u.duration
-  FROM updated u
- WHERE t.id = u.track_id
-   AND t.duration = 0
-   AND u.duration > 0;
+UPDATE albums a
+   SET duration_seconds = totals.duration
+  FROM (SELECT t.album_id, SUM(t.duration)::integer AS duration
+          FROM tracks t
+         WHERE t.album_id IN (SELECT album_id FROM preferred)
+         GROUP BY t.album_id) totals
+ WHERE a.id = totals.album_id;
 
 -- name: ListMusicArtists :many
 -- Merged listing across every music library, with album + track counts so

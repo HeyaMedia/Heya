@@ -31,10 +31,6 @@
       <div v-if="mediaType === 'movie'" class="mf-card">
         <div class="mf-card-head">Movie Info</div>
         <div class="mf-grid">
-          <div class="mf-field">
-            <label class="mf-label" for="me-runtime">Runtime (min)</label>
-            <input id="me-runtime" v-model.number="form.runtime_minutes" type="number" class="mf-input" />
-          </div>
           <div class="mf-field mf-full">
             <label class="mf-label" for="me-tagline">Tagline</label>
             <input id="me-tagline" v-model="form.tagline" type="text" class="mf-input" />

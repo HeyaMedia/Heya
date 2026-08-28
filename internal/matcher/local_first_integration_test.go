@@ -141,7 +141,7 @@ func TestLocalFirstUpserts(t *testing.T) {
 		// User edits genres, CLEARS tagline, and stamps provenance (what the
 		// metadata editor will do for edited fields).
 		_, err = qtx.UpdateMovie(ctx, sqlc.UpdateMovieParams{
-			ID: mv.ID, RuntimeMinutes: mv.RuntimeMinutes, Tagline: "", Genres: []string{"UserPick"},
+			ID: mv.ID, MetadataRuntimeMinutes: mv.MetadataRuntimeMinutes, Tagline: "", Genres: []string{"UserPick"},
 			Rating: mv.Rating, ReleaseDate: mv.ReleaseDate, OriginalTitle: mv.OriginalTitle,
 			OriginalLanguage: mv.OriginalLanguage, Budget: mv.Budget, Revenue: mv.Revenue,
 			Popularity: mv.Popularity, SpokenLanguages: mv.SpokenLanguages, OriginCountry: mv.OriginCountry,
@@ -206,7 +206,7 @@ func TestLocalFirstUpserts(t *testing.T) {
 		// User edits the episode title.
 		_, err = qtx.UpdateTVEpisode(ctx, sqlc.UpdateTVEpisodeParams{
 			ID: eps[0].ID, Title: "Edited Pilot", Overview: eps[0].Overview, StillPath: eps[0].StillPath,
-			RuntimeMinutes: eps[0].RuntimeMinutes, AirDate: eps[0].AirDate, Rating: eps[0].Rating,
+			MetadataRuntimeMinutes: eps[0].MetadataRuntimeMinutes, AirDate: eps[0].AirDate, Rating: eps[0].Rating,
 			AbsoluteNumber: eps[0].AbsoluteNumber, IsSpecial: eps[0].IsSpecial, EpisodeType: eps[0].EpisodeType,
 			ExternalIds: eps[0].ExternalIds, Source: eps[0].Source,
 		})

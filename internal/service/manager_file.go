@@ -35,14 +35,15 @@ type ManagerStreamView struct {
 // absolute path and every probed stream. Fetched lazily when a file row
 // expands — the blobs are too heavy to ride along on list endpoints.
 type ManagerFileDetailView struct {
-	ID          int64               `json:"id"`
-	Path        string              `json:"path" doc:"Absolute on-disk path"`
-	SizeBytes   int64               `json:"size_bytes"`
-	Container   string              `json:"container,omitempty"`
-	DurationSec int32               `json:"duration_sec,omitempty"`
-	BitrateKbps int32               `json:"bitrate_kbps,omitempty" doc:"Overall container bitrate"`
-	AddedAt     string              `json:"added_at"`
-	Streams     []ManagerStreamView `json:"streams"`
+	ID                  int64               `json:"id"`
+	Path                string              `json:"path" doc:"Absolute on-disk path"`
+	SizeBytes           int64               `json:"size_bytes"`
+	Container           string              `json:"container,omitempty"`
+	DurationSec         int32               `json:"duration_sec,omitempty"`
+	MetadataDurationSec int32               `json:"metadata_duration_sec,omitempty" doc:"Provider-reported expected duration, for comparison only"`
+	BitrateKbps         int32               `json:"bitrate_kbps,omitempty" doc:"Overall container bitrate"`
+	AddedAt             string              `json:"added_at"`
+	Streams             []ManagerStreamView `json:"streams"`
 }
 
 // ManagerFile returns full probe detail for one library file.
@@ -53,10 +54,18 @@ func (a *App) ManagerFile(ctx context.Context, fileID int64) (*ManagerFileDetail
 		blob    []byte
 	)
 	err := a.db.QueryRow(ctx, `
-		SELECT lf.id, lf.path, lf.size, lf.created_at, COALESCE(lf.media_info, '{}'::jsonb)
+		SELECT lf.id, lf.path, lf.size, lf.created_at, COALESCE(lf.media_info, '{}'::jsonb),
+		       COALESCE(
+		         (SELECT m.metadata_runtime_minutes * 60 FROM library_file_links l
+		          JOIN movies m ON m.id = l.movie_id WHERE l.library_file_id = lf.id LIMIT 1),
+		         (SELECT e.metadata_runtime_minutes * 60 FROM library_file_links l
+		          JOIN tv_episodes e ON e.id = l.tv_episode_id WHERE l.library_file_id = lf.id LIMIT 1),
+		         (SELECT t.metadata_duration FROM track_files tf
+		          JOIN tracks t ON t.id = tf.track_id WHERE tf.library_file_id = lf.id LIMIT 1),
+		         0)
 		FROM library_files lf
 		WHERE lf.id = $1 AND lf.deleted_at IS NULL`, fileID).
-		Scan(&view.ID, &view.Path, &view.SizeBytes, &created, &blob)
+		Scan(&view.ID, &view.Path, &view.SizeBytes, &created, &blob, &view.MetadataDurationSec)
 	if err != nil {
 		return nil, fmt.Errorf("manager file %d: %w", fileID, err)
 	}

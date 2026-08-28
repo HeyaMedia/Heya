@@ -21,10 +21,6 @@
             <input id="me-ep-air-date" v-model="form.air_date" type="date" class="mf-input" />
           </div>
           <div class="mf-field">
-            <label class="mf-label" for="me-ep-runtime">Runtime (min)</label>
-            <input id="me-ep-runtime" v-model.number="form.runtime_minutes" type="number" class="mf-input" />
-          </div>
-          <div class="mf-field">
             <label class="mf-label">Rating</label>
             <div class="mf-readonly">{{ episode?.episode?.rating ?? '—' }}</div>
           </div>

@@ -13,26 +13,26 @@ import (
 )
 
 const createTVEpisode = `-- name: CreateTVEpisode :one
-INSERT INTO tv_episodes (season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored)
+INSERT INTO tv_episodes (season_id, episode_number, title, overview, still_path, metadata_runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOT $10)
 ON CONFLICT (season_id, episode_number) DO NOTHING
-RETURNING id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored
+RETURNING id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored, metadata_runtime_minutes
 `
 
 type CreateTVEpisodeParams struct {
-	SeasonID       int64          `json:"season_id"`
-	EpisodeNumber  int32          `json:"episode_number"`
-	Title          string         `json:"title"`
-	Overview       string         `json:"overview"`
-	StillPath      string         `json:"still_path"`
-	RuntimeMinutes int32          `json:"runtime_minutes"`
-	AirDate        pgtype.Date    `json:"air_date"`
-	Rating         pgtype.Numeric `json:"rating"`
-	AbsoluteNumber int32          `json:"absolute_number"`
-	IsSpecial      bool           `json:"is_special"`
-	EpisodeType    int32          `json:"episode_type"`
-	ExternalIds    []byte         `json:"external_ids"`
-	Source         string         `json:"source"`
+	SeasonID               int64          `json:"season_id"`
+	EpisodeNumber          int32          `json:"episode_number"`
+	Title                  string         `json:"title"`
+	Overview               string         `json:"overview"`
+	StillPath              string         `json:"still_path"`
+	MetadataRuntimeMinutes int32          `json:"metadata_runtime_minutes"`
+	AirDate                pgtype.Date    `json:"air_date"`
+	Rating                 pgtype.Numeric `json:"rating"`
+	AbsoluteNumber         int32          `json:"absolute_number"`
+	IsSpecial              bool           `json:"is_special"`
+	EpisodeType            int32          `json:"episode_type"`
+	ExternalIds            []byte         `json:"external_ids"`
+	Source                 string         `json:"source"`
 }
 
 // DO NOTHING: episodes are insert-or-preserve. On re-enrich an existing episode
@@ -45,7 +45,7 @@ func (q *Queries) CreateTVEpisode(ctx context.Context, arg CreateTVEpisodeParams
 		arg.Title,
 		arg.Overview,
 		arg.StillPath,
-		arg.RuntimeMinutes,
+		arg.MetadataRuntimeMinutes,
 		arg.AirDate,
 		arg.Rating,
 		arg.AbsoluteNumber,
@@ -71,6 +71,7 @@ func (q *Queries) CreateTVEpisode(ctx context.Context, arg CreateTVEpisodeParams
 		&i.ExternalIds,
 		&i.Source,
 		&i.Monitored,
+		&i.MetadataRuntimeMinutes,
 	)
 	return i, err
 }
@@ -238,7 +239,7 @@ func (q *Queries) DeleteEmptyCanonicalTVSeasonsByIDs(ctx context.Context, season
 }
 
 const getTVEpisode = `-- name: GetTVEpisode :one
-SELECT id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored FROM tv_episodes WHERE season_id = $1 AND episode_number = $2
+SELECT id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored, metadata_runtime_minutes FROM tv_episodes WHERE season_id = $1 AND episode_number = $2
 `
 
 type GetTVEpisodeParams struct {
@@ -265,12 +266,13 @@ func (q *Queries) GetTVEpisode(ctx context.Context, arg GetTVEpisodeParams) (TvE
 		&i.ExternalIds,
 		&i.Source,
 		&i.Monitored,
+		&i.MetadataRuntimeMinutes,
 	)
 	return i, err
 }
 
 const getTVEpisodeByID = `-- name: GetTVEpisodeByID :one
-SELECT id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored FROM tv_episodes WHERE id = $1
+SELECT id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored, metadata_runtime_minutes FROM tv_episodes WHERE id = $1
 `
 
 func (q *Queries) GetTVEpisodeByID(ctx context.Context, id int64) (TvEpisode, error) {
@@ -292,6 +294,7 @@ func (q *Queries) GetTVEpisodeByID(ctx context.Context, id int64) (TvEpisode, er
 		&i.ExternalIds,
 		&i.Source,
 		&i.Monitored,
+		&i.MetadataRuntimeMinutes,
 	)
 	return i, err
 }
@@ -564,7 +567,7 @@ func (q *Queries) ListEpisodeNumbersForMediaItems(ctx context.Context, mediaItem
 }
 
 const listTVEpisodesBySeason = `-- name: ListTVEpisodesBySeason :many
-SELECT id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored FROM tv_episodes WHERE season_id = $1 ORDER BY episode_number ASC
+SELECT id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored, metadata_runtime_minutes FROM tv_episodes WHERE season_id = $1 ORDER BY episode_number ASC
 `
 
 func (q *Queries) ListTVEpisodesBySeason(ctx context.Context, seasonID int64) ([]TvEpisode, error) {
@@ -592,6 +595,7 @@ func (q *Queries) ListTVEpisodesBySeason(ctx context.Context, seasonID int64) ([
 			&i.ExternalIds,
 			&i.Source,
 			&i.Monitored,
+			&i.MetadataRuntimeMinutes,
 		); err != nil {
 			return nil, err
 		}
@@ -604,7 +608,7 @@ func (q *Queries) ListTVEpisodesBySeason(ctx context.Context, seasonID int64) ([
 }
 
 const listTVEpisodesBySeries = `-- name: ListTVEpisodesBySeries :many
-SELECT e.id, e.season_id, e.episode_number, e.title, e.overview, e.still_path, e.runtime_minutes, e.air_date, e.rating, e.absolute_number, e.is_special, e.episode_type, e.external_ids, e.source, e.monitored FROM tv_episodes e
+SELECT e.id, e.season_id, e.episode_number, e.title, e.overview, e.still_path, e.runtime_minutes, e.air_date, e.rating, e.absolute_number, e.is_special, e.episode_type, e.external_ids, e.source, e.monitored, e.metadata_runtime_minutes FROM tv_episodes e
 JOIN tv_seasons s ON s.id = e.season_id
 WHERE s.series_id = $1
 ORDER BY s.season_number ASC, e.episode_number ASC
@@ -637,6 +641,7 @@ func (q *Queries) ListTVEpisodesBySeries(ctx context.Context, seriesID int64) ([
 			&i.ExternalIds,
 			&i.Source,
 			&i.Monitored,
+			&i.MetadataRuntimeMinutes,
 		); err != nil {
 			return nil, err
 		}
@@ -930,25 +935,25 @@ func (q *Queries) TransferTVEpisodeMonitored(ctx context.Context, episodeIds []i
 
 const updateTVEpisode = `-- name: UpdateTVEpisode :one
 UPDATE tv_episodes
-SET title = $2, overview = $3, still_path = $4, runtime_minutes = $5, air_date = $6, rating = $7,
+SET title = $2, overview = $3, still_path = $4, metadata_runtime_minutes = $5, air_date = $6, rating = $7,
     absolute_number = $8, is_special = $9, episode_type = $10, external_ids = $11, source = $12
 WHERE id = $1
-RETURNING id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored
+RETURNING id, season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored, metadata_runtime_minutes
 `
 
 type UpdateTVEpisodeParams struct {
-	ID             int64          `json:"id"`
-	Title          string         `json:"title"`
-	Overview       string         `json:"overview"`
-	StillPath      string         `json:"still_path"`
-	RuntimeMinutes int32          `json:"runtime_minutes"`
-	AirDate        pgtype.Date    `json:"air_date"`
-	Rating         pgtype.Numeric `json:"rating"`
-	AbsoluteNumber int32          `json:"absolute_number"`
-	IsSpecial      bool           `json:"is_special"`
-	EpisodeType    int32          `json:"episode_type"`
-	ExternalIds    []byte         `json:"external_ids"`
-	Source         string         `json:"source"`
+	ID                     int64          `json:"id"`
+	Title                  string         `json:"title"`
+	Overview               string         `json:"overview"`
+	StillPath              string         `json:"still_path"`
+	MetadataRuntimeMinutes int32          `json:"metadata_runtime_minutes"`
+	AirDate                pgtype.Date    `json:"air_date"`
+	Rating                 pgtype.Numeric `json:"rating"`
+	AbsoluteNumber         int32          `json:"absolute_number"`
+	IsSpecial              bool           `json:"is_special"`
+	EpisodeType            int32          `json:"episode_type"`
+	ExternalIds            []byte         `json:"external_ids"`
+	Source                 string         `json:"source"`
 }
 
 func (q *Queries) UpdateTVEpisode(ctx context.Context, arg UpdateTVEpisodeParams) (TvEpisode, error) {
@@ -957,7 +962,7 @@ func (q *Queries) UpdateTVEpisode(ctx context.Context, arg UpdateTVEpisodeParams
 		arg.Title,
 		arg.Overview,
 		arg.StillPath,
-		arg.RuntimeMinutes,
+		arg.MetadataRuntimeMinutes,
 		arg.AirDate,
 		arg.Rating,
 		arg.AbsoluteNumber,
@@ -983,6 +988,7 @@ func (q *Queries) UpdateTVEpisode(ctx context.Context, arg UpdateTVEpisodeParams
 		&i.ExternalIds,
 		&i.Source,
 		&i.Monitored,
+		&i.MetadataRuntimeMinutes,
 	)
 	return i, err
 }

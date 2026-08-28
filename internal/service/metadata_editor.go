@@ -203,24 +203,24 @@ func (a *App) UpdateMediaMetadata(ctx context.Context, mediaItemID int64, req Up
 				if req.OriginalLanguage != nil {
 					origLang = *req.OriginalLanguage
 				}
-				runtime := movie.RuntimeMinutes
+				runtime := movie.MetadataRuntimeMinutes
 				if req.RuntimeMinutes != nil {
 					runtime = *req.RuntimeMinutes
 				}
 				if _, err := q.UpdateMovie(ctx, sqlc.UpdateMovieParams{
-					ID:               movie.ID,
-					RuntimeMinutes:   runtime,
-					Tagline:          tagline,
-					Genres:           genres,
-					Rating:           movie.Rating,
-					ReleaseDate:      releaseDate,
-					OriginalTitle:    origTitle,
-					OriginalLanguage: origLang,
-					Budget:           movie.Budget,
-					Revenue:          movie.Revenue,
-					Popularity:       movie.Popularity,
-					SpokenLanguages:  movie.SpokenLanguages,
-					OriginCountry:    movie.OriginCountry,
+					ID:                     movie.ID,
+					MetadataRuntimeMinutes: runtime,
+					Tagline:                tagline,
+					Genres:                 genres,
+					Rating:                 movie.Rating,
+					ReleaseDate:            releaseDate,
+					OriginalTitle:          origTitle,
+					OriginalLanguage:       origLang,
+					Budget:                 movie.Budget,
+					Revenue:                movie.Revenue,
+					Popularity:             movie.Popularity,
+					SpokenLanguages:        movie.SpokenLanguages,
+					OriginCountry:          movie.OriginCountry,
 				}); err != nil {
 					return fmt.Errorf("updating movie metadata: %w", err)
 				}
@@ -571,7 +571,7 @@ func (a *App) UpdateEpisode(ctx context.Context, episodeID int64, req UpdateEpis
 	if req.Overview != nil {
 		overview = *req.Overview
 	}
-	runtime := ep.RuntimeMinutes
+	runtime := ep.MetadataRuntimeMinutes
 	if req.RuntimeMinutes != nil {
 		runtime = *req.RuntimeMinutes
 	}
@@ -581,18 +581,18 @@ func (a *App) UpdateEpisode(ctx context.Context, episodeID int64, req UpdateEpis
 	}
 
 	updated, err := q.UpdateTVEpisode(ctx, sqlc.UpdateTVEpisodeParams{
-		ID:             episodeID,
-		Title:          title,
-		Overview:       overview,
-		StillPath:      ep.StillPath,
-		RuntimeMinutes: runtime,
-		AirDate:        airDate,
-		Rating:         ep.Rating,
-		AbsoluteNumber: ep.AbsoluteNumber,
-		IsSpecial:      ep.IsSpecial,
-		EpisodeType:    ep.EpisodeType,
-		ExternalIds:    ep.ExternalIds,
-		Source:         ep.Source,
+		ID:                     episodeID,
+		Title:                  title,
+		Overview:               overview,
+		StillPath:              ep.StillPath,
+		MetadataRuntimeMinutes: runtime,
+		AirDate:                airDate,
+		Rating:                 ep.Rating,
+		AbsoluteNumber:         ep.AbsoluteNumber,
+		IsSpecial:              ep.IsSpecial,
+		EpisodeType:            ep.EpisodeType,
+		ExternalIds:            ep.ExternalIds,
+		Source:                 ep.Source,
 	})
 	if err != nil {
 		return sqlc.TvEpisode{}, err

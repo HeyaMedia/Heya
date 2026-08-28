@@ -2233,6 +2233,10 @@
           "loudness_range_db": {
             "$ref": "#/components/schemas/Numeric"
           },
+          "metadata_duration_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
           "musicbrainz_id": {
             "type": "string"
           },
@@ -2372,7 +2376,8 @@
           "sales",
           "release_events",
           "script",
-          "artwork"
+          "artwork",
+          "metadata_duration_seconds"
         ],
         "type": "object"
       },
@@ -8642,6 +8647,10 @@
           "loudness_range_db": {
             "$ref": "#/components/schemas/Numeric"
           },
+          "metadata_duration_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
           "musicbrainz_id": {
             "type": "string"
           },
@@ -8786,6 +8795,7 @@
           "release_events",
           "script",
           "artwork",
+          "metadata_duration_seconds",
           "artist_name",
           "artist_slug",
           "track_count"
@@ -8894,6 +8904,10 @@
           "loudness_range_db": {
             "$ref": "#/components/schemas/Numeric"
           },
+          "metadata_duration_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
           "musicbrainz_id": {
             "type": "string"
           },
@@ -9038,6 +9052,7 @@
           "release_events",
           "script",
           "artwork",
+          "metadata_duration_seconds",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -9461,6 +9476,10 @@
           "loudness_range_db": {
             "$ref": "#/components/schemas/Numeric"
           },
+          "metadata_duration_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
           "musicbrainz_id": {
             "type": "string"
           },
@@ -9605,6 +9624,7 @@
           "release_events",
           "script",
           "artwork",
+          "metadata_duration_seconds",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -10060,6 +10080,10 @@
           "loudness_range_db": {
             "$ref": "#/components/schemas/Numeric"
           },
+          "metadata_duration_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
           "musicbrainz_id": {
             "type": "string"
           },
@@ -10208,6 +10232,7 @@
           "release_events",
           "script",
           "artwork",
+          "metadata_duration_seconds",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -10595,6 +10620,10 @@
           "loudness_range_db": {
             "$ref": "#/components/schemas/Numeric"
           },
+          "metadata_duration_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
           "musicbrainz_id": {
             "type": "string"
           },
@@ -10739,6 +10768,7 @@
           "release_events",
           "script",
           "artwork",
+          "metadata_duration_seconds",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -11358,6 +11388,10 @@
           "loved_at": {
             "$ref": "#/components/schemas/Timestamptz"
           },
+          "metadata_duration_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
           "musicbrainz_id": {
             "type": "string"
           },
@@ -11502,6 +11536,7 @@
           "release_events",
           "script",
           "artwork",
+          "metadata_duration_seconds",
           "artist_name",
           "artist_slug",
           "track_count",
@@ -11950,6 +11985,10 @@
           "loudness_range_db": {
             "$ref": "#/components/schemas/Numeric"
           },
+          "metadata_duration_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
           "musicbrainz_id": {
             "type": "string"
           },
@@ -12097,6 +12136,7 @@
           "release_events",
           "script",
           "artwork",
+          "metadata_duration_seconds",
           "artist_name",
           "artist_slug",
           "rating_2",
@@ -13854,6 +13894,11 @@
           },
           "id": {
             "format": "int64",
+            "type": "integer"
+          },
+          "metadata_duration_sec": {
+            "description": "Provider-reported expected duration, for comparison only",
+            "format": "int32",
             "type": "integer"
           },
           "path": {
@@ -25982,6 +26027,10 @@
           "lyrics_available": {
             "type": "boolean"
           },
+          "metadata_duration": {
+            "format": "int32",
+            "type": "integer"
+          },
           "preview_url": {
             "type": "string"
           },
@@ -26024,7 +26073,8 @@
           "lyrics_available",
           "sort_artist",
           "sort_album_year",
-          "sort_album"
+          "sort_album",
+          "metadata_duration"
         ],
         "type": "object"
       },
@@ -26436,6 +26486,10 @@
           "is_special": {
             "type": "boolean"
           },
+          "metadata_runtime_minutes": {
+            "format": "int32",
+            "type": "integer"
+          },
           "monitored": {
             "type": "boolean"
           },
@@ -26478,7 +26532,8 @@
           "episode_type",
           "external_ids",
           "source",
-          "monitored"
+          "monitored",
+          "metadata_runtime_minutes"
         ],
         "type": "object"
       },

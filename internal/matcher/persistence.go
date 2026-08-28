@@ -128,19 +128,19 @@ func (m *Matcher) createMovie(ctx context.Context, mediaItemID int64, d *metadat
 	switch {
 	case errors.Is(gerr, pgx.ErrNoRows):
 		_, err := m.q.CreateMovie(ctx, sqlc.CreateMovieParams{
-			MediaItemID:      mediaItemID,
-			RuntimeMinutes:   int32(d.RuntimeMinutes),
-			Tagline:          d.Tagline,
-			Genres:           emptyIfNil(d.Genres),
-			Rating:           numericFromFloat(d.Rating),
-			ReleaseDate:      pgDateFromString(d.ReleaseDate),
-			OriginalTitle:    d.OriginalTitle,
-			OriginalLanguage: d.OriginalLanguage,
-			Budget:           d.Budget,
-			Revenue:          d.Revenue,
-			Popularity:       numericFromFloat(d.Popularity),
-			SpokenLanguages:  emptyIfNil(d.SpokenLanguages),
-			OriginCountry:    emptyIfNil(d.OriginCountry),
+			MediaItemID:            mediaItemID,
+			MetadataRuntimeMinutes: int32(d.RuntimeMinutes),
+			Tagline:                d.Tagline,
+			Genres:                 emptyIfNil(d.Genres),
+			Rating:                 numericFromFloat(d.Rating),
+			ReleaseDate:            pgDateFromString(d.ReleaseDate),
+			OriginalTitle:          d.OriginalTitle,
+			OriginalLanguage:       d.OriginalLanguage,
+			Budget:                 d.Budget,
+			Revenue:                d.Revenue,
+			Popularity:             numericFromFloat(d.Popularity),
+			SpokenLanguages:        emptyIfNil(d.SpokenLanguages),
+			OriginCountry:          emptyIfNil(d.OriginCountry),
 		})
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
@@ -148,26 +148,26 @@ func (m *Matcher) createMovie(ctx context.Context, mediaItemID int64, d *metadat
 	case gerr == nil:
 		locked := m.lockedFields(ctx, mediaItemID)
 		p := sqlc.UpdateMovieParams{
-			ID:               existing.ID,
-			RuntimeMinutes:   int32(d.RuntimeMinutes),
-			Tagline:          d.Tagline,
-			Genres:           emptyIfNil(d.Genres),
-			Rating:           numericFromFloat(d.Rating),
-			ReleaseDate:      pgDateFromString(d.ReleaseDate),
-			OriginalTitle:    d.OriginalTitle,
-			OriginalLanguage: d.OriginalLanguage,
-			Budget:           d.Budget,
-			Revenue:          d.Revenue,
-			Popularity:       numericFromFloat(d.Popularity),
-			SpokenLanguages:  emptyIfNil(d.SpokenLanguages),
-			OriginCountry:    emptyIfNil(d.OriginCountry),
+			ID:                     existing.ID,
+			MetadataRuntimeMinutes: int32(d.RuntimeMinutes),
+			Tagline:                d.Tagline,
+			Genres:                 emptyIfNil(d.Genres),
+			Rating:                 numericFromFloat(d.Rating),
+			ReleaseDate:            pgDateFromString(d.ReleaseDate),
+			OriginalTitle:          d.OriginalTitle,
+			OriginalLanguage:       d.OriginalLanguage,
+			Budget:                 d.Budget,
+			Revenue:                d.Revenue,
+			Popularity:             numericFromFloat(d.Popularity),
+			SpokenLanguages:        emptyIfNil(d.SpokenLanguages),
+			OriginCountry:          emptyIfNil(d.OriginCountry),
 		}
 		// Remote wins EXCEPT any field the user has edited (provenance == "user").
 		if locked["genres"] {
 			p.Genres = existing.Genres
 		}
 		if locked["runtime_minutes"] {
-			p.RuntimeMinutes = existing.RuntimeMinutes
+			p.MetadataRuntimeMinutes = existing.MetadataRuntimeMinutes
 		}
 		if locked["tagline"] {
 			p.Tagline = existing.Tagline

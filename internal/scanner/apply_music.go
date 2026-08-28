@@ -884,25 +884,25 @@ func applyMusicTrack(ctx context.Context, q *sqlc.Queries, albumID int64, local 
 		return sqlc.Track{}, false, err
 	}
 	track, err := q.GetOrCreateTrack(ctx, sqlc.GetOrCreateTrackParams{
-		AlbumID:     albumID,
-		DiscNumber:  int32(disc),
-		TrackNumber: int32(trackNumber),
-		Title:       title,
-		Duration:    duration,
+		AlbumID:          albumID,
+		DiscNumber:       int32(disc),
+		TrackNumber:      int32(trackNumber),
+		Title:            title,
+		MetadataDuration: duration,
 	})
 	if err != nil {
 		return sqlc.Track{}, false, err
 	}
 	if found && (title != "" || duration > 0) {
 		updateTitle := firstNonEmpty(title, existing.Title)
-		updateDuration := existing.Duration
+		updateDuration := existing.MetadataDuration
 		if duration > 0 {
 			updateDuration = duration
 		}
 		if updated, err := q.UpdateTrackTitleAndDuration(ctx, sqlc.UpdateTrackTitleAndDurationParams{
-			ID:       track.ID,
-			Title:    updateTitle,
-			Duration: updateDuration,
+			ID:               track.ID,
+			Title:            updateTitle,
+			MetadataDuration: updateDuration,
 		}); err == nil {
 			track = updated
 		}

@@ -191,28 +191,56 @@ func TestIntegration(t *testing.T) {
 	}
 
 	movie, err := qtx.CreateMovie(ctx, sqlc.CreateMovieParams{
-		MediaItemID:     item.ID,
-		RuntimeMinutes:  166,
-		Tagline:         "Long live the fighters.",
-		Genres:          []string{"Science Fiction", "Adventure"},
-		Rating:          pgtype.Numeric{Valid: true},
-		Popularity:      pgtype.Numeric{Valid: true},
-		SpokenLanguages: []string{},
-		OriginCountry:   []string{},
+		MediaItemID:            item.ID,
+		MetadataRuntimeMinutes: 166,
+		Tagline:                "Long live the fighters.",
+		Genres:                 []string{"Science Fiction", "Adventure"},
+		Rating:                 pgtype.Numeric{Valid: true},
+		Popularity:             pgtype.Numeric{Valid: true},
+		SpokenLanguages:        []string{},
+		OriginCountry:          []string{},
 	})
 	if err != nil {
 		t.Fatalf("creating movie: %v", err)
 	}
-	if movie.RuntimeMinutes != 166 {
-		t.Errorf("expected runtime 166, got %d", movie.RuntimeMinutes)
+	if movie.RuntimeMinutes != 0 || movie.MetadataRuntimeMinutes != 166 {
+		t.Errorf("expected file runtime 0 and metadata runtime 166, got %d and %d", movie.RuntimeMinutes, movie.MetadataRuntimeMinutes)
 	}
 
 	gotMovie, err := qtx.GetMovieByMediaItemID(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("getting movie by media item id: %v", err)
 	}
-	if gotMovie.RuntimeMinutes != 166 {
-		t.Errorf("expected runtime 166, got %d", gotMovie.RuntimeMinutes)
+	if gotMovie.RuntimeMinutes != 0 || gotMovie.MetadataRuntimeMinutes != 166 {
+		t.Errorf("expected file runtime 0 and metadata runtime 166, got %d and %d", gotMovie.RuntimeMinutes, gotMovie.MetadataRuntimeMinutes)
+	}
+
+	file, err := qtx.UpsertLibraryFile(ctx, sqlc.UpsertLibraryFileParams{
+		LibraryID: lib.ID, Path: "/media/movies/Dune Part Two.mkv", Size: 1024,
+		ParseResult: []byte(`{}`), Status: sqlc.FileStatusMatched,
+	})
+	if err != nil {
+		t.Fatalf("creating movie file: %v", err)
+	}
+	if err := qtx.UpdateLibraryFileMediaInfo(ctx, sqlc.UpdateLibraryFileMediaInfoParams{
+		ID: file.ID, MediaInfo: []byte(`{"duration":9060,"streams":[{"codec_type":"video","height":2160}]}`),
+	}); err != nil {
+		t.Fatalf("storing movie probe: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO library_file_links (library_file_id, media_item_id, movie_id, relation_type)
+		VALUES ($1, $2, $3, 'primary')`, file.ID, item.ID, movie.ID); err != nil {
+		t.Fatalf("linking movie file: %v", err)
+	}
+	if err := qtx.RefreshVideoRuntimeFromFiles(ctx, file.ID); err != nil {
+		t.Fatalf("refreshing movie runtime: %v", err)
+	}
+	gotMovie, err = qtx.GetMovieByMediaItemID(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("getting refreshed movie: %v", err)
+	}
+	if gotMovie.RuntimeMinutes != 151 || gotMovie.MetadataRuntimeMinutes != 166 {
+		t.Errorf("expected probed runtime 151 and metadata runtime 166, got %d and %d", gotMovie.RuntimeMinutes, gotMovie.MetadataRuntimeMinutes)
 	}
 
 	results, err := qtx.SearchAllMedia(ctx, sqlc.SearchAllMediaParams{

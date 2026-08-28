@@ -450,7 +450,6 @@ function buildMediaForm(d: any) {
     original_title: movie?.original_title || tv?.original_name || '',
     original_language: movie?.original_language || tv?.original_language || '',
     tagline: movie?.tagline || '',
-    runtime_minutes: movie?.runtime_minutes || 0,
     genres: [...(movie?.genres || tv?.genres || [])],
     release_date: movie?.release_date ? formatPgDate(movie.release_date) : '',
     status: tv?.status || '',
@@ -474,7 +473,6 @@ function buildEpisodeForm(ep: any) {
     title: ep.title || '',
     overview: ep.overview || '',
     air_date: formatPgDate(ep.air_date),
-    runtime_minutes: ep.runtime_minutes || 0,
   }
 }
 
@@ -591,7 +589,6 @@ async function save() {
         release_date: form.value.release_date,
         original_title: form.value.original_title,
         original_language: form.value.original_language,
-        runtime_minutes: form.value.runtime_minutes,
         status: form.value.status,
         first_air_date: form.value.first_air_date,
         last_air_date: form.value.last_air_date,

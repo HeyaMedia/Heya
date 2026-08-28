@@ -66,6 +66,7 @@ function subLabel(s: ManagerStreamView): string {
       <div class="mfi-facts mono">
         <span v-if="data.container" class="mgr-quality">{{ data.container }}</span>
         <span v-if="data.duration_sec">{{ fmtDuration(data.duration_sec) }}</span>
+        <span v-if="data.metadata_duration_sec">expected {{ fmtDuration(data.metadata_duration_sec) }}</span>
         <span v-if="data.bitrate_kbps">{{ data.bitrate_kbps.toLocaleString() }} kbps overall</span>
         <span>{{ fmtBytes(data.size_bytes) }}</span>
         <span>added {{ new Date(data.added_at).toLocaleDateString() }}</span>

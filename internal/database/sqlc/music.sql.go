@@ -162,7 +162,7 @@ const createAlbum = `-- name: CreateAlbum :one
 INSERT INTO albums (artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date,
     label, country, barcode, total_tracks, total_discs, tags)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-RETURNING id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork
+RETURNING id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork, metadata_duration_seconds
 `
 
 type CreateAlbumParams struct {
@@ -249,6 +249,7 @@ func (q *Queries) CreateAlbum(ctx context.Context, arg CreateAlbumParams) (Album
 		&i.ReleaseEvents,
 		&i.Script,
 		&i.Artwork,
+		&i.MetadataDurationSeconds,
 	)
 	return i, err
 }
@@ -473,17 +474,17 @@ func (q *Queries) CreateArtistSimilarArtist(ctx context.Context, arg CreateArtis
 }
 
 const createTrack = `-- name: CreateTrack :one
-INSERT INTO tracks (album_id, disc_number, track_number, title, duration)
+INSERT INTO tracks (album_id, disc_number, track_number, title, metadata_duration)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits
+RETURNING id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits, metadata_duration
 `
 
 type CreateTrackParams struct {
-	AlbumID     int64  `json:"album_id"`
-	DiscNumber  int32  `json:"disc_number"`
-	TrackNumber int32  `json:"track_number"`
-	Title       string `json:"title"`
-	Duration    int32  `json:"duration"`
+	AlbumID          int64  `json:"album_id"`
+	DiscNumber       int32  `json:"disc_number"`
+	TrackNumber      int32  `json:"track_number"`
+	Title            string `json:"title"`
+	MetadataDuration int32  `json:"metadata_duration"`
 }
 
 func (q *Queries) CreateTrack(ctx context.Context, arg CreateTrackParams) (Track, error) {
@@ -492,7 +493,7 @@ func (q *Queries) CreateTrack(ctx context.Context, arg CreateTrackParams) (Track
 		arg.DiscNumber,
 		arg.TrackNumber,
 		arg.Title,
-		arg.Duration,
+		arg.MetadataDuration,
 	)
 	var i Track
 	err := row.Scan(
@@ -514,6 +515,7 @@ func (q *Queries) CreateTrack(ctx context.Context, arg CreateTrackParams) (Track
 		&i.SortAlbumYear,
 		&i.SortAlbum,
 		&i.Credits,
+		&i.MetadataDuration,
 	)
 	return i, err
 }
@@ -632,7 +634,7 @@ func (q *Queries) DeleteUserArtistRatingsByArtist(ctx context.Context, srcID int
 }
 
 const getAlbumByArtistAndSlug = `-- name: GetAlbumByArtistAndSlug :one
-SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork
+SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork, al.metadata_duration_seconds
 FROM albums al
 JOIN artists a ON a.id = al.artist_id
 JOIN media_item_cards mi ON mi.id = a.media_item_id
@@ -695,12 +697,13 @@ func (q *Queries) GetAlbumByArtistAndSlug(ctx context.Context, arg GetAlbumByArt
 		&i.ReleaseEvents,
 		&i.Script,
 		&i.Artwork,
+		&i.MetadataDurationSeconds,
 	)
 	return i, err
 }
 
 const getAlbumByArtistMusicBrainzID = `-- name: GetAlbumByArtistMusicBrainzID :one
-SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork FROM albums
+SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork, metadata_duration_seconds FROM albums
 WHERE artist_id = $1 AND musicbrainz_id = $2 AND musicbrainz_id != ''
 LIMIT 1
 `
@@ -760,12 +763,13 @@ func (q *Queries) GetAlbumByArtistMusicBrainzID(ctx context.Context, arg GetAlbu
 		&i.ReleaseEvents,
 		&i.Script,
 		&i.Artwork,
+		&i.MetadataDurationSeconds,
 	)
 	return i, err
 }
 
 const getAlbumByArtistTitleYear = `-- name: GetAlbumByArtistTitleYear :one
-SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork FROM albums
+SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork, metadata_duration_seconds FROM albums
 WHERE artist_id = $1 AND lower(title) = lower($2) AND year = $3
 LIMIT 1
 `
@@ -826,12 +830,13 @@ func (q *Queries) GetAlbumByArtistTitleYear(ctx context.Context, arg GetAlbumByA
 		&i.ReleaseEvents,
 		&i.Script,
 		&i.Artwork,
+		&i.MetadataDurationSeconds,
 	)
 	return i, err
 }
 
 const getAlbumByID = `-- name: GetAlbumByID :one
-SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork FROM albums WHERE id = $1
+SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork, metadata_duration_seconds FROM albums WHERE id = $1
 `
 
 func (q *Queries) GetAlbumByID(ctx context.Context, id int64) (Album, error) {
@@ -884,12 +889,13 @@ func (q *Queries) GetAlbumByID(ctx context.Context, id int64) (Album, error) {
 		&i.ReleaseEvents,
 		&i.Script,
 		&i.Artwork,
+		&i.MetadataDurationSeconds,
 	)
 	return i, err
 }
 
 const getAlbumByMusicBrainzID = `-- name: GetAlbumByMusicBrainzID :one
-SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork FROM albums WHERE musicbrainz_id = $1 AND musicbrainz_id != ''
+SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork, metadata_duration_seconds FROM albums WHERE musicbrainz_id = $1 AND musicbrainz_id != ''
 `
 
 func (q *Queries) GetAlbumByMusicBrainzID(ctx context.Context, musicbrainzID string) (Album, error) {
@@ -942,6 +948,7 @@ func (q *Queries) GetAlbumByMusicBrainzID(ctx context.Context, musicbrainzID str
 		&i.ReleaseEvents,
 		&i.Script,
 		&i.Artwork,
+		&i.MetadataDurationSeconds,
 	)
 	return i, err
 }
@@ -1480,20 +1487,20 @@ func (q *Queries) GetMusicArtistBySlug(ctx context.Context, slug string) (GetMus
 }
 
 const getOrCreateTrack = `-- name: GetOrCreateTrack :one
-INSERT INTO tracks (album_id, disc_number, track_number, title, duration)
+INSERT INTO tracks (album_id, disc_number, track_number, title, metadata_duration)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (album_id, disc_number, track_number) DO UPDATE
     SET title = CASE WHEN tracks.title = '' THEN EXCLUDED.title ELSE tracks.title END,
-        duration = CASE WHEN tracks.duration = 0 THEN EXCLUDED.duration ELSE tracks.duration END
-RETURNING id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits
+        metadata_duration = CASE WHEN tracks.metadata_duration = 0 THEN EXCLUDED.metadata_duration ELSE tracks.metadata_duration END
+RETURNING id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits, metadata_duration
 `
 
 type GetOrCreateTrackParams struct {
-	AlbumID     int64  `json:"album_id"`
-	DiscNumber  int32  `json:"disc_number"`
-	TrackNumber int32  `json:"track_number"`
-	Title       string `json:"title"`
-	Duration    int32  `json:"duration"`
+	AlbumID          int64  `json:"album_id"`
+	DiscNumber       int32  `json:"disc_number"`
+	TrackNumber      int32  `json:"track_number"`
+	Title            string `json:"title"`
+	MetadataDuration int32  `json:"metadata_duration"`
 }
 
 // Idempotent track creation: on conflict, return the existing row unchanged.
@@ -1504,7 +1511,7 @@ func (q *Queries) GetOrCreateTrack(ctx context.Context, arg GetOrCreateTrackPara
 		arg.DiscNumber,
 		arg.TrackNumber,
 		arg.Title,
-		arg.Duration,
+		arg.MetadataDuration,
 	)
 	var i Track
 	err := row.Scan(
@@ -1526,6 +1533,7 @@ func (q *Queries) GetOrCreateTrack(ctx context.Context, arg GetOrCreateTrackPara
 		&i.SortAlbumYear,
 		&i.SortAlbum,
 		&i.Credits,
+		&i.MetadataDuration,
 	)
 	return i, err
 }
@@ -1574,7 +1582,7 @@ func (q *Queries) GetPrimaryTrackFile(ctx context.Context, trackID int64) (Track
 }
 
 const getTrackByAlbumDiscTrack = `-- name: GetTrackByAlbumDiscTrack :one
-SELECT id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits FROM tracks
+SELECT id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits, metadata_duration FROM tracks
 WHERE album_id = $1
   AND disc_number = $2
   AND track_number = $3
@@ -1608,12 +1616,13 @@ func (q *Queries) GetTrackByAlbumDiscTrack(ctx context.Context, arg GetTrackByAl
 		&i.SortAlbumYear,
 		&i.SortAlbum,
 		&i.Credits,
+		&i.MetadataDuration,
 	)
 	return i, err
 }
 
 const getTrackByID = `-- name: GetTrackByID :one
-SELECT id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits FROM tracks WHERE id = $1
+SELECT id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits, metadata_duration FROM tracks WHERE id = $1
 `
 
 func (q *Queries) GetTrackByID(ctx context.Context, id int64) (Track, error) {
@@ -1638,12 +1647,13 @@ func (q *Queries) GetTrackByID(ctx context.Context, id int64) (Track, error) {
 		&i.SortAlbumYear,
 		&i.SortAlbum,
 		&i.Credits,
+		&i.MetadataDuration,
 	)
 	return i, err
 }
 
 const getTrackByIDForUpdate = `-- name: GetTrackByIDForUpdate :one
-SELECT id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits FROM tracks WHERE id = $1 FOR UPDATE
+SELECT id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits, metadata_duration FROM tracks WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) GetTrackByIDForUpdate(ctx context.Context, id int64) (Track, error) {
@@ -1668,6 +1678,7 @@ func (q *Queries) GetTrackByIDForUpdate(ctx context.Context, id int64) (Track, e
 		&i.SortAlbumYear,
 		&i.SortAlbum,
 		&i.Credits,
+		&i.MetadataDuration,
 	)
 	return i, err
 }
@@ -1985,7 +1996,7 @@ func (q *Queries) ListAlbumTracksUnderFolder(ctx context.Context, arg ListAlbumT
 }
 
 const listAlbumsByArtist = `-- name: ListAlbumsByArtist :many
-SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork FROM albums WHERE artist_id = $1 ORDER BY year ASC, title ASC
+SELECT id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork, metadata_duration_seconds FROM albums WHERE artist_id = $1 ORDER BY year ASC, title ASC
 `
 
 func (q *Queries) ListAlbumsByArtist(ctx context.Context, artistID int64) ([]Album, error) {
@@ -2044,6 +2055,7 @@ func (q *Queries) ListAlbumsByArtist(ctx context.Context, artistID int64) ([]Alb
 			&i.ReleaseEvents,
 			&i.Script,
 			&i.Artwork,
+			&i.MetadataDurationSeconds,
 		); err != nil {
 			return nil, err
 		}
@@ -2056,7 +2068,7 @@ func (q *Queries) ListAlbumsByArtist(ctx context.Context, artistID int64) ([]Alb
 }
 
 const listAlbumsByArtistSlug = `-- name: ListAlbumsByArtistSlug :many
-SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork,
+SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork, al.metadata_duration_seconds,
        a.name           AS artist_name,
        mi.slug          AS artist_slug,
        (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
@@ -2076,56 +2088,57 @@ type ListAlbumsByArtistSlugParams struct {
 }
 
 type ListAlbumsByArtistSlugRow struct {
-	ID                 int64              `json:"id"`
-	ArtistID           int64              `json:"artist_id"`
-	Title              string             `json:"title"`
-	Slug               string             `json:"slug"`
-	Year               string             `json:"year"`
-	MusicbrainzID      string             `json:"musicbrainz_id"`
-	AlbumType          string             `json:"album_type"`
-	Genres             []string           `json:"genres"`
-	CoverPath          string             `json:"cover_path"`
-	ReleaseDate        pgtype.Date        `json:"release_date"`
-	Label              string             `json:"label"`
-	Country            string             `json:"country"`
-	Barcode            string             `json:"barcode"`
-	TotalTracks        int32              `json:"total_tracks"`
-	TotalDiscs         int32              `json:"total_discs"`
-	Tags               []string           `json:"tags"`
-	IntegratedLufs     pgtype.Numeric     `json:"integrated_lufs"`
-	TruePeakDb         pgtype.Numeric     `json:"true_peak_db"`
-	LoudnessRangeDb    pgtype.Numeric     `json:"loudness_range_db"`
-	LoudnessAnalyzedAt pgtype.Timestamptz `json:"loudness_analyzed_at"`
-	SearchVector       interface{}        `json:"search_vector"`
-	CatalogNo          string             `json:"catalog_no"`
-	Explicit           bool               `json:"explicit"`
-	OriginalTitle      string             `json:"original_title"`
-	SecondaryTypes     []string           `json:"secondary_types"`
-	Styles             []string           `json:"styles"`
-	Language           string             `json:"language"`
-	DurationSeconds    int32              `json:"duration_seconds"`
-	Isrcs              []string           `json:"isrcs"`
-	Rating             pgtype.Numeric     `json:"rating"`
-	Popularity         int32              `json:"popularity"`
-	Listeners          int64              `json:"listeners"`
-	Playcount          int64              `json:"playcount"`
-	ExternalIds        []byte             `json:"external_ids"`
-	ArtistCredits      []byte             `json:"artist_credits"`
-	FieldProvenance    []byte             `json:"field_provenance"`
-	SortArtist         string             `json:"sort_artist"`
-	SortTitle          string             `json:"sort_title"`
-	Description        string             `json:"description"`
-	Review             string             `json:"review"`
-	Ratings            []byte             `json:"ratings"`
-	Editions           []byte             `json:"editions"`
-	Sales              int64              `json:"sales"`
-	ReleaseEvents      []byte             `json:"release_events"`
-	Script             string             `json:"script"`
-	Artwork            []byte             `json:"artwork"`
-	ArtistName         string             `json:"artist_name"`
-	ArtistSlug         string             `json:"artist_slug"`
-	TrackCount         int64              `json:"track_count"`
-	Available          bool               `json:"available"`
+	ID                      int64              `json:"id"`
+	ArtistID                int64              `json:"artist_id"`
+	Title                   string             `json:"title"`
+	Slug                    string             `json:"slug"`
+	Year                    string             `json:"year"`
+	MusicbrainzID           string             `json:"musicbrainz_id"`
+	AlbumType               string             `json:"album_type"`
+	Genres                  []string           `json:"genres"`
+	CoverPath               string             `json:"cover_path"`
+	ReleaseDate             pgtype.Date        `json:"release_date"`
+	Label                   string             `json:"label"`
+	Country                 string             `json:"country"`
+	Barcode                 string             `json:"barcode"`
+	TotalTracks             int32              `json:"total_tracks"`
+	TotalDiscs              int32              `json:"total_discs"`
+	Tags                    []string           `json:"tags"`
+	IntegratedLufs          pgtype.Numeric     `json:"integrated_lufs"`
+	TruePeakDb              pgtype.Numeric     `json:"true_peak_db"`
+	LoudnessRangeDb         pgtype.Numeric     `json:"loudness_range_db"`
+	LoudnessAnalyzedAt      pgtype.Timestamptz `json:"loudness_analyzed_at"`
+	SearchVector            interface{}        `json:"search_vector"`
+	CatalogNo               string             `json:"catalog_no"`
+	Explicit                bool               `json:"explicit"`
+	OriginalTitle           string             `json:"original_title"`
+	SecondaryTypes          []string           `json:"secondary_types"`
+	Styles                  []string           `json:"styles"`
+	Language                string             `json:"language"`
+	DurationSeconds         int32              `json:"duration_seconds"`
+	Isrcs                   []string           `json:"isrcs"`
+	Rating                  pgtype.Numeric     `json:"rating"`
+	Popularity              int32              `json:"popularity"`
+	Listeners               int64              `json:"listeners"`
+	Playcount               int64              `json:"playcount"`
+	ExternalIds             []byte             `json:"external_ids"`
+	ArtistCredits           []byte             `json:"artist_credits"`
+	FieldProvenance         []byte             `json:"field_provenance"`
+	SortArtist              string             `json:"sort_artist"`
+	SortTitle               string             `json:"sort_title"`
+	Description             string             `json:"description"`
+	Review                  string             `json:"review"`
+	Ratings                 []byte             `json:"ratings"`
+	Editions                []byte             `json:"editions"`
+	Sales                   int64              `json:"sales"`
+	ReleaseEvents           []byte             `json:"release_events"`
+	Script                  string             `json:"script"`
+	Artwork                 []byte             `json:"artwork"`
+	MetadataDurationSeconds int32              `json:"metadata_duration_seconds"`
+	ArtistName              string             `json:"artist_name"`
+	ArtistSlug              string             `json:"artist_slug"`
+	TrackCount              int64              `json:"track_count"`
+	Available               bool               `json:"available"`
 }
 
 // Paginated album listing for one artist. Same row shape as ListMusicAlbums
@@ -2186,6 +2199,7 @@ func (q *Queries) ListAlbumsByArtistSlug(ctx context.Context, arg ListAlbumsByAr
 			&i.ReleaseEvents,
 			&i.Script,
 			&i.Artwork,
+			&i.MetadataDurationSeconds,
 			&i.ArtistName,
 			&i.ArtistSlug,
 			&i.TrackCount,
@@ -2202,7 +2216,7 @@ func (q *Queries) ListAlbumsByArtistSlug(ctx context.Context, arg ListAlbumsByAr
 }
 
 const listAlbumsByArtistUnderFolder = `-- name: ListAlbumsByArtistUnderFolder :many
-SELECT DISTINCT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork
+SELECT DISTINCT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork, al.metadata_duration_seconds
 FROM albums al
 WHERE al.artist_id = $1
   AND EXISTS (
@@ -2281,6 +2295,7 @@ func (q *Queries) ListAlbumsByArtistUnderFolder(ctx context.Context, arg ListAlb
 			&i.ReleaseEvents,
 			&i.Script,
 			&i.Artwork,
+			&i.MetadataDurationSeconds,
 		); err != nil {
 			return nil, err
 		}
@@ -2614,11 +2629,11 @@ func (q *Queries) ListArtistsByLibrary(ctx context.Context, libraryID int64) ([]
 }
 
 const listMusicAlbums = `-- name: ListMusicAlbums :many
-SELECT sub.id, sub.artist_id, sub.title, sub.slug, sub.year, sub.musicbrainz_id, sub.album_type, sub.genres, sub.cover_path, sub.release_date, sub.label, sub.country, sub.barcode, sub.total_tracks, sub.total_discs, sub.tags, sub.integrated_lufs, sub.true_peak_db, sub.loudness_range_db, sub.loudness_analyzed_at, sub.search_vector, sub.catalog_no, sub.explicit, sub.original_title, sub.secondary_types, sub.styles, sub.language, sub.duration_seconds, sub.isrcs, sub.rating, sub.popularity, sub.listeners, sub.playcount, sub.external_ids, sub.artist_credits, sub.field_provenance, sub.sort_artist, sub.sort_title, sub.description, sub.review, sub.ratings, sub.editions, sub.sales, sub.release_events, sub.script, sub.artwork, sub.artist_name, sub.artist_slug,
+SELECT sub.id, sub.artist_id, sub.title, sub.slug, sub.year, sub.musicbrainz_id, sub.album_type, sub.genres, sub.cover_path, sub.release_date, sub.label, sub.country, sub.barcode, sub.total_tracks, sub.total_discs, sub.tags, sub.integrated_lufs, sub.true_peak_db, sub.loudness_range_db, sub.loudness_analyzed_at, sub.search_vector, sub.catalog_no, sub.explicit, sub.original_title, sub.secondary_types, sub.styles, sub.language, sub.duration_seconds, sub.isrcs, sub.rating, sub.popularity, sub.listeners, sub.playcount, sub.external_ids, sub.artist_credits, sub.field_provenance, sub.sort_artist, sub.sort_title, sub.description, sub.review, sub.ratings, sub.editions, sub.sales, sub.release_events, sub.script, sub.artwork, sub.metadata_duration_seconds, sub.artist_name, sub.artist_slug,
        (SELECT count(*) FROM tracks t WHERE t.album_id = sub.id) AS track_count,
        EXISTS (SELECT 1 FROM tracks t JOIN track_files tf ON tf.track_id = t.id JOIN library_files lf ON lf.id = tf.library_file_id WHERE t.album_id = sub.id AND lf.deleted_at IS NULL) AS available
 FROM (
-    SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork,
+    SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork, al.metadata_duration_seconds,
            a.name  AS artist_name,
            mi.slug AS artist_slug
     FROM (
@@ -2640,56 +2655,57 @@ type ListMusicAlbumsParams struct {
 }
 
 type ListMusicAlbumsRow struct {
-	ID                 int64              `json:"id"`
-	ArtistID           int64              `json:"artist_id"`
-	Title              string             `json:"title"`
-	Slug               string             `json:"slug"`
-	Year               string             `json:"year"`
-	MusicbrainzID      string             `json:"musicbrainz_id"`
-	AlbumType          string             `json:"album_type"`
-	Genres             []string           `json:"genres"`
-	CoverPath          string             `json:"cover_path"`
-	ReleaseDate        pgtype.Date        `json:"release_date"`
-	Label              string             `json:"label"`
-	Country            string             `json:"country"`
-	Barcode            string             `json:"barcode"`
-	TotalTracks        int32              `json:"total_tracks"`
-	TotalDiscs         int32              `json:"total_discs"`
-	Tags               []string           `json:"tags"`
-	IntegratedLufs     pgtype.Numeric     `json:"integrated_lufs"`
-	TruePeakDb         pgtype.Numeric     `json:"true_peak_db"`
-	LoudnessRangeDb    pgtype.Numeric     `json:"loudness_range_db"`
-	LoudnessAnalyzedAt pgtype.Timestamptz `json:"loudness_analyzed_at"`
-	SearchVector       interface{}        `json:"search_vector"`
-	CatalogNo          string             `json:"catalog_no"`
-	Explicit           bool               `json:"explicit"`
-	OriginalTitle      string             `json:"original_title"`
-	SecondaryTypes     []string           `json:"secondary_types"`
-	Styles             []string           `json:"styles"`
-	Language           string             `json:"language"`
-	DurationSeconds    int32              `json:"duration_seconds"`
-	Isrcs              []string           `json:"isrcs"`
-	Rating             pgtype.Numeric     `json:"rating"`
-	Popularity         int32              `json:"popularity"`
-	Listeners          int64              `json:"listeners"`
-	Playcount          int64              `json:"playcount"`
-	ExternalIds        []byte             `json:"external_ids"`
-	ArtistCredits      []byte             `json:"artist_credits"`
-	FieldProvenance    []byte             `json:"field_provenance"`
-	SortArtist         string             `json:"sort_artist"`
-	SortTitle          string             `json:"sort_title"`
-	Description        string             `json:"description"`
-	Review             string             `json:"review"`
-	Ratings            []byte             `json:"ratings"`
-	Editions           []byte             `json:"editions"`
-	Sales              int64              `json:"sales"`
-	ReleaseEvents      []byte             `json:"release_events"`
-	Script             string             `json:"script"`
-	Artwork            []byte             `json:"artwork"`
-	ArtistName         string             `json:"artist_name"`
-	ArtistSlug         string             `json:"artist_slug"`
-	TrackCount         int64              `json:"track_count"`
-	Available          bool               `json:"available"`
+	ID                      int64              `json:"id"`
+	ArtistID                int64              `json:"artist_id"`
+	Title                   string             `json:"title"`
+	Slug                    string             `json:"slug"`
+	Year                    string             `json:"year"`
+	MusicbrainzID           string             `json:"musicbrainz_id"`
+	AlbumType               string             `json:"album_type"`
+	Genres                  []string           `json:"genres"`
+	CoverPath               string             `json:"cover_path"`
+	ReleaseDate             pgtype.Date        `json:"release_date"`
+	Label                   string             `json:"label"`
+	Country                 string             `json:"country"`
+	Barcode                 string             `json:"barcode"`
+	TotalTracks             int32              `json:"total_tracks"`
+	TotalDiscs              int32              `json:"total_discs"`
+	Tags                    []string           `json:"tags"`
+	IntegratedLufs          pgtype.Numeric     `json:"integrated_lufs"`
+	TruePeakDb              pgtype.Numeric     `json:"true_peak_db"`
+	LoudnessRangeDb         pgtype.Numeric     `json:"loudness_range_db"`
+	LoudnessAnalyzedAt      pgtype.Timestamptz `json:"loudness_analyzed_at"`
+	SearchVector            interface{}        `json:"search_vector"`
+	CatalogNo               string             `json:"catalog_no"`
+	Explicit                bool               `json:"explicit"`
+	OriginalTitle           string             `json:"original_title"`
+	SecondaryTypes          []string           `json:"secondary_types"`
+	Styles                  []string           `json:"styles"`
+	Language                string             `json:"language"`
+	DurationSeconds         int32              `json:"duration_seconds"`
+	Isrcs                   []string           `json:"isrcs"`
+	Rating                  pgtype.Numeric     `json:"rating"`
+	Popularity              int32              `json:"popularity"`
+	Listeners               int64              `json:"listeners"`
+	Playcount               int64              `json:"playcount"`
+	ExternalIds             []byte             `json:"external_ids"`
+	ArtistCredits           []byte             `json:"artist_credits"`
+	FieldProvenance         []byte             `json:"field_provenance"`
+	SortArtist              string             `json:"sort_artist"`
+	SortTitle               string             `json:"sort_title"`
+	Description             string             `json:"description"`
+	Review                  string             `json:"review"`
+	Ratings                 []byte             `json:"ratings"`
+	Editions                []byte             `json:"editions"`
+	Sales                   int64              `json:"sales"`
+	ReleaseEvents           []byte             `json:"release_events"`
+	Script                  string             `json:"script"`
+	Artwork                 []byte             `json:"artwork"`
+	MetadataDurationSeconds int32              `json:"metadata_duration_seconds"`
+	ArtistName              string             `json:"artist_name"`
+	ArtistSlug              string             `json:"artist_slug"`
+	TrackCount              int64              `json:"track_count"`
+	Available               bool               `json:"available"`
 }
 
 // Merged listing of every album across every music library. Joins the artist
@@ -2765,6 +2781,7 @@ func (q *Queries) ListMusicAlbums(ctx context.Context, arg ListMusicAlbumsParams
 			&i.ReleaseEvents,
 			&i.Script,
 			&i.Artwork,
+			&i.MetadataDurationSeconds,
 			&i.ArtistName,
 			&i.ArtistSlug,
 			&i.TrackCount,
@@ -3158,7 +3175,7 @@ WITH additions AS (
   ORDER BY added_at DESC, t.album_id DESC
   LIMIT $2 OFFSET $1
 )
-SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork,
+SELECT al.id, al.artist_id, al.title, al.slug, al.year, al.musicbrainz_id, al.album_type, al.genres, al.cover_path, al.release_date, al.label, al.country, al.barcode, al.total_tracks, al.total_discs, al.tags, al.integrated_lufs, al.true_peak_db, al.loudness_range_db, al.loudness_analyzed_at, al.search_vector, al.catalog_no, al.explicit, al.original_title, al.secondary_types, al.styles, al.language, al.duration_seconds, al.isrcs, al.rating, al.popularity, al.listeners, al.playcount, al.external_ids, al.artist_credits, al.field_provenance, al.sort_artist, al.sort_title, al.description, al.review, al.ratings, al.editions, al.sales, al.release_events, al.script, al.artwork, al.metadata_duration_seconds,
        a.name           AS artist_name,
        mi.slug          AS artist_slug,
        (SELECT count(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
@@ -3178,57 +3195,58 @@ type ListRecentlyAddedAlbumsParams struct {
 }
 
 type ListRecentlyAddedAlbumsRow struct {
-	ID                 int64              `json:"id"`
-	ArtistID           int64              `json:"artist_id"`
-	Title              string             `json:"title"`
-	Slug               string             `json:"slug"`
-	Year               string             `json:"year"`
-	MusicbrainzID      string             `json:"musicbrainz_id"`
-	AlbumType          string             `json:"album_type"`
-	Genres             []string           `json:"genres"`
-	CoverPath          string             `json:"cover_path"`
-	ReleaseDate        pgtype.Date        `json:"release_date"`
-	Label              string             `json:"label"`
-	Country            string             `json:"country"`
-	Barcode            string             `json:"barcode"`
-	TotalTracks        int32              `json:"total_tracks"`
-	TotalDiscs         int32              `json:"total_discs"`
-	Tags               []string           `json:"tags"`
-	IntegratedLufs     pgtype.Numeric     `json:"integrated_lufs"`
-	TruePeakDb         pgtype.Numeric     `json:"true_peak_db"`
-	LoudnessRangeDb    pgtype.Numeric     `json:"loudness_range_db"`
-	LoudnessAnalyzedAt pgtype.Timestamptz `json:"loudness_analyzed_at"`
-	SearchVector       interface{}        `json:"search_vector"`
-	CatalogNo          string             `json:"catalog_no"`
-	Explicit           bool               `json:"explicit"`
-	OriginalTitle      string             `json:"original_title"`
-	SecondaryTypes     []string           `json:"secondary_types"`
-	Styles             []string           `json:"styles"`
-	Language           string             `json:"language"`
-	DurationSeconds    int32              `json:"duration_seconds"`
-	Isrcs              []string           `json:"isrcs"`
-	Rating             pgtype.Numeric     `json:"rating"`
-	Popularity         int32              `json:"popularity"`
-	Listeners          int64              `json:"listeners"`
-	Playcount          int64              `json:"playcount"`
-	ExternalIds        []byte             `json:"external_ids"`
-	ArtistCredits      []byte             `json:"artist_credits"`
-	FieldProvenance    []byte             `json:"field_provenance"`
-	SortArtist         string             `json:"sort_artist"`
-	SortTitle          string             `json:"sort_title"`
-	Description        string             `json:"description"`
-	Review             string             `json:"review"`
-	Ratings            []byte             `json:"ratings"`
-	Editions           []byte             `json:"editions"`
-	Sales              int64              `json:"sales"`
-	ReleaseEvents      []byte             `json:"release_events"`
-	Script             string             `json:"script"`
-	Artwork            []byte             `json:"artwork"`
-	ArtistName         string             `json:"artist_name"`
-	ArtistSlug         string             `json:"artist_slug"`
-	TrackCount         int64              `json:"track_count"`
-	Available          bool               `json:"available"`
-	AddedAt            pgtype.Timestamptz `json:"added_at"`
+	ID                      int64              `json:"id"`
+	ArtistID                int64              `json:"artist_id"`
+	Title                   string             `json:"title"`
+	Slug                    string             `json:"slug"`
+	Year                    string             `json:"year"`
+	MusicbrainzID           string             `json:"musicbrainz_id"`
+	AlbumType               string             `json:"album_type"`
+	Genres                  []string           `json:"genres"`
+	CoverPath               string             `json:"cover_path"`
+	ReleaseDate             pgtype.Date        `json:"release_date"`
+	Label                   string             `json:"label"`
+	Country                 string             `json:"country"`
+	Barcode                 string             `json:"barcode"`
+	TotalTracks             int32              `json:"total_tracks"`
+	TotalDiscs              int32              `json:"total_discs"`
+	Tags                    []string           `json:"tags"`
+	IntegratedLufs          pgtype.Numeric     `json:"integrated_lufs"`
+	TruePeakDb              pgtype.Numeric     `json:"true_peak_db"`
+	LoudnessRangeDb         pgtype.Numeric     `json:"loudness_range_db"`
+	LoudnessAnalyzedAt      pgtype.Timestamptz `json:"loudness_analyzed_at"`
+	SearchVector            interface{}        `json:"search_vector"`
+	CatalogNo               string             `json:"catalog_no"`
+	Explicit                bool               `json:"explicit"`
+	OriginalTitle           string             `json:"original_title"`
+	SecondaryTypes          []string           `json:"secondary_types"`
+	Styles                  []string           `json:"styles"`
+	Language                string             `json:"language"`
+	DurationSeconds         int32              `json:"duration_seconds"`
+	Isrcs                   []string           `json:"isrcs"`
+	Rating                  pgtype.Numeric     `json:"rating"`
+	Popularity              int32              `json:"popularity"`
+	Listeners               int64              `json:"listeners"`
+	Playcount               int64              `json:"playcount"`
+	ExternalIds             []byte             `json:"external_ids"`
+	ArtistCredits           []byte             `json:"artist_credits"`
+	FieldProvenance         []byte             `json:"field_provenance"`
+	SortArtist              string             `json:"sort_artist"`
+	SortTitle               string             `json:"sort_title"`
+	Description             string             `json:"description"`
+	Review                  string             `json:"review"`
+	Ratings                 []byte             `json:"ratings"`
+	Editions                []byte             `json:"editions"`
+	Sales                   int64              `json:"sales"`
+	ReleaseEvents           []byte             `json:"release_events"`
+	Script                  string             `json:"script"`
+	Artwork                 []byte             `json:"artwork"`
+	MetadataDurationSeconds int32              `json:"metadata_duration_seconds"`
+	ArtistName              string             `json:"artist_name"`
+	ArtistSlug              string             `json:"artist_slug"`
+	TrackCount              int64              `json:"track_count"`
+	Available               bool               `json:"available"`
+	AddedAt                 pgtype.Timestamptz `json:"added_at"`
 }
 
 // Newest albums across every music library, ordered by when the first file
@@ -3290,6 +3308,7 @@ func (q *Queries) ListRecentlyAddedAlbums(ctx context.Context, arg ListRecentlyA
 			&i.ReleaseEvents,
 			&i.Script,
 			&i.Artwork,
+			&i.MetadataDurationSeconds,
 			&i.ArtistName,
 			&i.ArtistSlug,
 			&i.TrackCount,
@@ -3757,7 +3776,7 @@ func (q *Queries) ListTrackFilesPendingLoudness(ctx context.Context, arg ListTra
 }
 
 const listTracksByAlbum = `-- name: ListTracksByAlbum :many
-SELECT id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits FROM tracks WHERE album_id = $1 ORDER BY disc_number ASC, track_number ASC
+SELECT id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits, metadata_duration FROM tracks WHERE album_id = $1 ORDER BY disc_number ASC, track_number ASC
 `
 
 func (q *Queries) ListTracksByAlbum(ctx context.Context, albumID int64) ([]Track, error) {
@@ -3788,6 +3807,7 @@ func (q *Queries) ListTracksByAlbum(ctx context.Context, albumID int64) ([]Track
 			&i.SortAlbumYear,
 			&i.SortAlbum,
 			&i.Credits,
+			&i.MetadataDuration,
 		); err != nil {
 			return nil, err
 		}
@@ -3800,7 +3820,7 @@ func (q *Queries) ListTracksByAlbum(ctx context.Context, albumID int64) ([]Track
 }
 
 const listTracksByArtist = `-- name: ListTracksByArtist :many
-SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.search_vector, t.external_ids, t.isrc, t.recording_mbid, t.preview_url, t.explicit, t.artist_credits, t.lyrics_available, t.sort_artist, t.sort_album_year, t.sort_album, t.credits FROM tracks t
+SELECT t.id, t.album_id, t.disc_number, t.track_number, t.title, t.duration, t.search_vector, t.external_ids, t.isrc, t.recording_mbid, t.preview_url, t.explicit, t.artist_credits, t.lyrics_available, t.sort_artist, t.sort_album_year, t.sort_album, t.credits, t.metadata_duration FROM tracks t
 JOIN albums al ON al.id = t.album_id
 WHERE al.artist_id = $1
 ORDER BY t.album_id ASC, t.disc_number ASC, t.track_number ASC
@@ -3836,6 +3856,7 @@ func (q *Queries) ListTracksByArtist(ctx context.Context, artistID int64) ([]Tra
 			&i.SortAlbumYear,
 			&i.SortAlbum,
 			&i.Credits,
+			&i.MetadataDuration,
 		); err != nil {
 			return nil, err
 		}
@@ -4532,7 +4553,7 @@ SET title = $2, slug = $3, year = $4, musicbrainz_id = $5, album_type = $6,
     genres = $7, cover_path = $8, release_date = $9,
     label = $10, country = $11, barcode = $12, total_tracks = $13, total_discs = $14, tags = $15
 WHERE id = $1
-RETURNING id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork
+RETURNING id, artist_id, title, slug, year, musicbrainz_id, album_type, genres, cover_path, release_date, label, country, barcode, total_tracks, total_discs, tags, integrated_lufs, true_peak_db, loudness_range_db, loudness_analyzed_at, search_vector, catalog_no, explicit, original_title, secondary_types, styles, language, duration_seconds, isrcs, rating, popularity, listeners, playcount, external_ids, artist_credits, field_provenance, sort_artist, sort_title, description, review, ratings, editions, sales, release_events, script, artwork, metadata_duration_seconds
 `
 
 type UpdateAlbumParams struct {
@@ -4619,6 +4640,7 @@ func (q *Queries) UpdateAlbum(ctx context.Context, arg UpdateAlbumParams) (Album
 		&i.ReleaseEvents,
 		&i.Script,
 		&i.Artwork,
+		&i.MetadataDurationSeconds,
 	)
 	return i, err
 }
@@ -4691,7 +4713,7 @@ UPDATE albums SET
     original_title   = CASE WHEN $3::text   != '' THEN $3 ELSE original_title END,
     language         = CASE WHEN $4::text   != '' THEN $4 ELSE language END,
     explicit         = $5,
-    duration_seconds = CASE WHEN $6::int    != 0  THEN $6 ELSE duration_seconds END,
+    metadata_duration_seconds = CASE WHEN $6::int != 0 THEN $6 ELSE metadata_duration_seconds END,
     rating           = CASE WHEN $7::numeric != 0 THEN $7 ELSE rating END,
     popularity       = $8,
     listeners        = $9,
@@ -5170,13 +5192,28 @@ WITH updated AS (
            quality_score  = $7
      WHERE track_files.id = $1
      RETURNING track_files.track_id, track_files.duration
+), preferred AS (
+    UPDATE tracks t
+       SET duration = best.duration
+      FROM updated u
+      JOIN LATERAL (
+          SELECT tf.duration
+          FROM track_files tf
+          JOIN library_files lf ON lf.id = tf.library_file_id AND lf.deleted_at IS NULL
+          WHERE tf.track_id = u.track_id AND tf.duration > 0
+          ORDER BY tf.quality_score DESC, tf.id ASC
+          LIMIT 1
+      ) best ON true
+     WHERE t.id = u.track_id
+     RETURNING t.album_id
 )
-UPDATE tracks t
-   SET duration = u.duration
-  FROM updated u
- WHERE t.id = u.track_id
-   AND t.duration = 0
-   AND u.duration > 0
+UPDATE albums a
+   SET duration_seconds = totals.duration
+  FROM (SELECT t.album_id, SUM(t.duration)::integer AS duration
+          FROM tracks t
+         WHERE t.album_id IN (SELECT album_id FROM preferred)
+         GROUP BY t.album_id) totals
+ WHERE a.id = totals.album_id
 `
 
 type UpdateTrackFileProbeDataParams struct {
@@ -5191,9 +5228,8 @@ type UpdateTrackFileProbeDataParams struct {
 
 // Called by FFProbeWorker after probing an audio file. Updates the per-file
 // physical properties and the refined quality_score that incorporates real
-// bitrate / sample rate / bit depth. Also backfills tracks.duration when
-// upstream metadata left it 0 — ffprobe is ground truth, and the FE renders
-// tracks.duration everywhere (0 shows as "0:00").
+// bitrate / sample rate / bit depth. The best live file owns tracks.duration;
+// album duration is always the sum of those canonical track durations.
 func (q *Queries) UpdateTrackFileProbeData(ctx context.Context, arg UpdateTrackFileProbeDataParams) error {
 	_, err := q.db.Exec(ctx, updateTrackFileProbeData,
 		arg.ID,
@@ -5210,7 +5246,7 @@ func (q *Queries) UpdateTrackFileProbeData(ctx context.Context, arg UpdateTrackF
 const updateTrackFromEnrichment = `-- name: UpdateTrackFromEnrichment :exec
 UPDATE tracks
    SET title    = CASE WHEN $2::text != '' THEN $2 ELSE title    END,
-       duration = CASE WHEN $3::int  > 0   THEN $3 ELSE duration END
+       metadata_duration = CASE WHEN $3::int > 0 THEN $3 ELSE metadata_duration END
  WHERE id = $1
 `
 
@@ -5228,19 +5264,19 @@ func (q *Queries) UpdateTrackFromEnrichment(ctx context.Context, arg UpdateTrack
 }
 
 const updateTrackTitleAndDuration = `-- name: UpdateTrackTitleAndDuration :one
-UPDATE tracks SET title = $2, duration = $3 WHERE id = $1 RETURNING id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits
+UPDATE tracks SET title = $2, metadata_duration = $3 WHERE id = $1 RETURNING id, album_id, disc_number, track_number, title, duration, search_vector, external_ids, isrc, recording_mbid, preview_url, explicit, artist_credits, lyrics_available, sort_artist, sort_album_year, sort_album, credits, metadata_duration
 `
 
 type UpdateTrackTitleAndDurationParams struct {
-	ID       int64  `json:"id"`
-	Title    string `json:"title"`
-	Duration int32  `json:"duration"`
+	ID               int64  `json:"id"`
+	Title            string `json:"title"`
+	MetadataDuration int32  `json:"metadata_duration"`
 }
 
 // Used by the enrichment pass to overwrite path-derived data with NFO /
 // heya.media canonical values once they're known.
 func (q *Queries) UpdateTrackTitleAndDuration(ctx context.Context, arg UpdateTrackTitleAndDurationParams) (Track, error) {
-	row := q.db.QueryRow(ctx, updateTrackTitleAndDuration, arg.ID, arg.Title, arg.Duration)
+	row := q.db.QueryRow(ctx, updateTrackTitleAndDuration, arg.ID, arg.Title, arg.MetadataDuration)
 	var i Track
 	err := row.Scan(
 		&i.ID,
@@ -5261,6 +5297,7 @@ func (q *Queries) UpdateTrackTitleAndDuration(ctx context.Context, arg UpdateTra
 		&i.SortAlbumYear,
 		&i.SortAlbum,
 		&i.Credits,
+		&i.MetadataDuration,
 	)
 	return i, err
 }

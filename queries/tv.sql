@@ -54,7 +54,7 @@ SELECT * FROM tv_series WHERE id = $1;
 -- DO NOTHING: episodes are insert-or-preserve. On re-enrich an existing episode
 -- (possibly user-edited) returns ErrNoRows and the caller skips it; new episodes
 -- insert. Episode-field refresh is deferred (episodes have no provenance column).
-INSERT INTO tv_episodes (season_id, episode_number, title, overview, still_path, runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored)
+INSERT INTO tv_episodes (season_id, episode_number, title, overview, still_path, metadata_runtime_minutes, air_date, rating, absolute_number, is_special, episode_type, external_ids, source, monitored)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOT $10)
 ON CONFLICT (season_id, episode_number) DO NOTHING
 RETURNING *;
@@ -70,7 +70,7 @@ SELECT * FROM tv_episodes WHERE id = $1;
 
 -- name: UpdateTVEpisode :one
 UPDATE tv_episodes
-SET title = $2, overview = $3, still_path = $4, runtime_minutes = $5, air_date = $6, rating = $7,
+SET title = $2, overview = $3, still_path = $4, metadata_runtime_minutes = $5, air_date = $6, rating = $7,
     absolute_number = $8, is_special = $9, episode_type = $10, external_ids = $11, source = $12
 WHERE id = $1
 RETURNING *;

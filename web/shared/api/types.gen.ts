@@ -667,6 +667,7 @@ export type Album = {
     listeners: number;
     loudness_analyzed_at: Timestamptz;
     loudness_range_db: Numeric;
+    metadata_duration_seconds: number;
     musicbrainz_id: string;
     original_title: string;
     playcount: number;
@@ -2616,6 +2617,7 @@ export type ListAlbumsByArtistIdForShelfRow = {
     listeners: number;
     loudness_analyzed_at: Timestamptz;
     loudness_range_db: Numeric;
+    metadata_duration_seconds: number;
     musicbrainz_id: string;
     original_title: string;
     playcount: number;
@@ -2669,6 +2671,7 @@ export type ListAlbumsByArtistSlugRow = {
     listeners: number;
     loudness_analyzed_at: Timestamptz;
     loudness_range_db: Numeric;
+    metadata_duration_seconds: number;
     musicbrainz_id: string;
     original_title: string;
     playcount: number;
@@ -2802,6 +2805,7 @@ export type ListMusicAlbumsRow = {
     listeners: number;
     loudness_analyzed_at: Timestamptz;
     loudness_range_db: Numeric;
+    metadata_duration_seconds: number;
     musicbrainz_id: string;
     original_title: string;
     playcount: number;
@@ -2931,6 +2935,7 @@ export type ListOnThisDayAlbumsRow = {
     listeners: number;
     loudness_analyzed_at: Timestamptz;
     loudness_range_db: Numeric;
+    metadata_duration_seconds: number;
     musicbrainz_id: string;
     original_title: string;
     playcount: number;
@@ -3055,6 +3060,7 @@ export type ListRecentlyAddedAlbumsRow = {
     listeners: number;
     loudness_analyzed_at: Timestamptz;
     loudness_range_db: Numeric;
+    metadata_duration_seconds: number;
     musicbrainz_id: string;
     original_title: string;
     playcount: number;
@@ -3232,6 +3238,7 @@ export type ListUserLovedAlbumsRow = {
     loudness_analyzed_at: Timestamptz;
     loudness_range_db: Numeric;
     loved_at: Timestamptz;
+    metadata_duration_seconds: number;
     musicbrainz_id: string;
     original_title: string;
     playcount: number;
@@ -3361,6 +3368,7 @@ export type ListUserRatedAlbumsRow = {
     listeners: number;
     loudness_analyzed_at: Timestamptz;
     loudness_range_db: Numeric;
+    metadata_duration_seconds: number;
     musicbrainz_id: string;
     original_title: string;
     playcount: number;
@@ -3885,6 +3893,10 @@ export type ManagerFileDetailView = {
     container?: string;
     duration_sec?: number;
     id: number;
+    /**
+     * Provider-reported expected duration, for comparison only
+     */
+    metadata_duration_sec?: number;
     /**
      * Absolute on-disk path
      */
@@ -7429,6 +7441,7 @@ export type TrackView = {
     id: number;
     isrc: string;
     lyrics_available: boolean;
+    metadata_duration: number;
     preview_url: string;
     recording_mbid: string;
     search_vector: unknown;
@@ -7545,6 +7558,7 @@ export type TvEpisode = {
     external_ids: string;
     id: number;
     is_special: boolean;
+    metadata_runtime_minutes: number;
     monitored: boolean;
     overview: string;
     rating: Numeric;
@@ -8381,6 +8395,7 @@ export type AlbumWritable = {
     listeners: number;
     loudness_analyzed_at: Timestamptz;
     loudness_range_db: Numeric;
+    metadata_duration_seconds: number;
     musicbrainz_id: string;
     original_title: string;
     playcount: number;
@@ -9199,6 +9214,10 @@ export type ManagerFileDetailViewWritable = {
     container?: string;
     duration_sec?: number;
     id: number;
+    /**
+     * Provider-reported expected duration, for comparison only
+     */
+    metadata_duration_sec?: number;
     /**
      * Absolute on-disk path
      */
@@ -10623,6 +10642,7 @@ export type TvEpisodeWritable = {
     external_ids: string;
     id: number;
     is_special: boolean;
+    metadata_runtime_minutes: number;
     monitored: boolean;
     overview: string;
     rating: Numeric;
