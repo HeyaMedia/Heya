@@ -1,3 +1,4 @@
+-- +goose Up
 -- Provider runtimes are reference data. Operational durations describe the
 -- bytes actually present in the library and come exclusively from ffprobe.
 ALTER TABLE movies ADD COLUMN metadata_runtime_minutes integer NOT NULL DEFAULT 0;
@@ -56,3 +57,9 @@ WHERE best.track_id = t.id;
 UPDATE albums a SET duration_seconds = totals.duration
 FROM (SELECT album_id, SUM(duration)::integer AS duration FROM tracks GROUP BY album_id) totals
 WHERE totals.album_id = a.id;
+
+-- +goose Down
+ALTER TABLE albums DROP COLUMN metadata_duration_seconds;
+ALTER TABLE tracks DROP COLUMN metadata_duration;
+ALTER TABLE tv_episodes DROP COLUMN metadata_runtime_minutes;
+ALTER TABLE movies DROP COLUMN metadata_runtime_minutes;
