@@ -170,8 +170,8 @@ github.com/cloudflare/circl v1.6.5 h1:O64F26HEqNhznd/hrC5KZXVKYuKM2rx4deZDTc4ihQ
 github.com/cloudflare/circl v1.6.5/go.mod h1:h5LNyxAc5nTue9DS5jT+48en2PSDYt3zdGnz5OstK6c=
 github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=
 github.com/coder/websocket v1.8.15/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
-github.com/corazawaf/coraza-caddy/v2 v2.5.0 h1:zdK/o14duUII/UCeJo5yozN1MhinASGULrJgQT+GIG4=
-github.com/corazawaf/coraza-caddy/v2 v2.5.0/go.mod h1:f/6EiRJI5ZpCG6BECRxsu6Bxn0Hqt0sIT7SzDHXhzI8=
+github.com/corazawaf/coraza-caddy/v2 v2.6.0 h1:3pHhlt9zaqtVYmM/zEtfQKychrcDpMdjXKoDUMHkBow=
+github.com/corazawaf/coraza-caddy/v2 v2.6.0/go.mod h1:naL5fUqzX9j/CkU92uJ6cN735zQInNH6xJFA8mPd440=
 github.com/corazawaf/coraza-coreruleset v0.0.0-20240226094324-415b1017abdc h1:OlJhrgI3I+FLUCTI3JJW8MoqyM78WbqJjecqMnqG+wc=
 github.com/corazawaf/coraza-coreruleset v0.0.0-20240226094324-415b1017abdc/go.mod h1:7rsocqNDkTCira5T0M7buoKR2ehh7YZiPkzxRuAgvVU=
 github.com/corazawaf/coraza-coreruleset/v4 v4.25.0 h1:tqFO1lfVpTiyWtlN618OXpZMfw+nnN0Q4///W5W+/HM=
