@@ -21,10 +21,10 @@
         "@pinia/nuxt": "^1.0.2",
         "@vueuse/core": "^14.4.0",
         "@vueuse/nuxt": "^14.4.0",
-        "akarisub": "^0.2.2",
+        "akarisub": "^1.1.2",
         "butterchurn": "^2.6.7",
         "butterchurn-presets": "^2.4.7",
-        "hls.js": "^1.7.0",
+        "hls.js": "^1.7.1",
         "nuxt": "^4.5.2",
         "ofetch": "^1.5.1",
         "pinia": "^4.0.3",
@@ -785,7 +785,7 @@
 
     "ajv": ["ajv@8.20.0", "", { "dependencies": { "fast-deep-equal": "^3.1.3", "fast-uri": "^3.0.1", "json-schema-traverse": "^1.0.0", "require-from-string": "^2.0.2" } }, "sha512-Thbli+OlOj+iMPYFBVBfJ3OmCAnaSyNn4M1vz9T6Gka5Jt9ba/HIR56joy65tY6kx/FCF5VXNB819Y7/GUrBGA=="],
 
-    "akarisub": ["akarisub@0.2.2", "", {}, "sha512-HjPwWKrPX9DIzXuOnFenV/YEw2skFAGJiRDG0AoNB2ls40woexZ66jfZV+p4Ps+7tCVUinsY4l/oNV4LdhlCWw=="],
+    "akarisub": ["akarisub@1.1.2", "", {}, "sha512-FKPPaq+xFvJrMNUq/aapdHq3w18ayME1OcgQWqLq4nXqmeyYvNLUCruQO7JrhBIbC+vKIyY+Ra+EIX+cxeQ6Hw=="],
 
     "ansi-regex": ["ansi-regex@5.0.1", "", {}, "sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ=="],
 

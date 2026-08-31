@@ -29,7 +29,7 @@
     "@pinia/nuxt": "^1.0.2",
     "@vueuse/core": "^14.4.0",
     "@vueuse/nuxt": "^14.4.0",
-    "akarisub": "^0.2.2",
+    "akarisub": "^1.1.2",
     "butterchurn": "^2.6.7",
     "butterchurn-presets": "^2.4.7",
     "hls.js": "^1.7.1",
