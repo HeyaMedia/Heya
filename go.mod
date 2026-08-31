@@ -8,7 +8,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/caddyserver/caddy/v2 v2.11.4
 	github.com/caddyserver/certmagic v0.25.4
-	github.com/corazawaf/coraza-caddy/v2 v2.5.0
+	github.com/corazawaf/coraza-caddy/v2 v2.6.0
 	github.com/danielgtaylor/huma/v2 v2.39.1
 	github.com/deepteams/webp v1.2.7
 	github.com/disintegration/imaging v1.6.2
