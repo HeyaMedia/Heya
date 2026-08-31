@@ -35,9 +35,9 @@ require (
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.2
 	github.com/quic-go/quic-go v0.61.0
-	github.com/riverqueue/river v0.44.0
-	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.44.0
-	github.com/riverqueue/river/rivertype v0.44.0
+	github.com/riverqueue/river v0.45.0
+	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.45.0
+	github.com/riverqueue/river/rivertype v0.45.0
 	github.com/rs/zerolog v1.35.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
@@ -170,8 +170,8 @@ require (
 	github.com/prometheus/otlptranslator v1.0.0 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
-	github.com/riverqueue/river/riverdriver v0.44.0 // indirect
-	github.com/riverqueue/river/rivershared v0.44.0 // indirect
+	github.com/riverqueue/river/riverdriver v0.45.0 // indirect
+	github.com/riverqueue/river/rivershared v0.45.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
